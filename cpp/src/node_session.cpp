@@ -226,16 +226,55 @@ bool harness_range_is_open() { return harness_range().has_value(); }
 
 bool nvtx_ranges() { return g_nvtx.load(std::memory_order_relaxed); }
 
+// `offsets[last] - offsets[first]`, both edges in one pair of async copies and one sync.
+// `cudf::get_element` would allocate a device scalar and launch a kernel per read, and this
+// runs for every string column of every node output of every batch.
+template <typename T>
+static int64_t offset_span(const cudf::column_view& offsets, cudf::size_type first,
+                           cudf::size_type last, rmm::cuda_stream_view stream) {
+  T edges[2] = {0, 0};
+  const T* data = offsets.data<T>();
+  // A copy that fails synchronously never enqueues and leaves nothing sticky, so the sync
+  // would report success and the span would read 0 bytes as an answer.
+  auto err =
+      cudaMemcpyAsync(&edges[0], data + first, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  if (err == cudaSuccess)
+    err =
+        cudaMemcpyAsync(&edges[1], data + last, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  if (err == cudaSuccess) err = cudaStreamSynchronize(stream.value());
+  if (err != cudaSuccess)
+    throw std::runtime_error(std::string("varlen_content_bytes: reading string offsets: ") +
+                             cudaGetErrorString(err));
+  return static_cast<int64_t>(edges[1]) - static_cast<int64_t>(edges[0]);
+}
+
+// The content bytes of a strings column's own rows. `chars_size` reads the unsliced
+// parent's last offset ("does not reflect a sliced parent column view",
+// strings_column_view.hpp), and a scatter partition is a slice of the scatter's table
+// (#145) — so a sliced view reads its own two edges instead.
+static uint64_t string_content_bytes(const cudf::column_view& col) {
+  if (col.size() == 0) return 0;
+  cudf::strings_column_view sv(col);
+  auto stream = cudf::get_default_stream();
+  auto offsets = sv.offsets();
+  // Every column but a scatter partition is the whole of its parent, and for those
+  // `chars_size` is already the answer in one read.
+  if (sv.offset() == 0 && sv.size() + 1 == offsets.size())
+    return static_cast<uint64_t>(sv.chars_size(stream));
+  const auto first = sv.offset();
+  const auto last = sv.offset() + sv.size();
+  return static_cast<uint64_t>(offsets.type().id() == cudf::type_id::INT64
+                                   ? offset_span<int64_t>(offsets, first, last, stream)
+                                   : offset_span<int32_t>(offsets, first, last, stream));
+}
+
 uint64_t varlen_content_bytes(const cudf::table_view& table) {
   uint64_t total = 0;
   for (cudf::size_type i = 0; i < table.num_columns(); ++i) {
     auto col = table.column(i);
     // Flat string columns only — no nested List types reach here. Matches the Rust
     // ColAccum content term (Σ value byte lengths = offsets[n]-offsets[0]).
-    if (col.type().id() == cudf::type_id::STRING) {
-      total += static_cast<uint64_t>(
-          cudf::strings_column_view(col).chars_size(cudf::get_default_stream()));
-    }
+    if (col.type().id() == cudf::type_id::STRING) total += string_content_bytes(col);
   }
   return total;
 }
@@ -317,6 +356,28 @@ struct NodeSession::Impl {
     if (measuring_sink) measuring_sink->produced_by[handle] = seq;
   }
 
+  /// Every handle a consumer can read enters here, so this is where the handle's own
+  /// shape is checked: one owner and one name per column, and never zero columns — a
+  /// zero-column `table_view` reads 0 rows whatever it held. A check in `TableResult`'s
+  /// constructors cannot stand in, because its fields are public and a caller may
+  /// assemble one without calling any of them (#164).
+  uint64_t register_handle(TableResult result, RegionSink* measuring_sink, uint64_t seq) {
+    if (result.columns.empty())
+      throw std::runtime_error(
+          "NodeSession: a handle of no columns reads as no rows; the plan's placeholder "
+          "column exists so that none is ever registered");
+    if (result.column_names.size() != result.columns.size() ||
+        result.owners.size() != result.columns.size())
+      throw std::runtime_error("NodeSession: a handle of " +
+                               std::to_string(result.columns.size()) + " columns under " +
+                               std::to_string(result.column_names.size()) + " names and " +
+                               std::to_string(result.owners.size()) + " owners (#164)");
+    uint64_t handle = next_handle++;
+    note_producer(measuring_sink, handle, seq);
+    registry.emplace(handle, std::move(result));
+    return handle;
+  }
+
   ~Impl() {
     // Events outlive their regions by design, so the session is the only thing that can
     // free them — a plan ending without a collection must not leak them.
@@ -395,13 +456,11 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
                       ? cudf::host_span<const uint32_t>{map_groups->data(), map_groups->size()}
                       : cudf::host_span<const uint32_t>{});
         timer.stop();
-        auto tv = result.table->view();
+        auto tv = result.view();
         if (out_stats)
           out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-        uint64_t handle = impl_->next_handle++;
-        impl_->note_producer(sink, handle, seq);
-        impl_->registry.emplace(handle, std::move(result));
-        out_handles[p] = handle;  // map entries are stored in partition order 0..n-1
+        out_handles[p] = impl_->register_handle(std::move(result), sink, seq);
+        // map entries are stored in partition order 0..n-1
       }
       *out_count = n;
       return;
@@ -428,7 +487,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         throw std::runtime_error("NodeSession::execute_node: unknown input handle");
       owned.push_back(std::move(it->second));
       impl_->registry.erase(it);
-      views.push_back(owned.back().table->view());
+      views.push_back(owned.back().view());
     }
     // A collapse of nothing has no schema to answer with: the node declares no schema of
     // its own, and concatenating no views gives a table of no columns, which is not a
@@ -438,8 +497,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       throw std::runtime_error(
           "NodeSession::execute_node: a collapse with no input handles has no columns to "
           "answer with — an empty lane emits nothing rather than calling this");
-    TableResult result;
-    result.column_names = owned[0].column_names;
+    std::unique_ptr<cudf::table> merged;
 
     const fb::CudfSortPreservingMerge* spm =
         (node->node_type() == fb::PlanNodeKind_CudfSortPreservingMerge)
@@ -471,28 +529,27 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
                                                 : cudf::null_order::AFTER);
       }
-      result.table = cudf::merge(views, key_cols, orders, null_orders);
+      merged = cudf::merge(views, key_cols, orders, null_orders);
       // Apply the SPM's own fetch (top-N) AFTER the global merge (-1 = unlimited).
       if (spm->fetch() >= 0) {
-        auto n = std::min(static_cast<cudf::size_type>(spm->fetch()),
-                          result.table->view().num_rows());
+        auto n = std::min(static_cast<cudf::size_type>(spm->fetch()), merged->num_rows());
         std::vector<cudf::size_type> slice_indices{0, n};
-        auto sliced = cudf::slice(result.table->view(), slice_indices);
-        result.table = std::make_unique<cudf::table>(sliced[0]);
+        auto sliced = cudf::slice(merged->view(), slice_indices);
+        // An owning copy of the top N, not a view: a view would pin the whole merged
+        // table, which is the memory this fetch exists to give back.
+        merged = std::make_unique<cudf::table>(sliced[0]);
       }
     } else {
       // CudfCoalescePartitions, or an SPM with no sort keys / a single partition:
       // a plain in-order concat is the correct collapse.
-      result.table = cudf::concatenate(views);
+      merged = cudf::concatenate(views);
     }
     timer.stop();
-    auto tv = result.table->view();
+    TableResult result = TableResult::owning(std::move(merged), owned[0].column_names);
+    auto tv = result.view();
     if (out_stats)
       out_stats[0] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-    uint64_t handle = impl_->next_handle++;
-    impl_->note_producer(sink, handle, seq);
-    impl_->registry.emplace(handle, std::move(result));
-    out_handles[0] = handle;
+    out_handles[0] = impl_->register_handle(std::move(result), sink, seq);
     *out_count = 1;
     return;
   }
@@ -500,13 +557,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
   // CudfRepartition Hash → scatter the ONE input table into N partitions by
   // Spark-murmur3 (comet-identical) hash of the key columns, so per-partition row
   // counts match the CPU twin by construction; the live conformance gate proves
-  // the kernel is bit-equal to comet. Post-lowering the child is a
-  // CudfCoalescePartitions (single handle), but concat defensively anyway.
-  //
-  // That concat has no caller: the planner puts a GpuCoalesceAllBatches above the merge
-  // feeding an emit, so this arm is handed exactly one handle per call. The modes that
-  // lowered a shuffle differently are gone, so nothing will grow a second caller — #197
-  // retires it.
+  // the kernel is bit-equal to comet. One handle per call: the emitter's contract (#197).
   if (node->node_type() == fb::PlanNodeKind_CudfRepartition &&
       node->node_as_CudfRepartition()->kind() == fb::PartitioningKind_Hash) {
     const fb::CudfRepartition* rp = node->node_as_CudfRepartition();
@@ -514,28 +565,22 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     if (n == 0 || n > out_cap)
       throw std::runtime_error("NodeSession::execute_node: bad Hash repartition out count");
 
-    // Gather + concat the child partitions into one table (matches the CPU concat).
-    std::vector<TableResult> owned;
-    std::vector<cudf::table_view> views;
-    owned.reserve(child[0].size());
-    views.reserve(child[0].size());
-    for (uint64_t h : child[0]) {
-      auto it = impl_->registry.find(h);
-      if (it == impl_->registry.end())
-        throw std::runtime_error("NodeSession::execute_node: unknown input handle");
-      owned.push_back(std::move(it->second));
-      impl_->registry.erase(it);
-      views.push_back(owned.back().table->view());
-    }
-    std::vector<std::string> column_names =
-        owned.empty() ? std::vector<std::string>{} : owned[0].column_names;
-    // The concat + hash-scatter is shared by all N partitions and charged to p0, so
-    // Σ-over-partitions still equals the node total; only the slice copies below are
-    // separable. p0's region stays open across both rather than closing and reopening,
+    if (child[0].size() != 1)
+      throw std::runtime_error(
+          "NodeSession::execute_node: a Hash repartition is handed exactly one handle per "
+          "call — the emitter sends one batch a call (gpu_backend/emit.rs) — and got " +
+          std::to_string(child[0].size()) + " (#197)");
+    auto it = impl_->registry.find(child[0][0]);
+    if (it == impl_->registry.end())
+      throw std::runtime_error("NodeSession::execute_node: unknown input handle");
+    TableResult input = std::move(it->second);
+    impl_->registry.erase(it);
+    std::vector<std::string> column_names = input.column_names;
+    // The hash-scatter is shared by all N partitions and charged to p0, so
+    // Σ-over-partitions still equals the node total; p1..N-1 now time only their slice.
+    // p0's region stays open across the scatter rather than closing and reopening,
     // because N output partitions must cost exactly N timed regions.
     ScopedNodeTimer shared_timer(sink, seq, 0, call_index);
-    std::unique_ptr<cudf::table> combined =
-        (owned.size() == 1) ? std::move(owned[0].table) : cudf::concatenate(views);
 
     // Hash keys: ColumnRef indices into the (partial-agg output) table. ColumnRef
     // keys only for now — the group-by columns.
@@ -549,33 +594,31 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       }
     }
 
-    auto tv = combined->view();
     auto [parted, offsets] = peacock::partitioning::spark_hash_partition(
-        tv, key_cols, static_cast<cudf::size_type>(n));
+        input.view(), key_cols, static_cast<cudf::size_type>(n));
+    // The input goes as soon as the partitioned copy exists: holding it while every
+    // partition was copied out beside it cost a whole input of allocation per call (#145).
+    input = TableResult{};
     const cudf::size_type total = parted->num_rows();
-    const cudf::table_view pv = parted->view();
+    // The N partitions share these columns, so an undrained lane keeps the whole
+    // partitioned table alive — worse under skew than the copies were.
+    TableResult whole = TableResult::owning(std::move(parted), std::move(column_names));
     for (size_t p = 0; p < n; ++p) {
       cudf::size_type start = offsets[p];
       cudf::size_type end = (p + 1 < n) ? offsets[p + 1] : total;
       // p0 finishes the shared region opened above; p1..N-1 open their own.
       std::optional<ScopedNodeTimer> own;
       if (p > 0) own.emplace(sink, seq, p, call_index);
-      // One owning table per partition (slice → deep copy so each handle owns memory).
-      cudf::table_view slice = cudf::slice(pv, {start, end}).front();
-      TableResult part;
-      part.column_names = column_names;
-      part.table = std::make_unique<cudf::table>(slice);
+      // A row-range view sharing the partitioned table's column owners: no copy.
+      TableResult part = whole.slice(start, end);
       if (p == 0)
         shared_timer.stop();
       else
         own->stop();
-      auto ptv = part.table->view();
+      auto ptv = part.view();
       if (out_stats)
         out_stats[p] = NodeStats{static_cast<uint64_t>(ptv.num_rows()), varlen_content_bytes(ptv)};
-      uint64_t handle = impl_->next_handle++;
-      impl_->note_producer(sink, handle, seq);
-      impl_->registry.emplace(handle, std::move(part));
-      out_handles[p] = handle;
+      out_handles[p] = impl_->register_handle(std::move(part), sink, seq);
     }
     *out_count = n;
     return;
@@ -612,13 +655,10 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     ScopedNodeTimer timer(sink, seq, p, call_index);
     TableResult result = execute_one(node, std::move(inputs));
     timer.stop();
-    auto tv = result.table->view();
+    auto tv = result.view();
     if (out_stats)
       out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-    uint64_t handle = impl_->next_handle++;
-    impl_->note_producer(sink, handle, seq);
-    impl_->registry.emplace(handle, std::move(result));
-    out_handles[p] = handle;
+    out_handles[p] = impl_->register_handle(std::move(result), sink, seq);
   }
   *out_count = n_out;
 }
@@ -665,13 +705,10 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
                              " reading row groups [" + groups + "]: " + e.what());
   }
   timer.stop();
-  auto tv = result.table->view();
+  auto tv = result.view();
   if (out_stats)
     *out_stats = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-  uint64_t handle = impl_->next_handle++;
-  impl_->note_producer(sink, handle, seq);
-  impl_->registry.emplace(handle, std::move(result));
-  return handle;
+  return impl_->register_handle(std::move(result), sink, seq);
 }
 
 // Shared by the export and the slice so the two cannot disagree. Its twin on the other
@@ -703,30 +740,24 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
   OptionalRange node_range(
       [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " slice_handle"; });
 
-  auto [begin, end] = clamp_row_range(offset, length, input.table->view().num_rows());
-  TableResult result;
-  result.column_names = input.column_names;
+  auto [begin, end] = clamp_row_range(offset, length, input.view().num_rows());
   ScopedNodeTimer timer(sink, seq, 0, call_index);
-  // An owning copy of the kept rows, so the input table can go: a view would keep the
-  // whole batch resident, which is the cost the mid-plan limit exists to avoid.
-  result.table =
-      std::make_unique<cudf::table>(cudf::slice(input.table->view(), {begin, end}).front());
+  // An owning copy of the kept rows rather than `input.slice`, so the input table can go:
+  // a view would keep the whole batch resident, which is the cost the mid-plan limit
+  // exists to avoid.
+  TableResult result = TableResult::owning(
+      std::make_unique<cudf::table>(cudf::slice(input.view(), {begin, end}).front()),
+      input.column_names);
   timer.stop();
-  uint64_t out = impl_->next_handle++;
   // The trimmed rows are still that node's output, so the export downstream of a limit
   // names the same seq the slice did.
-  impl_->note_producer(sink, out, seq);
-  impl_->registry.emplace(out, std::move(result));
-  return out;
+  return impl_->register_handle(std::move(result), sink, seq);
 }
 
 uint64_t NodeSession::adopt(TableResult result) {
-  uint64_t handle = impl_->next_handle++;
   // No node produced it, and the sink says so rather than leaving the handle unknown: a
   // slice or an export of it under timing is then refused naming the adoption.
-  impl_->note_producer(impl_->measuring(), handle, RegionSink::kAdopted);
-  impl_->registry.emplace(handle, std::move(result));
-  return handle;
+  return impl_->register_handle(std::move(result), impl_->measuring(), RegionSink::kAdopted);
 }
 
 void NodeSession::time_export(uint64_t handle, const std::function<void()>& body) {

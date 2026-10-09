@@ -11,6 +11,11 @@ the aggregate's key copies; the four Welford struct members and one merged-state
 view-only callers switch to it. Filter, project and window build their output through
 refcounted-scatter's `TableResult` (`owning`, `select`, public `owners`/`columns`), sharing the
 input's column owners instead of copying. The aggregate releases groupby's fresh key tables.
+Assembling a handle through the public fields is fine and is why they are public, but
+`register_handle` — the only path to a handle number — refuses one of no columns or whose names
+or owners do not number its columns, so a hand-built handle has to be complete before it is
+registered (added by refcounted-scatter's completeness pass, which is where this plan's
+`push_back` steps would otherwise have reopened [#164](../tickets/corpus-coverage.md#t164)).
 
 **Tech stack:** C++ against libcudf 25.02 and 26.02/25.10a; gtest on a device with the RMM
 statistics adaptor `main()` installs.

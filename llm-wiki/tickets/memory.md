@@ -111,3 +111,33 @@ reports `NodeStats` as `execute_node` does, and the slice is priced through `pro
 appends an out-parameter to a frozen ABI symbol. The fallback without an ABI change scales the
 input batch's measured var-length bytes by the row ratio, with the approximation named at the
 site. Test: a device limit over a string column whose slice's `byte_size` equals the export's.
+
+<a id="t265"></a>
+### #265 — the driver's memory model under-reports a shared scatter's partitions
+
+`accounting.rs` prices each lane's batch alone, so a released lane's bytes leave the model while
+the device still holds them: a scatter's N partitions are row views of one partitioned table
+(#145), and only the last handle over a column frees it.
+
+It under-reports, which is the direction that matters — a budget that should refuse a call lets
+it run, and the failure arrives from the allocator rather than as the named refusal the
+accounting exists to produce. Skew makes it worse: one undrained lane keeps the whole table.
+Nothing notices today because holds and releases still reconcile against each other; what they
+no longer track is the device. Pre-dates nothing — the sharing is what created it, and it was
+taken knowingly, because the copies it replaced cost a whole input of allocation per shuffle.
+
+**Corpus queries:** none — the model is not an answer. Every shuffle reaches it; `tpch/q1` at
+`tp4-rowgroup` is the cheapest case, four lanes over one partitioned table.
+
+**Fix proposed:** device-reported residency, read where the model's own total is read, so the
+accountant prices what the device holds rather than what it handed out. Test: release three of
+four partitions of one scatter and compare the model's resident total with the reader's value.
+
+Which reader is the open part. `GpuBackend::resident_bytes()` over the statistics adaptor's
+current value is the obvious one and is **not available where the accountant runs**: the adaptor
+exists only when `install_rmm_pool` succeeded (`rmm_pool.hpp`), which only `test_support/` calls,
+so `test_gpu_corpus` — the one place the model prices real queries under a budget — has no pool
+and would read 0. Nothing in `peacock_gpu.h` reports the adaptor to Rust either. So either the
+pool goes on everywhere, or the reader is the C++ handle registry instead, which can total the
+bytes whose owners it alone holds with no pool involved. A model that returns zero is not a cheap
+call, it is a guard switched off, so this has to be settled before the fix lands.

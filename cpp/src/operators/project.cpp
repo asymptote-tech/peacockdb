@@ -22,15 +22,15 @@ TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
     // input columns, only the row count). A 0-column table would lose that
     // count, so emit a single non-null placeholder column of the input length;
     // count(*) reads column 0 as size − null_count and gets the right answer.
-    auto n_rows = input.table->num_rows();
+    auto n_rows = input.num_rows();
     cudf::numeric_scalar<int8_t> zero(0, true);
     std::vector<std::unique_ptr<cudf::column>> columns;
     columns.push_back(cudf::make_column_from_scalar(zero, n_rows));
     std::vector<std::string> names{"__rowcount__"};
-    return {std::make_unique<cudf::table>(std::move(columns)), std::move(names)};
+    return TableResult::owning(std::make_unique<cudf::table>(std::move(columns)), std::move(names));
   }
 
-  auto tv = input.table->view();
+  auto tv = input.view();
   std::vector<std::unique_ptr<cudf::column>> columns;
   std::vector<std::string> names;
 
@@ -60,7 +60,7 @@ TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
   }
 
   auto result = std::make_unique<cudf::table>(std::move(columns));
-  return {std::move(result), std::move(names)};
+  return TableResult::owning(std::move(result), std::move(names));
 }
 
 

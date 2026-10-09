@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cudf/column/column_view.hpp>
 #include <cudf/table/table.hpp>
+#include <cudf/table/table_view.hpp>
 #include <cudf/utilities/span.hpp>
 
 #include <cstdint>
@@ -12,10 +14,30 @@
 
 namespace peacock {
 
-/// Result of executing a plan node: a cuDF table plus column names.
+/// A handle's table: one view per column, each kept alive by its own owner.
+///
+/// Two handles may view one column, so a scatter's partitions are row slices of one
+/// partitioned table and copy nothing. A column is freed when the last handle viewing it
+/// goes, and a slice pins its parent column rather than the whole table. Consumers read
+/// `view()`; one that needs an owning column copies at that site and says why.
+///
+/// Never zero columns: a `table_view` of none reads as 0 rows whatever it held, which is
+/// why the plan carries an explicit placeholder column instead. `owning` refuses it.
 struct TableResult {
-  std::unique_ptr<cudf::table> table;
-  std::vector<std::string> column_names;
+  std::vector<std::shared_ptr<cudf::column const>> owners;  // owners[i] keeps columns[i]'s
+                                                            // buffers alive; two entries may
+                                                            // share one column
+  std::vector<cudf::column_view> columns;  // a whole column of *owners[i], or a row slice
+  std::vector<std::string> column_names;   // same length as columns
+
+  cudf::table_view view() const { return cudf::table_view{columns}; }
+  cudf::size_type num_rows() const { return columns.empty() ? 0 : columns.front().size(); }
+  cudf::size_type num_columns() const { return static_cast<cudf::size_type>(columns.size()); }
+
+  static TableResult owning(std::unique_ptr<cudf::table> table, std::vector<std::string> names);
+  TableResult slice(cudf::size_type begin, cudf::size_type end) const;      // shares owners
+  TableResult select(std::vector<cudf::size_type> const& ordinals) const;   // shares owners
+  TableResult with(std::unique_ptr<cudf::column> column, std::string name) const;  // appends
 };
 
 /// Per-node actual costs returned across the FFI. The byte formula lives ONLY in
@@ -43,7 +65,7 @@ enum class NodeTiming : int {
 /// Opt-in because `Events`, though cheap, still allocates an event pair per region and
 /// holds it until collection.
 ///
-/// Neither mode removes every sync: `varlen_content_bytes` reads `chars_size` back, so
+/// Neither mode removes every sync: `varlen_content_bytes` reads an offset back, so
 /// a node with STRING outputs synchronizes regardless.
 void set_node_timing(NodeTiming mode);
 

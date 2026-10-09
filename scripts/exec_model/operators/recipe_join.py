@@ -18,7 +18,8 @@ where the frozen surface cannot express something it is named rather than worked
 - **the finish pass.** A build-preserving type emits build rows that matched no probe
   batch. The probe calls therefore accumulate the probe **keys** ([#136](../../../llm-wiki/tickets/joins.md#t136)),
   which costs a second copy — of the probe batch this time, since the join consumed it.
-  Both copies disappear under [#145](../../../llm-wiki/tickets/corpus-coverage.md#t145)'s refcounted handle.
+  Both copies become a second read of one handle under [#152](../../../llm-wiki/tickets/joins.md#t152);
+  #145's shared handle, which landed, is what makes that possible and does not itself remove them.
 
 **Ordinals arrive late.** The translation layer emits these seqs at plan time, from the
 schemas. The prototype has no typed schema (T7), so it resolves column names to ordinals

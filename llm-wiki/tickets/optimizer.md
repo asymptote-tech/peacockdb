@@ -144,7 +144,8 @@ consumer that turns those keys into a predicate on a scan below. That is a diamo
 plan model here is a tree. What serves it — a fork handing one batch stream to N consumers, plus
 a consumer that plans rather than executes — is what a materialized CTE needs ([#101](#t101))
 and what [#147](#t147) calls refinement in flight. Do it after the streamed lanes, which
-suit the shape: with refcounted handles ([#145](#t145)) a tee costs nothing on the device, the
+suit the shape: a `TableResult` shares its columns ([#145](../archive/archived-tickets.md#t145)),
+so a tee costs nothing on the device, the
 accountant already models a fork's residency as the slowest consumer's backlog, and a consumer
 blocking its producer is the join hold, one rule already mutation-tested. A diamond in the plan
 is then routing rather than scheduling.

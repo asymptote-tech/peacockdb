@@ -149,6 +149,7 @@ add_library(peacock_gpu SHARED
   src/gpu_executor.cpp
   src/expr.cpp
   src/node_session.cpp
+  src/table_result.cpp
   src/operators/dispatch.cpp
   src/operators/scan.cpp
   src/operators/filter.cpp

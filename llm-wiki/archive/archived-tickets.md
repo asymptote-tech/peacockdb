@@ -27,6 +27,37 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t145"></a>
+### #145 — Refcounted handles: stop copying every partition out of a scatter
+**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md), PR #173; awaiting merge.**
+
+`spark_hash_partition` returns one table whose N partitions are already contiguous, and the
+repartition arm deep-copied each range out, because a handle owned its memory alone — so every
+shuffle copied its whole input a second time, once per aggregate and once per join side.
+
+`TableResult` is now one `shared_ptr` owner and one `column_view` per column, built by `owning`,
+`slice`, `select` or `with` (`cpp/src/table_result.cpp`), and the scatter registers N handles that
+are row slices of the partitioned table. The input is dropped as soon as `spark_hash_partition`
+returns. No ABI change: a handle is still a `u64`. Measured on the card, a four-lane scatter of a
+fixed-width table asks the allocator for exactly one input's bytes fewer and peaks at the cost of
+partitioning alone (6,973,648 to 4,962,592 bytes); over a string column the peak does not move,
+because cuDF's gather inside `cudf::partition` already costs more than the copies did
+(`llm-wiki/tasks/refcounted-scatter-detail.md`). The cost taken on: an undrained lane keeps the
+whole partitioned table alive, worse under skew, and the driver's model under-reports that
+([#265](../tickets/memory.md#t265)).
+
+<a id="t197"></a>
+### #197 — the repartition arm still concatenates a child it can only be handed one of
+**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md), PR #173; awaiting merge.**
+
+The Hash-repartition arm concatenated `child[0]`'s handles before scattering, and the planner puts
+a `GpuCoalesceAllBatches` above the merge feeding an emit, so it is only ever handed one.
+
+The ticket's reason was wrong — the guarantee is the emitter sending one batch a call
+(`gpu_backend/emit.rs`), not a coalesce below every emit — and so was its cost: with one handle
+the old code moved the table rather than copying it, so the dead branch cost nothing. It is
+deleted either way, and the arm now refuses any count but one by name.
+
 <a id="t201"></a>
 ### #201 — the murmur gate proves a copy of the lane rule, not the rule
 **Done 2026-10-09 by [`repartition-keys`](../tasks/repartition-keys.md), PR #169; awaiting merge.**

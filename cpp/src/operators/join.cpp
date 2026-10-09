@@ -43,8 +43,8 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
   auto left = take_input(in);
   auto right = take_input(in);
 
-  auto ltv = left.table->view();
-  auto rtv = right.table->view();
+  auto ltv = left.view();
+  auto rtv = right.view();
 
   // Build key tables.
   std::vector<cudf::column_view> left_key_cols, right_key_cols;
@@ -211,10 +211,10 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
         p_cols.push_back(std::make_unique<cudf::column>(tv.column(idx)));
         p_names.push_back(names[idx]);
       }
-      return {std::make_unique<cudf::table>(std::move(p_cols)),
-              std::move(p_names)};
+      return TableResult::owning(std::make_unique<cudf::table>(std::move(p_cols)),
+                                 std::move(p_names));
     }
-    return {std::move(t), std::move(names)};
+    return TableResult::owning(std::move(t), std::move(names));
   }
 
   // LeftMark: one row per left row plus a trailing boolean "mark" = the left row
@@ -270,10 +270,10 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
         p_cols.push_back(std::make_unique<cudf::column>(tv.column(idx)));
         p_names.push_back(names[idx]);
       }
-      return {std::make_unique<cudf::table>(std::move(p_cols)),
-              std::move(p_names)};
+      return TableResult::owning(std::make_unique<cudf::table>(std::move(p_cols)),
+                                 std::move(p_names));
     }
-    return {std::move(t), std::move(names)};
+    return TableResult::owning(std::move(t), std::move(names));
   }
 
   // SQL equi-joins never match on NULL keys, but cuDF defaults to
@@ -351,7 +351,7 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
   // over the gathered [left..., right...] table and drop failing rows BEFORE the
   // output projection.
   if (join->filter()) {
-    auto left_width = static_cast<cudf::size_type>(left.table->num_columns());
+    auto left_width = static_cast<cudf::size_type>(left.num_columns());
     std::vector<cudf::column_view> inter_cols;
     if (join->filter_columns()) {
       for (const auto* fc : *join->filter_columns()) {
@@ -376,11 +376,11 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
       proj_cols.push_back(std::make_unique<cudf::column>(ftv.column(idx)));
       proj_names.push_back(all_names[idx]);
     }
-    return {std::make_unique<cudf::table>(std::move(proj_cols)),
-            std::move(proj_names)};
+    return TableResult::owning(std::make_unique<cudf::table>(std::move(proj_cols)),
+                               std::move(proj_names));
   }
 
-  return {std::move(full_table), std::move(all_names)};
+  return TableResult::owning(std::move(full_table), std::move(all_names));
 }
 
 // ============================================================================
@@ -391,10 +391,10 @@ TableResult execute_cross_join(const fb::CudfCrossJoin* join, NodeInputs* in) {
   auto left = take_input(in);
   auto right = take_input(in);
 
-  auto out = cudf::cross_join(left.table->view(), right.table->view());
+  auto out = cudf::cross_join(left.view(), right.view());
   std::vector<std::string> names = std::move(left.column_names);
   names.insert(names.end(), right.column_names.begin(), right.column_names.end());
-  return {std::move(out), std::move(names)};
+  return TableResult::owning(std::move(out), std::move(names));
 }
 
 // ============================================================================
@@ -410,8 +410,8 @@ TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInp
 
   auto left = take_input(in);
   auto right = take_input(in);
-  auto ltv = left.table->view();
-  auto rtv = right.table->view();
+  auto ltv = left.view();
+  auto rtv = right.view();
 
   std::vector<std::string> all_names = left.column_names;
   all_names.insert(all_names.end(), right.column_names.begin(),
@@ -525,11 +525,11 @@ TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInp
       proj_cols.push_back(std::make_unique<cudf::column>(ftv.column(idx)));
       proj_names.push_back(all_names[idx]);
     }
-    return {std::make_unique<cudf::table>(std::move(proj_cols)),
-            std::move(proj_names)};
+    return TableResult::owning(std::make_unique<cudf::table>(std::move(proj_cols)),
+                               std::move(proj_names));
   }
 
-  return {std::move(full_table), std::move(all_names)};
+  return TableResult::owning(std::move(full_table), std::move(all_names));
 }
 
 
