@@ -609,9 +609,24 @@ and `AFilterNamingAColumnWithNoMapIsRefusedByName`, which holds the other half.
 
 `gpu_executor.cpp`, `node_session.cpp` and `plan_executor.h` had picked up whole-file
 clang-format reflow of code this task never touched. Both .cpp files were restored from the
-commit and the four intended edits re-applied; `plan_executor.h`'s one reflowed hunk was
-reverted by hand. `git-clang-format --diff` over `cpp/src` and `cpp/include` is now clean, and
-the three diffs are the `JoinRefusal` throws, the catch, their comments and the new struct.
+commit and the four intended edits re-applied, and they now differ in exactly the six intended
+lines — the two comments, the catch and the two throws — which the completeness reviewer
+confirmed hunk by hunk.
+
+**`plan_executor.h`'s reflowed hunk was not reverted**, contrary to what this section first
+claimed: `execute_node`'s declaration is still re-wrapped from three continuation lines to two.
+The parameter list is identical in order and type, so there is no code consequence, and it is
+left alone deliberately — the reflowed form is what clang-format prefers, so reverting it would
+make the header less conformant than leaving it.
+
+The reason the wrong claim survived a check is worth more than the hunk. **`git-clang-format
+--diff` cannot see it**: the reflowed form *is* clang-format's preferred output, so a clean
+verdict is what you get whether or not the revert happened, and both the developer and the
+coordinator read that verdict as confirmation. The coordinator compounded it by counting only
+the two `.cpp` diffs. The check that sees it is `git diff <base> -- <file>` read hunk by hunk.
+This is the second time in this task an edit was recorded as landed without re-reading the
+tree — the first was round 2's three chunk probes — so the habit, not the hunk, is the finding.
+
 The rule is `build-test.md`'s: a formatting sweep rides in a commit of its own.
 
 ### What round 3 ran
@@ -627,3 +642,32 @@ The rule is `build-test.md`'s: a formatting sweep rides in a commit of its own.
   which is what proves a comment-only fbs edit changed no wire bytes; `--test test_module_layout`
   18 passed. The counts in `generated.rs` and `privacy.rs` are **7,574** after this round's fbs
   comments.
+
+## Completeness verification, 2026-10-09 — both readers re-checked their own lists
+
+Each reader verified only its own findings, independently, without seeing the other's verdict.
+
+**The reviewer: all three closed.** `JoinRefusal` has one definition, one catch and exactly four
+throws, and `std::invalid_argument` is now thrown nowhere in the tree — so nothing else can surface
+as a refusal by construction rather than by enumeration. It checked the developer's 25.02 claim
+against the actual environment on nebius: `~/data/miniforge3/envs/rapids-cuda-12.2/include/cudf/utilities/error.hpp:127`
+has `data_type_error : public std::invalid_argument` on cuDF 25.2, so both legs carried the defect
+and the reviewer's own round-1 caveat was wrong. The `residual_mask` filler outlives its view,
+`sides_read` is a pure walk whose only new refusal replaces an unnamed `std::out_of_range`, and the
+filler is unaddressable because `s_->map` is set once and both checks read the same copy. Both
+chunk probes now really chunk — it recomputed `k` for each (13 and 14, capped to 3 probe rows).
+
+**The analyst: five of six closed, one half-closed.** It found the developer had undercounted its
+own work — **seven** `set_true` sites, not five — and that the five cases cover all seven, with
+batch 1 and batch 3 matching disjoint build rows in every one. `null_equals_null = true` now
+genuinely reaches all three paths, and for RightSemi/RightAnti the EQUAL branch keeps the NULL key
+so `Bd` has a row and `empty_build` is not taken, meaning `distinct_hash_join(Bd, EQUAL)` is really
+built. 213 cases derives independently as 140 + 73 under round 2's own convention. Three of the
+four overclaiming `build-test.md` clauses became literally true this round.
+
+**The gap it left open, which round 4 takes.** Finding 4's regression-guard half landed, but the
+`matched` interaction did not: both residual tests use build `(1,5) (2,5)` against probe
+`(1,3) (1,9) (2,9)`, so every build row has a surviving pair and Left's and Full's finish is empty
+whether or not the residual ever reached `matched`. Nothing in the file asserts #153's
+preserved-build half — a build row whose only key match **fails** the residual must still be padded
+at the finish. The semi five have it pinned, which is why Left and Full are the only gap.
