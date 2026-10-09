@@ -536,3 +536,18 @@ Left alone deliberately. `cost-report` is outside this task's scope and its rest
 dead test helper is not production behaviour so it earns no ticket, and a verification round
 should not put an unrelated code change in the diff. Whoever next edits that crate should
 delete the helper or call it.
+
+#### CI on the rebased head
+
+Run [37950272373](https://github.com/asymptote-tech/peacockdb/actions/runs/37950272373) on
+`ef01e93b`, the code-carrying head. Seven jobs: changes, both dataset-matrix legs, cpp-build-2502,
+cost-report and s3-datasets all green; deploy-pages skipped, being a master-push job.
+
+GPU Tests failed at its rsync step again — `ssh: connect to host llm-gpu0h200.velkerr.ru port 22:
+Connection timed out`, exit 255. shad-gpu is unreachable, so no pool was ever built: not
+[#178](../tickets/testinfra.md#t178), which is a contended pool, and not a defect here. Chain K
+does not wait on that job, and nebius-gpu cannot exercise this task's GPU-side edits — they are to
+shad-gpu's own script and to `pipeline.yml`'s GPU job — so nothing device-side is owed. `done`.
+
+The two commits after `ef01e93b` are documentation only, so `paths-ignore` and the `changes` job
+both skip them and no run was started.
