@@ -125,18 +125,17 @@ cases are built, not run; #281 holds them.
 
 ## Completeness signoff
 
-Solved under its constraints, by the shape the page already described rather than by the fix
-either ticket proposed, and the device half has run on nebius-gpu: the four converted
-`source_cases.rs` cases green, and `tpch/scan-limit` enabled at all five device modes — which
-corrected its `gpu_oracle` to `golden_exact`, its result section having always served.
+Solved under its constraints, by the shape the page already described rather than by either
+ticket's proposed fix. The device half ran on nebius-gpu: the four converted `source_cases.rs`
+cases green, and `tpch/scan-limit` enabled at all five device modes — which corrected its
+`gpu_oracle` to `golden_exact`, its result section having always served.
 
-Six deviations outside the Scope table, each recorded in `limits-detail.md`: `Empties::fires` now
-fires every source's first call; a comment in `translator/common.rs`; that oracle change and the
-guard term it forced in `test_cpu_corpus.rs`; `gpu_plan.fbs`'s two field docs, which stated the
-model #285 is made of; and a fifth `source_cases.rs` case pinning #285. The spec's `## No GPU` and
-its "device: none" bar are superseded by chain K's board note.
+Six deviations outside the Scope table, recorded in `limits-detail.md`: `Empties::fires` firing
+every source's first call; a comment in `translator/common.rs`; that oracle change and the guard
+term it forced in `test_cpu_corpus.rs`; `gpu_plan.fbs`'s two field docs, which stated the model
+#285 is made of; and a fifth `source_cases.rs` case pinning #285. The spec's `## No GPU` and its
+"device: none" bar are superseded by chain K's board note.
 
 Filed, not fixed: **#284**, and **#285**, whose zero-column scan keeps `tpch/nested-limits` off at
-every device mode — not a limit defect, older than this branch, and #281 narrowed to empty-sorts'
-half. One device gap is named on #285: nested-limits carries the corpus's only mid-plan limit, so
-no device has run one.
+every device mode — not a limit defect, older than this branch, #281 narrowed to empty-sorts'
+half, and the one device gap named there: nested-limits carries the corpus's only mid-plan limit.
