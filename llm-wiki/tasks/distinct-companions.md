@@ -252,17 +252,16 @@ are not waited on. The C++ changes are built, not run on a device.
 
 ## Completeness signoff
 
-Solved under its constraints. A DISTINCT aggregate lowers to two sequences beside any companion the
-engine decomposes, with or without grouping sets; the five traps are built in structurally rather
-than asserted in prose; #261 and #144 are refused by name and #62 is archived; the wire's
-`distinct` field is deprecated with no slot moved and `recipe-payloads.txt` byte-identical; q28,
-`tpch/rollup-distinct` and `tpch/distinct-functions` run on the cpu corpus.
+Solved under its constraints. The lowering is as specified — two sequences beside any companion
+the engine decomposes, grouping sets included, #261 and #144 refused by name, the wire's
+`distinct` deprecated with no slot moved — and `distinct-functions` now runs it on a device at
+five modes, the first plan from this lowering any device has run, the C++ change with it.
 
-One shortcut, and it is the chain's: no GPU. The C++ change — the guard that read `distinct`, plus
-three gtest arguments — is compiled and not run, and every new gpu cell is off under #262. The
-decimal `sum` companion's cast-back is therefore pinned by a plan test alone: the cpu backend's
-`declared_as` casts a widened decimal back per batch, so no cpu run can observe the cast-back's
-absence, and the device that can has not run. No other shortcut or bandaid.
+Two shortcuts, both on #225 and both earned by a run: a schema-validation mask off at the three
+tp4 modes, where #225 refuses the outer init's Welford state on its alias, and
+`golden_approx_std` for one ULP of `stddev`. The cast-back stays pinned by a plan test, for a
+better reason than first given — a device holds `{type_id, scale}`, not a precision. Nothing else.
 
-Owed at merge: nothing for #62. `keeps_distinct` does not admit `Float32 → Float64`, an injective
-cast the spec's frozen list omits; the subcase and its cheaper fix are recorded on #144.
+Owed at merge: q28's and `rollup-distinct`'s device cells, off on #152, #65 and #189 with #262
+narrowed to that; #144's `Float32 → Float64` subcase; and two wiki edits nobody asked for, a
+`build-test.md` antipattern bullet and a widened `coding-style.md` re-export rule.
