@@ -42,8 +42,7 @@ corpus_query!(tpch, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, go
 // anyway — `an_undetermined_lines_rows_are_compared_only_against_committed_files` holds both.
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit in
 // the scan alone and the cpu backend's reader does not apply it — six million rows for ten.
-// filter-project, aggregate-groupby and shuffle-additive run everywhere on both engines;
-// cross-join is off on #220's join batching.
+// filter-project, aggregate-groupby and shuffle-additive run everywhere; cross-join is off on #220.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_exact, data_fusion_subset, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, filter_project, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, aggregate_groupby, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

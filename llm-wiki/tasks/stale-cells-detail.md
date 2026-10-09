@@ -152,8 +152,10 @@ rows A/F, N/O and R/F moved in their last one or two digits, e.g. `14.4264655591
 `14.4264655591781` and `208.12276776323006` → `208.1227677632301`. That is ~1e-15 relative, inside
 `golden_approx_std`'s 1e-11 and inside `duckdb_approx`'s tolerance, and both cases are green. It is
 run-to-run float nondeterminism in a Welford reduction, which the line's own comment and
-`build-test.md` both say to expect; `shuffle-stddev` is the only tpch query declaring Float64
-outputs, which is why it is the only section that could move.
+`build-test.md` both say to expect. `shuffle-stddev` and `tpch/q17` are the only tpch queries
+declaring Float64 outputs, and q17's float is a scalar divide over an exact `Decimal128(25,2)` sum
+— independent of merge order, lane count and card — so shuffle-stddev's are the only sections a
+reassociation can move.
 
 Everything else reproduced **byte for byte** against the committed files, which is the stronger half
 of this result: `tpcds.sf1/gpu-result.txt` and `pbench.sf1/gpu-result.txt` were both pulled from the
@@ -216,8 +218,10 @@ Then locally, with the pulled file: `duckdb_gpu_tpch_` **38 passed, 0 failed** (
 rows'); the whole rust-only tier `cargo test --features rust-only -p peacockdb-core` **rc=0**, 694 +
 11 + 26 + 3 + 983 + 43 + 18 = 1778 cases, 0 failed, 2 ignored (#182's pair); `cargo test -p
 cost-report` 41 passed. Then the registry re-synced with the tags struck and the device binary rerun
-with recording **off**: **95 passed, 0 failed** in 22.24 s, and `gpu-result.txt`'s md5 unchanged on
-the host, which is the proof that the committed file is what a non-recording run is held to.
+with recording **off**: **95 passed, 0 failed** in 22.24 s. The md5 being unchanged proves nothing
+there — with `PCK_WRITE_GPU_RESULT` unset nothing writes the file, and `test_gpu_corpus` never reads
+it, comparing against `mini.result.txt` instead. The committed file is held to account by the 38
+`duckdb_gpu_tpch_` cases above, which are the only readers of it.
 
 ### Host notes for the next run here
 
@@ -255,3 +259,26 @@ Two stale `#187` references, both pre-existing and outside this task's Restricti
 
 `llm-wiki/architecture.md:1185`'s `(#187)` is **not** drift: it names the failure mode the declared
 precision avoids, in a column that describes what would go wrong without it.
+
+### Review round 1, and a trap in editing this file at all
+
+0 blocking, 1 important, 5 nits, and every one of them prose: the sixteen cells, the registry, the
+tags and the counts were all confirmed. The reviewer reproduced the green from the committed
+artifacts alone and showed the registry-first trap could not have been taken silently here — new
+registry against the old `gpu-result.txt` gives 16 missing sections, old registry against the new
+file gives 16 extra, and each matched endpoint is clean, so only the actual pair is green. It also
+measured the tolerances independently: 3.09e-14 worst relative deviation against `golden_approx_std`'s
+1e-11, 4.81e-14 against DuckDB's, and 8.2e-16 for the one line that moved.
+
+The important finding was a false premise in this file: `shuffle-stddev` is **not** the only tpch
+query declaring Float64 outputs — `tpch/q17` does too, and has an enabled device section in the
+same file. The conclusion holds for a better reason, now written above. "The only X that could Y"
+wants the enumeration behind it, not an assertion.
+
+**`corpus_cases.inc` has a third consumer and it is a text parser.**
+`tests/test_corpus_goldens/benchmark.rs:303` reads the file as text and extracts `corpus_query!`
+invocations through `macro_invocations`, deliberately rather than through the inventories, because
+the macro expands only in the two corpus binaries. So a **comment** reflow in that file is the one
+edit shape that can reach a consumer no compiler would catch. `test_corpus_goldens` (26) is what
+covers it, and it is green. Anyone editing comments there should run the rust-only tier rather than
+reasoning that comments cannot matter.

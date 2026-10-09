@@ -63,7 +63,9 @@ the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned
 `bug_stddev_merge_holds_three_identically_named_columns` (the merge)
 in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
 `tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
-`schema_validation_disabled`; the cell stays enabled and its values match.
+`schema_validation_disabled`; the cells stay enabled and their values match. 2026-10-09: five of
+them now, `stale-cells` having turned on the four device modes that a closed #183 still held off;
+none failed on schema, so the row does not keep `225`.
 
 **Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
 
@@ -888,8 +890,7 @@ developer has both go red: `duckdb_exact` fails the device case, and `duckdb_div
 the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
 diverging". An empty position list does the same at the row level. So the only green options are
 to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
-keyed by mode for in the first place — a lane split or a shuffle defect shows per mode — and
-[`stale-cells`](../tasks/stale-cells.md) is a task that can produce one.
+keyed by mode for in the first place — a lane split or a shuffle defect shows per mode.
 
 **An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
 column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
@@ -911,8 +912,13 @@ give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent`
 a triple or a per-column exemption can carry a known difference while `rows` and the remaining
 columns stay checked.
 
-**pbench moved the deadline, and widened both halves.** `stale-cells` is blocked, pbench landed
-ahead of it, and the next task to build is `repartition-keys` — which owns `uint-key-group`, a
+**2026-10-09: `stale-cells` ran and produced no instance.** It was named here as the first task
+that could, and its sixteen device cells all matched DuckDB, so the first half is still a shape
+nothing has exhibited. The harness was deliberately not widened there: the task's restriction was
+the sixteen cells, and a device-only divergence would have stayed off under this ticket.
+
+**pbench moved the deadline, and widened both halves.** pbench landed ahead of `stale-cells`,
+and the next task to build was `repartition-keys` — which owns `uint-key-group`, a
 `duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
 on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
 fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is
