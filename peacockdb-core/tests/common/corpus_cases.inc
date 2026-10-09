@@ -110,15 +110,16 @@ corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 
 // distinct-companions (#62): a DISTINCT aggregate beside a companion DataFusion's own rewrite
 // declines. rollup-distinct puts one under a grouping set, which no other corpus query does;
-// its tp4 cpu modes are off on #189, whose shuffle cannot hash the inner merge's
-// __grouping_id, as rollup-over-join's are. Both are off on the device at every mode: #262,
-// the lowering's device cells have never run — rollup-distinct on #65 and #189 as well.
-// DataFusion 45 refuses stddev(DISTINCT) and answers a grouped decimal avg(DISTINCT) as the
-// plain average, so DataFusion is no oracle for distinct-functions; what holds its answer
-// instead is ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs, which a test reads. DuckDB's answer
-// is to be its oracle once chain J's duckdb-oracle has merged.
+// its tp4 cpu modes are off on #189, as rollup-over-join's are, and its device cells on #65
+// and #189. distinct-functions runs on the device at every mode — the first plan from the
+// lowering a device has run (#262) — under shuffle-stddev's Welford tolerance oracle, its
+// stddev one ULP from the cpu's in two groups, and schema validation off on #225: the outer
+// init's Welford state reaches the device named three times for the alias. DataFusion 45
+// refuses stddev(DISTINCT) and averages a grouped decimal avg(DISTINCT) plainly, so its
+// answer is held by ANSWER_HELD_ELSEWHERE in test_cpu_corpus.rs; DuckDB is to be its oracle
+// once chain J's duckdb-oracle has merged.
 corpus_query!(tpch, 1, rollup_distinct, tp1_single | tp1_rowgroup, none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_disabled, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, distinct_functions, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, data_fusion_disabled, golden_approx_std, schema_validation_disabled); // #225
 
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);

@@ -47,7 +47,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#235 — no independent oracle checks the result goldens](#t235)
-  - [#262 — the DISTINCT lowering's device cells have never run](#t262)
+  - [#262 — two DISTINCT corpus queries have no device cell](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
 
 ## Welford aggregation
@@ -69,7 +69,9 @@ in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema valida
 `tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
 `schema_validation_disabled`; the cell stays enabled and its values match.
 
-**Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
+**Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
+only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
+three tp4 modes: at the two tp1 modes that stage finalizes in one node and emits no state.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -954,22 +956,24 @@ Expected divergences, to declare or to normalize in the comparator:
 - **A real divergence** is a ticket, and its line in the declared list names it.
 
 <a id="t262"></a>
-### #262 — the DISTINCT lowering's device cells have never run
+### #262 — two DISTINCT corpus queries have no device cell
 
-The DISTINCT lowering (distinct-companions, chain K, closes [#62](../archive/archived-tickets.md#t62)) is built and proven on
-the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
-reach the wire — a two-stage aggregate whose outer init runs merge aggregators over state, a
-`__distinct_arg` key, a narrowed grouping id — and no device has run one. A device answer could
-differ from the cpu's there, and nothing would say so, because the cells are off.
+No device has run a DISTINCT under a grouping set, or one above a join: the two corpus queries
+carrying those shapes are off at every device mode, each on a ticket of its own.
 
-**Corpus queries:** `tpch/distinct-functions`, gpu cells off at all five modes on this ticket
-alone. tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65, #189) carry it too once
-those close.
+The lowering itself is proven on a device. `tpch/distinct-functions` was enabled at all five
+modes on nebius-gpu on 2026-10-09 (distinct-companions, chain K, which closed
+[#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
+match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. So an outer
+init running merge aggregators over state, a `__distinct_arg` key, and a decimal state widened
+to `Decimal128(35, 2)` and held as declared all work on the device.
 
-**Fix proposed:** on a GPU host, once chain J leaves one free: run distinct-functions' five
-device cells against the cpu golden; each one passing is enabled, each one failing gets the
-ticket it fails on. Then this ticket drops from the registry row and is archived. The same run
-takes q28's and rollup-distinct's cells when their own tickets have closed.
+**Corpus queries:** tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65 and #189).
+Neither row names this ticket; it is the record that their device cells are the lowering's last
+unrun ones.
+
+**Fix proposed:** when #152, #65 and #189 have closed, run those cells and enable each one that
+passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.
 
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run

@@ -49,7 +49,8 @@ own merge rule. Grouping sets lower too. Two shapes stay refused by name:
 merge, and [#144](../tickets/complete-coverage.md#t144) for a DISTINCT over two different
 arguments. The wire's `AggregateFuncNode.distinct` went with it, marked `(deprecated)` so no field
 slot moved. tpcds q28 runs on the cpu at five modes and `tpch/rollup-distinct` and
-`tpch/distinct-functions` joined the corpus; the device cells have never run, which is
+`tpch/distinct-functions` joined the corpus; distinct-functions runs on the device at five modes
+too, and q28's and rollup-distinct's device cells wait on their own tickets, which is
 [#262](../tickets/corpus-coverage.md#t262).
 
 <a id="t237"></a>

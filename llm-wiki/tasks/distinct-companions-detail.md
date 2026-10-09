@@ -1045,3 +1045,130 @@ load-bearing ones: work in `~/peacockdb-K` and never `~/peacockdb-J`; rsync the 
 `build-test-shadgpu.sh --build` and then run the staged binaries directly, never `--run`, which
 ssh-es to shad-gpu; cuDF 25.02; sf40 and the benchmarks are out. Probed at 15:20: card idle,
 37 GB free, sf1 data already in `~/peacockdb-K/testdata`, no source tree there yet.
+
+### The GPU run, 2026-10-09 on nebius-gpu
+
+All five of `tpch/distinct-functions`' device cells are **enabled and green**. The line and
+registry row changed in three ways, each one earned by a run rather than guessed:
+
+| round | the line said | result |
+|---|---|---|
+| 1 | `golden_exact`, `schema_validation_enabled` | 0/5 — three tp4 modes refused on schema, two tp1 modes red on `stddev` |
+| 2 | `golden_exact`, `schema_validation_disabled` // #225 | 0/5 — every mode past the hook, all five answers byte-identical, red on `stddev` alone |
+| 3 | `golden_approx_std`, `schema_validation_disabled` // #225 | **5/5** |
+
+**Round 1, the three tp4 modes.** The driver's output hook refused the outer init's batch:
+
+    GpuAggregate lane 0: the output hook refused a batch:
+      5 stddev(DISTINCT lineitem.l_quantity)$count: Int64 vs stddev(DISTINCT lineitem.l_quantity) INT64;
+      6 …$mean: Float64 vs stddev(DISTINCT lineitem.l_quantity) FLOAT64;
+      7 …$m2:   Float64 vs stddev(DISTINCT lineitem.l_quantity) FLOAT64
+
+That is [#225](../tickets/corpus-coverage.md#t225) and nothing else — the device holds a Welford
+state's three columns under the alias. It is also the most informative line in the run, because
+the divergence enumerates *every* mismatching column, and it named three of the node's eleven.
+So the other eight held as declared, position 9 among them: the outer init's
+`avg(lineitem.l_extendedprice)$sum`, declared `Decimal128(35, 2)`. The widened decimal state the
+lowering introduces is device-correct.
+
+The two tp1 modes reached the result instead, because at one lane the outer stage is a single
+`GpuAggregate` that inits *and* finalizes, so no state batch is ever emitted. That asymmetry is
+why `schema_validation_disabled` costs something here and is still right: `corpus_cases.inc`'s
+own header says a cell red on schema alone takes that flag with its ticket on the line, and
+`tpch/shuffle-stddev` is the precedent. It comes back on when #225 lands (chain L's
+aggregate-arms).
+
+**Round 2, the answer.** With the hook off, all five modes answered identically, and the one
+cell that differs from the cpu golden is `stddev_distinct_qty`:
+
+    device (all five modes):  A 14.577379737113251   N …251   R …251
+    cpu golden (tp4-sized):   A 14.577379737113253   N …251   R …253
+
+1.4e-16 relative — one ULP, in the two groups where the cpu's own value differs from its third.
+Welford association order, `tpch/shuffle-stddev`'s cause and `tpch/shuffle-stddev`'s remedy: the
+`golden_approx_std` oracle, whose 1e-11 is eleven orders above the difference. Not a ticket — a
+ULP is not a wrong answer. Everything else matched to the digit at every mode, `sum_distinct_qty`
+`1275.00` and `avg_distinct_qty` `25.500000` and `avg_price` `38273.129734` included, and so did
+the plan shape, the per-node `in_rows`, the batch lists and the bytes: `assert_section` runs
+before the result compare, and passed at the two tp1 modes in round 1 and at all five from round
+2 on — the three tp4 modes never reached it in round 1, since the hook refuses mid-run.
+
+### The decimal `sum` companion's cast-back: no device can see it either
+
+The spec's signoff says the cast-back is "pinned by a plan test alone" and that "the device that
+can has not run". The second half is wrong, and this run is what shows it. Two independent
+reasons:
+
+- **`distinct-functions` does not reach the cast.** The cast fires for a `Sum`, `Min` or `Max`
+  read off state the outer init widened (`translator/aggregate.rs`, `state[0].data_type() !=
+  out_type`). This query's companions are `count(*)` and `avg`, and its own `sum(DISTINCT
+  l_quantity)` reads `__distinct_arg` `Decimal128(15, 2)`, whose sum state is `Decimal128(25, 2)`
+   — equal to what DataFusion declares, so no cast. The goldens show the finalize as a bare
+  `` `sum(DISTINCT lineitem.l_quantity)`@2 ``. No corpus query has a plain decimal `sum`
+  companion beside a DISTINCT; `a_decimal_sum_companion_casts_its_finalize_back_to_the_declared_type`
+  reaches it with `sum(c_acctbal)` and is still the only thing that does.
+- **A device could not show it if it did.** The cast changes a decimal's *precision* and nothing
+  else — `(35, 2)` to `(25, 2)`, same scale, same value. `test_support/device_schema.rs` says it
+  in its header: "Precision, timezone and nullability are labels the export carries and the
+  device does not hold." Every device read in the harness is a `type_id` and a scale, so both
+  shapes read identically. A device case for it would be a guard that cannot go red.
+
+So the plan test is not a stand-in for a device reading; it is the only reading there is. Nothing
+is owed here, and the signoff sentence is the thing to correct.
+
+### What ran
+
+Device, in `~/peacockdb-K` after `. ~/peacock-env.sh`, with
+`LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib` and
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`, every rust binary `--test-threads=1`:
+
+| binary | result |
+|---|---|
+| `cpp/install/rust-tests/test_gpu_corpus` | 33 passed, 0 failed (31 cells, the no-golden case, registry↔CSV) |
+| `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::` | 536 passed, 628 filtered out |
+| `cpp/install/rust-tests/test_node_timing` | 1 passed |
+| `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered out |
+| `cpp/install/bin/peacock_gpu_tests` | 4 passed |
+| `cpp/install/bin/peacock_plan_tests` | 56 passed |
+
+Cpu, local, because the rebase onto master `bc9b6e2f` carried `cost-report/src/main.rs` and
+`pipeline.yml` and the branch had not been re-proved on them: `--lib` 622 passed / 2 ignored,
+`test_cpu_corpus` 567, `test_corpus_goldens` 26, `test_cost_model` 3, `test_ci_coverage` 9,
+`cargo test -p cost-report` 38; the ffi rung through `scripts/cargo-cudf.sh` — `--lib --
+ffi_tests::` 4, `the_payload_golden` 2, `peacockdb-ffi --test test_ffi` 3; and the C++ build
+against cuDF 25.02 with `ctest -L cpu` green and `peacock_cpu_tests` 12.
+
+Warnings. The device build reports none from cargo and two from the vendored flatbuffers
+(`_deps/flatbuffers-src/src/reflection.cpp`, gcc-12's `-Wstringop-overflow=` inside
+`<bits/stl_algobase.h>`) — third-party and not this branch's. Locally, one dead-code warning,
+`sha_links is never used` in `cost-report/src/main.rs`; it is byte-identical at `bc9b6e2f`, so it
+is master's, not the rebase's.
+
+Deferred under the board note, blocking nothing: the sf40 pair `peacock_tpch_tests` and
+`peacock_tpchv_tests`, `--run-benchmarks` (the three `bench_` cases, filtered out above), and
+Nsight.
+
+### Host notes for the next round
+
+- **Keep run logs out of the synced tree.** `rsync --delete-after` removed `build-K.log` on the
+  next sync, because it is untracked and not gitignored. Later logs went to `~/K-logs/`.
+- **The first sync deleted `~/peacockdb-K/testdata/pbench.sf1`** — chain J's dataset, hard-linked
+  into chain K's `testdata/` and named in neither chain K's tree nor its `.gitignore`. Chain J's
+  own copy is intact, because the files were hard links. Chain K needs no pbench data.
+- **Disk.** 37 GB free before the first build and 22-26 GB across the four incremental rebuilds
+  after it; chain K's `target-cudf-rapids-cuda-12.2` settled at 11 GB against chain J's 17 GB.
+  `~/miniforge3/bin/conda clean -a` found nothing removable — the 13 GB `pkgs` tree is all
+  hard-linked into the two envs — so chain J's cleanup rule has no slack left on this host.
+  Nothing was removed.
+- The card was idle throughout and no run met a memory failure; the whole device tier takes about
+  a minute of GPU time. The first build was ~20 minutes (C++ ~4, ccache warm from chain J's
+  identical sources); each corpus-line rebuild was under two. The table above is the last of the
+  two full tier runs, taken after the final sync so it reads the committed tree.
+
+### Drift this run found, for the human
+
+Chain L's `grouping-id.md` is frozen and at state `new`, so this run did not touch it, but two of
+its statements are now false: "**#262's rows:** `tpch/distinct-functions` (off at all five device
+modes on `262` alone…)", and its task 4, "**#262, the proof.** A walk test of a two-stage DISTINCT
+at `TWO_LANES`…". distinct-functions is on at all five device modes and #262 now covers q28 and
+`tpch/rollup-distinct` only. `grouping-id-impl.md` carries the same assumption in several places.
