@@ -107,7 +107,7 @@ out of the shuffle. #243's pins.
 The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
 run, enabled or ticketed, tags struck.
 
-### 6. [`exit-copies.md`](exit-copies.md) — closes [#154](../tickets/corpus-coverage.md#t154) (outside `join.cpp`) — state: reviewing — PR #176
+### 6. [`exit-copies.md`](exit-copies.md) — closes [#154](../tickets/corpus-coverage.md#t154) (outside `join.cpp`) — state: completing — PR #176
 
 The 11 operator exit copies outside `join.cpp`, `expr.cpp`'s `ColumnRef` copy the costliest.
 
