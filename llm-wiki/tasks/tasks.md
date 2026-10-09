@@ -96,6 +96,7 @@ each later task turns its own on. Folds in #227: both engines check declared non
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: reviewing — PR #169
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: completing — PR #169
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: completeness approved — PR #169
+### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: blocked(completeness approved) — PR #169
 
 The murmur gate onto the production lane rule first; then float, boolean, timestamp and decimal
 keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id

@@ -1686,3 +1686,74 @@ against `EnumValuesDataType()`, and that assertion is what caught this branch's 
 The analyst's own judgement was that a signoff line discharges it as well as code would, since the
 failure mode is a refusal and not a wrong answer, and adding a guard here would reopen a finished
 task. Named in the signoff, with the pattern to copy.
+
+## Blocked at completeness approved: the cost gate fires, and only a human can accept it (2026-10-09)
+
+Everything else is done and signed off. CI's **Cost report** job fails its last step, the PR-only
+cost-regression gate, and that job is not one the host override exempts — so `done`, which asserts
+the PR is green, cannot be written.
+
+```
+cost-diff: 679 compared, 12 changed, 6 regression(s)   exit 1
+```
+
+**Bisected across this branch's own runs**, so nobody need redo it: green on `1a1d03b6` (the
+rebase), red from `74da1059` (the device half) onward, and nothing since has touched a cost input.
+
+**Why four readings missed it.** The round ran `scripts/cost-report-preview.sh`, which renders and
+exits 0 and does not take a base SHA. Two review rounds and two completeness readings re-derived
+all 703 `.cost.txt` sections byte-exactly from their `.cpu.txt` siblings — which proves the
+derivation is right and says nothing about whether the total went up. The gate is the only thing in
+the tree that asks the second question, and it runs on a PR alone.
+
+### The six, and the one sentence that settles them
+
+| section | base Σout | PR Σout | Δ |
+|---|--:|--:|--:|
+| `tpch/q2` tp4-rowgroup | 392,944,650 | 392,944,816 | **+166** |
+| `tpch/q2` tp4-single | 394,695,770 | 394,695,804 | **+34** |
+| `tpch/q2` tp4-sized | 392,898,679 | 392,898,713 | **+34** |
+| `tpch/q10` tp4-rowgroup | 653,524,699 | 653,524,762 | **+63** |
+| `tpch/q10` tp4-single | 653,445,902 | 653,445,965 | **+63** |
+| `tpch/q10` tp4-sized | 652,518,141 | 652,518,204 | **+63** |
+
+Against six improvements — `pbench/decimal15-key-group` −4 and `decimal15-key-join` −14 at each tp4
+mode. **+423 bytes of regression and −54 of improvement on 3.17 GB of compared cost, and no row,
+node, lane count or answer changed anywhere.** Worst single ratio +0.000042%.
+
+**Benign and inherent to D2, tested rather than assumed.** `output_rows` unchanged in all twelve;
+node skeletons identical element for element; `lanes=4` on both sides; the only answer-golden
+changes on the whole branch are `mode=` author lines. For every moved figure but two,
+`Δbytes = columns × Δ(Σ ceil(rows_lane/8))` — validity-bitmap rounding to the byte. The two
+exceptions are `GpuSort` nodes whose per-lane top-N now holds a different *set* of rows at the same
+row count, so the variable-width string content differs; the merged answer is unchanged. And
+exactly one shuffle moved per query, always the only one whose key list holds a decimal of
+precision ≤ 18 — `decimal38-key-group` did not move at all, because at p = 38 the cast is a no-op.
+That is the cast's fingerprint and nothing else produces it.
+
+**Unavoidable, not merely accepted.** Keeping comet's 8-byte width at p ≤ 18 needs the device to
+know the precision and it cannot — cuDF's `data_type` carries none and the loader widens every
+decimal to `Decimal128` — which is why D2 refused the wire field that would carry it. Dropping
+those four columns from the shuffle key list would change which keys DataFusion picks, which the
+Restriction forbids. And `hash_keys` has no incidental cast to strip: it maps only over
+`hash_exprs`, matches only `Decimal128(p, _) if p < 38`, and the widened array reaches
+`create_murmur3_hashes` alone, never the data flow.
+
+### What the gate actually measures, which changes how the number reads
+
+`DiffRow::is_regression()` (`cost-report/src/main.rs:1262`) is `self.new > self.old` — **any
+increase of one byte**, no tolerance and no magnitude. The 1.4 threshold `build-test.md` names
+beside it is `RATIO_GREEN_MAX`, used only by the coverage report's peacock-over-DuckDB bucket;
+`DiffRow` has no `bucket()`. The two are one row of a CI table and two mechanisms. So "6 of 12
+changed" is the weakest possible trigger and here it fired on 34 to 166 bytes.
+
+**The artifact the human is asked to judge shows them no magnitude.** `fmt_delta` renders
+`{:+.2}%` and both Σout columns render human-readable, so all twelve rows of the PR comment read
+`623.25 MB | 623.25 MB | 🔴 +0.00%`. Every figure is identical on both sides and the delta displays
+as zero. That is a defect in a rendered artifact rather than in the engine, so it is not a ticket
+by the standing rule — but it is why the table above is in this file: it is the only place the
+numbers exist.
+
+`architecture.md` gained the one sentence that would have made this legible in a minute: a cost
+total is lane-split dependent, because `output_bytes` carries per-batch padding, so any change to
+the lane rule moves it even where no row, node or lane count does — and the gate fires on a byte.
