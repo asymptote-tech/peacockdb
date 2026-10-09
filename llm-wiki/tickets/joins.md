@@ -14,6 +14,31 @@ has to be settled first.
 Recipe planning will no longer happen for joins after the rewrite. The new backend implementation will
 not need to look at a recipe when executing a join, instead encoding the logic as plain Rust.
 
+## Contents
+
+- [#155 — umbrella: join execution through a wider C and FlatBuffers API](#t155)
+- [#152 — GpuHashJoin: the build handle does not survive a streamed probe](#t152)
+- [#153 — equi-join residual filter is applied after the outer gather](#t153)
+- [#80 — Anti-join NOT IN three-valued logic + independent DuckDB result oracle](#t80)
+- [#59 — Nullable-key semantics for semi/anti/mark joins](#t59)
+- [#215 — a left nested-loop join over a predicate the AST cannot take is refused on the device](#t215)
+- [#208 — the cpu's cross join answers nothing over a zero-row build side](#t208)
+- [#207 — both backends drop a cross join's projection](#t207)
+- [#190 — the CPU backend drops a nested-loop join's projection](#t190)
+- [#63 — a zero-column placeholder survives the cross join and shifts every ordinal above it](#t63)
+- [#212 — a build side that emits no batch at all still refuses Right, Full and RightAnti](#t212)
+- [#173 — a finish whose probe produced no keys refuses what it could answer from the build side](#t173)
+- [#136 — GpuHashJoin: build-side match tracking when the probe side streams](#t136)
+- [#137 — the planner does not drop null join keys before the shuffle](#t137)
+- [#159 — RightSemi/RightAnti with a residual filter has no cuDF path](#t159)
+- [#160 — nested-loop join supports Inner and Left only](#t160)
+- [#220 — the cpu's joins answer several batches per call where the device answers one](#t220)
+- [Complete Join Coverage](#complete-join-coverage)
+  - [#243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys](#t243)
+  - [#245 — a nested-type key cannot cross a shuffle](#t245)
+  - [#246 — a `LIKE` whose pattern is a column is refused on the device](#t246)
+  - [#250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs](#t250)
+
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
 Every join mode already runs on the frozen surface (`scripts/exec_model`, and the capability

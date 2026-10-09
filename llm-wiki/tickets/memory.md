@@ -1,4 +1,10 @@
+## Contents
 
+- [#182 — two accounting properties are out of reach, and no budgeted run survives](#t182)
+- [#179 — nothing shows a rebatcher moving an enforced budget boundary](#t179)
+- [#177 — the finish join's intermediate is priced by the node's row, not by what it emits](#t177)
+- [#167 — nothing proves a failed query gives its device memory back](#t167)
+- [#229 — a mid-plan limit's sliced device batch is priced without its string bytes](#t229)
 
 <a id="t182"></a>
 ### #182 — two accounting properties are out of reach, and no budgeted run survives

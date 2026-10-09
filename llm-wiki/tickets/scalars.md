@@ -3,6 +3,20 @@
 
 Tickets related to scalars and functions. These tickets are tied to a milestone of full SQL functionality for MVP.
 
+## Contents
+
+- [#224 — the device cannot cast an integer to a date](#t224)
+- [#211 — a typed null argument to substr or round is read as 0 on the device](#t211)
+- [#203 — the device cannot cast a number to text](#t203)
+- [#223 — `substr` with a column for its start or length is refused on the device](#t223)
+- [#218 — the device cannot cast text to a date](#t218)
+- [#222 — `round(x, places)` with a column for `places` is refused on the device](#t222)
+- [#221 — `round` over a `Float32` column answers `Float64` on the device](#t221)
+- [#219 — `ILIKE` is case-sensitive on the device](#t219)
+- [#200 — a Date64 comes back as a type the wire cannot name](#t200)
+- [#162 — expression forms the planner refuses](#t162)
+- [#230 — GROUPING() over a subset or reordering of the rollup keys is refused on the device](#t230)
+
 <a id="t224"></a>
 ### #224 — the device cannot cast an integer to a date
 

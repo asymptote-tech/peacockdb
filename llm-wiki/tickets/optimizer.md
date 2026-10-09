@@ -1,6 +1,25 @@
 
 # Tasks for the optimizer project
 
+## Contents
+
+- [#73 — Cost-based optimizer (CBO) umbrella](#t73)
+- [#101 — No CSE / CTE materialization: identical subexpressions recomputed N times](#t101)
+- [#140 — broadcast joins (1:N partition broadcast)](#t140)
+- [#170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire](#t170)
+- [#141 — the planner cannot skip the shuffle for small group-key sets](#t141)
+- [#139 — GpuCoalesceBatches(target): compact post-filter fragments](#t139)
+- [#147 — PlanEstimates: a tree the planner emits and the runtime refines](#t147)
+- [#20 — Join enumeration: DPccp/DPhyp cost-based tree reshaping](#t20)
+- [#71 — GPU scan: no predicate pushdown into the cuDF read](#t71)
+- [#19 — the planner has no cardinality estimate, and the memory model pays for it](#t19)
+- [#16 — Dynamic / runtime filters: build-side keys → probe-side scan](#t16)
+- [#75 — Refactor duckdb_cost.py: separate cost formula from extraction](#t75)
+- [#146 — aggregate shaping beyond the fixed sequence](#t146)
+- [#158 — an aggregate DataFusion answers from statistics reaches no executor](#t158)
+- [#142 — split large batches](#t142)
+- [#138 — add ranged sorted merge](#t138)
+
 <a id="t73"></a>
 ### #73 — Cost-based optimizer (CBO) umbrella
 Move physical planning from static heuristics to cost-based, validated against the DuckDB

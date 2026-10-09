@@ -3,6 +3,12 @@
 
 Tests, CI, hosts, testdata etc
 
+## Contents
+
+- [#178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault](#t178)
+- [#176 — the CI coverage guard checks one direction only](#t176)
+- [#129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard](#t129)
+
 <a id="t178"></a>
 ### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in

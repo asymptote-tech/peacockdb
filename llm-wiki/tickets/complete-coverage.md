@@ -3,6 +3,16 @@
 
 Tickets for MVP SQL functionality milestone
 
+## Contents
+
+- [#239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device](#t239)
+- [#195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all](#t195)
+- [#161 — aggregate shapes the planner refuses: FILTER, and functions with no decomposition](#t161)
+- [#144 — multiple DISTINCT arguments need a gid-multiplying expand](#t144)
+- [#261 — a `stddev` or `var` beside a DISTINCT is refused at planning](#t261)
+- [#249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`](#t249)
+- [#283 — a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
+
 <a id="t239"></a>
 ### #239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
 DataFusion 45 types `date_part`/`extract` as `Int32`; cuDF's `extract_datetime_component`

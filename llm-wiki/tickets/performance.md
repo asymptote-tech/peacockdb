@@ -3,6 +3,16 @@
 
 These issues should be fixed on a pre-prod performance path.
 
+## Contents
+
+- [#150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%](#t150)
+- [#149 — the parquet load must use pinned host memory](#t149)
+- [#148 — the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored](#t148)
+- [#231 — one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02](#t231)
+- [#232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader](#t232)
+- [#242 — the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
+- [#248 — three join shapes run on one lane or skewed after the rewrite](#t248)
+
 <a id="t150"></a>
 ### #150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
 The sf40 embedding columns are written SNAPPY and do not compress: `ps_image_embedding`

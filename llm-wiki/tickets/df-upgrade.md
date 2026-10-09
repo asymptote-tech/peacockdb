@@ -1,6 +1,14 @@
 
 # Tickets related to DataFusion upgrade
 
+## Contents
+
+- [#241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express](#t241)
+- [#23 — q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither](#t23)
+- [#166 — physical planning drops a LIMIT interval, and the answer changes](#t166)
+- [#228 — DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make](#t228)
+- [#247 — DataFusion 45 refuses or mis-answers seven subquery shapes](#t247)
+
 <a id="t241"></a>
 ### #241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express
 

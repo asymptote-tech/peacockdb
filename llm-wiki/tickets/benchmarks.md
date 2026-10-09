@@ -1,6 +1,11 @@
 
 # Wall-time benchmarks
 
+## Contents
+
+- [#226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it](#t226)
+- [#69 — DuckDB cost oracle: multi-threaded golden generation for larger SF](#t69)
+
 <a id="t226"></a>
 ### #226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it
 The `--- run ---` trailer and the record's `# run:` heading carry `build=`, `allocator=` and

@@ -1,6 +1,15 @@
 
 # Pre-production system hardening tasks
 
+## Contents
+
+- [#13 — Hermetic builds: system-library whitelist + CI audit](#t13)
+- [#196 — the table registrar's non-parquet guard does nothing, so a stray file panics](#t196)
+- [#169 — a recipe plan is a chain, so its depth is its length, and the verifier caps depth](#t169)
+- [#128 — Doctests run nowhere, and the meta guard cannot see them](#t128)
+- [#244 — cuDF 25.02 is kept for a host constraint that may no longer hold](#t244)
+- [#260 — on cuDF 26.02 a multi-batch decimal avg faults in cuDF's shared-memory groupby](#t260)
+
 <a id="t13"></a>
 ### #13 — Hermetic builds: system-library whitelist + CI audit
 `ld` silently prefers system libs over the conda env (seen as
