@@ -240,7 +240,11 @@ plan as they run any aggregate sequence. No device fix for #65.
   `peacock_plan_tests` included; `ctest -L cpu`.
 - device: none. q28's gpu cells wait on join-backend; the device's DISTINCT walk waits on the host.
 
-## No GPU
+## No GPU, superseded
+
+**Superseded 2026-10-09:** this task's GPU tests now run on nebius-gpu, under chain K's board
+note in `tasks.md`, which reopens it to `building` for its GPU half. The paragraph below is the
+original rule, kept for the record.
 
 Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. No device run,
 no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs

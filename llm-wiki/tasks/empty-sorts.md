@@ -88,7 +88,11 @@ a keyless aggregate over nothing is #199 (chain L).
   tests both ways.
 - device: none.
 
-## No GPU
+## No GPU, superseded
+
+**Superseded 2026-10-09:** this task's GPU tests now run on nebius-gpu, under chain K's board
+note in `tasks.md`, which reopens it to `building` for its GPU half. The paragraph below is the
+original rule, kept for the record.
 
 Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
 job but the GPU tests is green; the GPU jobs are not waited on. The device cases are built, not

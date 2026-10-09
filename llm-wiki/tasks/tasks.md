@@ -128,24 +128,40 @@ the chain turned on, against 25.02; the evidence #244 waits on.
 
 ## Chain K (base: master)
 
-> **No GPU, from 2026-10-08 until the human lifts it.** It overrides the specs, `build-test.md`
-> and the coordinator's `done` rule wherever they disagree.
+> **GPU on nebius-gpu, from 2026-10-09 until the human lifts it.** It replaces the earlier "No
+> GPU" note and overrides the specs, `build-test.md` and the coordinator's `done` rule wherever
+> they disagree.
 >
-> - **No device build, no device run, no GPU cycle.** Chain J holds the one GPU host
->   (nebius-gpu); this chain must not contend for it. Every build and run is local: rust-only,
->   the CPU tiers, `ctest -L cpu`, the C++ build against cuDF 25.02.
-> - **`done` when every CI job but the GPU tests is green.** The coordinator does not wait on the
->   GPU jobs. guard-checks' edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job go in
->   untested, and so do limits' and empty-sorts' device changes (#281).
+> - **GPU tests run on nebius-gpu**, `dmitry@89.169.109.150`, under chain J's host override
+>   above, with every rule there unless it is named here: GPU builds and runs only, CPU work stays
+>   local; cuDF 25.02; the `rsync --delete-after` sync, uncommitted; `build-test-shadgpu.sh
+>   --build` and the staged binaries run directly, never `--run`; sf40 and benchmarks out.
+> - **This chain works in `~/peacockdb-K`, never `~/peacockdb-J`.** The sf1 data is already in its
+>   `testdata/`, hard-linked from chain J's copy; never edit those files in place.
+> - **Sharing the card with chain J is allowed.** If a run fails on memory while chain J's is on
+>   the card, `nvidia-smi` shows it; wait for chain J's run to end and rerun, rather than
+>   ticketing it.
+> - **Watch the disk; two chains now build there.** Run `df -h /` before every GPU build. Below
+>   20 GB free, follow chain J's cleanup rule first; below 10 GB, do not start a build, and record
+>   it in the detail file as an obstacle. Never delete anything under `~/peacockdb-J`.
+> - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
+>   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
+>   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
+>   and empty-sorts' device changes and cases ([#281](../tickets/corpus-coverage.md#t281)). Each
+>   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
+>   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
+>   nebius-gpu cannot exercise.
+> - **`done`** is chain J's rule: CI green except the `gpu-tests` job, and the GPU tests passed
+>   on nebius-gpu, recorded in the detail file.
 > - **The cost gate's expected rises are accepted** (the human, 2026-10-08). limits and
 >   empty-sorts are `done` when the cost-report job's only regressions are the sections their
 >   detail files list from the local `--cost-diff` run: nested-limits at tp1-rowgroup and
 >   tp4-rowgroup for limits (expected +228 bytes), q17 at tp1-single and tp1-rowgroup for
 >   empty-sorts (expected +24 bytes). Any other regression is a finding, as usual.
 
-Corpus-coverage tickets and #62, all provable on the cpu, run beside chain J while it holds the
-GPU host. limits and empty-sorts were added after the chain started; their device changes go in
-built and not run, held by #281.
+Corpus-coverage tickets and #62, proved on the cpu first while chain J held the GPU host; their
+GPU halves now run on nebius-gpu beside chain J. limits and empty-sorts were added after the chain
+started.
 
 ### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: approved to build
 
