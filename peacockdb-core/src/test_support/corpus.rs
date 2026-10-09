@@ -600,7 +600,7 @@ pub(crate) fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
 /// lone parenthesis: the last argument may carry a schema-validation mode mask's parens, and
 /// a comment naming a ticket may carry its own. Hunting the final `)` found whichever came
 /// last, which is the comment's as soon as one has a bracket in it.
-fn invocations_in(text: &str, name: &str, at: &str) -> Vec<Vec<String>> {
+pub(crate) fn invocations_in(text: &str, name: &str, at: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for line in text.lines() {
         let body = line.trim();

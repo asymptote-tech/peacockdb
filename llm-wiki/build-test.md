@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 4938 test cases — Rust 4371, C++ 170, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 4940 test cases — Rust 4373, C++ 170, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2765 cases: `--lib` 775, `test_cpu_corpus` 1960, `test_corpus_goldens` 27, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 2767 cases: `--lib` 775, `test_cpu_corpus` 1960, `test_corpus_goldens` 29, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -75,7 +75,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 27 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 29 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -87,8 +87,11 @@ the record get the same reading: every `total_us` is the sum of the `time_us` be
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, a row that lost a cell is refused, a bare `calls` row names the seq it was
 handed, and the record's preamble is what `record_header()` writes. That device check reads
-`corpus_cases.inc` as text, so one case holds the reader to the two bracket shapes a declaration
-line carries — a mode mask on the last argument, and a trailing comment with a parenthesis in it
+`corpus_cases.inc` as text, and two more read it with the same reader: every schema-validation
+mask entry is one of its own line's device modes — the decoder is asked only about a mode a run
+reached, so an entry for a cell that is off is never decoded and arms itself when that cell is
+enabled — and one case holds the reader to the two bracket shapes a declaration line carries, a
+mode mask on the last argument and a trailing comment with a parenthesis in it
 
 | Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
 |---|---|--:|

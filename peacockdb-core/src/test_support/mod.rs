@@ -913,6 +913,11 @@ pub fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
     corpus::macro_invocations(path, name)
 }
 
+/// The same reader over a text rather than a file, so a test can hand it single lines.
+pub fn macro_invocations_in(text: &str, name: &str) -> Vec<Vec<String>> {
+    corpus::invocations_in(text, name, "a line")
+}
+
 /// The `corpus_query!` lines of the include both corpus binaries read.
 pub fn corpus_lines() -> Vec<Vec<String>> {
     corpus::corpus_lines()

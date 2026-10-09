@@ -21,8 +21,8 @@ use super::device_answer::{
 };
 use super::gpu_session::Session;
 use super::{
-    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator,
-    is_validated_at, mode_named, section_holds_rows,
+    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, is_validated_at,
+    mode_named, section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
