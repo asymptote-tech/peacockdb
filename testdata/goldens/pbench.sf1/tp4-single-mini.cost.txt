@@ -121,7 +121,7 @@ peacockdb_cost=124341
 == full-join-null-keys
 storage_read_bytes=269500 # GpuLoadParquet
 cuda_filter_bytes=0 # GpuFilter
-cuda_hash_join_bytes=716375 # GpuHashJoin
+cuda_hash_join_bytes=716363 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -129,11 +129,11 @@ cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
 cuda_shuffle_bytes=539016 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
 cuda_passthrough_bytes=24502 # GpuProject, GpuCoalesceAllBatches
-vram_to_ram_bytes=716375 # GpuUnload
+vram_to_ram_bytes=716363 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=2265768
+peacockdb_cost=2265744
 == full-join-residual
 skipped: not enabled at this mode
 == in-is-null
@@ -301,7 +301,7 @@ skipped: not enabled at this mode
 == sparse-build-anti
 storage_read_bytes=245033 # GpuLoadParquet
 cuda_filter_bytes=0 # GpuFilter
-cuda_hash_join_bytes=107721 # GpuHashJoin
+cuda_hash_join_bytes=107720 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
@@ -309,11 +309,11 @@ cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
 cuda_shuffle_bytes=490080 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
 cuda_passthrough_bytes=33 # GpuProject, GpuCoalesceAllBatches
-vram_to_ram_bytes=107721 # GpuUnload
+vram_to_ram_bytes=107720 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=950588
+peacockdb_cost=950586
 == sparse-build-full
 storage_read_bytes=245066 # GpuLoadParquet
 cuda_filter_bytes=0 # GpuFilter

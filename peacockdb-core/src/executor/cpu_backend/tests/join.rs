@@ -104,7 +104,7 @@ fn rows_of(batches: Vec<CpuBatch>) -> Vec<String> {
 /// The build side set, both probe batches through, then the finish — the call sequence a
 /// driver makes, in the order the typestate allows.
 fn drive(join: CpuJoin) -> Vec<String> {
-    let (mut probing, _) = join.set_build(dim()).expect("the build side is set");
+    let (mut probing, _) = join.set_build(Some(dim())).expect("the build side is set");
     let mut out = Vec::new();
     for batch in FACT {
         let (produced, _) = probing
@@ -212,7 +212,7 @@ fn the_probe_side_semi_family_answers_per_batch_and_finishes_with_nothing() {
             ctx(),
         )
         .expect("the join builds");
-        let (mut probing, _) = join.set_build(dim()).expect("the build side is set");
+        let (mut probing, _) = join.set_build(Some(dim())).expect("the build side is set");
         let mut out = Vec::new();
         for batch in FACT {
             let (produced, _) = probing
@@ -286,7 +286,7 @@ fn a_build_row_matched_in_one_batch_is_not_padded_against_another() {
         ctx(),
     )
     .expect("the join builds");
-    let (mut probing, _) = join.set_build(dim()).expect("the build side is set");
+    let (mut probing, _) = join.set_build(Some(dim())).expect("the build side is set");
     let mut per_batch = Vec::new();
     for batch in FACT {
         let (produced, _) = probing
@@ -396,7 +396,7 @@ fn a_nested_loop_left_join_pads_the_build_rows_no_pair_kept() {
         ctx(),
     )
     .expect("the nested loop join builds");
-    let (mut probing, _) = join.set_build(dim()).expect("the build side is set");
+    let (mut probing, _) = join.set_build(Some(dim())).expect("the build side is set");
     let whole_probe: Vec<(i64, i64)> = FACT.concat();
     let (produced, _) = probing
         .probe_and_fetch(fact(&whole_probe))
@@ -442,7 +442,7 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
             )
             .expect("the build side fits"),
         );
-        let (mut probing, _) = join.set_build(build).expect("the build side is set");
+        let (mut probing, _) = join.set_build(Some(build)).expect("the build side is set");
         let probe_keys: ArrayRef = Arc::new(Int64Array::from(vec![None, Some(9i64)]));
         let probe_values: ArrayRef = Arc::new(Int64Array::from(vec![Some(0i64), Some(9)]));
         let probe = CpuBatch::new(
@@ -542,7 +542,7 @@ fn the_filtered_column_answers_in_one_call_and_never_at_done() {
             ctx(),
         )
         .expect("the join builds");
-        let (mut probing, _) = join.set_build(dim()).expect("the build side is set");
+        let (mut probing, _) = join.set_build(Some(dim())).expect("the build side is set");
         let whole_probe: Vec<(i64, i64)> = FACT.concat();
         let (per_call, _) = probing
             .probe_and_fetch(fact(&whole_probe))
@@ -601,11 +601,59 @@ fn a_finish_over_no_probe_keys_at_all_owes_every_build_row() {
         ctx(),
     )
     .expect("the join builds");
-    let (probing, _) = join.set_build(dim()).expect("the build side is set");
+    let (probing, _) = join.set_build(Some(dim())).expect("the build side is set");
     let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
     assert_eq!(
         rows_of(finished),
         rows(&["1|a", "2|b", "3|c"]),
         "no probe batch ever arrived, so no build row was ever matched"
     );
+}
+
+/// #212 — a build side that produced no batch at all, for a type whose answer is its probe
+/// side. Nothing can join over a table that is not there, so `set_build(None)` refuses by
+/// name; the six types every row of which is built from a build row say they owe nothing.
+#[test]
+fn a_build_side_that_produced_nothing_is_refused_for_the_types_that_owe_their_probe() {
+    let owing = [JoinType::Right, JoinType::Full, JoinType::RightAnti];
+    for join_type in owing {
+        let node = hash_join(join_type, &both_sides());
+        let join = CpuJoin::hash(
+            &node,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
+            ctx(),
+        )
+        .expect("the join builds");
+        let refused = match join.set_build(None) {
+            Err(error) => error,
+            Ok(_) => panic!("{join_type:?} owes its probe side and must refuse"),
+        };
+        assert!(
+            refused.message.contains("#212"),
+            "{join_type:?}: {refused:?}"
+        );
+    }
+    for join_type in [
+        JoinType::Inner,
+        JoinType::Left,
+        JoinType::LeftSemi,
+        JoinType::LeftAnti,
+        JoinType::LeftMark,
+        JoinType::RightSemi,
+    ] {
+        let node = hash_join(join_type, &both_sides());
+        let join = CpuJoin::hash(
+            &node,
+            &columns(&dim_columns()).fields,
+            &columns(&fact_columns()).fields,
+            ctx(),
+        )
+        .expect("the join builds");
+        let probing = match join.set_build(None) {
+            Ok((probing, _)) => probing,
+            Err(error) => panic!("{join_type:?} owes nothing: {error:?}"),
+        };
+        assert!(probing.owes_nothing(), "{join_type:?}");
+    }
 }

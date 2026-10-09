@@ -90,7 +90,7 @@ impl GpuJoin {
     /// the rule is the one the CPU reads too. A scatter no longer brings an owing type
     /// here — the driver keeps its zero-row table and `set_build` takes it (#175) — so
     /// what reaches the refusal is an upstream that emitted nothing at all (#212).
-    pub(crate) fn without_build(self) -> Result<(), BackendError> {
+    pub(crate) fn without_build_allowed(&self) -> Result<(), BackendError> {
         // Cross and nested-loop joins carry no type here and owe nothing either: every row
         // they emit is built from a build row, the Left form's padding included.
         let owes_nothing = self.join_type.map_or(true, empty_build_answers_nothing);
@@ -105,13 +105,21 @@ impl GpuJoin {
 
     /// The build side, which is one batch per lane. It is held rather than consumed: which
     /// call takes it, and whether it survives that call, is what the recipe says.
-    pub(crate) fn set_build(self, batch: GpuBatch) -> CallResult<GpuProbingJoin> {
+    pub(crate) fn set_build(self, batch: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
+        let owes_nothing = match &batch {
+            Some(_) => false,
+            None => {
+                self.without_build_allowed()?;
+                true
+            }
+        };
         Ok((
             GpuProbingJoin {
                 join: self,
-                build: Some(batch),
+                build: batch,
                 accumulated: Vec::new(),
                 probes: 0,
+                owes_nothing,
             },
             no_abi_calls(),
         ))
@@ -119,6 +127,11 @@ impl GpuJoin {
 }
 
 impl GpuProbingJoin {
+    /// What this lane owes with no build side, read off the join type at `set_build`.
+    pub(crate) fn owes_nothing(&self) -> bool {
+        self.owes_nothing
+    }
+
     /// The build side, from `set_build` until the call that consumes it — `None` after,
     /// because the surface has no copy and the recipe says which call takes it.
     pub(crate) fn build_bytes(&self) -> usize {

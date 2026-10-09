@@ -44,10 +44,9 @@ pub(crate) enum LaneCall {
     Unload,
     Accumulate,
     MarkDone,
+    /// The build side's batch, or its absence: `set_build` takes an `Option`, and the
+    /// executor says whether a lane with no build batch owes anything.
     SetBuild,
-    /// The build side ended with no batch. The executor says whether the lane owes
-    /// nothing — six of the nine join types do — and the lane drains from there.
-    NoBuild,
     /// A probe batch for a lane that has no build side: released rather than probed, since
     /// what it could have matched is not there.
     DropProbe,
@@ -68,10 +67,15 @@ impl LaneCall {
             Self::Exec | Self::Unload | Self::Accumulate => Some(0),
             Self::SetBuild => Some(BUILD_SLOT),
             Self::Probe | Self::DropProbe => Some(PROBE_SLOT),
-            Self::NextBatch | Self::MarkDone | Self::Finish | Self::NoBuild | Self::EndOfInput => {
-                None
-            }
+            Self::NextBatch | Self::MarkDone | Self::Finish | Self::EndOfInput => None,
         }
+    }
+
+    /// Whether the slot [`Self::consumes`] names has to hold a batch. Every call but
+    /// `SetBuild` does: a build side that finished with no batch is told so by
+    /// `set_build(None)`, which is one call for both cases.
+    pub(crate) fn needs_its_batch(&self) -> bool {
+        !matches!(self, Self::SetBuild)
     }
 }
 
@@ -192,12 +196,9 @@ impl<B: Backend> LaneDriver<B> {
             ExecutorCategory::Exec | ExecutorCategory::Unload => LaneCall::EndOfInput,
             ExecutorCategory::BatchAccumulator if avail.has[0] => LaneCall::Accumulate,
             ExecutorCategory::BatchAccumulator => LaneCall::MarkDone,
-            // A lane whose scatter gave its build side no rows: routine for a small table
-            // over many lanes, and the executor is asked what the type owes rather than
-            // the driver assuming the plan is at fault.
-            ExecutorCategory::Join if self.awaits_build() && !avail.has[BUILD_SLOT] => {
-                LaneCall::NoBuild
-            }
+            // One call whether the build side produced a batch or not: a scatter that gave
+            // this lane no rows is routine for a small table over many lanes, and what the
+            // lane owes for it is the executor's answer rather than the driver's.
             ExecutorCategory::Join if self.awaits_build() => LaneCall::SetBuild,
             ExecutorCategory::Join if matches!(self.state, LaneState::Draining) => {
                 match avail.has[PROBE_SLOT] {
@@ -320,36 +321,29 @@ impl<B: Backend> LaneDriver<B> {
                     .made(stats.calls))
             }
             LaneCall::SetBuild => {
-                let batch = self.expect_input(input, site)?;
                 let LaneState::Build(executor) = mem::replace(&mut self.state, LaneState::Unbuilt)
                 else {
                     return Err(self.wrong_state(site, "set_build"));
                 };
                 let modelled = acct.begin_call(site.slot, &executor, n_rows, n_bytes)?;
+                let consumed = input.as_ref().map(|held| held.bytes);
                 let (probing, stats) = executor
-                    .set_build(batch.batch)
+                    .set_build(input.map(|held| held.batch))
                     .map_err(|e| failed(site, acct, Some(n_bytes), e))?;
-                acct.release(batch.bytes)?;
+                if let Some(bytes) = consumed {
+                    acct.release(bytes)?;
+                }
                 // The successor reports for the same slot: what the build side became is
                 // this instance's residency now.
                 acct.end_call(site.slot, &probing, &stats, modelled)?;
-                self.state = LaneState::Probe(probing);
+                // A lane that owes nothing still reads its probe side, to let go of it.
+                self.state = match probing.owes_nothing() {
+                    true => LaneState::Draining,
+                    false => LaneState::Probe(probing),
+                };
                 Ok(self
                     .outcome(LaneOutputs::Device(Vec::new()), false, CallKind::SetBuild)
                     .made(stats.calls))
-            }
-            LaneCall::NoBuild => {
-                let LaneState::Build(executor) = mem::replace(&mut self.state, LaneState::Draining)
-                else {
-                    return Err(self.wrong_state(site, "without_build"));
-                };
-                executor
-                    .without_build()
-                    .map_err(|e| failed(site, acct, None, e))?;
-                acct.forget(site.slot);
-                // Not finished: the probe side is still producing for this lane, and what
-                // it produces has to be read to be let go of.
-                Ok(self.outcome(LaneOutputs::Device(Vec::new()), false, CallKind::NoBuild))
             }
             LaneCall::DropProbe => {
                 let batch = self.expect_input(input, site)?;
@@ -369,7 +363,7 @@ impl<B: Backend> LaneDriver<B> {
                 let (out, stats) = executor
                     .probe_and_fetch(batch.batch)
                     .map_err(|e| failed(site, acct, Some(n_bytes), e))?;
-                let out = hold_all(out, acct, Some(batch.bytes))?;
+                let out = hold_all(out.into_iter().collect(), acct, Some(batch.bytes))?;
                 acct.end_call(site.slot, executor, &stats, modelled)?;
                 Ok(self.outcome(LaneOutputs::Device(out), false, CallKind::Probe).made(stats.calls))
             }
@@ -382,7 +376,7 @@ impl<B: Backend> LaneDriver<B> {
                 let (out, stats) = executor
                     .finish_and_fetch()
                     .map_err(|e| failed(site, acct, None, e))?;
-                let out = hold_all(out, acct, None)?;
+                let out = hold_all(out.into_iter().collect(), acct, None)?;
                 acct.end_consuming_call(site.slot, &stats, modelled)?;
                 Ok(self.outcome(LaneOutputs::Device(out), true, CallKind::Finish).made(stats.calls))
             }

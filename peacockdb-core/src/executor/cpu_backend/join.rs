@@ -166,7 +166,7 @@ impl CpuJoin {
     /// join type's answer; for the three that owe their probe side the driver keeps the
     /// scatter's zero-row table instead (#175), so only an upstream that emitted nothing
     /// at all reaches the refusal (#212).
-    pub(crate) fn without_build(self) -> Result<(), BackendError> {
+    pub(crate) fn without_build_allowed(&self) -> Result<(), BackendError> {
         if self.calls.empty_build_answers_nothing {
             return Ok(());
         }
@@ -177,13 +177,22 @@ impl CpuJoin {
     }
 
     /// The build side, which is one batch per lane: the planner puts a
-    /// `GpuCoalesceAllBatches` under it, so this is every row it will ever hold.
-    pub(crate) fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    /// `GpuCoalesceAllBatches` under it, so this is every row it will ever hold. `None` is
+    /// a lane whose build side finished with no batch, which the join type decides on.
+    pub(crate) fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
+        let owes_nothing = match &batch {
+            Some(_) => false,
+            None => {
+                CpuJoin::without_build_allowed(&self)?;
+                true
+            }
+        };
         Ok((
             CpuProbingJoin {
-                build: batch.into_record_batch(),
+                build: batch.map(CpuBatch::into_record_batch),
                 calls: self.calls,
                 accumulated: Vec::new(),
+                owes_nothing,
             },
             CallStats::default(),
         ))
@@ -193,7 +202,22 @@ impl CpuJoin {
 impl CpuProbingJoin {
     /// The build side, resident from `set_build` until the call that consumes it.
     pub(crate) fn build_bytes(&self) -> usize {
-        self.build.get_array_memory_size()
+        self.build
+            .as_ref()
+            .map_or(0, RecordBatch::get_array_memory_size)
+    }
+
+    /// What this lane owes with no build side, read off the join type at `set_build`.
+    pub(crate) fn owes_nothing(&self) -> bool {
+        self.owes_nothing
+    }
+
+    /// The build side a probe or finish call joins against. Absent only where the lane
+    /// owes nothing, and the driver drains such a lane rather than calling it.
+    fn build(&self) -> Result<&RecordBatch, BackendError> {
+        self.build.as_ref().ok_or_else(|| {
+            BackendError::new("a join whose build side is absent was probed rather than drained")
+        })
     }
 
     /// The probe keys a finishing type keeps until its finish pass runs (#136).
@@ -212,6 +236,7 @@ impl CpuProbingJoin {
     }
 
     pub(crate) fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+        // The chunked form; `backend.rs` folds it to the one batch a call answers (#220).
         let batch = batch.into_record_batch();
         if let Some(keys) = &self.calls.keys {
             let kept = run_node(keys, vec![vec![batch.clone()]], &self.calls.ctx)?;
@@ -222,7 +247,7 @@ impl CpuProbingJoin {
         };
         let joined = run_node(
             join,
-            vec![vec![self.build.clone()], vec![batch]],
+            vec![vec![self.build()?.clone()], vec![batch]],
             &self.calls.ctx,
         )?;
         Ok((declared(joined, &self.calls.output)?, CallStats::default()))
@@ -235,7 +260,8 @@ impl CpuProbingJoin {
         };
         let keys = concat_batches(&self.calls.key_schema, self.accumulated.iter())
             .map_err(|error| BackendError::new(format!("joining the probe keys: {error}")))?;
-        let unmatched = run_node(finish, vec![vec![self.build], vec![keys]], &self.calls.ctx)?;
+        let build = self.build()?.clone();
+        let unmatched = run_node(finish, vec![vec![build], vec![keys]], &self.calls.ctx)?;
         let out = match &self.calls.pad {
             Some(pad) => run_node(pad, vec![unmatched], &self.calls.ctx)?,
             None => unmatched,

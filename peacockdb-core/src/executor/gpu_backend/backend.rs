@@ -279,11 +279,8 @@ impl Executor for GpuJoin {
 
 impl JoinExecutor<GpuBackend> for GpuJoin {
     type Probing = GpuProbingJoin;
-    fn set_build(self, batch: GpuBatch) -> CallResult<GpuProbingJoin> {
+    fn set_build(self, batch: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
         GpuJoin::set_build(self, batch)
-    }
-    fn without_build(self) -> Result<(), BackendError> {
-        GpuJoin::without_build(self)
     }
 }
 
@@ -306,11 +303,30 @@ impl Executor for GpuProbingJoin {
 }
 
 impl ProbingJoin<GpuBackend> for GpuProbingJoin {
-    fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
-        GpuProbingJoin::probe_and_fetch(self, batch)
+    fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Option<GpuBatch>> {
+        let (out, stats) = GpuProbingJoin::probe_and_fetch(self, batch)?;
+        Ok((one_batch(out)?, stats))
     }
-    fn finish_and_fetch(self) -> CallResult<Vec<GpuBatch>> {
-        GpuProbingJoin::finish_and_fetch(self)
+    fn finish_and_fetch(self) -> CallResult<Option<GpuBatch>> {
+        let (out, stats) = GpuProbingJoin::finish_and_fetch(self)?;
+        Ok((one_batch(out)?, stats))
+    }
+    fn owes_nothing(&self) -> bool {
+        GpuProbingJoin::owes_nothing(self)
+    }
+}
+
+/// One batch per call (#220). The device already answers at most one — each recipe call
+/// returns a single handle — so this names a second as a protocol error rather than
+/// concatenating one that cannot occur. Scaffolding until task 7 puts the device on the
+/// session, whose calls answer an `Option` by construction.
+fn one_batch(mut out: Vec<GpuBatch>) -> Result<Option<GpuBatch>, BackendError> {
+    match out.len() {
+        0 => Ok(None),
+        1 => Ok(out.pop()),
+        several => Err(BackendError::new(format!(
+            "a device join call answered {several} batches, and a call answers at most one"
+        ))),
     }
 }
 

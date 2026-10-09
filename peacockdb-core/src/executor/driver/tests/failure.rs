@@ -91,7 +91,7 @@ fn a_call_that_consumes_its_executor_can_fail_too() {
     let script = join_script()
         .failing_at(FailAt::Finish)
         .with_join(JoinRule {
-            empty_build_owes_its_probe: false,
+            owes_nothing_when_empty: true,
             finish_rows: 3,
             build_residency: 64,
         });

@@ -907,7 +907,7 @@ pub trait ProbingJoin<B: Backend>: Executor {
 }
 ```
 
-- [ ] **Step 1: The failing driver tests.** In `flow.rs`, replace the mock's
+- [x] **Step 1: The failing driver tests.** In `flow.rs`, replace the mock's
   `empty_build_owes_its_probe` with a `JoinRule.owes_nothing_when_empty: bool` the mock's
   `owes_nothing()` reads; rewrite :211, :235, :288, :307, :341, :371, :391 to the new calls:
   `a_lane_with_no_build_batch_calls_set_build_none` (counts `CallKind::SetBuild` with no input = 1,
@@ -917,22 +917,43 @@ pub trait ProbingJoin<B: Backend>: Executor {
   dropped (`a_zero_row_scatter_output_is_dropped_under_every_join_type`).
   `single_partition/tests.rs:300` asserts `LaneCall::SetBuild` for a build side done without a
   batch. `index/tests.rs:178` is deleted with `feeds_owing_build`.
-- [ ] **Step 2: Run red** (`cargo test --lib --features rust-only executor::driver`).
-- [ ] **Step 3: The driver.** `LaneCall::NoBuild` is removed; `select` answers `SetBuild` both when
+- [x] **Step 2: Run red.** The trait change is a compile error first; with everything compiling
+  against the new traits, 15 of the lib tier are red, listed in the detail file.
+- [x] **Step 3: The driver.** `LaneCall::NoBuild` is removed; `select` answers `SetBuild` both when
   the build slot has a batch and when the build side is done without one; the `SetBuild` arm takes
   `input.map(|h| h.batch)`, and after the call moves to `LaneState::Draining` if
   `probing.owes_nothing()`, else `LaneState::Probe(probing)`. `Probe` and `Finish` wrap the
   `Option` into the outputs list: `hold_all(out.into_iter().collect(), …)`. `partitioned.rs:430`
   drops every zero-row scatter output (`if out.num_rows() == 0 { continue; }`); `index.rs`'s
   `feeds_owing_build` field and climb go.
-- [ ] **Step 4: Adapters**, so both backends compile against the new traits before tasks 7 and 8
+  **The last clause does not land here, measured.** Removing the scatter-drop exception makes
+  `set_build(None)` the route for a Right, Full or RightAnti lane whose build side is empty, and
+  the adapters cannot answer that — they call today's refusal. Six tests go red with #212's
+  message over four queries (`tests::end_to_end::{tpcds_q93, tpcds_q97, tpch_anti_join}`,
+  `dimensions::{a_right_join_with_an_empty_build_pads_every_probe_row,
+  a_right_anti_join_with_an_empty_build_returns_every_probe_row}` and
+  `flow::holds_and_releases_balance_over_a_plan_with_empty_lanes`). `feeds_owing_build`, the
+  exception and `dimensions.rs`'s use of it belong to the rounds that give an engine an answer:
+  the device in task 7 and the cpu in task 8. Also needed and not in this step:
+  `LaneCall::needs_its_batch`, because `consumes()` says `SetBuild` reads slot 0 and
+  `take_input` refuses an empty queue.
+- [x] **Step 4: Adapters**, so both backends compile against the new traits before tasks 7 and 8
   rewrite them: gpu and cpu `set_build(None)` call today's `without_build` and, on `Ok`, return a
   probing join with `owes_nothing() == true`; `Vec` returns map to `Option` by **concatenating**:
   none → `None`, one → it, several → `concat_batches` over the output schema (the cpu's chunks; the
   device answers at most one already). That is #220's fix in miniature, so every cpu corpus join
   cell whose call yields more than `batch_size` rows stays green through tasks 6–7; task 8 replaces
-  the adapter. No pin changes behaviour in this task.
-- [ ] **Step 5: The harness.** `script.rs`'s join arm:
+  the adapter.
+  **"No pin changes behaviour in this task" is wrong about the goldens.** The concatenation is a
+  behaviour change to the cpu, so 497 corpus cells over 116 queries move their `.cpu.txt` and
+  `.cost.txt` — the spec's risk 2 says to regenerate them here and this step list did not.
+  **Which adapter lines each later task deletes**, so a later round does not re-derive it:
+  task 7 takes `gpu_backend/backend.rs`'s `one_batch` and `GpuJoin::without_build_allowed`,
+  which the session answers itself; task 8 takes `cpu_backend/backend.rs`'s `one_batch` and
+  the whole `CpuJoin::without_build_allowed` path, since one stream per lane answers an
+  absent build and one batch per call by construction. `CpuProbingJoin::build:
+  Option<RecordBatch>` and its `build()` accessor go with task 8 too.
+- [x] **Step 5: The harness.** `script.rs`'s join arm (edited and **not compiled** — the gpu rung needs `CUDF_ROOT`):
 
 ```rust
 (NodeExecutors::Join(join), Script::Join { build, probe }) => {
@@ -950,7 +971,8 @@ pub trait ProbingJoin<B: Backend>: Executor {
 
   The `"a join with no build side is never probed"` assertion goes. `tests/injection.rs`'s
   wrapper follows the trait.
-- [ ] **Step 6: Run green** — driver tests, `--lib` rust-only.
+- [x] **Step 6: Run green** — driver tests, `--lib` rust-only, and the cpu corpus with its
+  regenerated goldens (the spec's risk 2, which this step list did not carry).
 - [ ] **Step 7: Commit.** `git commit -m "join traits: set_build(Option), one batch per call, owes_nothing; the driver asks no more"`.
 
 ### Task 7: The device on the session, and `CudfJoin` on the wire
@@ -1526,7 +1548,13 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
   `CudfNestedLoopJoin` from `gpu_plan.fbs` and the generated code regenerated; `execute_hash_join`,
   `execute_cross_join`, `execute_nested_loop_join` and `dispatch.cpp:58-62`; the map arm's
   "multi-partition joins are not implemented yet" text (`node_session.cpp:584-596`);
-  `NestedLoopJoinType`; `empty_build_answers_nothing` (renamed in task 7).
+  `NestedLoopJoinType` (already gone — task 5 removed it, since nothing referenced it after the
+  type switch); `empty_build_answers_nothing` (renamed in task 7); and **the driver's
+  `feeds_owing_build` with the scatter-drop exception it gates, plus `dimensions.rs`'s use of
+  both** — task 6 measured that removing them there costs six red tests over four queries, because
+  a Right/Full/RightAnti lane with an empty build then reaches `set_build(None)` and only tasks 7
+  and 8 can answer it. Step 2's grep already names `feeds_owing_build`, so this is the work behind
+  a check that would otherwise fail with no instruction attached.
 - [ ] **Step 2: The checks**, quoted in the PR, each empty:
 
 ```bash
@@ -1540,7 +1568,10 @@ git grep -n 'multi-partition joins are not implemented' -- cpp
   and `cargo build -p peacockdb-core --features gpu 2>&1 | grep -c 'never used\|never constructed'`
   is 0, as is the C++ build's `-Wunused-function` count.
 - [ ] **Step 3: The wiki:** `architecture.md`'s Joins section rewritten from the design (the
-  session, the matchers, the capability as two facts, the `NOT IN` rewrite, #137, `__rowmarker__`);
+  session, the matchers, the capability as two facts, the `NOT IN` rewrite, #137, `__rowmarker__`),
+  and its scheduling rule's scatter-drop exception — "a scatter feeding the build side of a Right,
+  Full or RightAnti join keeps its zero-row table" — which sits outside the Joins section and
+  stops being true when step 1 removes the exception;
   `hacks-audit.md`'s P1, P4, P8, P9, P10, P13 and findings 5, 11, 12 marked resolved with this PR;
   `build-test.md`'s rows and counts.
 - [ ] **Step 4: Commit.** `git commit -m "the old join path removed: recipes, tables, executors, scaffolding"`.

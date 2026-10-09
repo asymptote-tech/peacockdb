@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3118 test cases — Rust 2548, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3119 test cases — Rust 2549, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1741 cases: `--lib` 729, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1742 cases: `--lib` 730, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -303,7 +303,7 @@ entry unmeasured, the timing tree rendered with what each node cost, a call with
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 71 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 72 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
@@ -317,7 +317,10 @@ DataFusion widens still building. Then `declared_as` against its declaration: #2
 column declared without one refused by name and count, the rule itself over the columns, and a
 batch of another width refused for the width — at a differing count column *i* is not field
 *i*'s column, so a violation read off that pairing would name a NULL the batch does not hold
-there and hide the count that explains it
+there and hide the count that explains it. One case is here because the device tier cannot
+reach it without a card: a build side that produced no batch at all is refused by name for the
+three types that owe their probe rows ([#212](tickets/joins.md#t212)) and answers `owes_nothing` for
+the six that do not
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|

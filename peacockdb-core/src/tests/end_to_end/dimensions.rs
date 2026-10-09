@@ -205,15 +205,23 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
         NodeRef::Join(join) => !empty_build_answers_nothing(join.join_type),
         _ => false,
     };
-    assert_eq!(
-        report
+    // Every lane of an owing join reached `set_build`, the empty ones included. There is
+    // one route for a build side whether it produced a batch or not, so what this asserts
+    // is that no lane was skipped — the way a lane could still lose its probe rows.
+    for node in 0..index.len() {
+        if !owing_join(node) {
+            continue;
+        }
+        let builds = report
             .trace
             .iter()
-            .filter(|event| event.call == CallKind::NoBuild && owing_join(event.node as usize))
-            .count(),
-        0,
-        "{query}: a lane of an owing join reached NoBuild, the route this fix takes away"
-    );
+            .filter(|event| event.call == CallKind::SetBuild && event.node as usize == node)
+            .count();
+        assert_eq!(
+            builds, index.nodes[node].lanes,
+            "{query}: an owing join set its build side on {builds} of its lanes"
+        );
+    }
 }
 
 /// `Right` is left_join(probe, build) with left_policy = NULLIFY, which *is* the

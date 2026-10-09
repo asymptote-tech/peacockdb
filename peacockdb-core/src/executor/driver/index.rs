@@ -142,7 +142,7 @@ fn feeds_owing_build(nodes: &[IndexedNode<'_>], from: usize) -> bool {
             return match as_node_ref(nodes[node].node) {
                 NodeRef::Join(join) => !empty_build_answers_nothing(join.join_type),
                 // Cross and nested-loop joins carry no type and owe nothing, which is the
-                // same answer `without_build` reaches by a different route.
+                // same answer their executors give `set_build(None)` by another route.
                 _ => false,
             };
         }

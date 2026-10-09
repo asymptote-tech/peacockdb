@@ -69,7 +69,7 @@ fn a_left_joins_probe_batch_cannot_be_read_twice_and_says_which_ticket() {
     )
     .expect("the join builds");
     let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
+        .set_build(Some(session.scan(&[2])))
         .expect("the build side is set");
     let probe = session
         .exec(2, &columns())
@@ -164,7 +164,7 @@ fn every_member_of_the_semi_family_streams_and_answers_at_done() {
         )
         .expect("the join builds");
         let (mut probing, _) = join
-            .set_build(session.scan(&[2]))
+            .set_build(Some(session.scan(&[2])))
             .expect("the build side is set");
         for group in [0u32, 1] {
             let (produced, _) = probing
@@ -216,7 +216,7 @@ fn a_projecting_semi_joins_finish_emits_the_column_the_node_declares() {
     )
     .expect("the join builds");
     let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
+        .set_build(Some(session.scan(&[2])))
         .expect("the build side is set");
     for group in [0u32, 1] {
         let (produced, _) = probing
@@ -272,7 +272,7 @@ fn a_second_probe_batch_of_a_copying_join_is_refused_by_name() {
     )
     .expect("the join builds");
     let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
+        .set_build(Some(session.scan(&[2])))
         .expect("the build side is set");
     let (matched, _) = probing
         .probe_and_fetch(session.scan(&[0]))
@@ -359,7 +359,7 @@ fn a_finish_over_no_probe_keys_hands_the_build_side_up() {
     )
     .expect("the join builds");
     let (probing, _) = join
-        .set_build(session.scan(&[2]))
+        .set_build(Some(session.scan(&[2])))
         .expect("the build side is set");
     let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
     let [answer] = <[GpuBatch; 1]>::try_from(finished).expect("one batch at done");

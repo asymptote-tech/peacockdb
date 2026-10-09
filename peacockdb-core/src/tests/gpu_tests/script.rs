@@ -26,7 +26,8 @@ pub(crate) enum Script {
     /// One `emit` per batch; one slot per output lane per call.
     Emit(Vec<RecordBatch>),
     /// `set_build` then `probe_and_fetch` per probe batch then `finish_and_fetch`, one slot
-    /// per call; with no build, `without_build` and no slots at all.
+    /// per call. `build: None` is a build side that produced nothing, and a lane that owes
+    /// nothing over it reads no probe batch.
     Join {
         build: Option<RecordBatch>,
         probe: Vec<RecordBatch>,
@@ -262,24 +263,19 @@ fn drive<B: Backend, T>(
                 }
             }
         }
-        (NodeExecutors::Join(join), Script::Join { build, probe }) => match build {
-            Some(build) => {
-                let (mut probing, _) = join.set_build(up(build))?;
+        (NodeExecutors::Join(join), Script::Join { build, probe }) => {
+            let (mut probing, _) = join.set_build(build.as_ref().map(|batch| up(batch)))?;
+            // A lane that owes nothing reads no probe batch: the driver drops them, and the
+            // script's own probe list is what the driver would have handed over.
+            if !probing.owes_nothing() {
                 for batch in probe {
                     let (out, _) = probing.probe_and_fetch(up(batch))?;
-                    slots.push(lower(out)?);
+                    slots.push(lower(out.into_iter().collect())?);
                 }
-                let (out, _) = probing.finish_and_fetch()?;
-                slots.push(lower(out)?);
             }
-            None => {
-                assert!(
-                    probe.is_empty(),
-                    "a join with no build side is never probed"
-                );
-                join.without_build()?;
-            }
-        },
+            let (out, _) = probing.finish_and_fetch()?;
+            slots.push(lower(out.into_iter().collect())?);
+        }
         (NodeExecutors::Unload(mut unload), Script::Unload { batch, rows }) => {
             let (out, _) = unload.unload(up(batch), *rows)?;
             slots.push(vec![unloaded(out)]);

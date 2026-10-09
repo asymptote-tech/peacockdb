@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 
@@ -238,11 +239,8 @@ impl Executor for CpuJoin {
 
 impl JoinExecutor<CpuBackend> for CpuJoin {
     type Probing = CpuProbingJoin;
-    fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
         CpuJoin::set_build(self, batch)
-    }
-    fn without_build(self) -> Result<(), BackendError> {
-        CpuJoin::without_build(self)
     }
 }
 
@@ -265,11 +263,36 @@ impl Executor for CpuProbingJoin {
 }
 
 impl ProbingJoin<CpuBackend> for CpuProbingJoin {
-    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
-        CpuProbingJoin::probe_and_fetch(self, batch)
+    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
+        let (chunks, stats) = CpuProbingJoin::probe_and_fetch(self, batch)?;
+        Ok((one_batch(chunks)?, stats))
     }
-    fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
-        CpuProbingJoin::finish_and_fetch(self)
+    fn finish_and_fetch(self) -> CallResult<Option<CpuBatch>> {
+        let (chunks, stats) = CpuProbingJoin::finish_and_fetch(self)?;
+        Ok((one_batch(chunks)?, stats))
+    }
+    fn owes_nothing(&self) -> bool {
+        CpuProbingJoin::owes_nothing(self)
+    }
+}
+
+/// One batch per call (#220), by concatenating what DataFusion chunked. Scaffolding until
+/// task 8 gives the cpu one long-lived stream per lane, which answers one batch by
+/// construction; the join's own code still returns the chunks it ran.
+fn one_batch(chunks: Vec<CpuBatch>) -> Result<Option<CpuBatch>, BackendError> {
+    match chunks.len() {
+        0 => Ok(None),
+        1 => Ok(chunks.into_iter().next()),
+        _ => {
+            let schema = chunks[0].record_batch().schema();
+            let batches: Vec<RecordBatch> = chunks
+                .into_iter()
+                .map(CpuBatch::into_record_batch)
+                .collect();
+            concat_batches(&schema, batches.iter())
+                .map(|batch| Some(CpuBatch::new(batch)))
+                .map_err(|error| BackendError::new(format!("joining a call's chunks: {error}")))
+        }
     }
 }
 

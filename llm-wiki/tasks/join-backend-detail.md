@@ -529,3 +529,129 @@ restriction does not cover; task 10 is the round that touches the test files.
 row.
 
 
+
+#### Round 1, plan task 6 — the join traits, the driver, the mock and the harness
+
+Rust only; no device cycle. The first round that moves the executor traits, and the first where
+the spec knew something the plan's step list did not.
+
+**The traits.** `executor/mod.rs`: `JoinExecutor::set_build(Option<B::Batch>)` replaces
+`set_build(Batch)` and `without_build`; `ProbingJoin` returns `Option<B::Batch>` from both calls
+and gains `owes_nothing()`. `CallKind::NoBuild` is gone.
+
+**The driver.** `LaneCall::NoBuild` is gone; `select` answers `SetBuild` whether the build slot
+has a batch or not, and the `SetBuild` arm routes to `LaneState::Draining` when
+`probing.owes_nothing()` and to `Probe` otherwise. `partitioned.rs`'s `lane_left_build` trigger
+is one call instead of two. One piece the plan does not name was needed: **`LaneCall::needs_its_batch`**.
+`consumes()` says `SetBuild` reads slot 0, and `take_input` refused an empty queue — so a
+`SetBuild` with no batch failed with "the schedule offered a batch that is not there". The new
+predicate separates "which slot this call reads" from "the slot has to hold something", and
+`take_input` returns `Option<Held>`.
+
+**The adapters, and the line each later task deletes.**
+- `cpu_backend/backend.rs`'s `one_batch`: 0 chunks → `None`, 1 → it, several →
+  `concat_batches`. **Task 8 deletes it**, with `CpuJoin::without_build_allowed`,
+  `CpuProbingJoin::build: Option<RecordBatch>` and its `build()` accessor: one stream per lane
+  answers an absent build and one batch per call by construction.
+- `gpu_backend/backend.rs`'s `one_batch`: 0 → `None`, 1 → it, several → a `BackendError`, since
+  a device call answers at most one handle and concatenating a case that cannot occur would hide
+  it. **Task 7 deletes it**, with `GpuJoin::without_build_allowed`.
+- `owes_nothing` is a field on both probing joins, set at `set_build` from the join type's own
+  answer. One fact, one field, the same name in both backends — and it stays correct after tasks
+  7 and 8, when an absent build under Right, Full or RightAnti produces a probing join that owes
+  its probe rather than a refusal.
+
+**The plan's step 3 asks for one removal that cannot land here, and I measured it rather than
+arguing.** With `index.rs`'s `feeds_owing_build` and `partitioned.rs`'s scatter-drop exception
+removed, a Right, Full or RightAnti lane whose build side is empty reaches `set_build(None)` —
+and the adapters answer that with today's refusal, because the engines that can answer it are
+tasks 7 and 8. **Six tests red over four queries**, every one with #212's message:
+`tests::end_to_end::{tpcds_q93, tpcds_q97, tpch_anti_join}`,
+`dimensions::{a_right_join_with_an_empty_build_pads_every_probe_row,
+a_right_anti_join_with_an_empty_build_returns_every_probe_row}` and
+`flow::holds_and_releases_balance_over_a_plan_with_empty_lanes`. So `feeds_owing_build`, the
+exception, and `dimensions.rs`'s use of both stay for now and leave with the engine that
+replaces them — the device in task 7, the cpu in task 8. Noted in the plan at the step.
+
+**The spec's risk 2 was right that the goldens move and low on how many.** It says "about 82"
+rows; measured, **497 (query, mode) cells over 116 distinct queries** — tpcds 75, tpch 26,
+pbench 15. If "rows" meant registry rows, the estimate was 82 against 116, low by about 40%; if
+it meant cells, it was low by six times. Either way the direction and the kinds were right. One
+line for the completeness record.
+
+**Which golden kinds moved, and the one that did not.**
+
+| kind | files | what moved |
+|---|---|---|
+| `*-mini.cpu.txt` | 15 | `batch_rows`/`batch_bytes` per call, and the `output_rows` of nodes above a join |
+| `*-mini.cost.txt` | 14 | derived, downward |
+| `*.result.txt` | **0** | the answers did not move |
+| `*.plans.txt`, `recipe-payloads.txt`, `cost-registry.csv` | **0** | the planner did not change |
+
+Two arithmetic checks rather than an eyeball. Node-kind counts in each `.cpu.txt` are
+**identical** before and after — no node appeared or vanished. And every `GpuUnload:
+output_rows` is identical in all three datasets (35 + 74 + 27 sections), which is the answer.
+
+**An `output_rows` change that is not a batch count, and why it is right.** tpch q3's
+`GpuAggregate` goes from 21,242 rows to 11,620. The join below it used to emit four batches
+(8192, 8192, 8192, 5943), so the partial aggregate ran four times and emitted four group sets;
+with one batch of 30,519 rows it runs once and emits 11,620 groups. Fewer duplicate partial
+groups, same final answer — `GpuUnload: output_rows=10` either way. That is also where most of
+the cost improvement comes from: the saving is not the batch headers, it is the partial
+aggregation above the join.
+
+**Cost gate, `cargo run -q -p cost-report -- --cost-diff --base 4db7e82f`:**
+**445 improvements, 0 regressions.** The opposite direction from task 3. tpcds 318 rows, tpch
+111, pbench 16. Largest: tpcds q22 −17.54% at tp1-single (692.96 → 571.38 MB), tpch q13 −11.75%
+(173.91 → 153.47 MB), tpcds q22 −11.01% at tp1-rowgroup, tpcds q65 −8.60%, tpcds q22 −8.64% and
+−8.63% at the tp4 modes.
+
+**Tests, and one gap closed.** `flow.rs`'s join cases are the plan's:
+`a_lane_with_no_build_batch_calls_set_build_none` (one `SetBuild`, no `Probe`, one drop per probe
+batch, no `Finish`), `a_lane_that_owes_its_probe_side_probes_it` (the old
+`…_is_refused` case, which no longer refuses because the mock answers the absence),
+and the two scattered-build cases now counting `SetBuild` and `Probe`.
+`single_partition/tests.rs`'s `a_build_side_that_never_produced_still_chooses_set_build`
+replaces the `NoBuild` one, and its decision sweep filters on `needs_its_batch`.
+`dimensions.rs`'s "no owing lane reached NoBuild" assertion became "every lane of an owing join
+reached `set_build`", counted per node against its lane count — the old form is structurally
+true once the kind is gone, and that is a guard that cannot go red.
+**The gap:** nothing in the rust-only tier covered the #212 refusal — it was pinned only in
+`gpu_tests/join_cases.rs`, which needs a device. Closed with
+`cpu_backend::tests::join::a_build_side_that_produced_nothing_is_refused_for_the_types_that_owe_their_probe`:
+the three owing types refuse `set_build(None)` naming #212, and the six others answer
+`owes_nothing()`.
+
+**Red-green evidence. Six mutations, every one reverted and the revert read off `git diff`.**
+- Red before: a compile error on the traits, then 15 of the lib tier — five driver and flow
+  cases, `dimensions::a_right_join_with_an_empty_build_pads_every_probe_row`, and nine
+  `tests::end_to_end` queries failing with "the schedule offered a batch that is not there",
+  which is what made `needs_its_batch` necessary.
+- the mock's `owes_nothing()` → `true`: 11 failed.
+- → `false`: 2 failed (`a_lane_with_no_build_batch_calls_set_build_none` and the
+  owes-nothing scattered-build case).
+- `needs_its_batch()` → `true`: 15 failed, the end-to-end set among them.
+- the cpu skipping `without_build_allowed` in `set_build(None)`: 1 failed, the new #212 case.
+- the cpu `one_batch` keeping only the first chunk: 16 lib failures and 4 of 5 `cpu_tpch_q3`
+  cells — the concatenation is load-bearing for the answer, not just the batch count.
+- the scatter-drop exception removed (the plan's step 3): 6 failed, above.
+- Green after: 728 passed, 2 ignored, 0 failed; 983 corpus cells.
+
+**The identical-text trap again, in the other direction.** Last round a mutation aimed at one of
+two byte-identical blocks landed on the other. This round an un-asserted
+`str.replace(…, 1)` for `let out = hold_all(out, acct, Some(batch.bytes))?;` hit the
+**Accumulate** arm instead of **Probe**, because the two arms spell that line identically — and
+then a later asserted replace caught the real ones, so all four changed and two of them had no
+business changing. It compiled and passed (a `Vec` collected into a `Vec`), and it showed up only
+in the hunk-by-hunk diff read. Both reverted. The rule I am taking forward: assert the match
+count before **every** replace, not just the ones that look risky.
+
+**Still unproven: the gpu rung.** `tests/gpu_tests/script.rs`'s join arm,
+`gpu_backend/gpu_tests/join.rs`'s five `set_build` sites and task 5's `nested_cases.rs` are all
+edited and not compiled — `--features gpu` makes `peacockdb-ffi` run cmake and needs
+`CUDF_ROOT`, which exists only on nebius-gpu. Task 7's device build is the first thing that
+proves any of it.
+
+**build-test.md counts (human's file).** `--lib` moves 729 → 730: `cpu_backend`'s join block
+gains one case, and `executor::driver`'s flow block keeps its count (one case replaced, one
+renamed). No new row.

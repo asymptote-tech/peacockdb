@@ -298,7 +298,9 @@ impl<'a, B: Backend> Driver<'a, B> {
                     // is released where it stands, and the saving on the skip prefix is
                     // unbounded.
                     None => {
-                        let unwanted = self.take_input(node, lane, call)?;
+                        let unwanted = self
+                            .take_input(node, lane, call)?
+                            .expect("an unload consumes its batch");
                         self.rows_seen[node] += arriving;
                         self.rows_skipped[node] += arriving;
                         self.acct.release(unwanted.bytes)?;
@@ -325,9 +327,10 @@ impl<'a, B: Backend> Driver<'a, B> {
                     .into());
                 }
             }
-            let input = consuming
-                .then(|| self.take_input(node, lane, call))
-                .transpose()?;
+            let input = match consuming {
+                true => self.take_input(node, lane, call)?,
+                false => None,
+            };
             let site = LaneSite::<B> {
                 ctx: self.ctx,
                 node: gpu_node,
@@ -369,10 +372,10 @@ impl<'a, B: Backend> Driver<'a, B> {
                     produced
                 }
             };
-            // Both calls end a lane's build phase, and the hold lifts when every lane
-            // has: a lane that owed nothing still has to say so, or the probe subtree is
-            // held by a lane that will never build.
-            if matches!(call, LaneCall::SetBuild | LaneCall::NoBuild) {
+            // The call ends a lane's build phase whether a batch arrived or not, and the
+            // hold lifts when every lane has: a lane that owed nothing still has to say
+            // so, or the probe subtree is held by a lane that will never build.
+            if call == LaneCall::SetBuild {
                 self.scheduler.lane_left_build(node);
             }
             if outcome.finished {
@@ -644,24 +647,27 @@ impl<'a, B: Backend> Driver<'a, B> {
             .map_or(0, Held::rows)
     }
 
+    /// `None` only for a `SetBuild` whose build side finished without a batch — the one
+    /// call that reads its slot if there is something in it and is made either way.
     fn take_input(
         &mut self,
         node: usize,
         lane: usize,
         call: LaneCall,
-    ) -> Result<Held<B::Batch>, StepError> {
+    ) -> Result<Option<Held<B::Batch>>, StepError> {
         let slot = call.consumes().expect("a consuming call");
         let child = self.index.nodes[node].children[slot];
-        let batch = self.states[child].out_queues[lane]
-            .pop_front()
-            .ok_or_else(|| {
-                StepError::Run(RunError::Protocol(format!(
-                    "{}: the schedule offered a batch that is not there",
-                    self.index.nodes[node].node.name()
-                )))
-            })?;
-        self.record_consumed(node, slot, lane, batch.rows());
-        Ok(batch)
+        match self.states[child].out_queues[lane].pop_front() {
+            Some(batch) => {
+                self.record_consumed(node, slot, lane, batch.rows());
+                Ok(Some(batch))
+            }
+            None if !call.needs_its_batch() => Ok(None),
+            None => Err(StepError::Run(RunError::Protocol(format!(
+                "{}: the schedule offered a batch that is not there",
+                self.index.nodes[node].node.name()
+            )))),
+        }
     }
 
     fn queued(&self, node: usize) -> usize {

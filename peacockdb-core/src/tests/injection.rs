@@ -307,22 +307,22 @@ impl PartitionAccumulatorExecutor<Injected> for CpuPartitionAccumulator {
 impl JoinExecutor<Injected> for CpuJoin {
     type Probing = CpuProbingJoin;
 
-    fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
         JoinExecutor::<CpuBackend>::set_build(self, batch)
-    }
-
-    fn without_build(self) -> Result<(), BackendError> {
-        JoinExecutor::<CpuBackend>::without_build(self)
     }
 }
 
 impl ProbingJoin<Injected> for CpuProbingJoin {
-    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
         ProbingJoin::<CpuBackend>::probe_and_fetch(self, batch)
     }
 
-    fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
+    fn finish_and_fetch(self) -> CallResult<Option<CpuBatch>> {
         ProbingJoin::<CpuBackend>::finish_and_fetch(self)
+    }
+
+    fn owes_nothing(&self) -> bool {
+        ProbingJoin::<CpuBackend>::owes_nothing(self)
     }
 }
 

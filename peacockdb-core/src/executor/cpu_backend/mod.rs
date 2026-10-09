@@ -86,9 +86,12 @@ pub struct CpuJoin {
 
 /// A join with its build side set, taking probe batches.
 pub struct CpuProbingJoin {
-    build: RecordBatch,
+    /// `None` is a build side that finished without a batch, which only reaches here for
+    /// a type that owes nothing — the probe calls the driver would make are drained.
+    build: Option<RecordBatch>,
     calls: join::Calls,
     accumulated: Vec<RecordBatch>,
+    owes_nothing: bool,
 }
 
 /// A `BatchAccumulator` node's executor. What it holds between calls is one of four

@@ -99,6 +99,9 @@ pub(crate) struct GpuProbingJoin {
     /// The probe keys each batch contributed, held until the finish concatenates them.
     accumulated: Vec<GpuBatch>,
     probes: u64,
+    /// What this lane owes with no build side: nothing, for the six types every row of
+    /// which is built from a build row. Read off the join type at `set_build`.
+    owes_nothing: bool,
 }
 
 /// A lane's reads, in the order the mapping named them.

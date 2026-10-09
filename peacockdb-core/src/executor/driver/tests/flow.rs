@@ -205,49 +205,69 @@ fn nested_joins_resolve_outermost_first_without_deadlocking() {
     assert_accounted(&report);
 }
 
-/// A lane whose build side ended with no batch, for a join that owes nothing without one:
-/// the lane ends, its probe batches are released where they stand, and the run completes.
+/// A lane whose build side ended with no batch still makes one `set_build` call, with no
+/// input: there is no second call kind for the absence. For a join that owes nothing the
+/// lane then drains — its probe batches are released where they stand — and the run
+/// completes.
 #[test]
-fn a_join_that_owes_nothing_without_a_build_side_ends_its_lane() {
+fn a_lane_with_no_build_batch_calls_set_build_none() {
     let plan = join_plan(1);
     let script = join_script().with_accumulator(AccRule::EmitAtDone(0));
     let report = run(plan.as_ref(), &script);
     assert_eq!(rows_returned(&report), 0, "no build rows, no joined rows");
     assert_eq!(
-        count(&report, CallKind::NoBuild),
+        count(&report, CallKind::SetBuild),
         1,
-        "the lane asked what it owed rather than probing"
+        "the absence is an argument of the call, not a call of its own"
     );
     assert_eq!(
-        count(&report, CallKind::SetBuild),
+        count(&report, CallKind::Probe),
         0,
-        "and it never entered its probe phase"
+        "and the lane owed nothing, so it never probed"
     );
-    // The probe side had already produced: those batches have no reader now.
-    assert!(count(&report, CallKind::ReleaseUnwanted) > 0);
+    // The probe side had already produced: those batches have no reader now, and the lane
+    // reads them only to let go of them.
+    assert_eq!(
+        count(&report, CallKind::ReleaseUnwanted),
+        2,
+        "one drop per probe batch"
+    );
+    assert_eq!(
+        count(&report, CallKind::Finish),
+        0,
+        "a drained lane makes no finish call"
+    );
     assert_accounted(&report);
 }
 
-/// A join executor that refuses `without_build` fails the run with `CallFailed`: the driver
-/// propagates the refusal rather than swallowing it. The refusal itself is #212's, pinned on
-/// both backends in `tests/gpu_tests/join_cases.rs`; this mock names no join type.
+/// The other side of the same call: a lane whose type owes its probe side over an empty
+/// build probes it, batch by batch, and finishes. What the probe answers over a build table
+/// that is not there is the executor's business — the real backends refuse it today, pinned
+/// as #212 in `tests/gpu_tests/join_cases.rs`; this mock names no join type.
 #[test]
-fn a_join_that_owes_its_probe_side_without_a_build_side_is_refused() {
+fn a_lane_that_owes_its_probe_side_probes_it() {
     let plan = join_plan(1);
     let script = join_script()
         .with_accumulator(AccRule::EmitAtDone(0))
         .with_join(JoinRule {
-            empty_build_owes_its_probe: true,
+            owes_nothing_when_empty: false,
             finish_rows: 0,
             build_residency: 0,
         });
-    let failure = run_with(plan.as_ref(), &script, None);
-    match failure {
-        Err(RunError::CallFailed(said)) => {
-            assert!(said.contains("build side is empty"), "{said}")
-        }
-        other => panic!("expected the backend to refuse, got {other:?}"),
-    }
+    let report = run(plan.as_ref(), &script);
+    assert_eq!(count(&report, CallKind::SetBuild), 1);
+    assert_eq!(
+        count(&report, CallKind::Probe),
+        2,
+        "both probe batches were probed rather than dropped"
+    );
+    assert_eq!(count(&report, CallKind::Finish), 1);
+    assert_eq!(
+        count(&report, CallKind::ReleaseUnwanted),
+        0,
+        "a lane that owes its probe side drops none of it"
+    );
+    assert_accounted(&report);
 }
 
 // -- the empty build lane a join owes rows for (#175) -------------------------------
@@ -271,11 +291,11 @@ fn scattered_build_script() -> Script {
         .with_emit(EmitRule::ToLane(0))
 }
 
-/// A mock join that refuses `without_build`, so a lane reaching `NoBuild` fails the run
-/// rather than passing for the wrong reason.
+/// A mock join whose type owes its probe side, so a lane handed no build batch fails the
+/// run rather than passing for the wrong reason.
 fn owing_probe() -> JoinRule {
     JoinRule {
-        empty_build_owes_its_probe: true,
+        owes_nothing_when_empty: false,
         finish_rows: 0,
         build_residency: 0,
     }
@@ -291,11 +311,8 @@ fn an_empty_build_lane_reaches_set_build_rather_than_no_build() {
         let script = scattered_build_script().with_join(owing_probe());
         let report = run(plan.as_ref(), &script);
         assert_eq!(
-            (
-                count(&report, CallKind::SetBuild),
-                count(&report, CallKind::NoBuild)
-            ),
-            (4, 0),
+            count(&report, CallKind::SetBuild),
+            4,
             "{join_type:?}: every lane set its build side, the three empty ones included"
         );
     }
@@ -323,12 +340,14 @@ fn a_join_type_that_owes_nothing_still_drops_its_empty_lanes() {
             "{join_type:?}: an empty lane was queued"
         );
         assert_eq!(
-            (
-                count(&report, CallKind::SetBuild),
-                count(&report, CallKind::NoBuild)
-            ),
-            (1, 3),
-            "{join_type:?}: the hot lane built and the other three asked what they owed"
+            count(&report, CallKind::SetBuild),
+            4,
+            "{join_type:?}: the hot lane built and the other three were told there was none"
+        );
+        assert_eq!(
+            count(&report, CallKind::Probe),
+            1,
+            "{join_type:?}: only the hot lane probed, over the one batch its probe side has"
         );
         assert_accounted(&report);
     }
@@ -559,7 +578,7 @@ fn an_emit_returning_the_wrong_lane_count_is_an_error() {
 fn a_join_that_needs_a_finish_pass_emits_at_the_end() {
     let plan = join_plan(1);
     let script = join_script().with_join(JoinRule {
-        empty_build_owes_its_probe: false,
+        owes_nothing_when_empty: true,
         finish_rows: 3,
         build_residency: 64,
     });

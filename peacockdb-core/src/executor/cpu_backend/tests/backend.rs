@@ -277,7 +277,7 @@ fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
         ctx(),
     )
     .expect("a semi join builds");
-    let (probing, _) = semi.set_build(build).expect("the build side is set");
+    let (probing, _) = semi.set_build(Some(build)).expect("the build side is set");
     assert_eq!(
         probing.scratch_bytes(2, 64),
         64,
@@ -302,7 +302,7 @@ fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
         ctx(),
     )
     .expect("an inner join builds");
-    let (probing, _) = inner.set_build(build).expect("the build side is set");
+    let (probing, _) = inner.set_build(Some(build)).expect("the build side is set");
     assert_eq!(probing.scratch_bytes(2, 64), build_bytes + 64);
 }
 
