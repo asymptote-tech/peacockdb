@@ -80,3 +80,18 @@ does not change, since nothing reaches the session yet.
 
 `build-test-shadgpu.sh`, a cycle per arm group (hash, residual, semi family, nested loop, cross and
 empty sides), then one for the whole file.
+
+## Completeness signoff
+
+Solved under its constraints. 53 gtests over 213 hand-counted cases, green on nebius-gpu's L40S at
+cuDF 25.02 under the board's host override; the existing gpu tier unchanged. Four rounds; the
+completeness pass found one blocking gap and nine important items, all closed, and each fix proved
+red before being believed — #136's fold fails 10 of 53 under an overwriting `set_true`, #153's
+preserved-build half 6 of 53 under an empty conjunct list.
+
+Three deviations, each deliberate. §5.6's type × condition × build product is covered for three of
+its eight conditions, not all eight: the five absent ones reach the same `probe_empty_build` arm and
+the analyst judged them to add nothing. `join.cpp`'s ten #154 sites stay, as work item 6 provides —
+the session carries none of those copies and join-backend closes #154 whole. `plan_executor.h`
+keeps one clang-format reflow of an untouched declaration, left because the reflowed form is the
+conformant one. No bandaids.
