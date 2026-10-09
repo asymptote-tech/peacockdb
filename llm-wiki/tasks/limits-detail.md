@@ -109,7 +109,7 @@ tp4 modes do.
 ### 2026-10-09 — round 1 green, PR #172 open
 
 Committed as `7fdaeb22`, pushed, PR #172 against `ENS-distinct-companions` — base verified,
-13 commits, so the diff under review is this task and not the chain.
+two commits, so the diff under review is this task and not the chain.
 
 Three things from round 1 worth carrying forward rather than re-deriving:
 
