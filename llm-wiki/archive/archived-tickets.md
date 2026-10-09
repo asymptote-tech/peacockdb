@@ -29,7 +29,7 @@ number in none of them, failing the report rather than emitting one that goes no
 
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
-**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md); awaiting merge.**
+**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md), PR #173; awaiting merge.**
 
 `spark_hash_partition` returns one table whose N partitions are already contiguous, and the
 repartition arm deep-copied each range out, because a handle owned its memory alone — so every
@@ -48,7 +48,7 @@ whole partitioned table alive, worse under skew, and the driver's model under-re
 
 <a id="t197"></a>
 ### #197 — the repartition arm still concatenates a child it can only be handed one of
-**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md); awaiting merge.**
+**Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md), PR #173; awaiting merge.**
 
 The Hash-repartition arm concatenated `child[0]`'s handles before scattering, and the planner puts
 a `GpuCoalesceAllBatches` above the merge feeding an emit, so it is only ever handed one.
