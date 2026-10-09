@@ -11,4 +11,5 @@ mod join_refusals;
 mod logical_nullability;
 mod not_in;
 mod null_analysis;
+mod null_key_filters;
 mod plan_goldens;

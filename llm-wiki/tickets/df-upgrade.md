@@ -174,18 +174,23 @@ Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the
 oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
 answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
 [#155](joins.md#t155) — so no wrong answer is served. That arm lands in join-backend, and the
-`NOT IN` rule landing with it is what keeps the filter form from answering 0 rows to a user; see
-the corpus note below for what is still exposed. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
+`NOT IN` rule landing with it is what keeps the filter form from answering 0 rows to a user; the
+corpus note below has the measurement for every other shape. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
 and is the only thing that could have.
 
 **Corpus queries:** none. pbench's `in-is-null` was this ticket's witness until join-backend's
 `NOT IN` rule landed. It now meets [#250](joins.md#t250) at all five modes and its row carries
 `250` alone.
 
-The defect is untouched, and our exposure to it from a WHERE clause is closed. The rule runs before
-`decorrelate_predicate_subquery`, so an `IN` under a filter meets one of three fates: a spine form
-is rewritten and no mark join is built; an off-spine form whose data can hold a NULL is refused on
-#250; an off-spine form whose operands provably hold none is two-valued, and there folding
-`IS NULL` to false is the right answer. What stays exposed is the same expression outside a filter
-— `SELECT (f_k IN (SELECT s_y FROM sub)) IS NULL FROM fact` — which the rule does not visit,
-because it walks filters alone.
+The defect is untouched and our exposure to it is closed, in every shape, measured rather than
+argued. Under a filter the rule runs before `decorrelate_predicate_subquery`, so an `IN` meets one
+of three fates: a spine form is rewritten and no mark join is built; an off-spine form whose data
+can hold a NULL is refused on [#250](joins.md#t250); an off-spine form whose operands provably hold
+none is two-valued, and there folding `IS NULL` to false is the right answer. Outside a filter the
+rule never looks, and it does not need to: `SELECT (f_k IN (SELECT s_y FROM sub)) IS NULL FROM fact`
+is refused at physical planning with "does not support logical expression InSubquery", because
+DataFusion 45 decorrelates only inside a filter ([#247](#t247)'s second row). No mark join, so no
+fold.
+
+So the shape to re-check is a projection, and the thing that would change it is an upgrade that
+decorrelates there.

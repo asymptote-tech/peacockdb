@@ -606,7 +606,17 @@ let state = SessionStateBuilder::new_from_existing(base.state())
 - Produces: `fn drop_null_keys_below_shuffle(side: Box<dyn GpuNode>, keys: &[u32]) -> Box<dyn GpuNode>`
   in `nodes.rs`; `GpuEmitPartitions::into_parts(self) -> (Box<dyn GpuNode>, Vec<u32>)`.
 
-- [ ] **Step 1: The failing tests** (pbench is committed by then, chain task 3; the cases plan
+- [x] **Step 1: The failing tests.** In a new `planner/tests/null_key_filters.rs`, not in
+  `join_capability.rs`: that file's header says it writes its own parquet and reads no dataset,
+  and these cases need real footers. Seven cases, not four — three added while building:
+  `one_lane_shuffles_nothing_and_so_drops_nothing` (tp1, where there is no
+  `GpuEmitPartitions` and so no shuffle to skew), and, over the hand-built
+  `tests::join_fixture`, `set_semantics_keeps_the_null_keys_a_shuffle_would_skew` and
+  `the_filter_goes_below_the_shuffle_and_not_above_it` — no corpus SQL sets
+  `null_equals_null` on a nullable key, and nothing but the plan goldens said which side of
+  the shuffle the filter landed on. `plan::tests::joins::every_join_type_says_which_side_may_drop_a_null_key`
+  pins the nine-way table exhaustively; the query cases reach three of the nine.
+  (pbench is committed by then, chain task 3; the cases plan
   over `pbench.sf1` with pbench's own knobs — `MODES[2].knobs_for("pbench")`, tp4-single with the
   small-table rule off, so `fact` and `dim` really shuffle):
 
@@ -652,8 +662,9 @@ async fn a_tpch_join_gains_no_filter() {
   (`data_dir_for`, `queries_dir_for`, `MODES` and `knobs_for` are test_support's — the last pbench's; if a
   helper's name differs on master when this runs, use the one the corpus tier calls.)
 
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The sides per type** (design §4.1): a function in `plan/join.rs`
+- [x] **Step 2: Run red.** 2 of 4 red (the inner and left cases); the Full and tpch cases pass
+  before the rule and are the two that must not move.
+- [x] **Step 3: The sides per type** (design §4.1): a function in `plan/join.rs`
 
 ```rust
 /// The sides whose unmatched rows are never emitted: there a NULL key can match nothing
@@ -718,13 +729,25 @@ impl GpuEmitPartitions {
 
   (`schema.fields.field(k).name()` is the `Schema` wrapper's Arrow field; if master spells the
   wrapper's accessor differently, use the one `new_filter`'s callers use.)
-- [ ] **Step 4: Run green**; then regenerate every golden the filters move, **in the same
-  commit** as the code, so no commit leaves a tier red: `UPDATE_CANONICAL=1 cargo test --lib
-  plan_goldens` (about 73 tpcds plans gain the filter at the three tp4 modes), the cpu per-node
-  goldens over the corpus cpu tier at the three tp4 modes (`UPDATE_CANONICAL=1 cargo test --test
-  test_cpu_corpus -- tp4`), and the cost goldens (`UPDATE_CANONICAL=1 cargo test --test
-  test_cost_model`). Review the diff: `GpuFilter … IS NOT NULL` lines, the counts and row figures
-  under them, and nothing in `mini.result.txt`.
+- [x] **Step 4: Run green**; then regenerate every golden the filters move, **in the same
+  commit** as the code. What actually moved, and the three corrections to this step:
+  - `*.plans.txt` at the three tp4 modes only (tp1 has one lane, so no shuffle): **tpcds 74 of
+    99** sections, +416 filter lines per mode — "about 73" was right. **pbench 9 of 60**, +13.
+    **tpch 2 of 39, +3 — which this plan and design §4.1 both said would not happen.** q2 and
+    q15 join on an aggregate output (`min(ps_supplycost)`, `total_revenue`), and `can_be_null`
+    says an aggregate can be NULL — a sum over no rows is. The rule is right and the
+    prediction was about scan keys.
+  - **`recipe-payloads.txt` moves too**, 12 of 20, and this step does not mention it. Its
+    `sha256=` lines are guarded: `UPDATE_CANONICAL=1` alone verifies them and goes red, so the
+    regen needs `PEACOCK_REWRITE_RECIPE_BYTES=1` beside it. Every inserted node renumbers the
+    seqs above it, so the bytes move for any query that gained a filter.
+  - **`UPDATE_CANONICAL=1 … --test test_cpu_corpus -- tp4` is the wrong variable for a
+    filtered run**: `UPDATE_CANONICAL` means whole-file, which prunes, and `<tier>.result.txt`
+    is keyed by query with its author mode. Run the whole tier unfiltered instead, which is
+    what the whole-file contract means. `.cost.txt` comes with it — `test_cost_model` only
+    re-derives.
+  - Reviewed per kind: in every `.cpu.txt` the only node-kind count that changed is
+    `GpuFilter` (tpch +3, tpcds +363, pbench +12), and **no `.result.txt` moved at all**.
 - [ ] **Step 5: Commit.** `git commit -m "#137: a NULL key is dropped before a shuffle where it can match nothing"`.
 
 ### Task 4: `__rowmarker__` is a column the plan declares (#63) — run after task 8

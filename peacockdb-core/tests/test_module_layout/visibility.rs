@@ -44,6 +44,9 @@ const SURFACE: &[Surface] = &[
         file: "plan/mod.rs",
         items: &[
             "GpuNode",
+            // A supertrait of `GpuNode`, so `private_bounds` fires on `GpuNode` at
+            // anything less — the receipt, measured 2026-10-09.
+            "IntoAnyBox",
             "NodeKind",
             "PartitionLayout",
             "PlanError",

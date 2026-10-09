@@ -444,6 +444,18 @@ pub(crate) fn capability(
     }
 }
 
+/// The sides whose unmatched rows are never emitted, as `(build, probe)`. There a NULL key
+/// can match nothing under SQL equality, so it is dropped before the shuffle rather than
+/// skewing the one lane every NULL hashes to (#137).
+pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
+    match join_type {
+        JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi => (true, true),
+        JoinType::Left | JoinType::LeftAnti | JoinType::LeftMark => (false, true),
+        JoinType::Right | JoinType::RightAnti => (true, false),
+        JoinType::Full => (false, false),
+    }
+}
+
 /// Whether a lane whose build side produced no batch owes no rows at all.
 ///
 /// True where every output row is built from a build row, so an empty build side is an

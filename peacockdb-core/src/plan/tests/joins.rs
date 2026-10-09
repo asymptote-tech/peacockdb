@@ -512,3 +512,29 @@ fn a_semi_joins_projection_is_bounded_by_the_side_it_emits() {
         "projected column @2 is past the 2 a LeftSemi join emits",
     );
 }
+
+#[test]
+fn every_join_type_says_which_side_may_drop_a_null_key() {
+    // The preserved side owes its unmatched rows, padded or marked, so a NULL key there is
+    // a row the answer needs; on the other side it can match nothing (#137). Nine types,
+    // spelled out rather than derived, because the asymmetry is the whole rule.
+    use crate::plan::null_key_droppable;
+    use datafusion::common::JoinType::*;
+    assert_eq!(
+        [
+            Inner, LeftSemi, RightSemi, Left, LeftAnti, LeftMark, Right, RightAnti, Full
+        ]
+        .map(null_key_droppable),
+        [
+            (true, true),
+            (true, true),
+            (true, true),
+            (false, true),
+            (false, true),
+            (false, true),
+            (true, false),
+            (true, false),
+            (false, false)
+        ]
+    );
+}

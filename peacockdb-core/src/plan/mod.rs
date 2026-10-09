@@ -862,6 +862,12 @@ impl GpuEmitPartitions {
     pub(crate) fn new(input: Box<dyn GpuNode>, hash_keys: Vec<u32>, n: usize) -> Self {
         new_emit_partitions(input, hash_keys, n)
     }
+
+    /// Back into the input and the keys it hashes on, so a node can be put below it
+    /// (#137's filter) and the shuffle rebuilt over the result.
+    pub(crate) fn into_parts(self) -> (Box<dyn GpuNode>, Vec<u32>) {
+        (self.input, self.hash_keys)
+    }
 }
 
 /// N lanes of sorted batches into one sorted batch: every k·m batch goes into one merge
@@ -1057,8 +1063,22 @@ impl RowInterval {
     }
 }
 
+/// `Box<dyn GpuNode>` to `Box<dyn Any>`, so a translated node that [`GpuNode::as_any`] has
+/// already identified can be taken apart rather than only read. A blanket impl, so a node
+/// kind gains it with no line of its own; `pub` because a supertrait is as public as its
+/// trait, and `GpuNode` is the crate's.
+pub trait IntoAnyBox {
+    fn into_any_box(self: Box<Self>) -> Box<dyn Any>;
+}
+
+impl<T: Any> IntoAnyBox for T {
+    fn into_any_box(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 /// What a plan node offers the driver and the validator.
-pub trait GpuNode: std::fmt::Debug {
+pub trait GpuNode: std::fmt::Debug + IntoAnyBox {
     /// Layout and schema live inside the kind.
     fn kind(&self) -> &NodeKind;
 
@@ -1290,6 +1310,12 @@ pub(crate) fn capability(
     has_filter: bool,
 ) -> Result<JoinCapability, PlanError> {
     join::capability(join_type, has_filter)
+}
+
+/// The sides whose unmatched rows are never emitted, as `(build, probe)`: there a NULL key
+/// matches nothing, so it is dropped before the shuffle rather than skewing a lane (#137).
+pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
+    join::null_key_droppable(join_type)
 }
 
 /// Whether a lane whose build side produced no batch owes no rows at all.

@@ -78,9 +78,11 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 
 ## Cost gate
 
-The board accepts in advance any cost regression this task brings. The spec's risk 1 still
-applies: run `cargo run -q -p cost-report -- --cost-diff --base <base sha>` before the PR and
-list every rise here with its queries and byte delta, so the acceptance has a record.
+The board accepts in advance any cost regression this task brings, and the spec's risk 1 asks for
+the record. **Plan task 3 is where it came from and its numbers are under that round below**: 228
+regressions, 173 past the 10% gate, driven by #137's `IS NOT NULL` filters. Re-run
+`cargo run -q -p cost-report -- --cost-diff --base <base sha>` once before the PR against the
+branch point, so the PR quotes one figure for the whole task rather than one per round.
 
 ## Round log
 
@@ -270,3 +272,131 @@ component-tier block of 16 cases, and `--lib` moves 701 → 717. Suggested row, 
 false — it reaches #250 at all five modes. #257's "Corpus queries" line claims `in-is-null`'s
 cells are disabled on `155`; they are `na` on `250` now, and #257 loses its only corpus row
 while staying a real DataFusion bug.
+
+#### Round 1, plan task 3 — #137, no NULL key crosses a shuffle it cannot match through
+
+Rust only; no device cycle. **This is the round that moved the cost goldens**, as spec risk 1
+warned.
+
+**What shipped.** `plan/join.rs` gains `null_key_droppable(JoinType) -> (bool, bool)`, with a
+`pub(crate)` delegate in `plan/mod.rs`. `plan/mod.rs` also gains `GpuEmitPartitions::into_parts`
+and the `IntoAnyBox` trait, a blanket impl that turns `Box<dyn GpuNode>` into `Box<dyn Any>` so
+a node `as_any` has identified can be taken apart rather than only read; `GpuNode` takes it as a
+supertrait. `planner/translator/nodes.rs` gains `drop_null_keys_below_shuffle` and calls it from
+`hash_join`, after the co-partition check and before the build's `GpuCoalesceAllBatches`. New
+`planner/tests/null_key_filters.rs` (7 cases) and one case in `plan/tests/joins.rs`.
+
+**`IntoAnyBox` is a new row in `SURFACE`, with its receipt.** A supertrait is as public as its
+trait, so `pub(crate) trait IntoAnyBox` under `pub trait GpuNode` compiles with
+`warning: trait IntoAnyBox is more private than the item GpuNode` (`private_bounds`, measured
+on both `-p peacockdb-core` and `-p peacockdb`). That is the second receipt form the SURFACE doc
+names, on `GpuNode`, a row already listed — and a warning is not acceptable here, so `pub` plus
+the row is the only shape. 46 bare `pub` items becomes 47.
+
+**Three things the plan and the design got wrong.**
+- **tpch's plans do move.** Both §4.1 and the plan say tpch's keys hold no NULL so its plans
+  stay. True of its scan keys; false of two queries that join on an aggregate output — q2 on
+  `min(partsupp.ps_supplycost)` and q15 on `total_revenue` — where `can_be_null` says an
+  aggregate's output can be NULL, because a sum over no rows is. +3 filter lines per tp4 mode,
+  2 of 39 sections. The rule is exactly §4.1's ("only where `can_be_null` says the key can be
+  NULL"); the prediction was narrower than the rule. The filters are correct: a NULL from an
+  aggregate matches nothing under SQL equality on an Inner side. Cost: q2 +0.72%,
+  q15 +1.43…1.62%.
+- **`recipe-payloads.txt` moves and the plan does not mention it**, 12 of 20 queries. Any
+  inserted node renumbers every seq above it, so the recipe bytes move for every query that
+  gained a filter. Its `sha256=` lines are deliberately guarded: `UPDATE_CANONICAL=1` alone
+  VERIFIES them and goes red, by design, so the regen needs `PEACOCK_REWRITE_RECIPE_BYTES=1`
+  alongside. The `/tmp/peacock-plan-bytes-root` symlink build-test.md mentions is created by the
+  test itself; no manual step.
+- **`UPDATE_CANONICAL=1 … --test test_cpu_corpus -- tp4` is the wrong variable for a filtered
+  run.** `UPDATE_CANONICAL` is the whole-file contract and prunes sections no declaration
+  accounts for; `<tier>.result.txt` is keyed by query and written by its author mode, which a
+  tp4-only run may not have visited. Ran the whole tier unfiltered instead.
+
+**Which golden kinds moved, by section.**
+
+| kind | files | sections | new `IS NOT NULL` lines |
+|---|---|---|---|
+| `*.plans.txt` tpcds tp4-{single,rowgroup,sized} | 3 | 74 of 99 each | +416 each |
+| `*.plans.txt` pbench tp4-{single,rowgroup,sized} | 3 | 9 of 60 each | +13 each |
+| `*.plans.txt` tpch tp4-{single,rowgroup,sized} | 3 | 2 of 39 each | +3 each |
+| `*.plans.txt` every tp1 mode | 0 | — | 0 — one lane, no shuffle |
+| `recipe-payloads.txt` | 1 | 12 of 20 | — (seqs and digests) |
+| `*-mini.cpu.txt` tp4 × 3 datasets | 9 | — | GpuFilter +3 / +363 / +12 |
+| `*-mini.cost.txt` tp4 × 3 datasets | 9 | — | derived |
+| `*.result.txt` | **0** | — | the answers did not move |
+
+The `.cpu.txt` review the coordinator asked for, done arithmetically rather than by eye: node
+kinds counted before and after in each file, and **`GpuFilter` is the only kind whose count
+changed** — tpch 42→45, tpcds 317→680, pbench 2→14. Nothing else moved by a single line.
+(tpcds +363 in the cpu golden against +416 in the plans golden: the cpu golden carries only the
+cells enabled at that mode, the plans golden carries every query including the refused ones.)
+
+**Cost gate, `cargo run -q -p cost-report -- --cost-diff --base ee0367cd`:**
+**6 improvements, 228 regressions, 173 over the 10% gate — red, and pre-accepted by the board.**
+- By dataset: tpcds 198 rows (66 distinct queries), pbench 24, tpch 6.
+- tpch, in full: q2 +0.72% at all three tp4 modes (374.74 → 377.46 MB); q15 +1.59 / +1.43 /
+  +1.62% (56.60 → 57.50 MB).
+- The worst: tpcds q33 +30.74%, q56 +30.58%, q61 +30.53% (1.74 → 2.27 GB), q31 +30.39%,
+  q60 +30.30%. Distribution over the 198 tpcds rows: 21 under +5%, 16 to +10%, 21 to +15%,
+  22 to +20%, 14 to +25%, 90 to +30%, 14 above.
+- pbench's worst: `not-not-in` +26.89%, `uint-key-join` +25.95%, `exists-null-keys` +25.62%.
+- **Not purely additive: tpcds q93 improves by 11.19%** (963.44 → 855.63 MB), and q76 by 0.01%.
+  Dropping the NULL keys before the shuffle cuts what every node above it carries, so where the
+  key is NULL-heavy the rule pays for itself. The metric is Σ bytes out of every node, and a new
+  filter's output is one more copy of its input — which is why the typical row is +25% and why
+  q93, whose join loses rows, goes the other way.
+- `cost_diff.html` is written by that command; the per-query table is reproducible from it.
+
+**Red-green evidence. Four mutations, every one reverted and the revert read off `git diff`.**
+- Red before: 2 of 4 original cases (inner wanted 2 filters and saw 0, left wanted 1 and saw 0).
+- `null_key_droppable`'s `Right` → `(false, true)`: 1 failed, the nine-way table case.
+- the `!join.null_equals_null()` guard → `if true`: 5 failed —
+  `set_semantics_keeps_the_null_keys_a_shuffle_would_skew`, tpcds's three tp4 plan goldens and
+  the payload golden. tpcds carries 11 `null_equals_null=true` RightSemi joins (q14 ×6, q38 ×2,
+  q8, q87 ×2), so the goldens do guard it; the targeted case is what names the rule.
+- the filter put ABOVE the emit instead of below: 11 failed, including
+  `the_filter_goes_below_the_shuffle_and_not_above_it` and every tp4 plan golden.
+- `can_be_null` ignored (`nullable[k] || true`): 12 failed, including
+  `a_tpch_join_gains_no_filter` and `translator::tests::an_equi_join_is_co_partitioned_by_a_scatter_on_each_side`
+  — the footer reader is load-bearing, which is the question the dispatch asked.
+- Green after: 723 passed, 2 ignored, 0 failed.
+
+**One defect of mine, caught by reading the diff rather than by a test.** Both insertions into
+`plan/mod.rs` took the doc block of the declaration below them — `GpuNode` lost "What a plan
+node offers the driver and the validator." to `IntoAnyBox`, and `empty_build_answers_nothing`
+lost its three-sentence block to `null_key_droppable`. This is `coding-style.md`'s "a doc
+comment reassigned by an insertion" exactly, and `test_golden_format`'s
+`no_declaration_carries_a_block_left_behind_by_a_split` cannot see it: that guard looks for a
+block orphaned by a BLANK LINE, and an insertion is contiguous. Both fixed; the final
+`plan/mod.rs` diff is pure addition with no doc block moved. Worth knowing that reading each
+block's first sentence in the diff is the only check there is.
+
+**The #257 projection form: measured, and it does not fold.** The coordinator's note says
+`SELECT (f_k IN (SELECT …)) IS NULL FROM fact` still folds. It does not — measured on the
+`not_in.rs` fixture: it is refused at physical planning with "Physical plan does not support
+logical expression InSubquery". The fold needs the mark join, the mark join needs decorrelation,
+and DataFusion 45 decorrelates only inside a filter (#247's second row). So with this chain's
+rule in place #257's wrong answer is unreachable from every shape: on a WHERE spine it is
+rewritten; off the spine with nullable operands it is refused on #250; off the spine with
+provably non-null operands `IS NULL` folds to false, which is the right answer; and in a
+projection the planner refuses it. My view on the coordinator's question: **no new ticket.** A
+form that never reaches the defect has nothing to track that #247 does not already track, and
+`bug_datafusion_45_refuses_six_subquery_shapes` already pins the projection refusal — adding
+`IS NULL` around it is the same refusal from the same site.
+
+**build-test.md needs a third row (human's file).** `planner::tests::null_key_filters` is a new
+component-tier block of 7 cases; `plan::tests::joins` goes 23 → 24; `--lib` moves 717 → 725.
+Suggested row, after "`NOT IN` as SQL means it":
+
+    | #137's NULL-key filters | [an_inner_join_drops_null_keys_below_both_shuffles_where_the_data_holds_them](../peacockdb-core/src/planner/tests/null_key_filters.rs) | 7 |
+
+    which side of a join drops its NULL keys before the shuffle, read off the plan text over
+    real footers — pbench's `f_k` holds 1,034 NULLs and `d_k` 50, where every tpch scan key
+    holds none, so the tpch case is what proves the footer reader is consulted at all. Three
+    answers a query can show (Inner both sides, Left its probe, Full neither), one lane showing
+    that no shuffle means no filter, and two over the hand-built fixture for what no corpus SQL
+    reaches: the `null_equals_null` flag, and whether the filter landed below the shuffle
+
+The nine-way table itself is `plan::tests::joins::every_join_type_says_which_side_may_drop_a_null_key`,
+so that row's count moves from 23 to 24.

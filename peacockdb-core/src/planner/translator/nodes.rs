@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_plan::ExecutionPlan;
@@ -34,7 +35,9 @@ use super::scan_mapping::{parquet_table_name, partition, survivor_metadata};
 use crate::plan::BatchLayout;
 use crate::plan::PlanError;
 use crate::plan::Schema;
+use crate::plan::null_key_droppable;
 use crate::plan::{Batching, RowGroupMeta};
+use crate::plan::{BinaryOp, UnaryOp};
 use crate::plan::{Expr, NamedExpr};
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter,
@@ -43,6 +46,7 @@ use crate::plan::{
 };
 use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{NestedLoopJoinType, capability};
+use crate::planner::nullability::can_be_null;
 
 pub(crate) fn node(
     t: &Translator,
@@ -271,6 +275,19 @@ pub(crate) fn hash_join(
         build = merged(build);
         probe = merged(probe);
     }
+    // #137, before the build is coalesced: the key ordinals index each side's own output,
+    // which is the shuffle's input schema.
+    if !join.null_equals_null() {
+        let (drop_build, drop_probe) = null_key_droppable(*join.join_type());
+        if drop_build {
+            let ordinals: Vec<u32> = keys.iter().map(|(build, _)| *build).collect();
+            build = drop_null_keys_below_shuffle(build, &ordinals);
+        }
+        if drop_probe {
+            let ordinals: Vec<u32> = keys.iter().map(|(_, probe)| *probe).collect();
+            probe = drop_null_keys_below_shuffle(probe, &ordinals);
+        }
+    }
     if batches(build.as_ref()) != BatchLayout::SingleBatch {
         build = Box::new(GpuCoalesceAllBatches::new(build));
     }
@@ -298,6 +315,49 @@ pub(crate) fn hash_join(
             .map(|columns| columns.iter().map(|c| *c as u32).collect()),
         Schema::new(join.schema()),
     )))
+}
+
+/// #137: a NULL key matches nothing on a side whose unmatched rows are never emitted, so
+/// where the data can hold one it is dropped before the shuffle instead of skewing the one
+/// lane every NULL hashes to.
+fn drop_null_keys_below_shuffle(side: Box<dyn GpuNode>, keys: &[u32]) -> Box<dyn GpuNode> {
+    // Whether this side shuffles here is a question about the TRANSLATED top, not about
+    // DataFusion's: a hash `RepartitionExec` always arrives wrapped in a
+    // `CoalesceBatchesExec` (`coalesce_batches.rs:57-80`) that translation drops.
+    if side.as_any().downcast_ref::<GpuEmitPartitions>().is_none() {
+        return side;
+    }
+    let n = lanes(side.as_ref());
+    let emit = side
+        .into_any_box()
+        .downcast::<GpuEmitPartitions>()
+        .expect("the downcast above answered");
+    let (input, hash_keys) = emit.into_parts();
+    let nullable = can_be_null(input.as_ref());
+    let schema = input
+        .kind()
+        .schema()
+        .cloned()
+        .expect("a shuffle's input declares a schema");
+    let tests: Vec<Expr> = keys
+        .iter()
+        .filter(|key| nullable[**key as usize])
+        .map(|key| {
+            Expr::unary(
+                UnaryOp::IsNotNull,
+                Expr::column(*key, schema.fields.field(*key as usize).name()),
+            )
+        })
+        .collect();
+    let Some(predicate) = tests
+        .into_iter()
+        .reduce(|left, right| Expr::binary(left, BinaryOp::And, right, DataType::Boolean))
+    else {
+        // Every key holds no NULL in the data: nothing to drop, and the plan does not move.
+        return Box::new(GpuEmitPartitions::new(input, hash_keys, n));
+    };
+    let filtered = Box::new(GpuFilter::new(input, predicate, None, schema));
+    Box::new(GpuEmitPartitions::new(filtered, hash_keys, n))
 }
 
 /// Union branches are planned independently, so one column can arrive as a different

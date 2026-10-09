@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3106 test cases — Rust 2536, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3114 test cases — Rust 2544, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1729 cases: `--lib` 717, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1737 cases: `--lib` 725, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -125,7 +125,7 @@ one input per rule, each built to break the rule it is aimed at: a plan that vio
 unreachable from SQL because translation inserts the fix, so a hand-built input is the only
 thing that shows the guard going red
 
-| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 23 |
+| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 24 |
 |---|---|--:|
 
 what each of the three join kinds requires of its inputs, and the distribution a join declares
@@ -176,6 +176,16 @@ three negation-normal-form folds, the nested `NOT IN` inside an `EXISTS`, the un
 that must not become `count(*)`, the tpch keys that hold no NULL and so plan untouched, and the two
 refusals this chain leaves — #250's off-spine `IN` and #247's seven DataFusion limits. Every
 expected row is DuckDB 1.5.4's over the same tables
+
+| #137's NULL-key filters | [an_inner_join_drops_null_keys_below_both_shuffles_where_the_data_holds_them](../peacockdb-core/src/planner/tests/null_key_filters.rs) | 7 |
+|---|---|--:|
+
+which side of a join drops its NULL keys before the shuffle, read off the plan text over real
+footers — pbench's `f_k` holds 1,034 NULLs and `d_k` 50, where every tpch scan key holds none, so
+the tpch case is what proves the footer reader is consulted at all. Three answers a query can show
+(Inner both sides, Left its probe, Full neither), one lane showing that no shuffle means no filter,
+and two over the hand-built fixture for what no corpus SQL reaches: the `null_equals_null` flag,
+and whether the filter landed below the shuffle
 
 | Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
 |---|---|--:|

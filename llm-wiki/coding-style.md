@@ -145,7 +145,7 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 
 ## Visibility
 
-Four boundaries, each one thing. **The crate** exposes what the CLI calls: 46 bare `pub` items in
+Four boundaries, each one thing. **The crate** exposes what the CLI calls: 47 bare `pub` items in
 five files, listed by file and name — fields included — in `SURFACE`
 (`test_module_layout/visibility.rs`). **A
 component** — `plan`, `planner`, `executor`, `wire`, `plan_text` — is a directory whose `mod.rs`
