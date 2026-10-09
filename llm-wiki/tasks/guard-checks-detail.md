@@ -449,3 +449,12 @@ grand total 2340.
 
 Nothing else conflicted. `guard-checks.md`, `pipeline.yml`'s GPU job and
 `build-test-shadgpu.sh` applied clean.
+
+#### Re-proving dispatch, second rebase
+
+Local and CPU-only again; verda still does not resolve from this host. The bar is the same ten
+rust-only targets plus the C++ cpu side, with one addition: `cargo test -p cost-report`, because
+`cost-report/src/main.rs` is what master changed and `build-test.md` now claims 38 cases for it.
+Nothing master carried touches the library, so `--lib` should read 606 passed / 2 ignored / 608
+listed unchanged, and `test_ci_coverage` 9 — that target reads `pipeline.yml`, the one file both
+sides of this rebase touched, so it is the one that can legitimately move.
