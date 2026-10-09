@@ -34,7 +34,17 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   state changes.
 - **Tickets** live in the milestone files under `llm-wiki/tickets/`, indexed by
   `llm-wiki/tickets.md` (GitHub issues are retired). New bugs and follow-ups get a ticket in
-  the file of the milestone they block; ticket IDs (`#NN`) are permanent.
+  the file of the milestone they block; ticket IDs (`#NN`) are permanent. A ticket's header is
+  `### #NN (short label) title` under its `<a id="tNN"></a>` anchor: the label is at most 25
+  characters and names the problem the way a reader would look for it ("streamed probe
+  build"), and the title says what the engine does wrong. A new ticket adds its line to its
+  file's `## Contents` and to the index in `tickets.md`.
+- **The registry's report moves with the registry.** `testdata/report.html` is checked in: the
+  PR widget's tables for every dataset, with tickets, oracles and per-mode links. A commit that
+  changes `testdata/cost-registry.csv` regenerates it in the same commit, with
+  `python3 scripts/ticket_widget.py`, which writes it and needs nothing else. The developer
+  runs it whenever it touches the registry; the reviewer treats a registry diff without a
+  report diff as a finding.
 - **Only production behaviour gets a ticket.** A ticket says the engine does the wrong thing
   for a user: a wrong answer, a crash, a refusal, a leak, a regression. Cosmetics never get
   one — an unused output argument, a name you dislike, a shape you would have written
@@ -441,9 +451,10 @@ Interactive, with the human, never part of an autonomous run. You work in the pr
 checkout on master and never in a workspace, so you cannot collide with a running
 coordinator. At most fifteen lines per question. Refer to tasks by name, never by their
 board number: "join-cases", not "task 1" — numbers shift when a chain is resequenced and
-mean nothing outside its section. Refer to tickets by number and title, every time: "#185 —
-`GpuAggregateBatches` reports its own output as `in_rows`", never a bare "#185" — the human
-does not carry the index in their head, and a number alone sends them to look it up.
+mean nothing outside its section. Refer to tickets by number and short label, every time:
+"#152 (streamed probe build)", never a bare "#152" — the human does not carry the index in
+their head, and a number alone sends them to look it up. Add the full title only where the
+label alone would not say enough to decide on.
 
 - **Defining a task, in two phases.** `superpowers:brainstorming` with the human produces
   the spec, `llm-wiki/tasks/<task>.md`: what the task is, why this shape, what the

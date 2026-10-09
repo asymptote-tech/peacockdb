@@ -7,22 +7,23 @@ blocks, never here.
 Migrated from GitHub issues on 2026-07-31; GitHub issues are closed and these files are the
 registry. The number is the permanent ticket ID. Each ticket carries an `<a id="tNN">` anchor
 above its header, which the cost widget links to, so link a ticket as
-`tickets/<milestone>.md#tNN`. Device labels are `tp<N>-<tier>` (micro=100MiB, mini=2GiB,
+`tickets/<milestone>.md#tNN`. A header reads `### #NN (short label) title`: the label is at
+most 25 characters and is what `scripts/ticket_widget.py` shows beside the number. Device labels are `tp<N>-<tier>` (micro=100MiB, mini=2GiB,
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 287), one ID space across every file. 264–279
+New tickets take the next free number (currently 288), one ID space across every file. 264–279
 are left to chain J, whose branches number from 263 on their own boards.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-120 open tickets, in file order.
+121 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 36 | #225 #216 #94 #280 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #186 #282 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #235 #262 #281 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 37 | #225 #216 #94 #280 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #186 #282 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #235 #262 #281 #287 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 7 | #239 #195 #161 #144 #261 #249 #283 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 11 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 |
 | [`joins.md`](tickets/joins.md) | Join execution | 21 | #155 #152 #153 #80 #59 #215 #208 #207 #190 #63 #212 #173 #136 #137 #159 #160 #220 #243 #245 #246 #250 |
