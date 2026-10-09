@@ -426,3 +426,90 @@ One process note, self-reported by the developer: it used `git checkout -- <file
 the deliberate leak. Subagents do not mutate git state; that is the coordinator's. It was benign —
 that file's only uncommitted change was the leak — and I confirmed independently that every other
 round-2 edit survived, finding by finding.
+
+## Completeness pass, 2026-10-09 — 1 blocking, 8 important across two readings
+
+Two agents read the branch without seeing each other's list. Both reported the session's logic
+sound where they overlapped, and between them found one blocking gap and eight important items. The
+task is not finished; it goes back to the developer.
+
+### The analyst, asking what is missing
+
+- **Blocking — no accumulating type is ever probed more than once except Full without a residual.**
+  Of the 48 tests, exactly three probe twice or more with an asserted answer: Inner keys-only (2),
+  Full keys-only (3), and the region-count case (2, Left, asserting regions rather than rows).
+  Every test touching LeftSemi, LeftAnti or LeftMark probes once, and so does every test with a
+  residual. The thing this task exists for is #136, build-side match tracking while the probe side
+  streams, which in the code is `s_->matched = set_true(...)` folded across calls at five sites
+  (`join_session.cpp` 283, 294, 344, 457, and `derive`). Four of those five can only be wrong across
+  two batches and never see two. **A single-batch case cannot tell an OR from an overwrite.** §5.6
+  asks for "no batch; one; three with a zero-row batch between" against every type at least once,
+  and one case serves it, on the type whose arm needs it least.
+- **Important — §5.6's one explicit full product is covered for one condition of eight.** Type ×
+  condition × {no batch, zero rows, rows}: keys-only has all three build shapes against all nine
+  types; the other seven conditions have the rows column only. `JoinSession::JoinSession` sets
+  `empty_build` and returns before the A/R split, the hoisting and the hash build, so all eight
+  share `probe_empty_build` — which is why this is important and not blocking. But pbench leaves
+  three of four lanes with no build batch by design (§5.2), so empty-build × residual and
+  empty-build × nested-loop are shapes task 8's first multi-lane run produces.
+- **Important — `null_equals_null = true` never reaches the semi family.** It is set in one test,
+  looping Inner, Left, Right, Full. So `distinct_keys`'s EQUAL branch is never taken, and
+  `distinct_hash_join` and the per-batch distinct probe keys are only ever built with UNEQUAL.
+  Not hypothetical: `null_equals_null` comes off DataFusion, so INTERSECT is a LeftSemi under EQUAL
+  and EXCEPT a LeftAnti under EQUAL, and the fbs comment this branch wrote says the flag is
+  "honoured by every type".
+- **Important — two condition cells are one type wide.** "Keys + a cross residual the AST takes" is
+  Inner alone, at the exact spot where `keep_and_derive` was passed `R` instead of `cross`: in Inner
+  that defect drops rows, in Left and Full it also corrupts `matched` so the finish pads rows it
+  should not, which Inner cannot show. "No keys + AST and non-AST conjuncts" is Left and Full alone,
+  while Inner, Right and the five semi types take different branches of `derive` under it.
+- **Important — `chunk_bytes`'s units are undocumented and differ from what task 8 will assume.**
+  `chunks()` spends the budget at `pairs * (8 + filter_row_bytes)`; design §4.3, which task 8
+  implements, prices a pair at 8 bytes. A planner converting its scratch budget per §4.3 and an
+  accountant pricing per §4.3 are both wrong by the residual's per-row width, in the direction that
+  under-prices.
+- **Important — an absent build's output schema is never pinned.** With `build = 0` the build
+  columns are typed and named from `build_schema`; the empty-build test compares row text only, and
+  `Session::schema()` is never called over an absent build. Nothing states the contract task 8 must
+  honour, that `build_schema`'s field names and order equal the batch the loader would have
+  produced. A disagreement surfaces as an Arrow schema mismatch on empty lanes alone, debugged from
+  Rust rather than here.
+
+### The reviewer, asking what is wrong
+
+- **Important — the "session stands" marker is a type cuDF throws too.** `gpu_executor.cpp:358`
+  catches `std::invalid_argument` to mean one of exactly two recoverable refusals, an unknown join
+  id and a probe after finish, as four documents state. cuDF throws the same type from inside the
+  probe: `CUDF_EXPECTS(..., std::invalid_argument)` in `compute_hash_join` and `left_join_size`, and
+  `cudf::data_type_error : std::invalid_argument` on mismatched key types and from both conditional
+  join paths. `NodeSession::join_probe` consumes the handle before `JoinSession::probe` runs, so
+  such a failure returns 1 with the lane's batch already erased — and a driver honouring the
+  documented contract carries on, giving a wrong answer rather than a failed query. The
+  classification is version-dependent too: on 25.02 most of those were `cudf::logic_error`, so the
+  two CI legs disagree about the failure policy of the same call. The idiom is new in this branch;
+  nothing else in `cpp/src` throws `std::invalid_argument`.
+- **Important — the empty-`filter_columns` throw was deleted on a path check that missed
+  `residual_mask`.** That is the one function deriving its row count from the map: an empty map
+  gives a zero-column `table_view`, `build_column` of a literal broadcasts to its 0 rows, and
+  `binary_operation` against `acc`'s `bi.size()` rows throws "Column sizes don't match" — reported,
+  per the finding above, as a recoverable refusal. Reachable shape: a keyed Inner/Left/Right/Full
+  whose residual names no column, where `pairs_only` skips the A/R split so the literal is never
+  routed to the AST. Green today only because a chunk producing no key matches makes both sides zero
+  rows. **This one is the coordinator's doing**: I read §1.1, §3.6 and §4.1, confirmed the design
+  wants an empty map accepted, and told the developer to drop the throw on the strength of a path
+  check I did not extend. The design conclusion stands; the deletion should have been a narrowing.
+- **Important — the record claims a fix that is two thirds absent.** This file said all three
+  one-row `chunk_bytes = 16` probes were given three rows. Round 2 changed one;
+  `test_join_session.cpp:864` and `:1241` still probe one row, and `chunks()` caps the range count
+  at the probe's rows, so each runs identically to its unchunked sibling. Corrected below.
+
+### What the two readings agreed on, so nobody re-derives it
+
+`bare_probe_of` really does run the same cuDF work the session runs — same four calls in the same
+order, same key sub-tables, same `null_equality`, hash table built outside the measured frame as
+`join_build` builds it — and the byte-exact agreement is itself the evidence against the one way the
+two shapes could have diverged. The `net` and release bounds both go red under the leaks the record
+names. The three Rust edits are within the spec's restriction: `read.rs` is the reader, and
+`CudfJoin` is appended last in the union so no variant renumbers. §5.6's named list of 26 items is
+complete. The spec's item 6 is met: both `install(TARGETS …)` and the `INSTALL_RPATH` list carry the
+binary, and `install_rmm_pool` creates `stats_mr()` so one call installs pool and adaptor.
