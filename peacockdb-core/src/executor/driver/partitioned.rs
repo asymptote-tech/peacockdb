@@ -205,7 +205,7 @@ impl<'a, B: Backend> Driver<'a, B> {
     }
 
     fn drive(&mut self, max_steps: usize) -> Result<(), StepError> {
-        self.seed();
+        self.seed()?;
         while self.step()? {
             if self.steps > max_steps {
                 return Err(
@@ -218,11 +218,12 @@ impl<'a, B: Backend> Driver<'a, B> {
 
     /// Readiness for every node, and the limits settled: a zero-row interval is satisfied
     /// before anything runs, and the plan still has to complete rather than stall.
-    pub(crate) fn seed(&mut self) {
+    pub(crate) fn seed(&mut self) -> Result<(), StepError> {
         for node in 0..self.index.len() {
             self.refresh(node);
-            self.settle_limit(node);
+            self.settle_limit(node)?;
         }
+        Ok(())
     }
 
     /// Run one node — every lane of it. `false` when nothing is runnable, which is how a
@@ -233,7 +234,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         };
         self.steps += 1;
         self.run_node(node)?;
-        self.settle_limit(node);
+        self.settle_limit(node)?;
         self.refresh(node);
         if let Some(parent) = self.index.nodes[node].parent {
             self.refresh(parent);
@@ -625,22 +626,31 @@ impl<'a, B: Backend> Driver<'a, B> {
     /// unload's input has reached `skip + fetch`, or a mid-plan limit has emitted `fetch`.
     /// It is marked done as it is held, or the hold would stop it reporting and strand its
     /// parent — `LIMIT 0` is the case that forces it.
-    fn settle_limit(&mut self, node: usize) {
+    fn settle_limit(&mut self, node: usize) -> Result<(), StepError> {
         let indexed = &self.index.nodes[node];
         let Some(interval) = indexed.interval else {
-            return;
+            return Ok(());
         };
-        let (category, lanes) = (indexed.category, indexed.lanes);
+        let (category, lanes, name) = (indexed.category, indexed.lanes, indexed.node.name());
         let satisfied = match category {
             ExecutorCategory::Unload => interval.satisfied_by(self.rows_seen[node]),
-            // The other interval carrier is a mid-plan limit.
-            _ => interval.satisfied_by_emitted(self.rows_emitted[node]),
+            ExecutorCategory::BatchAccumulator => {
+                interval.satisfied_by_emitted(self.rows_emitted[node])
+            }
+            // The two carriers are judged by different counts, so a third would be judged
+            // by whichever rule it fell into rather than by one written for it.
+            _ => {
+                return Err(StepError::Run(RunError::Protocol(format!(
+                    "{name}: a row interval on neither an unload nor a limit"
+                ))));
+            }
         };
         if !satisfied {
-            return;
+            return Ok(());
         }
         self.scheduler.satisfy(node);
         self.states[node].out_done = vec![true; lanes];
+        Ok(())
     }
 
     // -- queues ------------------------------------------------------------------

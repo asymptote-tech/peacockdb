@@ -428,6 +428,11 @@ fn loader(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn GpuNode>, Pla
 /// and the metadata says where they are; the readers return every row of a group they read,
 /// so the groups after the prefix hold none of them. Without this a single-batch mode reads
 /// the whole file for `LIMIT 10`.
+///
+/// The scan's `can_be_null` is not recomputed, so it stays ORed over every survivor and a
+/// column nullable only in a dropped group is still claimed nullable. That is the safe
+/// direction — `planner/nulls.rs` spends a false positive on a refusal and a false negative
+/// on a wrong answer — and it is also what the scan claimed before any trim existed.
 fn covering_prefix(mut groups: Vec<RowGroupMeta>, n: u64) -> Vec<RowGroupMeta> {
     let mut rows = 0;
     let keep = groups

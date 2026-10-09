@@ -197,3 +197,121 @@ async fn a_limited_subquery_under_an_aggregate_counts_only_its_cut_at_every_mode
     )
     .await;
 }
+
+/// The hold's own effect, at a scan whose mapping cannot stand in for it. DataFusion pushes
+/// no limit through a `FilterExec`, so the scan carries no cut, `source()`'s prefix trim has
+/// nothing to trim, and the loader maps all 49 of lineitem's row groups at every mode. An
+/// aggregate above the limit makes it a node rather than the unload's interval, so what
+/// bounds the read is the driver's hold on the satisfied limit's subtree and nothing else.
+#[tokio::test]
+async fn a_limit_stops_a_scan_that_maps_every_row_group_at_every_mode() {
+    use crate::executor::CallKind;
+    use crate::plan::{NodeRef, as_node_ref};
+    use crate::planner::BatchSizing;
+    use datafusion::arrow::array::AsArray;
+    use datafusion::arrow::datatypes::Int64Type;
+
+    const SQL: &str =
+        "SELECT count(l_quantity) FROM (SELECT * FROM lineitem WHERE l_quantity > 0 LIMIT 10)";
+
+    let data_dir = data_dir_for("tpch", "1");
+    for mode in &MODES {
+        let name = mode.name;
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir,
+        )
+        .await
+        .expect("register the tables");
+        let plan = ctx
+            .sql(SQL)
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("the query has a physical plan");
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
+            .unwrap_or_else(|error| panic!("filtered limit at {name}: {error}"));
+        let mapping = loader_mapping(tree.as_ref());
+        assert_eq!(
+            mapping.groups, 49,
+            "filtered limit at {name}: the scan carries no cut, so nothing trims its 49 \
+             row groups"
+        );
+        let report = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .unwrap_or_else(|error| panic!("filtered limit at {name}: {error}"));
+        let pulled = report
+            .trace
+            .iter()
+            .filter(|e| e.call == CallKind::NextBatch)
+            .count();
+        assert!(
+            !report.satisfied.is_empty(),
+            "filtered limit at {name}: the run drained rather than stopping at its limit"
+        );
+        // A lane's first batch already holds more rows than the cut wants, so no lane is
+        // pulled twice however many batches its mapping offers.
+        assert!(
+            pulled <= mode.target_partitions,
+            "filtered limit at {name}: {pulled} pulls for {} lanes, and one batch a lane \
+             is all the cut needs",
+            mode.target_partitions
+        );
+        // Where the mapping is one batch per row group it offers all 49 and the hold is the
+        // whole of the bound. The other three modes map one batch a lane, so there is
+        // nothing left there for a hold to save.
+        if matches!(mode.sizing, BatchSizing::OneBatchPerRowGroup) {
+            assert_eq!(
+                (mapping.batches, pulled),
+                (49, 1),
+                "filtered limit at {name}: {} batches offered and {pulled} pulled",
+                mapping.batches
+            );
+        }
+        let answer: Vec<i64> = report
+            .batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .record_batch()
+                    .column(0)
+                    .as_primitive::<Int64Type>()
+                    .values()
+                    .to_vec()
+            })
+            .collect();
+        assert_eq!(
+            answer,
+            vec![10],
+            "filtered limit at {name}: the cut keeps ten of lineitem's rows"
+        );
+        assert_eq!(
+            report.in_flight_bytes, 0,
+            "filtered limit at {name} ended holding batches"
+        );
+    }
+
+    /// The one loader's mapping, in the two units the hold is argued in: the row groups it
+    /// covers, and the batches it offers over them.
+    fn loader_mapping(node: &dyn crate::plan::GpuNode) -> Mapping {
+        if let NodeRef::LoadParquet(load) = as_node_ref(node) {
+            return Mapping {
+                groups: load.partition_groups.iter().flatten().flatten().count(),
+                batches: load.partition_groups.iter().map(Vec::len).sum(),
+            };
+        }
+        node.children()
+            .into_iter()
+            .map(loader_mapping)
+            .fold(Mapping::default(), |total, found| Mapping {
+                groups: total.groups + found.groups,
+                batches: total.batches + found.batches,
+            })
+    }
+
+    #[derive(Default)]
+    struct Mapping {
+        groups: usize,
+        batches: usize,
+    }
+}

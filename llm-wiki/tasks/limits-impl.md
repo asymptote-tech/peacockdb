@@ -18,7 +18,9 @@ through a new `unload_input`. It hands the pushed cut of a scan with nothing abo
 unload, composed with any root limit by `RowInterval::over`. The reason is the validator: it
 refuses a `GpuLimit` feeding only the sink (`plan/validate.rs:40-49`), and the spec puts that cut
 in the unload's interval. In the driver (`executor/driver/partitioned.rs`), `settle_limit` reads
-a new `rows_emitted` for a mid-plan limit and keeps `rows_seen` for the unload alone.
+a new `rows_emitted` for a mid-plan limit and keeps `rows_seen` for the unload alone; it matches
+the two carriers' categories explicitly and refuses any other node carrying an interval, so
+`seed` and `settle_limit` return a `Result`.
 
 **Tech stack:** Rust over DataFusion 45 physical plans, cpu tier (`--features rust-only`);
 FlatBuffers schema; C++ against cuDF 25.02, built and `ctest -L cpu` only; the gpu-feature Rust
@@ -105,8 +107,9 @@ lib built, never run.
    - The prefix is exact only because the readers return every row of a group they read. Nothing
      filters inside the scan (`pushdown_filters` is off), and DataFusion pushes a limit into a
      scan only with nothing filtering between.
-   - `can_be_null` stays computed over every survivor. A NULL in a group the prefix drops only
-     makes it conservative.
+   - `can_be_null` stays computed over every survivor, so a node's `survivors` and its
+     `can_be_null` describe different group sets. A NULL in a group the prefix drops only makes
+     it conservative, and `covering_prefix`'s doc states the invariant.
    - Task 2's prefix case covers this at every mode.
 3. **A mid-plan limit with a skip.** The driver must compare the rows the limit emitted with
    `fetch`, never with `skip + fetch`. The slip is reusing `satisfied_by` on the new count. The
@@ -157,7 +160,8 @@ satisfied at the same step under either count.
 **Files:**
 - Modify: `peacockdb-core/src/plan/mod.rs` (`impl RowInterval`, ~l.1040-1058)
 - Modify: `peacockdb-core/src/executor/driver/partitioned.rs` (module doc l.1-9, fields
-  ~l.69-73, `new` ~l.173, `run_lane_scoped` ~l.284-360, `settle_limit` ~l.613-625)
+  ~l.69-73, `new` ~l.173, `run_lane_scoped` ~l.284-360, `seed` ~l.218-226,
+  `settle_limit` ~l.625-654)
 - Modify: `peacockdb-core/src/executor/driver/tests/mock.rs` (`AccRule` ~l.65, `Script`
   ~l.111-165, `MockAcc` ~l.408-445, `executors_for` ~l.634-650)
 - Test: `peacockdb-core/src/executor/driver/tests/limit.rs`
@@ -226,10 +230,11 @@ fn mid_plan(skip: u64, fetch: Option<u64>, rule: AccRule) -> RunReport {
 }
 
 #[test]
-fn a_mid_plan_limit_is_satisfied_by_fetch_rows_emitted_whatever_its_skip() {
-    // The mock forwards each batch whole, so ten rows leave the limit with the first one.
-    // Judged by what it emitted, a limit wanting five is done after one pull; judged by its
-    // input against skip + fetch it would read three batches.
+fn a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch() {
+    // The mock forwards each batch whole and implements no skip, so a real limit executor
+    // would need three pulls here rather than one. The one pull is what tells the driver's
+    // rules apart: by rows emitted a limit wanting five is done with the first batch, by its
+    // input against skip + fetch it reads three.
     let report = mid_plan(25, Some(5), AccRule::Streaming);
     assert!(!report.satisfied.is_empty());
     assert_eq!(
@@ -361,21 +366,31 @@ timeout 1200 cargo test --features rust-only -p peacockdb-core --lib -- executor
     /// unload's input has reached `skip + fetch`, or a mid-plan limit has emitted `fetch`.
     /// It is marked done as it is held, or the hold would stop it reporting and strand its
     /// parent — `LIMIT 0` is the case that forces it.
-    fn settle_limit(&mut self, node: usize) {
+    fn settle_limit(&mut self, node: usize) -> Result<(), StepError> {
         let indexed = &self.index.nodes[node];
         let Some(interval) = indexed.interval else {
-            return;
+            return Ok(());
         };
-        let satisfied = match indexed.category {
+        let (category, lanes, name) = (indexed.category, indexed.lanes, indexed.node.name());
+        let satisfied = match category {
             ExecutorCategory::Unload => interval.satisfied_by(self.rows_seen[node]),
-            // The other interval carrier is a mid-plan limit.
-            _ => interval.satisfied_by_emitted(self.rows_emitted[node]),
+            ExecutorCategory::BatchAccumulator => {
+                interval.satisfied_by_emitted(self.rows_emitted[node])
+            }
+            // The two carriers are judged by different counts, so a third would be judged
+            // by whichever rule it fell into rather than by one written for it.
+            _ => {
+                return Err(StepError::Run(RunError::Protocol(format!(
+                    "{name}: a row interval on neither an unload nor a limit"
+                ))));
+            }
         };
         if !satisfied {
-            return;
+            return Ok(());
         }
         self.scheduler.satisfy(node);
-        self.states[node].out_done = vec![true; indexed.lanes];
+        self.states[node].out_done = vec![true; lanes];
+        Ok(())
     }
 ```
 
@@ -1624,3 +1639,25 @@ tree disagreed, all recorded in [`limits-detail.md`](limits-detail.md#round-1-ev
 
 One caller outside the plan's list: `executor/gpu_backend/gpu_tests/mod.rs:141`, which only the
 `--features gpu --no-run` build can see.
+
+## As built — round 2
+
+Four findings from review round 1, all in files the plan already lists. The round's narrative and
+the evidence are in [`limits-detail.md`](limits-detail.md).
+
+- **I2, a new end-to-end case.** `a_limit_stops_a_scan_that_maps_every_row_group_at_every_mode`
+  (`tests/end_to_end/limits.rs`). The prefix trim removed the branch's only non-mock cover of the
+  driver's subtree hold, so this adds a limit the trim cannot reach: `SELECT count(l_quantity)
+  FROM (SELECT * FROM lineitem WHERE l_quantity > 0 LIMIT 10)`. DataFusion pushes no limit
+  through a `FilterExec`, so the scan carries no cut and the loader maps all 49 row groups at
+  every mode; the hold is the only thing that bounds the read. At the rowgroup modes 49 batches
+  are offered and 1 is pulled. The limit sits under an aggregate rather than at the root because
+  the bare `SELECT * … WHERE … LIMIT 10` is refused at the tp4 modes — see the detail file.
+- **N3, `settle_limit` names its two carriers.** The `_` arm became an explicit
+  `ExecutorCategory::BatchAccumulator`, and anything else carrying an interval is a
+  `RunError::Protocol` naming the node. `settle_limit` and `seed` return `Result`.
+- **N4, one sentence in `covering_prefix`'s doc** saying `can_be_null` stays over the untrimmed
+  survivors and why that is safe.
+- **N8, the mock case renamed** to
+  `a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch`, with the comment
+  saying what the mock's no-skip forwarding does and does not show.

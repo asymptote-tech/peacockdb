@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2393 test cases — Rust 1918, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2394 test cases — Rust 1919, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1240 cases: `--lib` 639, `test_cpu_corpus` 569, `test_corpus_goldens` 29, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1241 cases: `--lib` 640, `test_cpu_corpus` 569, `test_corpus_goldens` 29, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -80,12 +80,12 @@ mode mask on the last argument and a trailing comment with a parenthesis in it
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 36 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 37 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and seventeen cases no query list can
+to zero and holds equal releases at the end of every run — and twenty cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
@@ -95,14 +95,15 @@ RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
 hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
 project's field retyped refused naming the field; a scan's limit answering its count from one
-row group at every mode, and a limited subquery under an aggregate; and five on the DISTINCT
+row group at every mode, a limited subquery under an aggregate, and a limit stopping a scan
+whose mapping offers every row group it has; and five on the DISTINCT
 lowering — a
 `count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
 companions, a DISTINCT argument holding NULLs, an empty keyless input answering `0, 0`, and
 `tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`,
-since DataFusion is no oracle for it. Two of the 36 are `#[ignore]`d against
+since DataFusion is no oracle for it. Two of the 37 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 34 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 35 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 

@@ -130,10 +130,10 @@ pub(crate) fn limit_interval(
             },
         ));
     }
-    // Not reachable from today's planner: where a limit is root-adjacent DataFusion leaves
-    // a GlobalLimitExec there and uses a coalesce's fetch only as the bound pushed below
-    // it. The arm is here so both paths agree if that ever changes — one query must not
-    // have two plan shapes depending on where the fetch was parked.
+    // Reached at one target partition, where DataFusion leaves no GlobalLimitExec above the
+    // coalesce it parked the fetch in: `SELECT * FROM lineitem WHERE l_quantity > 0 LIMIT 10`
+    // plans a CoalesceBatchesExec with a fetch as the root. Above one partition a
+    // GlobalLimitExec sits there and the coalesce's fetch is the bound pushed below it.
     if let Some(coalesce) = any.downcast_ref::<CoalesceBatchesExec>() {
         return coalesce.fetch().map(|fetch| {
             (

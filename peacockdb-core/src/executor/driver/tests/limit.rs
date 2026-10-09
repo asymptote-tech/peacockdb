@@ -216,10 +216,11 @@ fn mid_plan(skip: u64, fetch: Option<u64>, rule: AccRule) -> RunReport {
 }
 
 #[test]
-fn a_mid_plan_limit_is_satisfied_by_fetch_rows_emitted_whatever_its_skip() {
-    // The mock forwards each batch whole, so ten rows leave the limit with the first one.
-    // Judged by what it emitted, a limit wanting five is done after one pull; judged by its
-    // input against skip + fetch it would read three batches.
+fn a_mid_plan_limit_is_satisfied_by_fetch_alone_and_not_by_skip_plus_fetch() {
+    // The mock forwards each batch whole and implements no skip, so a real limit executor
+    // would need three pulls here rather than one. The one pull is what tells the driver's
+    // rules apart: by rows emitted a limit wanting five is done with the first batch, by its
+    // input against skip + fetch it reads three.
     let report = mid_plan(25, Some(5), AccRule::Streaming);
     assert!(!report.satisfied.is_empty());
     assert_eq!(
