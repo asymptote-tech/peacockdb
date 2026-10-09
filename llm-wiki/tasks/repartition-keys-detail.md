@@ -2095,3 +2095,24 @@ block was written for — **passes locally against the new base with 0 of 6 regr
 tolerance**. No finding that is a defect: every red was a stale golden, and all fourteen are
 regenerated with the renderer's own rule and master's own pin agreeing. The working tree holds
 those fourteen files and nothing else; no git state was touched.
+
+### The block cleared, and on what
+
+Two independent grounds, either of which would do.
+
+**The human cleared it.** `f0a6ecbf` accepts "the +423-byte lane-split regression its developer
+diagnosed" by name, in the chain's own host override, and says a red cost-report job does not block
+`done` for this task. A coordinator never clears a block whatever its origin, and this one it did
+not: the human named the exact obstacle the block was written for.
+
+**And the obstacle is gone anyway.** The same commit takes the gate to a 10% tolerance, and the
+re-prove round measured the real binary on the new base — `cargo run -p cost-report -- --cost-diff
+--base ENS-pbench` reports `679 compared, 12 changed, 6 regression(s), 0 over 10%`, exit 0. So the
+acceptance is not even being spent. The twelve figures are unchanged from the blocked round, and
+the six tpch base figures are identical at master `f0a6ecbf` and at `ENS-pbench`, so the rebase
+moved neither side.
+
+The override asks for the regression to be named in the PR as well as here; that comment is on
+#169.
+
+So `blocked(completeness approved)` → `completeness approved`. What remains for `done` is CI.
