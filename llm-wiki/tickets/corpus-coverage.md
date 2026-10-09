@@ -63,7 +63,10 @@ the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned
 `bug_stddev_merge_holds_three_identically_named_columns` (the merge)
 in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
 `tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
-`schema_validation_disabled`; the cell stays enabled and its values match.
+`schema_validation_disabled`; the cells stay enabled and their values match. 2026-10-09: five of
+them now, `stale-cells` having turned on the four device modes that a closed #183 still held off.
+Validation was off for all five, so that run says nothing about the names and the refusal still
+stands at every mode; the row keeps no `225` only because no cell of it is off.
 
 **Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
 
@@ -659,8 +662,9 @@ Its mapping becomes `partition_groups=[[[0]]]`, one row group reaching ten rows,
 is `[[[0,1,…,48]]]` at tp1-single and the tp4 modes and `[[[0],[1],…,[48]]]` at tp1-rowgroup.
 `batches=multiple` becomes `batches=single`, and the `--- memory ---` estimate falls to one row
 group, from 371 MB at tp1-single. The tp4 unload keeps its own `skip=0, fetch=10`. scan-limit's
-cpu tp1 cells turn on. Its device cells then meet the decimal export (#187); nested-limits' meet
-the zero-column scan and the cross join's batching (#220).
+cpu tp1 cells turn on. Its device cells no longer meet the decimal export — #187 is archived and
+`stale-cells` ran `filter_project`'s four cells green against it; nested-limits' still meet the
+zero-column scan and the cross join's batching (#220).
 
 <a id="t282"></a>
 ### #282 — a scan with no surviving row groups is refused at planning
@@ -887,8 +891,7 @@ developer has both go red: `duckdb_exact` fails the device case, and `duckdb_div
 the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
 diverging". An empty position list does the same at the row level. So the only green options are
 to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
-keyed by mode for in the first place — a lane split or a shuffle defect shows per mode — and
-[`stale-cells`](../tasks/stale-cells.md) is a task that can produce one.
+keyed by mode for in the first place — a lane split or a shuffle defect shows per mode.
 
 **An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
 column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
@@ -910,8 +913,13 @@ give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent`
 a triple or a per-column exemption can carry a known difference while `rows` and the remaining
 columns stay checked.
 
-**pbench moved the deadline, and widened both halves.** `stale-cells` is blocked, pbench landed
-ahead of it, and the next task to build is `repartition-keys` — which owns `uint-key-group`, a
+**2026-10-09: `stale-cells` ran and produced no instance.** It was named here as the first task
+that could, and its sixteen device cells all matched DuckDB, so the first half is still a shape
+nothing has exhibited. The harness was deliberately not widened there: the task's restriction was
+the sixteen cells, and a device-only divergence would have stayed off under this ticket.
+
+**pbench moved the deadline, and widened both halves.** pbench landed ahead of `stale-cells`,
+and the next task to build was `repartition-keys` — which owns `uint-key-group`, a
 `duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
 on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
 fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is

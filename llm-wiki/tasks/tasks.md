@@ -102,7 +102,7 @@ out of the shuffle. #243's pins.
 `TableResult` takes its final shape, one owner per column; a scatter's partitions share them. Peak
 3× → 2× during the partition, 1× after. Files the accounting ticket on landing.
 
-### 5. [`stale-cells.md`](stale-cells.md) — closes no ticket — state: approved to build
+### 5. [`stale-cells.md`](stale-cells.md) — closes no ticket — state: done — PR #175
 
 The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
 run, enabled or ticketed, tags struck.
