@@ -1034,3 +1034,25 @@ outstanding, so the next step is the reviewer, then the completeness pass, then 
 - **The host has 15 GB free**, down from 21 across four builds, and the named cleanup reclaims
   nothing. Above the chain note's 10 GB floor, so a build may still start, but the next one should
   read `df -h /` first and expect to have to reclaim the 4.6 GB of staged binaries.
+
+### 2026-10-09 — review round 2 dispatched
+
+Control file empty at startup, so the `stop` from the last run is spent. Board read at
+`reviewing`; PR #174 verified open, base `ENS-limits`, 8 commits and 28 files — the task and not
+the chain (the eighth commit is the previous run's board write). **verda does not resolve from
+this host**, checked at this dispatch, so any CPU run a finding provokes is local.
+
+The reviewer is dispatched on the whole branch rather than on the GPU half alone. Round 1's
+reviewer and analyst read the cpu half at `53fc7289`; everything since is unread by any reviewer:
+the rebase onto `ENS-limits`, the four converted accumulate cases as measured rather than as
+built, the three q17 device declarations in `corpus_cases.inc` and `cost-registry.csv`, the
+`cost-report` test literal `205` → `214`, and the ticket markdown (#281 archived, #205's closing
+note, #220's count to 88, #225's q17 entry, `build-test.md`'s device-corpus row).
+
+Two things the reviewer is told are the coordinator's and not findings: the stale completeness
+signoff in the spec, which is rewritten at `completeness approved`, and `architecture.md`
+sentences the branch falsified, which are the analyst's reading at `completing`.
+
+CI at dispatch: `Changed paths` and `S3 datasets metadata check` green, the three pipeline legs
+and `cost-report` still pending on run 38004462130. Not waited on — the only wait is
+`completeness approved` → `done`.
