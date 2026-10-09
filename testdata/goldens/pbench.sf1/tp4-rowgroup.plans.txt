@@ -192,7 +192,7 @@ refused: unsupported: LeftMark join on a key that can be NULL on both sides (bui
 == finish-without-probe
 GpuUnload
   GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
-    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, Int64(1)@3], lanes=1, batches=multiple, schema=[d_id:Int64, d_w:Int32, mark:Boolean]
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, schema=[d_id:Int64, d_w:Int32, mark:Boolean]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
         GpuMergePartitions: lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
           GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
@@ -620,7 +620,7 @@ refused: unsupported: RightAnti join on a key that can be NULL on both sides (bu
 refused: unsupported: LeftMark join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
 == not-not-in
 GpuUnload
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=4, batches=multiple, schema=[f_id:Int64]
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, schema=[f_id:Int64]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], schema=[s_y:Int32]
       GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], schema=[s_y:Int32]
         GpuMergePartitions: lanes=1, batches=multiple, schema=[s_y:Int32]
@@ -651,7 +651,7 @@ GpuUnload: estimated_max_resident_size=250
         GpuLoadParquet: estimated_max_resident_size=98120, source_bytes=239101, target_batch_bytes=239101, amplification=4.0
 == not-or-not-in
 GpuUnload
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=4, batches=multiple, schema=[f_id:Int64]
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, schema=[f_id:Int64]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], schema=[s_y:Int32]
       GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], schema=[s_y:Int32]
         GpuMergePartitions: lanes=1, batches=multiple, schema=[s_y:Int32]
@@ -879,7 +879,7 @@ GpuUnload: estimated_max_resident_size=430000
                   GpuLoadParquet: estimated_max_resident_size=48112, source_bytes=12028, target_batch_bytes=12028, amplification=7.2
 == sparse-build-anti
 GpuUnload
-  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[t_k@0], lanes=4, batches=multiple, schema=[f_id:Int64]
+  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, schema=[f_id:Int64]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@0], schema=[t_k:Int32]
       GpuEmitPartitions: hash=[t_k@0], lanes=4, batches=multiple, hashed_on=[t_k@0], schema=[t_k:Int32]
         GpuMergePartitions: lanes=1, batches=multiple, schema=[t_k:Int32]
@@ -1000,7 +1000,7 @@ GpuUnload: estimated_max_resident_size=80
         GpuLoadParquet: estimated_max_resident_size=96524, source_bytes=24131, target_batch_bytes=24131, amplification=4.0
 == sparse-probe-semi
 GpuUnload
-  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[t_k@0], lanes=1, batches=multiple, schema=[d_id:Int64]
+  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
     GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_k:Int32]
       GpuMergePartitions: lanes=1, batches=multiple, schema=[t_k:Int32]
         GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_k:Int32]

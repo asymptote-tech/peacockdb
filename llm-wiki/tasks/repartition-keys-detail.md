@@ -1808,3 +1808,290 @@ rebase's own evidence that this branch's five archivals do not collide with mast
   **671** (580, 79, 11, 1). Every tier heading equals its rows and its own sub-breakdown. These are
   declarations to check against `--list` in the round below — the pbench round found one of them
   off by one.
+
+## The re-prove on the rebased pbench, and the fourteen goldens regenerated (2026-10-09) — green
+
+Everything green, both engines, on the exact tree left in the working directory. **The cost gate
+now passes on its own**, measured rather than assumed: `cost-diff: 679 compared, 12 changed, 6
+regression(s), 0 over 10%`, **exit 0**. The working tree holds **fourteen changed files and nothing
+else** — all goldens, every one a regeneration, no code.
+
+### The fourteen were predicted and then found, not assumed
+
+The regeneration set was taken from the tests, not from the rebase note. Verify mode first:
+
+- `cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens
+  --test-threads=1` → **18 passed, 8 failed**: the five pbench `.plans.txt` and the three tpcds
+  `tp4-*.plans.txt`. tpch's did not move at all, as predicted — its `projection=` join lines are
+  `LeftSemi`/`LeftAnti`, which `projection_field` is a no-op for.
+- `--test test_cpu_corpus -- --test-threads=2` → **937 passed, 30 failed**, and the 30 are
+  10 queries × the three tp4 modes: pbench `finish-without-probe`, `not-not-in`, `not-or-not-in`,
+  `sparse-build-anti`, `sparse-probe-semi`, and tpcds `q10`, `q35`, `q45`, `q58`, `q83` — exactly
+  the five families master's `64ced62e` named plus pbench's own five.
+
+That is **8 files under `pbench.sf1/` and 6 `tp4-*` under `tpcds.sf1/`**, which is the fourteen the
+rebase note predicted. Nothing else was stale, and in particular **pbench's `tp1-*-mini.cpu.txt`
+were already right**: this branch never edited them, so they came across from the parent carrying
+pbench's own regeneration. Only files this branch had edited were takebranch'd, and only those lost
+the renderer update.
+
+### Regenerated, and what moved
+
+`.plans.txt` in one call, `UPDATE_CANONICAL=1 … --lib -- planner::tests::plan_goldens
+--test-threads=1` → 26 passed, 8 files written. `.cpu.txt` one query at a time,
+`PCK_UPDATE_SECTIONS=1 … --test test_cpu_corpus <query> -- --test-threads=1`, ten runs, 5 cases
+each, rc=0 every time — no section lost, which #213 is the reason to check.
+
+| file set | changed lines each | what moved |
+|---|--:|---|
+| 5 × `pbench.sf1/*.plans.txt` | 5 | 5 `projection=[…]` name lists |
+| 3 × `pbench.sf1/tp4-*-mini.cpu.txt` | 5 | the same 5, in the execution tree |
+| 3 × `tpcds.sf1/tp4-*.plans.txt` | 12 | 11 `projection=[…]`, **+1 literal**: q90's `` `None,23,8` `` → `NULL` |
+| 3 × `tpcds.sf1/tp4-*-mini.cpu.txt` | 11 | 11 `projection=[…]` |
+
+Every file is line-for-line balanced in `git diff --numstat` (N added = N removed). **No `.cost.txt`
+moved, no `.result.txt` moved, `recipe-payloads.txt` did not move** — `UPDATE_CANONICAL=1` alone
+verifies it, and `the_payload_golden_carries_what_each_call_hands_the_executor` is green.
+
+The one non-projection line is the **second arm of `64ced62e`**, `literal_text`'s null
+`Decimal128`/`Decimal256` case, and it is renderer text on its face: the node is the same
+`GpuProject`, the expression the same `CASE`, the schema still `[am_pm_ratio:Decimal128(23,8)]`.
+
+### The mechanical checks, five of them, and the one that is master's own
+
+1. **Mask `projection=[…]` and diff the rest.** Clean on all five pbench `.plans.txt` and all six
+   `.cpu.txt` — **zero lines**. On the three tpcds `.plans.txt`, exactly **one** line each, the q90
+   literal above. So no node name, no indentation, no other field moved anywhere.
+2. **The `@N` ordinal sequence inside the projection fields is byte-identical** in all fourteen
+   files — 47 ordinals per pbench plan file, 3703 per tpcds one. Only the names left of the `@`
+   changed, which is what the new `projection_field` does: it still emits `ordinal`, and takes the
+   name from `name_at(output, position)` instead of from build++probe.
+3. **Every measured quantity in the six `.cpu.txt` is byte-identical**, key by key:
+   `output_rows=`, `output_bytes=`, `in_rows=`, `batch_rows=`, `batch_bytes=`, `lanes=`,
+   `batches=`, `early_exit=`, `join_type=`, `hashed_on=`, `hash=`. 243 occurrences of each of the
+   first five per pbench file, 5389–5925 per tpcds one; 216 / 5314–5850 `lanes=`. Section counts
+   unchanged (57 pbench, 81 tpcds, 60/99 in the plan files). **That is why `.cost.txt` could not
+   move**, and the reason is checkable rather than asserted.
+4. **The new names are the node's own output schema, in order.** Over the 58 changed
+   `projection=` lines in the `.plans.txt` files — the only goldens that carry a `schema=[…]`
+   field — the name list equals the schema field list **58 of 58**. Under the *old* text it
+   agreed **0 of 58**. The old goldens were wrong and are now right; this is not a cosmetic
+   re-spelling. For the `.cpu.txt` files, which carry no `schema=`, the equivalent holds: every
+   one of the 3 / 9 distinct new projection fields per file appears verbatim in its sibling
+   `.plans.txt`.
+5. **Master's own pin agrees.** `planner::tests::join_projection_names::`
+   `every_join_projection_in_a_golden_names_the_column_its_ordinal_selects` — written by
+   `64ced62e` to hold this rule over the whole corpus — is **green** on the regenerated tree. It
+   is the authoritative form of check 4 and it did not need writing.
+
+And the join types: **every** changed projection line is `LeftMark`, `RightSemi` or `RightAnti` —
+pbench 1/3/1 per file, tpcds 3/8 per file — and no other join type moved in any golden. That is
+`projection_field`'s predicted blast radius exactly.
+
+**Two independent cross-checks against the two parents**, because both regenerated some of these
+files themselves:
+
+- vs **master `f0a6ecbf`**: the three tpcds `tp4-*.plans.txt` now have a `projection=` field set
+  **byte-identical to master's**. Their `.cpu.txt` siblings differ by **45 additions and zero
+  removals**, and the reason is this branch's own work — master has 10 `skipped:` sections where
+  this branch has 6.
+- vs the parent **`ENS-pbench` 09ab965b**: the five pbench `.plans.txt` projection sets are
+  **identical** to the parent's. The three `.cpu.txt` differ by **one addition and zero removals**
+  (`projection=[d_id@0, f_id@2]`), again a cell this branch turned on — 33 `skipped:` → 30.
+
+Nothing was removed or renumbered anywhere. **No moved section, no moved row count, no moved node,
+no changed `lanes=`, no changed answer.**
+
+### The proving set, in full, with the command that produced each figure
+
+A rebase onto a moved renderer plus a golden regeneration, so the subset shortcut does not apply.
+`cargo test --no-run --features rust-only -p peacockdb-core` from cold: **exit 0, zero warnings**.
+Every command under `timeout`.
+
+**cpu, local, `--features rust-only` into `./target`, `--test-threads=2`:**
+
+| target | measured | `build-test.md` | |
+|---|--:|--:|:-:|
+| `test_cpu_corpus` | **967** passed, 0 failed | 967 | ✓ |
+| `--lib` | **696** (694 passed, 0 failed, 2 ignored) | 696 | ✓ |
+| `test_corpus_goldens` | 26 | 26 | ✓ |
+| `test_cost_model` | 3 | 3 | ✓ |
+| `test_golden_format` | 43 | 43 | ✓ |
+| `test_module_layout` | 18 | 18 | ✓ |
+| `test_ci_coverage` | 11 | 11 | ✓ |
+| `cargo test -p cost-report` | 41 | 41 | ✓ |
+| `generate_pbench.sh --check` | `pbench.sf1 matches gen.sql` | — | ✓ |
+
+The two ignored are #182's pair, as before. `test_corpus_goldens` and `test_cost_model` together
+are the proof the regeneration kept the derivation: the first reads every committed section against
+its own arithmetic, the second re-derives all 703 `.cost.txt` sections from their `.cpu.txt`
+siblings.
+
+**ffi, local, cuDF 25.02 via `scripts/cargo-cudf.sh`:** `peacockdb-ffi --test test_ffi` **3 passed**.
+The binary exits **127** under `cargo test -- --list` until `LD_LIBRARY_PATH` carries
+`target-cudf-*/debug/build/peacockdb-ffi-*/out/lib` and the cuDF root's `lib`, exactly as
+`build-test.md` warns; run directly with those set it lists 3 and passes 3.
+
+**C++ cpu, local.** `cpp/build` in this worktree is still an empty root-owned directory, so the
+build is configured in `/tmp/dkb-cppbuild` (left over from the device round and still valid —
+`CMAKE_HOME_DIRECTORY` points at this worktree's `cpp/`). `ninja peacock_cpu_tests` → 18/18,
+**zero warnings**; `ctest -L cpu` → **1/1 passed**; the binary direct → **15 tests from 7 suites,
+PASSED 15**.
+
+**python, local.** `matplotlib` is absent on this workstation and `test_plot.py` imports it at
+module scope, so it was installed with `pip3 install --target /tmp/dkb-pydeps` and reached by
+`PYTHONPATH`; the system environment is untouched.
+
+| set | measured | `build-test.md` | |
+|---|--:|--:|:-:|
+| `testdata/test_duckdb_cost.py` | 41 | 41 | ✓ |
+| `testdata/test_duckdb_result.py` | 20 | 20 | ✓ |
+| `scripts/exec_model/tests/` prototype, CI's exclusion list applied | 17+4+18+21+23+63+24+22+15+9 = **216** | 216 | ✓ |
+| `scripts/calibration/tests/` | 5+4+3 = **12** | 12 | ✓ |
+
+**device, nebius-gpu L40S, cuDF 25.02, each staged binary run directly**, `--test-threads=1`,
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`. Card idle at 0 MiB of 46068 before the run; 37 GB free on `/`
+after, nothing cleaned. The device build emitted **zero warnings**. The tree was rsynced
+(`--delete-after`) **after** the regeneration, and the 14 regenerated goldens plus
+`recipe-payloads.txt` were then **sha256-compared local against remote and are identical** — so
+the device verified these exact bytes.
+
+| binary | measured | `build-test.md` | |
+|---|--:|--:|:-:|
+| `peacock_gpu_tests` | 2 passed | 2 | ✓ |
+| `peacock_plan_tests` | 58 passed | 58 | ✓ |
+| `peacock_cpu_tests` (on the card too) | 15 passed | 15 | ✓ |
+| `test_gpu_corpus` | **79** passed, 0 failed | 79 | ✓ |
+| `test_node_timing` | 1 passed | 1 | ✓ |
+| `peacockdb_core_gpu_lib gpu_tests::` | **580** passed, 0 failed | 580 | ✓ |
+| `peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered | 11 (3 are `bench_`) | ✓ |
+| of which `murmur_conformance` | **19** | 19 | ✓ |
+
+`the_registry_matches_the_gpu_corpus_in_both_directions` is green, and so is
+`the_registry_matches_the_cpu_corpus_in_both_directions` in the cpu log — the pair agrees on both
+sides after the rebase. This branch's device half is intact: 21 device cells, the murmur gate at
+19 cases, every kernel arm.
+
+### The twelve cost sections, re-derived, and the gate's answer
+
+The gate is reproducible locally and **the preview script is not the way**: the binary takes
+`--cost-diff --base REF|DIR` and `base_total` resolves a ref with `git show <base>:<path>`, so
+from this worktree:
+
+    cargo run -q -p cost-report -- --cost-diff --base 09ab965b --html … --md-diff …
+    cost-diff: 679 compared, 12 changed, 6 regression(s), 0 over 10%      exit 0
+
+**The regression did not move.** Every one of the twelve is byte-for-byte the figure the
+"Blocked at completeness approved" table records, against the **new** base:
+
+| section | base Σout (`ENS-pbench`) | PR Σout | Δ |
+|---|--:|--:|--:|
+| `tpch/q2` tp4-rowgroup | 392,944,650 | 392,944,816 | **+166** |
+| `tpch/q2` tp4-single | 394,695,770 | 394,695,804 | **+34** |
+| `tpch/q2` tp4-sized | 392,898,679 | 392,898,713 | **+34** |
+| `tpch/q10` tp4-rowgroup | 653,524,699 | 653,524,762 | **+63** |
+| `tpch/q10` tp4-single | 653,445,902 | 653,445,965 | **+63** |
+| `tpch/q10` tp4-sized | 652,518,141 | 652,518,204 | **+63** |
+| `pbench/decimal15-key-group` tp4-rowgroup | 534,208 | 534,204 | −4 |
+| `pbench/decimal15-key-group` tp4-single | 490,408 | 490,404 | −4 |
+| `pbench/decimal15-key-group` tp4-sized | 490,408 | 490,404 | −4 |
+| `pbench/decimal15-key-join` tp4-rowgroup | 8,094,652 | 8,094,638 | −14 |
+| `pbench/decimal15-key-join` tp4-single | 8,094,592 | 8,094,578 | −14 |
+| `pbench/decimal15-key-join` tp4-sized | 8,094,592 | 8,094,578 | −14 |
+
+**+423 of regression, −54 of improvement**, worst single ratio **+0.0000422%** (`tpch/q2`
+tp4-rowgroup). Re-derived twice: once by the real binary, once by an independent reimplementation
+of `cost_diff`/`fails_gate` over the same `peacockdb_cost=` totals — both give 679 / 12 / 6 / 0.
+The six tpch base figures are the same at master `f0a6ecbf` as at `ENS-pbench`, so the rebase moved
+neither side. pbench's six have no master baseline at all — those `.cost.txt` files are pbench's
+own new files — and they are improvements, which never fail a gate.
+
+**One number in this file to correct.** "on 3.17 GB of compared cost" is the base sum of the
+**twelve changed** sections (3,165,826,701 B). The sum over all **679 compared** is
+**440,198,043,713 B — 440.20 GB**. The regression is +423 bytes in 440 GB, not in 3.17 GB; the
+sentence makes it read about 140× larger than it is.
+
+**The rendering defect the last round named reproduces exactly.** All twelve rows of the markdown
+read `… | 623.25 MB | 623.25 MB | 🔴 +0.00%` — both Σout columns human-readable and identical,
+`fmt_delta`'s `{:+.2}%` rounding every delta to zero. Still not a ticket by the standing rule, and
+still the reason this table exists here.
+
+### `cost-report-preview.sh --base <sha>` — small, and worth doing in a later round
+
+`cost-report-preview.sh` renders the **coverage** report: `cargo run -q -p cost-report -- --sha
+$(git rev-parse HEAD) --html "$out"`. It never passes `--cost-diff`, so it cannot answer the gate's
+question whatever it is given — that is the hole four readings fell into, and it is in the script,
+not in the binary.
+
+The change is about four lines and no new code in `cost-report`: accept `--base <sha>`, and when it
+is present run the binary a second time with `--cost-diff --base "$base" --html
+"${out%.html}-diff.html" --md-diff "${out%.html}-diff.md"`, propagating its exit status. The
+default `<sha>` a developer wants is the PR's base, which locally is the parent branch's head
+(`git merge-base HEAD <parent>`), so a bare `--base` could default to that. **Not built this
+round** — this round restores a finished task and takes no new work.
+
+### `build-test.md`'s counts, every one measured
+
+**All of them are right.** No drift, unlike the pbench round. Measured by `--list` /
+`--gtest_list_tests` wherever a binary exists here:
+
+    cpu   1692 = --lib 696 + test_cpu_corpus 967 + test_corpus_goldens 26 + test_cost_model 3
+    ffi      7 = --lib -- ffi_tests:: 4 + peacockdb-ffi --test test_ffi 3
+    gpu    671 = --lib -- gpu_tests:: 580 + test_gpu_corpus 79 + peacock_gpu_benchmarks 11
+                 + test_node_timing 1
+    else   113 = test_golden_format 43 + test_ci_coverage 11 + test_module_layout 18
+                 + cost-report 41
+    Rust  2483 = 1692 + 7 + 671 + 113
+    C++     97 = (15 + 2 + 58 + 4 + 4) + (4 + 1 + 4 + 4 + 1)
+    Python 401 = (41 + 20 + 216 + 12) + (19 + 93)
+    TOTAL 2981 = 2483 + 97 + 401
+
+The whole device lib reconciles independently: `peacockdb_core_gpu_lib --list` is **1280**, and
+696 + 4 + 580 = 1280 — the cpu, ffi and gpu rungs of one binary, each listed under its own path
+filter. `--lib` is **696** and not the 692 the last round measured: master's `64ced62e` brought
+`join_projection_names` and the `plan_text` cases with it, and the rebase's declared 696 is right.
+
+Three groups could not be run here and were counted from the source instead, each named so it is
+not mistaken for a measurement: the **C++ manual tier** — `TEST`/`TEST_F` counts of
+`test_tpch_streamed.cpp` 4, `test_cudf_nodes.cpp` 1, `test_multi_gpu_tpch.cpp` 4,
+`test_multi_gpu_tpchv.cpp` 4, `test_basic_multi_gpu.cpp` 1 = 14, binaries the gate script does not
+build; `test_tpch.py` **19** `def test_`, which needs the generated sf1 and rides dataset-matrix;
+and the **exec-model corpus 93** = `test_tpch_corpus.py`'s 22 `def test_` plus `test_tpcds.py`'s
+**71** generated from `plans_tpcds.QUERIES` (its own comment says "seventy-one copies"), both
+manual-dispatch only. `peacock_tpch_tests` and `peacock_tpchv_tests` **are** staged on the card and
+`--gtest_list_tests` gives **4** and **4**, so those two rows are measured even though the sf40
+dataset is absent.
+
+### Deferred by the chain-wide host override, unchanged from the device round
+
+- **the sf40 pair**, `peacock_tpch_tests` / `peacock_tpchv_tests` — listed (4 + 4) but **not run**:
+  69 GiB against the L40S's 46 GB, and no `tpch.sf40` on nebius-gpu.
+- **`--run-benchmarks` and the three `bench_` cases** — not run; the 3 filtered in
+  `peacock_gpu_benchmarks` are exactly those.
+- **Nsight captures** — not taken. **H200 timing** — not taken; no H200.
+- **cuDF 26.02** — not built; red there for #260 and #94, outside this chain.
+- **shad-gpu** — never touched: no `--run`, no `--pull-results`. **verda** — unreachable,
+  `VERDA_CLIENT_ID` unset, so every CPU run is local.
+- **The C++ manual and 2gpu tiers** (14 cases) — not built here; counted from source above.
+- **The two dataset-dependent Python sets** (19 + 93) — not run; counted from source above.
+
+### Two workstation traps for the next developer
+
+- **`cpp/build` is still an empty root-owned directory** in this worktree, and cmake dies at
+  configure with `Unable to (re)create the private pkgRedirects directory`. Removing it needs sudo.
+  `/tmp/dkb-cppbuild` is a working configure against this worktree's `cpp/` and survives between
+  rounds.
+- **A previous round left `/tmp/struct.py`** — a scratch cost-skeleton script. Any python script
+  run *from `/tmp`* gets `/tmp` as `sys.path[0]`, so `import struct` picks that file up and
+  **executes it**, printing its output into the middle of yours and then dying inside
+  `gzip`/`matplotlib`. It cost one confusing `pip3 install` failure and one run of output that
+  looked like it came from nowhere. Keep scratch python in a subdirectory (`/tmp/dkb/`), not in
+  `/tmp` itself.
+
+### Verdict
+
+Green on every tier that the host override leaves runnable, and the cost gate — the one thing the
+block was written for — **passes locally against the new base with 0 of 6 regressions over the 10%
+tolerance**. No finding that is a defect: every red was a stale golden, and all fourteen are
+regenerated with the renderer's own rule and master's own pin agreeing. The working tree holds
+those fourteen files and nothing else; no git state was touched.

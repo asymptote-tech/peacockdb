@@ -130,7 +130,7 @@ GpuUnload: output_rows=53, output_bytes=431
   in_rows=[[53]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
   GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, output_rows=53, output_bytes=431
     in_rows=[[2000]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
-    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, Int64(1)@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
       in_rows=[[2000],[8]] batch_rows=[[0,2000]] batch_bytes=[[0,25000]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32750
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32750]]
@@ -272,7 +272,7 @@ skipped: not enabled at this mode
 early_exit=none
 GpuUnload: output_rows=5002, output_bytes=40657
   in_rows=[[388,374,495,3745]] batch_rows=[[32,32,39,35,43,50,43,44,39,31],[42,44,33,24,40,39,42,34,45,31],[64,43,44,62,51,49,54,41,48,39],[380,399,372,396,379,390,374,374,388,293]] batch_bytes=[[260,260,317,285,350,407,350,358,317,252],[342,358,269,195,325,317,342,277,366,252],[520,350,358,504,415,399,439,334,390,317],[3088,3242,3023,3218,3080,3169,3039,3039,3153,2381]]
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=4, batches=multiple, output_rows=5002, output_bytes=40657
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=5002, output_bytes=40657
     in_rows=[[45,46,64,45],[2160,2413,6538,8889]] batch_rows=[[32,32,39,35,43,50,43,44,39,31],[42,44,33,24,40,39,42,34,45,31],[64,43,44,62,51,49,54,41,48,39],[380,399,372,396,379,390,374,374,388,293]] batch_bytes=[[260,260,317,285,350,407,350,358,317,252],[342,358,269,195,325,317,342,277,366,252],[520,350,358,504,415,399,439,334,390,317],[3088,3242,3023,3218,3080,3169,3039,3039,3153,2381]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=200, output_bytes=826
       in_rows=[[45,46,64,45]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
@@ -292,7 +292,7 @@ GpuUnload: output_rows=5002, output_bytes=40657
 early_exit=none
 GpuUnload: output_rows=4915, output_bytes=39953
   in_rows=[[383,368,488,3676]] batch_rows=[[32,30,39,34,42,50,43,43,39,31],[41,44,33,24,38,38,42,33,44,31],[64,42,43,61,50,49,53,40,47,39],[371,393,366,389,371,380,369,369,382,286]] batch_bytes=[[260,244,317,277,342,407,350,350,317,252],[334,358,269,195,309,309,342,269,358,252],[520,342,350,496,407,399,431,325,382,317],[3015,3194,2974,3161,3015,3088,2999,2999,3104,2324]]
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=4, batches=multiple, output_rows=4915, output_bytes=39953
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=4915, output_bytes=39953
     in_rows=[[45,46,64,45],[2115,2369,6412,8704]] batch_rows=[[32,30,39,34,42,50,43,43,39,31],[41,44,33,24,38,38,42,33,44,31],[64,42,43,61,50,49,53,40,47,39],[371,393,366,389,371,380,369,369,382,286]] batch_bytes=[[260,244,317,277,342,407,350,350,317,252],[334,358,269,195,309,309,342,269,358,252],[520,342,350,496,407,399,431,325,382,317],[3015,3194,2974,3161,3015,3088,2999,2999,3104,2324]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=200, output_bytes=826
       in_rows=[[45,46,64,45]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
@@ -364,7 +364,7 @@ skipped: not enabled at this mode
 early_exit=none
 GpuUnload: output_rows=13257, output_bytes=107731
   in_rows=[[2160,2413,6538,2146]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[221,205,233,235,246,219,213,215,205,154]] batch_bytes=[[1918,1780,1772,1699,1707,1707,1885,1772,1926,1390],[1991,2145,1942,1796,1885,2024,2121,2015,2137,1552],[5452,5241,5566,5420,5347,5582,5404,5493,5428,4193],[1796,1666,1894,1910,1999,1780,1731,1747,1666,1252]]
-  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[t_k@0], lanes=4, batches=multiple, output_rows=13257, output_bytes=107731
+  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=13257, output_bytes=107731
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[221,205,233,235,246,219,213,215,205,154]] batch_bytes=[[1918,1780,1772,1699,1707,1707,1885,1772,1926,1390],[1991,2145,1942,1796,1885,2024,2121,2015,2137,1552],[5452,5241,5566,5420,5347,5582,5404,5493,5428,4193],[1796,1666,1894,1910,1999,1780,1731,1747,1666,1252]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@0], output_rows=8, output_bytes=33
       in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[33]]
@@ -442,7 +442,7 @@ GpuUnload: output_rows=2009, output_bytes=24612
 early_exit=none
 GpuUnload: output_rows=3, output_bytes=25
   in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[25]]
-  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[t_k@0], lanes=1, batches=multiple, output_rows=3, output_bytes=25
+  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[d_id@0], lanes=1, batches=multiple, output_rows=3, output_bytes=25
     in_rows=[[8],[2000]] batch_rows=[[3]] batch_bytes=[[25]]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
       in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
