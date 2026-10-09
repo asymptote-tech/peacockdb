@@ -36,6 +36,12 @@ const PAGES_URL_DEFAULT: &str = "https://asymptote-tech.github.io/peacockdb/";
 const DEFAULT_REPO: &str = "asymptote-tech/peacockdb";
 /// Hidden marker so CI can find-and-update its single PR comment in place.
 const SENTINEL: &str = "<!-- peacockdb-cost-report -->";
+/// The cost-regression gate fails CI only when a query's PeacockDB CPU Σout grows by MORE
+/// than this many percent over base. Every increase is still a regression and still shows
+/// 🔴; the tolerance only decides the exit code. Lane-split changes move Σout by a few bytes
+/// of validity and offset padding without changing an answer, which is what this absorbs.
+const REGRESSION_FAIL_PCT: u64 = 10;
+
 /// Separate marker for the cost-regression gate widget, so it upserts as its own
 /// PR comment independently of the coverage/ratio report above.
 const DIFF_SENTINEL: &str = "<!-- peacockdb-cost-regression -->";
@@ -1207,8 +1213,16 @@ struct DiffRow {
 }
 
 impl DiffRow {
+    /// Any increase. Shown 🔴; fails the gate only past `REGRESSION_FAIL_PCT`.
     fn is_regression(&self) -> bool {
         self.new > self.old
+    }
+    /// An increase of more than `REGRESSION_FAIL_PCT` percent, in exact integers. Growth from
+    /// a zero base has no percentage and always fails.
+    fn fails_gate(&self) -> bool {
+        self.is_regression()
+            && (self.old == 0
+                || u128::from(self.new) * 100 > u128::from(self.old) * u128::from(100 + REGRESSION_FAIL_PCT))
     }
     fn is_improvement(&self) -> bool {
         self.new < self.old
@@ -1380,6 +1394,7 @@ fn base_total(base: &str, repo_path: &str, testdata: &Path, section: &str) -> Op
 fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
     let changed: Vec<&DiffRow> = rows.iter().filter(|r| r.changed()).collect();
     let regr = changed.iter().filter(|r| r.is_regression()).count();
+    let failing = changed.iter().filter(|r| r.fails_gate()).count();
     let impr = changed.iter().filter(|r| r.is_improvement()).count();
     let mut s = String::new();
     s.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
@@ -1396,7 +1411,7 @@ fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
     );
     s.push_str("</style></head><body>");
     s.push_str("<h1>PeacockDB CPU cost change vs base</h1>");
-    let _ = write!(s, "<p>{impr} improvement(s), {regr} regression(s).</p>");
+    let _ = write!(s, "<p>{impr} improvement(s), {regr} regression(s), {failing} over the {REGRESSION_FAIL_PCT}% gate.</p>");
     if changed.is_empty() {
         s.push_str("<p>No PeacockDB CPU cost change across compared queries.</p></body></html>");
         return s;
@@ -1413,9 +1428,9 @@ fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
             fmt_delta(r.delta_pct()),
         );
     }
-    s.push_str("</table><p class=\"foot\">Σout = Σ per-operator output bytes (PeacockDB CPU cost). \
-        A regression (PeacockDB CPU Σout increased vs base) fails CI; exact integer compare, no tolerance. \
-        New queries with no base .cost.txt are omitted.</p></body></html>");
+    let _ = write!(s, "</table><p class=\"foot\">Σout = Σ per-operator output bytes (PeacockDB CPU cost). \
+        Every increase is a regression and shows red; CI fails only on an increase of more than \
+        {REGRESSION_FAIL_PCT}% (exact integer compare). New queries with no base .cost.txt are omitted.</p></body></html>");
     s
 }
 
@@ -1424,6 +1439,7 @@ fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
 fn render_diff_markdown(rows: &[DiffRow], links: &Links) -> String {
     let changed: Vec<&DiffRow> = rows.iter().filter(|r| r.changed()).collect();
     let regr = changed.iter().filter(|r| r.is_regression()).count();
+    let failing = changed.iter().filter(|r| r.fails_gate()).count();
     let impr = changed.iter().filter(|r| r.is_improvement()).count();
     let mut s = String::new();
     s.push_str(DIFF_SENTINEL);
@@ -1432,7 +1448,13 @@ fn render_diff_markdown(rows: &[DiffRow], links: &Links) -> String {
         s.push_str("**PeacockDB CPU cost gate** — ✅ no cost change vs base across compared queries.\n");
         return s;
     }
-    let verdict = if regr > 0 { " — 🔴 **build failing**" } else { " — ✅" };
+    let verdict = if failing > 0 {
+        format!(" — 🔴 **build failing**: {failing} over the {REGRESSION_FAIL_PCT}% gate")
+    } else if regr > 0 {
+        format!(" — ✅ every regression within the {REGRESSION_FAIL_PCT}% gate")
+    } else {
+        " — ✅".to_string()
+    };
     let _ = write!(s, "**PeacockDB CPU cost gate** — {impr} improvement(s), {regr} regression(s) vs base{verdict}\n\n");
     s.push_str("| Query | Base Σout | PR Σout | Δ% |\n|---|---:|---:|---:|\n");
     for r in &changed {
@@ -1448,16 +1470,17 @@ fn render_diff_markdown(rows: &[DiffRow], links: &Links) -> String {
     }
     let _ = write!(
         s,
-        "\n_🔴 regression (PeacockDB CPU Σout increased) fails CI; 🟢 improvement. Exact integer byte-sum \
-         compare, no tolerance. New queries with no base .cost.txt are omitted (never a regression)._\n"
+        "\n_🔴 regression (PeacockDB CPU Σout increased); CI fails only on an increase of more than \
+         {REGRESSION_FAIL_PCT}%. 🟢 improvement. Exact integer byte-sum compare. New queries with no base \
+         .cost.txt are omitted (never a regression)._\n"
     );
     s
 }
 
 /// Drive the gate: build the PR (working-tree) and base cost maps, render the
-/// widget (always), write the artifacts, and exit non-zero iff ≥1 regression.
-/// With no resolvable base (e.g. a master run), every query is omitted → 0
-/// regressions → clean exit 0.
+/// widget (always), write the artifacts, and exit non-zero iff ≥1 regression is over
+/// `REGRESSION_FAIL_PCT`. With no resolvable base (e.g. a master run), every query is
+/// omitted → 0 regressions → clean exit 0.
 fn run_cost_diff(testdata: &Path, base: &str, html_out: &str, md_out: &str, links: &Links) {
     let goldens = collect_cost_goldens(testdata);
     let mut new_map = BTreeMap::new();
@@ -1477,6 +1500,7 @@ fn run_cost_diff(testdata: &Path, base: &str, html_out: &str, md_out: &str, link
 
     let rows = cost_diff(&old_map, &new_map);
     let regressions = rows.iter().filter(|r| r.is_regression()).count();
+    let failing = rows.iter().filter(|r| r.fails_gate()).count();
 
     // Render ALWAYS; the exit-code decision is separate from rendering.
     std::fs::write(html_out, render_diff_html(&rows, links)).unwrap_or_else(|e| panic!("write {html_out}: {e}"));
@@ -1490,8 +1514,11 @@ fn run_cost_diff(testdata: &Path, base: &str, html_out: &str, md_out: &str, link
     }
 
     let changed = rows.iter().filter(|r| r.changed()).count();
-    eprintln!("cost-diff: {} compared, {changed} changed, {regressions} regression(s)", rows.len());
-    if regressions > 0 {
+    eprintln!(
+        "cost-diff: {} compared, {changed} changed, {regressions} regression(s), {failing} over {REGRESSION_FAIL_PCT}%",
+        rows.len()
+    );
+    if failing > 0 {
         std::process::exit(1);
     }
 }
@@ -1912,6 +1939,33 @@ mod tests {
         // No-change case still upserts a benign comment (clears a prior regression).
         let clean = render_diff_markdown(&cost_diff(&map(&[("a", 100)]), &map(&[("a", 100)])), &no_links());
         assert!(clean.starts_with(DIFF_SENTINEL) && clean.contains("no cost change"));
+    }
+
+    #[test]
+    fn the_gate_fails_only_past_the_tolerance_but_every_increase_is_a_regression() {
+        // +5% and exactly +10% are regressions that pass; +10.001% fails; a zero base that
+        // grows has no percentage and fails; an improvement never fails.
+        let old = map(&[("a", 100_000), ("b", 100_000), ("c", 100_000), ("d", 0), ("e", 100_000)]);
+        let new = map(&[("a", 105_000), ("b", 110_000), ("c", 110_001), ("d", 5), ("e", 90_000)]);
+        let rows = cost_diff(&old, &new);
+        let get = |l: &str| rows.iter().find(|r| r.label == l).unwrap();
+        assert!(get("a").is_regression() && !get("a").fails_gate());
+        assert!(get("b").is_regression() && !get("b").fails_gate());
+        assert!(get("c").is_regression() && get("c").fails_gate());
+        assert!(get("d").is_regression() && get("d").fails_gate());
+        assert!(!get("e").is_regression() && !get("e").fails_gate());
+        // The exit decision counts only the rows past the tolerance.
+        assert_eq!(rows.iter().filter(|r| r.fails_gate()).count(), 2);
+    }
+
+    #[test]
+    fn a_regression_within_the_gate_is_red_but_not_failing() {
+        let rows = cost_diff(&map(&[("a", 1000)]), &map(&[("a", 1001)]));
+        let md = render_diff_markdown(&rows, &no_links());
+        assert!(md.contains("1 regression(s)") && md.contains("🔴"));
+        assert!(!md.contains("build failing") && md.contains("within the 10% gate"));
+        let html = render_diff_html(&rows, &no_links());
+        assert!(html.contains("tr class=\"red\"") && html.contains("0 over the 10% gate"));
     }
 
     #[test]

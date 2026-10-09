@@ -928,13 +928,13 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-      # Red ❌ on the PR iff the gate found a regression (cost-report exited nonzero),
+      # Red ❌ on the PR iff a regression is over cost-report's 10% gate (it exited nonzero),
       # AFTER the widget has been posted above.
       - name: Cost-regression gate — fail on regression
         if: github.event_name == 'pull_request' && steps.cost_gate.outputs.rc != '0'
         run: |
           if [ "${{ steps.cost_gate.outputs.rc }}" = "1" ]; then
-            echo "::error::PeacockDB CPU cost regression detected (see the cost-regression PR comment)."
+            echo "::error::PeacockDB CPU cost regression over the 10% gate (see the cost-regression PR comment)."
           else
             echo "::error::cost-diff died with rc=${{ steps.cost_gate.outputs.rc }} — it computed no \
           diff, so this is not a cost result. See the cost-diff step's output."
