@@ -2114,3 +2114,73 @@ cuDF legs, the GPU build, the cost report and the S3 check, with only `GPU Tests
 `ssh: connect to host llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, which the
 override exempts by name. The device evidence the override also requires is the nebius-gpu run
 recorded above: 576 passed, 0 failed.
+
+## The human's `rebase` order, surveyed and not yet executed (2026-10-09)
+
+The control file carried `rebase`. I surveyed it, started it, and **aborted it deliberately** —
+the branch is back at `0df60133`, clean. What is written instead is the thing the protocol says
+survives: the `rebase needed(...)` mark on every task above this one whose branch exists. The
+order is **left standing in the control file** for the next coordinator, because it has not been
+acted on and clearing it would lose it.
+
+**Why I stopped rather than pushed through.** The rebase is `git rebase --onto origin/master
+dbf44bcc ENS-duckdb-oracle`, twenty-one commits, and every one I reached conflicted in the wiki.
+With pbench's twelve and repartition-keys' eight behind it, plus a re-prove round each, it is more
+than one window, and a chain left half-rebased with no board truth is worse than one not rebased
+at all.
+
+### What the rebase carries, which decides whether it re-verifies
+
+**It is not documentation-only, so nothing comes back on its own.** master moved from `8806a3c3`
+(where the order was requested) to **`2ad302bf`**, and among the five commits it brings across,
+`64ced62e` — "plan_text: a null decimal prints as NULL, a join's projection names its own output
+(#236, #237)" — changes the plan-text **renderer**: `plan_text/expr_text.rs` and `node_text.rs`,
+a new `planner/tests/join_projection_names.rs` (+166 lines, so `--lib` moves), `plan_text/tests.rs`
+(+36), and **ten tpcds goldens**.
+
+A renderer change can move any plan golden, and this chain owns pbench's 18 plus every tpch and
+tpcds section the chain touched. **Expect golden regeneration on all three branches**, which is
+developer work and the reason the whole operation is more than a conflict pass. The other four
+commits are chain K and L specs, plans and board, plus tickets — documentation, except that #263
+is exactly why even that cannot be waved through: `duckdb_oracle.rs`'s `ticket_is_open` reads
+`llm-wiki/tickets/` at test run time.
+
+### The conflict shape, learned from the two commits I did resolve
+
+- **`build-test.md`** conflicts on its count lines, every time, because both sides re-derived them
+  for different trees. Take master's through the replay and **re-derive once at the end from the
+  declarations** — `corpus_cases.inc` and `cost-registry.csv` — rather than adding deltas. Seven
+  arithmetic passes of which six are discarded is waste, and this chain has done it twice now.
+- **`tickets.md`** conflicts on its index rows and is the one that must **not** be taken by side.
+  master carries tickets from chains K and L that this chain cannot know about — #261, #280, #283
+  were already there at commit 2 of 21 — while the chain's own commits add #251, #253, #263, #264.
+  Resolve by **union of the ID lists**, then fix every count at the end: a row's declared count
+  must equal both its listed IDs and its file's `<a id="tNN">` anchors, in the same order, and the
+  total must equal the header.
+- **`tickets/corpus-coverage.md`** auto-merged at commit 2 and will not always.
+- Nothing conflicted in Rust or C++ in the two commits reached.
+
+### Recovery points and the exact commands
+
+```
+master               2ad302bf
+ENS-duckdb-oracle    0df60133   fork from master:        dbf44bcc
+ENS-pbench           d39fdded   fork from duckdb-oracle: 0df60133
+ENS-repartition-keys 51091100   fork from pbench:        d39fdded
+
+git rebase --onto origin/master ENS-duckdb-oracle@{fork} ...   # use the fork points above
+git rebase --onto ENS-duckdb-oracle 0df60133 ENS-pbench
+git rebase --onto ENS-pbench d39fdded ENS-repartition-keys
+```
+
+`--onto` and the old fork point, never a plain `git rebase <parent>`: the parent's own commits are
+rewritten by its rebase, and a plain rebase replays them and invents conflicts in goldens and code.
+This chain has lost one abort to that already.
+
+**It must end in a force-push, not a merge** — the reason this order was requested at all. master's
+material is largely documentation, so a merge gives the `changes` job a clean doc append, it answers
+`code=false`, every job skips, and PR #167 goes green in seconds having compiled nothing. A rebase
+makes the compare report `diverged`, which fails open to `code=true` and runs the pipeline for real.
+`pipeline.yml` has no `workflow_dispatch`, so there is no other route to a real run on #167. And no
+run has ever built the four comment-only `.rs` files in this task's `a68cf8ec`; the first real run
+closes that gap.
