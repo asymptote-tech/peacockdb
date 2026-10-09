@@ -356,6 +356,28 @@ struct NodeSession::Impl {
     if (measuring_sink) measuring_sink->produced_by[handle] = seq;
   }
 
+  /// Every handle a consumer can read enters here, so this is where the handle's own
+  /// shape is checked: one owner and one name per column, and never zero columns — a
+  /// zero-column `table_view` reads 0 rows whatever it held. A check in `TableResult`'s
+  /// constructors cannot stand in, because its fields are public and a caller may
+  /// assemble one without calling any of them (#164).
+  uint64_t register_handle(TableResult result, RegionSink* measuring_sink, uint64_t seq) {
+    if (result.columns.empty())
+      throw std::runtime_error(
+          "NodeSession: a handle of no columns reads as no rows; the plan's placeholder "
+          "column exists so that none is ever registered");
+    if (result.column_names.size() != result.columns.size() ||
+        result.owners.size() != result.columns.size())
+      throw std::runtime_error("NodeSession: a handle of " +
+                               std::to_string(result.columns.size()) + " columns under " +
+                               std::to_string(result.column_names.size()) + " names and " +
+                               std::to_string(result.owners.size()) + " owners (#164)");
+    uint64_t handle = next_handle++;
+    note_producer(measuring_sink, handle, seq);
+    registry.emplace(handle, std::move(result));
+    return handle;
+  }
+
   ~Impl() {
     // Events outlive their regions by design, so the session is the only thing that can
     // free them — a plan ending without a collection must not leak them.
@@ -437,10 +459,8 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         auto tv = result.view();
         if (out_stats)
           out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-        uint64_t handle = impl_->next_handle++;
-        impl_->note_producer(sink, handle, seq);
-        impl_->registry.emplace(handle, std::move(result));
-        out_handles[p] = handle;  // map entries are stored in partition order 0..n-1
+        out_handles[p] = impl_->register_handle(std::move(result), sink, seq);
+        // map entries are stored in partition order 0..n-1
       }
       *out_count = n;
       return;
@@ -529,10 +549,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     auto tv = result.view();
     if (out_stats)
       out_stats[0] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-    uint64_t handle = impl_->next_handle++;
-    impl_->note_producer(sink, handle, seq);
-    impl_->registry.emplace(handle, std::move(result));
-    out_handles[0] = handle;
+    out_handles[0] = impl_->register_handle(std::move(result), sink, seq);
     *out_count = 1;
     return;
   }
@@ -601,10 +618,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
       auto ptv = part.view();
       if (out_stats)
         out_stats[p] = NodeStats{static_cast<uint64_t>(ptv.num_rows()), varlen_content_bytes(ptv)};
-      uint64_t handle = impl_->next_handle++;
-      impl_->note_producer(sink, handle, seq);
-      impl_->registry.emplace(handle, std::move(part));
-      out_handles[p] = handle;
+      out_handles[p] = impl_->register_handle(std::move(part), sink, seq);
     }
     *out_count = n;
     return;
@@ -644,10 +658,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
     auto tv = result.view();
     if (out_stats)
       out_stats[p] = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-    uint64_t handle = impl_->next_handle++;
-    impl_->note_producer(sink, handle, seq);
-    impl_->registry.emplace(handle, std::move(result));
-    out_handles[p] = handle;
+    out_handles[p] = impl_->register_handle(std::move(result), sink, seq);
   }
   *out_count = n_out;
 }
@@ -697,10 +708,7 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
   auto tv = result.view();
   if (out_stats)
     *out_stats = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
-  uint64_t handle = impl_->next_handle++;
-  impl_->note_producer(sink, handle, seq);
-  impl_->registry.emplace(handle, std::move(result));
-  return handle;
+  return impl_->register_handle(std::move(result), sink, seq);
 }
 
 // Shared by the export and the slice so the two cannot disagree. Its twin on the other
@@ -741,21 +749,15 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
       std::make_unique<cudf::table>(cudf::slice(input.view(), {begin, end}).front()),
       input.column_names);
   timer.stop();
-  uint64_t out = impl_->next_handle++;
   // The trimmed rows are still that node's output, so the export downstream of a limit
   // names the same seq the slice did.
-  impl_->note_producer(sink, out, seq);
-  impl_->registry.emplace(out, std::move(result));
-  return out;
+  return impl_->register_handle(std::move(result), sink, seq);
 }
 
 uint64_t NodeSession::adopt(TableResult result) {
-  uint64_t handle = impl_->next_handle++;
   // No node produced it, and the sink says so rather than leaving the handle unknown: a
   // slice or an export of it under timing is then refused naming the adoption.
-  impl_->note_producer(impl_->measuring(), handle, RegionSink::kAdopted);
-  impl_->registry.emplace(handle, std::move(result));
-  return handle;
+  return impl_->register_handle(std::move(result), impl_->measuring(), RegionSink::kAdopted);
 }
 
 void NodeSession::time_export(uint64_t handle, const std::function<void()>& body) {

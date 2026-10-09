@@ -129,7 +129,15 @@ taken knowingly, because the copies it replaced cost a whole input of allocation
 **Corpus queries:** none — the model is not an answer. Every shuffle reaches it; `tpch/q1` at
 `tp4-rowgroup` is the cheapest case, four lanes over one partitioned table.
 
-**Fix proposed:** device-reported residency. `GpuBackend::resident_bytes()` over the statistics
-adaptor's current value, read where the model's own total is read, so the accountant prices what
-the device holds rather than what it handed out. Test: release three of four partitions of one
-scatter and compare the model's resident total with the adaptor's `value`.
+**Fix proposed:** device-reported residency, read where the model's own total is read, so the
+accountant prices what the device holds rather than what it handed out. Test: release three of
+four partitions of one scatter and compare the model's resident total with the reader's value.
+
+Which reader is the open part. `GpuBackend::resident_bytes()` over the statistics adaptor's
+current value is the obvious one and is **not available where the accountant runs**: the adaptor
+exists only when `install_rmm_pool` succeeded (`rmm_pool.hpp`), which only `test_support/` calls,
+so `test_gpu_corpus` — the one place the model prices real queries under a budget — has no pool
+and would read 0. Nothing in `peacock_gpu.h` reports the adaptor to Rust either. So either the
+pool goes on everywhere, or the reader is the C++ handle registry instead, which can total the
+bytes whose owners it alone holds with no pool involved. A model that returns zero is not a cheap
+call, it is a guard switched off, so this has to be settled before the fix lands.

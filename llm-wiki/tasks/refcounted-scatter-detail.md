@@ -102,7 +102,13 @@ One undrained lane keeps **all** of the partitioned table alive, not just its ow
 skewed hash is worse than N copies were: the peak falls but the tail lengthens. And the driver
 prices each lane's batch alone (`driver/accounting.rs`), so a released lane's bytes leave the
 model while the device still holds them behind a sibling — the model under-reports, filed as
-**#265** in `llm-wiki/tickets/memory.md`. Both sentences are in `architecture.md`.
+**#265** in `llm-wiki/tickets/memory.md`.
+
+The spec asks for **two** sentences, and the second is the per-partition timers: p1..N−1 collapse
+to the cost of a CUDA event pair, because between a `p > 0` region's two events there is now only
+a `slice`, which is host-side bookkeeping. p0 still carries the scatter. All three are in
+`architecture.md`'s "What sharing costs" — the timer one was added by the completeness pass, which
+found this line claiming two sentences were there and naming the wrong pair.
 
 ### Deferred by the human override, not by a finding
 
@@ -238,3 +244,46 @@ against these three constructors, which is why the guards are worth a case at al
 string-keyed tp4 cells 3+3 passed. The scatter's memory figures printed byte-identical to rounds 1
 and 2 (fixed 4,962,592 / 5,455,456; string 9,621,376 / 10,624,352), so neither nit moved a number.
 No golden moved.
+
+## Round 4 (2026-10-09) — completeness pass: the name count is checked at the registry
+
+Both readings found the same gap from opposite ends, and it was real. The branch claimed #164's
+name-count half closed on the strength of `TableResult::owning`, but `owners`, `columns` and
+`column_names` are public fields of a plain aggregate, and `exit-copies-impl.md` — already
+committed — assembles handles through them with no constructor. So the claim held for the tree as
+committed and would have stopped holding at the next task, with the out-of-bounds
+`column_names[i]` reads #164 names still there (`filter.cpp:42`, `join.cpp:260/338/343`,
+`aggregate.cpp:169`, `window.cpp:47`).
+
+**The fix is a boundary, not a second constructor check.** `NodeSession::Impl::register_handle`
+(`node_session.cpp:364`) now owns handle allocation: it refuses a handle of no columns and one
+whose names or owners do not number its columns, then takes `next_handle++`, notes the producer
+and emplaces. `next_handle++` appears in exactly one place now. Seven call sites went through it —
+the scan-map arm, the collapse arm, the scatter loop, the per-partition map arm,
+`execute_scan_rowgroups`, `slice_handle` and `adopt` — which is every way a handle can reach the
+registry, so no consumer can read a handle that has not been checked. That is what a constructor
+check could not give: it covers whatever task 6 assembles by hand.
+
+Two things beyond the letter of the ask, both reported: the check also holds
+`owners.size() == columns.size()`, since a view with no owner is the same class of hand-assembly
+defect and the worse one (a dangling view rather than a bad name lookup); and the refusal is
+reachable publicly through `adopt`, which is the harness's upload and exactly the "assembled by
+hand" shape, so the case needs no test-only hook.
+
+**Watched fail, both guards disabled together.**
+
+| guard | the red |
+|---|---|
+| no columns | `ATableOfNoColumnsIsRefused`: "Expected: `session.adopt(peacock::TableResult{})` throws an exception of type std::runtime_error" |
+| the counts disagree | `NamesMustMatchColumns`: "Expected: `session.adopt(std::move(handed))` throws…", `handed` being a one-column handle with its names cleared |
+
+Restored and re-proved green. Both cases live inside the two existing refusal bodies, where each
+is that case's own subject, so the count stays at **68** and `build-test.md` does not move.
+
+**Re-proved.** md5 local = remote (`node_session.cpp` `f882ad29…`, `test_plan_executor.cpp`
+`b984aea5…`), build 0 warnings, `peacock_gpu_tests` 2/2, `peacock_plan_tests` **68/68**
+(`--gtest_list_tests` 68), `test_gpu_corpus` **79/0 whole** rather than the six cells — a check on
+the registration path sits under all 79 — `test_node_timing` 1/0,
+`peacockdb_core_gpu_lib gpu_tests::` 580/0, `peacock_gpu_benchmarks --skip bench_` 8/0. No golden
+moved (`7a8b50b8…` both sides). Handle numbering is unchanged on the success path: the refusals
+throw before `next_handle++`.

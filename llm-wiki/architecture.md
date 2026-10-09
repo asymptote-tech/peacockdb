@@ -889,7 +889,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
-| [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into an owning table |
+| [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into a view sharing the partitioned table's column owners, no copy |
 | [`CudfSortPreservingMerge`](../flatbuffers/gpu_plan.fbs) | `exprs`, `fetch` | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::merge(views, key_cols, orders, null_orders)`, k-way and order-preserving; a concat fallback with no keys or one input, which drops the fetch ([#204](tickets/corpus-coverage.md#t204)) |
 | [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`. Branches are planned independently, so one column can land a different cuDF type per branch; the planner's per-branch cast projects are what align them before the concatenate, which refuses mixed types |
 | [`CudfLimit`](../flatbuffers/gpu_plan.fbs) | `skip`, `fetch` | [`limit.cpp`](../cpp/src/operators/limit.cpp) — `cudf::slice(tv, {skip, end})`, and the whole table returned untouched when the range covers it |
@@ -1002,8 +1002,10 @@ the names: two handles may view one column, so a scatter's N partitions are row 
 partitioned table and copy nothing. A column is freed when the last handle viewing it goes, and
 a slice pins its parent column rather than the whole table. Four constructors build every one of
 them — `owning` from a fresh `cudf::table`, `slice`, `select` and `with`
-([`table_result.cpp`](../cpp/src/table_result.cpp)) — and `owning` refuses a table of no columns
-and a name count that does not match. Consumers read `view()`; four sites copy on purpose and say
+([`table_result.cpp`](../cpp/src/table_result.cpp)) — and the fields are public, so a consumer
+may assemble one. The check is therefore at the registry rather than in a constructor:
+`register_handle` is the only path to a handle number, and it refuses one of no columns or whose
+names or owners do not number its columns. `owning` refuses the same shapes earlier. Consumers read `view()`; four sites copy on purpose and say
 why — the session's `slice_handle` and sorted-merge fetch, and the limit and sort operators' own
 fetch slices — because a view there would pin the whole batch, which is the memory those copies
 exist to give back. `NodeStats` carries only
@@ -1015,7 +1017,9 @@ nothing.
 **What sharing costs.** A lane that does not drain keeps all of the partitioned table alive, not
 just its own rows, which is worse under skew than N copies were. And the driver prices each lane's
 batch alone, so a released lane's bytes leave the model while the device still holds them behind
-a sibling ([#265](tickets/memory.md#t265)).
+a sibling ([#265](tickets/memory.md#t265)). The per-partition device times of p1..N−1 also
+collapse, to the cost of a CUDA event pair: between a `p > 0` region's two events there is now
+only a `slice`, which is host-side bookkeeping. p0 still carries the scatter itself.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
 every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
@@ -1103,6 +1107,7 @@ copies together.
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
 hash repartition, 1:1 map — and the timed regions, the NVTX domain and the harness range),
 `expr.cpp` (expression and AST building),
+`table_result.cpp` (the handle's four constructors),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
 node kind plus `dispatch.cpp` with the `run_op` switch).
 
@@ -1145,9 +1150,10 @@ offsets and vectors are well formed and has no idea what an ordinal means.
 
 Two things nothing guards, and [#164](tickets/corpus-coverage.md#t164) carries the fixes.
 
-**A column ordinal is still unchecked, though the name count is not.** `TableResult::owning`
-refuses a names vector that is not as long as the table's columns, so every handle carries one
-name per column; the sites indexing names with `operator[]` are bounded by that. What is left is
+**A column ordinal is still unchecked, though the name count is not.** `register_handle` is the
+only path to a handle number and refuses a handle whose names do not number its columns, so every
+handle a consumer can read carries one name per column; the sites indexing names with `operator[]`
+are bounded by that. What is left is
 the ordinal itself: `expr.cpp` answers `type_id::EMPTY` for an out-of-range `ColumnRef` instead of
 throwing, which turns a bad ordinal into a confusing type error further along.
 

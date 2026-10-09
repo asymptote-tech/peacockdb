@@ -6,7 +6,8 @@
 //! for one anyway, and both are refused by name rather than run against a dead handle: a
 //! streamed probe's second batch, whose build side the first call erased, and a Left or
 //! Full join's probe batch, which its key project and its join both read. #152 records
-//! them and #145 retires both.
+//! them. #145's shared handle landed and retires neither: both copies are a second read of
+//! one handle, which is #152.
 
 use std::sync::Arc;
 

@@ -2332,6 +2332,15 @@ TEST(TableResult, ATableOfNoColumnsIsRefused) {
   cols.push_back(int64_column({1}));
   auto t = peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), {"a"});
   EXPECT_THROW(t.select({}), std::runtime_error) << "selecting no ordinals is the same table";
+
+  // The same rule where a handle enters the registry, which is the boundary every
+  // consumer reads through: the fields are public, so an empty one can be assembled
+  // without calling a constructor at all.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+  EXPECT_THROW(session.adopt(peacock::TableResult{}), std::runtime_error)
+      << "a handle of no columns registered by hand";
 }
 
 TEST(TableResult, NamesMustMatchColumns) {
@@ -2340,6 +2349,20 @@ TEST(TableResult, NamesMustMatchColumns) {
   EXPECT_THROW(peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(cols)),
                                             {"a", "b"}),
                std::runtime_error);
+
+  // And at the registry, which is where a hand-assembled handle is caught: `owning`
+  // cannot see one, since nothing obliges a caller to go through it. The eight sites that
+  // index `column_names` with `operator[]` are bounded by this check and not by that one.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = customer_scan_plan(fbb, {0});
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<std::unique_ptr<cudf::column>> one;
+  one.push_back(int64_column({1, 2}));
+  auto handed =
+      peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(one)), {"a"});
+  handed.column_names.clear();
+  EXPECT_THROW(session.adopt(std::move(handed)), std::runtime_error)
+      << "a handle of one column registered under no names";
 }
 
 TEST(VarlenBytes, ASliceCountsOnlyItsOwnRows) {

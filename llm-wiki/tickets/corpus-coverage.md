@@ -755,8 +755,8 @@ unstarted and belongs here too: a per-node type check in the GPU tiers, the only
 surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
 `driver-output-hook` are that check for the operator and corpus tiers — every device batch held
 to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
-half is closed — `TableResult::owning` refuses a names vector that is not as long as the table's
-columns (`refcounted-scatter`).
+half is closed — `register_handle`, the only path to a handle number, refuses a handle whose names
+do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
 
 <a id="t174"></a>
 ### #174 — two clamps for one rule, and nothing compares them
