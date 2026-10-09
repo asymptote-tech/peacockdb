@@ -1555,3 +1555,13 @@ false, and one is spent:
 1268, 1423, 1499-1500, 1545, 1550, 1566 and 1571. Both files are frozen and at `new`, so this
 branch correctly does not touch them; the list is here so the human can apply it in one pass
 before chain L starts.
+
+**`coding-style.md`'s re-export rule was widened too, and that is also the human's to narrow.**
+The bullet said "`pub use` is not allowed" and now says a re-export is not allowed at any
+visibility, naming the delegating-`fn` remedy. Defensible as a correction rather than growth —
+the bullet's very next sentence already said "a parent never re-exports a child", so `pub use`
+was the narrow spelling of a rule that already covered every visibility, and after round 3 the
+guard enforces the wide reading. But it is a project-wide rule edited on a page the spec's
+`## Scope` does not name, so it is recorded here beside the `build-test.md` bullet rather than
+left for someone to find. Narrowing it means narrowing `re_exports` in
+`tests/test_module_layout/visibility.rs` back with it.
