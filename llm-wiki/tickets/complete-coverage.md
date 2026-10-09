@@ -28,8 +28,9 @@ tables, no new dataset, plus the engine work it needs.
   half is synthetic-only; shape it away from [#166](#t166)'s two droppers.
 - `min`/`max` over a string or date column: zero uses, and the merge is a string reduce.
 - a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
-- a shuffle keyed on a decimal: not a query but [#95](../archive/archived-tickets.md#t95)'s kernel work, and the murmur3
-  conformance gate extended to cover it.
+- a shuffle keyed on a decimal: delivered by `repartition-keys`, which closed
+  [#95](../archive/archived-tickets.md#t95) — two pbench decimal rows run at all five device modes
+  and the gate carries both precisions and a decimal-then-string composite.
 - two `DISTINCT` args over different expressions: [#144](#t144) has no refusal of its own, and
   `count_distinct` marks queries this mode handles, so a grep for one finds the wrong two.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
@@ -102,7 +103,7 @@ device's missing keyless Welford arm. The `bug_` test flips to a plan test and a
 case.
 
 <a id="t249"></a>
-### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
+### #249 — the wire has no Time, Duration, Interval, Struct or List type
 The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-39`) stops at the four `Timestamp`
 variants, and `serialize_schema` used to map any Arrow type it could not name to `Null` without
 saying so. Most device nodes take a column's type from the data, so such a

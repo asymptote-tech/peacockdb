@@ -131,3 +131,16 @@ on where they pass; `uint-key-group` and `uint-key-join` turn on at tp4 on both 
 
 `build-test-shadgpu.sh`; a cycle per arm group (bool and float, timestamp, decimal), then one for
 the corpus cells.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints, on both engines, and **no shortcut or bandaid**: #201, #206, #240, #95 and
+#189 are closed and archived, every kernel arm landed red-first under a live gate, 21 device and 24 cpu
+cells are on, and the 24 left off carry a measured ticket each. #201 was the one worth having — the gate
+passed with production's seed moved, because it compared the kernel against a second copy of the rule.
+Three key types now depart from a counterparty by design: decimals from Spark, NaN from comet (which
+restores Spark), unsigned from both; `architecture.md` carries which from which. Two Registry claims are
+undelivered — the three #249 queries did not enter `NOT_RUNNABLE`, their `.sql` files being #255's, so
+that step was deleted, and `uint-key-join` turned on at tp4 on the cpu only, its four device cells
+measured as #152. One thing is not self-policing: nothing fails by count when `convert_data_type` gains
+a member, so the next key type can land unproven on both engines; a refusal, not a wrong answer.

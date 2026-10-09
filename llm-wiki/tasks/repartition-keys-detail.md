@@ -1429,3 +1429,260 @@ Also fixed where found: the archive header listed `tasks/active-tickets.md` amon
 - The device half's log above still reads `timestamp-s-key-group … left at 240` in its table. That
   was true when written; the retag to `264` is recorded in the section below it. Left as the dated
   record it is.
+
+## Completeness pass — what is missing (analyst, 2026-10-09)
+
+Read as one change: `git diff ENS-pbench...HEAD`, head `caec7e1b`. The question is what the
+branch does not contain. **2 blocking, 5 important**, plus the three `architecture.md` sentences,
+which are not scored. Everything below was derived from the committed tree; no project code was
+built or run.
+
+### Blocking
+
+**B1. `build-test.md:531-541` still describes the pre-task device corpus.** The table counts
+beside it were re-summed (`Corpus, device` 57 → 78, the gpu block 671) and the prose was not.
+Five false statements, each measured against `cost-registry.csv`:
+
+| the page says | measured |
+|---|---|
+| "Fifty-six cells today" | **77** (26 tpch/tpcds + 51 pbench; 78 = those plus the regeneration case) |
+| "From pbench, thirty" | **51** |
+| "the seven key-type groups … at the two tp1 modes, where no shuffle hashes the key" | all five modes on each of the seven; the shuffle hashes the key, which is this task |
+| "The rest are off against #152, **#95**, #220 and the device's own tickets (#57, #63, #65, #205, **#206**, **#240**)" | no registry row carries 95, 206 or 240; all three are archived |
+| "The fifty-seventh case is that a device run under a regeneration writes no golden" | the seventy-eighth |
+
+One commit ago the review round graded four ticket bodies blocking for describing their own
+subject as open. This paragraph describes this task's subject as not done, on the page an agent
+reads under pressure to find a single fact.
+
+**B2. Both public C++ headers still state the contract this branch changed.**
+
+- `cpp/include/peacock/partitioning.hpp:1` — "Spark-compatible (**comet-identical**) hash
+  partitioning on the GPU"; `:5-7` — "The CPU twin uses comet's `create_murmur3_hashes` (Spark
+  spec), so to make the GPU partition assignment agree by construction we own a small
+  Spark-murmur3 hash kernel"; `:30-33` — "the single source of truth the conformance test
+  asserts **against comet's CPU twin**".
+- `cpp/include/peacock_gpu.h:278-283` — "so the live conformance test can assert the REAL GPU
+  path == **the REAL comet CPU helper** over the SAME bytes".
+
+Neither is true now. Placement is deliberately not comet's for decimals at p ≤ 18, for NaN and
+for every unsigned width, and since #201 the gate's reference is production `rows_per_lane`, not
+comet. `architecture.md`'s hash section calls the divergence "the one thing to know before
+changing either side", and these two headers are what a C++ reader opens first.
+`prompts.md`: every commit keeps code, code comments and llm-wiki content in agreement. The
+`.cu` comments were all updated; the headers were not touched at all.
+
+### Important
+
+**I1. The two hand-off facts this round bought die with the detail file.** `#259` exists because
+a recipe in `<task>-impl.md` and `<task>-detail.md` is deleted at merge. Two such facts are here
+and nowhere else:
+
+- **Registry first, then regenerate, then read the file back** (§"Plan Task 9 step 2"):
+  `declared_sections` (`corpus_golden.rs:445`) reads `cost-registry.csv`, not
+  `corpus_cases.inc`, so a newly-enabled cpu cell's golden section cannot be written until the
+  CSV says `enabled` — and under regeneration the case reports `ok` while writing nothing. It
+  cost this round a round. `join-backend-impl.md`'s Task 14 step 1 sets `corpus_cases.inc` and
+  runs, enabling cpu cells for #190's four rows and q77; it does not say the CSV must move first.
+  `build-test.md`'s "Consequences worth knowing before you regenerate" list does not carry it
+  either.
+- **`git diff --numstat` after any scripted edit of `cost-registry.csv`** (§"One trap worth the
+  next developer's attention"): Python's `csv.writer` terminates `\r\n` and rewrites all 198
+  lines while every test still passes. join-backend edits that file in a dozen batches.
+
+Secondary, same shape and lower stakes: the #245 struct-key pin is blocked by #255 and
+demonstrated, but neither #245 nor #255 records that the harness pin is owed with the fix —
+#255's "guard to delete when this closes" lists the registry rows, corpus lines and
+`duckdb-result.txt` sections only.
+
+**I2. Two spec claims the branch does not deliver.** Both already measured here; the signoff has
+to restate them rather than let the arithmetic look wrong later.
+
+- Scope, `plan_goldens.rs` row: "`NOT_RUNNABLE`: `timestamp-s-key-group` leaves; **the three
+  #249 pbench queries enter**". They did not enter: the three `.sql` files do not exist (they are
+  #255's) and the declaration guard is bidirectional, so the step was deleted rather than
+  deferred. Recorded twice above.
+- Registry: "`uint-key-group` and `uint-key-join` turn on at tp4 **on both engines**".
+  `uint-key-group` did, both engines. `uint-key-join`'s device column is unchanged —
+  `gpu_tp1_single` alone, its four other cells measured as #152 verbatim. Zero device cells were
+  turned on for that row.
+
+**I3. `reports/corpus-fixes.md` fix 12 still prescribes the design D2 rejected.** D2
+(`:1128-1141`) now reads "decided, and neither append was taken" and ends "Details in fix 12".
+Fix 12 (`#fix12`, `:625-668`) is the rejected design in full implementation detail:
+"Recommended: append `hash_key_precisions: [uint8]` to `CudfRepartition`", "`partitioning.hpp`
+gains `struct HashKey { column; decimal_precision }`, both entry points take `vector<HashKey>`",
+"hashing `width` LE bytes … (8 if p ≤ 18, else 16)", plus a tests/goldens/registry recipe for it
+and "#184 and #95 archived" as outstanding. That is the trap the review round called the costliest
+when #95's own body carried it, one pointer away. One superseded line at the head of fix 12
+closes it. (`reports/` is the human's; the report is dated at `188c23ce`, but D2 was already
+updated, so the snapshot convention no longer protects the section it points into.)
+
+**I4. The task's central invariant is not self-policing.** "The shuffle hashes every key type the
+planner emits" is asserted by 19 hand-written gates in `murmur_conformance.rs` and 21 harness
+cases in `emit_cases.rs`. Nothing fails by count when `convert_data_type`
+(`wire/serialize.rs:102`) gains a member: the next key type lands unproven on both engines and
+says nothing until a query reaches `CUDF_FAIL` at run time — and with zero rows the kernel's
+`default` sits inside `if (n > 0)` and does not even say that. The tree already owns the pattern
+one file away: `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot`
+(`test_plan_executor.cpp:2186-2190`) asserts `cases.size() == std::size(fb::EnumValuesDataType())`
+precisely so a new member cannot arrive unexamined, and that assertion is what caught this
+branch's own fbs append. The failure mode is a refusal rather than a wrong answer, so this is
+important and not blocking; naming it in the signoff discharges it as well as code would.
+
+**I5. Two ticket sentences this branch's own work falsified.**
+
+- `tickets/complete-coverage.md:67` — #249's title still ends "**and writes such a field as
+  `Null`**". The body now says "used to map … to `Null`" and "half done by repartition-keys", so
+  the title contradicts its own first paragraph. The index is what a reader scans.
+- `tickets/complete-coverage.md:31-32` — #195's bullet "a shuffle keyed on a decimal: not a query
+  but #95's kernel work, and the murmur3 conformance gate extended to cover it", in a list headed
+  "six shapes have no query at all". Both halves are now delivered: `pbench/decimal15-key-group`
+  and `decimal38-key-group` are on at all five device modes, and the gate carries p ≤ 18 and
+  p > 18 plus a decimal-then-string composite. The branch repointed the bullet's `#95` link to the
+  archive and left the bullet, so #195 still counts six.
+
+### `architecture.md`, the sentences this branch falsified
+
+Correction only; three, and all three are outside the hash section the branch already extended.
+
+1. **"Interfaces"**, `:1009-1011` — "**[`peacock::partitioning`]** — the second public header:
+   `spark_partition_ids` and `spark_hash_partition`, **our own bit-exact Spark-murmur3 at seed
+   42**, because cuDF ships only standard murmur3." Bit-exact with Spark is what three key types
+   deliberately are not since this branch. Correction: bit-exact with the cpu's lane rule at seed
+   42, with the three divergences in [Rehash and the comet hash](#rehash-and-the-comet-hash).
+2. **"Interfaces"**, `:963-964` — "two test hooks: `peacock_spark_partition_ids`, which runs the
+   murmur3 kernel over one Arrow C-data batch **so the Rust side can compare it against
+   comet's**". #201's whole point is that the comparison is now against production
+   `rows_per_lane`. Correction: "so the Rust side can compare it against the production lane
+   rule".
+3. **"Every cast is explicit"**, `:379-387` — "**Four stay in C++ with a reason.** … Hash key
+   normalization feeds the hash alone and never reaches a returned value." Hash key normalization
+   is now on both engines — the cpu half is the decimal widening, the NaN canonicalization and the
+   unsigned widening in `spark_partitioning::hash_keys` — so it is not one of the four that stay
+   in C++. The reason given (a cast that cannot change an answer needs no plan node) is still the
+   right one and should stay; what moves is "in C++" → "outside the plan, once per engine".
+
+Nothing else on the page is untrue. Two sentences the branch made true rather than false, checked
+rather than assumed: "the merge groups on keys + gid and the shuffle still hashes the keys alone"
+(`:288-290`) and "A rollup's last set masks every key, so those rows hash on nothing and land in
+the single lane `pmod(seed, N)`" (`:313`) — before the drop the gid was a non-null constant in the
+hash and neither held.
+
+### Verified sound, so nobody re-derives it
+
+- **77 enabled gpu cells, 77 `gpu-result.txt` sections** (pbench 51, tpch 22, tpcds 4) and 703
+  enabled cpu cells; 177 active lines, 138 at all five cpu modes, 6 partial, 33 out. Every
+  `build-test.md` figure I recomputed matches: `--lib` rows, `test_cpu_corpus` 967/`Corpus, cpu`
+  966, 703 cells, 144 running lines, murmur 19, `emit_cases` 33, `emit_schema_cases` 21,
+  `Harness helpers` 21, `Rollup's shuffle keys` 3, `Arrow to the wire enum` 3, `The lane rule's
+  own properties` 1, `Translator` 30, `Expression writer` 18.
+- **No cell is left under an archived ticket by this branch.** All 25 rows that carried
+  95/189/201/206/240 were re-examined and the tag struck; the registry's remaining archived tags
+  are #32, #143, #183 and #187, every one pre-existing (#183 and #187 are `stale-cells`'s 16
+  cells). No row has an off cell and no ticket.
+- **`tickets.md` is consistent in three directions** for all eleven files — declared count =
+  listed IDs = file anchors, in the same order, summing to 117. Five anchors added to the archive,
+  none removed, none duplicated. No link anywhere still points at the five archived tickets'
+  old paths.
+- **One production caller of the lane rule** (`cpu_backend/emit.rs:57`), one gate, one rust-only
+  test. **`spark_hash_partition` delegates to `spark_partition_ids`**, so the normalizing switch
+  has no second copy on the production scatter path — the shape #201 was about, one level up.
+- **The exec model is not a third copy**: `operators/partition_ops.py` uses crc32 by design and
+  says so, and no emitter in `tpch.plans.txt`/`tpcds.plans.txt` hashes `__grouping_id`, so #189's
+  drop leaves it in step.
+- **Date64 agrees by accident and it is worth knowing**: the new `TIMESTAMP_MILLISECONDS` arm
+  makes a `Date64` key hash as its i64 ms, and comet has a `Date64` arm doing exactly that
+  (`hash_funcs/utils.rs`), so a type nothing gates now works on both engines where the device used
+  to refuse. `Float16`, `Binary` and `LargeBinary` are the only members `convert_data_type` names
+  that the kernel has no arm for, and `fb_to_type_id` maps all three to `EMPTY`, so the device
+  cannot hold them at all — out of this task's reach, not a gap in it.
+- **No device item was filed as deferred that the host override does not defer.** The detail's
+  deferred list is exactly the override's four (the sf40 pair, `--run-benchmarks`, Nsight, H200)
+  plus cuDF 26.02, which the override itself assigns to 25.02 and which chain J's `verify-26.02`
+  owns. The two non-override holds are each demonstrated rather than asserted — the #245 pin by a
+  measured `common.rs:66` panic that #255 cites by line, the float rows by the spec's own
+  Restriction — and each sits on a live ticket.
+
+### One stale line in this file, for whoever writes the signoff
+
+§"Left undone, deliberately" (above) says `reports/corpus-fixes.md`'s D2 "is still written as an
+open decision", and the impl plan's Task 10 lists it as owed. Commit `a75ecf08` rewrote D2. D2 is
+done; what is left there is fix 12 (I3). Do not carry D2 into the signoff as a shortcut.
+
+## Completeness pass, and what it found twice (2026-10-09)
+
+Two readings at `caec7e1b`, dispatched together. **The reviewer: 1 blocking, 5 important. The
+analyst: 2 blocking, 5 important, plus three falsified `architecture.md` sentences.** The analyst's
+own section is above, and it disclosed that the reviewer's list would overlap on its B1 — it did,
+which is the second time in this chain that the finding both readings arrived at independently was
+the real one.
+
+**Neither found anything wrong with the code.** Between them they re-derived: all 703 `.cost.txt`
+sections byte-exactly from their `.cpu.txt` siblings; conservation over 67,443 per-lane checks;
+loader batches against `partition_groups` over 4,328 nodes; the registry against the corpus on both
+engines; every `build-test.md` count, the grand total 2975 equalling the sum of all 85 N-column
+rows; the three divergences read side by side against comet 0.6.0's own dispatch arm for arm; and
+#201's closure, including that no fourth implementation of the rule exists anywhere in the tree.
+`gpu-result.txt` holds exactly 77 sections against 77 enabled cells, set-equal with no extras.
+
+### The blocking pair, both prose, both mine
+
+**`build-test.md`'s device-corpus paragraph was the pre-task text.** The table count beside it had
+been re-summed to 78 and the paragraph had not moved at all. Five false statements, and the worst of
+them named three tickets this branch had just archived as live blockers, and said the seven key-type
+groups run "at the two tp1 modes, where no shuffle hashes the key" — which is the negation of what
+the task did. Rewritten from the registry: 77 cells, pbench's 51 at every mode, #152 and #220
+holding over 900 between them, and #264 named.
+
+**Both public C++ headers still stated the comet-identical contract.** `partitioning.hpp:1`
+("comet-identical") and `:30` ("asserts against comet's CPU twin"), and `peacock_gpu.h:278` ("the
+REAL comet CPU helper"). Every `.cu` comment had been updated and the headers never touched —
+and `architecture.md` points a reader at `partitioning.hpp` as the place to look. Both now say what
+the rule actually is, with the three departures named in the header itself.
+
+### The correction that matters most, because it would have been acted on
+
+The analyst checked Spark's own `Murmur3Hash` and found **the paragraph I wrote named the wrong
+counterparty for two of the three rules.** Spark hashes a float through `doubleToLongBits`, which
+already collapses every NaN to the same bit pattern this branch canonicalizes to — so the NaN rule
+**restores** Spark's placement, and the departure is from comet, which hashes raw `to_le_bytes()`.
+And `-0.0` folding to `+0.0` is Spark's rule and comet's both, not a departure at all. The unsigned
+rule has no Spark counterpart to depart from. Only the decimal rule departs from Spark.
+
+That matters more than the four prose findings around it: a reader told "we deliberately left Spark
+here" could reverse the canonicalization believing raw bits are Spark's rule, which is exactly the
+tp4 lane split the task fixed. Corrected in `architecture.md`, in `emit_cases.rs`'s case comment,
+and in `partitioning.hpp`'s new paragraph.
+
+### The rest, applied
+
+`architecture.md`'s three falsified sentences, all outside the section the branch had extended:
+"our own bit-exact Spark-murmur3" (bit-exact with the cpu's lane rule, not Spark), the conformance
+hook comparing "against comet's" (against the production rule, which is #201), and "four stay in
+C++" listing hash key normalization, which is now on both engines. `corpus_cases.inc`'s device-column
+comment named #95 as a live cause in the present tense. #95's archived body justified the eight
+dropped tags with a reason false for two of them — `tpcds/q37` and `q82` have `gpu_tp1_single`
+enabled, so #95 *was* a real tp4 blocker there; corrected in the one artifact nobody revises later.
+#249's header still ended "and writes such a field as `Null`", contradicting its own first
+paragraph. #195's "no query at all" bullet for a decimal shuffle key, now delivered. And
+`corpus-fixes.md`'s fix 12 was still the rejected design in full with D2 pointing at it — marked
+superseded at its head, since D2 says "neither append was taken" and fix 12 said which to append.
+
+**The two hand-off facts this round bought are now where they survive the merge**, which was the
+analyst's point and #259's exact shape: `build-test.md`'s regeneration list gains the
+registry-moves-first rule — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
+cell the CSV still calls `disabled` is not written and the case reports `ok` anyway — and the
+`git diff --numstat` habit after a scripted CSV edit. `join-backend-impl.md`'s Task 14 step 1, which
+edits that file in a dozen batches, now carries the ordering in the step itself.
+
+### One important finding discharged by the signoff rather than by code
+
+The task's central invariant — the shuffle hashes every key type the planner emits — rests on 19
+hand-written gates and 21 harness cases, and **nothing fails by count** when `convert_data_type`
+gains a member, so the next key type can land unproven on both engines. The tree owns the pattern
+one file away (`Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` asserts its case count
+against `EnumValuesDataType()`, and that assertion is what caught this branch's own fbs append).
+The analyst's own judgement was that a signoff line discharges it as well as code would, since the
+failure mode is a refusal and not a wrong answer, and adding a guard here would reopen a finished
+task. Named in the signoff, with the pattern to copy.

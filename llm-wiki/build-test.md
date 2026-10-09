@@ -542,17 +542,20 @@ device with every batch held to its node's declared schema through the driver's 
 [#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-Fifty-six cells today. From tpch and tpcds, twenty-six: `tpch/q6`, `tpch/q1` and
+Seventy-seven cells today. From tpch and tpcds, twenty-six: `tpch/q6`, `tpch/q1` and
 `tpch/shuffle-additive-avg` at every mode,
 and `q17`, `q19`, `nested-loop-join`, `shuffle-stddev`, `tpcds/q84`, `tpch/aggregate-groupby`,
 `tpch/filter-project`, `tpch/shuffle-additive`, `tpcds/q37`, `tpcds/q82` and `tpcds/q85` at
-`tp1-single`. From pbench, thirty, its whole device cycle settled on what it measured:
-`int8-key-group`, `sparse-probe-left` and `sparse-probe-semi` at every mode; the seven key-type
-groups — `bool`, `decimal15`, `decimal38`, the three `timestamp-*` and `uint` — at the two tp1
-modes, where no shuffle hashes the key; and `uint-key-join` at `tp1-single` alone.
-The rest are off against [#152](tickets/joins.md#t152),
-[#95](archive/archived-tickets.md#t95),
-[#220](tickets/joins.md#t220) and the device's own tickets (#57, #63, #65, #205, #206, #240). The fifty-seventh case is that a device run under a
+`tp1-single`. From pbench, fifty-one, every one of them measured rather than predicted:
+`int8-key-group`, `sparse-probe-left`, `sparse-probe-semi`, `bool-key-group`,
+`decimal15-key-group`, `decimal38-key-group`, the three `timestamp-{ms,us,ns}-key-group` and
+`uint-key-group` at **every** mode — the tp4 cells are the key types the shuffle learned to hash —
+plus `uint-key-join` at `tp1-single` alone.
+The rest are off against [#152](tickets/joins.md#t152) and
+[#220](tickets/joins.md#t220) above all, which between them hold over 900 cells, and then the
+device's own (#55, #56, #57, #63, #65, #168, #186, #199, #205) and
+[#264](tickets/corpus-coverage.md#t264), which holds `timestamp-s-key-group`'s five on a cast
+group key. The seventy-eighth case is that a device run under a
 regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -870,6 +873,14 @@ tpch.sf40 (shad-gpu only) + testdata/tpch_query_sql.sh
 
 Consequences worth knowing before you regenerate:
 
+- **The registry is the write-side authority, so it moves first.** `declared_sections` reads
+  `cost-registry.csv`, not `corpus_cases.inc`, so a golden section for a newly enabled cell cannot
+  be written until the CSV says `enabled` — and a regeneration run reports that case **`ok` while
+  writing nothing**, which reads exactly like a cell that had nothing to write. Order is registry,
+  then regenerate, then read the file back. This cost `repartition-keys` a round.
+- **Read `git diff --numstat` after any scripted edit of `cost-registry.csv`.** Python's
+  `csv.writer` rewrites every line with CRLF, and the whole suite still passes: nothing in the tree
+  reads the line endings. The numstat is what shows 198 lines changed where you meant 11.
 - **`.cost.txt` is a pure function of `.cpu.txt` and `cost_model.conf`** — regenerating one
   `.cpu.txt` obliges the sibling `.cost.txt`, and `test_cost_model` re-derives every one of
   them, so a hand-edited `.cost.txt` goes red.

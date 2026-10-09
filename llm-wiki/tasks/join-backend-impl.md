@@ -1415,8 +1415,12 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 ### Task 14: The cells, in batches
 
 - [ ] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
-  estimate's per-query table order, `reports/join-rewrite-cell-estimate.md` §7), set the
-  `corpus_cases.inc` gpu modes (and cpu modes for #190's four and #212's q77 rows), run on
+  estimate's per-query table order, `reports/join-rewrite-cell-estimate.md` §7), set
+  **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (and cpu modes for #190's
+  four and #212's q77 rows) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
+  cell the CSV still calls `disabled` is not written and the case reports `ok` anyway
+  (`build-test.md`, "Consequences worth knowing before you regenerate"; it cost `repartition-keys`
+  a round). Then run on
   shad-gpu (`PCK_TEST_FILTER` on the batch), compare with DuckDB (`duckdb_*` cases), enable the
   green, ticket the rest: tpch rollup_over_join gains `65`, tpcds q78 `60`, tpcds q32 at tp4
   `199`, as the estimate expects. The stale `183` rows' join cells are among the batches. A line

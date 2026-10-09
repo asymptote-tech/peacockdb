@@ -199,8 +199,10 @@ operator_case! {
     }
 }
 
-// #206, and the rule the two engines agree on rather than Spark: -0.0 hashes as +0.0 and
-// every NaN as one canonical NaN, on both sides.
+// #206, and the one place the rule departs from comet: every NaN is canonicalized to a single
+// bit pattern before hashing, where comet hashes a float's raw bytes. That restores Spark, whose
+// doubleToLongBits already collapses NaNs. -0.0 hashing as +0.0 is comet's rule and Spark's, and
+// is not a departure.
 operator_case! {
     GpuEmitPartitions,
     fn a_float32_key_places_every_row_the_same() { every_row_in_the_same_lane_on(5) }

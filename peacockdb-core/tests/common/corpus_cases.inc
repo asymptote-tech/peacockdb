@@ -21,10 +21,11 @@ corpus_query!(tpch, 1, q14, all_modes, none, duckdb_approx, data_fusion_exact, g
 corpus_query!(tpch, 1, q19, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 // THE DEVICE COLUMN. q6 runs at all five modes and q19 at tp1-single; every other device
-// cell is off against a ticket. The causes: #152 refuses a join whose recipe copies a side
-// the ABI cannot copy (by name rather than by crash), #95 is the hash scatter refusing a
-// decimal key, #220 is the cpu splitting a join's output into more batches than the device, seen
-// first at the aggregate merge's in_rows above it.
+// cell is off against a ticket. The two causes that hold almost all of them: #152 refuses a join
+// whose recipe copies a side the ABI cannot copy (by name rather than by crash), and #220 is the
+// cpu splitting a join's output into more batches than the device, seen first at the aggregate
+// merge's in_rows above it. #95, the hash scatter refusing a decimal key, was a third until
+// repartition-keys closed it; no row carries it now.
 // T19 is where the rest are settled query by query.
 corpus_query!(tpch, 1, q13, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

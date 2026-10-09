@@ -100,9 +100,12 @@ longer matches Spark's at precision ≤ 18, deliberately.
 **Corpus queries:** `pbench/decimal15-key-group` and `decimal38-key-group`, all five device cells
 on; `decimal15-key-join` is off on [#152](../tickets/joins.md#t152) and
 [#220](../tickets/joins.md#t220), not on this. Eight tpch and tpcds rows carried `95` and no
-longer do — `tpcds/q24`, `q37`, `q75`, `q82` and `tpch/q2`, `q10`, `q15`, `q18`. At each either no
-device cell was ever declarable, or `gpu_tp1_single` is off too and tp1-single runs one lane and
-hashes nothing; each keeps the ticket that does explain its off cells.
+longer do — `tpcds/q24`, `q37`, `q75`, `q82` and `tpch/q2`, `q10`, `q15`, `q18`. On six of them
+`95` could never have been the blocker: `q24`'s cpu side is off on #190 so no device cell is
+declarable, and the other five have `gpu_tp1_single` off too, where one lane hashes nothing. On
+`tpcds/q37` and `q82` it was real, at the three tp4 modes — both group on a decimal
+`i_current_price` — and is not now. Every one of the eight keeps a ticket that does explain its
+off cells; dropping the tag is not a claim that any of them passes.
 
 <a id="t189"></a>
 ### #189 — the shuffle cannot hash a rollup's grouping-set id

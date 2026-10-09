@@ -625,6 +625,12 @@ All five modes, both backends; refused by `planner::plan` at `:119` today. Not i
 <a id="fix12"></a>
 ### 12. A decimal shuffle key hashes as comet does, by declared precision — M
 
+**Superseded. `repartition-keys` closed #95 and #184 on 2026-10-09 by the shape D2 calls
+"neither": both engines hash 16 bytes of the unscaled value, so no fbs field, no
+`partitioning.hpp` signature and no FFI argument carries a precision, and a decimal's lane no
+longer matches Spark's at precision ≤ 18. Everything below is the design that was not taken —
+read it for the issue statement, not for the plan.**
+
 **Closes:** #184 (misdiagnosed: the shuffle key is a decimal and the kernel has no decimal arm
 — #95 reached by a corpus query; the 1→N shape is routine) and #95 together. The fbs shape is
 D2.
