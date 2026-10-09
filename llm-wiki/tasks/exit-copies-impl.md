@@ -57,7 +57,8 @@ statistics adaptor `main()` installs.
 
 | file | responsibility |
 |---|---|
-| `cpp/src/peacock/expr.h:46-47`, `cpp/src/expr.cpp` | `EvaluatedColumn`, `evaluate_column`; the view-only callers |
+| `cpp/src/plan_executor_internal.h`, `cpp/src/expr.cpp` | `EvaluatedColumn`, `evaluate_column`; the view-only callers |
+| `cpp/src/peacock/expr.h` | `build_column`'s declaration, unchanged in signature |
 | `cpp/src/operators/filter.cpp` | mask by `evaluate_column`; projection by `select` |
 | `cpp/src/operators/project.cpp`, `window.cpp` | output sharing the input's owners |
 | `cpp/src/operators/aggregate.cpp` | groupby's two fresh key tables released; the five kept copies' reasons |
@@ -82,10 +83,12 @@ comparison against the same work done straight against cuDF on the same input �
 names, numbers and the red-before evidence are in `exit-copies-detail.md`.
 
 **Interfaces:**
-- Produces:
+- Produces, in `cpp/src/plan_executor_internal.h` — **not** `expr.h`, which is private to the
+  library and which no test in the tree includes; that header is the sanctioned route for what a
+  test reaches into, and `expr.h` includes it, so the operators still see both names:
 
 ```cpp
-// expr.h
+// plan_executor_internal.h
 /// What an expression evaluated to: a column the evaluation made, or one of the input table's
 /// own columns, borrowed — a bare ColumnRef is the second. Copying it was #154's costliest
 /// site: a whole column per batch on every predicate the AST refuses.
@@ -158,27 +161,16 @@ TEST(ExitCopies, ANonAstPredicateDoesNotCopyTheColumnsItReads) {
   // 24 bytes a row. A copied operand adds 16 more.
   EXPECT_LT(got.total, rows * 24) << got.total << " bytes for " << rows << " rows";
 }
-
-TEST(ExitCopies, AFilterOnABareBooleanColumnBorrowsItsMask) {
-  std::vector<std::unique_ptr<cudf::column>> cols;
-  cols.push_back(int64_column({1, 2, 3}));
-  auto b = cudf::make_numeric_column(cudf::data_type{cudf::type_id::BOOL8}, 3);
-  std::vector<int8_t> bits{1, 0, 1};
-  cudaMemcpy(b->mutable_view().data<int8_t>(), bits.data(), 3, cudaMemcpyHostToDevice);
-  cols.push_back(std::move(b));
-  cudf::table table(std::move(cols));
-  flatbuffers::FlatBufferBuilder fbb;
-  const fb::Expr* ref = finished_expr(fbb, make_col_ref(fbb, 1, "b"));
-  auto mask = peacock::evaluate_column(ref, table.view());
-  auto kept = cudf::apply_boolean_mask(table.view(), mask.view());
-  EXPECT_EQ(host_int64_column(kept->view().column(0)), (std::vector<int64_t>{1, 3}));
-}
 ```
+
+  (A third case was sketched here for a filter on a bare boolean column. It was never written:
+  Review focus 4 records why — a bare `ColumnRef` is AST-able, so a borrowed mask is unreachable
+  from `filter.cpp`.)
 
   (`make_decimal_literal`'s argument order is the file's own, `:103`; read it before writing the
   literal. `int64_column`, `host_int64_column` and `allocated_by` are refcounted-scatter's.)
-- [x] **Step 2: Device cycle:** the first and third do not compile (no `evaluate_column`); with
-  a stub returning `{build_column(...), {}}` the first and second are red.
+- [x] **Step 2: Device cycle:** with `evaluate_column` stubbed as `{build_column(...), {}}` so
+  the cases compile and fail on behaviour rather than on a missing symbol, both are red.
 - [x] **Step 3: The evaluator.** In `expr.cpp`, rename today's `build_column` (`:801`) to
   `static std::unique_ptr<cudf::column> make_column(...)`, delete its `ColumnRef` arm
   (`:822-839`), and add after it:
@@ -235,9 +227,6 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_vie
   - `make_column`'s arms: unary `arg` (`:854`), LIKE `strcol` (`:872`); the cast's `inner`
     (`:897`) converts, and its string-to-string no-op returns `std::move(inner).take()` (a copy
     only for a bare `ColumnRef`, as today).
-  - `filter.cpp:27`: `auto mask = evaluate_column(...)`, used as `mask.view()`; the AST branch
-    keeps its owned column: hold both as `EvaluatedColumn mask = cudf_ast_can_evaluate(...) ?
-    EvaluatedColumn{cudf::compute_column(...), {}} : evaluate_column(...);`.
   - `window.cpp:58-74`: `key_owned` → `std::vector<EvaluatedColumn>`; the decimal cast moves to
     an `arg_cast` `unique_ptr` and the argument is `EvaluatedColumn arg = evaluate_column(...)`
     with `arg_view = arg.view()`.
@@ -311,7 +300,7 @@ TEST(ExitCopies, AFiltersRepeatedOrdinalIsTwoColumnsOverOneOwner) {
 - [x] **Step 3: The fix.**
 
 ```cpp
-  auto filtered = cudf::apply_boolean_mask(input.view(), mask.view());
+  auto filtered = cudf::apply_boolean_mask(input.view(), mask->view());
   auto result = TableResult::owning(std::move(filtered), std::move(input.column_names));
   // The planner's fused projection, as a selection over the filtered table: kept columns are
   // shared, dropped ones freed with it, and a repeated ordinal is two entries over one owner.

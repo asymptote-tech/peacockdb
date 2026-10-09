@@ -32,10 +32,7 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
   // Optional projection, set when the planner fused a downstream ProjectionExec
   // into the filter. Skipping it leaves every input column in place and shifts all
   // downstream column indices by the number of columns that should have dropped.
-  //
-  // A selection over the filtered table, not a copy of it: kept columns are shared,
-  // dropped ones freed with `result`, and a repeated ordinal is two entries over one
-  // owner rather than one column moved twice (#154).
+  // A selection over the filtered table rather than a copy of it (#154).
   if (filter->projection() && filter->projection()->size() > 0) {
     std::vector<cudf::size_type> ordinals;
     ordinals.reserve(filter->projection()->size());

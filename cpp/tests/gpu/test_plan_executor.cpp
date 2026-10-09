@@ -2,7 +2,6 @@
 /// executes them against testdata/tpch.minimal/ Parquet files.
 
 #include "peacock_gpu.h"
-#include "peacock/expr.h"
 #include "peacock/partitioning.hpp"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
@@ -2624,6 +2623,12 @@ TEST(ExitCopies, ANonAstPredicateDoesNotCopyTheColumnItReads) {
   std::vector<uint32_t> g{0};
   uint64_t in = session.execute_scan_rowgroups(0, g, nullptr);
   auto input = session.table_for(in);  // shares the owners, so it outlives the call
+  // The premise, pinned rather than left to the comment above: loosen cudf's decimal arm and
+  // the node routes to compute_column, allocates less, and the bound below stays green with
+  // nothing left covering expr.cpp's site.
+  const fb::Expr* pred_expr = fb::GetGpuPlan(buf.data())->root()->node_as_CudfFilter()->predicate();
+  ASSERT_FALSE(peacock::cudf_ast_can_evaluate(pred_expr, input.view()))
+      << "a decimal comparison must take the column path, or this case tests nothing";
   // The predicate and the filter run straight against cuDF, the scalar built at the
   // literal's own scale as `build_scalar` builds it: everything the operator must allocate
   // once its ColumnRef operand is a view.

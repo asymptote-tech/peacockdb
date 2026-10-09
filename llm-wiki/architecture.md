@@ -946,7 +946,8 @@ semantics change with no ABI change at all.
 fresh table where a move would do ([#154](tickets/corpus-coverage.md#t154)) — for a join with a projection,
 twice over. An engine running a node once per query would pay that once per node; this one pays
 it once per node per *batch*, which is what makes it worth a ticket. Every other operator hands
-its columns over: filter, project and window share their input's owners through `TableResult`,
+its columns over, bar five copies in `aggregate.cpp` that give their reason at the site: filter,
+project and window share their input's owners through `TableResult`,
 the aggregate releases groupby's key tables, and a bare `ColumnRef` evaluates to a view of the
 input's own column rather than a copy of it.
 

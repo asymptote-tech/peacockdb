@@ -57,16 +57,29 @@ as a comment in place. The only other `std::make_unique<cudf::column>` left unde
 outside `join.cpp` is `EvaluatedColumn::take()`'s, which is the one sanctioned place a borrowed
 column is copied — for a caller that keeps it past its input.
 
+**The repeated-ordinal regression the spec names did run.** `corpus_cases.inc:139,294` put tpcds
+q84 and q85 on the device at `tp1-single`, and `tp1-single.plans.txt` shows q84 projecting
+`c_customer_id@0` twice in one `GpuProject` and q85 repeating two ordinals. So the 95-case corpus
+run covered the shape, on top of the `AFiltersRepeatedProjectionOrdinalAnswersBothColumns` and
+`AProjectOfColumnRefsAllocatesNothing` cases that pin it directly.
+
 **The four Welford copies were examined for removal and the answer is no, deliberately.** A
 hand-built `cudf::column_view{data_type{STRUCT}, rows, nullptr, nullptr, 0, 0, children}` would
-borrow the two children instead, and cuDF accepts a struct view with null data. What stopped it
-is `structs_column_view::get_sliced_child`, which adds the parent's offset to the child's: with
-copies, the children arrive at offset 0 whatever the input was; with borrowed views a *sliced*
-input (a scatter partition, a `slice_handle`) hands cuDF children carrying their own offsets into
-a parent at offset 0, and whether `group_merge_m2` reads that correctly cannot be settled from
-headers alone. The gain is two FLOAT64 per-group state columns. A correctness risk on a path no
-test slices, for a small saving, is the wrong trade; recorded here so the next reader does not
-re-derive it.
+borrow the two children instead, and cuDF accepts a struct view with null data. What stops it is
+that `make_structs_column` takes owning children and these are the input's columns, owned
+elsewhere — which is what the code comments at the sites say — and that the borrowed form is an
+inconsistent shape rather than a measured win: `cnt` is a fresh cast at offset 0 beside two
+borrowed children at offset k. The gain is two FLOAT64 per-group state columns. A correctness
+risk on a path no test slices, for a small saving, is the wrong trade.
+
+**The first version of that argument was wrong about cuDF, and the correction is the lesson.** It
+said `structs_column_view::get_sliced_child` "adds the parent's offset to the child's". Read in
+the vendored source rather than inferred from the header, it *substitutes* the parent's offset and
+discards the child's — worse, same conclusion — and `group_merge_m2` never calls it at all: it
+reads `values.child(0..2)` and `begin<T>()` directly, honouring each child's own offset and
+ignoring the parent's. So the specific hazard first named does not arise at that call, and the
+decision above stands on our own code instead. When a decision rests on a claim about a vendored
+library, read the vendored body or argue from something in this tree.
 
 ### Three sites the spec's scope listed that needed nothing, and why
 
@@ -218,3 +231,85 @@ corpus, and its 95 cases are green against them unchanged.
   binaries have no registry case, so the row and the `--list` total are the same number here —
   unlike the Rust rows the page warns about. C++ total 107 → **114**; grand total 3023 →
   **3030** (Rust 2515 and Python 401 unchanged).
+
+## Round 2 — review round 1 addressed (2026-10-09)
+
+Four items taken: two important, two nits. Both important findings were in the test file; the
+operators were not touched for correctness.
+
+**Important 1 — the test no longer reaches a private header.** `test_plan_executor.cpp` had
+`#include "peacock/expr.h"`, the only include of `cpp/src/peacock/` by any test in the tree (the
+other seven `peacock/*` test includes are `rmm_pool.hpp` and `partitioning.hpp`, both under
+`cpp/include/`, which is public). `EvaluatedColumn` and the `evaluate_column` declaration moved
+to `cpp/src/plan_executor_internal.h` — the sanctioned route, whose four other entries each carry
+a "why a test reaches this" note, and whose own header says it exists for exactly this — with
+that note added, naming the case. `expr.h` includes it, so the operators still see both names
+and nothing is declared twice; `expr.h`'s closing pointer now lists all four names that come from
+there. The include was dropped, which also stops dragging `ExprContext`, `build_expr` and
+`fb_to_type_id` into the test. The boundary did not move, so `architecture.md`'s Interfaces
+section is still true as written.
+
+The header gained `<cudf/column/column.hpp>` and `<memory>` for `EvaluatedColumn`'s body. Both
+are host headers, so the "host-only CPU tests compile against it" property holds — proved by
+`peacock_cpu_tests` building and passing 15/15 locally after the move.
+
+**Important 2 — the non-AST case now pins its own premise.** `c_acctbal > decimal(0,2)` reaches
+the column path only because `cudf_ast_can_evaluate` refuses a decimal operand, and that lived
+only in a comment: loosen that arm and the node routes to `compute_column`, allocates *less*, and
+`EXPECT_LE` stays green with nothing covering `expr.cpp`'s site. Added before the measurement:
+
+    const fb::Expr* pred_expr = fb::GetGpuPlan(buf.data())->root()->node_as_CudfFilter()->predicate();
+    ASSERT_FALSE(peacock::cudf_ast_can_evaluate(pred_expr, input.view()))
+
+The predicate is re-read off the plan root rather than hoisted out of `acctbal_filter_plan`, so
+the helper's signature is unchanged. `cudf_ast_can_evaluate` is already in
+`plan_executor_internal.h`, which the file includes.
+
+**The assertion was proved non-vacuous rather than assumed to be.** It cannot be checked on the
+host — `infer_expr_type` needs the scanned table, and against an empty one the function returns
+false for the wrong reason (`lt == EMPTY`), which would pass the assertion while proving nothing.
+So it took a device cycle of its own in the `ASSERT_TRUE` form: **1 of 75 failed**, on
+`Value of: peacock::cudf_ast_can_evaluate(pred_expr, input.view()) / Actual: false / Expected:
+true`. That is the evidence that the call reaches the decimal arm and that `false` is its real
+answer. Flipped to `ASSERT_FALSE` and green. Note from the same run: `ABareColumnRefIsBorrowedNotCopied`
+passed there too, which is the proof the test reaches `evaluate_column` through its new header.
+
+**Nit 5 — the plan's three contradictions about `filter.cpp:27`.** The superseded bullet is
+deleted; Task 2 Step 3's sketch says `mask->view()`, which is what shipped; the
+`AFilterOnABareBooleanColumnBorrowsItsMask` sketch is gone, replaced by one line saying it was
+never written and pointing at Review focus 4. Also corrected while in there: the Interfaces block
+said `// expr.h` and now names `plan_executor_internal.h` with the reason, the File structure
+table's first row with it, and Step 2's red note, which described a compile failure where the
+actual red was a behavioural one under the stub.
+
+**Nit 6 — taken, not argued.** `filter.cpp` and `window.cpp` were 7-line in-body comment runs
+against `coding-style.md`'s four. Both are 4 now: the `#154` half is one clause at each site. The
+displaced "why" went to the operation it describes rather than into prose — a two-line doc above
+`TableResult::select` in `table_result.cpp`, saying that an ordinal may repeat, that the two
+entries share one owner, and that this is why a fused projection selects instead of moving a
+column twice. That file's own header already claims the owner-per-column rule lives in one place,
+so it belongs there, and a reader of `result.select(ordinals)` lands on it. The cap for a doc
+above a declaration is ten lines, so it is comfortably inside. `project.cpp`'s runs were already
+4 and 2 and were left alone.
+
+### Re-run
+
+The coordinator's bar — a clean build plus the whole `peacock_plan_tests` binary — is the right
+level and I did not argue it: a header move and an added assertion cannot reach the corpus, and
+nothing in the operators changed but comment text. Run anyway, because the header move changes
+what `peacock_cpu_tests` compiles against:
+
+| what | command | result |
+|---|---|---|
+| C++ build, local | `cmake --build /tmp/dkb-cppbuild --target peacock_gpu peacock_plan_tests peacock_cpu_tests -j 8` | rc=0, **no warnings** |
+| C++ CPU, local | `/tmp/dkb-cppbuild/peacock_cpu_tests` | **15 passed, 0 failed** |
+| device, the red cycle | `peacock_plan_tests` with `ASSERT_TRUE` | **74 passed, 1 failed** — the premise assertion, on `Actual: false` |
+| device, green | `peacock_plan_tests` | **75 passed, 0 failed** |
+| `--list` | `peacock_plan_tests --gtest_list_tests` | **75** cases, 16 suites — unchanged, no case added or lost |
+
+The four printed figures came back identical to round 1, to the byte: non-AST predicate
+2 431 792 = 2 431 792, filter projection 4 333 728 = 4 333 728, window 3 914 992 = 3 914 992,
+aggregate 5 874 832 = 5 874 832. `build-test.md` needs no further change.
+
+`git clang-format --diff HEAD` over the four files this round touched proposes nothing; the new
+test lines were formatted over their range as before.

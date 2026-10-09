@@ -41,6 +41,8 @@ TableResult TableResult::slice(cudf::size_type begin, cudf::size_type end) const
   return out;
 }
 
+/// An ordinal may repeat: the two entries share one owner and both read the same column,
+/// which is why an operator's fused projection selects rather than moving a column twice.
 TableResult TableResult::select(std::vector<cudf::size_type> const& ordinals) const {
   TableResult out;
   for (auto i : ordinals) {

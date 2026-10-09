@@ -42,32 +42,13 @@ using JoinFilterColMap = flatbuffers::Vector<const fb::JoinFilterColumn*>;
 cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
                                   const JoinFilterColMap* col_map = nullptr);
 
-/// What an expression evaluated to: a column the evaluation made, or one of the input
-/// table's own columns, borrowed — a bare ColumnRef is the second. Copying it was #154's
-/// costliest site: a whole column per batch on every predicate cuDF's AST refuses.
-struct EvaluatedColumn {
-  std::unique_ptr<cudf::column> owned;  // null when borrowed
-  cudf::column_view borrowed;           // valid while the input table lives
-
-  [[nodiscard]] cudf::column_view view() const { return owned ? owned->view() : borrowed; }
-
-  /// Ownership, for a caller that keeps the column past the input: the made column, or a
-  /// copy of the borrowed one — the one place a borrowed column is copied.
-  [[nodiscard]] std::unique_ptr<cudf::column> take() && {
-    return owned ? std::move(owned) : std::make_unique<cudf::column>(borrowed);
-  }
-};
-
-// Evaluate an expression, borrowing the input's column for a bare ColumnRef (the non-AST
-// path). The borrowed view is valid only while `table` lives.
-EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table);
-
 // Materialize an expression into a column (the non-AST path).
 std::unique_ptr<cudf::column> build_column(const fb::Expr* expr,
                                            cudf::table_view const& table);
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 
-// binop_output_type and cudf_ast_can_evaluate come from plan_executor_internal.h, above.
+// binop_output_type, cudf_ast_can_evaluate, EvaluatedColumn and evaluate_column come from
+// plan_executor_internal.h, above.
 
 }  // namespace peacock

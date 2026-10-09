@@ -36,13 +36,10 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
   auto input = take_input(in);
   auto tv = input.view();
 
-  // Output = all input columns (in order) followed by one column per window expr. The
-  // input's columns are shared rather than copied, so the output views what it keeps and
-  // owns only what it computes (#154).
-  //
-  // The input arrives pre-sorted by [partition_by, order_by] (DataFusion's
-  // SortExec), so consecutive equal partition keys form one group, and
-  // grouped_rolling_window preserves input row order.
+  // Output = all input columns (in order) followed by one column per window expr, the
+  // input's own columns shared rather than copied (#154). The input arrives pre-sorted by
+  // [partition_by, order_by] (DataFusion's SortExec), so consecutive equal partition keys
+  // form one group, and grouped_rolling_window preserves input row order.
   TableResult out = input;
 
   if (win->window_exprs()) {
