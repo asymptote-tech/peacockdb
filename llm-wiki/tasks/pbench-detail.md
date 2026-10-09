@@ -1998,3 +1998,200 @@ where a join's pre-projection width differs from build++probe, so `LeftMark`, `R
 to be different**: its whole subject is NULL keys and `NOT IN` over NULLs, and a `NOT IN` lowers to
 an anti or a mark join. If pbench's plan goldens move, that is the expected regeneration and not a
 defect. The second, `f0a6ecbf`, is the cost gate, which the cost-report tests cover.
+
+## Re-proved on the rebased duckdb-oracle (2026-10-09)
+
+The re-prove the rebase above owed. Whole proving set, not a subset: the local `rust-only` tier
+in full, the C++ CPU suite, cost-report and its Python half, and the device set on nebius-gpu's
+L40S under the host override. **Every tier is green. Ten plan-text goldens moved and all ten moves
+are renderer text.** No defect found, no ticket owed.
+
+### What master's `64ced62e` did to this branch, and why it is the expected regeneration
+
+The prediction held. `projection_field` now names each projection position by the node's **own
+output schema** instead of by build++probe, so a join whose pre-projection width differs from
+build++probe prints different names. pbench has 25 such lines per golden family, and nothing else
+in the tree did: `UPDATE_CANONICAL=1` rewrote every `.plans.txt` in all three sf1 dirs and only
+pbench's five came back changed, which is independent confirmation that master's own regeneration
+of the ten tpcds goldens was right on this base.
+
+Watched red first, in both tiers:
+
+- `--lib`: **675 passed, 5 failed** — the five `planner::tests::plan_goldens::pbench_*`, each
+  reporting "5 of 60 queries differ".
+- `test_cpu_corpus`: **897 passed, 25 failed** — `cpu_pbench_<q>_<mode>` over five queries × five
+  modes, each a single `moved — line N, column C` from the golden differ.
+
+The five queries, and the join each lowers to:
+
+| query | join line | was | is |
+|---|---|---|---|
+| `finish-without-probe` | `LeftMark` | `[d_id@0, d_w@2, Int64(1)@3]` | `[d_id@0, d_w@2, mark@3]` |
+| `not-not-in` | `RightSemi` | `[s_y@0]` | `[f_id@0]` |
+| `not-or-not-in` | `RightSemi` | `[s_y@0]` | `[f_id@0]` |
+| `sparse-build-anti` | `RightAnti` | `[t_k@0]` | `[f_id@0]` |
+| `sparse-probe-semi` | `RightSemi` | `[t_k@0]` | `[d_id@0]` |
+
+Exactly the three join types the duckdb-oracle round predicted, and no fourth. Every other
+`projection=` line in these files — `Inner`, `Left`, `Right`, `Full`, `LeftSemi`, and the three
+nested-loop and filter variants — is untouched, because for those the output schema and
+build++probe agree position for position.
+
+### The proof that it is text and not an answer
+
+Three mechanical checks per file, not a reading:
+
+- **Mask the field and the files are byte-identical.** `sed -E 's/projection=\[[^]]*\]/<X>/g'`
+  over `HEAD:<file>` and the regenerated file: `diff -q` clean for all ten. So nothing outside
+  `projection=[...]` moved — not a node, not a `lanes=`, not an `on=`, not an `output_rows=`.
+- **Every projection ordinal is unchanged.** The `@N` sequence extracted from the projection
+  fields is identical before and after: 47 ordinals in each `.plans.txt`, 36 / 36 / 32 / 32 / 32
+  in the five `.cpu.txt`. Only the names left of the `@` moved.
+- **No section was lost and no row count moved** (#213's hazard): `== ` sections 57 → 57 in every
+  `.cpu.txt` and 60 → 60 in every `.plans.txt`; `rows=` lines 348 / 348 / 430 / 430 / 430,
+  unchanged.
+
+And the new text is the *correct* text, which the goldens show on their own. In
+`finish-without-probe` the `GpuFilter` sitting directly above the mark join already read
+`predicate=(d_w@1 = 0) OR mark@2` — the filter has always named the join's output columns
+`d_w` and `mark`. The old `Int64(1)@3` on the line below it was naming the probe side's
+column 3−build_width and contradicting its own parent. `output_rows=2000, output_bytes=25000` on
+that join is unchanged. Same for `sparse-probe-semi`: `output_rows=3, output_bytes=25`, one column
+wide, and `d_id` is the column the RightSemi actually emits where `t_k` was the discarded build
+key.
+
+`.cost.txt` carries no plan text (checked: zero `projection=` in all five), so the five
+`-mini.cost.txt` did not move and `test_cost_model` re-derived all three sections green.
+`mini.result.txt`, `duckdb-result.txt` and `gpu-result.txt` did not move either — no answer
+changed, which is the whole point.
+
+### Regeneration commands
+
+```
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --lib \
+  -- planner::tests::plan_goldens --test-threads=1          # 26 passed; 5 .plans.txt rewritten
+PCK_UPDATE_SECTIONS=1 cargo test --features rust-only -p peacockdb-core \
+  --test test_cpu_corpus cpu_pbench_<q>_ -- --test-threads=1   # once per query, 5 passed each
+```
+`PCK_UPDATE_SECTIONS` (merge only) rather than `UPDATE_CANONICAL` for the `.cpu.txt`, and
+`--test-threads=1`, so the two-writer section loss cannot happen. `PEACOCK_REWRITE_RECIPE_BYTES`
+was *not* set: `recipe-payloads.txt` verified rather than rewrote, and its two guard cases passed,
+so the wire format did not move under the rebase.
+
+### The bar, measured
+
+Local, `cargo test --features rust-only -p peacockdb-core -- --test-threads=2`, after the
+regeneration — exit 0, and `--no-run` reports **zero warnings**:
+
+| target | `--list` | result | `build-test.md` |
+|---|--:|---|--:|
+| `--lib` | 682 | 680 passed, 2 ignored (#182), 0 failed | 682 |
+| `test_cpu_corpus` | 922 | **922 passed, 0 failed** | 922 |
+| `test_corpus_goldens` | 26 | 26 passed | 26 |
+| `test_cost_model` | 3 | 3 passed | 3 |
+| `test_golden_format` | 43 | 43 passed | 43 |
+| `test_module_layout` | 18 | 18 passed | 18 |
+| `test_ci_coverage` | 11 | 11 passed | 11 |
+| `cargo test -p cost-report` | **41** | 41 passed | **40 — wrong, see below** |
+| `ctest -L cpu` / `peacock_cpu_tests` | 15 | 15 passed | 15 |
+| `testdata/test_duckdb_result.py` | — | Ran 20, OK | 20 |
+| `testdata/test_duckdb_cost.py` | — | Ran 41, OK | 41 |
+| `scripts/exec_model/tests/` (10 files, minus the three run elsewhere) | — | **216 passed** | 216 |
+| `scripts/exec_model/tests/test_tpch.py` | — | 19 passed | 19 |
+| `scripts/calibration/tests/` (3 files) | — | 12 passed | 12 |
+| `testdata/generate_pbench.sh --check` | — | `pbench.sf1 matches gen.sql`, exit 0 | — |
+
+Device, nebius-gpu `dmitry@89.169.109.150` (L40S, card idle, 37 GB free on `/`), cuDF 25.02,
+`./scripts/build-test-shadgpu.sh --build` exit 0 and **zero warnings**, each binary run directly
+with `LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib`,
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`, `--test-threads=1`:
+
+| binary | `--list` | result | `build-test.md` |
+|---|--:|---|--:|
+| `cpp/install/bin/peacock_gpu_tests` | 4 | 4 passed | 4 |
+| `cpp/install/bin/peacock_plan_tests` | 56 | 56 passed | 56 |
+| `cpp/install/rust-tests/test_gpu_corpus` | 58 | **58 passed, 0 failed** | 58 |
+| `cpp/install/rust-tests/test_node_timing` | 1 | 1 passed | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 536 | 536 passed | 536 |
+| `peacock_gpu_benchmarks --skip bench_` | 11 | 8 passed, 3 filtered | 11 |
+| `cpp/install/bin/peacock_cpu_tests` (bonus) | 15 | 15 passed | 15 |
+
+`test_gpu_corpus` ran **after** the regenerated goldens were rsynced up, and all 58 cells passed
+against them — so the device agrees with the new renderer text as well as the cpu does. The device
+authored nothing: all 18 `testdata/goldens/pbench.sf1/*` are md5-identical on both hosts after the
+run, and no `gpu-result-<v>.txt` exists anywhere in the tree.
+
+The C++ side of the device build was a no-op (`ninja: no work to do` locally too) — the rebase
+moved no file under `cpp/`, so the three C++ binaries are the ones staged on 2026-10-08 and the
+four Rust ones were relinked.
+
+### `f0a6ecbf`, the cost gate
+
+Covered and green: `cargo test -p cost-report` 41 passed, including the gate cases master added
+(`REGRESSION_FAIL_PCT`) and this branch's three widget cases; `test_ci_coverage` 11 passed, which
+is what reads `pipeline.yml`. Nothing about the 10% gate misbehaves against pbench's own 152/26
+and 5/0 hunks in `main.rs`.
+
+### build-test.md: one declared figure is wrong, by one
+
+Measured against the page's own tables. Right: cpu **1633** (682 + 922 + 26 + 3), ffi **7**
+(`--lib -- ffi_tests::` 4 on the device lib + `peacockdb-ffi --test test_ffi` 3 by source count),
+gpu **606** (536 + 58 + 11 + 1), C++ **97** (75 measured — 15 + 4 + 56 — plus the 22 sf40 /
+multi-GPU / manual cases the override defers), Python **401** (308 measured, plus the 93 manual
+corpus queries).
+
+Wrong: **the cost-report renderer row is 41, not 40.** The row's derivation was
+"37 at the fork, +1 from master's gate tests, +2 from this branch"; the truth is **36 at the fork,
++2 from master, +3 from this branch**. Two of the three terms were off and nearly cancelled.
+Counted four ways, all agreeing: `cargo test -p cost-report -- --list` says 41; `#[test]` in
+`cost-report/src/main.rs` is 41 here, 38 on `ENS-duckdb-oracle`, 36 at `f0a6ecbf^` and 36 at the
+rebase's old upstream `0df60133`; `git show f0a6ecbf -- cost-report/src/main.rs` adds 2; and the
+three names this branch adds over its parent are
+`the_widget_renders_a_pbench_section_beside_the_benchmarks`,
+`a_cell_with_all_five_modes_enabled_shows_one_larger_tick` and
+`a_cell_with_any_mode_off_keeps_five_glyphs`.
+
+So two sums move with it: **Rust 2358 → 2359** and **grand total 2856 → 2857**. The markdown is
+the human's; this round does not edit it.
+
+A trap worth naming: local `master` in this worktree is stale at `2ad302bf` and does **not**
+contain `f0a6ecbf`. `origin/master` is `f0a6ecbf`. Counting a master-side figure off the local ref
+gives the pre-gate number.
+
+### Deferred by the override, and recorded as deferred
+
+Unchanged from the previous round and none of it blocks the task: the sf40 pair
+(`peacock_tpch_tests`, `peacock_tpchv_tests` — 69 GiB against the L40S's 46 GB, and no
+`tpch.sf40` on the host), `--run-benchmarks` and the three `bench_` cases, the manual-only C++
+rows (streamed sf40, per-operator timings, the three multi-GPU binaries), Nsight captures, any
+H200 timing, and the 93-query exec-model corpus. shad-gpu is down, so `--run` and
+`--pull-results` were never invoked; verda is unreachable, so every CPU run was local.
+
+### Two local environment facts, still true
+
+`cpp/build` in this worktree is an empty root-owned directory and cmake still dies at configure
+there, so the C++ CPU suite was built and run out of `/tmp/dkb-cppbuild`, which is already
+configured against this worktree's `cpp/` with `cudf_ROOT` on the 25.02 env. And `matplotlib` is
+still absent from the workstation: `pip install --target /tmp/pydeps matplotlib` plus
+`PYTHONPATH=/tmp/pydeps MPLBACKEND=Agg` runs `test_plot.py` without touching the system
+environment. One new trap beside it — a stray `/tmp/struct.py` from an earlier round shadows the
+stdlib `struct` module for anything run with `cwd=/tmp`, which breaks `import matplotlib`; run
+from the repo root.
+
+### Files left in the working tree
+
+Ten regenerated goldens under `testdata/goldens/pbench.sf1/` — the five `.plans.txt` and the five
+`-mini.cpu.txt`, 25 changed lines each family, all `projection=` names — plus this section of
+`pbench-detail.md`. No code change: the rebase's two code files needed none, and nothing in the
+suite asked for one.
+
+### The one count the derivation got wrong, and how
+
+The round measured the cost-report renderer row at **41**, not the 40 the rebase derived, so the
+page now reads **2857 — Rust 2359**. The derivation said "37 at the fork, +1 from master, +2 from
+this branch"; the truth is 36 at the fork, +2 from master, +3 here, confirmed four ways (`cargo
+test -p cost-report -- --list`, the `#[test]` count at four revisions, `f0a6ecbf`'s own diff, and
+the three test names this branch adds). The cause is worth keeping because it will bite again:
+**the local `master` ref in this worktree is stale at `2ad302bf` and does not contain `f0a6ecbf`.**
+Any master-side figure read off `master` rather than `origin/master` is a pre-gate number. Read
+`origin/master`.

@@ -86,7 +86,7 @@ GpuUnload: output_rows=53, output_bytes=431
   in_rows=[[53]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
   GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, output_rows=53, output_bytes=431
     in_rows=[[2000]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
-    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, Int64(1)@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
       in_rows=[[2000],[8]] batch_rows=[[0,2000]] batch_bytes=[[0,25000]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32750
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32750]]
@@ -192,7 +192,7 @@ skipped: not enabled at this mode
 early_exit=none
 GpuUnload: output_rows=5002, output_bytes=40645
   in_rows=[[5002]] batch_rows=[[518,513,518,528,520,488,513,517,493,394]] batch_bytes=[[4209,4169,4209,4290,4225,3965,4169,4201,4006,3202]]
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=1, batches=multiple, output_rows=5002, output_bytes=40645
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=5002, output_bytes=40645
     in_rows=[[200],[20000]] batch_rows=[[518,513,518,528,520,488,513,517,493,394]] batch_bytes=[[4209,4169,4209,4290,4225,3965,4169,4201,4006,3202]]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=200, output_bytes=825
       in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[825]]
@@ -204,7 +204,7 @@ GpuUnload: output_rows=5002, output_bytes=40645
 early_exit=none
 GpuUnload: output_rows=4915, output_bytes=39939
   in_rows=[[4915]] batch_rows=[[508,501,509,517,512,481,507,508,485,387]] batch_bytes=[[4128,4071,4136,4201,4160,3909,4120,4128,3941,3145]]
-  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[s_y@0], lanes=1, batches=multiple, output_rows=4915, output_bytes=39939
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=4915, output_bytes=39939
     in_rows=[[200],[19600]] batch_rows=[[508,501,509,517,512,481,507,508,485,387]] batch_bytes=[[4128,4071,4136,4201,4160,3909,4120,4128,3941,3145]]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=200, output_bytes=825
       in_rows=[[200]] batch_rows=[[200]] batch_bytes=[[825]]
@@ -314,7 +314,7 @@ GpuUnload: output_rows=1, output_bytes=26
 early_exit=none
 GpuUnload: output_rows=13257, output_bytes=107717
   in_rows=[[13257]] batch_rows=[[1373,1346,1333,1365,1373,1375,1371,1332,1357,1032]] batch_bytes=[[11156,10937,10831,11091,11156,11172,11140,10823,11026,8385]]
-  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[t_k@0], lanes=1, batches=multiple, output_rows=13257, output_bytes=107717
+  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, output_rows=13257, output_bytes=107717
     in_rows=[[8],[20000]] batch_rows=[[1373,1346,1333,1365,1373,1375,1371,1332,1357,1032]] batch_bytes=[[11156,10937,10831,11091,11156,11172,11140,10823,11026,8385]]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
       in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
@@ -364,7 +364,7 @@ GpuUnload: output_rows=2009, output_bytes=24612
 early_exit=none
 GpuUnload: output_rows=3, output_bytes=25
   in_rows=[[3]] batch_rows=[[3]] batch_bytes=[[25]]
-  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[t_k@0], lanes=1, batches=multiple, output_rows=3, output_bytes=25
+  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[d_id@0], lanes=1, batches=multiple, output_rows=3, output_bytes=25
     in_rows=[[8],[2000]] batch_rows=[[3]] batch_bytes=[[25]]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
       in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
