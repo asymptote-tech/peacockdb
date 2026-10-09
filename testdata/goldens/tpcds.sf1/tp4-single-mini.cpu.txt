@@ -10629,13 +10629,13 @@ early_exit=none
 GpuUnload: output_rows=2, output_bytes=216
   in_rows=[[2]] batch_rows=[[2]] batch_bytes=[[216]]
   GpuMergeSortedPartitions: by=[i_item_id@0 asc nulls_last], fetch=100, lanes=1, batches=single, sorted_on=[i_item_id@0 asc nulls_last], output_rows=2, output_bytes=216
-    in_rows=[[0,0,0,2]] batch_rows=[[2]] batch_bytes=[[216]]
+    in_rows=[[0,0,2,0]] batch_rows=[[2]] batch_bytes=[[216]]
     GpuSort: by=[i_item_id@0 asc nulls_last], fetch=100, lanes=4, batches=single, hashed_on=[i_item_id@0, i_item_desc@1, i_current_price@2], sorted_on=[i_item_id@0 asc nulls_last], output_rows=2, output_bytes=216
-      in_rows=[[0,0,0,2]] batch_rows=[[],[],[],[2]] batch_bytes=[[],[],[],[216]]
+      in_rows=[[0,0,2,0]] batch_rows=[[],[],[2],[]] batch_bytes=[[],[],[216],[]]
       GpuAggregateBatches: group_by=[i_item_id@0, i_item_desc@1, i_current_price@2], aggs=[], final=[], lanes=4, batches=single, hashed_on=[i_item_id@0, i_item_desc@1, i_current_price@2], output_rows=2, output_bytes=216
-        in_rows=[[0,0,0,2]] batch_rows=[[],[],[],[2]] batch_bytes=[[],[],[],[216]]
+        in_rows=[[0,0,2,0]] batch_rows=[[],[],[2],[]] batch_bytes=[[],[],[216],[]]
         GpuEmitPartitions: hash=[i_item_id@0, i_item_desc@1, i_current_price@2], lanes=4, batches=multiple, hashed_on=[i_item_id@0, i_item_desc@1, i_current_price@2], output_rows=2, output_bytes=216
-          in_rows=[[2]] batch_rows=[[],[],[],[2]] batch_bytes=[[],[],[],[216]]
+          in_rows=[[2]] batch_rows=[[],[],[2],[]] batch_bytes=[[],[],[216],[]]
           GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2, output_bytes=216
             in_rows=[[2]] batch_rows=[[2]] batch_bytes=[[216]]
             GpuMergePartitions: lanes=1, batches=multiple, output_rows=2, output_bytes=216

@@ -619,4 +619,542 @@ is not 678, the cpu block, Rust and the grand total move with it.
 Everything in the task's verification bar, on the new base, plus the two things this rebase makes
 specifically doubtful: that the registry ↔ corpus pair still agrees in both directions after six
 hand-resolved hunks, and that no pbench golden moved. Red drops the task to `building` with the
-failure recorded here; green restores `reviewing`.
+failure recorded here; green restores `building`, which the override set and which the device
+half below is the work for.
+
+## The re-prove on the new base (2026-10-09) — green
+
+Every command with a `timeout`, plain `cargo test --features rust-only -p peacockdb-core` into
+`./target`, `--test-threads=2`. `cargo test --no-run` built every rust-only target from cold:
+exit 0, no warning.
+
+| command | measured | expected | |
+|---|---|---|---|
+| `test_cpu_corpus` | **940 passed, 0 failed** | 940 | ✓ |
+| `--lib` | **686** (684 passed, 0 failed, 2 ignored) | 678 carried | **corrected** |
+| `test_corpus_goldens` | 26 passed | 26 | ✓ |
+| `test_cost_model` | 3 passed | 3 | ✓ |
+| `test_golden_format` | 43 passed | 43 | ✓ |
+| `test_module_layout` | 18 passed | 18 | ✓ |
+| `test_ci_coverage` | 11 passed | 11 | ✓ |
+| `cargo test -p cost-report` | 39 passed | 39 | ✓ |
+| `test_duckdb_result.py` | 20 passed | 20 | ✓ |
+| `test_duckdb_cost.py` | 41 passed | 41 | ✓ |
+| `generate_pbench.sh --check` | `pbench.sf1 matches gen.sql` | — | ✓ |
+
+**The 27 carried reds are gone, and that is the rebase's doing, not a weakening.** They were the
+26 `duckdb_gpu_*` cases plus
+`every_enabled_device_cell_has_its_gpu_result_section_and_no_other`, red on a `gpu-result.txt` no
+device had written. pbench's device cycle wrote the three files, so all 56 `duckdb_gpu_*` cases
+now compare against a recorded answer and pass. Counted in the log: exactly 56 `duckdb_gpu_*`
+cases, which is the 56 enabled gpu cells.
+
+### `--lib` is 686, and the page's own rows already said so
+
+`build-test.md`'s header carried pbench's 678; its **rows sum to 1655**, and
+1655 − 939 − 1 − 26 − 3 = **686**. The rebase took the row numbers to HEAD (which carry this
+branch's 8 new tests: `Recipes per join type` 24→27, `Translator` 29→30, the new
+`Rollup's shuffle keys` 3, `Expression writer` 17→18) and re-derived only the four-figure header
+line, so the header was the one thing left at pbench's value. `--list` on the binary says
+`686 tests, 0 benchmarks`, independently.
+
+Corrected in `build-test.md`, re-summed by script rather than by eye: `--lib` 678 → **686**, the
+cpu block 1647 → **1655**, Rust 2371 → **2379**, grand total 2869 → **2877**. Every block header
+now equals its rows (cpu 1655, ffi 7, gpu 606) and the grand total its parts
+(2379 + 97 + 401 = 2877).
+
+### The registry ↔ corpus pair, answered
+
+Both deciding tests are green by name in the `test_cpu_corpus` log:
+`the_registry_matches_the_cpu_corpus_in_both_directions` ... ok and
+`every_device_cell_has_a_cpu_cell_at_the_same_mode` ... ok. Independently re-derived here, by
+parsing the declarations and the CSV:
+
+| | declarations (`corpus_cases.inc`) | registry (`cost-registry.csv`) |
+|---|--:|--:|
+| active lines / rows | 177 | 198 |
+| cpu cells | 697 | 697 enabled |
+| gpu cells | 56 | 56 enabled |
+
+and 136 lines at all five cpu modes, 8 partial, 33 fully out, oracles 110 / 16 / 14 / 33 / 4,
+144 running lines — every figure the coordinator re-derived, reproduced. No line declares a gpu
+cell without a cpu cell. So the six hand-resolved hunks agree in both directions.
+
+### No pbench golden moved that this branch did not move on purpose
+
+`git diff --stat ENS-pbench..HEAD -- testdata/goldens/pbench.sf1/` is 12 files, and **the device
+cycle's three answer files are not among them**: `gpu-result.txt`, `duckdb-result.txt` and the
+two tp1 `-mini.cpu.txt`/`.cost.txt` sets are byte-identical to the base. The 12 are exactly this
+branch's own two edits:
+
+- `timestamp-s-key-group`'s `--- recipes ---` block at all five modes, `not runnable: …​ (#240)` →
+  a real recipe tree (Task 5b);
+- `rollup-small-keys`'s tp4 cpu cells turning on — the three `tp4-*-mini.cpu.txt` and
+  `.cost.txt` sections going `skipped: not enabled at this mode` → a real block, the three
+  `tp4-*.plans.txt` sections losing `__grouping_id` from `hash=`/`hashed_on=`, and
+  `mini.result.txt`'s `mode=` stamp going `tp1-rowgroup` → `tp4-sized` with not one answer row
+  changed.
+
+### Verdict
+
+Green. The parenthesised state is `building` and the device half below is the work.
+
+## The device half (2026-10-09), on nebius-gpu's L40S
+
+Host `dmitry@89.169.109.150`, card idle, cuDF 25.02 at `~/data/miniforge3/envs/rapids-cuda-12.2`.
+Every cycle is: rsync the **uncommitted** tree with `--delete-after`, `build-test-shadgpu.sh
+--build` on the host, then run the staged binary directly. Never `--run` or `--pull-results`,
+which ssh to shad-gpu.
+
+### The device baseline on the new base, before any of this task's device work
+
+Measured first, so a later red is attributable. Every target green:
+
+| binary | measured | `build-test.md` |
+|---|---|---|
+| `peacock_plan_tests` | 56 passed | 56 |
+| `peacock_gpu_tests` | 4 passed | 4 |
+| `test_gpu_corpus` | 58 passed | 58 |
+| `test_node_timing` | 1 passed | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 536 passed | 536 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered | 11 (3 are `bench_`) |
+
+`the_registry_matches_the_gpu_corpus_in_both_directions` is green, so the registry ↔ corpus pair
+agrees on the **device** side too, not only the cpu side.
+
+**Two things the record left owing on the gtests are answered.**
+`Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` **passes on a card** — the count
+assertion holds at 24 and each of the four `NULL::TimestampX` projects throws. And the throw is
+`build_scalar`'s default, not an earlier refusal carrying the name: `grep -rn EnumNameDataType
+cpp/src/` returns exactly two sites, `expr.cpp:483` (`build_scalar`'s default,
+`"unsupported scalar type: " + name`) and `expr.cpp:654`, which names a *scalar function's*
+`return_type()` and is unreachable from a bare `NULL::T` project. So the substring search cannot
+be satisfied by anything else.
+
+### Plan Task 1 — #201, the gate proves `rows_per_lane` and not a copy of it
+
+**The defect, measured on a card first.** With the gate unchanged and production's
+`SEED` set to 43 — the kernel still seeded at 42 — **all 10 gates passed**. That is #201 exactly:
+the guard could not go red, because `cpu_partition_ids` was a second copy of the rule that moved
+with the gate rather than with production.
+
+Then the rewrite: `pmod` and `cpu_partition_ids` are gone from the gate, `pmod` is `pub(crate)`
+in `spark_partitioning.rs`, and `production_partition_ids` builds a `RecordBatch` and a `Column`
+expr per key and inverts production `rows_per_lane`'s per-lane row lists into one id per row.
+`assert_gpu_matches_comet_live` → `assert_gpu_matches_rule_live`.
+`cpu_reference_2col_partition_ids_for_probe` is deleted — it was a print-only probe over the
+deleted copy. `pmod_handles_negative_hashes` now asserts the imported production `pmod`.
+
+**The red-green cycle, the whole of #201's proof:**
+
+- `SEED = 43`: **7 failed, 2 passed** — every `*_match_rule_live` gate red, each printing its two
+  lane vectors, e.g. the string gate `left: [3, 7, 1, 0, 4, 2]` against
+  `right: [6, 7, 3, 4, 2, 4]`. The two that stay green are the two that do not drive the kernel
+  (`pmod_handles_negative_hashes`, `step_i_comet_murmur3_public_api_compiles_and_runs`).
+- `SEED = 42` restored: **9 passed, 0 failed.**
+
+The gate count is 10 → 9, the deleted probe.
+
+**The third copy of the rule is gone too.** `CudfGpu.SparkPartitionIdsMatchCometSingleCol` and
+`CudfGpu.SparkPartitionIdsMatchComet2ColWithNulls` and their `gpu_partition_ids` helper are
+deleted from `cpp/tests/gpu/test_cudf.cpp` — 47 lines of hardcoded comet ids. With them went the
+includes nothing else in the file used (`cudf_test/column_wrapper.hpp`, `peacock/partitioning.hpp`,
+`cuda_runtime.h`, `cudf/hashing.hpp`, `cudf/table/table_view.hpp`, `cudf/utilities/default_stream.hpp`,
+`cstdio`, `vector`) and the `cudf::test::get_default_stream` shim, which existed only for
+`strings_column_wrapper`. `peacock_gpu_tests` now runs **2 tests, both PASSED**, so
+`build-test.md`'s "cuDF GPU smoke" row drops 4 → 2.
+
+### Plan Tasks 3, 4, 5, 6, 6b — every kernel arm, each red first as a live gate
+
+One device cycle per arm group, `PCK_TEST_FILTER` being the binary's own filter argument
+(`peacockdb_core_gpu_lib murmur_conformance --test-threads=1`). The gate count runs 9 → 19.
+
+| plan task | arm | the red, measured | green |
+|---|---|---|--:|
+| 3 | Boolean, as comet's i32 | `unsupported key column cuDF type_id=11` at `.cu:179` | 12 |
+| 4 | Float32/64 | `type_id=9` and `type_id=10` at `.cu:180` | 15 |
+| 5 | Timestamp, all four units + a zoned one | `type_id=13` (TIMESTAMP_SECONDS) at `.cu:212` | 16 |
+| 6 | Decimal128, 16 bytes | `type_id=27` at `.cu:219`, both gates | 18 |
+| 6b | UInt8/16/32/64 | **the cpu first**: `comet murmur3: Internal error: Unsupported data type in hasher: UInt8` — comet has no unsigned arm at all, so the rule refuses before the kernel is reached | 19 |
+
+**Int8, the zero-row input and the all-NULL key were green on arrival**, which is the survey's
+point: the kernel already widened INT8 and already skipped the kernel launch at `n == 0`, and
+nothing asserted either. They are gates now.
+
+Each arm also widened the `CUDF_FAIL` text's supported list, so the refusal a *future* unmapped
+type gets names what is actually supported. The fixed-width kernel's comment
+"Int64/Timestamp-as-i64 → 8B" was true of nothing before Task 5 and is true now.
+
+**The cpu halves, in `hash_keys`.** Three normalizations before comet, each the other half of a
+two-engine rule:
+
+- `canonical_nans` maps every NaN to Rust's `NAN` (`0x7ff8000000000000` / `0x7fc00000`). comet
+  hashes a float by its bits, so without it `NaN` and `-NaN` split at tp4 while the device
+  equates them at tp1.
+- a `Decimal128(p, s)` with `p < 38` is cast to `Decimal128(38, s)`, so comet hashes 16 bytes at
+  every precision.
+- `UInt8`/`UInt16` cast to `Int32`, `UInt32` to `Int64`, and `UInt64` goes through
+  `unary::<_, Int64Type>(|v| v as i64)` — **by its bits, not its value**, since a `u64` past
+  `i64::MAX` has no `i64` value. The gates carry `1 << 63` and `u64::MAX` for exactly that.
+
+#### One deviation: the NaN lane test is rust-only, not a device gate
+
+The plan puts `every_nan_shares_a_lane_and_so_do_the_two_zeros` in `murmur_conformance.rs` with a
+`lanes_of` helper, then says to run it locally under `--features rust-only`. Those two cannot both
+hold: `cpu_backend/mod.rs:716` declares `gpu_tests` `#[cfg(all(test, feature = "gpu"))]`, so
+anything in that file runs on the device rung alone.
+
+The test needs no device — it asserts which rows the **cpu rule** puts together — so under the
+rung rule ("a test module declares the lowest build rung it needs") it belongs in the rust-only
+tier, and it is now `executor/cpu_backend/spark_partitioning/tests.rs`, the sanctioned
+`foo.rs` + `foo/tests.rs` shape that `accumulate.rs` and `join.rs` already use in this
+subcomponent. It therefore runs in every CI cpu leg rather than only on a card, which is strictly
+more coverage than the plan asked for. Its red-green cycle was watched in that tier:
+
+    assertion `left == right` failed: NaN and -NaN share a lane
+      left: 7
+     right: 2
+
+before `canonical_nans`, green after. `lanes_of` lives in that file instead, so
+`murmur_conformance.rs` gained no unused helper.
+
+#### The cpu goldens D2 moves: 30 sections, 6 queries, and not one answer
+
+The decimal cast changes which lane a decimal key lands in at p ≤ 18, so the cpu's own tp4
+goldens move. **That is decision D2's designed effect, not a regression** — the spec says "a
+decimal's lane no longer matches Spark's at p ≤ 18, deliberately" — but it is a golden movement
+and it was diagnosed before it was regenerated, not cleared with `UPDATE_CANONICAL`.
+
+**The 18 reds, before any regeneration**, from `test_cpu_corpus` (922 passed, 18 failed):
+`pbench/decimal15-key-group` and `-key-join`, `tpch/q2`, `q10`, `q18`, `tpcds/q82` — six
+queries × the three tp4 modes, and **nothing else in the 940**. All 18 panic at the same site,
+`test_support/corpus_golden.rs:202`, which is the golden-text differ. Zero DuckDB cases and zero
+meta cases failed, which is what says the *answers* did not move: the DuckDB tier compares
+against `duckdb-result.txt` and each corpus case compares the live answer against plain
+DataFusion at one partition, and both stayed green through the red.
+
+The signature is lane redistribution and nothing else — `in_rows=[[12,14,17,14]]` →
+`[[14,14,11,18]]` on q18 (same total, 57), `[[0,0,0,2]]` → `[[0,0,2,0]]` on q82 (a permutation).
+
+**`decimal38` does not move, and that is the check that the cause is the cast and not something
+else**: at p = 38 comet already hashed 16 bytes, so the widening is a no-op there, and
+`decimal38-key-group`/`-key-join` stayed green throughout.
+
+Regenerated scoped to those six queries, then counted by parsing `== <section>` headers rather
+than by eye:
+
+| | |
+|---|--:|
+| sections moved | **30** |
+| sections added | **0** |
+| sections removed | **0** |
+| `*-mini.cpu.txt` | 18 (6 queries × 3 tp4 modes) |
+| `*-mini.cost.txt` | 12 |
+
+No `.plans.txt`, no `.result.txt` and not `recipe-payloads.txt` moved — correct, because the lane
+rule is not in the wire and does not change the answer. The 12 cost sections are the 18 minus
+`tpch/q18` and `tpcds/q82`, whose costs are unchanged because their lane change is a permutation
+of the same per-lane totals and the model sums across lanes; `test_cost_model` is green, which is
+the independent check that each `.cost.txt` still derives from its `.cpu.txt`.
+
+**The strongest single check: not one `output_rows=` value changed anywhere in the 30 sections.**
+Extracting every `output_rows=N` from the `-` side and the `+` side of the diff and sorting both
+gives byte-identical lists. Only the per-lane `in_rows` split and the `output_bytes` that follows
+from a different row mix moved.
+
+Afterwards: `test_cpu_corpus` **940 passed, 0 failed**; `test_cost_model` 3,
+`test_corpus_goldens` 26, `test_golden_format` 43, `--lib` 685 passed + 2 ignored = **687**.
+
+### Plan Task 7 — every key type through the operator harness
+
+`synthetic::key_types(rows, seed)` and `key_types_schema()`: 20 columns, ordinals 0–19, the
+unsigned four last so the rest keep theirs. Five tests of the generator itself, in the rust-only
+tier beside `a_synthetic_batch_is_the_same_batch_twice`, and they are gates rather than
+bookkeeping — each asserts a property a case downstream depends on and nothing else would catch:
+deterministic from the seed, a null in all 19 non-id columns, **both zeros and both NaN signs
+present in `f64`**, a `u32` past `i32::MAX` and a `u64` past `i64::MAX`, and a `dec38` value no
+`i64` can hold.
+
+**The three `bug_` pins flipped rather than being deleted quietly.** Before Task 7 they were
+*red*, which is the signal the style guide describes — `bug_a_float_key_is_refused_on_the_device`,
+`bug_a_boolean_key_is_refused_on_the_device` and `bug_a_decimal_key_is_refused_on_the_device`
+asserted a refusal the kernel no longer makes (measured: 542 passed, **3 failed**, exactly those
+three). They are gone, and in their place 21 green cases: one per key ordinal 1–19, a mixed
+composite over `[f64, dec38, s, d]`, and a zero-row batch scattered on each of the 19 in turn.
+`refused_key_type` went with them, having no caller.
+
+`emit_schema_cases.rs` gained 15, one per key type whose kernel arm *normalizes* the column —
+the half a lane comparison cannot see, since both engines could agree on the lane and the device
+still hand up the widened column rather than the declared one.
+
+| binary | before | after |
+|---|--:|--:|
+| `emit_cases` | 18 (3 of them pins) | **33** |
+| `emit_schema_cases` | 6 | **21** |
+
+#### Plan Task 7 step 3b — #245's struct-key pin cannot be written, and #255 is why
+
+The pin was written, run, and removed. It does not reach the hasher at all:
+
+    type_structural_size: unhandled DataType Struct([...]) — add a deterministic arm
+    panicked at peacockdb-core/src/common.rs:66
+
+**That is [#255](../tickets/complete-coverage.md#t255) by its own citation** — the ticket names
+`common.rs:66` and the same `"add a deterministic arm"` message, and says in as many words "Not
+#245 either — that is the shuffle's hasher". The harness prices every batch's schema, so a nested
+key aborts before any scatter runs, on either engine. Adding a Struct arm to
+`type_structural_size` to make a pin work would be production code changed for a test, outside
+the spec's Restriction, and the comment at that site says the arm it wants is a *deterministic*
+one, which a Struct's cannot be derived from the parent row count. So the step is **blocked by
+#255, not deferred by choice** — the same shape as Task 5c step 4, in a different place.
+
+### Plan Task 8 — #243's two pins, green as pins
+
+Both assert the divergence and both matched the plan's predicted numbers on the first run, which
+is itself evidence the divergence is understood rather than discovered:
+
+| pin | cpu | device |
+|---|--:|--:|
+| `bug_a_float_group_key_splits_negative_zero_and_the_nans_on_the_cpu` | 6 groups | 4 |
+| `bug_a_float_join_key_misses_negative_zero_and_nan_pairs_on_the_cpu` | 4 rows | 7 |
+
+`float_key_batch()` and `rows()` are `pub(crate)` in `aggregate_cases.rs` and shared with
+`join_cases.rs`. `hash_join_with` now delegates to a new `hash_join_on`, which takes the key pair
+— the old helper hardcoded `vec![(1, 1)]` and the pin needs `(4, 4)`, and a parameter is better
+than a second copy of the builder.
+
+**The pins are about equality, not the lane rule**, and they stay green precisely because this
+task did not touch the cpu's float equality: #243 is reworded, not fixed.
+
+### Plan Task 5b's owed gtest, written and proved on a card
+
+`PlanExecutor.CastTimestampMicrosToSeconds` plus `PlanExecutor.CastToEveryWireTimestampUnit`.
+`peacock_plan_tests` is **58 passed** (was 56).
+
+**The plan's construction does not work and the measurement says why.** It asks for a
+`TIMESTAMP_MICROSECONDS` column holding `1'500'000` and `-1`, built by casting an int64. cuDF
+refuses that:
+
+    CUDF failure at cast_ops.cu:428: Timestamps cannot be converted to numeric
+    without converting it to a duration
+
+which confirms the note already in `test_plan_executor.cpp` ("cudf::cast makes no timestamp from
+a number"). The source is therefore a Date32 `CASE` — 1995-03-15 for the first ten nations,
+1969-12-31 for the rest — cast up to the unit under test, which gives a **negative** instant as
+well as a positive one. The sub-second flooring the plan wanted cannot be reached without a
+timestamp column in `tpch.minimal`, and is recorded here rather than faked.
+
+**Red-green on a card, not assumed**: with the four `fb_to_type_id` arms deleted both gtests fail
+with `type_dispatcher.hpp:546: Invalid type_id` — the target maps to `EMPTY` — and both pass with
+them restored. That is the cycle the record said was owed for the C++ half of Task 5b.
+
+### Plan Task 9 step 2 — the cells, each settled on what it measured
+
+**The registry is the write-side authority, and that cost a round.** `declared_sections`
+(`corpus_golden.rs:445`) reads `cost-registry.csv`, not `corpus_cases.inc`, so a newly-enabled
+cell's golden section **cannot be written until the CSV says `enabled`** — the merge rebuilds
+against a skeleton the CSV produces and puts the `skipped: not enabled at this mode` marker back.
+Worse, a regeneration run reports that case as `ok` while doing it, because under regeneration the
+case writes instead of asserting. The first attempt looked green and had written nothing; only
+reading the golden back caught it. **Order matters: registry first, then regenerate, then verify.**
+The same effect hid three `gpu-result.txt` sections on the first recording run.
+
+Also: `UPDATE_CANONICAL=1` is the *whole-file* form and `PCK_UPDATE_SECTIONS=1` the filtered one
+(`test_support/mod.rs:646`). A filtered run wants the latter.
+
+#### The cpu side — #189's last six cells
+
+`uint-key-group` and `uint-key-join` go `tp1_single | tp1_rowgroup` → `all_modes` on the cpu: six
+cells, all green. These are the six #189 was still holding, and comet could not hash them before
+Task 6b's widening. #189 now reaches all 24 of its cells.
+
+#### The device side — 21 cells on, 20 left off with the ticket each actually failed on
+
+Every candidate was enabled, run on the card, and then settled on the measurement. **21 on:**
+
+| query | gpu before | gpu after | ticket struck |
+|---|---|---|---|
+| `bool-key-group` | two tp1 | **all five** | `206` |
+| `decimal15-key-group` | two tp1 | **all five** | `95` |
+| `decimal38-key-group` | two tp1 | **all five** | `95` |
+| `timestamp-ms-key-group` | two tp1 | **all five** | `240` |
+| `timestamp-ns-key-group` | two tp1 | **all five** | `240` |
+| `timestamp-us-key-group` | two tp1 | **all five** | `240` |
+| `uint-key-group` | two tp1 | **all five** | `189` |
+
+Each of those seven rows now has **zero off cells, so its ticket column is empty** —
+`registry.rs:242` would accept a stale ticket there, which is exactly the rot to avoid.
+
+**Left off, each with the ticket it was measured to fail on:**
+
+| query | cells | measured failure | ticket after | before |
+|---|--:|---|---|---|
+| `timestamp-s-key-group` | 5 | `CudfAggregate: only ColumnRef group exprs supported` — the query groups on `arrow_cast(f_ts_s, …)`, so the group expr is a CAST | **wants a new ticket**; left at `240` | `240` |
+| `uint-key-join` | 4 | `#152` verbatim: "this join's recipe copies its build side per probe batch and the ABI has no copy" | `152` | `152 189` |
+| `decimal15-key-join` | 5 | the cpu's `batch_rows=[[8192,8192,…]]` against the device's `[[132216]]` — #220's several-batches-per-join-call | `152 220` | `95 152 220` |
+| `ts-key-join` | 5 | the same, `[[8192,…]]` vs `[[100000]]` | `152 220` | `152 220 240` |
+| `rollup-small-keys` | 5 | `the output hook refused a batch: 2 __grouping_id: UInt8 vs INT32` — #65 verbatim | `65` | `65 206` |
+
+**Four tags dropped because they stopped explaining a cell**: `95` from `decimal15-key-join`
+(decimals hash now), `240` from `ts-key-join` (timestamps hash now), `206` from
+`rollup-small-keys` (the boolean arm exists; #65 is what is left), `189` from `uint-key-join`
+(the cpu cells are on). Each was checked against a *measured* failure, not against a plan.
+
+#### `timestamp-s-key-group` is the one finding that needs a ticket I may not file
+
+Its five device cells fail on a cause that is **not #240 and not in this task's scope**: the
+device's `CudfAggregate` (`cpp/src/operators/aggregate.cpp:163`) refuses any group expression
+that is not a `ColumnRef`. #240 is fixed — the ms/ns/us rows prove the timestamp *key* hashes —
+and the wire now names the type, which is what this branch added. There is no existing ticket for
+it: `grep` over every ticket file finds nothing about a computed group expression, and the nearest
+neighbours are #57 (a value-form CASE) and #62 (a DISTINCT beside an aggregate), neither of which
+is this.
+
+So the row keeps `240` for now, because `cost-report/src/main.rs:475` **exits 1 on a registry
+ticket that resolves to no anchor**, and the ticket files are not mine to write. **Two consequences
+for whoever picks this up: #240 must not be archived until row 195 is retagged, and the ticket
+needs filing.** Proposed, under the 15-line cap:
+
+> ### #264 — the device refuses a group key that is not a bare column
+> `CudfAggregate` throws `"CudfAggregate: only ColumnRef group exprs supported"`
+> (`cpp/src/operators/aggregate.cpp:163`) for any group expression that is not a `ColumnRef`, so
+> `GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on
+> the device at every mode. The cpu answers. The planner does not lower a group expression into a
+> project below the aggregate, and the recipe hands the expression through as it stands.
+>
+> **Corpus queries:** `pbench/timestamp-s-key-group`
+> (`GROUP BY arrow_cast(f_ts_s, 'Timestamp(Second, None)')`). Its five device cells are off and
+> registry row 195 tags `240` only because this ticket has no number yet; retag it on filing.
+> Not #240 — the timestamp key itself hashes on both engines since repartition-keys, which the
+> three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes.
+
+### The final measurement, both engines, on the formatted tree
+
+Every number below is from a run after the last edit, not carried forward.
+
+**cpu, local, `--features rust-only` into `./target`, `--test-threads=2`.** `cargo test --no-run`
+from cold: exit 0, **no warning**.
+
+| target | measured | before this round |
+|---|--:|--:|
+| `test_cpu_corpus` | **967** passed, 0 failed | 940 |
+| `--lib` | **692** (690 passed, 0 failed, 2 ignored) | 686 |
+| `test_corpus_goldens` | 26 | 26 |
+| `test_cost_model` | 3 | 3 |
+| `test_golden_format` | 43 | 43 |
+| `test_module_layout` | 18 | 18 |
+| `test_ci_coverage` | 11 | 11 |
+| `cargo test -p cost-report` | 39 | 39 |
+| `test_duckdb_result.py` | 20 | 20 |
+| `test_duckdb_cost.py` | 41 | 41 |
+| `generate_pbench.sh --check` | `pbench.sf1 matches gen.sql` | — |
+| `cost-report` binary | wrote `cost_report.html` | — |
+
+The `cost-report` run matters on its own: `main.rs:475` exits 1 if any registry ticket resolves to
+no anchor, so a completed run is the proof that every tag left on a row — and every tag cleared —
+still resolves.
+
+**device, nebius-gpu L40S, cuDF 25.02, each staged binary run directly.**
+
+| binary | measured | before |
+|---|--:|--:|
+| `peacock_plan_tests` | **58** | 56 |
+| `peacock_gpu_tests` | **2** | 4 |
+| `peacock_cpu_tests` | 15 | 15 |
+| `test_gpu_corpus` | **79** | 58 |
+| `test_node_timing` | 1 | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | **580** | 536 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 passed, 3 filtered | 8 / 3 |
+| of which `murmur_conformance` | **19** | 10 |
+
+**The device lib's +44 reconciles exactly**, per file, against `HEAD`: `emit_cases` 15→33 (+18),
+`emit_schema_cases` 6→21 (+15), `murmur_conformance` 10→19 (+9), `aggregate_cases` 20→21 (+1),
+`join_cases` 89→90 (+1). 18+15+9+1+1 = 44, and 536+44 = 580.
+
+### `build-test.md`, re-summed by script and not by eye
+
+`--lib` 686 → **692**, `test_cpu_corpus` 940 → **967**, `Corpus, cpu` 939 → **966**,
+`Harness helpers` 16 → **21**, a new `The lane rule's own properties` row at **1**, the cpu block
+1655 → **1688**; `Corpus, device` 57 → **78**, `Operator harness` 335 → **355**,
+`Operator harness, what the device holds` 134 → **149**, `GPU↔comet murmur3` 10 → **19**,
+`test_gpu_corpus` 58 → **79**, the gpu block 606 → **671**; `cuDF GPU smoke` 4 → **2** and
+`Plan-executor` 56 → **58**, which cancel, so C++ stays 97; Rust 2379 → **2477**, grand total
+2877 → **2975**. Prose counts that are arithmetic: the DuckDB tier 236 → **257** (177 + 77 + 3),
+`697 cells` → **703**, and the partial-line list drops `uint-key-group` and `uint-key-join`, which
+now run at all five cpu modes, leaving `scalar-subquery-cross`.
+
+A script checks three things rather than a reader: every block header equals its rows, every
+header's named parts equal the header, and the grand total equals the two tables. All three hold.
+
+### Formatting
+
+`rustfmt --edition 2024 --config skip_children=true` is **clean** on
+`spark_partitioning.rs`, `spark_partitioning/tests.rs`, `synthetic.rs`, `emit_cases.rs`,
+`emit_schema_cases.rs`, `join_cases.rs` and `aggregate_cases.rs` — every one of which was clean at
+`HEAD` and had to stay so. `murmur_conformance.rs` was **already 189 lines drifted at `HEAD`**
+(its data vectors are hand-formatted several-values-per-line), and the precedent here is round 2's
+deviation 4: rather than bury the rewrite in 189 lines of unrelated reflow, every construct *this
+round added* was put in rustfmt's shape one at a time — eight of them — and the remaining 129
+differing lines were then checked to be nothing but the pre-existing vector idiom.
+
+`git clang-format --diff HEAD -- cpp/` is **clean**; its 112-line patch was applied to the working
+tree with `git apply` (the index is untouched, and `git clang-format` itself refuses an unstaged
+tree). The machine format was kept even where it breaks the one-parameter-per-line idiom of the
+kernels around it, as `coding-style.md` requires and as round 2's deviation 5 already settled.
+
+### Deferred by the chain-wide host override, each recorded as such
+
+- **the sf40 pair**, `peacock_tpch_tests` and `peacock_tpchv_tests` — not run. Doubly
+  unrunnable: 69 GiB against the L40S's 46 GB, and no `tpch.sf40` on the host.
+- **`--run-benchmarks` and the three `bench_` cases** — not run; the 3 filtered cases in every
+  `peacock_gpu_benchmarks` line above are exactly those.
+- **Nsight captures** — not taken.
+- **H200 timing** — not taken; no H200.
+- **cuDF 26.02** — not built; red there for #260 and #94, outside this chain.
+
+Nothing was deleted from the host: it ended with 37 GB free of 96, so the override's cleanup rules
+were never needed.
+
+### One trap worth the next developer's attention: the registry writer and CRLF
+
+Editing `cost-registry.csv` with Python's `csv.writer` rewrites **every** line, because the
+writer's default terminator is `\r\n`. The eleven intended row changes came out as a 199-line
+diff, and **every test still passed** — the parser is tolerant of it — so nothing would have
+caught it before review. `git diff --numstat` is what caught it: 199/199 where 11/11 was expected.
+Converted back to LF and re-verified; the diff is now 11 rows and nothing else. Check the numstat
+after any scripted edit of that file.
+
+### What this round did not take, and why
+
+- **Plan Task 10's wiki edits and the five archivals.** `llm-wiki/` markdown other than this
+  plan and this file belongs to the human in this dispatch, with `build-test.md`'s counts carved
+  out and done. The prose owed, and what each sentence should say, is above.
+- **#95, #189, #201 and #206 are ready to archive; #240 is not.** Every cell the first four held
+  is now run and enabled, #189's at all 24. #240's last five cells
+  (`pbench/timestamp-s-key-group`) are off on a different cause, so archiving it would leave them
+  explained by a closed ticket — the rot this round was told to avoid. File the proposed #264,
+  retag registry row 195, and #240 goes with the rest.
+- **The #245 struct-key pin** — blocked by #255, demonstrated rather than assumed.
+- **The float rows** (`float32-key-group`, `float64-key-group`, `float64-key-join`) stay
+  commented out, on #243, which this task reworded and did not fix. The spec says so.
+- **The sub-second half of the timestamp cast gtest** — `tpch.minimal` has no timestamp column
+  and cuDF makes no timestamp from a number, measured.
+
+### The last run, on the exact tree left in the working directory
+
+After the CRLF fix and the formatting, both engines re-run end to end:
+
+    cpu   test_cpu_corpus 967/0 · --lib 690+2 · test_corpus_goldens 26 · test_cost_model 3
+          test_golden_format 43 · test_module_layout 18 · test_ci_coverage 11
+          cost-report 39 · cost-report binary exit 0
+    gpu   peacock_plan_tests 58 · peacock_gpu_tests 2 · peacock_cpu_tests 15
+          test_gpu_corpus 79/0 · test_node_timing 1 · gpu_lib 580/0
+          peacock_gpu_benchmarks 8 passed, 3 filtered
+
+Zero failures anywhere. The device build emitted **no warning**; the one warning the device
+type-check still reports, `unused import: AsArray` in `gpu_tests/aggregate_dimension_cases.rs`,
+is on `ENS-pbench` and that file is not in this diff. nebius-gpu ended with 37 GB free of 96, so
+nothing was cleaned.
+
+**To stage:** the 32 modified files plus the one new directory,
+`peacockdb-core/src/executor/cpu_backend/spark_partitioning/` (which holds `tests.rs`).

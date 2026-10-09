@@ -305,12 +305,12 @@ corpus_query!(tpcds, 1, q92, all_modes, none, duckdb_exact, data_fusion_exact, g
 // the planner, 21 of them citing their ticket on the golden's `refused:` line; the other 5 plan
 // fine and the cpu backend refuses them at run time, on #190. Three queries are absent, on #255.
 corpus_query!(pbench, 1, anti_null_preserved_condition, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, bool_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, bool_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_projection, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, decimal15_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, decimal15_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, decimal15_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, decimal38_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, decimal38_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_side_left_join, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, exists_null_keys, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, exists_or_mark, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -354,13 +354,13 @@ corpus_query!(pbench, 1, sparse_build_full, all_modes, none, duckdb_fingerprint,
 corpus_query!(pbench, 1, sparse_build_right, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_left, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_ms_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_ns_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_ms_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_ns_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, timestamp_s_key_group, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, timestamp_us_key_group, all_modes, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, timestamp_us_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, ts_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, uint_key_group, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, uint_key_join, tp1_single | tp1_rowgroup, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, uint_key_group, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, uint_key_join, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // #243 — the cpu keys -0.0 and NaN by their BITS, so the three float rows land with their SQL,
 // their plan goldens and their DuckDB answers, and their lines commented out for the task that

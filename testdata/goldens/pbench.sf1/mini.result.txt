@@ -30415,9 +30415,9 @@ fingerprint: rows=19848
 col 0: nonnull=19847
 col 1: nonnull=19848
 hash: 8d45fa3de34c9b38f05b58949b92998f35534f3b8c6433ff2f1049d10dfeacff
-mode=tp1-rowgroup
+mode=tp4-sized
 == uint-key-join
-mode=tp1-rowgroup
+mode=tp4-sized
 +------+------+
 | f_id | d_id |
 +------+------+

@@ -17,19 +17,19 @@ peacockdb_cost=1453292163
 == q2
 storage_read_bytes=64597547 # GpuLoadParquet
 cuda_filter_bytes=19624 # GpuFilter
-cuda_hash_join_bytes=50873259 # GpuHashJoin
+cuda_hash_join_bytes=50873251 # GpuHashJoin
 cuda_aggregate_bytes=9427420 # GpuAggregate, GpuAggregateBatches
-cuda_sort_bytes=95918 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
+cuda_sort_bytes=95935 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
-cuda_shuffle_bytes=210665471 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
-cuda_passthrough_bytes=57200216 # GpuProject, GpuCoalesceAllBatches
+cuda_shuffle_bytes=210665504 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
+cuda_passthrough_bytes=57200208 # GpuProject, GpuCoalesceAllBatches
 vram_to_ram_bytes=19224 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=392898679
+peacockdb_cost=392898713
 == q3
 storage_read_bytes=168005022 # GpuLoadParquet
 cuda_filter_bytes=148950589 # GpuFilter
@@ -146,18 +146,18 @@ peacockdb_cost=1894511652
 storage_read_bytes=168595522 # GpuLoadParquet
 cuda_filter_bytes=60636752 # GpuFilter
 cuda_hash_join_bytes=58907482 # GpuHashJoin
-cuda_aggregate_bytes=31244427 # GpuAggregate, GpuAggregateBatches
-cuda_sort_bytes=19811 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
+cuda_aggregate_bytes=31244435 # GpuAggregate, GpuAggregateBatches
+cuda_sort_bytes=19850 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
-cuda_shuffle_bytes=256622914 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
-cuda_passthrough_bytes=76487335 # GpuProject, GpuCoalesceAllBatches
+cuda_shuffle_bytes=256622922 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
+cuda_passthrough_bytes=76487343 # GpuProject, GpuCoalesceAllBatches
 vram_to_ram_bytes=3898 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=652518141
+peacockdb_cost=652518204
 == q11
 skipped: not enabled at this mode
 == q12
