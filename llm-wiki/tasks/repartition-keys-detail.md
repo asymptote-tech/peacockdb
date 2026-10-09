@@ -1757,3 +1757,54 @@ numbers exist.
 `architecture.md` gained the one sentence that would have made this legible in a minute: a cost
 total is lane-split dependent, because `output_bytes` carries per-batch padding, so any change to
 the lane rule moves it even where no row, node or lane count does — and the gate fires on a byte.
+
+## Rebased onto the rebased pbench, and the block cleared by the human (2026-10-09)
+
+`git rebase --onto ENS-pbench d39fdded ENS-repartition-keys`, 18 commits, no stop. Method and why
+it is cheap: `duckdb-oracle-detail.md`, "The rebase, executed". The whole chain moved this run —
+duckdb-oracle onto master `f0a6ecbf` and back to `done`, pbench after it and back to `done`.
+
+**The block is cleared, and not by me.** `f0a6ecbf` adds this to the chain's host override:
+"Cost regressions are accepted for repartition-keys, join-session-cpp and join-backend… for
+repartition-keys, the +423-byte lane-split regression its developer diagnosed." The human named the
+exact obstacle the block was written for, so the block is theirs to have cleared and is cleared.
+Two things follow. The same commit takes the gate itself to a 10% tolerance
+(`REGRESSION_FAIL_PCT`), so at +0.000042% the gate should now pass on its own rather than being
+waived — but the rebase moves the base it diffs against, so it has to be **re-measured, not
+assumed**. And the override asks for the regression to be named in the PR as well as here, which is
+a comment on #169 the coordinator owes.
+
+### The intersection, and why the goldens were resolved differently
+
+This branch touches 74 files, the new parent moved 54, and they overlap in **twenty**: the six
+`llm-wiki/*.md`, and **fourteen goldens** — eight of pbench's and six tpcds `tp4-*`. The 54
+non-intersecting files came across byte for byte.
+
+Goldens are not textually mergeable, and the three-way merge for them is the wrong question
+anyway: master's `64ced62e` moved the plan-text renderer, so **every plan golden on this branch was
+written by the old renderer** whether it conflicted or not. So the fourteen were resolved
+mechanically — a one-line `merge=takebranch` driver (`cp %B %A`) attached to those paths alone,
+taking the replayed commit's side every time — and all fourteen were then verified byte-identical
+to the pre-rebase branch. That is deliberately the wrong content, and **the regeneration round
+below is what makes it right**; a stale golden is a red test, which is the net under it. Nothing
+else in the tree got that treatment: the driver was attached by path, and a conflict anywhere else
+would have stopped the replay.
+
+The six markdown files cost three hunks in `tasks.md`, three in `tickets.md`, two in
+`build-test.md`, and nothing at all in the other three — `archive/archived-tickets.md`,
+`tickets/complete-coverage.md` and `tickets/corpus-coverage.md` all merged clean, which is the
+rebase's own evidence that this branch's five archivals do not collide with master's.
+
+- **`tasks.md`**: parent's numbering and the two states below this one (duckdb-oracle and pbench are
+  both `done` now), and **this branch's link targets** for its own five tickets — #201, #206, #240,
+  #95 and #189 point at `archive/archived-tickets.md` here because this branch archived them, and
+  master's copy still points at `corpus-coverage.md` because master has not seen that yet.
+- **`tickets.md`**: next free **265** (this branch filed #264), keeping master's sentence that it
+  reserved 264–279 for this chain and went on to 284 itself. Rows re-derived from the ticket files'
+  anchors: **123 open over 11 rows**, every row agreeing with its file in count and order, header
+  equal to the sum. The drop from pbench's 127 is this branch's five archivals plus #264.
+- **`build-test.md`**: derived from the page's own two tables, not by adding deltas. **2981 — Rust
+  2483, C++ 97, Python 401**; cpu 1692 (`--lib` 696, `test_cpu_corpus` 967, 26, 3), ffi 7, gpu
+  **671** (580, 79, 11, 1). Every tier heading equals its rows and its own sub-breakdown. These are
+  declarations to check against `--list` in the round below — the pbench round found one of them
+  off by one.
