@@ -395,3 +395,129 @@ the rsync step, for the fourth time today. The host is unreachable, so no pool w
 
 Everything the chain can test is green, so the task is `done` and the human merges. #281 holds
 the device half, including the one case here that is a new assertion rather than a converted pin.
+
+### 2026-10-09 — rebased onto ENS-limits, and the GPU half dispatched
+
+The chain's base moved: master `31c56bea` → `bc9b6e2f`, and the three tasks below this one took
+their GPU halves. `git rebase --onto ENS-limits pre-rebase2-K-limits ENS-empty-sorts`, recovery
+tag `pre-rebase2-K-empty-sorts` at the old head `da47434f`. The task's own diff is unchanged by
+the move: 27 files, 938 insertions, 197 deletions against either base, byte for byte the same
+`--stat`. **The standing facts at the top of this file are stale from here on** — the chain now
+has a GPU host, the base is no longer `31c56bea`, and #205's half of #281 is the only half left.
+
+Five conflicts, all bookkeeping, resolved by ownership:
+
+- `tasks.md`: the replayed side, the branch's own state progression.
+- `tickets.md`'s contents: the new base's list minus `#205`, so `#285` (filed by limits) survives.
+  33 corpus-coverage tickets, 117 open, both re-summed from the rows rather than deltaed — and
+  every row's count now checked against the length of its own id list.
+- `corpus-coverage.md`'s #281, twice: the new base's narrowed text kept both times, since limits'
+  half is closed and the replayed side still described both tasks. The completeness pass's
+  fourth-case sentence folded into it.
+- `build-test.md`'s three count headers: the replayed commit's own delta applied to the new base's
+  absolutes, then every figure re-summed from the rows. cpu 1254 = `--lib` 653 + 569 + 29 + 3;
+  gpu 588 = 538 + 38 + 11 + 1; ffi 7; everything-else Rust 90; Rust 1939; grand total 2414.
+- `build-test.md`'s device-corpus prose: the new base's paragraph with `#205` → `#281`.
+
+**One row needed hands that no conflict marker showed.** Both branches edited *Operator harness*
+from 335 to 336 — limits' new `bug_` case and this branch's new mixed-merge case — so git saw one
+identical change and collapsed the two `+1`s into one. Set to **337** by that reasoning, not by
+measurement: the coordinator cannot build. It is the one figure on the page to re-measure first.
+
+`cost-registry.csv` auto-merged to exactly one changed row, tpcds q17's ticket `205` → `281`,
+which is this task's own query, so row ownership held.
+
+#### The dispatch
+
+verda does not resolve from this host, checked at this dispatch, so every CPU run is local.
+nebius-gpu answers: card idle (0 MiB of 46068), `df -h /` 21 GB free, `~/peacockdb-K` present
+with its `testdata/`.
+
+#### The brief: two jobs, re-prove then measure
+
+**Job 1 — re-prove the cpu half on the new base.** The rebase carried code, so nothing on this
+branch is proven until it runs again. The spec's rust-only bar, locally, `-- --test-threads=2`:
+`--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`, plus `test_golden_format`,
+`test_module_layout` and `test_ci_coverage`. Red here is the rebase having broken something and
+is the first thing to fix. The cells limits enabled (`tpch/scan-limit` at five modes) and
+distinct-companions' (`tpch/distinct-functions`) are new neighbours in the corpus binaries.
+
+**Job 2 — the GPU half, which is what #281 holds.** Everything below has run on no device:
+
+- the four `GpuAccumulateBatchesAndSort`/`GpuMergeSortedPartitions` cases in
+  `peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs` —
+  `one_zero_row_batch_sorts_to_zero_rows_on_both`, `a_fetch_over_zero_rows_is_zero_rows_on_both`,
+  `every_lane_a_zero_row_batch_merges_to_zero_rows_on_both`, and
+  `one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`. The first three are
+  converted `bug_` pins; the fourth is a **new assertion no run has ever checked**, about
+  `gpu_backend/accumulate.rs`'s `held.is_empty()` arm over one zero-row lane and one silent lane.
+- **`tpcds/q17`'s device cell at `tp1-single`**, off today: `corpus_cases.inc:287` declares its
+  gpu modes `none`, and `cost-registry.csv` row `tpcds,1,q17` carries ticket `281`.
+
+Run the whole device tier, not only these — a cell enabled by limits or distinct-companions going
+red on this base is a finding too. Then: **a cell that passes is enabled; a cell that fails stays
+off naming a ticket, and you report what the ticket must say rather than writing it** (ticket
+markdown is the coordinator's). `corpus_cases.inc`, `cost-registry.csv` and the comment above
+line 285 are yours.
+
+The prediction is agreement, and the reason it is worth measuring is that agreement is a
+prediction: the cpu's `sorted_and_cut` now hands held batches to `coalesce_or_nothing`, and
+`gpu_backend/accumulate.rs` flattens `per_lane` and branches on `held.is_empty()` the same way.
+If the device disagrees, the finding is which of the two is wrong — say which, with the batch
+the device actually emitted.
+
+**Job 3 — `build-test.md`'s counts are yours on this task.** Measure every figure with `--list`
+on the final tree, both shapes, and re-sum the headers from the rows. Start with *Operator
+harness*, set to 337 by reasoning above; the gpu block header 588 and `--lib -- gpu_tests::` 538
+rest on it. `test_gpu_corpus` 38 moves to 39 if q17's cell turns on.
+
+#### The host, and the five traps this chain has already paid for
+
+nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02 at `~/data/miniforge3/envs/rapids-cuda-12.2`,
+working dir `~/peacockdb-K` — never `~/peacockdb-J`, and never delete anything under it. The
+board's chain-K note and chain J's host override above it are the full rules; the recipe limits
+used, which worked:
+
+    rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-K/
+    # on the host, in ~/peacockdb-K, after  . ~/peacock-env.sh
+    find . -path ./target -prune -o \( -name '*.rs' -o -name '*.inc' \) -print | xargs touch
+    ./scripts/build-test-shadgpu.sh --build          # detached; never --run, which ssh-es to shad-gpu
+    export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib
+    export PEACOCK_TESTDATA_DIR=$PWD/testdata
+    cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: -- --test-threads=1
+    cpp/install/rust-tests/test_gpu_corpus -- --test-threads=1
+    cpp/install/rust-tests/test_node_timing -- --test-threads=1
+    cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_ -- --test-threads=1
+    cpp/install/bin/peacock_gpu_tests ; cpp/install/bin/peacock_plan_tests
+
+1. **`rsync -a` can restore a host-side source with an older mtime**, and cargo then skips the
+   rebuild and the run reports the previous build's behaviour. `touch` the sources; then confirm
+   the staged binary is *this* tree by a literal a test reads — `--list` naming the four
+   accumulate cases, and `strings | grep -c sorts_to_nothing_on_the_cpu` returning 0. An exit
+   code is not that proof.
+2. **A binary whose tests all filter out runs zero tests and passes.** Report ran/passed/filtered
+   per binary, as limits' section does, so a zero-test pass cannot read as green.
+3. **`df -h /` before every build**: 21 GB free, and `conda clean -a` finds nothing to reclaim, so
+   there is no slack. Below 20 GB follow chain J's cleanup rule; below 10 GB do not build and
+   record it here as an obstacle.
+4. **The card is shared with chain J.** A memory failure with chain J's run on the card
+   (`nvidia-smi` shows it) is waiting and rerunning, not a ticket.
+5. **Never a foreground command without `timeout`**, and never end your turn with a detached
+   build still running — poll its log and stay in the turn.
+
+The sf40 pair (`peacock_tpch_tests`, `peacock_tpchv_tests`), `--run-benchmarks` and Nsight are out
+of every chain-K task. Record any skip here as deferred.
+
+#### The cost gate
+
+The human pre-accepted exactly two rows for this task: `tpcds.sf1/q17` at `tp1-single` and
+`tp1-rowgroup`, +24 bytes each. Any third regression, or any figure moving downward, is a finding.
+Re-run `--cost-diff` against the new base (`ENS-limits`) and put the output here — the earlier run
+was against `4581bca3`, which no longer exists in the chain.
+
+#### Ownership on this round
+
+`llm-wiki/` is the coordinator's except this file, `empty-sorts-impl.md`, and `build-test.md`'s
+counts. The spec is frozen; its signoff is already written and will be rewritten by the
+coordinator when this round closes. Code, `.inc`, `.csv`, goldens and `.github/workflows/` are
+yours. You never look at CI.
