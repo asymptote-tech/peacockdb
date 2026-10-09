@@ -212,3 +212,23 @@ so 35 run" became "two of the 39 … so 37 run".
   a gpu-feature build sees it, which is why a green rust-only run never reported it. Cosmetic, so
   no ticket under the "only production behaviour gets a ticket" rule — a one-line deletion for
   whoever next opens that file.
+
+### 2026-10-09 — round 1 green, PR #174 open
+
+Committed as `388c8940`, pushed, PR #174 against `ENS-limits` — base verified, two commits.
+
+The wiki half was an ownership conflict the developer flagged rather than resolved on its own
+authority, which was right: the spec's Scope row and the impl plan's Task 5 put `architecture.md`
+and `tickets/` on the developer, and the coordinator's standing rule is that markdown is the
+coordinator's. The developer wrote and verified all of it, reverted it, and left the diff at
+`/tmp/empty-sorts/wiki-coordinator.patch` with the text in this file. Applied here with three
+additions it did not cover, each a bare `#205` that stopped being true rather than a dangling
+link:
+
+- `build-test.md`'s device-corpus line listed q17's cell under "the device's own tickets
+  (#57, #63, #205)". That cell is held by #281 now.
+- #199's body named "#205's sort" among the sources of nothing below a keyless init. The
+  sentence's claim still holds; the ticket it names is closed, so it says so.
+- #214's body said "as #205 says". Repointed at the archive, past tense.
+
+The board's link moved to the archive; the spec's did not, since the spec is frozen.
