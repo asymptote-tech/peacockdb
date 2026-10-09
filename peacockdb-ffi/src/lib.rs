@@ -199,6 +199,43 @@ pub mod raw {
             out_handle: *mut u64,
         ) -> i32;
 
+        /// Build join `seq`'s session over `build` (0 = no build batch for this lane),
+        /// CONSUMING that handle, and write the join id to `out_join`. A `CudfJoin` is a
+        /// plan leaf: `peacock_executor_execute_node` refuses it by name. The session
+        /// lives until [`peacock_join_release`] or `peacock_executor_end_plan`, and any
+        /// lane may probe it. A failure ends the query.
+        pub fn peacock_join_build(
+            executor: *mut PeacockExecutor,
+            seq: u64,
+            build: u64,
+            out_join: *mut u64,
+            out_stats: *mut PeacockNodeStats,
+        ) -> i32;
+
+        /// One probe batch, CONSUMED: exactly one output handle, possibly of zero rows,
+        /// or `*out_handle == 0` for the types that answer only at finish (LeftSemi,
+        /// LeftAnti, LeftMark). An unknown join id and a probe after finish leave the
+        /// session standing; anything else ends the query.
+        pub fn peacock_join_probe(
+            executor: *mut PeacockExecutor,
+            join: u64,
+            probe: u64,
+            out_handle: *mut u64,
+            out_stats: *mut PeacockNodeStats,
+        ) -> i32;
+
+        /// Called once, after the last probe: one handle for the types that finish (Left,
+        /// Full, LeftSemi, LeftAnti, LeftMark), `*out_handle == 0` for the rest.
+        pub fn peacock_join_finish(
+            executor: *mut PeacockExecutor,
+            join: u64,
+            out_handle: *mut u64,
+            out_stats: *mut PeacockNodeStats,
+        ) -> i32;
+
+        /// Release a join session (idempotent, as [`peacock_handle_release`] is).
+        pub fn peacock_join_release(executor: *mut PeacockExecutor, join: u64);
+
         /// Materialize rows `[offset, offset+length)` of a resident handle as an Arrow
         /// IPC stream; `length == u64::MAX` means to the end, which is what a caller
         /// wanting the whole table passes. A range naming no rows of a non-empty table

@@ -15,6 +15,7 @@
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+#include <cudf/utilities/span.hpp>
 
 #include <memory>
 #include <vector>
@@ -35,7 +36,19 @@ struct ExprContext {
 // When non-null (join-filter context), a ColumnRef(i) in the expression is
 // remapped to column_reference(col_map[i].index, LEFT|RIGHT) so a mixed
 // semi/anti join's AST predicate can address its two conditional tables.
-using JoinFilterColMap = flatbuffers::Vector<const fb::JoinFilterColumn*>;
+//
+// A span rather than the FlatBuffers vector itself, so a caller may pass a map it built:
+// the join session flips the sides for the call that hands cuDF the probe as its left, and
+// appends an entry per hoisted condition column. `col_map_of` is the plan's own map.
+using JoinFilterColMap = cudf::host_span<fb::JoinFilterColumn const>;
+
+// A FlatBuffers vector of structs stores them inline, but its `data()` is typed
+// `const S* const*`; `Data()` is the bytes. A `true` filter carries no filter_columns, so a
+// null vector is an empty span.
+inline JoinFilterColMap col_map_of(const flatbuffers::Vector<const fb::JoinFilterColumn*>* v) {
+  if (!v) return {};
+  return {reinterpret_cast<const fb::JoinFilterColumn*>(v->Data()), v->size()};
+}
 
 // Default argument lives on the DECLARATION only -- repeating it on the definition
 // is a hard error.

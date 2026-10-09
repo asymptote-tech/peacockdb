@@ -54,6 +54,15 @@ struct EvaluatedColumn {
 // operator-level call can show.
 EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table);
 
+// The two size_type ceilings a CudfJoin checks before it makes pairs or a cross product
+// (join-rewrite-design.md §3.9). Reachable here because a test exercises them on sizes:
+// 2^31 rows of anything is more than a test host holds, so no table can show the refusal,
+// and a ceiling nothing can reach is a ceiling nobody has checked.
+namespace join {
+void fits_or_throw(std::size_t n, char const* what);
+cudf::size_type cross_rows_or_throw(std::int64_t nb, std::int64_t np);
+}  // namespace join
+
 // Whether a harness range is open. Observable only so that push_harness_range's one-level
 // rule can be tested — NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting is the only
 // caller, since NVTX itself reports nothing back.

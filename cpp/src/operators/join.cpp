@@ -90,12 +90,14 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
   auto join_nulls = join->null_equals_null() ? cudf::null_equality::EQUAL
                                              : cudf::null_equality::UNEQUAL;
   ExprContext semi_ctx;
+  JoinFilterColMap semi_map;
   const cudf::ast::expression* semi_pred = nullptr;
   if (semi_anti_type && join->filter()) {
     if (!join->filter_columns())
       throw std::runtime_error(
           "semi/anti join has a filter but no filter_columns map");
-    semi_pred = &build_expr(join->filter(), semi_ctx, join->filter_columns());
+    semi_map = col_map_of(join->filter_columns());
+    semi_pred = &build_expr(join->filter(), semi_ctx, &semi_map);
   }
 
   // NULL semantics by join kind (#59 semi / #80 anti):
@@ -230,7 +232,8 @@ TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in) {
         throw std::runtime_error(
             "LeftMark join has a filter but no filter_columns map");
       ExprContext mctx;
-      const auto& pred = build_expr(join->filter(), mctx, join->filter_columns());
+      auto mark_map = col_map_of(join->filter_columns());
+      const auto& pred = build_expr(join->filter(), mctx, &mark_map);
       matched = cudf::mixed_left_semi_join(left_keys, right_keys, ltv, rtv, pred,
                                            cudf::null_equality::EQUAL);
     } else {
@@ -484,7 +487,8 @@ TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInp
       throw std::runtime_error(
           "CudfNestedLoopJoin has a filter but no filter_columns map");
     ExprContext ctx;
-    const auto& pred = build_expr(join->filter(), ctx, join->filter_columns());
+    auto nlj_map = col_map_of(join->filter_columns());
+    const auto& pred = build_expr(join->filter(), ctx, &nlj_map);
 
     auto [left_indices, right_indices] =
         jt == fb::JoinType_Left ? cudf::conditional_left_join(ltv, rtv, pred)

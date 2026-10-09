@@ -175,6 +175,22 @@ class NodeSession {
   /// (`clamp_row_range` for the edges). The input handle is CONSUMED, as every
   /// operation on a resident table is.
   uint64_t slice_handle(uint64_t handle, uint64_t offset, uint64_t length);
+  /// Build the session for the `CudfJoin` at post-order `seq` over `build` (0 = no build
+  /// batch), CONSUMING it, and return the join id every later call names. A join lives
+  /// until `join_release` or the end of the plan, and any lane may probe it (#140).
+  uint64_t join_build(uint64_t seq, uint64_t build, NodeStats* out_stats);
+
+  /// One probe batch, CONSUMED: exactly one output handle, possibly of zero rows, or 0 for
+  /// the types that answer only at finish (LeftSemi, LeftAnti, LeftMark).
+  uint64_t join_probe(uint64_t join, uint64_t probe, NodeStats* out_stats);
+
+  /// Called once, after the last probe: one handle for the types that finish (Left, Full,
+  /// LeftSemi, LeftAnti, LeftMark), 0 for the rest. A probe after it is refused.
+  uint64_t join_finish(uint64_t join, NodeStats* out_stats);
+
+  /// Release a join session (idempotent, as handle release is).
+  void join_release(uint64_t join);
+
   /// Drain every region recorded since the last call, in execution order. Empty
   /// unless the mode was `NodeTiming::Events`.
   ///

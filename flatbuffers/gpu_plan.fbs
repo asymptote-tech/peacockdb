@@ -459,6 +459,20 @@ table CudfNestedLoopJoin {
   projection: [uint32];
 }
 
+/// A join answered through the session symbols (peacock_join_*), never execute_node: a leaf,
+/// since its inputs arrive by call. join-rewrite-design.md §1.1.
+table CudfJoin {
+  join_type: JoinType;                  // the nine; no RightMark (#241)
+  keys: [JoinKey];                      // ColumnRef pairs; empty = nested loop or cross
+  filter: Expr;                         // residual; refs index the filter's own schema
+  filter_columns: [JoinFilterColumn];   // filter schema ordinal -> (side, column)
+  null_equals_null: bool = false;       // honoured by every type
+  build_schema: Schema;                 // types of an absent build side, and pad types
+  probe_schema: Schema;                 // pad types before any probe batch arrived
+  projection: [uint32];                 // absent = keep all; present = these, never empty
+  chunk_bytes: uint64 = 0;              // pair/cross scratch per call; 0 = 1 GiB
+}
+
 /// Sort by one or more columns.
 table CudfSort {
   /// Sort specifications (first = primary key, etc.).
@@ -594,6 +608,7 @@ union PlanNodeKind {
   CudfUnion,
   CudfLimit,
   CudfWindow,
+  CudfJoin,
 }
 
 /// A single node in the physical plan tree.

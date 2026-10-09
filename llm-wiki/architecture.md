@@ -811,9 +811,10 @@ Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, 
 the C++ dispatches on, with `GpuPlan` as the root table wrapping them. A `Gpu` name with no
 `Cudf` is one of the engine's own plan nodes and never crosses.
 
-Three of the fifteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
-own and needs no node), `CudfLimit` (a limit is a row range on the export) and `CudfWindow` (no
-window function here yet, #143). They stay because the kernels behind them do.
+Four of the sixteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
+own and needs no node), `CudfLimit` (a limit is a row range on the export), `CudfWindow` (no
+window function here yet, #143) and `CudfJoin`, whose writer lands with the join backend. They
+stay because the kernels behind them do.
 
 **Statement order is the wire format**: FlatBufferBuilder is a no-interning bump arena, so
 reordering writes changes bytes even with identical values, and
@@ -888,6 +889,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
 | [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
 | [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets/joins.md#t215)) |
+| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join` or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
@@ -919,7 +921,7 @@ below has a smallest unfreeze that removes it; deciding them together is
 |---|---|---|---|
 | **A build-side copy per probe batch** (#152) | `execute_node` erases the handles it reads and nothing duplicates one | a handle that can be read twice: `TableResult` already shares its columns, so a retained build side is a second handle over the same owners | no ABI change — a handle stays a `u64` |
 | **A probe-batch copy on Left/Full** (#152) | two consumers, one handle: the join needs the batch and the key project needs it too | the same refcount, or a node allowed to return its input beside its output | the second form is an fbs *semantics* change with no ABI change |
-| **The build side re-hashed per probe batch** (#136) | `CudfHashJoin` is stateless per call, so B batches means B builds; sharing removes the copy and not this | a join session: begin, probe, finish, holding one `cudf::hash_join` | three symbols and session state keyed by id — the largest change here |
+| **The build side re-hashed per probe batch** (#136) | `CudfHashJoin` is stateless per call, so B batches means B builds; sharing removes the copy and not this | a join session: begin, probe, finish, holding one `cudf::hash_join` | the four `peacock_join_*` symbols and a session map keyed by id, which the C++ side now carries (Interfaces above); the cost stands until a writer emits `CudfJoin` instead of the three join nodes |
 | **Probe keys held resident, plus an extra join at finish** (#136) | "which build rows matched" cannot cross an ABI that returns a table and row counts | a match bitmap out-param, or the join session above | the bitmap is a one-argument delta; either deletes the key accumulation and the finish join |
 | **A new symbol per runtime-varying parameter** | an fb node's fields are plan constants, so anything decided per call cannot ride the node | per-call overrides: one `execute_node` variant taking an override struct | one symbol instead of three, and the next such field costs nothing |
 
@@ -961,17 +963,31 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is twenty-one symbols in five groups: lifecycle (`peacock_gpu_version`,
+The ABI is twenty-five symbols in six groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
-`handle_schema`, a handle's schema without its rows, read by the test harness alone);
+`handle_schema`, a handle's schema without its rows, read by the test harness alone); the join
+session (`peacock_join_build`, `_probe`, `_finish`, `_release`, below);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
 `nvtx_pop_range`, `executor_collect_node_regions`); and two test hooks:
 `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so the
 Rust side can compare it against the production lane rule, and `peacock_handle_from_arrow`, which adopts one such
 batch into the live session as a handle so the operator harness can hand an executor a table it
 wrote.
+
+**A join is a session, not a node.** A `CudfJoin` is a plan leaf: `execute_node` refuses it by
+name, because its two tables arrive by call instead. `peacock_join_build(seq, build)` makes the
+session over one build side — `build = 0` is a lane with no build batch, which is an empty build
+side — and answers a join id from its own map in `NodeSession::Impl`, freed by
+`peacock_join_release` or by `end_plan` with the plan. The session owns the build table, the
+distinct-key table a `distinct_hash_join` views, the cuDF join object and the build-matched
+column; it is not tied to a lane, so any lane may probe it. `peacock_join_probe` consumes one
+batch and answers exactly one table, possibly of zero rows — or handle 0 for LeftSemi, LeftAnti
+and LeftMark, which answer only at `peacock_join_finish`. `finish` is called once, after the
+last probe, and answers handle 0 for the types that have none. Two refusals leave the session
+standing, an unknown join id and a probe after finish; anything else ends the query, as
+`execute_node` does. Each call opens one region, `(seq, partition 0, call_index)`.
 
 Three conventions the signatures do not carry:
 
