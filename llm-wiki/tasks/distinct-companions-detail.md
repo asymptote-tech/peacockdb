@@ -5,14 +5,18 @@ plan: [`distinct-companions-impl.md`](distinct-companions-impl.md).
 
 ## Standing facts
 
-- Chain K, second task. Branch `ENS-distinct-companions`, forked off `ENS-guard-checks` at
-  `6175d5fb`. Its PR targets `ENS-guard-checks`, not master — guard-checks is `done` and awaiting
-  the human's merge, so the parent branch exists on the remote already.
-- No GPU on this chain. No device build beyond compiling, no device run. `done` once every CI job
-  but the GPU tests is green.
+- Chain K, second task. Branch `ENS-distinct-companions`, PR #171 targeting `ENS-guard-checks`
+  rather than master. Twice rebased since the fork; the current base is master `bc9b6e2f` through
+  `ENS-guard-checks`, so a fork-point SHA recorded below is stale wherever one appears.
+- **The GPU rule changed on 2026-10-09 and the paragraphs below it did not.** The chain had no GPU
+  while chain J held the one host, and everything written here before that date assumes it. It now
+  builds and runs on **nebius-gpu** under chain K's board note in `tasks.md`, and the task was
+  reopened to `building` for its GPU half (#262). Where this file says "no device run", read it as
+  true of the round it is recording and false of the task.
 - Verification bar: rust-only `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`;
   the ffi rung through `scripts/cargo-cudf.sh`; C++ `cpp/build` against cuDF 25.02 plus
-  `ctest -L cpu`. No device run.
+  `ctest -L cpu`; and the device tier on nebius-gpu, which the board note makes a condition of
+  `done`.
 
 ## Both of the spec's conditionals resolve to "has not merged"
 
@@ -1387,3 +1391,167 @@ nothing and passing forever.
 `test_cpu_corpus` 567. No warnings, `rustfmt --check` clean. `build-test.md` re-summed: first
 table 1817, second's Rust rows 90 → Rust 1907, grand total 2382. No device run: nothing here
 reaches one.
+
+### 2026-10-09 — completeness reading of the GPU half (analyst, "what is missing")
+
+Read as `git diff ENS-guard-checks..HEAD`, 22 commits, against the spec's Corpus, Tests,
+Restriction and Verification bar, the chain K board note, `architecture.md` and `build-test.md`.
+No code built or run. **Three important items, nothing blocking.** The first completeness
+reading's three items and the four signoff clauses this run already found are not repeated.
+
+#### `architecture.md`: one sentence this branch falsified, and one it split
+
+The cpu half's four are applied and correct — the init bullet, the shuffle "only", the gid's
+asymmetry, and the `CudfAggregate.mode` row all read true now, and the three sections Scope named
+match the code. Two more, both in sections no round has looked at:
+
+1. **"Every cast is explicit"**, and this one is a count:
+
+   > Six coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
+   > and its finalize divide, the stddev/var operands, union branch types, a decimal divide's
+   > numerator, and `round`'s operand.
+
+   The branch adds two more of exactly this kind, and the paragraph's own sub-clauses name the
+   places they land ("the aggregate ones inside the finalize expressions ... the union ones as
+   per-branch projects"). The outer finalize's cast-back of a widened decimal `sum`, `min` or
+   `max` (`translator/aggregate.rs:314`, whose comment quotes this very section), and the project
+   above the outer stage that casts a narrowed `__grouping_id` to DataFusion's width
+   (`translator/aggregate/distinct.rs:326`). Six becomes eight. A third new site,
+   `distinct.rs:275`, re-applies the coercion casts the classifier stripped, over
+   `__distinct_arg` — DataFusion's own cast relocated rather than one we decided, so whether it
+   joins the list is a judgement; the other two are not.
+
+2. **"Planning"**, weaker, and the human's call:
+
+   > An aggregate's phases read different tables: the init sees input columns, the merge sees
+   > state columns.
+
+   It survives on the reading that the outer node's input *is* state. But it is the same claim
+   the branch amended 150 lines below, in "The aggregate sequence"'s init bullet, and leaving it
+   here puts the fact in two places with two answers.
+
+Checked and sound, so the human need not: **"Every cast is explicit"**'s "The device type is
+`{type_id, scale}`: a decimal's precision is a label the export is told, not a fact the device
+holds" is the page's own answer to the cast-back question, and it corroborates this run rather
+than needing a word. **"The scheduling rule"**'s "the device corpus installs `test_support`'s
+schema validator through it" is not falsified by the mask: the install was already per-line
+conditional. **"Grouping sets"**' 8/16/32 exception, the decomposition table's bare `count`
+finalize, and "Three of the fifteen wire kinds have no writer" all hold.
+
+#### 1. (important) The run record's own `## Standing facts` is false
+
+The section a restarted coordinator reads first still says:
+
+> - No GPU on this chain. No device build beyond compiling, no device run. `done` once every CI
+>   job but the GPU tests is green.
+> - Verification bar: rust-only `--lib`, … No device run.
+
+Both bullets are now wrong in every clause: the chain K board note overrides them, the device
+tier ran on nebius-gpu, and `done` now also requires that run. The correction sits 1000 lines
+below, in *The GPU half*. The fork point `6175d5fb` in the first bullet is two rebases stale as
+well. The spec's `## No GPU` section carries its superseded marker; this file's summary of the
+same fact does not.
+
+#### 2. (important) A fifth signoff clause, and the four are correctly listed
+
+The four already recorded are right. Clause 2 verified rather than assumed:
+`cpp/tests/gpu/test_plan_executor.cpp` is `peacock_plan_tests`' only source
+(`cpp/CMakeLists.txt:208`), all three `CreateAggregateFuncNode` sites are in live `TEST` bodies
+or a helper two of them call, and that binary ran 56 green — so the C++ change did run.
+
+The fifth is the sentence after them:
+
+> No other shortcut or bandaid.
+
+The GPU half took two. `schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)` on
+#225 runs three of the five device cells with no schema hook at all, and `golden_approx_std` in
+place of `golden_exact` gives up the result compare's exact digits — which, as this file notes,
+"constrains no scale at all". Both are earned and both are recorded here and on #225; neither is
+in the signoff's list of what was given up, and the signoff is what survives this file.
+
+One clause is incomplete rather than false: "q28, `tpch/rollup-distinct` and
+`tpch/distinct-functions` run on the cpu corpus" should say distinct-functions runs on the device
+at five modes too.
+
+#### 3. (important) The recorded device pass is two commits behind the committed tree
+
+The last device tier run is recorded at `5e2e068f`. Two commits followed, and `4a0c8419` edits
+source the gpu tier compiles and the device corpus calls: `test_support/mod.rs`'s
+`pub(crate) use` became a `pub(crate) fn is_validated_at` wrapper under
+`cfg(not(feature = "rust-only"))`, which is what `corpus_gpu::gpu_case` now resolves to, and
+`schema_validation.rs`'s two `cfg_attr`s changed condition.
+
+The delta is inert — a body that is one delegating call, and two lint attributes — and round 3
+compile-checked it under `--features gpu` with `--no-run`. But the board note makes a recorded
+nebius-gpu pass a condition of `done`, and this round's own lesson was a green that belonged to
+code the host no longer held. The host notes say the whole device tier is about a minute of GPU
+time and an incremental rebuild under two, so either rerun it, or say in this file exactly what
+the delta since `5e2e068f` is and why the recorded pass still stands.
+
+#### Checked and sound — not findings
+
+- **Both of the spec's Corpus conditionals still resolve to "has not merged"**, re-checked on
+  this tree rather than on the first fork: nothing under `src/test_support/` mentions duckdb, no
+  golden carries a `duckdb-result.txt` section, and `drop_grouping_id` appears nowhere in
+  `peacockdb-core/src`. So no DuckDB section is owed, `distinct-functions`' cpu oracle stays
+  `data_fusion_disabled`, and `rollup-distinct`'s tp4 cpu cells stay off on #189. The spec's
+  "whichever lands second" still points at repartition-keys.
+- **The cast-back conclusion is right, and the plan test is sufficient on its own terms.**
+  `test_support/device_schema.rs`'s `device_type_of` maps `Decimal128(_, scale)` to
+  `{Decimal128, scale}` and drops the precision, and `architecture.md` says the same under *Every
+  cast is explicit*, so no device reading in the harness can distinguish `(35, 2)` from `(25, 2)`.
+  `a_decimal_sum_companion_casts_its_finalize_back_to_the_declared_type` pins three things under
+  `validate_all` — the outer init's state type, the finalize being an `Expr::Cast` to
+  `Decimal128(25, 2)`, and the node declaring that type for that column — and was watched red
+  with the cast behind `if false &&`. The one thing it does not pin is that `(25, 2)` is
+  DataFusion's declaration rather than a constant copied from the implementation; DataFusion's
+  rule over `Decimal128(15, 2)` gives exactly it, and the five-mode end-to-end case compares the
+  values against DataFusion. Sufficient.
+- **The device run is the set the board note names.** All six binaries are recorded with non-zero
+  pass counts and their filtered counts, so a reader can tell none filtered itself empty; the
+  `gpu_tests::` filtered count rising 628 → 634 is itself the evidence that the six new decoder
+  tests reached the staged binary. The deferred items (the sf40 pair, `--run-benchmarks`, Nsight)
+  are named as the note requires.
+- **Counts add up mechanically.** Summing the N column of every row of both tables gives 2382,
+  the header; the four tier sums are 1229, 7, 581 and 565. `corpus_cases.inc` holds 123
+  declarations, 563 cpu cells and 31 device cells, which is what the cpu block, the device row
+  and "Thirty-one cells today" claim. `test_corpus_goldens` has 29 `#[test]`s and
+  `schema_validation/tests.rs` 6.
+- **Nothing was weakened.** The visibility guard went from a `pub use ` prefix to stripping the
+  visibility, with five near-miss cases including the two shapes a widened reader could start
+  mis-reading; the `.inc` reader drops the comment first and takes `");"` as a suffix, which is
+  stricter than the old tail assert. No golden moved in the GPU half and the declaration line has
+  not changed since the last device run — only its comment.
+
+#### Two device-unrun pieces, each a sentence rather than a finding
+
+Everything else distinctive about the lowering either ran on a device or is named on a ticket:
+the outer init over state and `__distinct_arg` ran at five modes, the narrowed id is #65 and
+#189 through `rollup-distinct`, the keyless shape is #152 through q28, and the cast-back is
+unreachable by any device reading. Two pieces are named nowhere, and both are small enough to
+leave:
+
+- The `CASE WHEN o IS NULL THEN 0` finalize **runs** on the device at all five modes — it is in
+  the `CudfProject{finalize}` of both counts — but its NULL arm needs an empty keyless input, so
+  the arm is untaken. Subsumed by q28 (#152) and by #199.
+- `x` being **also a group key** has a plan test and no corpus query, so no device cell can reach
+  it whatever closes. #262 is framed in corpus queries, which is why it does not appear there.
+
+#### Chain L's drift list, completed
+
+*Drift this run found, for the human* names two statements of `grouping-id.md`. Four more are
+false, and one is spent:
+
+- line 8, the parenthetical title "(the DISTINCT lowering's device cells have never
+  run)" — #262 is renamed and narrowed;
+- line 29, "Chain K ran without a GPU, so distinct-companions is proven on the cpu only";
+- line 102, "its gpu oracle goes from `golden_exact` to `golden_approx_std`" — this branch has
+  already done it, so the instruction is spent rather than wrong;
+- the `#262's rows` table entry for `tpch/distinct-functions`, "off at all five device modes on
+  `262` alone", which the existing note names, and q28's and `rollup-distinct`'s rows beside it,
+  which now carry `262` as well as their own tickets.
+
+`grouping-id-impl.md` carries the same assumption at lines 6, 53-54, 1058, 1116, 1160, 1258,
+1268, 1423, 1499-1500, 1545, 1550, 1566 and 1571. Both files are frozen and at `new`, so this
+branch correctly does not touch them; the list is here so the human can apply it in one pass
+before chain L starts.
