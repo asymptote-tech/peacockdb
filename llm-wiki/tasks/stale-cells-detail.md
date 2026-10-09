@@ -307,3 +307,18 @@ mergeable PR the lever works, and it is the only one: `pipeline.yml` has no `wor
 **The rule, for `completeness approved` → `done`:** find the last commit that touched anything but
 `**.md` and `llm-wiki/**`, and check a run actually built *it or later*. The PR's own green is not
 that check. If the head is unbuilt, close and reopen.
+
+### CI, for the `done` transition (2026-10-09)
+
+Run **37930362767** on `0dcc36ab`, created by the close-and-reopen above and the only run that
+built this branch's current code: cudf 25.02 pass, cudf 26.02 pass, GPU build pass, Cost report
+pass, S3 check pass, Pages skipped, and `GPU Tests (remote)` red on `ssh: connect to host
+llm-gpu0h200.velkerr.ru port 22: Connection timed out` — shad-gpu, exempted by name, its work done
+on nebius-gpu above.
+
+**cuDF 26.02 passing is worth more here than usual.** These sixteen cells are newly in the enabled
+set, and `verify-26.02` is task 9; the 26.02 leg builds and runs the cpu side of them, so the four
+rows arrive at that task already exercised on the newer cuDF on the host that CI uses.
+
+Only `1cb7b829` follows, and it touches `llm-wiki/**` alone, so the code state the run built is the
+code state that merges. `completeness approved` → `done`.
