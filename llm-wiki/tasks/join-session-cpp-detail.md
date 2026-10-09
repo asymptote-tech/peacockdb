@@ -398,3 +398,31 @@ The existing gpu tier was **not** re-run, deliberately: nothing it can reach mov
 touched `read.rs` (rust-only), `join_session.cpp`'s refusal path, `join_residual.cpp`'s refusal
 path, two headers' comments, the fbs's comments and the test file. `expr.cpp` and `join.cpp` —
 the only files round 1 changed that today's plans execute — were not touched at all.
+
+## Round 2 closed, 2026-10-09 — coordinator's record
+
+Committed `34e6b3f7`, pushed. All three findings closed, each proved rather than asserted: the
+child-walk arm was watched red first with CI's own signature, and every allocation bound was proved
+red by a deliberate leak on the device. What I verified myself before committing, since a green
+measured against a mutated tree is worth nothing: `NodeSession::join_release` erases from both maps
+again (the leak that proved the release bound is gone), 48 `TEST` lines in the file, no untracked
+scratch files, and `build-test.md`'s header derived from the sum of its two tables' N columns rather
+than from a delta — 3080, C++ 164, both matching. The 7,570-line count is the real flatc output in
+`OUT_DIR`, not the 11-line `generated.rs` stub that includes it.
+
+**Two things task 8 inherits from this round.**
+
+- **`wire/fb_text.rs`'s `payload_text` ends in `_ => {}`**, so a `CudfJoin` renders no fields into
+  `recipe-payloads.txt`. Nothing is red because nothing writes the node — join-backend's writer is
+  what makes that arm reachable, and it will want one when its payload golden comes out empty. Left
+  alone deliberately: with no writer and no golden, which of the nine fields to print is a guess.
+- **An fbs change is a Rust change.** `peacockdb-core/build.rs` regenerates the bindings every
+  build, so the rust-only tier belongs in re-proving any `gpu_plan.fbs` edit whatever a spec's
+  restriction says about Rust behaviour. Round 1 proved the CPU side with `peacock_cpu_tests` and
+  `cargo check -p peacockdb-ffi`, and a `cargo check` compiles without running a test, which is how
+  a totality guard stayed red through a round.
+
+One process note, self-reported by the developer: it used `git checkout -- <file>` once, to restore
+the deliberate leak. Subagents do not mutate git state; that is the coordinator's. It was benign —
+that file's only uncommitted change was the leak — and I confirmed independently that every other
+round-2 edit survived, finding by finding.
