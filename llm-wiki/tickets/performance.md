@@ -5,17 +5,17 @@ These issues should be fixed on a pre-prod performance path.
 
 ## Contents
 
-- [#150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%](#t150)
-- [#149 — the parquet load must use pinned host memory](#t149)
-- [#148 — the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored](#t148)
-- [#231 — one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02](#t231)
-- [#232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader](#t232)
-- [#242 — the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
-- [#248 — three join shapes run on one lane or skewed after the rewrite](#t248)
-- [#286 — an OFFSET that reaches a scan still reads every row group it skips](#t286)
+- [#150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%](#t150)
+- [#149 (pinned host memory) the parquet load must use pinned host memory](#t149)
+- [#148 (RMM allocator) the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored](#t148)
+- [#231 (26.02 big aggregate) one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02](#t231)
+- [#232 (chunked parquet reader) the scan reads through `read_parquet`, which is several times slower than the chunked reader](#t232)
+- [#242 (26.02 join paths) the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
+- [#248 (join parallelism gaps) three join shapes run on one lane or skewed after the rewrite](#t248)
+- [#286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips](#t286)
 
 <a id="t150"></a>
-### #150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
+### #150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
 The sf40 embedding columns are written SNAPPY and do not compress: `ps_image_embedding`
 12306/12661 MB and `p_text_embedding` 3205/3293 MB, both 1.03x against ~1.6x elsewhere.
 
@@ -32,7 +32,7 @@ shad-gpu, so it means re-uploading 40 GB and re-verifying the 16 sf40 goldens. M
 
 
 <a id="t149"></a>
-### #149 — the parquet load must use pinned host memory
+### #149 (pinned host memory) the parquet load must use pinned host memory
 **Priority: high**
 
 Nothing in the engine sets a host memory resource for IO, so parquet loads from pageable host
@@ -49,7 +49,7 @@ over. Condition it on the device: GB10 shows 59.5 vs 59.2 because it has one phy
 hosts, asserting the discrete host improves and the integrated one does not regress.
 
 <a id="t148"></a>
-### #148 — the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored
+### #148 (RMM allocator) the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored
 **Priority: high**
 
 Nothing under `cpp/src/` or `cpp/include/` calls `set_current_device_resource`, so every cuDF
@@ -73,7 +73,7 @@ and the 5x growth cost says reserve it up front — and how an integrated part i
 asserting a small limit is honoured.
 
 <a id="t231"></a>
-### #231 — one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02
+### #231 (26.02 big aggregate) one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02
 
 libcudf 26.02's hash groupby is linear up to 100M rows and then jumps: 100M to 200M rows costs
 4.62x on H200 and 61.4x on GB10, where a linear cost is 2.0x and 25.02 gives 1.86x.
@@ -106,7 +106,7 @@ First, a re-measure on H200 with the same CUDA on both versions, to separate the
 the toolkit.
 
 <a id="t232"></a>
-### #232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader
+### #232 (chunked parquet reader) the scan reads through `read_parquet`, which is several times slower than the chunked reader
 
 `scan.cpp` loads every row-group batch with `cudf::io::read_parquet`. On GB10 the same bytes
 through `cudf::io::chunked_parquet_reader` with one chunk load 5.6x faster.
@@ -144,7 +144,7 @@ below 1 GiB wants re-measuring too. Tests: the device tiers stay byte-identical;
 section for the load.
 
 <a id="t242"></a>
-### #242 — the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused
+### #242 (26.02 join paths) the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused
 **Priority: low** — nothing measured; the one real candidate may be slower.
 
 The join rewrite (`tasks/join-rewrite-design.md` §3.10) calls nothing that only one cuDF version
@@ -167,7 +167,7 @@ A second path is tested only where 26.02 runs, so each wants a measured win firs
 corpus benchmark's join nodes on verda-gpu, each path against the portable one.
 
 <a id="t248"></a>
-### #248 — three join shapes run on one lane or skewed after the rewrite
+### #248 (join parallelism gaps) three join shapes run on one lane or skewed after the rewrite
 The chain-J join rewrite answers all three correctly; each costs parallelism.
 
 - **`CollectLeft` is merged, not broadcast.** A join DataFusion plans `CollectLeft` has both sides
@@ -183,7 +183,7 @@ The chain-J join rewrite answers all three correctly; each costs parallelism.
 at tp4.
 
 <a id="t286"></a>
-### #286 — an OFFSET that reaches a scan still reads every row group it skips
+### #286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips
 After chain K's limits task, DataFusion pushes `skip + fetch` into a scan and keeps the skip in
 its limit above. `source()` (`planner/translator/nodes.rs`) trims the scan's row groups to the
 shortest prefix whose metadata row counts reach `skip + fetch`, and the `GpuLimit` above (or the

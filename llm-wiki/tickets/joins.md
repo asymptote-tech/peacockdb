@@ -16,31 +16,31 @@ not need to look at a recipe when executing a join, instead encoding the logic a
 
 ## Contents
 
-- [#155 — umbrella: join execution through a wider C and FlatBuffers API](#t155)
-- [#152 — GpuHashJoin: the build handle does not survive a streamed probe](#t152)
-- [#153 — equi-join residual filter is applied after the outer gather](#t153)
-- [#80 — Anti-join NOT IN three-valued logic + independent DuckDB result oracle](#t80)
-- [#59 — Nullable-key semantics for semi/anti/mark joins](#t59)
-- [#215 — a left nested-loop join over a predicate the AST cannot take is refused on the device](#t215)
-- [#208 — the cpu's cross join answers nothing over a zero-row build side](#t208)
-- [#207 — both backends drop a cross join's projection](#t207)
-- [#190 — the CPU backend drops a nested-loop join's projection](#t190)
-- [#63 — a zero-column placeholder survives the cross join and shifts every ordinal above it](#t63)
-- [#212 — a build side that emits no batch at all still refuses Right, Full and RightAnti](#t212)
-- [#173 — a finish whose probe produced no keys refuses what it could answer from the build side](#t173)
-- [#136 — GpuHashJoin: build-side match tracking when the probe side streams](#t136)
-- [#137 — the planner does not drop null join keys before the shuffle](#t137)
-- [#159 — RightSemi/RightAnti with a residual filter has no cuDF path](#t159)
-- [#160 — nested-loop join supports Inner and Left only](#t160)
-- [#220 — the cpu's joins answer several batches per call where the device answers one](#t220)
+- [#155 (join API umbrella) umbrella: join execution through a wider C and FlatBuffers API](#t155)
+- [#152 (streamed probe build) GpuHashJoin: the build handle does not survive a streamed probe](#t152)
+- [#153 (outer residual order) equi-join residual filter is applied after the outer gather](#t153)
+- [#80 (NOT IN null semantics) Anti-join NOT IN three-valued logic + independent DuckDB result oracle](#t80)
+- [#59 (nullable semi/anti keys) Nullable-key semantics for semi/anti/mark joins](#t59)
+- [#215 (left NLJ non-AST filter) a left nested-loop join over a predicate the AST cannot take is refused on the device](#t215)
+- [#208 (cross join empty build) the cpu's cross join answers nothing over a zero-row build side](#t208)
+- [#207 (cross join projection) both backends drop a cross join's projection](#t207)
+- [#190 (cpu NLJ projection) the CPU backend drops a nested-loop join's projection](#t190)
+- [#63 (zero-column placeholder) a zero-column placeholder survives the cross join and shifts every ordinal above it](#t63)
+- [#212 (no build batch refusal) a build side that emits no batch at all still refuses Right, Full and RightAnti](#t212)
+- [#173 (keyless probe finish) a finish whose probe produced no keys refuses what it could answer from the build side](#t173)
+- [#136 (streamed build matching) GpuHashJoin: build-side match tracking when the probe side streams](#t136)
+- [#137 (null keys at shuffle) the planner does not drop null join keys before the shuffle](#t137)
+- [#159 (right semi residual) RightSemi/RightAnti with a residual filter has no cuDF path](#t159)
+- [#160 (NLJ join types) nested-loop join supports Inner and Left only](#t160)
+- [#220 (cpu join batch count) the cpu's joins answer several batches per call where the device answers one](#t220)
 - [Complete Join Coverage](#complete-join-coverage)
-  - [#243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys](#t243)
-  - [#245 — a nested-type key cannot cross a shuffle](#t245)
-  - [#246 — a `LIKE` whose pattern is a column is refused on the device](#t246)
-  - [#250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs](#t250)
+  - [#243 (float key equality) the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys](#t243)
+  - [#245 (nested-type shuffle key) a nested-type key cannot cross a shuffle](#t245)
+  - [#246 (LIKE column pattern) a `LIKE` whose pattern is a column is refused on the device](#t246)
+  - [#250 (nullable IN subquery) an `IN` subquery whose NULL answer is read is refused when its data holds NULLs](#t250)
 
 <a id="t155"></a>
-### #155 — umbrella: join execution through a wider C and FlatBuffers API
+### #155 (join API umbrella) umbrella: join execution through a wider C and FlatBuffers API
 Every join mode already runs on the frozen surface (`scripts/exec_model`, and the capability
 matrix in `architecture.md`); open is what running it there costs.
 
@@ -57,7 +57,7 @@ constants, and they overlap. The session subsumes the bitmap; the top two rows n
 change. Land [#154](#t154) first, or the numbers are inflated by per-call copies.
 
 <a id="t152"></a>
-### #152 — GpuHashJoin: the build handle does not survive a streamed probe
+### #152 (streamed probe build) GpuHashJoin: the build handle does not survive a streamed probe
 `NodeSession::execute_node` erases every input handle it reads (`node_session.cpp` ~L250, ~L339,
 ~L427), but a streamed probe calls the join seq once per batch and needs it B times.
 
@@ -77,7 +77,7 @@ by rows and 73:1 by bytes. Decide before T16, under [#155](#t155).
 Lay the foundation for #140 - broadcast joins - in this task.
 
 <a id="t153"></a>
-### #153 — equi-join residual filter is applied after the outer gather
+### #153 (outer residual order) equi-join residual filter is applied after the outer gather
 **Priority: high**
 
 `join.cpp` (~L353) masks a `CudfHashJoin.filter` over the gathered table *after* the join
@@ -93,7 +93,7 @@ referencing both sides, which no corpus query has. Fix: evaluate the residual du
 gtest with a filtered Left join. The same commit drops the prototype's deliberate reproduction.
 
 <a id="t80"></a>
-### #80 — Anti-join NOT IN three-valued logic + independent DuckDB result oracle
+### #80 (NOT IN null semantics) Anti-join NOT IN three-valued logic + independent DuckDB result oracle
 `NOT IN` with any NULL in the build side must yield the empty set; neither
 `null_equality::EQUAL` nor `UNEQUAL` implements that, so ANTI/mark joins stay hardcoded
 EQUAL (`cpp/src/operators/join.cpp`). Needs a planner/serializer flag distinguishing
@@ -102,7 +102,7 @@ DuckDB final-result oracle, now [#235](corpus-coverage.md#t235) — today's vali
 (goldens vs DataFusion, GPU vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
 
 <a id="t59"></a>
-### #59 — Nullable-key semantics for semi/anti/mark joins
+### #59 (nullable semi/anti keys) Nullable-key semantics for semi/anti/mark joins
 Anti/mark keep `null_equality::EQUAL` deliberately; a blind UNEQUAL flip is wrong for
 `NOT IN`. No enabled query has a nullable anti/mark key. Wants a dedicated analysis plus
 expr/join goldens covering nullable IN / NOT IN / EXISTS before defaults change. Anti
@@ -118,7 +118,7 @@ a residual filter and a streamed probe all included. The composite-key form is
 in `gpu_tests/join_dimension_cases.rs`: a null in the second key column alone is a match.
 
 <a id="t215"></a>
-### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
+### #215 (left NLJ non-AST filter) a left nested-loop join over a predicate the AST cannot take is refused on the device
 
 A `LEFT JOIN` with no equi-key whose predicate has a decimal operand or a string literal answers
 on the cpu and throws on the device: `non-AST-able NestedLoopJoin filter is only supported for Inner joins`.
@@ -134,7 +134,7 @@ this shape is the one the planner lets through. Pinned by
 projected neighbour (`gpu_tests/nested_cases.rs`). Numbered past #214.
 
 <a id="t208"></a>
-### #208 — the cpu's cross join answers nothing over a zero-row build side
+### #208 (cross join empty build) the cpu's cross join answers nothing over a zero-row build side
 
 A `GpuCrossJoin` whose build batch has zero rows emits no batch on the cpu, where the device
 emits one of zero rows; a zero-row probe batch is zero rows on both.
@@ -149,7 +149,7 @@ batch are different arrivals downstream, as #205 says. Pinned by
 (`gpu_tests/nested_cases.rs`).
 
 <a id="t207"></a>
-### #207 — both backends drop a cross join's projection
+### #207 (cross join projection) both backends drop a cross join's projection
 
 A `GpuCrossJoin` carrying a projection emits every column of the crossed table on both engines:
 the cpu refuses at `declared_as`, the device hands the wider table up under the narrower one.
@@ -165,7 +165,7 @@ does apply it. On the device every ordinal above the join then reads one column 
 `bug_a_cross_join_with_a_projection_holds_every_column_on_the_device`.
 
 <a id="t190"></a>
-### #190 — the CPU backend drops a nested-loop join's projection
+### #190 (cpu NLJ projection) the CPU backend drops a nested-loop join's projection
 
 `tpch/q11` at all five modes: `the node declares Schema { … 2 fields } and DataFusion answered with
 Schema { … 3 fields }`. The extra column is the build side's scalar, which the node's projection
@@ -193,7 +193,7 @@ Device half untested — the CPU refuses first, as with [#189](corpus-coverage.m
 four registry rows with `tpch/q11` and `tpcds/q54`.
 
 <a id="t63"></a>
-### #63 — a zero-column placeholder survives the cross join and shifts every ordinal above it
+### #63 (zero-column placeholder) a zero-column placeholder survives the cross join and shifts every ordinal above it
 A project with no expressions has rows but no columns, and a cuDF table cannot say that:
 `num_rows()` reads column 0. So `execute_project` (`cpp/src/operators/project.cpp`) emits one INT8
 column, `__rowcount__`. `execute_cross_join` (`cpp/src/operators/join.cpp`) concatenates both
@@ -225,7 +225,7 @@ enabled at tp1-single on shad-gpu. The report's second arm — a scan projected 
 which cuDF's cross join refuses with "Left table is empty" — shares the helper and lands with it.
 
 <a id="t212"></a>
-### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
+### #212 (no build batch refusal) a build side that emits no batch at all still refuses Right, Full and RightAnti
 A Right, Full or RightAnti join whose build side hands the lane no batch is refused by name
 in `without_build`, where the answer owed is every probe row, padded or not.
 
@@ -242,7 +242,7 @@ aggregate emits nothing where nothing arrived. Pinned by
 `a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
 
 <a id="t173"></a>
-### #173 — a finish whose probe produced no keys refuses what it could answer from the build side
+### #173 (keyless probe finish) a finish whose probe produced no keys refuses what it could answer from the build side
 
 `finish_without_keys` (`gpu_backend/join.rs`) refuses Left, Full, LeftSemi and LeftMark on the
 device when a lane's probe side accumulated no keys, and answers LeftAnti with the raw build side,
@@ -276,7 +276,7 @@ joins (filtered LeftSemi/LeftAnti/LeftMark, nested-loop Left), which emit nothin
 batch on both engines, a separate wrong answer.
 
 <a id="t136"></a>
-### #136 — GpuHashJoin: build-side match tracking when the probe side streams
+### #136 (streamed build matching) GpuHashJoin: build-side match tracking when the probe side streams
 Left-outer, full, semi, anti and mark need "which build rows matched across all probe batches",
 and that never crosses the ABI — every call rebuilds the join from scratch.
 
@@ -294,7 +294,7 @@ them with the rest of the join surface, [#155](#t155).
 
 
 <a id="t137"></a>
-### #137 — the planner does not drop null join keys before the shuffle
+### #137 (null keys at shuffle) the planner does not drop null join keys before the shuffle
 With `null_equals_null=false` an all-null key matches nothing, and `spark_hash_partition.cu`
 skips null columns, so every such row lands in the one partition `pmod(seed, N)`.
 
@@ -310,7 +310,7 @@ corpus query exercises it. The adaptive form — insert the filter at replan tim
 adaptive replanning existing at all.
 
 <a id="t159"></a>
-### #159 — RightSemi/RightAnti with a residual filter has no cuDF path
+### #159 (right semi residual) RightSemi/RightAnti with a residual filter has no cuDF path
 The mixed_* family evaluates a residual during the join, and no swapped variant exists — so a
 right-semi form carrying one cannot be expressed and the planner refuses it.
 
@@ -322,7 +322,7 @@ join stays a Left form and the existing `mixed_left_*` applies, which is a plann
 a swapped `mixed_*` in cuDF, which is not ours. The first is cheap and has not been costed.
 
 <a id="t160"></a>
-### #160 — nested-loop join supports Inner and Left only
+### #160 (NLJ join types) nested-loop join supports Inner and Left only
 `execute_nested_loop_join` handles Inner and Left; every other type is refused at plan time
 rather than throwing in the executor.
 
@@ -334,7 +334,7 @@ distinct-on-the-preserved-side pass. No corpus query has one; the refusal is wha
 true rather than discovering it at run time.
 
 <a id="t220"></a>
-### #220 — the cpu's joins answer several batches per call where the device answers one
+### #220 (cpu join batch count) the cpu's joins answer several batches per call where the device answers one
 
 A cpu join hands back DataFusion's output stream for one probe call as it came: 8192-row chunks,
 plus an empty batch per probe batch that matched nothing. The device answers one table per call.
@@ -377,7 +377,7 @@ Join shapes the chain-J rewrite leaves refused or wrong, each with a pbench quer
 Not part of the bulk rewrite above: each is its own fix.
 
 <a id="t243"></a>
-### #243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
+### #243 (float key equality) the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
 A float join or group key equates `-0.0` with `0.0` and every NaN with every other NaN on the
 device and in DuckDB, and does not on the cpu, so the two engines answer a float-keyed join or
 `GROUP BY` differently wherever those values occur. At the tp4 modes the device can also disagree
@@ -411,7 +411,7 @@ land as commented-out `corpus_query!` lines naming this ticket. Pins: `bug_` cas
 harness for a float-keyed join and a float-keyed aggregate, cpu against device (`repartition-keys`).
 
 <a id="t245"></a>
-### #245 — a nested-type key cannot cross a shuffle
+### #245 (nested-type shuffle key) a nested-type key cannot cross a shuffle
 A join or `GROUP BY` keyed on a struct or list column is refused at run time at the tp4 modes, on
 both engines: comet's hasher has no struct or list arm, and neither has the device kernel
 (`cpp/src/spark_hash_partition.cu`). The tp1 modes, which do not shuffle, answer.
@@ -424,7 +424,7 @@ extended to it.
 (`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`), its cells off on this ticket.
 
 <a id="t246"></a>
-### #246 — a `LIKE` whose pattern is a column is refused on the device
+### #246 (LIKE column pattern) a `LIKE` whose pattern is a column is refused on the device
 `expr.cpp:873-877` takes a `LIKE` pattern only as a literal. A join condition that matches one
 side's strings against the other side's patterns — a nested loop, since it has no key — is
 refused on the device; the cpu answers. The same holds for any `LIKE` over two columns.
@@ -436,7 +436,7 @@ cuDF's `strings::like` takes a scalar pattern; a column of patterns needs a per-
 (`SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat`), its device cells off on this ticket.
 
 <a id="t250"></a>
-### #250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
+### #250 (nullable IN subquery) an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
 `x IN (S)` is three-valued: NULL when `x` is NULL and `S` is non-empty, or when `S` holds a NULL
 and `x` matches nothing. Where a filter reads that NULL as a value — `IS [NOT] NULL`,
 `IS [NOT] TRUE/FALSE/UNKNOWN`, a comparison (`(x IN S) = false`), `COALESCE`, a function argument

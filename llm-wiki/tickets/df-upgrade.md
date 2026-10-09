@@ -8,14 +8,14 @@ than comet; `datafusion-spark`, released with DataFusion, is the one to check.
 
 ## Contents
 
-- [#241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express](#t241)
-- [#23 — q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither](#t23)
-- [#166 — physical planning drops a LIMIT interval, and the answer changes](#t166)
-- [#228 — DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make](#t228)
-- [#247 — DataFusion 45 refuses or mis-answers seven subquery shapes](#t247)
+- [#241 (RightMark on DF 49) DataFusion 49 plans `RightMark`, which the planner and the wire cannot express](#t241)
+- [#23 (q27/q72 do not plan) q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither](#t23)
+- [#166 (lost LIMIT interval) physical planning drops a LIMIT interval, and the answer changes](#t166)
+- [#228 (DF 55 grouping id) DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make](#t228)
+- [#247 (DF 45 subquery shapes) DataFusion 45 refuses or mis-answers seven subquery shapes](#t247)
 
 <a id="t241"></a>
-### #241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express
+### #241 (RightMark on DF 49) DataFusion 49 plans `RightMark`, which the planner and the wire cannot express
 
 An upgrade to DataFusion 49 or later refuses every mark join that `JoinSelection` swaps, on both
 backends. On 45 those same queries plan and run.
@@ -39,7 +39,7 @@ null-aware form reads its two facts from the build side, known before the first 
 swaps on the upgraded version.
 
 <a id="t23"></a>
-### #23 — q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither
+### #23 (q27/q72 do not plan) q27 and q72 do not plan on DataFusion 45, and an upgrade fixes neither
 
 Two TPC-DS queries fail to physical-plan (`plan_status=fail`, every cell `na`): q27 is refused by
 `SanityCheckPlan`, q72 by type coercion (`Cannot coerce arithmetic expression Date32 + Int64`).
@@ -91,7 +91,7 @@ the wire is #183 again. After the bump: `grep -c 'Utf8View\|BinaryView\|ListView
 read for its default.
 
 <a id="t166"></a>
-### #166 — physical planning drops a LIMIT interval, and the answer changes
+### #166 (lost LIMIT interval) physical planning drops a LIMIT interval, and the answer changes
 
 DataFusion 45 loses a limit in two shapes, both measured against DuckDB 1.5.4 on the same sf1
 parquet: the interval is absent from the physical plan, so both engines compute the same wrong answer.
@@ -122,7 +122,7 @@ the upgrade, re-read whether any plan golden gains a root coalesce with a fetch,
 the arm live.
 
 <a id="t228"></a>
-### #228 — DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make
+### #228 (DF 55 grouping id) DataFusion 55's grouping-set id packs a duplicate ordinal the device does not make
 
 From 55, DataFusion packs a duplicate ordinal above the key bits of `__grouping_id`, so a grouping
 set listed twice keeps two groups. The device gives both copies the same id, and its merge folds
@@ -145,7 +145,7 @@ the plan's declared type rather than from `nkeys`, since the width is no longer 
 the key count alone. The payload golden regenerates for every rollup.
 
 <a id="t247"></a>
-### #247 — DataFusion 45 refuses or mis-answers seven subquery shapes
+### #247 (DF 45 subquery shapes) DataFusion 45 refuses or mis-answers seven subquery shapes
 Each is DataFusion 45's own limit, so both engines refuse it (or, for the last, both answer the
 same wrong thing), and the fix is an upgrade or a rewrite of ours, not executor work. Checked
 against DataFusion 45's source by the chain-J review (2026-10-07); pbench tables.

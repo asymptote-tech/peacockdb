@@ -3,11 +3,11 @@
 
 ## Contents
 
-- [#226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it](#t226)
-- [#69 — DuckDB cost oracle: multi-threaded golden generation for larger SF](#t69)
+- [#226 (benchmark provenance) a benchmark tree does not say which device, driver, CUDA or cuDF produced it](#t226)
+- [#69 (DuckDB oracle threads) DuckDB cost oracle: multi-threaded golden generation for larger SF](#t69)
 
 <a id="t226"></a>
-### #226 — a benchmark tree does not say which device, driver, CUDA or cuDF produced it
+### #226 (benchmark provenance) a benchmark tree does not say which device, driver, CUDA or cuDF produced it
 The `--- run ---` trailer and the record's `# run:` heading carry `build=`, `allocator=` and
 `capture=`, and nothing about the hardware or the stack. Two hosts now write the same files:
 shad-gpu (cuDF 25.02, driver-side CUDA 12.5 compat) through `build-test-shadgpu.sh` and
@@ -29,7 +29,7 @@ different heading is refused — then does what it should: a 26.02 row cannot la
 a capture whose `TARGET_INFO_GPU` device name differs from the record's.
 
 <a id="t69"></a>
-### #69 — DuckDB cost oracle: multi-threaded golden generation for larger SF
+### #69 (DuckDB oracle threads) DuckDB cost oracle: multi-threaded golden generation for larger SF
 `gen_duckdb_cost.sh` pins `PRAGMA threads=1` because `operator_rows_scanned` scales with
 thread count (`output_bytes`/`output_rows` are thread-invariant). Fine at sf1, too slow
 at sf10/sf100. Simplest fix: parallelize across queries, keep per-query threads=1; or

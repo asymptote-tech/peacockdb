@@ -3,31 +3,31 @@
 
 ## Contents
 
-- [#73 — Cost-based optimizer (CBO) umbrella](#t73)
-- [#101 — No CSE / CTE materialization: identical subexpressions recomputed N times](#t101)
-- [#140 — broadcast joins (1:N partition broadcast)](#t140)
-- [#170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire](#t170)
-- [#141 — the planner cannot skip the shuffle for small group-key sets](#t141)
-- [#139 — GpuCoalesceBatches(target): compact post-filter fragments](#t139)
-- [#147 — PlanEstimates: a tree the planner emits and the runtime refines](#t147)
-- [#20 — Join enumeration: DPccp/DPhyp cost-based tree reshaping](#t20)
-- [#71 — GPU scan: no predicate pushdown into the cuDF read](#t71)
-- [#19 — the planner has no cardinality estimate, and the memory model pays for it](#t19)
-- [#16 — Dynamic / runtime filters: build-side keys → probe-side scan](#t16)
-- [#75 — Refactor duckdb_cost.py: separate cost formula from extraction](#t75)
-- [#146 — aggregate shaping beyond the fixed sequence](#t146)
-- [#158 — an aggregate DataFusion answers from statistics reaches no executor](#t158)
-- [#142 — split large batches](#t142)
-- [#138 — add ranged sorted merge](#t138)
+- [#73 (CBO umbrella) Cost-based optimizer (CBO) umbrella](#t73)
+- [#101 (CSE/CTE reuse) No CSE / CTE materialization: identical subexpressions recomputed N times](#t101)
+- [#140 (broadcast joins) broadcast joins (1:N partition broadcast)](#t140)
+- [#170 (one-batch lane shortcuts) a source whose lanes each hold one batch could say so, and three shortcuts would fire](#t170)
+- [#141 (small-key shuffle skip) the planner cannot skip the shuffle for small group-key sets](#t141)
+- [#139 (post-filter coalesce) GpuCoalesceBatches(target): compact post-filter fragments](#t139)
+- [#147 (PlanEstimates tree) PlanEstimates: a tree the planner emits and the runtime refines](#t147)
+- [#20 (join enumeration) Join enumeration: DPccp/DPhyp cost-based tree reshaping](#t20)
+- [#71 (GPU scan pushdown) GPU scan: no predicate pushdown into the cuDF read](#t71)
+- [#19 (cardinality estimates) the planner has no cardinality estimate, and the memory model pays for it](#t19)
+- [#16 (runtime filters) Dynamic / runtime filters: build-side keys → probe-side scan](#t16)
+- [#75 (duckdb_cost refactor) Refactor duckdb_cost.py: separate cost formula from extraction](#t75)
+- [#146 (aggregate shaping) aggregate shaping beyond the fixed sequence](#t146)
+- [#158 (stats-answered aggregate) an aggregate DataFusion answers from statistics reaches no executor](#t158)
+- [#142 (split large batches) split large batches](#t142)
+- [#138 (ranged sorted merge) add ranged sorted merge](#t138)
 
 <a id="t73"></a>
-### #73 — Cost-based optimizer (CBO) umbrella
+### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
 Move physical planning from static heuristics to cost-based, validated against the DuckDB
 cost oracle and goldens. In scope: adaptive filter placement, join enumeration (#20),
 stats (#19, the load-bearing prereq), runtime filters (#16).
 
 <a id="t101"></a>
-### #101 — No CSE / CTE materialization: identical subexpressions recomputed N times
+### #101 (CSE/CTE reuse) No CSE / CTE materialization: identical subexpressions recomputed N times
 **Priority: post-MVP**
 
 DataFusion inlines every CTE reference and peacock re-scans each copy. Worst: tpcds q23
@@ -40,7 +40,7 @@ a streamed-batch model and expensive in a single-resident-table one. Sequence th
 that way round.
 
 <a id="t140"></a>
-### #140 — broadcast joins (1:N partition broadcast)
+### #140 (broadcast joins) broadcast joins (1:N partition broadcast)
 Deferred by the design. Lets one partition (small dimension side) be broadcast to all N
 partitions of the other side without shuffling the big side; also unblocks partitioned
 cross/nested-loop joins. The blocker is consume-once: a GPU handle feeds exactly one
@@ -50,7 +50,7 @@ refcounted handle. Interacts with #136's persistent-build option, which would so
 at once.
 
 <a id="t170"></a>
-### #170 — a source whose lanes each hold one batch could say so, and three shortcuts would fire
+### #170 (one-batch lane shortcuts) a source whose lanes each hold one batch could say so, and three shortcuts would fire
 
 The loader declares `MultipleBatches` unconditionally
 ([architecture.md](architecture.md#modes-and-knobs)), so no downstream node may assume one
@@ -70,7 +70,7 @@ already elides their coalesce when the input is `SingleBatch`. So the change is 
 and the plans get smaller by themselves. Every plan golden moves, which is its real cost.
 
 <a id="t141"></a>
-### #141 — the planner cannot skip the shuffle for small group-key sets
+### #141 (small-key shuffle skip) the planner cannot skip the shuffle for small group-key sets
 v1 skips `GpuMergePartitions` + `GpuEmitPartitions` around an aggregate only when the
 input is already one partition or the aggregate is keyless. Skipping when the key set is
 merely small (collapse to one partition, run `GpuAggregateBatches[final]` once, avoid the
@@ -78,7 +78,7 @@ shuffle) needs a cardinality estimate that does not exist — the estimators are
 (#19). When stats land, add the rule and regenerate the affected plan goldens.
 
 <a id="t139"></a>
-### #139 — GpuCoalesceBatches(target): compact post-filter fragments
+### #139 (post-filter coalesce) GpuCoalesceBatches(target): compact post-filter fragments
 Dropped from v1. After a selective filter, batches shrink to a few rows and every
 downstream kernel pays per-launch overhead on each fragment. A `BatchAccumulator` that
 concatenates to a minimum target size (DataFusion semantics: merge only, never split),
@@ -90,7 +90,7 @@ shown to tolerate one at any tree position; it also splits, which the ticket's n
 not need, because the prototype uses it to make a stream's batches any shape.
 
 <a id="t147"></a>
-### #147 — PlanEstimates: a tree the planner emits and the runtime refines
+### #147 (PlanEstimates tree) PlanEstimates: a tree the planner emits and the runtime refines
 The planner's `target_batch_bytes` walk already computes a per-node maximum resident size and
 throws all but one number away. Keep it, as a tree shaped like the plan, one estimate per node.
 
@@ -108,14 +108,14 @@ why the driver owns no state a caller must survive it.
 
 
 <a id="t20"></a>
-### #20 — Join enumeration: DPccp/DPhyp cost-based tree reshaping
+### #20 (join enumeration) Join enumeration: DPccp/DPhyp cost-based tree reshaping
 DataFusion 45 has no join enumerator — trees come out in FROM-clause order, and ~70/99
 TPC-DS queries have 4+ joins (q64 ≈ 18 tables). Implement DPccp (extend to DPhyp, IKKBZ
 fallback beyond 14 tables) as a logical rule after PushDownFilter, cost = Σ intermediate
 cardinality. Blocked by #19. Landing rewrites all plan goldens.
 
 <a id="t71"></a>
-### #71 — GPU scan: no predicate pushdown into the cuDF read
+### #71 (GPU scan pushdown) GPU scan: no predicate pushdown into the cuDF read
 Partly addressed: stats-based row-group pruning exists
 (`planner/translator/scan_mapping/rowgroup_prune.rs` → cuDF `set_row_groups`, parity with
 ParquetExec). Remaining: serialize the predicate itself
@@ -123,7 +123,7 @@ into the cuDF `read_parquet` filter AST (page pruning / pre-filter during decode
 multi-file scans, dynamic ranges (#16). Cause of red widget ratios on selective queries.
 
 <a id="t19"></a>
-### #19 — the planner has no cardinality estimate, and the memory model pays for it
+### #19 (cardinality estimates) the planner has no cardinality estimate, and the memory model pays for it
 Widths are facts and source rows are facts — the schema, and the `rows`/`bytes` a scan reads
 off its surviving row groups at plan time (`planner/translator/scan_mapping/parquet_meta.rs`).
 What a query
@@ -144,7 +144,7 @@ with was of a wrapper tree that is deleted. #147 is the mechanism a real estimat
 through; #73 and #20 are what it unlocks.
 
 <a id="t16"></a>
-### #16 — Dynamic / runtime filters: build-side keys → probe-side scan
+### #16 (runtime filters) Dynamic / runtime filters: build-side keys → probe-side scan
 Star-schema fact scans read 100% of rows while the joined dimension is filtered to ~30%. Build
 an IN-set / min-max (later Bloom) at build completion and feed the probe-side GpuScan.
 
@@ -161,7 +161,7 @@ blocking its producer is the join hold, one rule already mutation-tested. A diam
 is then routing rather than scheduling.
 
 <a id="t75"></a>
-### #75 — Refactor duckdb_cost.py: separate cost formula from extraction
+### #75 (duckdb_cost refactor) Refactor duckdb_cost.py: separate cost formula from extraction
 **Priority: low** — not started (867 lines, 29 top-level defs as of 2026-08-05), and it buys
 readability, not behaviour.
 
@@ -171,7 +171,7 @@ and row-group pruning. Shape: preprocessor → flat per-node intermediate
 `.duckdb_cost.txt` numbers must not move.
 
 <a id="t146"></a>
-### #146 — aggregate shaping beyond the fixed sequence
+### #146 (aggregate shaping) aggregate shaping beyond the fixed sequence
 **Priority: low** — each part optimizes an already-correct plan and needs the same estimate.
 
 The aggregate sequence applies one shape everywhere — per-batch init, merge per lane,
@@ -188,7 +188,7 @@ want** — does this aggregate reduce? — which the constant estimators (#19) c
 which gates [#141](#t141). Land after #19.
 
 <a id="t158"></a>
-### #158 — an aggregate DataFusion answers from statistics reaches no executor
+### #158 (stats-answered aggregate) an aggregate DataFusion answers from statistics reaches no executor
 `SELECT count(*) FROM nation` never reaches an `AggregateExec`: DataFusion's
 `AggregateStatistics` rule answers it from parquet metadata and emits `PlaceholderRowExec`
 holding the result.
@@ -208,7 +208,7 @@ CPU half alone makes the oracle answer a query the device refuses, and the oracl
 device is checked against. Waits on the make-a-table-of-literals call all three want.
 
 <a id="t142"></a>
-### #142 — split large batches
+### #142 (split large batches) split large batches
 Nothing downstream of the loader can split a batch: minimum load granularity is one row
 group, `GpuCoalesceAllBatches` before a join build side can exceed any budget, and the
 planner deliberately still produces a plan — `executor/driver/accounting.rs` then trips at run time and
@@ -224,7 +224,7 @@ tripped, so something can branch on it, but there is nowhere to record into — 
 trip log, and `Underestimate` is the precedent for what one would look like. Related: #91.
 
 <a id="t138"></a>
-### #138 — add ranged sorted merge
+### #138 (ranged sorted merge) add ranged sorted merge
 `GpuAccumulateBatchesAndSort` and `GpuMergeSortedPartitions` run one `cudf::merge` over all
 sorted inputs and materialize the whole output, so the local peak is inputs + output.
 
