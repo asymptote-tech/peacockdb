@@ -458,3 +458,81 @@ rust-only targets plus the C++ cpu side, with one addition: `cargo test -p cost-
 Nothing master carried touches the library, so `--lib` should read 606 passed / 2 ignored / 608
 listed unchanged, and `test_ci_coverage` 9 — that target reads `pipeline.yml`, the one file both
 sides of this rebase touched, so it is the one that can legitimately move.
+
+### 2026-10-09 — re-proved on master bc9b6e2f
+
+Everything local and CPU-only, as chain K's nebius-gpu note requires for this task: no device
+build, no device run, no `--features gpu`, no remote host. verda still does not resolve from
+this host. The task's GPU-side edits are to `build-test-shadgpu.sh` and `pipeline.yml`'s GPU
+job, which nebius-gpu cannot exercise, so there was nothing device-side to prove.
+
+**Every target green, exit 0, every count exactly what the dispatch predicted.** Rust rows are
+one `cargo test --features rust-only -p peacockdb-core` each unless the command says otherwise.
+
+| target | command | result |
+|---|---|---|
+| `--lib` | `--lib`, 44s | **606 passed, 0 failed, 2 ignored (608 listed)** |
+| `test_cpu_corpus` | one `--test test_cpu_corpus --test test_corpus_goldens --test test_cost_model -- --test-threads=2`, 225s | **555 passed, 0 failed** |
+| `test_corpus_goldens` | same command | **26 passed, 0 failed** |
+| `test_cost_model` | same command | **3 passed, 0 failed** |
+| `test_golden_format` | own run | 26 passed, 0 failed |
+| `test_ci_coverage` | own run | **9 passed, 0 failed** |
+| `test_module_layout` | own run | 17 passed, 0 failed |
+| `test_gpu_corpus` | own run | `running 0 tests`, 0 passed (device rung gated off) |
+| `test_node_timing` | own run | `running 0 tests`, 0 passed (ffi rung gated off) |
+| `peacock_gpu_benchmarks` | own run, `-- --skip bench_` as CI | `running 0 tests`, 0 passed |
+| `cost-report` | `cargo test -p cost-report` | **38 passed, 0 failed** |
+
+The three gated targets each printed `running 0 tests` and `test result: ok. 0 passed`, so they
+are empty under `rust-only` rather than skipped unreported.
+
+`test_ci_coverage` was the one target that could have moved, since `pipeline.yml` is the file
+both sides of this rebase touched: master changed the cost gate's message in the cost-report
+job, this task's edits are in the GPU job. It reads 9, unchanged. `--lib` is unchanged at
+606/2/608, as expected from a rebase that carried no library test.
+
+C++, 25.02 (`scripts/build.sh --configure --build --cudf_ROOT
+~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12`): configure reported
+`Using host cudf: 25.02.02`, 20 build steps, zero warnings, exit 0. The build was not warm —
+it recompiled every translation unit, `tests/cpu/test_executor.cpp` and `src/node_session.cpp`
+among them, which are the two C++ files this task touched, so the zero-warning reading covers
+them. `./cpp/build/peacock_cpu_tests` **12 tests from 7 suites, 12 passed**, including
+`ClampRowRange.AnswersEveryCaseInTheSharedTable`; `ctest --test-dir cpp/build -L cpu` 1/1
+passed.
+
+Rust warnings have their own command, because the inventory build is warm: `touch
+peacockdb-core/src/lib.rs` then `cargo check --features rust-only -p peacockdb-core
+--all-targets` — it printed `Compiling peacockdb-core`, so it did recheck, and exited 0 with no
+warning.
+
+#### `build-test.md`: the cost-report row is right as resolved, and so is the header
+
+The run agrees with the row. `cargo test -p cost-report` lists 38 cases, `grep -c '#\[test\]'
+cost-report/src/main.rs` is 38, and the page's row says 38, so master's value stands and no
+edit was owed. The two new cases master brought are
+`the_gate_fails_only_past_the_tolerance_but_every_increase_is_a_regression` and
+`a_regression_within_the_gate_is_red_but_not_failing`, both green.
+
+Summing the N columns of both tables gives 2340 over 75 rows, which is the header exactly; its
+C++ rows sum to 94 and its Python rows to 381, leaving Rust 1865. So the rebase resolution's
+re-summed header is row-consistent and nothing in the page moved this round. The cpu block
+header's 1192 is 608 + 555 + 26 + 3, also exact.
+
+#### One inherited warning, in `cost-report`, not ours and not fixed
+
+`cargo test -p cost-report` builds with one warning:
+
+    warning: function `sha_links` is never used
+      --> cost-report/src/main.rs:1538:8
+
+It is master's, not this branch's. `git diff bc9b6e2f HEAD -- cost-report/` is empty, so the
+crate here is byte-identical to master. The helper lost its four call sites in master's
+`3c0750ee` ("drop the six legacy execution modes") and has warned on master ever since; this
+branch's base at the time hid it only because nothing on the chain ran that crate until the
+cost gate's change made it part of the bar. `f0a6ecbf`, the commit this rebase carried, does
+not touch `sha_links`.
+
+Left alone deliberately. `cost-report` is outside this task's scope and its restriction, a
+dead test helper is not production behaviour so it earns no ticket, and a verification round
+should not put an unrelated code change in the diff. Whoever next edits that crate should
+delete the helper or call it.
