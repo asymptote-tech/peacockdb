@@ -230,7 +230,9 @@ GpuUnload: estimated_max_resident_size=128000
 == full-join-residual
 refused: unsupported: Full join with a residual filter: the executor applies it after the outer gather, so a padded row's NULLs drop it (#153)
 == in-is-null
-refused: unsupported: plan node EmptyExec
+refused by datafusion: Optimizer rule 'null_aware_not_in' failed
+caused by
+Error during planning: an IN or NOT IN that can meet a NULL, read outside a WHERE's AND/OR spine, is refused (#250): fact.f_k IN (<subquery>)
 == indf-full-join
 refused: unsupported: nested-loop join type Full — the executor rejects anything but Inner and Left (#160)
 == inner-join-hot-keys
@@ -427,9 +429,9 @@ refused: unsupported: nested-loop join type RightSemi — the executor rejects a
 == not-exists-null-keys
 refused: unsupported: LeftAnti join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
 == not-in-correlated
-refused: unsupported: RightAnti join on a key that can be NULL on both sides (build @0, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+refused: unsupported: RightAnti join with a residual filter: no swapped mixed_* variant exists — keeping the emitted side as the build turns it into a Left form (#159)
 == not-in-uncorrelated
-refused: unsupported: RightAnti join on a key that can be NULL on both sides (build @0, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+refused: unsupported: nested-loop join type Right — the executor rejects anything but Inner and Left (#160)
 == not-in-under-or
 refused: unsupported: LeftMark join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
 == not-not-in

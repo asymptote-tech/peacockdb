@@ -231,7 +231,7 @@ fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanE
   `pub(crate) fn in_subquery_may_meet_null(x: &Expr, sub: &Subquery, outer: &LogicalPlan) -> bool`
   and the narrowed refusal `pub(crate) fn refuse_nullable_in_off_the_spine(e: &Expr, outer: &LogicalPlan) -> Result<()>`.
 
-- [ ] **Step 1: The failing tests** — the scratch probe's four forms (`notin-probe`, measured
+- [x] **Step 1: The failing tests** — the scratch probe's four forms (`notin-probe`, measured
   2026-10-07: correlated 3 rows, uncorrelated 2, both under `OR` the same). The fixture registers
   two in-memory tables exactly as the probe did:
 
@@ -367,7 +367,15 @@ async fn not_in_over_an_untraceable_operand_is_rewritten() {
   here, so a refusal cannot cite it; #250's text gains the nested form), and
   `a_not_in_nested_in_an_exists_is_rewritten_too` becomes `bug_a_not_in_nested_in_an_exists_is_refused`, asserting `#250` —
   recorded in the detail file with the planner's error.
-- [ ] **Step 1b: The pins for what stays refused.** One `bug_` test per ticketed refusal this
+- [~] **Step 1b: The pins for what stays refused.** The #247 pin landed, split in two:
+  `bug_datafusion_45_refuses_six_subquery_shapes` over the six refused shapes and
+  `bug_a_scalar_subquery_of_several_rows_is_not_refused` over the seventh, which is an answer
+  rather than a refusal and so cannot share the loop (the sketch's `rows_any` had no
+  definition). **The #246 pin is deferred**: `nested_cases.rs` is `src/tests/gpu_tests/`, so it
+  needs a device to run and a cudf-feature cargo build even to typecheck, which
+  `build-test.md` forbids in `./target`. It belongs in a round that pays for a device cycle
+  anyway (task 7), and nothing in task 2 changes the behaviour it pins.
+  Original text: One `bug_` test per ticketed refusal this
   chain leaves, each asserting today's refusal and citing its ticket:
 
 ```rust
@@ -404,9 +412,9 @@ operator_case! {
   `like_column_residual()` builds `Expr::Like { expr: build "s", pattern: probe "s" }` with its
   `JoinFilterColumn`s, as `decimal_residual()` builds its cast (`nested_cases.rs:98`); the
   message is `expr.cpp:873-877`'s.
-- [ ] **Step 2: Run red**: today's DataFusion answers 7 and 5 rows for the first two, keeps the
+- [x] **Step 2: Run red**: today's DataFusion answers 7 and 5 rows for the first two, keeps the
   NULL-keyed rows under the negated positive form, and plans the two off-spine forms.
-- [ ] **Step 3: The rule, on the spine only.** `rewrite` visits every `LogicalPlan::Filter`, the
+- [x] **Step 3: The rule, on the spine only.** `rewrite` visits every `LogicalPlan::Filter`, the
   ones inside subqueries included, and rewrites its predicate's **spine** — the AND/OR tree from the
   root — never below a `NOT`, an `IS NULL`, a comparison or a function:
 
@@ -556,7 +564,7 @@ fn rewrite_not_in(x: Expr, sub: Subquery, outer: &LogicalPlan) -> Result<Expr> {
   `apply_order` is `None` and `rewrite` walks with `LogicalPlan::transform_down_with_subqueries`
   (DataFusion 45, `logical_plan/tree_node.rs:740`), so a filter under a join, and one inside an
   `EXISTS` or `IN` subquery's plan, is reached before `decorrelate_predicate_subquery` runs.
-- [ ] **Step 4: Register it.** In `build_session_state`:
+- [x] **Step 4: Register it.** In `build_session_state`:
 
 ```rust
 let mut rules = datafusion::optimizer::Optimizer::new().rules;
@@ -569,8 +577,21 @@ let state = SessionStateBuilder::new_from_existing(base.state())
     .build();
 ```
 
-- [ ] **Step 5: Run green** — the thirteen cases (fourteen with Step 1b's #247 pin); then `test_cpu_corpus` for tpch q16 and anti-join
-  (their plans do not move: the reader finds no NULL), `cargo test --lib plan_goldens` unchanged.
+- [x] **Step 5: Run green** — sixteen cases: the thirteen above, Step 1b's #247 pin as two, and
+  one added case (below). `test_cpu_corpus` is unchanged at 983, tpch q16 and anti-join included —
+  the reader finds no NULL in their keys.
+  **`plan_goldens` is NOT unchanged**, which this step had wrong: pbench's `in-is-null`,
+  `not-in-correlated` and `not-in-uncorrelated` move at all five modes, three sections per file,
+  every one of them a refusal line. Regenerated in this round with `UPDATE_CANONICAL=1` over
+  `plan_goldens::pbench_tp`. `in-is-null` now meets the #250 refusal instead of #257's
+  `EmptyExec` fold, so `cost-registry.csv`'s `in_is_null` row becomes `na` ×5 with
+  `plan_status=fail` and ticket `250`.
+  **One case added:** `a_nested_not_in_over_a_set_holding_a_null_empties_its_exists`. The
+  sketch's `a_not_in_nested_in_an_exists_is_rewritten_too` answers the same six rows before and
+  after the rule — DuckDB agrees, so it is a valid answer check, but it cannot witness the walk
+  reaching inside a subquery. The added case can: its inner set holds a NULL, so SQL answers no
+  rows where a two-valued engine answers six. Proved by mutating the walk to `transform_down`,
+  which reddens the added case alone.
 - [ ] **Step 6: Commit.** `git commit -m "NOT IN answers as SQL: a logical rewrite, where the data can hold a NULL (#80)"`.
 
 ### Task 3: #137 — no NULL key crosses a shuffle it cannot match through

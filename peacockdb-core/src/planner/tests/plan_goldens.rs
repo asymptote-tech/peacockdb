@@ -815,7 +815,10 @@ fn the_registry_matches_the_goldens_in_both_directions() {
                     panic!("{column}: {} has a registry row and no section", row.query)
                 });
                 let declared = if body.starts_with("refused by datafusion") {
-                    // Not the engine declining: the query never reaches its planner.
+                    // The query never reaches our planner, so no plan cell is about it.
+                    // Two ways in, and the prefix cannot tell them apart: DataFusion
+                    // declining, and one of our own optimizer rules declining inside its
+                    // loop, which comes back wrapped the same way (#250's refusal does).
                     "na"
                 } else if body.starts_with("refused") {
                     "disabled"

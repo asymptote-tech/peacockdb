@@ -451,12 +451,12 @@ The fix is the three-valued rewrite: `CASE WHEN EXISTS (S AND y = x) THEN true W
 EXISTS (S)) OR EXISTS (S AND y IS NULL) THEN NULL ELSE false END`, planned as two mark joins and a
 count, or a nullable mark join type of our own.
 
-**Corpus queries:** none yet. pbench's `in-is-null`
-(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`) was written for this ticket
-and does not reach it: DataFusion 45 folds the whole query to an `EmptyExec`
-([#257](df-upgrade.md#t257)), so our planner refuses `plan node EmptyExec` on
-[#155](#t155) and the `IN` never reaches a join. The row carries `155 250 257`, and this ticket
-cannot be demonstrated until #257 is fixed.
+**Corpus queries:** pbench's `in-is-null`
+(`SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL`), at all five modes, since
+join-backend's `NOT IN` rule landed. The rule runs before `decorrelate_predicate_subquery`, so the
+mark join [#257](df-upgrade.md#t257) needs is never built, and the query meets this refusal by name
+instead of folding to an `EmptyExec`. The row carries `250` alone. An earlier note here said the
+ticket could not be demonstrated until #257 was fixed; refusing earlier in the pass answered it.
 
 
 <a id="t256"></a>

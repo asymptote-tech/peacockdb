@@ -9,5 +9,6 @@ mod join_capability;
 mod join_projection_names;
 mod join_refusals;
 mod logical_nullability;
+mod not_in;
 mod null_analysis;
 mod plan_goldens;

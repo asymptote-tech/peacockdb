@@ -173,10 +173,19 @@ plan still carried the filter and sent the reader to physical planning, which wa
 Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the corpus' cpu
 oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
 answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
-[#155](joins.md#t155) — so no wrong answer is served; the moment that arm lands, this one starts
-answering 0 rows to a user. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
+[#155](joins.md#t155) — so no wrong answer is served. That arm lands in join-backend, and the
+`NOT IN` rule landing with it is what keeps the filter form from answering 0 rows to a user; see
+the corpus note below for what is still exposed. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
 and is the only thing that could have.
 
-**Corpus queries:** pbench's `in-is-null`. Its plan cells are disabled on `155`, the refusal it
-actually meets, and the row carries this ticket and `250` beside it — `250` is the ticket it was
-WRITTEN for (the `IN`'s NULL is read) and cannot demonstrate while the answer is empty.
+**Corpus queries:** none. pbench's `in-is-null` was this ticket's witness until join-backend's
+`NOT IN` rule landed. It now meets [#250](joins.md#t250) at all five modes and its row carries
+`250` alone.
+
+The defect is untouched, and our exposure to it from a WHERE clause is closed. The rule runs before
+`decorrelate_predicate_subquery`, so an `IN` under a filter meets one of three fates: a spine form
+is rewritten and no mark join is built; an off-spine form whose data can hold a NULL is refused on
+#250; an off-spine form whose operands provably hold none is two-valued, and there folding
+`IS NULL` to false is the right answer. What stays exposed is the same expression outside a filter
+— `SELECT (f_k IN (SELECT s_y FROM sub)) IS NULL FROM fact` — which the rule does not visit,
+because it walks filters alone.

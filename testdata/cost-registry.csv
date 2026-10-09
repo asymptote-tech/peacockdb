@@ -153,7 +153,7 @@ pbench,1,float64_key_group,enabled,enabled,enabled,enabled,enabled,na,na,na,na,n
 pbench,1,float64_key_join,enabled,enabled,enabled,enabled,enabled,na,na,na,na,na,na,na,na,na,na,ok,,243
 pbench,1,full_join_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
 pbench,1,full_join_residual,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,153
-pbench,1,in_is_null,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,155 250 257
+pbench,1,in_is_null,na,na,na,na,na,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,fail,semi_join,250
 pbench,1,indf_full_join,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join nested_loop_join,155 160
 pbench,1,inner_join_hot_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,152 220
 pbench,1,int8_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,

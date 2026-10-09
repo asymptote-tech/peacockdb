@@ -7,6 +7,7 @@
 //! `translator` and `memory_estimation` are subcomponents, so only this file may reach them;
 //! the four entry points below are what a test drives instead.
 mod memory_estimation;
+mod not_in;
 mod nullability;
 mod parquet_nulls;
 mod pipeline;
@@ -106,6 +107,13 @@ pub fn plan(
 pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
     memory_estimation::estimate(root, budget)
 }
+
+/// DataFusion's `NOT IN` is two-valued and so wrong wherever a key can be NULL (#80). This
+/// rule rewrites it where the rewrite is exact and refuses it where it is not; `not_in.rs`
+/// implements `OptimizerRule` for it and `build_session_state` registers it ahead of
+/// `decorrelate_predicate_subquery`.
+#[derive(Debug)]
+pub(crate) struct NullAwareNotIn;
 
 /// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
 /// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the

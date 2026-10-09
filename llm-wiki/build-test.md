@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3090 test cases — Rust 2520, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3106 test cases — Rust 2536, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1713 cases: `--lib` 701, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1729 cases: `--lib` 717, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -166,6 +166,16 @@ whether a column of a DataFusion logical plan can hold a NULL, traced to the par
 what the `NOT IN` rewrite and #137's key filters ask before a physical plan exists. Against real
 files, since every corpus column is declared nullable; the tpcds case is the only one whose column
 really holds NULLs
+
+| `NOT IN` as SQL means it | [correlated_not_in_answers_as_sql](../peacockdb-core/src/planner/tests/not_in.rs) | 16 |
+|---|---|--:|
+
+the `NOT IN` rewrite, over two in-memory tables whose columns the footer reader cannot reach, so
+every operand counts as possibly-NULL and every form rewrites: the four scratch probe shapes, the
+three negation-normal-form folds, the nested `NOT IN` inside an `EXISTS`, the uncorrelated count
+that must not become `count(*)`, the tpch keys that hold no NULL and so plan untouched, and the two
+refusals this chain leaves — #250's off-spine `IN` and #247's seven DataFusion limits. Every
+expected row is DuckDB 1.5.4's over the same tables
 
 | Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
 |---|---|--:|

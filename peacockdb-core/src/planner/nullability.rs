@@ -9,10 +9,12 @@
 //! Where either analysis cannot decide, a column is possibly-NULL: a false positive costs a
 //! refusal or a rewrite a reader can see, a false negative is a wrong answer.
 
-use datafusion::common::{Column, JoinType};
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
+use datafusion::common::{Column, JoinType, plan_err};
 use datafusion::datasource::listing::ListingTable;
 use datafusion::datasource::source_as_provider;
-use datafusion::logical_expr::{Expr as LogicalExpr, Join, LogicalPlan, TableScan};
+use datafusion::logical_expr::expr::InSubquery;
+use datafusion::logical_expr::{Expr as LogicalExpr, Join, LogicalPlan, Subquery, TableScan};
 
 use super::parquet_nulls::column_may_hold_null;
 use crate::plan::Expr;
@@ -63,10 +65,6 @@ fn nullable_at(columns: &[bool], ordinal: u32) -> bool {
 
 /// Whether `column` of `plan`'s output can hold a NULL, read off the data where the column
 /// traces to a parquet scan. Anything the trace cannot follow is possibly-NULL.
-///
-/// Its production caller is the `NOT IN` rewrite, which this lands ahead of; until then the
-/// tests are the only ones, so the attribute leaves with that rule.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool {
     match plan {
         LogicalPlan::TableScan(scan) => {
@@ -140,6 +138,47 @@ fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanE
         any |= column_may_hold_null(&path.to_string_lossy(), name)?;
     }
     Ok(any)
+}
+
+/// Whether `x [NOT] IN (S)` can meet a NULL: `x` on the outer side, or `S`'s one output
+/// column. An operand that is not a bare column cannot be traced, so it counts as nullable.
+pub(crate) fn in_subquery_may_meet_null(
+    x: &LogicalExpr,
+    sub: &Subquery,
+    outer: &LogicalPlan,
+) -> bool {
+    let x_may_be_null = match x {
+        LogicalExpr::Column(column) => logical_can_be_null(outer, column),
+        _ => true,
+    };
+    let y = &sub.subquery.schema().columns()[0];
+    x_may_be_null || logical_can_be_null(&sub.subquery, y)
+}
+
+/// An `IN` or `NOT IN` below a `NOT`, an `IS [NOT] NULL`, a comparison or a function reads
+/// three-valued truth, and the joins DataFusion decorrelates it into answer two-valued — a
+/// mark is never NULL. Where it can meet a NULL it is refused rather than answered wrong.
+pub(crate) fn refuse_nullable_in_off_the_spine(
+    expr: &LogicalExpr,
+    outer: &LogicalPlan,
+) -> datafusion::common::Result<()> {
+    let mut refused = None;
+    expr.apply(|node| {
+        if let LogicalExpr::InSubquery(InSubquery { expr, subquery, .. }) = node {
+            if in_subquery_may_meet_null(expr, subquery, outer) {
+                refused = Some(node.to_string());
+                return Ok(TreeNodeRecursion::Stop);
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    match refused {
+        Some(what) => plan_err!(
+            "an IN or NOT IN that can meet a NULL, read outside a WHERE's AND/OR spine, is \
+             refused (#250): {what}"
+        ),
+        None => Ok(()),
+    }
 }
 
 /// Per output column of this node, whether it can be NULL.
