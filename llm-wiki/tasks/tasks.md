@@ -80,12 +80,19 @@ refcounted-tables, whose scatter half is refcounted-scatter and whose join half 
 unnecessary.
 
 ### 1. [`duckdb-oracle.md`](duckdb-oracle.md) — closes [#235](../archive/archived-tickets.md#t235) — state: done — PR #167
+### 1. [`duckdb-oracle.md`](duckdb-oracle.md) — closes [#235](../archive/archived-tickets.md#t235) — state: rebase needed(completeness approved) — PR #167
 
 Every corpus line names its `duckdb_oracle`; a comparison case per line against
 `duckdb-result.txt`, over `mini.result.txt` and the device's new `gpu-result.txt`; a fingerprint
 for sections over the 256 KB cap. First, so every cell a later task enables meets DuckDB.
 
 ### 2. [`pbench.md`](pbench.md) — closes half of [#227](../tickets/corpus-coverage.md#t227) — state: done — PR #168
+### 2. [`stale-cells.md`](stale-cells.md) — closes no ticket — state: approved to build
+
+The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
+run, enabled or ticketed, tags struck.
+
+### 3. [`pbench.md`](pbench.md) — closes half of [#227](../tickets/corpus-coverage.md#t227) — state: rebase needed(done) — PR #168
 
 A third dataset, sf1 only, committed: NULL keys on both sides, `NOT IN` over NULLs, every
 hashable key type, skew, empty sides. One query per demonstrable ticket of the chain, cells off;
@@ -97,6 +104,7 @@ each later task turns its own on. Folds in #227: both engines check declared non
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: completing — PR #169
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: completeness approved — PR #169
 ### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: blocked(completeness approved) — PR #169
+### 4. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: rebase needed(completeness approved) — PR #169
 
 The murmur gate onto the production lane rule first; then float, boolean, timestamp and decimal
 keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id
