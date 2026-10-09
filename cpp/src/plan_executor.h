@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -134,6 +135,16 @@ uint64_t varlen_content_bytes(const cudf::table_view& table);
 std::pair<cudf::size_type, cudf::size_type> clamp_row_range(uint64_t offset, uint64_t length,
                                                             cudf::size_type num_rows);
 
+/// The two refusals a join call recovers from: an unknown join id, and a probe or a finish
+/// after the finish. Its own type rather than `std::invalid_argument`, which cuDF throws from
+/// inside a probe — mismatched key types are a `cudf::data_type_error`, and that derives from
+/// `std::invalid_argument` — so sharing one would let a failure mid-work, with the lane's
+/// batch already consumed, read as a refusal that started nothing. Everything else ends the
+/// query, as `execute_node` does.
+struct JoinRefusal : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 /// Node-by-node execution session: parses a plan once and drives ONE node at a
 /// time given already-resident child inputs, keeping intermediates resident in a
 /// handle registry. The only way a plan is executed.
@@ -159,9 +170,8 @@ class NodeSession {
   /// `out_stats[0..*out_count]` is filled PER PARTITION, so Rust can sum the
   /// ColAccum overhead per partition: Σ_p ColAccum(rows_p), NOT ColAccum(Σ rows).
   /// Input handles are CONSUMED.
-  void execute_node(uint64_t seq, const uint64_t* input_handles,
-                    const uint64_t* input_child_counts, size_t n_children,
-                    uint64_t* out_handles, size_t out_cap, size_t* out_count,
+  void execute_node(uint64_t seq, const uint64_t* input_handles, const uint64_t* input_child_counts,
+                    size_t n_children, uint64_t* out_handles, size_t out_cap, size_t* out_count,
                     NodeStats* out_stats);
 
   /// Execute the `CudfScan` at post-order `seq` reading exactly `row_groups` rather

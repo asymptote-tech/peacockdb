@@ -476,7 +476,11 @@ table CudfJoin {
   /// the build alone for LeftSemi/LeftAnti, the build plus the trailing `mark` for LeftMark,
   /// the probe alone for RightSemi/RightAnti.
   projection: [uint32];
-  chunk_bytes: uint64 = 0;              // pair/cross scratch per call; 0 = 1 GiB
+  /// The pair/cross scratch a probe call may spend, 0 meaning 1 GiB. The executor bounds
+  /// `pairs x (8 + the residual's per-row bytes)` by it, the second term being the sum over
+  /// the filter's columns of their fixed width, 16 for a variable-width one — not 8 bytes a
+  /// pair, which is the index maps alone.
+  chunk_bytes: uint64 = 0;
 }
 
 /// Sort by one or more columns.

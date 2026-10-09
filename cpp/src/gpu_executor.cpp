@@ -344,7 +344,8 @@ int peacock_join_build(peacock_executor_t* executor, uint64_t seq, uint64_t buil
 
 /// Shared by probe and finish: an unknown join id and a probe after finish are validation
 /// refusals and leave the session standing; anything else ends the query, as execute_node
-/// does. The C++ side marks the two with std::invalid_argument.
+/// does. The C++ side marks the two with `peacock::JoinRefusal`, a type of its own — cuDF
+/// throws std::invalid_argument from inside a probe, after the lane's batch was consumed.
 template <typename F>
 static int join_call(peacock_executor_t* executor, uint64_t* out_handle, F body) {
   if (!executor || !out_handle) return 1;
@@ -355,7 +356,7 @@ static int join_call(peacock_executor_t* executor, uint64_t* out_handle, F body)
   try {
     *out_handle = body();
     return 0;
-  } catch (const std::invalid_argument& e) {
+  } catch (const peacock::JoinRefusal& e) {
     executor->last_error = e.what();
     return 1;
   } catch (const std::exception& e) {

@@ -514,3 +514,116 @@ names. The three Rust edits are within the spec's restriction: `read.rs` is the 
 `CudfJoin` is appended last in the union so no variant renumbers. §5.6's named list of 26 items is
 complete. The spec's item 6 is met: both `install(TARGETS …)` and the `INSTALL_RPATH` list carry the
 binary, and `install_rmm_pool` creates `stats_mr()` so one call installs pool and adaptor.
+
+## Developer round 3, 2026-10-09 — the completeness pass addressed
+
+**53 gtests, 213 hand-counted cases** (was 48/140). Blocking and all eight importants fixed;
+none disputed. Two of the three production fixes were defects that answered wrongly or
+classified a failure wrongly, and each is pinned by a case proved red.
+
+### Blocking — #136's fold was tested at one site of five
+
+`matched` is an OR folded across probe calls, and a single batch cannot tell that from the
+last call's answer. Five sites fold it; only Full's had two batches. Five cases now probe
+**three batches with a zero-row batch between, no batch matching what another did**:
+
+| case | the fold it covers |
+|---|---|
+| `LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey` | the keyed `inner_join` arm, Left |
+| `FullNeverReemitsAnUnmatchedBuildRowAcrossThreeBatches` | the keyed `left_join` arm (already had three) |
+| `LeftSemiAntiMarkFoldEveryBatchAndAnswerEachBuildRowOnce` | the keyed distinct-probe-keys arm |
+| `TheSemiFamilyOverACrossResidualAnswersTheSameEitherPath` | `probe_mixed` and, in its decimal form, `derive` on the pairs path |
+| `ANestedLoopFoldsItsMatchedBitAcrossBatches` (new) | `probe_nested_rowwise`, both its `conditional_inner_join` and `conditional_left_semi_join` arms |
+
+**Proved red** by making `set_true` return `hit` instead of `col OR hit`: **10 of 53 cases
+fail**, including all five above. Before this round that same break left every build-side semi
+and every residual case green.
+
+### Important 1 — the refusal marker shared a type with cuDF, and it bites on 25.02 too
+
+`peacock::JoinRefusal : std::runtime_error` is declared in `plan_executor.h` beside the join
+calls, thrown at exactly the four documented sites, and caught by `join_call`; every other
+exception now resets the session. `std::runtime_error` rather than `std::invalid_argument` on
+purpose, so there is no relationship with cuDF's hierarchy at all.
+
+`AFailureInsideCudfEndsTheQueryWhileTheTwoRefusalsDoNot` pins both arms: an unknown join id
+leaves the session usable (a later probe on the live join still answers), and an Int64 probe key
+against an Int32 build key ends the query. **Proved red by a pure revert** of the throws and the
+catch to `std::invalid_argument`:
+
+    a failure inside cuDF must end the query: CUDF failure at:
+      .../cpp/src/join/hash_join.cu:577: Mismatch in joining column data types
+
+The review expected this to bite only on 26.02, 25.02 having thrown `cudf::logic_error` there.
+**It bites on 25.02 as well** — that `CUDF_EXPECTS` is already `std::invalid_argument`-derived in
+the shipped 25.02 — so the two legs agreed about the defect, not about the policy. The reverted
+run left the session standing and the following `join_finish` *succeeded*, which is the wrong
+answer the handle-consumed-already path produces.
+
+### Important 2 — the throw round 2 deleted was guarding a real hole
+
+`residual_mask` is the one function whose row count comes from the map: with an empty map
+`table_view{cols}` reads as 0 rows, a constant conjunct broadcasts to 0 rows, and
+`binary_operation` against the pairs' count threw *"Column sizes don't match"* —
+reported, before important 1, as a recoverable refusal. Reachable by a **keyed** Inner/Left/
+Right/Full whose residual is the literal `true` with no `filter_columns`: `pairs_only` skips the
+A/R split for those types, so the literal reaches `residual_mask` rather than the AST.
+
+Fixed by answering rather than refusing, which is what the design wants: when the map is empty
+`residual_mask` gives the view one column so it has the pairs' row count. That is safe because
+`split_residual` now walks `sides_read` for **every** type, not the semi family alone — it is
+also the bounds check on a conjunct's ColumnRefs against the map, so a conjunct naming a column
+under an empty map is refused by name and nothing can address the filler column.
+
+Two cases: `AKeyedResidualOfConstantsKeepsEveryKeyMatch` over the four pair types, **proved red**
+by removing the filler (`Column sizes don't match` at `binaryop.cpp:197`, the exact signature);
+and `AFilterNamingAColumnWithNoMapIsRefusedByName`, which holds the other half.
+
+### Importants 3 through 8
+
+3. `AnEmptyOrAbsentBuildAnswersEveryType` now runs §5.6's full product over **three** of its
+   eight conditions — keys-only, keys + a residual both sides read, and the same condition with
+   no keys — at 9 types × 2 build shapes × 3 conditions = 54 cases. The two new specs share the
+   keys-only spec's schemas exactly, so one expectation table serves all three.
+4. `NullEqualsNullMatchesNullKeysForEveryType` (renamed from `…ForEveryOuterType`) loops the
+   nine, so `distinct_keys`'s EQUAL side, `distinct_hash_join(Bd, EQUAL)` and the per-batch
+   distinct probe keys under EQUAL are all exercised — INTERSECT's and EXCEPT's semantics.
+5. `AnOuterResidualOfMatchingTypesIsStillApplied` loops the four pair types: in Inner the
+   dropped-conjunct defect only loses rows, while in Left and Full it also corrupts `matched`,
+   so the finish pads rows it should not. `ANestedLoopSplitsItsConjunctsBetweenTheAstAndThe\
+   Columns` loops the nine × two budgets.
+6. The two remaining one-row `chunk_bytes = 16` probes now probe three rows. Round 2's note was
+   wrong about this: clang-format had rewrapped two of the three sites after the patch was
+   written, so only one replacement landed and the claim went unchecked.
+7. `AnAbsentBuildEmitsTheSchemaABatchWouldHave` pins what task 8 must honour — an absent build
+   side's columns are named and ordered by `build_schema`, so a lane with no batch emits the
+   schema a lane with rows does, compared against a measured rows-present run.
+8. `chunk_bytes`'s fbs comment now carries the real formula: the executor bounds
+   `pairs × (8 + the residual's per-row bytes)`, the second term being the sum over the filter's
+   columns of their fixed width, 16 for a variable-width one. **Design §4.3 prices a pair at 8
+   bytes**, so a planner converting its scratch budget per §4.3 and an accountant pricing per
+   §4.3 are both wrong by the residual's width, under-pricing. Task 8 owns the reconciliation;
+   this is the note it will look for.
+
+### Formatting scope, corrected mid-round
+
+`gpu_executor.cpp`, `node_session.cpp` and `plan_executor.h` had picked up whole-file
+clang-format reflow of code this task never touched. Both .cpp files were restored from the
+commit and the four intended edits re-applied; `plan_executor.h`'s one reflowed hunk was
+reverted by hand. `git-clang-format --diff` over `cpp/src` and `cpp/include` is now clean, and
+the three diffs are the `JoinRefusal` throws, the catch, their comments and the new struct.
+The rule is `build-test.md`'s: a formatting sweep rides in a commit of its own.
+
+### What round 3 ran
+
+- **Device, nebius-gpu, installed binaries** — `peacock_join_session_tests` **53 passed**,
+  `peacock_gpu_tests` 2 passed, `peacock_plan_tests` 77 passed. The gpu tier was re-run this
+  round because `gpu_executor.cpp`'s exception classification changed.
+- **Red proofs, on the device** — the `set_true` overwrite (10 of 53 red), the pure
+  `std::invalid_argument` revert (1 red, the two real refusals still green), the `residual_mask`
+  filler removed (1 red).
+- **Local** — `peacock_cpu_tests` 15 passed; the build with 0 warnings;
+  `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens` 26 passed,
+  which is what proves a comment-only fbs edit changed no wire bytes; `--test test_module_layout`
+  18 passed. The counts in `generated.rs` and `privacy.rs` are **7,574** after this round's fbs
+  comments.

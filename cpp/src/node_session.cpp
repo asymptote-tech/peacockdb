@@ -816,10 +816,10 @@ uint64_t NodeSession::join_build(uint64_t seq, uint64_t build, NodeStats* out_st
 
 uint64_t NodeSession::join_probe(uint64_t join, uint64_t probe, NodeStats* out_stats) {
   auto it = impl_->joins.find(join);
-  // invalid_argument, not runtime_error: the C wrapper keeps the session for a call that
-  // named a join wrongly, and ends the query for one that failed mid-work.
+  // JoinRefusal, so the C wrapper keeps the session for a call that named a join wrongly and
+  // ends the query for one that failed mid-work. Nothing has been consumed at this point.
   if (it == impl_->joins.end())
-    throw std::invalid_argument("NodeSession::join_probe: unknown join " + std::to_string(join));
+    throw JoinRefusal("NodeSession::join_probe: unknown join " + std::to_string(join));
   const uint64_t seq = impl_->join_seq.at(join);
   RegionSink* sink = impl_->measuring();
   const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
@@ -835,7 +835,7 @@ uint64_t NodeSession::join_probe(uint64_t join, uint64_t probe, NodeStats* out_s
 uint64_t NodeSession::join_finish(uint64_t join, NodeStats* out_stats) {
   auto it = impl_->joins.find(join);
   if (it == impl_->joins.end())
-    throw std::invalid_argument("NodeSession::join_finish: unknown join " + std::to_string(join));
+    throw JoinRefusal("NodeSession::join_finish: unknown join " + std::to_string(join));
   const uint64_t seq = impl_->join_seq.at(join);
   RegionSink* sink = impl_->measuring();
   const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;

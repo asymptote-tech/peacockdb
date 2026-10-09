@@ -392,9 +392,20 @@ TEST(JoinSession, LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey) {
             0)
       << s.error();
   EXPECT_EQ(s.rows(out), sorted({"2|b|2|20", "2|c|2|20"}));
+  // A zero-row batch, then one matching key 1 and not key 2: `matched` folds across the
+  // three, so only the NULL-key build row is left to pad (#136).
+  ASSERT_EQ(
+      peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {}), i64("p_w", {})}), &out, nullptr), 0)
+      << s.error();
+  EXPECT_TRUE(s.rows(out).empty());
+  ASSERT_EQ(
+      peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {10})}), &out, nullptr),
+      0)
+      << s.error();
+  EXPECT_EQ(s.rows(out), sorted({"1|a|1|10"}));
   ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
   // the latent finish defect: today's LeftAnti hardcodes NULL = NULL and drops "n"
-  EXPECT_EQ(s.rows(out), sorted({"1|a|NULL|NULL", "NULL|n|NULL|NULL"}));
+  EXPECT_EQ(s.rows(out), sorted({"NULL|n|NULL|NULL"}));
 }
 
 TEST(JoinSession, RightPadsEachUnmatchedProbeRowInItsOwnCall) {
@@ -434,9 +445,25 @@ TEST(JoinSession, FullNeverReemitsAnUnmatchedBuildRowAcrossThreeBatches) {
   EXPECT_EQ(s.rows(out), sorted({"1|a|NULL|NULL", "NULL|n|NULL|NULL"}));
 }
 
-TEST(JoinSession, NullEqualsNullMatchesNullKeysForEveryOuterType) {
-  for (auto t : {fb::JoinType_Inner, fb::JoinType_Left, fb::JoinType_Right, fb::JoinType_Full}) {
-    auto spec = typed(t);
+// `null_equals_null` is INTERSECT's and EXCEPT's semantics, so it reaches the semi family
+// too: it is what makes `distinct_keys` keep a NULL key rather than drop it, and what
+// `distinct_hash_join` and the per-batch distinct probe keys are built with.
+TEST(JoinSession, NullEqualsNullMatchesNullKeysForEveryType) {
+  struct C {
+    fb::JoinType t;
+    Rows probe;
+    std::optional<Rows> finish;
+  };
+  for (auto const& c : std::vector<C>{{fb::JoinType_Inner, {"NULL|n|NULL|99"}, std::nullopt},
+                                      {fb::JoinType_Left, {"NULL|n|NULL|99"}, Rows{}},
+                                      {fb::JoinType_Right, {"NULL|n|NULL|99"}, std::nullopt},
+                                      {fb::JoinType_Full, {"NULL|n|NULL|99"}, Rows{}},
+                                      {fb::JoinType_LeftSemi, {}, Rows{"NULL|n"}},
+                                      {fb::JoinType_LeftAnti, {}, Rows{}},
+                                      {fb::JoinType_LeftMark, {}, Rows{"NULL|n|true"}},
+                                      {fb::JoinType_RightSemi, {"NULL|99"}, std::nullopt},
+                                      {fb::JoinType_RightAnti, {}, std::nullopt}}) {
+    auto spec = typed(c.t);
     spec.null_equals_null = true;
     Session s(make_plan(spec));
     uint64_t j = 0, out = 0;
@@ -450,13 +477,16 @@ TEST(JoinSession, NullEqualsNullMatchesNullKeysForEveryOuterType) {
                            &out, nullptr),
         0)
         << s.error();
-    EXPECT_EQ(s.rows(out), sorted({"NULL|n|NULL|99"})) << fb::EnumNameJoinType(t);
-    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-    // The one build row matched, so the two finishing types have nothing left to pad.
-    if (t == fb::JoinType_Left || t == fb::JoinType_Full)
-      EXPECT_TRUE(s.rows(out).empty()) << fb::EnumNameJoinType(t);
+    if (is_build_side_semi(c.t))
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
     else
-      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(t);
+      EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    // The one build row matched its NULL twin, so nothing is left to pad or to keep.
+    if (c.finish)
+      EXPECT_EQ(s.rows(out), sorted(*c.finish)) << fb::EnumNameJoinType(c.t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
   }
 }
 
@@ -480,15 +510,18 @@ TEST(JoinSession, AProjectionCrossingSidesKeepsOnlyItsColumns) {
 
 // --- Task 4: the semi family without a residual -----------------------------
 
-TEST(JoinSession, LeftSemiAntiMarkAnswerOnlyAtFinishEachBuildRowOnce) {
+// The fold this session exists for (#136): a build row matched by one batch stays matched
+// through every later one, so `matched` is an OR across calls and not the last call's answer.
+// Three batches with a zero-row batch between them, and no batch matches what another did.
+TEST(JoinSession, LeftSemiAntiMarkFoldEveryBatchAndAnswerEachBuildRowOnce) {
   for (auto const& [t, want] : std::vector<std::pair<fb::JoinType, Rows>>{
-           {fb::JoinType_LeftSemi, {"2|b", "2|c"}},
-           {fb::JoinType_LeftAnti, {"1|a", "NULL|n"}},
-           {fb::JoinType_LeftMark, {"1|a|false", "2|b|true", "2|c|true", "NULL|n|false"}}}) {
+           {fb::JoinType_LeftSemi, {"1|a", "2|b", "2|c"}},
+           {fb::JoinType_LeftAnti, {"NULL|n"}},
+           {fb::JoinType_LeftMark, {"1|a|true", "2|b|true", "2|c|true", "NULL|n|false"}}}) {
     Session s(make_plan(typed(t)));
     uint64_t j = 0, out = 1;
     ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload(build_k_v()), &j, nullptr), 0) << s.error();
-    // three probe rows on key 2 and a NULL: many-to-many, and NULL matches nothing
+    // Batch 1: three probe rows on key 2 and a NULL — many-to-many, and NULL matches nothing.
     ASSERT_EQ(
         peacock_join_probe(
             s.exec(), j, s.upload({i32("p_k", {2, 2, 2, std::nullopt}), i64("p_w", {1, 2, 3, 4})}),
@@ -496,6 +529,18 @@ TEST(JoinSession, LeftSemiAntiMarkAnswerOnlyAtFinishEachBuildRowOnce) {
         0)
         << s.error();
     EXPECT_EQ(out, 0u) << "a build-side semi type answers no batch per probe";
+    ASSERT_EQ(
+        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {}), i64("p_w", {})}), &out, nullptr),
+        0)
+        << s.error();
+    EXPECT_EQ(out, 0u);
+    // Batch 3 matches key 1 and not key 2, so an overwrite would lose the build rows batch 1
+    // matched and a lost fold shows in every one of the three answers.
+    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {10})}), &out,
+                                 nullptr),
+              0)
+        << s.error();
+    EXPECT_EQ(out, 0u);
     ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
     EXPECT_EQ(s.rows(out), sorted(want)) << fb::EnumNameJoinType(t);
   }
@@ -565,29 +610,87 @@ static std::vector<EmptyCase> empty_build_answers() {
   };
 }
 
+/// The same two sides under a residual the build and probe both read, so the empty-build
+/// answers can be compared against the keys-only ones row for row. `p_w > b_k` is Int64
+/// beside Int32, which the AST refuses, so it also exercises the pairs path's constructor.
+static JoinSpec typed_with_residual(fb::JoinType t) {
+  auto spec = typed(t);
+  spec.filter = [](auto& f) { return bin(f, col(f, 0), fb::BinaryOp_Gt, col(f, 1)); };
+  spec.filter_columns = {{fb::JoinSide_Right, 1}, {fb::JoinSide_Left, 0}};
+  return spec;
+}
+
+/// The same condition with no keys: a nested loop over the same two sides.
+static JoinSpec typed_nested(fb::JoinType t) {
+  auto spec = typed_with_residual(t);
+  spec.keys.clear();
+  return spec;
+}
+
+// §5.6's one explicit full product, now over three of its eight conditions rather than one:
+// `join_build` sets `empty_build` and returns before the A/R split, the hoisting and the
+// hash build, so every condition shares `probe_empty_build` — and pbench leaves three lanes
+// in four with no build batch, which is how task 8's first multi-lane run meets this.
 TEST(JoinSession, AnEmptyOrAbsentBuildAnswersEveryType) {
-  for (bool absent : {true, false}) {
-    for (auto const& c : empty_build_answers()) {
-      Session s(make_plan(typed(c.t)));
-      uint64_t b = absent ? 0 : s.upload({i32("b_k", {}), utf8("b_v", {})});
-      uint64_t j = 0, out = 0;
-      ASSERT_EQ(peacock_join_build(s.exec(), 0, b, &j, nullptr), 0) << s.error();
-      ASSERT_EQ(peacock_join_probe(s.exec(), j,
-                                   s.upload({i32("p_k", {1, std::nullopt}), i64("p_w", {10, 99})}),
-                                   &out, nullptr),
-                0)
-          << s.error();
-      if (is_build_side_semi(c.t))
-        EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
-      else
-        EXPECT_EQ(s.rows(out), sorted(c.per_probe))
-            << fb::EnumNameJoinType(c.t) << " absent=" << absent;
-      ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-      if (c.finish)
-        EXPECT_EQ(s.rows(out), sorted(*c.finish)) << fb::EnumNameJoinType(c.t);
-      else
-        EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
+  const std::vector<std::pair<const char*, JoinSpec (*)(fb::JoinType)>> conditions{
+      {"keys only", typed}, {"keys + residual", typed_with_residual}, {"no keys", typed_nested}};
+  for (auto const& [name, spec_of] : conditions) {
+    for (bool absent : {true, false}) {
+      for (auto const& c : empty_build_answers()) {
+        Session s(make_plan(spec_of(c.t)));
+        uint64_t b = absent ? 0 : s.upload({i32("b_k", {}), utf8("b_v", {})});
+        uint64_t j = 0, out = 0;
+        const std::string where = std::string(fb::EnumNameJoinType(c.t)) + " " + name +
+                                  " absent=" + std::to_string(absent);
+        ASSERT_EQ(peacock_join_build(s.exec(), 0, b, &j, nullptr), 0) << s.error() << " " << where;
+        ASSERT_EQ(peacock_join_probe(
+                      s.exec(), j, s.upload({i32("p_k", {1, std::nullopt}), i64("p_w", {10, 99})}),
+                      &out, nullptr),
+                  0)
+            << s.error() << " " << where;
+        if (is_build_side_semi(c.t))
+          EXPECT_EQ(out, 0u) << where;
+        else
+          EXPECT_EQ(s.rows(out), sorted(c.per_probe)) << where;
+        ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error() << " " << where;
+        if (c.finish)
+          EXPECT_EQ(s.rows(out), sorted(*c.finish)) << where;
+        else
+          EXPECT_EQ(out, 0u) << where;
+      }
     }
+  }
+}
+
+// What task 8 must honour: an absent build side's columns are named and ordered by
+// `build_schema`, so a lane with no batch emits the same schema as one with rows. A
+// disagreement shows up as an Arrow mismatch on empty lanes alone, debugged from Rust.
+TEST(JoinSession, AnAbsentBuildEmitsTheSchemaABatchWouldHave) {
+  std::shared_ptr<arrow::Schema> want;
+  {
+    Session s(make_plan(typed(fb::JoinType_Right)));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {1}), utf8("b_v", {"a"})}), &j,
+                                 nullptr),
+              0)
+        << s.error();
+    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {10})}), &out,
+                                 nullptr),
+              0)
+        << s.error();
+    ASSERT_EQ(s.rows(out).size(), 1u);
+    want = s.schema(out);
+  }
+  for (bool absent : {true, false}) {
+    Session s(make_plan(typed(fb::JoinType_Right)));
+    uint64_t b = absent ? 0 : s.upload({i32("b_k", {}), utf8("b_v", {})});
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, b, &j, nullptr), 0) << s.error();
+    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {10})}), &out,
+                                 nullptr),
+              0)
+        << s.error();
+    expect_same_columns(s.schema(out), want);
   }
 }
 
@@ -784,9 +887,9 @@ static JoinSpec cross_residual(fb::JoinType t, bool decimals) {
 TEST(JoinSession, TheSemiFamilyOverACrossResidualAnswersTheSameEitherPath) {
   for (bool decimals : {false, true}) {
     for (auto const& [t, want] : std::vector<std::pair<fb::JoinType, Rows>>{
-             {fb::JoinType_LeftSemi, {"1|5"}},
-             {fb::JoinType_LeftAnti, {"1|9", "2|5"}},
-             {fb::JoinType_LeftMark, {"1|5|true", "1|9|false", "2|5|false"}},
+             {fb::JoinType_LeftSemi, {"1|5", "2|5"}},
+             {fb::JoinType_LeftAnti, {"1|9"}},
+             {fb::JoinType_LeftMark, {"1|5|true", "1|9|false", "2|5|true"}},
              {fb::JoinType_RightSemi, {"1|7"}},
              {fb::JoinType_RightAnti, {"2|1", "3|9"}}}) {
       Session s(make_plan(cross_residual(t, decimals)));
@@ -804,6 +907,23 @@ TEST(JoinSession, TheSemiFamilyOverACrossResidualAnswersTheSameEitherPath) {
                 0)
           << s.error();
       if (is_build_side_semi(t)) {
+        EXPECT_EQ(out, 0u);
+        // A zero-row batch, then one whose residual passes against b3 alone: the build row
+        // batch 1 matched must stay matched, on the mixed path and on the pairs path alike
+        // (#136). Both of those fold `matched` at a site a single batch cannot test.
+        ASSERT_EQ(
+            peacock_join_probe(s.exec(), j,
+                               s.upload({i32("p_k", {}), i64("p_w", {}), dec("p_d", 15, 2, {})}),
+                               &out, nullptr),
+            0)
+            << s.error();
+        EXPECT_EQ(out, 0u);
+        ASSERT_EQ(
+            peacock_join_probe(
+                s.exec(), j, s.upload({i32("p_k", {2}), i64("p_w", {9}), dec("p_d", 15, 2, {900})}),
+                &out, nullptr),
+            0)
+            << s.error();
         EXPECT_EQ(out, 0u);
         ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
       }
@@ -859,11 +979,14 @@ TEST(JoinSession, ASemiJoinWithTwoCrossConjunctsAndsThemAtTheAstLevel) {
                              &j, nullptr),
           0)
           << s.error();
-      ASSERT_EQ(
-          peacock_join_probe(
-              s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {10}), dec("p_d", 15, 2, {1000})}),
-              &out, nullptr),
-          0)
+      // Three probe rows, so a small budget actually cuts the batch: `chunks` caps the range
+      // count at the probe's rows, and one row is one range however small the budget. p1
+      // fails both conjuncts against both build rows, p2 matches no key.
+      ASSERT_EQ(peacock_join_probe(s.exec(), j,
+                                   s.upload({i32("p_k", {1, 1, 2}), i64("p_w", {10, 3, 10}),
+                                             dec("p_d", 15, 2, {1000, 300, 1000})}),
+                                   &out, nullptr),
+                0)
           << s.error();
       EXPECT_EQ(out, 0u);
       ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
@@ -1025,6 +1148,36 @@ TEST(JoinSession, AnUnconditionalInnerNestedLoopIsTheCrossProduct) {
   ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_v", {7, 8, 9})}), &out, nullptr), 0)
       << s.error();
   EXPECT_EQ(s.rows(out), sorted({"1|7", "1|8", "1|9", "2|7", "2|8", "2|9"}));
+}
+
+// The keyless half of #136's fold: `probe_nested_rowwise` sets `matched` from a
+// conditional_inner_join for Left and from a conditional_left_semi_join for the build-side
+// semi family, and no single batch can tell an OR from an overwrite. Equality rather than
+// `<`, so batch 1 matches the second build row alone and batch 3 the first alone.
+TEST(JoinSession, ANestedLoopFoldsItsMatchedBitAcrossBatches) {
+  for (auto const& [t, want] : std::vector<std::pair<fb::JoinType, Rows>>{
+           {fb::JoinType_Left, {}},
+           {fb::JoinType_LeftSemi, {"1|5", "2|10"}},
+           {fb::JoinType_LeftAnti, {}},
+           {fb::JoinType_LeftMark, {"1|5|true", "2|10|true"}}}) {
+    JoinSpec spec{.type = t,
+                  .build_schema = {{"b_id", fb::DataType_Int32}, {"b_v", fb::DataType_Int32}},
+                  .probe_schema = {{"p_v", fb::DataType_Int32}}};
+    spec.filter = [](auto& f) { return bin(f, col(f, 0), fb::BinaryOp_Eq, col(f, 1)); };
+    spec.filter_columns = {{fb::JoinSide_Right, 0}, {fb::JoinSide_Left, 1}};
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_id", {1, 2}), i32("b_v", {5, 10})}),
+                                 &j, nullptr),
+              0)
+        << s.error();
+    for (auto const& batch : std::vector<std::vector<std::optional<int32_t>>>{{10}, {}, {5}}) {
+      ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_v", batch)}), &out, nullptr), 0)
+          << s.error();
+    }
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    EXPECT_EQ(s.rows(out), sorted(want)) << fb::EnumNameJoinType(t);
+  }
 }
 
 // --- Task 10: cross (§3.7) --------------------------------------------------
@@ -1237,9 +1390,12 @@ TEST(JoinSession, AKeyedSemiJoinAnswersTheSameWithAHoistedConjunctOrThePairsPath
                     &j, nullptr),
                 0)
           << s.error();
-      ASSERT_EQ(peacock_join_probe(
-                    s.exec(), j, s.upload({i32("p_k", {1}), utf8("p_s", {"X"}), i64("p_w", {10})}),
-                    &out, nullptr),
+      // Three probe rows, so `chunk_bytes = 16` cuts the batch rather than making one range
+      // of it: p1 matches b2's key and string but not its limit, p2 matches no key.
+      ASSERT_EQ(peacock_join_probe(s.exec(), j,
+                                   s.upload({i32("p_k", {1, 1, 2}), utf8("p_s", {"X", "Y", "X"}),
+                                             i64("p_w", {10, 10, 10})}),
+                                   &out, nullptr),
                 0)
           << s.error();
       EXPECT_EQ(out, 0u);
@@ -1308,22 +1464,40 @@ TEST(JoinSession, HoistingKeepsANestedLoopOffTheCrossProduct) {
 // Regression — the path once passed only the conjuncts the AST had refused, so a residual
 // of matching types was dropped and every key match was emitted.
 TEST(JoinSession, AnOuterResidualOfMatchingTypesIsStillApplied) {
-  auto spec = residual(fb::JoinType_Inner);
-  spec.build_schema[2].type = fb::DataType_Int64;  // b_lim beside p_w: AST-able as it stands
-  Session s(make_plan(spec));
-  uint64_t j = 0, out = 0;
-  ASSERT_EQ(peacock_join_build(
-                s.exec(), 0,
-                s.upload({i32("b_k", {1, 2}), utf8("b_v", {"a", "b"}), i64("b_lim", {5, 5})}), &j,
-                nullptr),
-            0)
-      << s.error();
-  ASSERT_EQ(
-      peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1, 1, 2}), i64("p_w", {3, 9, 9})}),
-                         &out, nullptr),
-      0)
-      << s.error();
-  EXPECT_EQ(s.rows(out), sorted({"1|a|5|1|9", "2|b|5|2|9"}));
+  struct C {
+    fb::JoinType t;
+    Rows probe;
+    Rows finish;
+  };
+  for (auto const& c :
+       std::vector<C>{{fb::JoinType_Inner, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
+                      {fb::JoinType_Left, {"1|a|5|1|9", "2|b|5|2|9"}, {}},
+                      {fb::JoinType_Right, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}},
+                      {fb::JoinType_Full, {"1|a|5|1|9", "2|b|5|2|9", "NULL|NULL|NULL|1|3"}, {}}}) {
+    auto spec = residual(c.t);
+    spec.build_schema[2].type = fb::DataType_Int64;  // b_lim beside p_w: AST-able as it stands
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(
+                  s.exec(), 0,
+                  s.upload({i32("b_k", {1, 2}), utf8("b_v", {"a", "b"}), i64("b_lim", {5, 5})}), &j,
+                  nullptr),
+              0)
+        << s.error();
+    ASSERT_EQ(
+        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1, 1, 2}), i64("p_w", {3, 9, 9})}),
+                           &out, nullptr),
+        0)
+        << s.error();
+    EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    // Both build rows passed the filter against some probe row, so a finish that pads
+    // anything is a `matched` the dropped conjunct corrupted — which Inner cannot show.
+    if (c.t == fb::JoinType_Left || c.t == fb::JoinType_Full)
+      EXPECT_EQ(s.rows(out), sorted(c.finish)) << fb::EnumNameJoinType(c.t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
+  }
 }
 
 // --- Task 11: typed pads, stats, regions, no exit copy ----------------------
@@ -1517,6 +1691,87 @@ TEST(JoinSession, AProbeHandsItsGatheredColumnsOverWithoutACopy) {
       << ": a deep copy at the exit would add a second output";
 }
 
+// The two refusals the ABI promises leave the session standing are the only two: a failure
+// from inside cuDF has consumed the lane's batch, so it must end the query instead. cuDF
+// throws `data_type_error`, which is a `std::invalid_argument`, on mismatched key types —
+// the shape that would read as a refusal if the session's marker shared that type.
+TEST(JoinSession, AFailureInsideCudfEndsTheQueryWhileTheTwoRefusalsDoNot) {
+  // An unknown join id leaves the session usable: a later call on a live join still answers.
+  {
+    Session s(make_plan(inner_on_k()));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {1}), utf8("b_v", {"a"})}), &j,
+                                 nullptr),
+              0)
+        << s.error();
+    EXPECT_NE(peacock_join_probe(s.exec(), 999, s.upload({i32("p_k", {1}), i64("p_w", {7})}), &out,
+                                 nullptr),
+              0);
+    EXPECT_NE(s.error().find("unknown join"), std::string::npos) << s.error();
+    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {1}), i64("p_w", {7})}), &out,
+                                 nullptr),
+              0)
+        << s.error();
+    EXPECT_EQ(s.rows(out), sorted({"1|a|1|7"})) << "the session was still standing";
+  }
+  // A probe whose key type does not match the build's fails inside cuDF, after the batch was
+  // consumed: the query ends, and the next call says so rather than answering.
+  {
+    JoinSpec spec = inner_on_k();
+    spec.probe_schema[0].type = fb::DataType_Int64;
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {1}), utf8("b_v", {"a"})}), &j,
+                                 nullptr),
+              0)
+        << s.error();
+    EXPECT_NE(peacock_join_probe(s.exec(), j, s.upload({i64("p_k", {1}), i64("p_w", {7})}), &out,
+                                 nullptr),
+              0)
+        << "an Int64 probe key against an Int32 build key";
+    EXPECT_NE(peacock_join_finish(s.exec(), j, &out, nullptr), 0);
+    EXPECT_NE(s.error().find("no plan loaded"), std::string::npos)
+        << "a failure inside cuDF must end the query: " << s.error();
+  }
+}
+
+// A keyed join whose residual names no column: the literal `true` with an empty
+// `filter_columns`, which is what a planner writes for it. The pairs path evaluates the
+// residual over the key matches, and a residual of constants must keep every one of them.
+TEST(JoinSession, AKeyedResidualOfConstantsKeepsEveryKeyMatch) {
+  for (auto t : {fb::JoinType_Inner, fb::JoinType_Left, fb::JoinType_Right, fb::JoinType_Full}) {
+    auto spec = typed(t);
+    spec.filter = [](auto& f) { return lit_bool(f, true); };  // and no filter_columns
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload(build_k_v()), &j, nullptr), 0) << s.error();
+    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {2, 5}), i64("p_w", {20, 50})}),
+                                 &out, nullptr),
+              0)
+        << s.error();
+    Rows want{"2|b|2|20", "2|c|2|20"};
+    if (t == fb::JoinType_Right || t == fb::JoinType_Full) want.push_back("NULL|NULL|5|50");
+    EXPECT_EQ(s.rows(out), sorted(want)) << fb::EnumNameJoinType(t);
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+    if (t == fb::JoinType_Left || t == fb::JoinType_Full)
+      EXPECT_EQ(s.rows(out), sorted({"1|a|NULL|NULL", "NULL|n|NULL|NULL"}))
+          << fb::EnumNameJoinType(t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(t);
+  }
+}
+
+// The same filter with a ColumnRef and no map is a malformed plan, and is refused by name
+// rather than reading the column `residual_mask` gives the view its row count from.
+TEST(JoinSession, AFilterNamingAColumnWithNoMapIsRefusedByName) {
+  auto spec = typed(fb::JoinType_Inner);
+  spec.filter = [](auto& f) { return col(f, 0); };  // and no filter_columns
+  Session s(make_plan(spec));
+  uint64_t j = 0;
+  EXPECT_NE(peacock_join_build(s.exec(), 0, s.upload(build_k_v()), &j, nullptr), 0);
+  EXPECT_NE(s.error().find("out of range of filter_columns"), std::string::npos) << s.error();
+}
+
 // --- Task 11b: the rest of §5.6's named cases -------------------------------
 
 // A present-but-empty projection keeps no column, which no plan asks for: the session
@@ -1627,31 +1882,60 @@ TEST(JoinSession, ARightSemiOverAnAllNullBuildAnswersNothingAndRightAntiEveryRow
 // §3.6's middle case: one conjunct the AST takes and one it does not, so the conditional
 // join makes the candidates and the rest is evaluated over them as columns.
 TEST(JoinSession, ANestedLoopSplitsItsConjunctsBetweenTheAstAndTheColumns) {
-  for (uint64_t chunk_bytes : {uint64_t{0}, uint64_t{16}}) {
-    JoinSpec spec{.type = fb::JoinType_Left,
-                  .build_schema = {{"b_id", fb::DataType_Int32}, {"b_v", fb::DataType_Int32}},
-                  .probe_schema = {{"p_v", fb::DataType_Int32}},
-                  .chunk_bytes = chunk_bytes};
-    // p_v < b_v AND cast(p_v as decimal) <> cast(b_v as decimal): the first is AST-able as
-    // it stands, the second stays refused even with both operands hoisted.
-    spec.filter = [](auto& f) {
-      return bin(
-          f, bin(f, col(f, 0), fb::BinaryOp_Lt, col(f, 1)), fb::BinaryOp_And,
-          bin(f, cast_dec(f, col(f, 0), 15, 2), fb::BinaryOp_NotEq, cast_dec(f, col(f, 1), 15, 2)));
-    };
-    spec.filter_columns = {{fb::JoinSide_Right, 0}, {fb::JoinSide_Left, 1}};
-    Session s(make_plan(spec));
-    uint64_t j = 0, out = 0;
-    ASSERT_EQ(peacock_join_build(s.exec(), 0, s.upload({i32("b_id", {1, 2}), i32("b_v", {5, 10})}),
-                                 &j, nullptr),
-              0)
-        << s.error();
-    ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_v", {3, 7, 12})}), &out, nullptr), 0)
-        << s.error();
-    EXPECT_EQ(s.rows(out), sorted({"1|5|3", "2|10|3", "2|10|7"})) << "chunk_bytes=" << chunk_bytes;
-    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
-    EXPECT_TRUE(s.rows(out).empty()) << "both build rows matched";
-  }
+  // Pairs passing `p_v < b_v` over build (1,5) (2,10) and probe 3, 7, 12: (b1,3) (b2,3)
+  // (b2,7). The decimal conjunct is true for every pair here, so each type's answer is the
+  // one its own branch of `derive` and `kept_probe_rows` owes.
+  struct C {
+    fb::JoinType t;
+    Rows probe;
+    std::optional<Rows> finish;
+  };
+  const std::vector<C> cases{
+      {fb::JoinType_Inner, {"1|5|3", "2|10|3", "2|10|7"}, std::nullopt},
+      {fb::JoinType_Left, {"1|5|3", "2|10|3", "2|10|7"}, Rows{}},
+      {fb::JoinType_Right, {"1|5|3", "2|10|3", "2|10|7", "NULL|NULL|12"}, std::nullopt},
+      {fb::JoinType_Full, {"1|5|3", "2|10|3", "2|10|7", "NULL|NULL|12"}, Rows{}},
+      {fb::JoinType_LeftSemi, {}, Rows{"1|5", "2|10"}},
+      {fb::JoinType_LeftAnti, {}, Rows{}},
+      {fb::JoinType_LeftMark, {}, Rows{"1|5|true", "2|10|true"}},
+      {fb::JoinType_RightSemi, {"3", "7"}, std::nullopt},
+      {fb::JoinType_RightAnti, {"12"}, std::nullopt},
+  };
+  for (uint64_t chunk_bytes : {uint64_t{0}, uint64_t{16}})
+    for (auto const& c : cases) {
+      JoinSpec spec{.type = c.t,
+                    .build_schema = {{"b_id", fb::DataType_Int32}, {"b_v", fb::DataType_Int32}},
+                    .probe_schema = {{"p_v", fb::DataType_Int32}},
+                    .chunk_bytes = chunk_bytes};
+      // p_v < b_v AND cast(p_v as decimal) <> cast(b_v as decimal): the first is AST-able as
+      // it stands, the second stays refused even with both operands hoisted.
+      spec.filter = [](auto& f) {
+        return bin(f, bin(f, col(f, 0), fb::BinaryOp_Lt, col(f, 1)), fb::BinaryOp_And,
+                   bin(f, cast_dec(f, col(f, 0), 15, 2), fb::BinaryOp_NotEq,
+                       cast_dec(f, col(f, 1), 15, 2)));
+      };
+      spec.filter_columns = {{fb::JoinSide_Right, 0}, {fb::JoinSide_Left, 1}};
+      Session s(make_plan(spec));
+      uint64_t j = 0, out = 0;
+      ASSERT_EQ(peacock_join_build(
+                    s.exec(), 0, s.upload({i32("b_id", {1, 2}), i32("b_v", {5, 10})}), &j, nullptr),
+                0)
+          << s.error();
+      ASSERT_EQ(peacock_join_probe(s.exec(), j, s.upload({i32("p_v", {3, 7, 12})}), &out, nullptr),
+                0)
+          << s.error();
+      const std::string where =
+          std::string(fb::EnumNameJoinType(c.t)) + " chunk_bytes=" + std::to_string(chunk_bytes);
+      if (is_build_side_semi(c.t))
+        EXPECT_EQ(out, 0u) << where;
+      else
+        EXPECT_EQ(s.rows(out), sorted(c.probe)) << where;
+      ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
+      if (c.finish)
+        EXPECT_EQ(s.rows(out), sorted(*c.finish)) << where;
+      else
+        EXPECT_EQ(out, 0u) << where;
+    }
 }
 
 // A nested loop over no probe batch at all: the finish answers from the build alone, so

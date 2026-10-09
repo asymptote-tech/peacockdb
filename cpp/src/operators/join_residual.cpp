@@ -162,6 +162,16 @@ std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view
     owned.push_back(cudf::gather(src, build ? bi : pi, cudf::out_of_bounds_policy::DONT_CHECK));
     cols.push_back(owned.back()->get_column(0).view());
   }
+  // An empty map is a residual of constants -- the literal `true` a predicate-free join
+  // carries. A view of no columns reads as no rows whatever it holds, and a constant
+  // broadcasts to its table's row count, so the mask would come out a row short of the
+  // pairs; one column gives the view the pairs' count. No ColumnRef can address it: a
+  // conjunct naming a column under an empty map is refused in `split_residual`.
+  std::unique_ptr<cudf::column> row_count;
+  if (cols.empty()) {
+    row_count = bools(bi.size(), true);
+    cols.push_back(row_count->view());
+  }
   cudf::table_view ft{cols};
   auto acc = bools(bi.size(), true);
   cudf::numeric_scalar<bool> f(false);

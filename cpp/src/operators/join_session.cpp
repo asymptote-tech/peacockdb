@@ -186,12 +186,15 @@ void JoinSession::split_residual() {
   const bool semi =
       (is_build_side_semi(s_->type) || is_probe_side_semi(s_->type)) && !s_->bkeys.empty();
   for (auto const* e : parts) {
+    // Walked for every type, not only the ones that push: it is also the bounds check on a
+    // conjunct's ColumnRefs against the map, which is what lets `residual_mask` treat an
+    // empty map as a residual of constants.
+    bool reads_build = false, reads_probe = false;
+    sides_read(e, s_->map, reads_build, reads_probe);
     if (!semi) {
       s_->cross.push_back(e);
       continue;
     }
-    bool reads_build = false, reads_probe = false;
-    sides_read(e, s_->map, reads_build, reads_probe);
     if (reads_build && !reads_probe)
       s_->build_only.push_back(e);
     else if (reads_probe && !reads_build)
@@ -256,7 +259,7 @@ void JoinSession::flip_map() {
 }
 
 std::optional<TableResult> JoinSession::probe(TableResult P) {
-  if (s_->finished) throw std::invalid_argument("join_probe: the join is finished");
+  if (s_->finished) throw JoinRefusal("join_probe: the join is finished");
   if (s_->probe_types.empty()) {
     s_->probe_types = types_of(P.view());
     s_->probe_names = P.column_names;
@@ -557,7 +560,7 @@ void JoinSession::keep_and_derive(TableResult const& Pc, cudf::column_view bi, c
 }
 
 std::optional<TableResult> JoinSession::finish() {
-  if (s_->finished) throw std::invalid_argument("join_finish: the join is finished");
+  if (s_->finished) throw JoinRefusal("join_finish: the join is finished");
   s_->finished = true;
   switch (s_->type) {
     case fb::JoinType_Left:
