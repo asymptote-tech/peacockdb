@@ -326,3 +326,40 @@ build above. `ctest -L cpu` re-run: 1/1 passed.
 **One pre-existing warning, unchanged.** The gpu rung still reports the unused `AsArray` import at
 `tests/gpu_tests/aggregate_dimension_cases.rs:9` — one warning, the same one round 1 recorded, and
 the only one either build emits.
+
+### 2026-10-09 — round 1 findings closed, state completing
+
+Committed as `7d4f92d8`. The important finding is closed with a measured proof rather than an
+argument: the hold's refresh loop was removed, leaving `satisfied[node] = true` so
+`report.satisfied` and the goldens' `early_exit=` lines stayed populated, and `--lib` went 611
+passed / 21 failed — twenty of them the mock tier and the twenty-first the new end-to-end case.
+The other three `end_to_end::limits` cases stayed green, which is the gap the finding named.
+
+Counts after round 2: `--lib` 632 passed + 2 ignored = 634, `test_cpu_corpus` 569,
+`test_corpus_goldens` 26, `test_cost_model` 3, `test_module_layout` 17, `test_golden_format` 26,
+`test_ci_coverage` 9, `cost-report` 36, `ctest -L cpu` 1/1, the gpu rung built and listed at 536
+cases. `build-test.md` moved by one — End to end 36 → 37, `--lib` 634, cpu 1232, Rust 1903, grand
+total 2378 — and the developer also corrected prose that was already wrong there, "seventeen
+cases no query list can carry" where they were nineteen. No golden moved and no `testdata/`,
+`cpp/` or `flatbuffers/` file changed in this round, so `## Cost gate`'s rows still stand.
+
+#### [#284](../tickets/complete-coverage.md#t284) filed — a limit over a filter is refused above one lane
+
+The developer sanity-checked the reviewer's suggested query instead of taking it, and found half
+of it refused: `select * from lineitem where l_quantity > 0 limit 10;` is `invalid plan: GpuLimit:
+a limit feeding only the sink is not a node` at the three tp4 modes. Above one partition
+DataFusion parks a **fetch-carrying** `CoalesceBatchesExec` between the root limit and the
+filter, and `unload_input` descends that node only where it has no fetch, so the inner fetch
+becomes a limit whose only parent is the sink.
+
+It predates this branch, and that was measured, not reasoned: reverting `translate` to the base's
+`node()` call gives the same refusal at the same three modes. A refusal of a legal query is
+production behaviour, so it is filed rather than noted — #284, in complete-coverage.md, since no
+corpus query has the shape. The fix is one arm and the composition it needs is already written
+and already tested.
+
+This also corrects the review's own closing sentence, that anything outside the descent set
+"becomes a node and the limit lands legally beneath it". The descent set is the erasing set, as
+the review says; what does not follow is that everything outside it is safe. A comment in
+`limit_interval` claiming its `CoalesceBatchesExec` arm is "not reachable from today's planner"
+went with it — it is reachable, and at one target partition it is what makes that query plan.
