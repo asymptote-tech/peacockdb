@@ -560,32 +560,30 @@ answers nothing at every mode instead of its twenty rows, measured on nebius-gpu
 (`wire/node_writer.rs::scan`), which `scan.cpp` reads as "every column of the schema I was given".
 With no column declared that selects none, and a cuDF table of no columns reports `num_rows() == 0`
 whatever the file holds, so `NodeStats.rows` crosses the ABI as 0. The cpu is right because an
-Arrow batch carries its row count beside its columns rather than in them. Pinned by
+Arrow batch carries its row count beside its columns. Pinned by
 `bug_a_scan_declaring_no_column_reads_no_rows_on_the_device` (`gpu_tests/source_cases.rs`), 64 rows
-against 0 over one parquet and no limit in it.
+against 0 over one parquet with no limit in it.
 
 The same root cause as [#63](joins.md#t63) — a cuDF table cannot hold rows without columns — at
 the scan rather than at a project, and `reports/corpus-fixes.md`'s unfiled "ticket 1". Nothing is
 refused, because nothing reaches `cudf::cross_join`: the zero-row batch is dropped by the
-`GpuLimit` above the scan ([#214](#t214)) and the join's build side gets no batch at all. Older
-than limits, which only moved that scan's cut into that `GpuLimit`; the `set_num_rows(23)` it
-dropped was on the same zero-column read, and could not have made it answer five rows.
+`GpuLimit` above the scan ([#214](#t214)). Older than limits, which only moved that scan's cut
+into that `GpuLimit`; the `set_num_rows(23)` it dropped sat on the same zero-column read.
 
 **Corpus queries:** `tpch/nested-limits` at every device mode, off on this ticket, and the corpus's
-only scan declaring no column. It is also the only corpus query carrying a mid-plan `GpuLimit` and
-the only one carrying an OFFSET, so while it is off **no device has run a mid-plan limit inside a
-driven plan** — the driver's hold of a satisfied one, two and three nested intervals on one path,
-and a limit carrying a skip. Those are device-covered at operator level only, by
-`harness_cases::limit_over` and `source_cases.rs`. Enabling these five cells is the first run of
-all three.
+only scan declaring no column. It also carries the corpus's only mid-plan `GpuLimit` and its only
+OFFSET, so while it is off **no device has run a mid-plan limit inside a driven plan** — the
+driver's hold of a satisfied one, nested intervals, or a limit with a skip. Those are covered at
+operator level only (`harness_cases::limit_over`, `source_cases.rs`), and enabling these five cells
+is the first run of all three.
 
-**Fix proposed:** `scan()` writes the file's own column names into `file_schema` and the declared
-ones into `projection`, so "no projection" and "no column" stop being one wire value. That is the
-honest fix — the field is named `file_schema` and holds something else — and it needs the file's
-full column list, which `scan()`'s doc says a plan node does not carry. #63's
-`row_count_table(rows)` / `is_row_count_only(t)` helpers give the representation but not the
-count: a zero-column read returns no rows and the node sends none, so the scan arm needs that
-column list either way.
+**Fix proposed:** both halves, or neither works. `scan()` writes the file's own column names into
+`file_schema` and the declared ones into `projection` — it needs the file's full column list, which
+`scan()`'s doc says a plan node does not carry. And `scan.cpp` stops reading an empty `projection`
+as every column: the writer change alone would select all five of region's columns where none was
+declared, which is #63's ordinal shift and a validator refusal. A node declaring none reads one
+column for the count and answers #63's `row_count_table(rows)` — whose helpers give the
+representation but not the count, so the column list is needed either way.
 
 ## Repartitioning
 

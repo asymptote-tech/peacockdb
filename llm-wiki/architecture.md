@@ -1224,13 +1224,15 @@ to it.
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
 | `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
+| `CudfScan.projection` | nobody | — | every column of `file_schema`, which is the node's projected schema — so a node declaring none selects none ([#285](tickets/corpus-coverage.md#t285)) |
 
 Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
 the result is compared against. The last three rows are different: a field left at its
 default on purpose; a pair no writer sets and no reader reads, which is the wire-format
-surface #132 is about; and a pair the C++ still reads that no plan fills, because the row
-groups a batch loads are a per-call value and ride the call instead.
+surface #132 is about; and three the C++ still reads that no plan fills — the row groups a batch
+loads are a per-call value and ride the call instead, and an empty `projection` means the whole
+declared schema, which is #285.
 
 ### Join types and NULL key equality
 
