@@ -1,6 +1,11 @@
 
 # Tickets related to DataFusion upgrade
 
+**Status quo (2026-10-09):** DataFusion 45.0.0; latest stable 55.2.0. Comet's spark-expr 0.6.0
+(the cpu's murmur3) is built on the same 45, and its latest, 0.10.0, needs 49. **Path:** 46 (#166's
+fix), then 49 once `RightMark` is handled (#241), then 55 (#228) — past 49 murmur3 needs a home other
+than comet; `datafusion-spark`, released with DataFusion, is the one to check.
+
 ## Contents
 
 - [#241 — DataFusion 49 plans `RightMark`, which the planner and the wire cannot express](#t241)
