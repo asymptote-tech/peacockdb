@@ -9,23 +9,26 @@
 //! produce the same shape by construction; the evidence is the rows and the bytes under it.
 //! The shape check stays because it costs nothing and goes red the day that stops holding.
 
-use std::collections::HashMap;
-
 use datafusion::arrow::array::RecordBatch;
 
 use crate::executor::{GpuBackend, PlanIndex, run_with_hook};
 use crate::plan_text::render_run;
 
-use super::corpus::{plan_at, run_cpu};
+use super::corpus::{self, plan_at, run_cpu};
+use super::device_answer::{
+    GpuResultMode, cudf_version, device_answer_matches, gpu_recording, gpu_result_mode,
+};
 use super::gpu_session::Session;
 use super::{
-    Mode, SKIPPED, assert_results_match, batches_to_sorted_str, corpus_golden,
-    gpu_schema_validator, mode_named,
+    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, mode_named,
+    section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
-/// installed where the declaration asks for it, then the two read-only assertions — the
-/// mode's `.cpu.txt` section, and the result the declaration names.
+/// installed where the declaration asks for it, record the answer, then the two read-only
+/// assertions it is recorded ahead of — the mode's `.cpu.txt` section, and the result the
+/// declaration names. The run's own accounting is asserted first: a report that held batches
+/// it never released is a broken run rather than an answer DuckDB can settle.
 pub(crate) async fn gpu_case(
     dataset: &str,
     sf: &str,
@@ -50,17 +53,55 @@ pub(crate) async fn gpu_case(
         "{what} held {} batches and released {}",
         report.holds, report.releases
     );
-    corpus_golden::assert_section(
-        &corpus_golden::cpu_golden(dataset, sf, mode.name),
-        query,
-        &render_run(tree.as_ref(), &report),
-    );
     let batches: Vec<RecordBatch> = report
         .batches
         .iter()
         .map(|batch| batch.record_batch().clone())
         .collect();
+    // Ahead of BOTH comparisons against the cpu below, each of which panics. The divergence
+    // DuckDB exists to settle is the one that makes them panic — #243's lane split moves an
+    // aggregate's group count, which `.cpu.txt` carries — so an answer recorded after them is
+    // missing in exactly the case that needs it. Held by `write_order.rs`.
+    record_gpu_result(dataset, sf, query, mode, &batches);
+    corpus_golden::assert_section(
+        &corpus_golden::cpu_golden(dataset, sf, mode.name),
+        query,
+        &render_run(tree.as_ref(), &report),
+    );
     assert_result(dataset, sf, query, mode, gpu_oracle, &batches).await;
+}
+
+/// The device's own answer, written beside the cpu's goldens when the cycle asks for it.
+///
+/// A RECORD and never an authority: the device still asserts against `mini.result.txt`, and
+/// nothing compares this file with its previous version — GPU float reductions are not
+/// reproducible run to run. What reads it is the DuckDB comparison in the cpu binary.
+///
+/// Which file, if any, is [`GpuRecording`]'s — never `UPDATE_CANONICAL` or
+/// `PCK_UPDATE_SECTIONS`, which own the cpu's goldens and which
+/// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly.
+fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches: &[RecordBatch]) {
+    let version = match gpu_recording() {
+        GpuRecording::No => return,
+        GpuRecording::Committed => None,
+        GpuRecording::Versioned(version) => Some(version),
+    };
+    // The cuDF the binary is linked against, not the value the operator typed: the committed
+    // file is 25.02's, and a cycle on any other cuDF is refused here rather than noticed in a
+    // diff after it has overwritten answers nothing else holds.
+    let cudf = cudf_version();
+    corpus_golden::recording_cudf_suits_the_path(&cudf, version.as_deref())
+        .unwrap_or_else(|said| panic!("{dataset}/{query}: {said}"));
+    let (body, _over_cap) = corpus::rendered_or_fingerprint(batches);
+    corpus_golden::merge_mode_section(
+        &corpus_golden::gpu_result_golden(dataset, sf, version.as_deref()),
+        dataset,
+        sf,
+        query,
+        mode.name,
+        &body,
+        &cudf,
+    );
 }
 
 /// The two conditions that decide which authority is available, and the check that the
@@ -76,14 +117,13 @@ fn assert_oracle_suits_the_golden(
     what: &str,
 ) {
     let section = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
-    let frozen = !section.starts_with(SKIPPED);
+    let frozen = section_holds_rows(&section);
     match gpu_result_mode(gpu_oracle) {
         GpuResultMode::LiveCpu => assert!(
             !frozen,
             "{what}: gpu_oracle is live_cpu and `.result.txt` holds this query's rows — a \
              device-side cpu run for a comparison the committed section already makes"
         ),
-        GpuResultMode::Skip => {}
         _ => assert!(
             frozen,
             "{what}: gpu_oracle names a golden and `.result.txt` has none for this query — \
@@ -94,6 +134,10 @@ fn assert_oracle_suits_the_golden(
 }
 
 /// The device's answer against whichever authority the declaration names.
+///
+/// The frozen section is one mode's answer serving every mode's run. Where that cannot hold
+/// the declaration says `live_cpu`, so a golden compare here is also the claim that the modes
+/// agree — which is why `device_answer_matches` is handed the author line too.
 async fn assert_result(
     dataset: &str,
     sf: &str,
@@ -104,41 +148,17 @@ async fn assert_result(
 ) {
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
     assert_oracle_suits_the_golden(dataset, sf, query, gpu_oracle, &what);
-    let tolerance = match gpu_result_mode(gpu_oracle) {
-        GpuResultMode::Skip => return,
-        // A live cpu run at the SAME mode, because where the SQL does not fix the row set,
-        // another mode's answer is not an authority on this one's — which is the reason
-        // this value exists rather than a frozen section serving all five.
-        GpuResultMode::LiveCpu => {
-            let run = run_cpu(dataset, sf, query, mode).await;
-            assert_results_match(&run.batches, batches, None, &what);
-            return;
-        }
-        GpuResultMode::GoldenExact => None,
-        GpuResultMode::GoldenApprox => Some(1e-12),
-        GpuResultMode::GoldenApproxStddev => Some(1e-11),
-    };
-    let golden = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
-    let (author, rows) = golden
-        .split_once('\n')
-        .expect("a result section names the mode that wrote it, then its rows");
-    let author = author
-        .strip_prefix("mode=")
-        .expect("a result section opens with `mode=`");
-    // The frozen section is one mode's answer serving every mode's run. Where that cannot
-    // hold, the declaration says `live_cpu` — so a golden compare here is also the claim
-    // that the modes agree, and it is worth naming the author when they do not.
-    let actual = batches_to_sorted_str(batches);
-    match tolerance {
-        None => assert_eq!(
-            actual.trim_end(),
-            rows.trim_end(),
-            "{what}: the device's answer differs from the result golden, written at {author}"
-        ),
-        Some(tolerance) => {
-            assert_sorted_str_approx(rows.trim_end(), actual.trim_end(), tolerance, &what)
-        }
+    // A live cpu run at the SAME mode, because where the SQL does not fix the row set,
+    // another mode's answer is not an authority on this one's — which is the reason this
+    // value exists rather than a frozen section serving all five.
+    if gpu_result_mode(gpu_oracle) == GpuResultMode::LiveCpu {
+        let run = run_cpu(dataset, sf, query, mode).await;
+        assert_results_match(&run.batches, batches, None, &what);
+        return;
     }
+    let golden = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
+    device_answer_matches(&golden, gpu_oracle, batches)
+        .unwrap_or_else(|said| panic!("{what}: {said}"));
 }
 
 /// A `corpus_query!` line's last argument, decoded: whether every batch is held to its
@@ -152,136 +172,5 @@ fn schema_validation(s: &str, what: &str) -> bool {
             "{what}: corpus_query!: unknown schema validation '{other}' \
              (expected schema_validation_enabled|schema_validation_disabled)"
         ),
-    }
-}
-
-#[derive(Clone, Copy)]
-enum GpuResultMode {
-    GoldenExact,
-    GoldenApprox,
-    GoldenApproxStddev,
-    LiveCpu,
-    Skip,
-}
-
-/// Map a `corpus_query!` `gpu_oracle` keyword to its [`GpuResultMode`].
-fn gpu_result_mode(s: &str) -> GpuResultMode {
-    match s {
-        "golden_exact" => GpuResultMode::GoldenExact,
-        "golden_approx" => GpuResultMode::GoldenApprox,
-        "golden_approx_std" => GpuResultMode::GoldenApproxStddev,
-        "live_cpu" => GpuResultMode::LiveCpu,
-        "skip" => GpuResultMode::Skip,
-        other => panic!(
-            "corpus_query!: unknown gpu_oracle '{other}' \
-             (expected golden_exact|golden_approx|golden_approx_std|live_cpu|skip)"
-        ),
-    }
-}
-
-/// Float-tolerant comparison of two `batches_to_sorted_str` renderings. The data
-/// rows are grouped by their NON-numeric cells (so a ULP difference in a numeric
-/// cell can't reorder the sorted lines and break pairing — same idea as
-/// `assert_results_match`'s float path), and every numeric cell must agree within
-/// `tol` relative error. Used for the result-golden approx path (q14/q39).
-fn assert_sorted_str_approx(golden: &str, actual: &str, tol: f64, query: &str) {
-    fn split_cells(line: &str) -> Vec<String> {
-        let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() < 2 {
-            return vec![line.trim().to_string()];
-        }
-        parts[1..parts.len() - 1]
-            .iter()
-            .map(|c| c.trim().to_string())
-            .collect()
-    }
-    // Column NAMES and the data rows as cells — never the borders. Arrow sizes each column
-    // to its widest printed cell, so the ascii art encodes the values this comparator exists
-    // not to compare bit-for-bit: one digit more in a float moved a border by a dash and
-    // failed the test a line before the tolerance that allows it was reached.
-    fn parse(s: &str) -> (Vec<String>, Vec<Vec<String>>) {
-        let lines: Vec<&str> = s.lines().collect();
-        if lines.len() <= 4 {
-            return (
-                lines.get(1).map(|l| split_cells(l)).unwrap_or_default(),
-                vec![],
-            );
-        }
-        let header = split_cells(lines[1]);
-        let data = lines[3..lines.len() - 1]
-            .iter()
-            .map(|l| split_cells(l))
-            .collect();
-        (header, data)
-    }
-    // key = non-numeric cells joined; vals = the numeric cells (as f64) per row.
-    fn index(rows: &[Vec<String>]) -> HashMap<String, Vec<Vec<f64>>> {
-        let mut m: HashMap<String, Vec<Vec<f64>>> = HashMap::new();
-        for row in rows {
-            let mut key = String::new();
-            let mut nums = Vec::new();
-            for cell in row {
-                match cell.parse::<f64>() {
-                    Ok(v) => nums.push(v),
-                    Err(_) => {
-                        key.push_str(cell);
-                        key.push('\u{1}');
-                    }
-                }
-            }
-            m.entry(key).or_default().push(nums);
-        }
-        m
-    }
-    fn tuple_cmp(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
-        for (p, q) in a.iter().zip(b) {
-            match p.partial_cmp(q) {
-                Some(std::cmp::Ordering::Equal) | None => continue,
-                Some(o) => return o,
-            }
-        }
-        std::cmp::Ordering::Equal
-    }
-
-    let (gh, gd) = parse(golden);
-    let (ah, ad) = parse(actual);
-    assert_eq!(
-        gh, ah,
-        "result header/schema for {query} differs from golden"
-    );
-    let (mut gm, am) = (index(&gd), index(&ad));
-    assert_eq!(
-        gm.len(),
-        am.len(),
-        "approx result: distinct non-numeric row keys differ for {query} (golden {}, actual {})",
-        gm.len(),
-        am.len()
-    );
-    for (key, mut avs) in am {
-        let mut evs = gm.remove(&key).unwrap_or_else(|| {
-            panic!("approx result: actual row key absent from golden for {query}")
-        });
-        assert_eq!(
-            evs.len(),
-            avs.len(),
-            "approx result: row multiplicity differs for a key in {query}"
-        );
-        evs.sort_by(|a, b| tuple_cmp(a, b));
-        avs.sort_by(|a, b| tuple_cmp(a, b));
-        for (ev, av) in evs.iter().zip(&avs) {
-            assert_eq!(
-                ev.len(),
-                av.len(),
-                "approx result: numeric-cell count differs for {query}"
-            );
-            for (e, a) in ev.iter().zip(av) {
-                let d = (e - a).abs();
-                let rel = if *e != 0.0 { d / e.abs() } else { d };
-                assert!(
-                    rel <= tol,
-                    "approx result: cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (golden={e}, actual={a})"
-                );
-            }
-        }
     }
 }

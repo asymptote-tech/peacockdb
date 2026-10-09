@@ -73,7 +73,7 @@ gtest with a filtered Left join. The same commit drops the prototype's deliberat
 `null_equality::EQUAL` nor `UNEQUAL` implements that, so ANTI/mark joins stay hardcoded
 EQUAL (`cpp/src/operators/join.cpp`). Needs a planner/serializer flag distinguishing
 NOT IN from NOT EXISTS, a nullable-anti-key test (no corpus query exercises it), and a
-DuckDB final-result oracle, now [#235](corpus-coverage.md#t235) — today's validation is circular
+DuckDB final-result oracle, now [#235](../archive/archived-tickets.md#t235) — today's validation is circular
 (goldens vs DataFusion, GPU vs CPU). Semi half done (q33; semi honors per-join `null_equals_null`).
 
 <a id="t59"></a>

@@ -169,8 +169,11 @@ state, and a watchdog restarts you.
     resolve it, write `blocked(building)` with what you learned from all three steps.
 - **Check whether verda is up before each dispatch** — one `ssh` with a short timeout. When
   it answers, tell the developer to run that task's CPU tests there through
-  `scripts/build-test.sh --host verda`; when it does not, say so, and a local run is fine.
-  The human starts verda by hand, so this is per dispatch rather than per chain.
+  `scripts/build-test.sh --host <user@ip>`; when it does not, say so, and a local run is fine.
+  The human starts verda by hand, so this is per dispatch rather than per chain. `verda` is a
+  name for the host and not an address of it: it is an ephemeral instance with a new IP per
+  reprovision and no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or
+  down. Ask the human for the address, or `scripts/list_verda_instances.sh` for it.
 - **Task loop**: branch; dispatch the developer with the spec and the context it needs;
   iterate until it reports tests green with evidence; commit, push, open the PR against its
   parent branch; dispatch the reviewer; have the developer address blocking and important

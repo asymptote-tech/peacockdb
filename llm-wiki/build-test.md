@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2334 test cases — Rust 1856, C++ 97, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2581 test cases — Rust 2089, C++ 97, Python 395.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,15 +22,16 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1189 cases: `--lib` 605, `test_cpu_corpus` 555, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1398 cases: `--lib` 663, `test_cpu_corpus` 706, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 554 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 705 |
 |---|---|--:|
 
-one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
-whether its device run is schema-validated, expanded to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
+one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
+DuckDB's, the cpu's, the device's — and whether its device run is schema-validated, expanded
+to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
 checked against plain DataFusion at `target_partitions = 1`. 116 queries at the modes each is
 correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
@@ -38,8 +39,22 @@ correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
 [#186](tickets/corpus-coverage.md#t186), and four queries are out entirely: `tpch/q11`,
 `tpch/q22` and `tpcds/q24` on
-[#190](tickets/joins.md#t190), and `tpcds/q54`. 551 cells, plus three checks
-that every declaration's two oracles suit each other and every device cell has a cpu cell
+[#190](tickets/joins.md#t190), and `tpcds/q54`. 551 cells, plus five checks
+that every declaration's oracles suit each other and every device cell has a cpu cell,
+that a hyphenated query resolves its authority and has its result section, that an
+undetermined line's rows are compared only against committed files, and `all_modes`
+expanding to the same cells as the five spelled out
+
+Then the DuckDB tier, 149 of the count and the only independent oracle over the answers
+([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
+`mini.result.txt` with `duckdb-result.txt` by column position under the line's
+`duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
+for `gpu-result.txt`. Today 93 lines are `duckdb_exact`, 15 `duckdb_approx`, 4
+`duckdb_fingerprint` (the over-cap sections), 4 `duckdb_none` (one side does not answer) and
+4 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
+enabled device cell has its `gpu-result.txt` section and no other, and the committed
+`gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
+no file, and neither guard asks for one
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
 |---|---|--:|
@@ -203,7 +218,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 23 |
+| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 24 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
@@ -315,11 +330,56 @@ the record's reading of a plan: a row's `node_seq` names the steps its `recipes`
 so the record and the plan golden agree on what a call is; and every cell of a written row
 sits under the column named for it, since `row()` is positional and the heading is not
 
-| Golden merge under contention | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 1 |
+| Golden merge | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 9 |
 |---|---|--:|
 
 sixteen writers merging one golden file at once each keep their section: the lock is on the
-directory, because the rename that publishes replaces the file's inode (#213)
+directory, because the rename that publishes replaces the file's inode (#213). And the
+mode-keyed merge `gpu-result.txt` takes: one cell replaced in an ordered file, and a section
+dropped once the registry stops enabling its cell — what makes the coverage guard's advice to
+regenerate true in both directions. Then the `cudf=` provenance line: written first, dropping
+whatever another cuDF recorded rather than carrying it under this one's stamp; read back against
+the path, both ways; refused where two such lines disagree; and the same rule at the writer, so a
+26.02 cycle told to record the committed file fails before it writes
+
+| DuckDB oracle | [test_support::duckdb_oracle::tests](../peacockdb-core/src/test_support/duckdb_oracle/tests.rs) | 26 |
+|---|---|--:|
+
+the five oracle keywords and what each one accepts: rows as a multiset by position whatever the
+names, a float held to its relative tolerance and a decimal to one unit in our last place, a
+divergent line needing an open ticket and a real difference in every column it names and
+checking everything it does not, a fingerprinted section and the fingerprint oracle each
+refusing the other, and `duckdb_none` refusing two sections that both exist. Plus the
+`gpu-result.txt` coverage rule both ways, over a file handed in as text: a cell with no section
+and a section no cell enables each failing, and an absent file passing where no cell is
+enabled
+
+| Result comparison | [test_support::result_text::tests](../peacockdb-core/src/test_support/result_text/tests.rs) | 8 |
+|---|---|--:|
+
+the two arms a corpus case compares its answer with, a `data_fusion_subset` line reaching
+neither: the tolerant one, over parsed rows, accepting a float a reassociated sum would move and
+failing past its tolerance, on a missing row, a duplicated one and one the oracle does not have;
+the exact one, a digest, failing on the drift the tolerant one accepts; a NaN against a number a
+difference under both; and the panicking wrapper still naming its query
+
+| Device answer comparison | [test_support::device_answer::tests](../peacockdb-core/src/test_support/device_answer/tests.rs) | 9 |
+|---|---|--:|
+
+the same for the device helper, ungated so it runs without a card: a wrong row and a missing one
+failing under either golden oracle, a digit held to the tolerance under `golden_approx_std`, a
+NaN against a number a difference, `live_cpu` not being a section comparison at all, an unknown
+keyword naming the accepted set, an empty `PCK_WRITE_GPU_RESULT` reading as "record nothing", and
+cuDF's own `version_config.hpp` read as `25.02` — the minor padded to two digits, which is the
+spelling every path in the tree uses
+rather than as a version suffix
+
+| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 6 |
+|---|---|--:|
+
+the cpu helper shown failing, which is what keeps the corpus honest: a wrong row, a missing row,
+a digit past the tolerance, and a section another mode wrote; plus every `CpuOracle` variant
+being named by some corpus line
 
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
@@ -556,11 +616,12 @@ the harness's own format reader — none of which runs engine code.
 
 | Category (lang) | Why | Examples | Runs | N |
 |---|---|---|---|--:|
-| Golden text format (Rust) | the one reader of the format, over strings: the differ must name what moved, what is missing and what is out of order, and a node line must yield its name, depth and fields — every golden assertion in the tree is a comparison through it. The comma traps are cases, since `on=[(a@0, b@1)]` and `Decimal128(38, 15)` each carry one inside brackets | [a_section_that_moved_is_named_with_the_column_that_moved](../peacockdb-core/tests/test_golden_format.rs) | dataset-matrix (25.02 leg) | 26 |
+| Golden text format (Rust) | the one reader of the format, over strings: the differ must name what moved, what is missing and what is out of order, and a node line must yield its name, depth and fields — every golden assertion in the tree is a comparison through it. The comma traps are cases, since `on=[(a@0, b@1)]` and `Decimal128(38, 15)` each carry one inside brackets. The over-cap fingerprint round-trips here too: a column of either class, a row order that must not reach it, a mis-paired join that only the hash catches, and the triple's number format, which `testdata/test_duckdb_result.py` asserts from the Python side so the two writers' text is one | [a_section_that_moved_is_named_with_the_column_that_moved](../peacockdb-core/tests/test_golden_format.rs) | dataset-matrix (25.02 leg) | 43 |
 | CI wiring guard (Rust) | every Rust target must be named by a CI step — CI does not glob, the three lists that decide where a GPU target runs must agree, and both GPU runners must pass `--test-threads=1`, which is the whole of the single-tenant invariant inside a process and is what a device test's `unsafe { set_var }` rests on. The rungs the `--test` sweep cannot see get one assertion each: cpu (`--lib` under `rust-only`), ffi (`--lib -- ffi_tests::`), device (the staged lib binary and the loop line handing it `gpu_tests::` — shad-gpu runs prebuilt binaries, so there is no command line), plus the CLI build, which has no test target. The three runners must agree on the lib's staged name and rung too, and the rung must reach the binary through `rung_args`. The reader is scoped to the rust loop: a file-wide search passes on the comment above the command, and the C++ loop above it shares the loop variable and rightly carries no flag; and the benchmark binary runs on CI without its `bench_` cases, `--skip bench_` read off the same loop | [every_rust_test_target_is_named_by_ci](../peacockdb-core/tests/test_ci_coverage.rs), [each_rung_has_its_ci_line_and_the_cli_is_built](../peacockdb-core/tests/test_ci_coverage.rs), [the_three_gpu_target_lists_agree](../peacockdb-core/tests/test_ci_coverage/runners.rs) | cost-report | 9 |
-| Module layout rules (Rust) | the component walls, which the compiler mostly cannot check: where a `pub` may appear, that a subcomponent is declared `mod`, that no `super::` chain climbs out of its component, that no public signature names a type from a private module — `private_interfaces` reads a type's nominal visibility, so an unreachable type spelled `pub` passes it silently — and that no `pub` in `test_support/mod.rs` names a type from a component, which is what keeps the harness a facade and not a rename. Sibling reach is the case rustc refuses to have an opinion on at all: no visibility level means "my parent but not my siblings". One case compiles a probe crate against the built library to prove `wire::generated` is unreachable from outside, with a positive control so a probe that fails for the wrong reason cannot pass as proof. Five more rules say where test code may live: a test module is named for the build rung it needs and gated for it, in both directions; its body is a file of its own; a `#[cfg(test)]` sits on nothing but a test-module declaration; and a path compiled only under a test gate says `test` in its name. Bare `pub` is checked against `SURFACE`, the CLI's API by file and name, in both directions, so a dropped-and-added pair cannot pass a count; `pub mod` is pinned to `lib.rs`. One register remains, the items that keep a `#[cfg(test)]` because no test module can hold them, checked in the reverse direction too, so an entry outliving its reason goes red. Needs no dataset and no device | [no_public_signature_names_a_type_from_a_private_module](../peacockdb-core/tests/test_module_layout/privacy.rs) | cost-report | 17 |
+| Module layout rules (Rust) | the component walls, which the compiler mostly cannot check: where a `pub` may appear, that a subcomponent is declared `mod`, that no `super::` chain climbs out of its component, that no public signature names a type from a private module — `private_interfaces` reads a type's nominal visibility, so an unreachable type spelled `pub` passes it silently — and that no `pub` in `test_support/mod.rs` names a type from a component, which is what keeps the harness a facade and not a rename. Sibling reach is the case rustc refuses to have an opinion on at all: no visibility level means "my parent but not my siblings". One case compiles a probe crate against the built library to prove `wire::generated` is unreachable from outside, with a positive control so a probe that fails for the wrong reason cannot pass as proof. Five more rules say where test code may live: a test module is named for the build rung it needs and gated for it, in both directions; its body is a file of its own; a `#[cfg(test)]` sits on nothing but a test-module declaration; and a path compiled only under a test gate says `test` in its name. Bare `pub` is checked against `SURFACE`, the CLI's API by file and name, in both directions, so a dropped-and-added pair cannot pass a count; `pub mod` is pinned to `lib.rs`. One register remains, the items that keep a `#[cfg(test)]` because no test module can hold them, checked in the reverse direction too, so an entry outliving its reason goes red. One rule here is a task spec's rather than the style guide's, and the same kind of claim: the device corpus tier records `gpu-result.txt` ahead of both comparisons against the cpu, read as the order of three calls in `gpu_case`, because the divergence DuckDB settles is the one that makes those comparisons panic. Needs no dataset and no device | [no_public_signature_names_a_type_from_a_private_module](../peacockdb-core/tests/test_module_layout/privacy.rs), [the_device_case_records_its_answer_before_it_compares_with_the_cpu](../peacockdb-core/tests/test_module_layout/write_order.rs) | cost-report | 18 |
 | Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs) | cost-report | 38 |
 | DuckDB cost extraction (Python) | classifier / pruning / dynamic-filter logic — fails CI before generation | [scan_count_mismatch_fails_loud](../testdata/test_duckdb_cost.py), [compute_pruning_from_rowgroups](../testdata/test_duckdb_cost.py) | cost-report | 41 |
+| DuckDB result rendering (Python) | the only side that can get the result oracle's rendering wrong on its own: a timestamp must read as arrow-rs prints it (`…00.001`, not `isoformat()`'s `…00.001000`) or every row carrying one is a false divergence, and the over-cap fingerprint must be the text `test_golden_format.rs` pins, byte for byte, or the two writers compare nothing | [test_a_timestamp_renders_as_arrow_rs_prints_it](../testdata/test_duckdb_result.py), [test_both_writers_fingerprint_the_same_rows_the_same_way](../testdata/test_duckdb_result.py) | cost-report | 14 |
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode run on two backends — one pandas, one emitting FlatBuffers nodes and interpreting them as the C++ does — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle_on_both_backends](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 216 |
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch; `PCK_BACKEND=recipe` re-runs the whole set with every join going through the FlatBuffers emulation | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
@@ -590,7 +651,10 @@ Notes
 - Execution goldens are per mode, not per query: `<mode>-<tier>.cpu.txt` with a
   `== <query>` section each, the derived `.cost.txt` beside it, and `<tier>.result.txt`
   for the answers. A device run reads the cpu's sections read-only. Result validation is
-  `golden_exact` | `golden_approx` | `golden_approx_std` | `live_cpu` | `skip`.
+  `golden_exact` | `golden_approx_std` | `live_cpu` on the device, and
+  `duckdb_exact` | `duckdb_approx` | `duckdb_divergent(<ticket>[, <positions>])` |
+  `duckdb_fingerprint` | `duckdb_none` against DuckDB. Each list is held to the lines by an
+  `ALL` test, so a value nothing uses is deleted rather than carried.
 - The crate has no doctest today, so `--doc` runs nothing. The gap #128 names is still open:
   no CI step passes it and the meta guard enumerates only `--test` targets plus `--lib`, so
   the first doctest written would be unrun with nothing saying so.
@@ -638,10 +702,12 @@ sha256 matches local). Notes on the rows above:
 
 ## Golden files
 
-All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (39 files), `tpcds.sf1`
-(116), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
+All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (40 files), `tpcds.sf1`
+(117), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe payloads with
 a digest each. Most of each sf1 count is the per-query DuckDB cost oracle (22 + 99); the
-engine's own are 16 apiece, one plan and one execution set per mode. The committed DuckDB
+engine's own are 16 apiece, one plan and one execution set per mode. Two files per sf1 dir
+sit outside that bucket, one per engine that answers: `duckdb-result.txt` and
+`gpu-result.txt`. The committed DuckDB
 profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
 `testdata/duckdb-dynfilters/{tpch,tpcds}` (22 + 99).
 
@@ -653,9 +719,10 @@ The generator scripts live in `testdata/`.
 | `recipe-payloads.txt` | `planner::tests::plan_goldens` with `UPDATE_CANONICAL=1`<br>**and** `PEACOCK_REWRITE_RECIPE_BYTES=1` | sf1 parquet, and a fixed `/tmp` symlink for the testdata root — without it the payloads carry this machine's paths and so does the digest | <sub>the_payload_golden_carries_<br>what_each_call_hands_the_executor</sub> |
 | `<mode>-<tier>.cpu.txt` | the corpus cpu tier under `UPDATE_CANONICAL=1` (merge and prune) or `PCK_UPDATE_SECTIONS=1` (merge only) — never the GPU | sf1 parquet; one file per mode, a `== <query>` section each | the corpus cpu tier writes and verifies; the device tier verifies read-only |
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
-| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden |
+| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden_exact`, `golden_approx_std`, `live_cpu`); the DuckDB `duckdb_<ds>_<q>` cases |
 | `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
-| `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`) | sf1 parquet, the query text in `<bench>-queries/` | nothing yet: #235's comparison test is to come |
+| `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle` |
+| `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -675,20 +742,31 @@ testdata/{tpch,tpcds}-queries/*.sql
           ├── the corpus cpu tier, UPDATE_CANONICAL=1   (the author; a device never writes)
           │     ├──► <mode>-<tier>.cpu.txt        (a == <query> section each)
           │     │       └──× cost_model.conf ──► <mode>-<tier>.cost.txt
-          │     └──► <tier>.result.txt         (one section per query, from its last mode)
-          │               │
+          │     └──► <tier>.result.txt   (one section per query, from its last mode; over
+          │               │               256 KB a fingerprint, asserted like the rows it stands for)
           │               ▼  read-only, never written
           │     the corpus device tier (test_gpu_corpus, shad-gpu)
           │       ├── <mode>-<tier>.cpu.txt, .cost.txt ──► every device cell, per node
-          │       └── <tier>.result.txt ──► the device's answer, per gpu_oracle:
-          │             golden_exact            text for text, one section serving all modes
-          │             golden_approx[_std]     within 1e-12 / 1e-11
-          │             live_cpu                not read: a cpu run at the same mode instead,
-          │                                     for a query whose section is skipped
-          │             skip                    no answer check
+          │       ├── <tier>.result.txt ──► the device's answer, per gpu_oracle:
+          │       │     golden_exact            text for text, one section serving all modes
+          │       │     golden_approx_std       within 1e-11
+          │       │     live_cpu                not read: a cpu run at the same mode instead,
+          │       │                             for a query whose section holds no rows
+          │       └──► gpu-result.txt   only under PCK_WRITE_GPU_RESULT=1, before asserting:
+          │                              a cudf= line, then one section per (query, mode), a
+          │                              fingerprint over the cap; --pull-results brings it
+          │                              home; a record, never an authority (=<v>:
+          │                              gpu-result-<v>.txt, gitignored)
           │
-          ├── duckdb_result.py  (DuckDB 1.5.4, threads=1)
-          │     └──► duckdb-result.txt   (DuckDB's answers; to be compared with <tier>.result.txt, #235)
+          ├── duckdb_result.py  (DuckDB 1.5.4, threads=1; timestamps as arrow-rs renders them)
+          │     └──► duckdb-result.txt   (one section per query; a fingerprint over the cap)
+          │
+          │   test_cpu_corpus, rust-only (CI), per the line's duckdb_oracle
+          │   (exact | approx | divergent(ticket, cols) | fingerprint | none):
+          │     duckdb_<ds>_<q>             <tier>.result.txt ↔ duckdb-result.txt
+          │     duckdb_gpu_<ds>_<q>_<mode>  gpu-result.txt   ↔ duckdb-result.txt
+          │     coverage   every enabled device cell has its gpu-result section, and no other;
+          │                and the committed file's cudf= line is 25.02's
           │
           └── gen_duckdb_cost.sh --gen  (DuckDB 1.5.4, threads=1, pyarrow 19.0.1)
                 ├── pass 1, JFP off ──► duckdb-profiles/<bench>/<q>.json     (committed)
@@ -724,6 +802,29 @@ Consequences worth knowing before you regenerate:
 - **The `.duckdb_cost.txt` path is re-runnable without DuckDB**: `--extract-only` rebuilds
   the goldens from the committed profiles plus the parquet, so only a genuine oracle change
   needs the 1.5.4 pin.
+- **`gpu-result.txt` is regenerated whenever a device answer might move.** After a device
+  code change, a cell turned on or off, or a cuDF update, run a cycle with
+  `PCK_WRITE_GPU_RESULT=1`, then `./scripts/build-test-shadgpu.sh --pull-results`, which brings
+  home only a file newer than the gate run's launch and dies if none is — the push mirrors the
+  committed copy up, so existence alone would report a refresh that never happened. Read
+  `git diff testdata/goldens/*/gpu-result.txt` before committing it, the `cudf=` line included. A
+  value that does not name the cuDF the binaries were built against is refused before anything is
+  written, so `PCK_WRITE_GPU_RESULT=1` on a 26.02 host fails rather than overwriting 25.02's
+  answers. A moved section the
+  change did not intend is a finding, not a regeneration. Float cells move a little from run
+  to run — GPU reductions are not reproducible, nor across cuDF versions — which is why
+  nothing compares the file with its previous version; the `duckdb_gpu_*` cases and
+  `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` are what CI checks. The
+  writer keeps a section the registry still enables and drops one it does not, so a cell turned
+  off loses its section on the next recording cycle — read the diff for a disappearance too.
+- **An over-cap result section is a fingerprint**, written by both result writers and
+  compared under `duckdb_fingerprint`: `rows=`, each column's `nonnull` and — where the
+  column is a declared float — its `sum`/`min`/`max`, then a SHA-256 over the rest. A float
+  is the one type the two engines print to their own precision; a decimal renders at its
+  declared scale on both sides, so it is hashed. That is what makes an over-cap join checked
+  row for row rather than by sums.
+  Regenerating one is `PCK_UPDATE_SECTIONS=1` with a filter naming the query, as any other
+  section is.
 
 ### Benchmark data flow
 
@@ -779,11 +880,15 @@ What the arrows are there to make checkable:
 ## CI structure (`.github/workflows/pipeline.yml`)
 
 `pipeline.yml` runs on pushes to master and on every PR, but not on documentation —
-`**.md` and `llm-wiki/**`, which nothing builds, tests or reads. It takes two layers:
-`paths-ignore` skips a wholly-documentation diff, and the **changes** job skips a
-documentation-only push to a PR that carries code, which `paths-ignore` cannot see because
-it judges the whole PR diff. Both fail open, and a doc file that ever becomes an input to
-something has to come off both lists.
+`**.md` and `llm-wiki/**`. It takes two layers: `paths-ignore` skips a wholly-documentation
+diff, and the **changes** job skips a documentation-only push to a PR that carries code,
+which `paths-ignore` cannot see because it judges the whole PR diff. Both fail open.
+
+**One doc file is now an input, and neither list excepts it** ([#263](tickets/testinfra.md#t263)).
+`duckdb_oracle.rs`'s `ticket_is_open` reads `llm-wiki/tickets/` at test run time, so a
+commit that only moves a ticket can turn the rust tier red while both layers skip the
+pipeline. The helper's post-merge archival commit is exactly that shape. Until #263 is
+settled, run `--lib` by hand after a tickets-only commit.
 
 Five independent job chains:
 
@@ -835,7 +940,8 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   run on every job and its timed cases only under `--run-benchmarks`. No `set -e` — statuses are OR'd so one failure cannot skip the rest — and
   `REMOTE_DIR` is removed on `always()`.
 - **cost-report** — the report crate and its inputs, and nothing else: python
-  `testdata/test_duckdb_cost.py`, the `scripts/exec_model/tests/test_*.py` prototype set,
+  `testdata/test_*.py` by glob (the two DuckDB generators' own tests), the
+  `scripts/exec_model/tests/test_*.py` prototype set,
   the `scripts/calibration/tests/test_*.py` cases over a synthetic capture, and
   `cargo test -p cost-report`. Then report generation, the PR-comment upsert and the
   cost-regression gate against the base SHA. Every query whose PeacockDB CPU Σout grew is a
@@ -869,9 +975,9 @@ prototype has to hold across that boundary, unpinned on purpose.
 
 Which Rust targets run where is not folklore — `test_ci_coverage` fails when a target
 exists that no workflow step names. Doctests are the one class outside that guard (#128).
-The two python steps need no such guard because neither names files: the extractor test is
-one file, and the prototype step globs `test_*.py` and errors when the glob matches
-nothing. Inside a prototype file the equivalent hole — a test defined below the
+The two python steps need no such guard because neither names files: both glob —
+`testdata/test_*.py` and the prototype step's own pattern — and each errors when its glob
+matches nothing. Inside a prototype file the equivalent hole — a test defined below the
 `__main__` footer, which pytest collects and direct execution would not — is closed by
 `tests/harness.py`, which reads the source back and fails naming what it missed.
 
@@ -902,8 +1008,8 @@ crate's unit tests reach as `crate::test_support::…` and the `tests/*.rs` bina
 `peacockdb_core::test_support::…`. The crate's dev-dependency on itself turns it on, so `cargo
 test` in every shape sees the module and `cargo build` cannot name it; no CI step and no script
 passes the flag. The corpus binaries and `test_corpus_goldens` reach it directly through
-`cpu_case`, `gpu_case`, `authoritative_mode` and `over_cap`, whose signatures name no engine
-type; the other suites name `test_support` directly. `tests/common/` holds only the two case
+`cpu_case`, `gpu_case`, `duckdb_case`, `duckdb_gpu_case` and `authoritative_mode`, whose
+signatures name no engine type; the other suites name `test_support` directly. `tests/common/` holds only the two case
 lists, `corpus_cases.inc` and `corpus_benchmark_cases.inc`: each corpus binary `include!`s its
 own so `corpus_query!` expands, and `inventory::submit!` runs, in that binary alone.
 
@@ -969,7 +1075,7 @@ Rules that keep this healthy:
   build script (zstd-sys, bzip2-sys, lzma-sys, psm, blake3) and rebuilds the whole
   DataFusion stack above them — before this, alternating between the two entry points
   thrashed the cache each way:
-  `CUDF_ROOT=~/data/miniforge3/envs/rapids scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`
+  `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`
   For anything more than a one-off command, use `build-test.sh` / `build-test-shadgpu.sh`
   instead — they handle build, staging, shipping and running.
 - **A cudf-shape binary needs `LD_LIBRARY_PATH` to run at all.** `libpeacock_gpu.so` lives in
@@ -1005,8 +1111,8 @@ Rules that keep this healthy:
 | Host | Use | Managed by |
 |---|---|---|
 | **shad-gpu** (most used) | GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
-| **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host verda --all` (add `--rust-only` to skip the C++/FFI half) |
-| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host verda-gpu --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
+| **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host <user@ip> --all` (add `--rust-only` to skip the C++/FFI half) |
+| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host <user@ip> --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
 | **nebius** | large CPU-only VM | manual |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
@@ -1028,6 +1134,11 @@ Rules that keep this healthy:
   `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,
   so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets/testinfra.md#t178)). Budgets are
   H200 numbers; `PEACOCK_RMM_POOL_BYTES=<bytes>` replaces one for a sweep or another host.
+- **`verda` and `verda-gpu` are names for a host, not addresses of one.** They are ephemeral
+  Verda Cloud instances, reprovisioned with a new IP, so `--host` takes `<user@ip>` and
+  `scripts/list_verda_instances.sh` is what finds it (`VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET`).
+  `ssh verda` resolves nowhere, so a probe of the bare name reports "down" whether the instance
+  is up or not. Only shad-gpu has a stanza in `~/.ssh/config`.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
   up (the human starts it manually) — falling back to a local run is completely fine.
 - **Comparing files across hosts: use checksums, and `LC_ALL=C sort` for any listing.**
@@ -1042,7 +1153,7 @@ Rules that keep this healthy:
   from `getconf` where the binaries are built, and the prefix is built once on the first patch
   from that host class. A binary patched to a glibc older than its own dies at load with
   `version GLIBC_2.38 not found`.
-- **Golden regen**: on verda via `scripts/build-test.sh --host verda --rust-only
+- **Golden regen**: on verda via `scripts/build-test.sh --host <user@ip> --rust-only
   --update-canonical`, then `--pull-goldens` to bring regenerated goldens back; or
   locally with `UPDATE_CANONICAL=1 cargo test --features rust-only ...`. Sync is one
   flag per kind per direction — `--push-<kind>` / `--pull-<kind>` for
@@ -1067,6 +1178,20 @@ Rules that keep this healthy:
   long run.
 - **Large CPU + GPU batches run in parallel** — kick off the shad-gpu run and the
   verda/local CPU run concurrently; neither waits for the other.
+- **The device's own answers are a knob, not a flag**: `PCK_WRITE_GPU_RESULT=1` on a gate
+  run has the device corpus tier write `gpu-result.txt` beside the cpu's goldens, before it
+  asserts against them — so an answer the cpu rejects is still recorded for DuckDB to judge.
+  `--pull-results` brings the file home afterwards — only one the gate run itself wrote, by
+  mtime against the run-id file — and it refuses while a detached gate run is still going. Any other non-empty value (`PCK_WRITE_GPU_RESULT=26.02`) writes
+  `gpu-result-<value>.txt` beside it, which `testdata/.gitignore` lists: one cuDF version per
+  committed file. An empty value records nothing, and that is the ordinary case: the gate script
+  exports the variable on every cycle, so empty is how a cycle that is not recording says so. The read side is a second knob: `PCK_GPU_RESULT_VERSION=<v>` points the
+  `duckdb_gpu_*` cases at `gpu-result-<v>.txt`, which is how a non-25.02 run gets compared at all.
+  The coverage guard reads the committed file whatever that is set to, so a versioned file can
+  exercise the comparison and can never satisfy the guard. Every one of these files opens with a
+  `cudf=` line naming the cuDF that recorded it, and a file whose line disagrees with its name is
+  refused by every reader — which is what holds "one version per file" without trusting the value
+  somebody typed.
 - **A run that outlives your ssh session** is `--run-detached`, read back with
   `--run-status`. That flag exits 0 only when the latest run finished with 0 — still
   going, died without writing its code, and a completion belonging to an earlier run are

@@ -150,6 +150,28 @@ if found: print(found)
   echo "--- Staged: $staging/$staged"
 }
 
+# device_result_files <testdata dir> <the gate launch's run-id file>
+#
+# Every `goldens/*/gpu-result*.txt` under the dir, each as `fresh <rel>` or `stale <rel>` by
+# whether it is newer than the marker. FRESHNESS, not existence: --push-binaries mirrors
+# testdata/goldens/ onto the host on every deploy, so from the first commit of the file
+# onward a cycle that recorded nothing still leaves one there, and a pull that brings that
+# copy home reports files having refreshed nothing. The gate's run-id file is the clock
+# because launch_remote writes it first, before the binaries run. `no-marker` is the answer
+# where no gate has ever been launched. Shipped into a remote script with `declare -f`, the
+# way passed_count is, since the files it reads are the host's.
+device_result_files() {
+  local dir=$1 marker=$2 f
+  [ -f "$marker" ] || { echo no-marker; return 0; }
+  (
+    cd "$dir" 2>/dev/null || exit 0
+    for f in goldens/*/gpu-result*.txt; do
+      [ -f "$f" ] || continue
+      if [ "$f" -nt "$marker" ]; then echo "fresh $f"; else echo "stale $f"; fi
+    done
+  )
+}
+
 # pull_one <path under testdata/> <what it is>
 #
 # Fetch one file from the host into the same place here, and return 1 when there is none.

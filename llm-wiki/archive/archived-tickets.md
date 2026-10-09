@@ -60,6 +60,58 @@ goldens. No answer is wrong; a reader of the text cannot tell the value is null.
 `plan_text::expr_text::tests::a_null_decimal_literal_prints_as_null_at_either_width` and
 `plan_text::tests::a_null_decimal_literal_prints_as_null`.
 
+<a id="t235"></a>
+### #235 — no independent oracle checks the result goldens
+
+Every answer the corpus checks is checked against DataFusion or against our own goldens, which
+our cpu engine wrote. A defect DataFusion shares with us — a limit it drops (#166), `NOT IN` over
+NULLs (#80) — passes every tier. DuckDB answers exist only for the hand-written bare-cuDF
+gtests at sf40 (`testdata/gen_duckdb_goldens.sh`, `cpp/tests/gpu/test_tpch.cpp`), never for the
+engine's corpus.
+
+**Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 120
+queries, 4 of them a fingerprint over the 262144-byte cap and 4 not enabled.
+
+**Done 2026-10-08 by [`duckdb-oracle`](../tasks/duckdb-oracle.md), PR #167; awaiting merge.** A
+DuckDB golden sits beside each result golden and a Rust case per corpus line compares them. The
+generator and both `duckdb-result.txt` files landed 2026-09-28; the `duckdb_oracle` argument, the
+comparator, the over-cap fingerprint, the helpers' negative tests and the three `ALL` tests landed
+with the task. The device cycle ran last, on nebius-gpu rather than shad-gpu — both hosts were
+down while the task was built, and the human's host override routed it — so it used a plain
+`rsync` to bring the files home rather than `--pull-results`, which ssh-es to shad-gpu. It
+recorded 26 sections at cuDF 25.02 into `testdata/goldens/{tpch,tpcds}.sf1/gpu-result.txt`, and
+every one compared green: 13 cells on `duckdb_exact`, 12 on `duckdb_approx`, 1 on
+`duckdb_fingerprint`, none declining to compare. No divergence, so none is owed a ticket.
+
+Measured by the first run (2026-09-28), over every section both files hold: no row count, string
+or NULL differs. tpch 39 queries: 22 identical, 6 differ in column names only, 5 in float or decimal
+digits, 6 not compared. tpcds 99: 53 identical, 12 names only, 3 formatting only, 10 digits, 1
+empty answer, 2 not compared, 18 answered by DuckDB alone. `round(x, 2)` (q2) agrees on the cpu;
+no tie under a LIMIT and no NULL-order difference appeared; turning DuckDB's integer division off
+changes only the typing of two decimal divisions (q2, q61), no value.
+
+The divergences, and the oracle each line carries:
+- **Column names** (18 queries). DataFusion names an unaliased expression by its qualified text
+  (`sum(lineitem.l_quantity)`), DuckDB by its own (`sum(l_quantity)`). Compared by position.
+- **Decimal `avg` and division truncate at a fixed scale.** We follow DataFusion's rule, a decimal
+  cut (not rounded) at its declared scale; DuckDB answers a double. On its own it is formatting
+  and `duckdb_approx` covers it — tpch q1's `avg_qty` is `25.522005` against `25.522005853…`.
+  Inside an expression the truncated intermediates compound past that tolerance, which is
+  **#251**: tpcds q58, q61 and q66, each a `duckdb_divergent(251, …)` line.
+- **Float last digits.** Floating sums and Welford `stddev`/`var` reassociate: tpch q14 and
+  shuffle-stddev, tpcds q39, below 1e-13.
+- **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
+  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows, so
+  the line is `duckdb_divergent(205)` — no positions, a row-level divergence — and it goes back
+  to `duckdb_exact` when #205 clears.
+- **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
+  q27 and q72 (#23), q28 (#62). Not compared.
+- **Queries over the cap on both sides** (4): tpch q16, anti-join, filter-project, semi-join.
+  Both writers hold a fingerprint instead of the rows and the line says `duckdb_fingerprint`;
+  measured identical on both sides, hash included. **Not enabled on ours**: tpch q11 and q22,
+  tpcds q24 and q54 (#190), each `duckdb_none` until the task that turns their cells on.
+- **A real divergence** is a ticket, and its line in the declared list names it.
+
 <a id="t191"></a>
 ### #191 — the device exports Int16 for an extracted year the plan declared Int32
 
