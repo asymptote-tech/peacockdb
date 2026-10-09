@@ -28,37 +28,6 @@ one that goes nowhere.
 
 ## Done
 
-<a id="t237"></a>
-### #237 — a mark or right-semi join's projection prints under the wrong names
-`projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
-projects its type's own output: build and `mark` for LeftMark, probe alone for RightSemi and
-RightAnti. The ordinal is right and the name beside it is not.
-
-Seen in tpcds q10, q35, q45 (LeftMark: `mark` printed as a probe column) and q58, q83 (RightSemi:
-probe columns printed as build ones) — 80 fields over the 5 `plans.txt` goldens. No answer is wrong; a
-reader resolving a column by the name it is printed under takes the wrong one. The fix is to name
-them from the join's own output schema, then regenerate.
-
-**Done.** `projection_field` names each ordinal by the output column it becomes — the node's own
-schema at that position — so no join type's emitted table is re-derived in the renderer.
-`plans.txt` and the `cpu.txt` sections regenerated (q10, q35, q45, q58, q83; names only). Pinned
-by `plan_text::tests::a_mark_join_names_its_mark_in_its_projection` and, over every golden, by
-`planner::tests::join_projection_names`, which rebuilds each join's output from its children.
-
-<a id="t236"></a>
-### #236 — a null decimal literal renders as `None,23,8` in the plan text
-`literal_text` (`plan_text/expr_text.rs`) handles `Decimal128(Some…)` and `Decimal256(Some…)`
-only; a null one falls to DataFusion's `Display`, which prints `{v:?},{p:?},{s:?}`. Every
-other null prints `NULL`.
-
-Seen in tpcds q90 (`` CASE WHEN pmc@1 = 0 THEN `None,23,8` … ``), 5 `plans.txt` and 2 `cpu.txt`
-goldens. No answer is wrong; a reader of the text cannot tell the value is null. The fix is a
-`None` arm printing `NULL`, then regenerate.
-
-**Done.** `literal_text` prints a null `Decimal128`/`Decimal256` as `NULL`; `plans.txt` and the
-`cpu.txt` sections regenerated (q90). Pinned by
-`plan_text::expr_text::tests::a_null_decimal_literal_prints_as_null_at_either_width` and
-`plan_text::tests::a_null_decimal_literal_prints_as_null`.
 <a id="t259"></a>
 ### #259 — pbench landed with every device cell off, and nothing owns running them
 
@@ -98,6 +67,38 @@ of `rollup-small-keys` are off on [#65](../tickets/corpus-coverage.md#t65), the 
 that ticket on a device. `gpu-result.txt` is golden 18 of 18 and every section of it agrees with
 DuckDB. The rest belong to `join-backend` (#152, #220, #63) and `repartition-keys` (#95, #206,
 #240, #189), as this ticket said.
+
+<a id="t237"></a>
+### #237 — a mark or right-semi join's projection prints under the wrong names
+`projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
+projects its type's own output: build and `mark` for LeftMark, probe alone for RightSemi and
+RightAnti. The ordinal is right and the name beside it is not.
+
+Seen in tpcds q10, q35, q45 (LeftMark: `mark` printed as a probe column) and q58, q83 (RightSemi:
+probe columns printed as build ones) — 80 fields over the 5 `plans.txt` goldens. No answer is wrong; a
+reader resolving a column by the name it is printed under takes the wrong one. The fix is to name
+them from the join's own output schema, then regenerate.
+
+**Done.** `projection_field` names each ordinal by the output column it becomes — the node's own
+schema at that position — so no join type's emitted table is re-derived in the renderer.
+`plans.txt` and the `cpu.txt` sections regenerated (q10, q35, q45, q58, q83; names only). Pinned
+by `plan_text::tests::a_mark_join_names_its_mark_in_its_projection` and, over every golden, by
+`planner::tests::join_projection_names`, which rebuilds each join's output from its children.
+
+<a id="t236"></a>
+### #236 — a null decimal literal renders as `None,23,8` in the plan text
+`literal_text` (`plan_text/expr_text.rs`) handles `Decimal128(Some…)` and `Decimal256(Some…)`
+only; a null one falls to DataFusion's `Display`, which prints `{v:?},{p:?},{s:?}`. Every
+other null prints `NULL`.
+
+Seen in tpcds q90 (`` CASE WHEN pmc@1 = 0 THEN `None,23,8` … ``), 5 `plans.txt` and 2 `cpu.txt`
+goldens. No answer is wrong; a reader of the text cannot tell the value is null. The fix is a
+`None` arm printing `NULL`, then regenerate.
+
+**Done.** `literal_text` prints a null `Decimal128`/`Decimal256` as `NULL`; `plans.txt` and the
+`cpu.txt` sections regenerated (q90). Pinned by
+`plan_text::expr_text::tests::a_null_decimal_literal_prints_as_null_at_either_width` and
+`plan_text::tests::a_null_decimal_literal_prints_as_null`.
 
 <a id="t235"></a>
 ### #235 — no independent oracle checks the result goldens

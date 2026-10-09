@@ -140,7 +140,6 @@ keyless-identity, which makes a keyless aggregate answer its row and leaves this
 the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
 set's. DataFusion is not the oracle for it; DuckDB is.
 
-
 <a id="t255"></a>
 ### #255 — the planner panics on a Struct or Interval column instead of refusing it
 `common::type_structural_size` has an arm per flat type and `panic!`s on everything else

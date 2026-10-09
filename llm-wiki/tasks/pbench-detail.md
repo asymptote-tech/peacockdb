@@ -1944,3 +1944,57 @@ The override's second condition is met too: the GPU tests passed on nebius-gpu, 
 "Re-proved after the rebase" and "The device cycle, run".
 
 **State: `done`.** Terminal for the ensemble; the human merges PR #168.
+
+## Rebased onto the rebased duckdb-oracle (2026-10-09)
+
+`git rebase --onto ENS-duckdb-oracle 0df60133 ENS-pbench`, 25 commits, replayed with a
+worktree-local untracked `.gitattributes` giving the six overlapping markdown files `merge=union`
+so the replay never stops, and one three-way merge per file afterwards. Nine conflict hunks in all.
+The method and why it beats resolving per commit: `duckdb-oracle-detail.md`, "The rebase, executed".
+
+**The intersection was eight files, and two of them are code.** pbench touches 126 files, the new
+parent moved 43, and they overlap in `.github/workflows/pipeline.yml`,
+`cost-report/src/main.rs`, and six `llm-wiki/*.md`. Both code files **auto-merged with both sides
+intact**, which was checked rather than assumed: pbench's own change against the new parent is
+exactly the 152/26 and 5/0 it was against the old one, `REGRESSION_FAIL_PCT` appears 11 times in
+`cost-report/src/main.rs` on this branch as on its parent, and the 10%-gate error string is in
+`pipeline.yml`. Their hunks never touched — pbench works at lines 376–2273 of `main.rs` and
+master's `f0a6ecbf` at 36–1941, pbench at lines 177 and 503 of `pipeline.yml` and the other two
+sides at 712 and 928. The 118 non-intersecting files came across byte for byte.
+
+**The six markdown files.**
+
+- **`tasks.md`** — three hunks, all states. duckdb-oracle takes its parent branch's `done`, since a
+  task's own branch is the authority on its own state. master's resequencing drops stale-cells from
+  task 2 and renumbers, as on the parent. The one thing kept from this branch rather than its
+  parent: pbench **closes half of #227**, not #227 — this branch's own finding about its own scope,
+  which master cannot know yet and which reaches it when PR #168 merges. So the board here differs
+  from its parent's in that one line.
+- **`tickets.md`** — two hunks, again re-derived from the ticket files' anchors rather than taken
+  from a side: **127 open over 11 rows**, every row agreeing with its file in count and order, the
+  header equal to the sum. "Next free 264" survives untouched and is right: this chain's #251–#259
+  all predate master's reservation of 264–279 for it, and none of them collides with master's
+  #261 or #280–#283.
+- **`archive/archived-tickets.md`** — one hunk, both sides inserting at the head of **Done**. This
+  branch's #259 goes above master's #237 and #236, which keeps the head of the section descending.
+- **`tickets/complete-coverage.md`** — one hunk, and the only one needing judgement. Both sides
+  rewrote the end of #249 and then appended: master a new #283, this branch a rewritten #249
+  paragraph plus #255. Resolution keeps this branch's #249 paragraph (it is strictly more
+  informative — it says the two queries cannot reach the wire at all and names #255), then master's
+  #283 where master put it, then #255 appended. Eight anchors, matching the index row.
+- **`tickets/corpus-coverage.md`** — no conflict at all; the clean three-way merge equalled what
+  the union replay had already produced, so the file needed no write.
+- **`build-test.md`** — three hunks, the count lines, derived from the page's own tables as before
+  and not by adding deltas. **2856 — Rust 2358, C++ 97, Python 401**; cpu 1633 (`--lib` 682,
+  `test_cpu_corpus` 922, 26, 3), ffi 7, gpu **606** (536, 58, 11, 1), every tier heading equal to
+  its rows and to its own sub-breakdown. The cost-report renderer row is 40: 37 at the fork, +1
+  from master's gate tests, +2 from this branch.
+
+**What the re-prove has to look at.** Two of the six commits master brought carry code. `64ced62e`
+moves the plan-text renderer, and the duckdb-oracle round established exactly where it bites: only
+where a join's pre-projection width differs from build++probe, so `LeftMark`, `RightSemi` and
+`RightAnti` and nothing else. duckdb-oracle's goldens were untouched because tpch's three
+`projection=` join lines are all `LeftSemi`/`LeftAnti`. **pbench is the branch where that is likely
+to be different**: its whole subject is NULL keys and `NOT IN` over NULLs, and a `NOT IN` lowers to
+an anti or a mark join. If pbench's plan goldens move, that is the expected regeneration and not a
+defect. The second, `f0a6ecbf`, is the cost gate, which the cost-report tests cover.
