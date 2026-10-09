@@ -446,7 +446,11 @@ the old reachable state. Corrected in place.
 - The estimator does not treat the new node as an accumulator (`NodeRef::Limit` falls to
   `_ => None`), so it neither truncates the amplification walk nor comes off the budget.
 
-### 2026-10-09 — done
+### 2026-10-09 — done (pre-rebase; superseded)
+
+**This section is the cpu half's `done`, before the second rebase.** `34bd7f4c` is no longer an
+ancestor of this branch — the rebase onto master `bc9b6e2f` replaced it — so the run below says
+nothing about the current head and `done` needs a fresh one.
 
 CI run [37898744572](https://github.com/asymptote-tech/peacockdb/actions/runs/37898744572) on
 `34bd7f4c`. Green: changes, both dataset-matrix legs, cpp-build-2502, s3-datasets;
@@ -515,6 +519,12 @@ device answer is compared against a fresh cpu run at the same mode. `nested-limi
 `golden_exact`.
 
 ### 2026-10-09 — the GPU half ran on nebius-gpu
+
+**The tree it ran on.** The working tree that became `a47aff90`. Two commits landed after it:
+`04547750`, comments and wiki only, and `dbfc4079`, which edits `flatbuffers/gpu_plan.fbs` and so
+regenerates both generated files and relinks `libpeacock_gpu.so`. That edit is comment-only and
+the regeneration was proved identical with comment lines stripped — md5s in the round below — so
+this run stands for the final tree. Nothing else compiled has moved.
 
 Everything #281 held for this task is now measured. The device tier is green at 537 + 38 + 1 + 8
 + 4 + 56 cases, `tpch/scan-limit`'s five device cells are **enabled**, `tpch/nested-limits`' five
@@ -802,3 +812,12 @@ first attempt at them, `--lib -- the_payload_golden_carries_… --exact`, report
 than the exit code; the name needs its `planner::tests::plan_goldens::` prefix. C++
 `scripts/build.sh --build` rc=0 with the regenerated header, 20 targets, no warning, and
 `ctest -L cpu` 1/1. No device run: nothing here reaches one.
+
+### Deferred from the completeness pass
+
+`flatbuffers/gpu_plan.fbs`'s new `projection` comment says "No writer fills it", which is true of
+the recipe writer and not of `cpp/tests/gpu/test_plan_executor.cpp`, where four hand-built plans
+do. The neighbouring `row_groups` comment protects itself with "reachable only from a hand-built
+plan" and this one should say the same. Left alone deliberately: a `.fbs` comment is a codegen
+input, so the qualifier costs a regeneration round and a fresh proof that nothing but the doc line
+moved, and a nit does not buy that at a completeness pass. For whoever next edits that file.
