@@ -820,3 +820,33 @@ This branch **will** conflict in code-adjacent files, unlike guard-checks: maste
 a regeneration by a developer, not a hand-merge: master changed how a join's projection and
 a null decimal render, this branch added q28's sections, and only a run can say what the
 combined text is.
+
+### 2026-10-09 — rebased onto guard-checks on master 31c56bea
+
+`git rebase --onto ENS-guard-checks pre-rebase-K-guard-checks ENS-distinct-companions`. The
+`--onto` form is the one that works here: a plain `git rebase ENS-guard-checks` tried to replay
+guard-checks' own pre-rebase commits, because only three of the nine were recognised as already
+applied.
+
+**Every conflict was wiki, none was code.** All ten tpcds goldens master and this branch both
+touch auto-merged — `tp{1,4}-{single,rowgroup,sized}.plans.txt` and the `tp*-mini.cpu.txt`
+beside them. That is a textual merge no run has checked, and it is the one thing the re-proving
+dispatch has to settle: master's `64ced62e` moved how a join's projection (q10, q35, q45, q58,
+q83) and a null decimal (q90) print, while this branch inserted q28's sections into the same
+files.
+
+Four conflicts, resolved by ownership:
+
+- `build-test.md`'s two count lines, four times over (once per commit of this branch that moved
+  them). Resolved each time as `ours + (theirs − base)` per field, with the grand total asserted
+  equal to Rust + C++ + Python and the cpu block equal to the sum of its binaries. The end state
+  is **2366 — Rust 1891, C++ 94, Python 381**, cpu `1220: --lib 624, test_cpu_corpus 567,
+  test_corpus_goldens 26, test_cost_model 3`. guard-checks' re-prove corrected the Cost-report
+  renderer row from 37 to 36 on the way through, and that correction survived; so did master's
+  new `Join projection names` row and its two moved plan-text rows.
+- `archive/archived-tickets.md` — an add/add at the top of the file. Both sides kept: #62 first,
+  then master's #237 and #236, which is the file's newest-archived-first order.
+- `tickets.md`'s index — master's side for which tickets exist (#280, #281, #282, #283 are
+  master's), this branch's side for #62 leaving corpus-coverage. 118 open, corpus-coverage 35.
+- `tasks.md` — master's side for tasks 3 and 4 (`limits` and `empty-sorts`, `approved to build`)
+  and for the chain note's new cost-gate bullet; this branch's side for states 1 and 2.
