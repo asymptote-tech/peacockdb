@@ -265,16 +265,17 @@ fn drive<B: Backend, T>(
         }
         (NodeExecutors::Join(join), Script::Join { build, probe }) => {
             let (mut probing, _) = join.set_build(build.as_ref().map(|batch| up(batch)))?;
-            // A lane that owes nothing reads no probe batch: the driver drops them, and the
-            // script's own probe list is what the driver would have handed over.
+            // A lane that owes nothing is drained: the driver makes neither a probe nor a
+            // finish call over it, and this stands in for the driver. Calling the finish
+            // anyway is what `a_lane_with_no_build_batch_calls_set_build_none` denies.
             if !probing.owes_nothing() {
                 for batch in probe {
                     let (out, _) = probing.probe_and_fetch(up(batch))?;
                     slots.push(lower(out.into_iter().collect())?);
                 }
+                let (out, _) = probing.finish_and_fetch()?;
+                slots.push(lower(out.into_iter().collect())?);
             }
-            let (out, _) = probing.finish_and_fetch()?;
-            slots.push(lower(out.into_iter().collect())?);
         }
         (NodeExecutors::Unload(mut unload), Script::Unload { batch, rows }) => {
             let (out, _) = unload.unload(up(batch), *rows)?;

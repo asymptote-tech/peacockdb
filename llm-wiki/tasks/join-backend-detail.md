@@ -14,21 +14,33 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 | review rounds | none |
 | tickets filed | none. Next free is **267**; master reserved 264–279 for this chain |
 
-## Hosts, measured at dispatch (2026-10-09)
+## Hosts, and the device recipe now proven (2026-10-09)
 
-- **nebius-gpu `dmitry@89.169.109.150`** — up, L40S, 46068 MiB VRAM with 0 MiB in use, sf1
-  tpch/tpcds/pbench present in `~/peacockdb-J/testdata`. **Disk is the risk: 21 GB free of 96 GB.**
-  `~/peacockdb-J` is 23 G, `~/miniforge3` 17 G, `~/peacockdb-K` 16 G (chain K's worktree — never
-  delete it), `~/peacockdb` 991 M (already cleaned). A device build that runs out of disk reads as
-  a compiler error; check `df -h ~` first and clean only stale build/target dirs inside
-  `~/peacockdb-J`, per the board's host override.
+- **nebius-gpu `dmitry@89.169.109.150`**, `computeinstance-e00tnrse7ayntnzcyt` — up, L40S,
+  46,068 MiB VRAM with 0 MiB in use, cuDF 25.02 from `~/data/miniforge3/envs/rapids-cuda-12.2`,
+  sf1 tpch/tpcds/pbench present in `~/peacockdb-J/testdata`.
+- **Disk is the standing risk and it is getting tighter: 14 GB free of 96** after task 7's first
+  device build (21 GB before it, 15 GB after). Nothing was deleted to get there — the 17 G
+  `target-cudf-rapids-cuda-12.2` is reused incrementally, which is why the second build took 23
+  seconds. One more full rebuild fits; a `cargo clean` is not recoverable inside 14 GB. A build
+  that runs out of disk reads as a compiler error, so check `df -h ~` first, and clean only stale
+  build and target dirs inside `~/peacockdb-J`. `~/peacockdb-K` is chain K's worktree: never touch
+  it, nor `~/miniforge3`.
+- **The recipe works and `--build` is safe with shad-gpu down.**
+  `./scripts/build-test-shadgpu.sh --build` exits 0 and neither pushes nor ssh-es anywhere; each
+  staged binary is then run directly with `--test-threads=1`. Never `--run`, which ssh-es to
+  shad-gpu.
 - **shad-gpu** — down since 2026-10-08. The `gpu-tests` CI job is exempt by the override.
 - **verda** — unlocatable: `VERDA_CLIENT_ID` is unset, so `scripts/list_verda_instances.sh`
   exits on it and `ssh verda` resolves nowhere. **Every CPU build and run is local.**
-- Local `cpp/build` is an empty **root-owned** directory and cmake dies at configure blaming
-  itself. `/tmp/dkb-cppbuild` is already configured against this worktree and is the 30-second
-  local compile check before paying for a device cycle. Clearing `cpp/build` needs `sudo` and is
-  the human's.
+
+### The device baseline, at task 6 plus its harness fix
+
+816 cases over seven binaries, every one green, each binary confirmed to have run tests:
+`peacockdb_core_gpu_lib gpu_tests::` 580, `test_gpu_corpus` 95, `test_node_timing` 1,
+`peacock_gpu_benchmarks --skip bench_` 8, `peacock_gpu_tests` 2, `peacock_plan_tests` 77,
+`peacock_join_session_tests` 53. Not run, per the board: `peacock_cpu_tests` (local), the sf40
+pair, the `bench_` cases. This is the figure a later device round is read against.
 
 ## What task 8 inherits from join-session-cpp, each already paid for once
 
@@ -51,6 +63,23 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 - **An absent build's output schema comes from `build_schema`'s field names and order**, pinned by
   `AnAbsentBuildEmitsTheSchemaABatchWouldHave` against a rows-present run. The driver concatenates
   lane outputs, so a disagreement shows up as an Arrow schema mismatch on empty lanes alone.
+
+## Four workstation traps, each already paid for once
+
+Carried from the chain's previous run, and the first one cost this task a round: the coordinator
+had them and passed on only the inherited-code list.
+
+- **`pgrep -f build-test-shadgpu` matches its own ssh command line** and so reports RUNNING
+  forever. `build-test.md`'s antipattern section names the shape: a wait loop whose pattern
+  appears in the waiter's own argv waits for itself and ends only at the timeout. Poll the log's
+  mtime, a terminal line in it, or an `rc` marker file written by a detached `nohup` — never a
+  process pattern. Task 7's first round polled a build that had finished for about 38 minutes.
+- **Local `cpp/build` is an empty root-owned directory** and cmake dies at configure blaming
+  itself. `/tmp/dkb-cppbuild` is configured against this worktree and is the 30-second local
+  compile check. Clearing `cpp/build` needs `sudo` and is the human's.
+- **`matplotlib` is absent** while `scripts/calibration/tests/test_plot.py` imports it at module
+  scope. `pip3 install --target` outside the tree plus `PYTHONPATH` works.
+- **A stray `/tmp/struct.py` shadows the stdlib** for any python run whose cwd is `/tmp`.
 
 ## Rules this chain paid for, and the one that costs a whole round
 
@@ -655,3 +684,104 @@ proves any of it.
 **build-test.md counts (human's file).** `--lib` moves 729 → 730: `cpu_backend`'s join block
 gains one case, and `executor::driver`'s flow block keeps its count (one case replaced, one
 renamed). No new row.
+
+#### Round 1, plan task 7 — the device cycle, the inherited compile verdict, and a task 6 defect
+
+This round bought the device cycle and spent it on the three things that had to come before any
+task 7 code: whether the blind edits compile, whether the device tier is green at task 6's
+commit, and what `chunk_bytes` is really priced at. **Task 7's steps 1–6 are not started** — no
+wire writer, no session executor, no pricing, no pin flips, no goldens.
+
+**Run identification.** Host `dmitry@89.169.109.150` (nebius-gpu,
+`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S 46,068 MiB with 0 MiB in use. cuDF **25.02**
+(`CUDF_VERSION_MAJOR 25`, `MINOR 2`, from
+`~/data/miniforge3/envs/rapids-cuda-12.2/include/cudf/version_config.hpp`). Tree synced
+uncommitted with the board's `rsync -a --delete-after` line; built in `~/peacockdb-J` with
+`./scripts/build-test-shadgpu.sh --build`, which exits 0 and stages four rust binaries and six
+C++ ones. Every binary run directly, `--test-threads=1`, with
+`LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib` and
+`PEACOCK_TESTDATA_DIR=$PWD/testdata`. `--build` does **not** push or ssh anywhere, so it is safe
+with shad-gpu down.
+
+**Disk, measured rather than inherited.** 21 GB free of 96 before the first build — not the 26
+the dispatch carried, so that reading was already stale. 15 GB after the first build, 14 GB after
+the second. **I removed nothing**: `~/peacockdb-J/target-cudf-rapids-cuda-12.2` is 17 G and was
+reused incrementally, which is what made the second build 23 seconds. `~/peacockdb-K` (17 G) and
+`~/miniforge3` (17 G) untouched. A third full rebuild would fit; a `cargo clean` would not be
+recoverable inside 14 GB and must not be done casually.
+
+**The first finding is the good one: tasks 5 and 6's blind edits compile.**
+`cpp/install/rust-tests/peacockdb_core_gpu_lib` is the binary that carries every `gpu_tests`
+module, and it staged clean. That covers task 5's `tests/gpu_tests/nested_cases.rs` (the
+`NestedLoopJoinType` → `JoinType` conversion, eleven paths, a signature and a panicking match
+arm) and task 6's `tests/gpu_tests/script.rs` and `gpu_backend/gpu_tests/join.rs` (five
+`set_build(Some(…))` sites).
+
+**The second finding is a defect in task 6, which is committed: `script.rs` called
+`finish_and_fetch` on a drained lane.** Four cases failed —
+`join_cases::{left, left_semi, left_anti, left_mark}_with_no_build_batch_is_never_probed` — with
+`cpu refused: a join whose build side is absent was probed rather than drained`. The cause is
+mine and the plan's together: task 6 step 5's sketch puts the finish call *outside* the
+`if !probing.owes_nothing()` block, and I copied it. The driver does not do that —
+`flow::a_lane_with_no_build_batch_calls_set_build_none` asserts `Finish == 0` for exactly this
+lane — so the harness, which stands in for the driver, was violating the protocol the driver
+keeps. The guard that caught it is the `build()` accessor task 6 added, doing its job.
+Fixed by moving the finish inside the block, which also restores the pre-task-6 contract that a
+no-build lane pushes no slots at all. Rust-only stayed green throughout (728), because
+`script.rs` is `#[cfg(all(test, feature = "gpu"))]` and the cpu tier never compiles it: **this
+class of defect is only ever found by a device build.** Re-synced, rebuilt (23 s incremental),
+re-run: 580 passed, 0 failed.
+
+**The device baseline at task 6's commit plus that fix — 816 cases over seven binaries, all
+green.** Nobody had measured the device tier since shad-gpu went down, so this is also the
+precondition task 7's work will be read against.
+
+| binary | result |
+|---|---|
+| `rust-tests/peacockdb_core_gpu_lib gpu_tests::` | **580 passed**, 0 failed, 734 filtered out |
+| `rust-tests/test_gpu_corpus` | **95 passed**, 0 failed |
+| `rust-tests/test_node_timing` | **1 passed** |
+| `rust-tests/peacock_gpu_benchmarks --skip bench_` | **8 passed**, 3 filtered out |
+| `bin/peacock_gpu_tests` (gtest) | **2 passed**, 2 suites |
+| `bin/peacock_plan_tests` (gtest) | **77 passed**, 16 suites |
+| `bin/peacock_join_session_tests` (gtest) | **53 passed**, 1 suite |
+
+Not run, per the board's override: `peacock_cpu_tests` (local), the sf40 pair
+(`peacock_tpch_tests`, `peacock_tpchv_tests`), and `bench_` cases.
+
+**`chunk_bytes`: the fbs is right and the plan and §4.3 are wrong, confirmed by reading.**
+`flatbuffers/gpu_plan.fbs:479-483` says: "The executor bounds `pairs x (8 + the residual's
+per-row bytes)` by it, the second term being the sum over the filter's columns of their fixed
+width, 16 for a variable-width one — **not 8 bytes a pair, which is the index maps alone**." The
+plan's step 5 ("8 B per key-match pair") and design §4.3 both state the flat form. **Task 7's
+pricing must follow the fbs**, or the accountant and the session disagree about the same call,
+which is what step 5b exists to prevent. §4.3 is this task's to reconcile and the sentence to
+change is the flat-8-bytes one.
+
+**The four FFI symbols are declared as the plan's step 2 says**, in `peacockdb-ffi/src/lib.rs:202-237`:
+`peacock_join_build(exec, seq, build, *mut join, *mut stats) -> i32`,
+`peacock_join_probe(exec, join, probe, *mut handle, *mut stats) -> i32`,
+`peacock_join_finish(exec, join, *mut handle, *mut stats) -> i32`,
+`peacock_join_release(exec, join)`. Their doc comments carry the contract task 7 implements
+against: `build = 0` for no build batch; probe answers exactly one handle, possibly zero rows, or
+0 for the build-side semi family; finish answers one handle for Left/Full/LeftSemi/LeftAnti/
+LeftMark and 0 for the rest; release is idempotent.
+
+**A mistake of mine worth the line, because this file already warns about it.** My wait loop was
+`until ! ssh … "pgrep -f build-test-shadgpu >/dev/null"`, and `pgrep -f` matched **its own
+command line** on the remote, so it reported RUNNING forever. The build had finished at 23:03
+and I polled a finished build for about 38 minutes before checking `ps` for an actual compiler
+and finding load average 0.08. `build-test.md` names this exact trap ("a wait loop that matches
+itself") and I walked into it anyway. What would have caught it in one step: wait on the **log's
+mtime or a terminal line in the log**, not on a process pattern that includes the pattern.
+
+**What task 7 still needs, so the next round does not re-survey it.** Steps 1–6 untouched:
+`wire/join.rs`'s one leaf writer for the three nodes, `FbKind::Join` and
+`CallPattern::{JoinBuild, PerProbeBatch}` (neither exists yet — `FbKind` has `HashJoin`,
+`CrossJoin`, `NestedLoopJoin` and `CallPattern` has `PerProbeBatch` but no `JoinBuild`),
+`serialize_join_schema` as `pub(super)`, `Writer::with_join_scratch` plus the budget through
+`planner/pipeline.rs`, `gpu_backend/join.rs` on the four symbols with `Drop` releasing,
+the §4.3 pricing in `memory_estimation.rs`, `fb_text.rs`'s `payload_text` arm (still `_ => {}`,
+so a `CudfJoin` renders nothing and the payload golden will be empty until the writer chooses
+which of the nine fields to print), and step 6's pin flips. The #246 pin deferred from task 2
+also belongs here.
