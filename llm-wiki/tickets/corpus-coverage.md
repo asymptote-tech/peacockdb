@@ -64,8 +64,9 @@ the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned
 in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
 `tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
 `schema_validation_disabled`; the cells stay enabled and their values match. 2026-10-09: five of
-them now, `stale-cells` having turned on the four device modes that a closed #183 still held off;
-none failed on schema, so the row does not keep `225`.
+them now, `stale-cells` having turned on the four device modes that a closed #183 still held off.
+Validation was off for all five, so that run says nothing about the names and the refusal still
+stands at every mode; the row keeps no `225` only because no cell of it is off.
 
 **Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
 

@@ -11,14 +11,14 @@ above its header, which the cost widget links to, so link a ticket as
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 266), one ID space across every file. master
+New tickets take the next free number (currently 267), one ID space across every file. master
 reserved 264–279 for this chain and has gone on to 284 itself.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-122 open tickets, in file order.
+123 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -32,4 +32,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 7 | #150 #149 #148 #231 #232 #242 #248 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 6 | #263 #258 #252 #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 7 | #266 #263 #258 #252 #178 #176 #129 |

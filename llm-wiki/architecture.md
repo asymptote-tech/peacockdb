@@ -769,7 +769,9 @@ pinned.
 **These rules pin execution for a given plan, not across plans.** Two plans for one query may
 legitimately return different rows where the SQL does not determine them, which is what an
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
-contract; what must hold is that one plan run twice gives one answer, byte for byte.
+contract; what must hold is that one plan run twice gives one answer, byte for byte — except a
+float reduction on the device, which cuDF does not make reproducible, and which is what
+`golden_approx_std` and `duckdb_approx` exist for.
 
 ### Zero-row batches change no answer
 

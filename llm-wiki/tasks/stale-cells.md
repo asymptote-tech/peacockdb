@@ -52,3 +52,22 @@ The 16 cells. No fix to anything they show.
 ## Device workflow
 
 `build-test-shadgpu.sh`, one cycle under the corpus filter for the four rows.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints. All sixteen cells ran and all sixteen passed and met DuckDB, so
+item 2 is vacuous and no ticket was owed; `183` came off three rows and `187` off the fourth,
+which takes `187` out of the registry entirely. Seven join rows still keep `183` and are
+join-backend's, so `corpus_cases.inc`'s comment stays under item 3's own condition. No code
+changed, so the Restriction held by construction.
+
+**Measured on nebius-gpu, an L40S at cuDF 25.02, not the shad-gpu this spec names** — the human's
+host override routed it, shad-gpu being down throughout. Deferred by that override and by nothing
+else: `--run-benchmarks` and the `bench_` cases, Nsight, any H200 timing, the sf40 pair, and
+cuDF 26.02. The DuckDB half of the evidence is re-runnable without a device, by the 38
+`duckdb_gpu_tpch_` cases against the committed `gpu-result.txt`.
+
+One golden moved and it is accepted as float noise: `shuffle-stddev mode=tp1-single`, three lines
+in their last digits, 8.2e-16 relative against tolerances of 1e-11. The completeness pass found
+`architecture.md` claiming a plan run twice is byte-identical, which this contradicts and
+`build-test.md` already denied; that sentence now names the exception. No bandaid applied.

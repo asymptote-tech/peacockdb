@@ -3,6 +3,29 @@
 
 Tests, CI, hosts, testdata etc
 
+<a id="t266"></a>
+### #266 — the registry accepts an archived ticket as a reason to keep a cell off
+**Priority: low** — no answer is wrong; the cost is coverage that silently stops being measured.
+
+`registry.rs`'s rule for a row with disabled cells is `off == 0 || !tickets.is_empty()`, which asks
+only that *some* number sit in the `tickets` column. It does not ask whether that number names an
+open ticket. So a ticket closes, its rows keep their tag, and their cells are never run again —
+which is exactly what happened to sixteen tpch device cells under #183 and #187 for the months
+between those tickets closing and [`stale-cells`](../tasks/stale-cells.md) running them. All
+sixteen passed, so the engine was right the whole time and nobody could have known.
+
+**Corpus queries:** none fails. The failing state today is `tpch/nested_loop_join`: four device
+cells off under a lone `183`, archived, with no live blocker — assigned to `join-backend`. The
+fourteen tpcds window rows under #32 and #143 are the same shape but not the same problem: the
+capability is genuinely absent and the live pages say so.
+
+**Fix proposed:** the rule asks for at least one *open* ticket. `ticket_is_open`
+(`test_support/duckdb_oracle.rs`) already reads `llm-wiki/tickets/` for exactly this question and
+is already used by `duckdb_divergent`, so this is wiring rather than new machinery. A row whose
+every tag is archived goes red and is either run or re-tagged. The tpcds window rows need an
+answer first — an open capability ticket to point at, or an exemption the rule names — since they
+would go red on day one and their cells genuinely cannot run.
+
 <a id="t263"></a>
 ### #263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so

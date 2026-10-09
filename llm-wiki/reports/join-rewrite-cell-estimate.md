@@ -165,6 +165,15 @@ inc:53 "a row keeping `183` has modes never run past the string class"). Both ti
 | tpch nested-loop-join, q4, cross-join, nested-loop-left-join, semi-join, anti-join at 1r/4s/4r/4z; q15 at 1r | 25 | #152 (in chain) | FLIP, M |
 | tpch aggregate-groupby, shuffle-additive, shuffle-stddev (183), filter-project (187) at 1r/4s/4r/4z | 16 | none known; no chain task touches these rows | likely FLIP if anyone runs them (outside this chain) |
 
+**2026-10-09: scored, and the second row was right 16 of 16.** `stale-cells` — added to the chain
+after this report was written, which is why §2 has no row for it — ran all sixteen on an L40S at
+cuDF 25.02 and every one passed and met DuckDB. `183` and `187` are struck from the four rows and
+`187` is gone from the registry. So the device baseline in §1 and §5 moves: the tpch-and-tpcds
+figure those sections count is **42 on, not 26**, and "every cell on today is still on at the end"
+now reads against 42. Twelve of the sixteen are string-keyed partition cells at the tp4 modes, and
+they passed on top of refcounted-scatter, which is twelve cells of further negative evidence for
+§5's R1 beyond the six it names. The first row's 25 cells remain join-backend's under #152.
+
 ## 7. Per query
 
 Codes: F FLIP, N NEXT, S STAY, Z STALE; confidence in brackets; JB join-backend, RK
@@ -207,7 +216,7 @@ Line numbers: inc / csv. Rows with every cell on today are listed first.
 | tpch/left_join | 152 | 55 / 129 | — | 1s,1r,4s,4r,4z F(M) | JB | Left never ran on a device (probe copy, #152) |
 | tpch/mixed_join | 168 | 71 / 130 | — | 1s,1r,4s,4r,4z S(H) | — | #168 interval literal cannot cross the wire |
 | tpch/nested_limits | 186 | 73 / 131 | — | 1s,1r,4s,4r,4z S(H) | — | #186 limit in the scan (then the zero-column scan the design does not name) |
-| tpch/nested_loop_join | 183 | 58 / 132 | — | 1r,4s,4r,4z Z(M) | — | #183 (closed) never-run modes; no chain task touches the row |
+| tpch/nested_loop_join | 183 | 58 / 132 | — | 1r,4s,4r,4z Z(M) | JB | #183 (closed) never-run modes. 2026-10-09: `stale-cells` measured #183 dead on all sixteen cells it held, so these four have no live blocker; join-backend runs them |
 | tpch/nested_loop_left_join | 183 220 | 72 / 133 | — | 1s F(M-H) · 1r,4s,4r,4z Z(M) | JB, — | NLJ Left; tp1-single ran, #220 was its documented blocker (inc comment); in-chain; #183 (closed): "modes never run past the string class"; design 5.7 keeps #183 rows off. Real blocker at these modes was #152 (in chain): would flip if run |
 | tpch/rollup_over_join | 152 189 220 | 83 / 134 | 4s,4r,4z F(H) | 1s,1r,4s,4r,4z N(H) | JB, RK | #65: GpuAggregate declares __grouping_id:UInt8, device builds INT32; schema_validation_enabled refuses it (tp1-single.plans.txt rollup-over-join; corpus_cases.inc:83); #189: rollup shuffle stops hashing __grouping_id |
 | tpch/scan_limit | 186 | 42 / 135 | 1s,1r S(H) | 1s,1r,4s,4r,4z S(H) | — | #186 |
