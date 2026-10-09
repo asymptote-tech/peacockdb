@@ -314,3 +314,13 @@ Resolved by summing both deltas against the common base 8806a3c3:
 
 Arithmetic, not a count — the re-proving dispatch confirms it against
 `scripts/case-inventory.sh rust-only`.
+
+### Re-proving dispatch, 2026-10-09
+
+verda does not resolve from this host (`ssh: Could not resolve hostname verda`), and chain K's
+note says every build and run is local anyway, so the developer runs locally. The bar is the
+same nine rust-only targets as round 2 above plus the C++ cpu side, re-run on the new base.
+`--lib` should gain master's four new cases (`plan_text::tests` +2, `plan_text::expr_text::tests`
++1, `planner::tests::join_projection_names` +1) and so read 606 passed / 2 ignored / 608 listed;
+a different number means the build-test.md arithmetic above is wrong and the developer corrects
+it from `--list`.
