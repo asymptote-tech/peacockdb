@@ -602,18 +602,217 @@ async fn a_small_source_plans_one_lane_and_the_shuffle_around_it_disappears() {
     validate_all(large.as_ref());
 }
 
-#[tokio::test]
-async fn a_scan_carrying_a_pushed_down_limit_plans_one_lane() {
-    // DataFusion erases the limit node when it can push the bound into the scan, so at tp4
-    // `SELECT * FROM nation LIMIT 3` is a bare scan with limit=3 above nothing. Four lanes
-    // each honouring it would answer with twelve rows.
-    let tree = translated_at_tp4("SELECT * FROM nation LIMIT 3", 0).await;
-    assert_eq!(shape(tree.as_ref()), "Unload(LoadParquet)");
-    let NodeRef::LoadParquet(load) = as_node_ref(descend(tree.as_ref(), 1)) else {
-        panic!("expected a loader");
+/// `sql` planned at every mode over the minimal dataset, through the planner the corpus
+/// uses — the estimator's second pass and the validator included, so a tree the validator
+/// refuses fails here.
+async fn planned_at_every_mode(sql: &str) -> Vec<(String, Box<dyn GpuNode>)> {
+    let mut planned = Vec::new();
+    for mode in &crate::test_support::MODES {
+        let plan = plan_at(sql, mode.target_partitions).await;
+        let (tree, _memory) = crate::planner::plan(&plan, mode.knobs())
+            .unwrap_or_else(|error| panic!("{sql} at {}: {error}", mode.name));
+        planned.push((mode.name.to_string(), tree));
+    }
+    planned
+}
+
+fn is_limit_over_a_loader(node: &dyn GpuNode) -> bool {
+    matches!(as_node_ref(node), NodeRef::Limit(_))
+        && node
+            .children()
+            .first()
+            .is_some_and(|child| matches!(as_node_ref(*child), NodeRef::LoadParquet(_)))
+}
+
+/// The interval of every limit directly over a loader, parents before children.
+fn limits_over_loaders(node: &dyn GpuNode, found: &mut Vec<RowInterval>) {
+    if is_limit_over_a_loader(node) {
+        found.extend(node.row_interval());
+    }
+    for child in node.children() {
+        limits_over_loaders(child, found);
+    }
+}
+
+/// The row groups the tree's first loader maps, in mapping order.
+fn mapped_groups(tree: &dyn GpuNode) -> Vec<u32> {
+    let loader = find(tree, &|node| {
+        matches!(as_node_ref(node), NodeRef::LoadParquet(_))
+    })
+    .expect("a loader");
+    let NodeRef::LoadParquet(load) = as_node_ref(loader) else {
+        unreachable!("find accepted only a loader");
     };
-    assert_eq!(load.limit, Some(3));
-    assert_eq!(load.partition_groups.len(), 1);
+    let survivors: Vec<u32> = load.survivors.iter().map(|group| group.index).collect();
+    let mapped: Vec<u32> = load
+        .partition_groups
+        .iter()
+        .flatten()
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(
+        mapped, survivors,
+        "the mapping addresses exactly the survivors"
+    );
+    mapped
+}
+
+#[tokio::test]
+async fn a_scan_limit_with_nothing_above_it_is_the_unloads_interval_at_every_mode() {
+    // DataFusion pushes the bound into the scan and, over one partition, erases the limit
+    // node above it. A GpuLimit here would feed only the sink, which the validator refuses:
+    // a root-adjacent interval is the unload's. The scan is one lane, since rows from
+    // several have no order a cut could follow.
+    for (mode, tree) in planned_at_every_mode("SELECT n_nationkey FROM nation LIMIT 3").await {
+        assert_eq!(shape(tree.as_ref()), "Unload(LoadParquet)", "at {mode}");
+        assert_eq!(
+            tree.row_interval(),
+            Some(RowInterval {
+                skip: 0,
+                fetch: Some(3)
+            }),
+            "at {mode}"
+        );
+        assert_eq!(
+            descend(tree.as_ref(), 1).kind().layout().unwrap().n,
+            1,
+            "at {mode}"
+        );
+    }
+    // With an offset DataFusion pushes skip + fetch into the scan and keeps a limit above
+    // for the skip; the two fold into the one cut the query meant.
+    for (mode, tree) in
+        planned_at_every_mode("SELECT n_nationkey FROM nation LIMIT 3 OFFSET 2").await
+    {
+        assert_eq!(shape(tree.as_ref()), "Unload(LoadParquet)", "at {mode}");
+        assert_eq!(
+            tree.row_interval(),
+            Some(RowInterval {
+                skip: 2,
+                fetch: Some(3)
+            }),
+            "at {mode}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_limited_scan_under_a_subquery_or_a_join_is_a_limit_over_a_one_lane_scan_at_every_mode() {
+    let cut = |fetch| RowInterval {
+        skip: 0,
+        fetch: Some(fetch),
+    };
+    // Under an aggregate: DataFusion's pushdown erases the limit node and leaves the cut in
+    // the scan alone, so until #186 no reader applied it and the count was of all 25 rows.
+    let subquery = "SELECT count(n_name) FROM (SELECT * FROM nation LIMIT 3)";
+    for (mode, tree) in planned_at_every_mode(subquery).await {
+        assert!(
+            shape(tree.as_ref()).contains("Aggregate(Limit(LoadParquet))"),
+            "at {mode}: {}",
+            shape(tree.as_ref())
+        );
+        let mut found = Vec::new();
+        limits_over_loaders(tree.as_ref(), &mut found);
+        assert_eq!(found, vec![cut(3)], "at {mode}");
+        let limit = find(tree.as_ref(), &is_limit_over_a_loader).expect("found above");
+        assert_eq!(
+            limit.children()[0].kind().layout().unwrap().n,
+            1,
+            "at {mode}"
+        );
+    }
+    // Under a cross join: nested-limits, whose two scans each carry a pushed cut.
+    let sql = std::fs::read_to_string(
+        crate::test_support::queries_dir_for("tpch").join("nested-limits.sql"),
+    )
+    .expect("the corpus query");
+    for (mode, tree) in planned_at_every_mode(&sql).await {
+        let mut found = Vec::new();
+        limits_over_loaders(tree.as_ref(), &mut found);
+        assert_eq!(
+            found,
+            vec![cut(23), cut(28)],
+            "at {mode}: {}",
+            shape(tree.as_ref())
+        );
+    }
+    // A scan DataFusion pushed nothing into gains no node.
+    for (mode, tree) in planned_at_every_mode("SELECT n_nationkey + 1 AS k FROM nation").await {
+        assert!(
+            find(tree.as_ref(), &|node| matches!(
+                as_node_ref(node),
+                NodeRef::Limit(_)
+            ))
+            .is_none(),
+            "at {mode}: {}",
+            shape(tree.as_ref())
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_limited_scan_maps_only_the_row_groups_that_reach_its_limit_at_every_mode() {
+    // The minimal part is two row groups, 122,880 rows and 77,120. At the single-batch
+    // modes a scan of every survivor would be one batch of the whole file whatever the cut.
+    let cases = [
+        ("SELECT p_partkey FROM part LIMIT 10", vec![0]),
+        ("SELECT p_partkey FROM part LIMIT 122880", vec![0]),
+        ("SELECT p_partkey FROM part LIMIT 122881", vec![0, 1]),
+        ("SELECT p_partkey FROM part", vec![0, 1]),
+    ];
+    for (sql, expected) in cases {
+        for (mode, tree) in planned_at_every_mode(sql).await {
+            assert_eq!(mapped_groups(tree.as_ref()), expected, "{sql} at {mode}");
+        }
+    }
+}
+
+#[test]
+fn an_interval_over_another_keeps_the_rows_both_keep() {
+    let interval = |skip, fetch| RowInterval { skip, fetch };
+    // (outer, inner, the one interval over inner's input)
+    let cases = [
+        // scan-limit at tp4: the root limit and the scan's are the same cut
+        (
+            interval(0, Some(10)),
+            interval(0, Some(10)),
+            interval(0, Some(10)),
+        ),
+        // LIMIT 3 OFFSET 2 over the scan's 0..+5
+        (
+            interval(2, Some(3)),
+            interval(0, Some(5)),
+            interval(2, Some(3)),
+        ),
+        // the inner cut is the tighter one
+        (
+            interval(0, Some(10)),
+            interval(0, Some(4)),
+            interval(0, Some(4)),
+        ),
+        // the outer skip passes the whole inner cut: nothing
+        (
+            interval(5, Some(10)),
+            interval(0, Some(3)),
+            interval(5, Some(0)),
+        ),
+        // a pure offset over a cut, and a cut over a pure offset
+        (
+            interval(3, None),
+            interval(0, Some(8)),
+            interval(3, Some(5)),
+        ),
+        (
+            interval(0, Some(4)),
+            interval(2, None),
+            interval(2, Some(4)),
+        ),
+        (interval(1, None), interval(2, None), interval(3, None)),
+    ];
+    for (outer, inner, expected) in cases {
+        assert_eq!(outer.over(&inner), expected, "{outer:?} over {inner:?}");
+    }
 }
 
 #[tokio::test]

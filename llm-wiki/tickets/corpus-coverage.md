@@ -984,9 +984,9 @@ passes. Then this ticket is archived. Chain L's grouping-id takes the rollup hal
 
 limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
 device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
-`GpuLimit` above the scan now does (#186), and the four `bug_` source cases and three `bug_`
-accumulate cases it turns into agreement cases have run on no device. A device answer could differ
-from the cpu's, and nothing would say so.
+`GpuLimit` above the scan, or the unload's interval where nothing sits between, now does (#186),
+and the four `bug_` source cases and three `bug_` accumulate cases it turns into agreement cases
+have run on no device. A device answer could differ from the cpu's, and nothing would say so.
 
 **Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
 `tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.

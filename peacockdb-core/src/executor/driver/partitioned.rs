@@ -6,7 +6,8 @@
 //! strictly lower, so it is carried up before anything below produces again — and what
 //! bounds every queue at one batch per lane without a cap. Lane-scoped work is delegated
 //! to [`super::single_partition`]; the three cross-lane categories are here, along with
-//! the one node the driver special-cases, a `GpuUnload` carrying a limit.
+//! the hold on a satisfied limit — an unload's interval, whose count only the driver can
+//! keep, and a mid-plan `GpuLimit`, judged by the rows it emitted.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -67,10 +68,14 @@ pub(crate) struct Driver<'a, B: Backend> {
     results: Vec<CpuBatch>,
     trace: Vec<TraceEvent>,
     steps: usize,
-    /// Per limit-carrying node (an unload or a mid-plan limit), rows of its input stream seen
-    /// so far, summed over every lane; zero for every other node. Only the
-    /// driver can hold this: an unload instance is one lane's and the count is not.
+    /// Per unload carrying an interval, rows of its input stream seen so far, summed over
+    /// every lane; zero for every other node. Only the driver can hold this: an unload
+    /// instance is one lane's and the count is not.
     rows_seen: Vec<u64>,
+    /// Per mid-plan limit, rows it has emitted. Its executor keeps the only count of its
+    /// one-lane input and makes every cut; this is what those cuts let through, read off
+    /// its outputs rather than computed a second time (#234).
+    rows_emitted: Vec<u64>,
     rows_skipped: Vec<u64>,
     peak_queued: Vec<usize>,
     emitted: Vec<Vec<Vec<EmittedBatch>>>,
@@ -171,6 +176,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             trace: Vec::new(),
             steps: 0,
             rows_seen: vec![0; nodes],
+            rows_emitted: vec![0; nodes],
             rows_skipped: vec![0; nodes],
             peak_queued: vec![0; nodes],
             emitted,
@@ -284,13 +290,13 @@ impl<'a, B: Backend> Driver<'a, B> {
             // Every branch below is about the batch this call consumes, and the calls that
             // end a lane consume none: an interval decides nothing about them.
             let consuming = call.consumes().is_some();
-            let arriving = match (interval, consuming) {
+            let arriving = match (interval, unloading && consuming) {
                 (Some(_), true) => self.peek_rows(node, lane, call),
                 _ => 0,
             };
             // Only an unload's decision is made here, its range being an argument of the
-            // driver's own call. A mid-plan limit makes the same three-way choice inside
-            // its executor, so for that one the driver only counts.
+            // driver's own call. A mid-plan limit makes the same three-way choice inside its
+            // executor, and the driver reads what it emitted.
             let mut rows = RowRange::WHOLE;
             if let Some(interval) = interval.filter(|_| unloading && consuming) {
                 match interval.range_of(self.rows_seen[node], arriving) {
@@ -345,6 +351,11 @@ impl<'a, B: Backend> Driver<'a, B> {
                     let mut batches = batches.into_iter();
                     while let Some(batch) = batches.next() {
                         self.record_emitted(node, lane, &batch);
+                        // Device outputs carrying an interval are a mid-plan limit's: the
+                        // unload's are host batches.
+                        if interval.is_some() {
+                            self.rows_emitted[node] += batch.rows();
+                        }
                         // The lane held this call's whole output at once, so a refusal
                         // gives back the batches behind the refused one as well.
                         if let Err(refusal) = self.offer(node, lane, &batch) {
@@ -610,18 +621,26 @@ impl<'a, B: Backend> Driver<'a, B> {
         live == 0
     }
 
-    /// Enough rows have reached this node that no later one can change its answer. It is
-    /// marked done as it is held, or the hold would stop it reporting and strand its
+    /// Enough rows have passed this node that no later one can change its answer: an
+    /// unload's input has reached `skip + fetch`, or a mid-plan limit has emitted `fetch`.
+    /// It is marked done as it is held, or the hold would stop it reporting and strand its
     /// parent — `LIMIT 0` is the case that forces it.
     fn settle_limit(&mut self, node: usize) {
-        let Some(interval) = self.index.nodes[node].interval else {
+        let indexed = &self.index.nodes[node];
+        let Some(interval) = indexed.interval else {
             return;
         };
-        if !interval.satisfied_by(self.rows_seen[node]) {
+        let (category, lanes) = (indexed.category, indexed.lanes);
+        let satisfied = match category {
+            ExecutorCategory::Unload => interval.satisfied_by(self.rows_seen[node]),
+            // The other interval carrier is a mid-plan limit.
+            _ => interval.satisfied_by_emitted(self.rows_emitted[node]),
+        };
+        if !satisfied {
             return;
         }
         self.scheduler.satisfy(node);
-        self.states[node].out_done = vec![true; self.index.nodes[node].lanes];
+        self.states[node].out_done = vec![true; lanes];
     }
 
     // -- queues ------------------------------------------------------------------

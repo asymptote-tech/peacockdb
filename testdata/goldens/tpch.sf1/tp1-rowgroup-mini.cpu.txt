@@ -919,21 +919,25 @@ GpuUnload: output_rows=1, output_bytes=43
         GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_quantity@4, l_shipdate@10], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11],[12],[13],[14],[15],[16],[17],[18],[19],[20],[21],[22],[23],[24],[25],[26],[27],[28],[29],[30],[31],[32],[33],[34],[35],[36],[37],[38],[39],[40],[41],[42],[43],[44],[45],[46],[47],[48]]], lanes=1, batches=multiple, output_rows=6001215, output_bytes=170284476
           in_rows=[] batch_rows=[[122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,102975]] batch_bytes=[[3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,3486720,2921916]]
 == nested-limits
-early_exit=GpuUnload@6,GpuLimit@3
+early_exit=GpuUnload@8,GpuLimit@5,GpuLimit@4
 GpuUnload: skip=3, fetch=20, output_rows=20, output_bytes=163
   in_rows=[[23]] batch_rows=[[20]] batch_bytes=[[163]]
   GpuCrossJoin: lanes=1, batches=multiple, output_rows=115, output_bytes=935
     in_rows=[[5],[23]] batch_rows=[[23,23,23,23,23]] batch_bytes=[[187,187,187,187,187]] abandoned=[92]
     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=5, output_bytes=0
       in_rows=[[5]] batch_rows=[[5]] batch_bytes=[[0]]
-      GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], limit=23, lanes=1, batches=multiple, output_rows=5, output_bytes=0
-        in_rows=[] batch_rows=[[5]] batch_bytes=[[0]]
+      GpuLimit: skip=0, fetch=23, lanes=1, batches=multiple, output_rows=5, output_bytes=0
+        in_rows=[[5]] batch_rows=[[5]] batch_bytes=[[0]]
+        GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=5, output_bytes=0
+          in_rows=[] batch_rows=[[5]] batch_bytes=[[0]]
     GpuProject: exprs=[p_partkey@0 as k], lanes=1, batches=multiple, output_rows=23, output_bytes=187
       in_rows=[[23]] batch_rows=[[23]] batch_bytes=[[187]]
       GpuLimit: skip=5, fetch=23, lanes=1, batches=multiple, output_rows=23, output_bytes=187
-        in_rows=[[122880]] batch_rows=[[23]] batch_bytes=[[187]]
-        GpuLoadParquet: table=part, projections=[p_partkey@0], partition_groups=[[[0],[1]]], limit=28, lanes=1, batches=multiple, output_rows=122880, output_bytes=998400
-          in_rows=[] batch_rows=[[122880]] batch_bytes=[[998400]]
+        in_rows=[[28]] batch_rows=[[23]] batch_bytes=[[187]]
+        GpuLimit: skip=0, fetch=28, lanes=1, batches=multiple, output_rows=28, output_bytes=228
+          in_rows=[[122880]] batch_rows=[[28]] batch_bytes=[[228]]
+          GpuLoadParquet: table=part, projections=[p_partkey@0], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=122880, output_bytes=998400
+            in_rows=[] batch_rows=[[122880]] batch_bytes=[[998400]]
 == nested-loop-join
 early_exit=none
 GpuUnload: output_rows=50, output_bytes=9041
@@ -1007,7 +1011,11 @@ GpuUnload: output_rows=3, output_bytes=242
           GpuLoadParquet: table=lineitem, projections=[l_quantity@4, l_extendedprice@5, l_returnflag@8], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11],[12],[13],[14],[15],[16],[17],[18],[19],[20],[21],[22],[23],[24],[25],[26],[27],[28],[29],[30],[31],[32],[33],[34],[35],[36],[37],[38],[39],[40],[41],[42],[43],[44],[45],[46],[47],[48]]], lanes=1, batches=multiple, output_rows=6001215, output_bytes=224295607
             in_rows=[] batch_rows=[[122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,122880,102975]] batch_bytes=[[4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,4592644,3848695]]
 == scan-limit
-skipped: not enabled at this mode
+early_exit=GpuUnload@1
+GpuUnload: skip=0, fetch=10, output_rows=10, output_bytes=1828
+  in_rows=[[122880]] batch_rows=[[10]] batch_bytes=[[1828]]
+  GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_partkey@1, l_suppkey@2, l_linenumber@3, l_quantity@4, l_extendedprice@5, l_discount@6, l_tax@7, l_returnflag@8, l_linestatus@9, l_shipdate@10, l_commitdate@11, l_receiptdate@12, l_shipinstruct@13, l_shipmode@14, l_comment@15], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=122880, output_bytes=21474484
+    in_rows=[] batch_rows=[[122880]] batch_bytes=[[21474484]]
 == semi-join
 early_exit=none
 GpuUnload: output_rows=303959, output_bytes=39534056

@@ -128,13 +128,13 @@ tpch,1,hash_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled
 tpch,1,join_int,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,152 220
 tpch,1,left_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,152
 tpch,1,mixed_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,168
-tpch,1,nested_limits,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,limit_offset cross_join,186
+tpch,1,nested_limits,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,limit_offset cross_join,281
 tpch,1,nested_loop_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,nested_loop_join,183
 tpch,1,nested_loop_left_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,nested_loop_join outer_join,183 220
 tpch,1,rollup_over_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,rollup,152 189 220
 tpch,1,rollup_distinct,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,rollup count_distinct,65 189 262
 tpch,1,distinct_functions,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,count_distinct,225
-tpch,1,scan_limit,enabled,enabled,enabled,enabled,enabled,disabled,disabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,top_n,186
+tpch,1,scan_limit,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,top_n,281
 tpch,1,semi_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join,152 183 220
 tpch,1,shuffle_additive,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,ok,,183
 tpch,1,shuffle_additive_avg,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg,

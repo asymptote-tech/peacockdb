@@ -334,8 +334,9 @@ table CudfScan {
   projection: [uint32];
   /// Number of rows per batch.
   batch_size: uint32;
-  /// Maximum rows to read (0 = unlimited).
-  limit: uint64;
+  /// Never written: a scan's limit is a `GpuLimit` above it, or the unload's interval
+  /// (#186). The slot stays, so no later field moves.
+  limit: uint64 (deprecated);
   /// Surviving parquet row-group indices (single-source case), computed at
   /// serialize time by the SAME DataFusion PruningPredicate that prunes the CPU
   /// path (static predicate on a clustered column). Passed to cuDF read_parquet's

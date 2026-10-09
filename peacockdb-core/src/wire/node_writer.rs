@@ -90,7 +90,6 @@ pub(crate) fn scan<'a>(
         &fb::CudfScanArgs {
             file_paths: Some(paths),
             file_schema: Some(schema),
-            limit: node.limit.unwrap_or(0) as u64,
             ..Default::default()
         },
     );

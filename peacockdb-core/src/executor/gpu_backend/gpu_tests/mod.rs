@@ -143,7 +143,6 @@ fn mapped(partition_groups: Vec<Vec<Vec<u32>>>) -> Box<dyn GpuNode> {
         vec![0, 1],
         partition_groups,
         &scan,
-        None,
         Schema::new(Arc::new(columns())),
     ))
 }

@@ -287,7 +287,6 @@ fn a_scan_the_partitioner_gave_no_lanes_is_caught_at_plan_time() {
         vec![0],
         Vec::new(),
         &scan,
-        None,
         columns(&["n_nationkey"]),
     );
     invalid(
@@ -654,7 +653,6 @@ fn loading(partition_groups: Vec<Vec<Vec<u32>>>, survivors: Vec<u32>) -> GpuLoad
         vec![0],
         partition_groups,
         &scan,
-        None,
         columns(&["n_nationkey"]),
     )
 }

@@ -58,10 +58,6 @@ TableResult execute_scan(const fb::CudfScan* scan,
                   .columns(projected_names)
                   .build();
 
-  if (scan->limit() > 0) {
-    opts.set_num_rows(static_cast<cudf::size_type>(scan->limit()));
-  }
-
   // Row-group pruning: decode ONLY the groups the serializer computed (the same
   // DataFusion PruningPredicate the CPU path prunes with) unless this call overrides
   // them — with the RG→partition map, or one batch of the loader.

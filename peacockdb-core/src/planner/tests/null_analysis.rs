@@ -47,7 +47,6 @@ fn source(nullable: &[bool]) -> Box<dyn GpuNode> {
         (0..nullable.len() as u32).collect(),
         vec![vec![vec![0]]],
         &scan,
-        None,
         schema,
     ))
 }

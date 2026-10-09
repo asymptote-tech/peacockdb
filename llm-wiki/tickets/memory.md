@@ -99,12 +99,12 @@ content. Every other device batch is priced through `produced()` (`gpu_backend/m
 ABI's `varlen_content_bytes`, but `peacock_executor_slice_handle` reports no stats. So a
 budgeted run can pass a boundary it should trip on, and `peak_bytes` in a golden is low. Holds
 and releases still reconcile, because `Held::of` reads the figure once, which is why nothing
-notices. Found by `reports/hacks-audit.md` (production bug 1). #186's fix caps the scan inside
-`scan.cpp` and leaves this path alone.
+notices. Found by `reports/hacks-audit.md` (production bug 1). Every limit DataFusion pushes into
+a scan below the root reaches it too, as a `GpuLimit` over the scan (#186).
 
-**Corpus queries:** none. The one mid-plan limit, `tpch/nested-limits`, slices `part(p_partkey)`,
-an Int64. Any `LIMIT` subquery over a string column reaches it, e.g. `select count(p_name) from
-(select p_name from part limit 10);` (tpch), unconfirmed.
+**Corpus queries:** `tpch/nested-limits` slices `part(p_partkey)`, an Int64, at both of its
+part-side limits. Any `LIMIT` subquery over a string column reaches it, e.g. `select
+count(p_name) from (select p_name from part limit 10);` (tpch), unconfirmed.
 
 **Fix proposed:** measure the slice the way every other batch is measured: `slice_handle`
 reports `NodeStats` as `execute_node` does, and the slice is priced through `produced()`. That

@@ -62,16 +62,24 @@ pub(crate) const SEED: u64 = 17;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Empties {
     Never,
-    /// Percent of calls, decided from the seed and the source's address rather than from
-    /// a shared generator — two runs of one setting make the same calls.
+    /// The first call of every source, then this percent of the rest, decided from the seed
+    /// and the source's address rather than from a shared generator — two runs of one
+    /// setting make the same calls.
     Sometimes(u32),
 }
 
 impl Empties {
+    /// Every source's first call, and then `percent` of the rest. The first call is
+    /// unconditional because the stamp is a function of the node's post-order: a plan whose
+    /// sources make two calls apiece is four coin flips, and a seed under which none lands
+    /// leaves the run claiming a dimension it did not carry. Any inserted node shifts those
+    /// post-orders, so leaving it to the seed makes the caller's count a shape test.
     fn fires(self, stamp: u64, call: u32) -> bool {
         match self {
             Self::Never => false,
-            Self::Sometimes(percent) => mix(stamp, u64::from(call)) % 100 < u64::from(percent),
+            Self::Sometimes(percent) => {
+                call == 0 || mix(stamp, u64::from(call)) % 100 < u64::from(percent)
+            }
         }
     }
 }
@@ -550,7 +558,7 @@ pub(crate) fn rebatch_at(root: &dyn GpuNode, child: usize) -> Box<dyn GpuNode> {
 pub(crate) fn merge_over_sorted() -> Box<dyn GpuNode> {
     Box::new(GpuUnload::new(
         Box::new(GpuMergeSortedPartitions::new(
-            sorted(source(None), key(0)),
+            sorted(source(), key(0)),
             vec![key(0)],
             None,
         )),
@@ -572,7 +580,6 @@ fn drained(load: &GpuLoadParquet, schema: Schema) -> Box<dyn GpuNode> {
         load.projection.clone(),
         groups,
         &scan_of(load),
-        load.limit,
         schema,
     ))
 }
@@ -784,7 +791,7 @@ fn requirements(modes: &[PlannedMode], dimensions: &Dimensions) -> Vec<(String, 
 /// `executors_for` rather than built by hand, so what it measures is the executor the
 /// driver would have been handed.
 pub(crate) fn emitter_over_four_lanes(keys: &[i64], hash: Hash) -> Vec<CpuBatch> {
-    let node = GpuEmitPartitions::new(source(None), vec![0], 4);
+    let node = GpuEmitPartitions::new(source(), vec![0], 4);
     let ctx = InjectedContext::new(
         SessionContext::new().task_ctx(),
         Injection {

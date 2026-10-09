@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 2382 test cases — Rust 1907, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 2393 test cases — Rust 1918, C++ 94, Python 381.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,11 +22,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1229 cases: `--lib` 630, `test_cpu_corpus` 567, `test_corpus_goldens` 29, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1240 cases: `--lib` 639, `test_cpu_corpus` 569, `test_corpus_goldens` 29, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 566 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 568 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its two oracles and
@@ -44,10 +44,9 @@ each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disa
 [#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
 `tpcds/q80`, `tpcds/q18`, `tpcds/q22`, `tpcds/q5`, `tpch/rollup-over-join` and
 `tpch/rollup-distinct` three by
-[#189](tickets/corpus-coverage.md#t189), `tpch/scan-limit` two by
-[#186](tickets/corpus-coverage.md#t186), and four queries are out entirely: `tpch/q11`,
+[#189](tickets/corpus-coverage.md#t189), and four queries are out entirely: `tpch/q11`,
 `tpch/q22` and `tpcds/q24` on
-[#190](tickets/joins.md#t190), and `tpcds/q54`. 563 cells, plus three checks
+[#190](tickets/joins.md#t190), and `tpcds/q54`. 565 cells, plus three checks
 that every declaration's two oracles suit each other and every device cell has a cpu cell
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -81,12 +80,12 @@ mode mask on the last argument and a trailing comment with a parenthesis in it
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 34 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 36 |
 |---|---|--:|
 
 SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and fifteen cases no query list can
+to zero and holds equal releases at the end of every run — and seventeen cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
@@ -95,13 +94,15 @@ keeping the shapes only one query has, and a degenerate hash under a Right outer
 RightAnti answering like the oracle from the empty build lanes it leaves
 ([#175](archive/archived-tickets.md#t175)), and the schema validator as the driver's output
 hook — `tpch/q6` at every mode passing under it, and an index over the same tree with one
-project's field retyped refused naming the field; and five on the DISTINCT lowering — a
+project's field retyped refused naming the field; a scan's limit answering its count from one
+row group at every mode, and a limited subquery under an aggregate; and five on the DISTINCT
+lowering — a
 `count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
 companions, a DISTINCT argument holding NULLs, an empty keyless input answering `0, 0`, and
 `tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`,
-since DataFusion is no oracle for it. Two of the 34 are `#[ignore]`d against
+since DataFusion is no oracle for it. Two of the 36 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 32 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 34 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -252,14 +253,15 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 109 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 113 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
 queue bounds, batch release, the trace, the output hook (called once per batch a node queues
 as its own and not at a forwarder, a refusal failing the run at that node and lane with the
 hook's words, and `None` leaving the report as `run` makes it): the schedule and the two holds, both limit lowerings by
-the calls not made, what each node emitted and consumed (the two records the corpus goldens
+the calls not made and a mid-plan limit judged by the rows it emitted, never its input, what
+each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
 script, the empty build lane a join owes rows for reaching `SetBuild` while every other empty
@@ -293,7 +295,7 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 37 |
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 40 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
