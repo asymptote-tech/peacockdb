@@ -65,7 +65,7 @@ enum class NodeTiming : int {
 /// Opt-in because `Events`, though cheap, still allocates an event pair per region and
 /// holds it until collection.
 ///
-/// Neither mode removes every sync: `varlen_content_bytes` reads two offsets back, so
+/// Neither mode removes every sync: `varlen_content_bytes` reads an offset back, so
 /// a node with STRING outputs synchronizes regardless.
 void set_node_timing(NodeTiming mode);
 

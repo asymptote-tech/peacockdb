@@ -124,8 +124,10 @@ a fresh table; that is #154 and untouched.
 - `strings_column_view::chars_size` reports the **unsliced parent's** bytes
   (`strings_column_view.hpp`: "does not reflect a sliced parent column view"). `offsets()` returns
   the whole child and `offset()` indexes into it, so a slice's own bytes are
-  `at(offset + size) - at(offset)` through `cudf::get_element`. Two reads back instead of one, so
-  a node with STRING outputs still synchronizes; `plan_executor.h`'s comment says so.
+  `at(offset + size) - at(offset)`, read by two 4-byte `cudaMemcpyAsync` and one sync — not
+  `cudf::get_element`, which allocates a device scalar and launches a kernel and cost 4.3x. An
+  unsliced view short-circuits to `chars_size`, so only a scatter partition pays the second read.
+  Either way a node with STRING outputs synchronizes; `plan_executor.h`'s comment says so.
 - `cudf::column`'s constructor from a `column_view` "accounts for the `column_view`'s offset", so
   the old per-partition copies were compacted — N copies summed to one input, not N.
 - `cpp/build` in this worktree is an empty root-owned directory and cmake dies at configure
@@ -198,3 +200,41 @@ the six string-keyed tp4 cells run again on their own (q1 x3, shuffle-additive-a
 `test_node_timing` 1/0, `peacockdb_core_gpu_lib gpu_tests::` 580/0,
 `peacock_gpu_benchmarks --skip bench_` 8/0. No golden moved: the host's goldens hash
 `7a8b50b8…` after the corpus run, identical to the tree's.
+
+## Round 3 (2026-10-09) — review round 2: 0 blocking, 0 important, 3 nits
+
+**Nit 1, the dropped copy returns** (`node_session.cpp:237-247`). Both `cudaMemcpyAsync` returns
+now fold into the one check that already guarded the sync. The failure mode the reviewer named is
+real and silent: a synchronous `cudaErrorInvalidValue` never enqueues and is not sticky, so the
+following `cudaStreamSynchronize` returns success and `edges` stays `{0, 0}` — zero content bytes
+reported as an answer. One `cudaError_t` threaded through three calls, one throw site, and the
+comment says why rather than what.
+
+**Nit 2, the stale sentence** (`plan_executor.h:68`): "reads two offsets back" became "reads an
+offset back". The common unsliced path reads one since the short-circuit landed; two is the
+scatter-partition path only, and the claim the sentence exists to make — a STRING output
+synchronizes regardless — is unchanged. `build-test.md` and the "Traps worth keeping" section
+above are the coordinator's corrections and were left alone.
+
+**Nit 3, the three untested refusals, each watched fail.** `select`'s out-of-range ordinal,
+`select`'s empty ordinals and `with`'s row-count mismatch now have a case, appended inside the
+existing `TableResult.*` bodies beside the call each guards, so the count stays at 68
+(`--gtest_list_tests` confirms) and `build-test.md` does not move. Red-green run rather than
+assumed, since an untested guard is what the nit was about:
+
+| guard | how it was watched fail |
+|---|---|
+| `with`: a column of 1 row beside 4 | guard deleted → `SlicesAndSelectionsShareTheirColumnsOwners` red, "Expected: `t.with(int64_column({9}), "d")` throws" |
+| `select`: no ordinals | guard deleted → `ATableOfNoColumnsIsRefused` red, "Expected: `t.select({})` throws" |
+| `select`: ordinal out of range | proved by its own message — `TableResult::select: ordinal 7 of 1 columns`. Deleting this one is an out-of-bounds `std::vector` read rather than a clean red, so the guard's own text is the proof its line ran; no other code on that path throws `std::runtime_error`. |
+
+Both deletions restored and re-proved green. `exit-copies` and `join-session-cpp` are written
+against these three constructors, which is why the guards are worth a case at all.
+
+**Re-proved, exact tree.** md5 local = remote: `table_result.cpp` `e19ffa7f…`,
+`node_session.cpp` `276984c1…`, `plan_executor.h` `ccd7f5cf…`,
+`test_plan_executor.cpp` `90333542…`. Build 0 warnings. `peacock_plan_tests` **68/68**
+(`--gtest_list_tests` 68), `TableResult.*:VarlenBytes.*` 4/4, `peacock_gpu_tests` 2/2, and the six
+string-keyed tp4 cells 3+3 passed. The scatter's memory figures printed byte-identical to rounds 1
+and 2 (fixed 4,962,592 / 5,455,456; string 9,621,376 / 10,624,352), so neither nit moved a number.
+No golden moved.

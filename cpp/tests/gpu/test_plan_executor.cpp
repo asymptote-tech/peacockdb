@@ -2313,11 +2313,14 @@ TEST(TableResult, SlicesAndSelectionsShareTheirColumnsOwners) {
   auto twice = t.select({1, 1});
   EXPECT_EQ(twice.owners[0], twice.owners[1]) << "a column selected twice is one owner";
   EXPECT_EQ(twice.column_names, (std::vector<std::string>{"b", "b"}));
+  EXPECT_THROW(t.select({2}), std::runtime_error) << "an ordinal the table has not got";
 
   auto plus = t.with(int64_column({9, 9, 9, 9}), "c");
   EXPECT_EQ(plus.num_columns(), 3);
   EXPECT_EQ(plus.owners[0], t.owners[0]);
   EXPECT_EQ(plus.column_names.back(), "c");
+  EXPECT_THROW(t.with(int64_column({9}), "d"), std::runtime_error)
+      << "a column of one row beside four";
 }
 
 TEST(TableResult, ATableOfNoColumnsIsRefused) {
@@ -2325,6 +2328,10 @@ TEST(TableResult, ATableOfNoColumnsIsRefused) {
   // carries an explicit placeholder column; constructing one is a planner defect.
   EXPECT_THROW(peacock::TableResult::owning(std::make_unique<cudf::table>(), {}),
                std::runtime_error);
+  std::vector<std::unique_ptr<cudf::column>> cols;
+  cols.push_back(int64_column({1}));
+  auto t = peacock::TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), {"a"});
+  EXPECT_THROW(t.select({}), std::runtime_error) << "selecting no ordinals is the same table";
 }
 
 TEST(TableResult, NamesMustMatchColumns) {

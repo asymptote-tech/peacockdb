@@ -234,9 +234,15 @@ static int64_t offset_span(const cudf::column_view& offsets, cudf::size_type fir
                            cudf::size_type last, rmm::cuda_stream_view stream) {
   T edges[2] = {0, 0};
   const T* data = offsets.data<T>();
-  cudaMemcpyAsync(&edges[0], data + first, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
-  cudaMemcpyAsync(&edges[1], data + last, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
-  if (auto err = cudaStreamSynchronize(stream.value()); err != cudaSuccess)
+  // A copy that fails synchronously never enqueues and leaves nothing sticky, so the sync
+  // would report success and the span would read 0 bytes as an answer.
+  auto err =
+      cudaMemcpyAsync(&edges[0], data + first, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  if (err == cudaSuccess)
+    err =
+        cudaMemcpyAsync(&edges[1], data + last, sizeof(T), cudaMemcpyDeviceToHost, stream.value());
+  if (err == cudaSuccess) err = cudaStreamSynchronize(stream.value());
+  if (err != cudaSuccess)
     throw std::runtime_error(std::string("varlen_content_bytes: reading string offsets: ") +
                              cudaGetErrorString(err));
   return static_cast<int64_t>(edges[1]) - static_cast<int64_t>(edges[0]);
