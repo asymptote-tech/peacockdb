@@ -59,8 +59,8 @@ reference is an ordinal into a child whose column order the engine decides. Ordi
 every node the layer inserts, so a per-branch cast project or an inserted merge shifts every
 reference above it.
 
-An aggregate's phases read different tables: the init sees input columns, the merge sees state
-columns. An argument expression is valid against the input only, so it runs once, in the init,
+An aggregate's phases read different tables, and *The aggregate sequence* below says which.
+An argument expression is valid against the input only, so it runs once, in the init,
 and a merge reads state columns by reference. #55 and #56 were the old executor breaking this
 rule: its final phase evaluated the argument again, over state, and the C++ found out at run time.
 
@@ -409,10 +409,12 @@ that its input and its expressions do not account for is a defect whichever side
 invented it, and the plan golden prints the declared schema per node, so it is one a reader can
 see.
 
-Six coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
+Eight coercions are plan nodes rather than something an executor infers: `avg`'s decimal count
 and its finalize divide, the stddev/var operands, union branch types, a decimal divide's
-numerator, and `round`'s operand. Each is a `CastExprNode` the planner
-emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
+numerator, `round`'s operand, and two the DISTINCT lowering adds — the outer finalize's cast of a
+`sum`, `min` or `max` back from the state its own init widened, and the project above the outer
+stage that casts a narrowed `__grouping_id` to DataFusion's width. Each is a `CastExprNode` the
+planner emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
 Four stay in C++ with a reason. The loader's decimal width is the source honouring the output
