@@ -12,6 +12,7 @@ These issues should be fixed on a pre-prod performance path.
 - [#232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader](#t232)
 - [#242 — the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
 - [#248 — three join shapes run on one lane or skewed after the rewrite](#t248)
+- [#286 — an OFFSET that reaches a scan still reads every row group it skips](#t286)
 
 <a id="t150"></a>
 ### #150 — store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
@@ -181,3 +182,20 @@ The chain-J join rewrite answers all three correctly; each costs parallelism.
 **Corpus queries:** pbench's collapse readings (`tasks/pbench.md`) and `dim FULL JOIN fact ON d_k = f_k`
 at tp4.
 
+<a id="t286"></a>
+### #286 — an OFFSET that reaches a scan still reads every row group it skips
+After chain K's limits task, DataFusion pushes `skip + fetch` into a scan and keeps the skip in
+its limit above. `source()` (`planner/translator/nodes.rs`) trims the scan's row groups to the
+shortest prefix whose metadata row counts reach `skip + fetch`, and the `GpuLimit` above (or the
+unload's interval) drops the first `skip` rows after they are read. Only the tail is trimmed, so
+every row group that lies wholly inside the skip is read, decoded and thrown away.
+`SELECT * FROM lineitem OFFSET 5000000 LIMIT 10` at sf1 reads about 41 of lineitem's 49 row groups
+to answer ten rows.
+
+**Corpus queries:** none; `tpch/scan-limit` has no offset.
+
+**Fix proposed:** in `source()`, read the skip from the limit directly above the scan. Drop the
+leading row groups whose cumulative row count is at most the skip, and lower the limit's skip
+by the rows they held. This holds only where the trim already holds: one lane, row groups in
+index order, and metadata row counts that are the rows the scan emits. Test: the example above
+reads one row group and answers the same ten rows as today.
