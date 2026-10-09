@@ -910,9 +910,11 @@ passes. Then this ticket is archived. Chain L's grouping-id takes the rollup hal
 ### #281 — empty-sorts' device cells have never run
 
 empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
-are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases have
-run on no device, and `tpcds/q17`'s device cell with them. A device answer could differ from the
-cpu's, and nothing would say so.
+are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases, a
+fourth case it adds, and `tpcds/q17`'s device cell have run on no device. The fourth is
+`one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`, the first assertion
+anywhere about `gpu_backend/accumulate.rs`'s `held.is_empty()` arm over a mixed lane script. A
+device answer could differ from the cpu's, and nothing would say so.
 
 limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
 `set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled

@@ -307,3 +307,70 @@ outstanding and the chain is at its end:
 - **The documented Python-model divergence is accurate**, and rule 1 moved the engine *toward* the
   model rather than away: `operators/accumulators.py` already emits one empty batch
   unconditionally.
+
+### 2026-10-09 — completeness pass: 0 blocking, 4 important, all of them prose
+
+The reviewer found **nothing** blocking or important — the first clean code reading in this chain
+— and the analyst found four, every one a sentence the branch falsified or left unwritten. Applied
+in the commit that carries this section.
+
+**Analyst's four.**
+
+1. The branch narrowed *Zero-row batches change no answer*'s last known-break bullet from plural
+   to singular when it struck #205, which made it assert the limit is the only producer that drops
+   a zero-row batch. [#208](../tickets/joins.md#t208) is the same shape and still open — the cpu's
+   cross join over a zero-row build side — and with #205 gone it is the **last surviving
+   asymmetric** one, #214 being symmetric and saying so. Restored to the plural, naming #208 and
+   which of the two is asymmetric.
+2. Rule 2 is an engine-wide invariant and the only place `architecture.md` recorded it was a
+   parenthetical inside the Python-model sentence of *The scheduling rule*. The section a reader
+   actually goes to says nothing, because its requirement is about a *node's* output rows and the
+   driver's answer is no node's output — so that reader would still conclude q17 at tp4-sized
+   answers no batch. One sentence added after the requirement paragraph.
+3. #281 undercounted what this chain built and never ran: the branch adds a **fourth** accumulate
+   case, `one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`, which is not a
+   converted pin but the first assertion anywhere about the device's `held.is_empty()` arm over a
+   mixed lane script. That fact lived only in this file, which the helper deletes at archive time,
+   and the frozen spec names only the three pins. #281 now records it.
+4. `RunReport::batches`' doc carried the never-empty half of its guarantee and not the half the
+   branch's own driver tests had to assert: that the batch is in no other field, so `batches.len()`
+   no longer relates to the unload's calls or to `Σ emitted[ROOT]`.
+
+The analyst also noted that the Python model differs from the engine in a second place at the
+empty case — its accumulators emit one empty batch even over no arrival, where the engine keeps a
+lane that received nothing answering nothing, which is the half of rule 1 the branch deliberately
+kept. Folded into the same sentence.
+
+#### One latent defect, deliberately not filed
+
+The reviewer found it and reached the same conclusion, which is why it is here rather than in
+`tickets/`. `seed()` iterates `refresh(node)` then `settle_limit(node)` in pre-order, so a parent
+is refreshed before its children are satisfied and nothing recomputes its readiness afterwards.
+For `unload(coalesce_all(limit(…, skip, Some(0))))` the limit is satisfied at seed, every ancestor
+keeps the stale `false` it was given, `scheduler.next()` returns `None` on the first step, and the
+accumulator above never receives `mark_done` — so it never emits the batch its `SingleBatch`
+output owes. Under a global aggregate that would be a wrong answer, and rule 2 would dress it as a
+well-formed empty answer with a header.
+
+**Not reachable from SQL**, which is why it is not a ticket: DataFusion 45's `EliminateLimit`
+folds `fetch == 0` to an empty relation, and `satisfied_by`/`satisfied_by_emitted` can only be
+true at seed when `fetch == 0`, so no plan reaches a mid-plan `GpuLimit` with `fetch: Some(0)`.
+Mid-run satisfaction is fine — `step` does `settle_limit`, then `refresh(node)`, then
+`refresh(parent)`, which is the ordering `seed` lacks. Worth knowing because the existing pin
+`a_mid_plan_limit_of_no_rows_is_satisfied_before_any_pull_whatever_its_skip` puts a *filter* above
+the limit, which owes nothing, so it does not cover the accumulator shape: a future change that
+lets a zero-fetch limit reach a plan would need that case first.
+
+#### Verified independently by the reviewer, so nobody re-derives it
+
+- q17's new result section is **byte-identical** to `duckdb-result.txt`'s q17 section once the
+  `mode=` line is dropped, so #235's empty-answer divergence is closed in fact.
+- 565 cost sections each side, identical section sets, exactly 2 changed (+24 each on q17),
+  nothing moved downward. 172 golden files, `== ` section counts identical in every one.
+- Rule 2's schema source matches the device's: `GpuExport::new` takes `input(0)`, the same
+  `root.children()[0].kind().schema().fields` that `answer()` reads.
+- Rule 1's granularity matches the device's: `gpu_backend/accumulate.rs` flattens `per_lane` and
+  branches on `held.is_empty()` too, so one zero-row lane plus one silent lane makes the merge call
+  on a device as it now does on the cpu. A `fetch` is moot there — `first_rows` over a zero-row
+  batch is the identity — and the sort-order claim holds vacuously, `SortOrder` being a plan-level
+  declaration that a zero-row batch satisfies.

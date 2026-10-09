@@ -97,3 +97,17 @@ original rule, kept for the record.
 Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
 job but the GPU tests is green; the GPU jobs are not waited on. The device cases are built, not
 run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints. Both rules landed as written, every line of the Tests list exists
+with the case the spec names — including the unpruned predicate — and q17's new result section is
+byte-identical to the DuckDB oracle's, so #235's empty-answer divergence is closed in fact and not
+only on paper. Two readings: the reviewer found nothing blocking or important, the analyst four
+things, all of them prose the branch falsified or left unwritten, now applied. Shortcuts and
+deviations, three: the device half — the three converted pins and one new mixed-merge case — is
+built and not run under the chain's no-GPU rule, held by #281; those four cases assert only
+cpu-device agreement, so none of them alone can tell "one zero-row batch on both" from "nothing on
+both", which the cpu-side pins and a real run cover instead; and two review nits were traded
+rather than fixed — `count_of`'s now-unreachable `expect`, and an end-to-end case that runs its
+query twice at five modes because the harness hands no report back.
