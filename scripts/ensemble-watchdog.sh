@@ -2,8 +2,12 @@
 # Restarts the chain coordinator until it reports that nothing can progress.
 #
 # The coordinator exits when its window gets tight, which is normal and not a failure — the
-# board is the state, so a fresh one resumes. Two things stop the loop: the coordinator saying
-# it is stalled, and a run of restarts that advances no task.
+# board is the state, so a fresh one resumes. Three things stop the loop: `stop` in the control
+# file, the coordinator saying it is stalled, and a run of restarts that advances no task.
+#
+# `stop` is checked here, before every run, because a coordinator that obeys it exits like one
+# whose window got tight, and nothing else tells the two apart. The coordinator leaves the word
+# in the file for this check; the watchdog clears it on the way out, so the next start runs.
 #
 # A run is never timed out from here. Tasks are long, a build can run for hours, and a
 # watchdog that cannot tell a slow task from a stuck one would kill the slow ones. Bounding a
@@ -49,6 +53,10 @@ done
 [ -n "$chain" ] || die "no chain named"
 
 status=".claude/ensemble/${chain}.status"
+control=".claude/ensemble/${chain}.control"
+
+# Whether the human has asked the chain to stop: the word on a line of its own.
+stop_asked() { grep -qx '[[:space:]]*stop[[:space:]]*' "$control" 2>/dev/null; }
 board="llm-wiki/tasks/tasks.md"
 
 # How long to wait after each consecutive fast failure; --limit-seconds says how fast one has
@@ -106,6 +114,11 @@ else
 fi
 
 while :; do
+  if stop_asked; then
+    : > "$control"
+    printf 'watchdog: stop in %s; not restarting chain %s\n' "$control" "$chain"
+    exit 0
+  fi
   before=$(board_state)
   started=$SECONDS
   if [ -n "$interactive" ]; then

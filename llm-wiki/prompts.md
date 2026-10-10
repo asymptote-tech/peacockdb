@@ -130,7 +130,9 @@ state, and a watchdog restarts you.
   `rebase needed(...)` is written on master where you cannot see it. One word per line:
   `pause` — write the board and wait, re-reading the file; `rebase` — run the rebase protocol,
   the whole chain and every branch in it, now rather than at the next boundary; `stop` — write
-  the board and exit cleanly. Clear the file once you have acted on it. A dispatched subagent
+  the board and exit cleanly, leaving `stop` in the file: you exit the same way when your
+  window gets tight, so the watchdog reads the word to know not to restart you, and clears it.
+  Clear any other word once you have acted on it. A dispatched subagent
   cannot be interrupted, so one subagent is the floor on how fast you can answer.
 - **You cannot arm a wake, so waiting means staying in the dispatch.** Under `claude -p` a
   backgrounded command does not outlive the run — a `sleep` armed to wake you dies with the
@@ -492,7 +494,10 @@ does not carry the index in their head, and a number alone sends them to look it
   workspace is free again the moment its chain is merged and its files are cleared.
 - **Reaching a running coordinator**: write one word to
   `.claude/ensemble/<chain>.control` — `pause`, `rebase` or `stop`. It is read after every
-  subagent returns, so the answer is one subagent away at worst. Or run the watchdog with
+  subagent returns, so the answer is one subagent away at worst. `stop` ends the watchdog too:
+  it checks the file before every restart and exits, clearing it. A watchdog started from a
+  checkout older than that check restarts a stopped coordinator; end its loop by hand. Or run
+  the watchdog with
   `--interactive` and talk to the coordinator directly; unattended is the default.
 - Unlike the coordinator and reviewer you may build and run project code, and you may
   mutate git state on master. An interactive session has no developer to delegate to, and a
