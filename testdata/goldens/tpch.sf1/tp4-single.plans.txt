@@ -49,9 +49,9 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=2700000, certain=0
-GpuUnload: estimated_max_resident_size=337500
-  GpuHashJoin: estimated_max_resident_size=124834932
+budget=2147483648, accumulators=5100000, certain=0
+GpuUnload: estimated_max_resident_size=937500
+  GpuHashJoin: estimated_max_resident_size=127234932
     GpuCoalesceAllBatches: estimated_max_resident_size=1350000
       GpuEmitPartitions: estimated_max_resident_size=2059524
         GpuMergePartitions: estimated_max_resident_size=514881
@@ -127,13 +127,13 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               GpuMergePartitions: none
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=594104490, certain=39000000
+budget=2147483648, accumulators=618104490, certain=39000000
 GpuUnload: estimated_max_resident_size=258052245
   GpuAggregateBatches: estimated_max_resident_size=258052245
     GpuMergePartitions: estimated_max_resident_size=64513060
       GpuAggregateBatches: estimated_max_resident_size=258052245
-        GpuAggregate: estimated_max_resident_size=49323528
-          GpuHashJoin: estimated_max_resident_size=94263820
+        GpuAggregate: estimated_max_resident_size=79676468
+          GpuHashJoin: estimated_max_resident_size=118263820
             GpuCoalesceAllBatches: estimated_max_resident_size=39000000
               GpuEmitPartitions: estimated_max_resident_size=25222112
                 GpuMergePartitions: estimated_max_resident_size=6305528
@@ -176,7 +176,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
                     GpuMergePartitions: none
                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=67200000, certain=2100000
+budget=2147483648, accumulators=69600000, certain=2100000
 GpuUnload: estimated_max_resident_size=5250000
   GpuProject: estimated_max_resident_size=21000000
     GpuAggregateBatches: estimated_max_resident_size=21000000
@@ -184,8 +184,8 @@ GpuUnload: estimated_max_resident_size=5250000
         GpuCoalesceAllBatches: estimated_max_resident_size=21000000
           GpuMergePartitions: estimated_max_resident_size=5250000
             GpuAggregateBatches: estimated_max_resident_size=21000000
-              GpuAggregate: estimated_max_resident_size=5880000
-                GpuHashJoin: estimated_max_resident_size=14711056
+              GpuAggregate: estimated_max_resident_size=12600000
+                GpuHashJoin: estimated_max_resident_size=17111056
                   GpuCoalesceAllBatches: estimated_max_resident_size=2100000
                     GpuEmitPartitions: estimated_max_resident_size=4241992
                       GpuMergePartitions: estimated_max_resident_size=1060498
@@ -222,13 +222,13 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               GpuMergePartitions: none
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=648115425, certain=39000000
+budget=2147483648, accumulators=619604490, certain=39000000
 GpuUnload: estimated_max_resident_size=258052245
   GpuAggregateBatches: estimated_max_resident_size=258052245
     GpuMergePartitions: estimated_max_resident_size=64513060
       GpuAggregateBatches: estimated_max_resident_size=258052245
-        GpuAggregate: estimated_max_resident_size=117631472
-          GpuHashJoin: estimated_max_resident_size=148274755
+        GpuAggregate: estimated_max_resident_size=81573528
+          GpuHashJoin: estimated_max_resident_size=119763820
             GpuCoalesceAllBatches: estimated_max_resident_size=39000000
               GpuEmitPartitions: estimated_max_resident_size=25222112
                 GpuMergePartitions: estimated_max_resident_size=6305528
@@ -253,13 +253,13 @@ GpuUnload
 --- recipes ---
 not runnable: unsupported: unsupported scalar value: IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 90, nanoseconds: 0 }") (#168) at #5
 --- memory ---
-budget=2147483648, accumulators=609104490, certain=46500000
+budget=2147483648, accumulators=633104490, certain=46500000
 GpuUnload: estimated_max_resident_size=258052245
   GpuAggregateBatches: estimated_max_resident_size=258052245
     GpuMergePartitions: estimated_max_resident_size=64513060
       GpuAggregateBatches: estimated_max_resident_size=258052245
-        GpuAggregate: estimated_max_resident_size=58808820
-          GpuHashJoin: estimated_max_resident_size=101785864
+        GpuAggregate: estimated_max_resident_size=89161764
+          GpuHashJoin: estimated_max_resident_size=125785864
             GpuCoalesceAllBatches: estimated_max_resident_size=46500000
               GpuEmitPartitions: estimated_max_resident_size=25240620
                 GpuMergePartitions: estimated_max_resident_size=6310155
@@ -461,7 +461,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   GpuFilter: calling_lanes=4, per batch: execute_node(#13 CudfFilter, batch)
                                     GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#12 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=1124244700, certain=10050350
+budget=2147483648, accumulators=1129045100, certain=10050350
 GpuUnload: estimated_max_resident_size=270336000
   GpuMergeSortedPartitions: estimated_max_resident_size=270336000
     GpuSort: estimated_max_resident_size=270336000
@@ -471,20 +471,20 @@ GpuUnload: estimated_max_resident_size=270336000
             GpuCoalesceAllBatches: estimated_max_resident_size=270336000
               GpuMergePartitions: estimated_max_resident_size=67584000
                 GpuAggregateBatches: estimated_max_resident_size=270336000
-                  GpuAggregate: estimated_max_resident_size=288
-                    GpuProject: estimated_max_resident_size=348
-                      GpuHashJoin: estimated_max_resident_size=11400350
+                  GpuAggregate: estimated_max_resident_size=624
+                    GpuProject: estimated_max_resident_size=748
+                      GpuHashJoin: estimated_max_resident_size=13800750
                         GpuCoalesceAllBatches: estimated_max_resident_size=350
                           GpuEmitPartitions: estimated_max_resident_size=1708
                             GpuMergePartitions: estimated_max_resident_size=427
                               GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                        GpuEmitPartitions: estimated_max_resident_size=11400000
-                          GpuMergePartitions: estimated_max_resident_size=2850000
-                            GpuHashJoin: estimated_max_resident_size=59019776
+                        GpuEmitPartitions: estimated_max_resident_size=13800000
+                          GpuMergePartitions: estimated_max_resident_size=3450000
+                            GpuHashJoin: estimated_max_resident_size=61419776
                               GpuCoalesceAllBatches: estimated_max_resident_size=11400000
-                                GpuEmitPartitions: estimated_max_resident_size=10050000
-                                  GpuMergePartitions: estimated_max_resident_size=2512500
-                                    GpuHashJoin: estimated_max_resident_size=16209360
+                                GpuEmitPartitions: estimated_max_resident_size=12450000
+                                  GpuMergePartitions: estimated_max_resident_size=3112500
+                                    GpuHashJoin: estimated_max_resident_size=18609360
                                       GpuCoalesceAllBatches: estimated_max_resident_size=10050000
                                         GpuEmitPartitions: estimated_max_resident_size=80214764
                                           GpuMergePartitions: estimated_max_resident_size=20053691
@@ -602,7 +602,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     GpuMergePartitions: none
                                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=124560500, certain=280000
+budget=2147483648, accumulators=124881300, certain=280000
 GpuUnload: estimated_max_resident_size=20800000
   GpuMergeSortedPartitions: estimated_max_resident_size=20800000
     GpuSort: estimated_max_resident_size=13600000
@@ -612,17 +612,17 @@ GpuUnload: estimated_max_resident_size=20800000
             GpuAggregateBatches: estimated_max_resident_size=13600000
               GpuMergePartitions: estimated_max_resident_size=3400000
                 GpuAggregateBatches: estimated_max_resident_size=13600000
-                  GpuAggregate: estimated_max_resident_size=80
-                    GpuHashJoin: estimated_max_resident_size=140125
+                  GpuAggregate: estimated_max_resident_size=340
+                    GpuHashJoin: estimated_max_resident_size=300525
                       GpuCoalesceAllBatches: estimated_max_resident_size=125
                         GpuEmitPartitions: estimated_max_resident_size=608
                           GpuMergePartitions: estimated_max_resident_size=152
                             GpuFilter: estimated_max_resident_size=608
                               GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                      GpuEmitPartitions: estimated_max_resident_size=140000
-                        GpuMergePartitions: estimated_max_resident_size=35000
-                          GpuProject: estimated_max_resident_size=140000
-                            GpuHashJoin: estimated_max_resident_size=12733640
+                      GpuEmitPartitions: estimated_max_resident_size=300000
+                        GpuMergePartitions: estimated_max_resident_size=75000
+                          GpuProject: estimated_max_resident_size=300000
+                            GpuHashJoin: estimated_max_resident_size=12893640
                               GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                 GpuEmitPartitions: estimated_max_resident_size=346464
                                   GpuMergePartitions: estimated_max_resident_size=86616
@@ -636,17 +636,17 @@ GpuUnload: estimated_max_resident_size=20800000
                 GpuCoalesceAllBatches: estimated_max_resident_size=20800000
                   GpuMergePartitions: estimated_max_resident_size=5200000
                     GpuAggregateBatches: estimated_max_resident_size=20800000
-                      GpuAggregate: estimated_max_resident_size=92
-                        GpuHashJoin: estimated_max_resident_size=140125
+                      GpuAggregate: estimated_max_resident_size=388
+                        GpuHashJoin: estimated_max_resident_size=300525
                           GpuCoalesceAllBatches: estimated_max_resident_size=125
                             GpuEmitPartitions: estimated_max_resident_size=608
                               GpuMergePartitions: estimated_max_resident_size=152
                                 GpuFilter: estimated_max_resident_size=608
                                   GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                          GpuEmitPartitions: estimated_max_resident_size=140000
-                            GpuMergePartitions: estimated_max_resident_size=35000
-                              GpuProject: estimated_max_resident_size=140000
-                                GpuHashJoin: estimated_max_resident_size=20598208
+                          GpuEmitPartitions: estimated_max_resident_size=300000
+                            GpuMergePartitions: estimated_max_resident_size=75000
+                              GpuProject: estimated_max_resident_size=300000
+                                GpuHashJoin: estimated_max_resident_size=20758208
                                   GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                     GpuEmitPartitions: estimated_max_resident_size=346464
                                       GpuMergePartitions: estimated_max_resident_size=86616
@@ -697,7 +697,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuMergePartitions: none
                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=201813120, certain=0
+budget=2147483648, accumulators=219507840, certain=0
 GpuUnload: estimated_max_resident_size=40500000
   GpuMergeSortedPartitions: estimated_max_resident_size=40500000
     GpuSort: estimated_max_resident_size=40500000
@@ -707,9 +707,9 @@ GpuUnload: estimated_max_resident_size=40500000
             GpuCoalesceAllBatches: estimated_max_resident_size=40500000
               GpuMergePartitions: estimated_max_resident_size=10125000
                 GpuAggregateBatches: estimated_max_resident_size=40500000
-                  GpuAggregate: estimated_max_resident_size=29859840
-                    GpuProject: estimated_max_resident_size=19906560
-                      GpuHashJoin: estimated_max_resident_size=33116964
+                  GpuAggregate: estimated_max_resident_size=56401920
+                    GpuProject: estimated_max_resident_size=37601280
+                      GpuHashJoin: estimated_max_resident_size=50811684
                         GpuCoalesceAllBatches: estimated_max_resident_size=19906560
                           GpuEmitPartitions: estimated_max_resident_size=8265680
                             GpuMergePartitions: estimated_max_resident_size=2066420
@@ -763,7 +763,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               GpuFilter: calling_lanes=4, per batch: execute_node(#4 CudfFilter, batch)
                                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=124200000, certain=1350000
+budget=2147483648, accumulators=113250000, certain=1350000
 GpuUnload: estimated_max_resident_size=27000000
   GpuMergeSortedPartitions: estimated_max_resident_size=27000000
     GpuSort: estimated_max_resident_size=27000000
@@ -775,8 +775,8 @@ GpuUnload: estimated_max_resident_size=27000000
                 GpuAggregate: estimated_max_resident_size=27000000
                   GpuProject: estimated_max_resident_size=13500000
                     GpuAggregateBatches: estimated_max_resident_size=27000000
-                      GpuAggregate: estimated_max_resident_size=14850000
-                        GpuHashJoin: estimated_max_resident_size=86831528
+                      GpuAggregate: estimated_max_resident_size=3900000
+                        GpuHashJoin: estimated_max_resident_size=75881528
                           GpuCoalesceAllBatches: estimated_max_resident_size=1350000
                             GpuEmitPartitions: estimated_max_resident_size=3932284
                               GpuMergePartitions: estimated_max_resident_size=983071
@@ -820,15 +820,15 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     GpuFilter: calling_lanes=4, per batch: execute_node(#4 CudfFilter, batch)
                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=23911680, certain=3600000
+budget=2147483648, accumulators=27111680, certain=3600000
 GpuUnload: estimated_max_resident_size=2211840
   GpuProject: estimated_max_resident_size=2211840
     GpuAggregateBatches: estimated_max_resident_size=8355840
       GpuMergePartitions: estimated_max_resident_size=2088960
         GpuAggregateBatches: estimated_max_resident_size=8355840
-          GpuAggregate: estimated_max_resident_size=2846508
-            GpuProject: estimated_max_resident_size=2176744
-              GpuHashJoin: estimated_max_resident_size=10869124
+          GpuAggregate: estimated_max_resident_size=5376736
+            GpuProject: estimated_max_resident_size=4111624
+              GpuHashJoin: estimated_max_resident_size=14069124
                 GpuCoalesceAllBatches: estimated_max_resident_size=3600000
                   GpuEmitPartitions: estimated_max_resident_size=4440676
                     GpuMergePartitions: estimated_max_resident_size=1110169
@@ -912,16 +912,16 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 GpuFilter: calling_lanes=4, per batch: execute_node(#19 CudfFilter, batch)
                                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#18 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=123108480, certain=360000
+budget=2147483648, accumulators=129166720, certain=360000
 GpuUnload: estimated_max_resident_size=19537920
   GpuMergeSortedPartitions: estimated_max_resident_size=19537920
-    GpuSort: estimated_max_resident_size=19537920
-      GpuHashJoin: estimated_max_resident_size=44605440
+    GpuSort: estimated_max_resident_size=25436160
+      GpuHashJoin: estimated_max_resident_size=50503680
         GpuCoalesceAllBatches: estimated_max_resident_size=19537920
-          GpuEmitPartitions: estimated_max_resident_size=360000
-            GpuFilter: estimated_max_resident_size=90000
-              GpuMergePartitions: estimated_max_resident_size=90000
-                GpuHashJoin: estimated_max_resident_size=9944640
+          GpuEmitPartitions: estimated_max_resident_size=520000
+            GpuFilter: estimated_max_resident_size=130000
+              GpuMergePartitions: estimated_max_resident_size=130000
+                GpuHashJoin: estimated_max_resident_size=10104640
                   GpuCoalesceAllBatches: estimated_max_resident_size=360000
                     GpuEmitPartitions: estimated_max_resident_size=3119580
                       GpuMergePartitions: estimated_max_resident_size=779895
@@ -1018,7 +1018,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           GpuMergePartitions: none
                                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#8 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=166580000, certain=0
+budget=2147483648, accumulators=169940000, certain=0
 GpuUnload: estimated_max_resident_size=25600000
   GpuMergeSortedPartitions: estimated_max_resident_size=25600000
     GpuSort: estimated_max_resident_size=25600000
@@ -1033,17 +1033,17 @@ GpuUnload: estimated_max_resident_size=25600000
                       GpuCoalesceAllBatches: estimated_max_resident_size=25600000
                         GpuMergePartitions: estimated_max_resident_size=6400000
                           GpuAggregateBatches: estimated_max_resident_size=25600000
-                            GpuAggregate: estimated_max_resident_size=90000
-                              GpuHashJoin: estimated_max_resident_size=6490000
+                            GpuAggregate: estimated_max_resident_size=250000
+                              GpuHashJoin: estimated_max_resident_size=9850000
                                 GpuCoalesceAllBatches: estimated_max_resident_size=90000
                                   GpuEmitPartitions: estimated_max_resident_size=1491512
                                     GpuMergePartitions: estimated_max_resident_size=372878
                                       GpuFilter: estimated_max_resident_size=1491512
                                         GpuLoadParquet: estimated_max_resident_size=2983028, source_bytes=745757, target_batch_bytes=745757, amplification=4.0
-                                GpuEmitPartitions: estimated_max_resident_size=6400000
-                                  GpuMergePartitions: estimated_max_resident_size=1600000
-                                    GpuProject: estimated_max_resident_size=6400000
-                                      GpuHashJoin: estimated_max_resident_size=16629136
+                                GpuEmitPartitions: estimated_max_resident_size=9600000
+                                  GpuMergePartitions: estimated_max_resident_size=2400000
+                                    GpuProject: estimated_max_resident_size=9600000
+                                      GpuHashJoin: estimated_max_resident_size=19829136
                                         GpuCoalesceAllBatches: estimated_max_resident_size=6400000
                                           GpuEmitPartitions: estimated_max_resident_size=5122732
                                             GpuMergePartitions: estimated_max_resident_size=1280683
@@ -1107,17 +1107,17 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuAggregate: calling_lanes=4, per batch: execute_node(#10 CudfAggregate{Partial}, batch)
                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#9 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=1299862440, certain=0
+budget=2147483648, accumulators=1399081880, certain=0
 GpuUnload: estimated_max_resident_size=54010935
   GpuProject: estimated_max_resident_size=54010935
     GpuAggregateBatches: estimated_max_resident_size=102020655
       GpuMergePartitions: estimated_max_resident_size=25505163
         GpuAggregateBatches: estimated_max_resident_size=102020655
-          GpuAggregate: estimated_max_resident_size=258052244
-            GpuHashJoin: estimated_max_resident_size=414083833
+          GpuAggregate: estimated_max_resident_size=354071684
+            GpuHashJoin: estimated_max_resident_size=510103273
               GpuCoalesceAllBatches: estimated_max_resident_size=258052245
-                GpuProject: estimated_max_resident_size=1800000
-                  GpuHashJoin: estimated_max_resident_size=107546552
+                GpuProject: estimated_max_resident_size=5000000
+                  GpuHashJoin: estimated_max_resident_size=110746552
                     GpuCoalesceAllBatches: estimated_max_resident_size=1800000
                       GpuEmitPartitions: estimated_max_resident_size=1538464
                         GpuMergePartitions: estimated_max_resident_size=384616
@@ -1125,7 +1125,7 @@ GpuUnload: estimated_max_resident_size=54010935
                             GpuLoadParquet: estimated_max_resident_size=4615392, source_bytes=1878604, target_batch_bytes=1878604, amplification=4.0
                     GpuEmitPartitions: estimated_max_resident_size=105746552
                       GpuMergePartitions: estimated_max_resident_size=26436638
-                        GpuLoadParquet: estimated_max_resident_size=105746552, source_bytes=100568882, target_batch_bytes=67108864, amplification=4.0
+                        GpuLoadParquet: estimated_max_resident_size=105746552, source_bytes=100568882, target_batch_bytes=33554432, amplification=4.0
               GpuProject: estimated_max_resident_size=156031588
                 GpuAggregateBatches: estimated_max_resident_size=156031590
                   GpuEmitPartitions: estimated_max_resident_size=840170100
@@ -1203,7 +1203,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         GpuMergePartitions: none
                           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#18 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=2258826465, certain=2700000
+budget=2147483648, accumulators=2381245905, certain=2700000
 GpuUnload: estimated_max_resident_size=396080190
   GpuMergeSortedPartitions: estimated_max_resident_size=396080190
     GpuSort: estimated_max_resident_size=396080188
@@ -1212,8 +1212,8 @@ GpuUnload: estimated_max_resident_size=396080190
           GpuCoalesceAllBatches: estimated_max_resident_size=396080190
             GpuMergePartitions: estimated_max_resident_size=99020047
               GpuAggregateBatches: estimated_max_resident_size=396080190
-                GpuAggregate: estimated_max_resident_size=54010932
-                  GpuHashJoin: estimated_max_resident_size=127510935
+                GpuAggregate: estimated_max_resident_size=150030372
+                  GpuHashJoin: estimated_max_resident_size=247530375
                     GpuFilter: estimated_max_resident_size=54010932
                       GpuAggregateBatches: estimated_max_resident_size=156031590
                         GpuEmitPartitions: estimated_max_resident_size=624126360
@@ -1222,11 +1222,11 @@ GpuUnload: estimated_max_resident_size=396080190
                               GpuAggregateBatches: estimated_max_resident_size=156031590
                                 GpuAggregate: estimated_max_resident_size=55263820
                                   GpuLoadParquet: estimated_max_resident_size=55263820, source_bytes=52557643, target_batch_bytes=52557643, amplification=4.0
-                    GpuHashJoin: estimated_max_resident_size=128763820
+                    GpuHashJoin: estimated_max_resident_size=152763820
                       GpuCoalesceAllBatches: estimated_max_resident_size=73500000
-                        GpuEmitPartitions: estimated_max_resident_size=2700000
-                          GpuMergePartitions: estimated_max_resident_size=675000
-                            GpuHashJoin: estimated_max_resident_size=40551676
+                        GpuEmitPartitions: estimated_max_resident_size=5100000
+                          GpuMergePartitions: estimated_max_resident_size=1275000
+                            GpuHashJoin: estimated_max_resident_size=42951676
                               GpuCoalesceAllBatches: estimated_max_resident_size=2700000
                                 GpuEmitPartitions: estimated_max_resident_size=14745852
                                   GpuMergePartitions: estimated_max_resident_size=3686463
@@ -1272,14 +1272,14 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                   GpuFilter: calling_lanes=4, per batch: execute_node(#5 CudfFilter, batch)
                     GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=216841310, certain=0
+budget=2147483648, accumulators=220041310, certain=0
 GpuUnload: estimated_max_resident_size=102020654
   GpuProject: estimated_max_resident_size=102020654
     GpuAggregateBatches: estimated_max_resident_size=102020655
       GpuMergePartitions: estimated_max_resident_size=25505163
         GpuAggregateBatches: estimated_max_resident_size=102020655
-          GpuAggregate: estimated_max_resident_size=3200000
-            GpuHashJoin: estimated_max_resident_size=93883064
+          GpuAggregate: estimated_max_resident_size=4800000
+            GpuHashJoin: estimated_max_resident_size=97083064
               GpuCoalesceAllBatches: estimated_max_resident_size=6400000
                 GpuEmitPartitions: estimated_max_resident_size=4986940
                   GpuMergePartitions: estimated_max_resident_size=1246735
@@ -1446,40 +1446,40 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     GpuMergePartitions: none
                                                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#37 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=311221550, certain=810725
+budget=2147483648, accumulators=327542510, certain=810725
 GpuUnload: estimated_max_resident_size=64000000
   GpuMergeSortedPartitions: estimated_max_resident_size=64000000
-    GpuSort: estimated_max_resident_size=77600000
-      GpuProject: estimated_max_resident_size=77600000
-        GpuHashJoin: estimated_max_resident_size=160800000
+    GpuSort: estimated_max_resident_size=90400000
+      GpuProject: estimated_max_resident_size=90400000
+        GpuHashJoin: estimated_max_resident_size=173600000
           GpuCoalesceAllBatches: estimated_max_resident_size=77600000
-            GpuEmitPartitions: estimated_max_resident_size=24
-              GpuMergePartitions: estimated_max_resident_size=6
-                GpuHashJoin: estimated_max_resident_size=497
+            GpuEmitPartitions: estimated_max_resident_size=104
+              GpuMergePartitions: estimated_max_resident_size=26
+                GpuHashJoin: estimated_max_resident_size=977
                   GpuCoalesceAllBatches: estimated_max_resident_size=25
                     GpuEmitPartitions: estimated_max_resident_size=168
                       GpuMergePartitions: estimated_max_resident_size=42
                         GpuFilter: estimated_max_resident_size=168
                           GpuLoadParquet: estimated_max_resident_size=480, source_bytes=120, target_batch_bytes=120, amplification=4.0
-                  GpuEmitPartitions: estimated_max_resident_size=472
-                    GpuMergePartitions: estimated_max_resident_size=118
-                      GpuProject: estimated_max_resident_size=472
-                        GpuHashJoin: estimated_max_resident_size=670475
+                  GpuEmitPartitions: estimated_max_resident_size=872
+                    GpuMergePartitions: estimated_max_resident_size=218
+                      GpuProject: estimated_max_resident_size=872
+                        GpuHashJoin: estimated_max_resident_size=830875
                           GpuCoalesceAllBatches: estimated_max_resident_size=475
                             GpuEmitPartitions: estimated_max_resident_size=2328
                               GpuMergePartitions: estimated_max_resident_size=582
                                 GpuLoadParquet: estimated_max_resident_size=2328, source_bytes=582, target_batch_bytes=582, amplification=4.0
-                          GpuEmitPartitions: estimated_max_resident_size=670000
-                            GpuMergePartitions: estimated_max_resident_size=167500
-                              GpuProject: estimated_max_resident_size=670000
-                                GpuHashJoin: estimated_max_resident_size=4270000
+                          GpuEmitPartitions: estimated_max_resident_size=830000
+                            GpuMergePartitions: estimated_max_resident_size=207500
+                              GpuProject: estimated_max_resident_size=830000
+                                GpuHashJoin: estimated_max_resident_size=7630000
                                   GpuCoalesceAllBatches: estimated_max_resident_size=670000
                                     GpuEmitPartitions: estimated_max_resident_size=6128948
                                       GpuMergePartitions: estimated_max_resident_size=1532237
                                         GpuLoadParquet: estimated_max_resident_size=6128948, source_bytes=1532237, target_batch_bytes=1532237, amplification=4.0
-                                  GpuEmitPartitions: estimated_max_resident_size=3600000
-                                    GpuMergePartitions: estimated_max_resident_size=900000
-                                      GpuHashJoin: estimated_max_resident_size=21693704
+                                  GpuEmitPartitions: estimated_max_resident_size=6800000
+                                    GpuMergePartitions: estimated_max_resident_size=1700000
+                                      GpuHashJoin: estimated_max_resident_size=24893704
                                         GpuCoalesceAllBatches: estimated_max_resident_size=3600000
                                           GpuEmitPartitions: estimated_max_resident_size=2811968
                                             GpuMergePartitions: estimated_max_resident_size=702992
@@ -1498,25 +1498,25 @@ GpuUnload: estimated_max_resident_size=64000000
                         GpuCoalesceAllBatches: estimated_max_resident_size=20800000
                           GpuMergePartitions: estimated_max_resident_size=5200000
                             GpuAggregateBatches: estimated_max_resident_size=20800000
-                              GpuAggregate: estimated_max_resident_size=24
-                                GpuHashJoin: estimated_max_resident_size=273
+                              GpuAggregate: estimated_max_resident_size=104
+                                GpuHashJoin: estimated_max_resident_size=753
                                   GpuCoalesceAllBatches: estimated_max_resident_size=25
                                     GpuEmitPartitions: estimated_max_resident_size=168
                                       GpuMergePartitions: estimated_max_resident_size=42
                                         GpuFilter: estimated_max_resident_size=168
                                           GpuLoadParquet: estimated_max_resident_size=480, source_bytes=120, target_batch_bytes=120, amplification=4.0
-                                  GpuEmitPartitions: estimated_max_resident_size=248
-                                    GpuMergePartitions: estimated_max_resident_size=62
-                                      GpuProject: estimated_max_resident_size=248
-                                        GpuHashJoin: estimated_max_resident_size=140250
+                                  GpuEmitPartitions: estimated_max_resident_size=648
+                                    GpuMergePartitions: estimated_max_resident_size=162
+                                      GpuProject: estimated_max_resident_size=648
+                                        GpuHashJoin: estimated_max_resident_size=300650
                                           GpuCoalesceAllBatches: estimated_max_resident_size=250
                                             GpuEmitPartitions: estimated_max_resident_size=1120
                                               GpuMergePartitions: estimated_max_resident_size=280
                                                 GpuLoadParquet: estimated_max_resident_size=1120, source_bytes=280, target_batch_bytes=280, amplification=4.0
-                                          GpuEmitPartitions: estimated_max_resident_size=140000
-                                            GpuMergePartitions: estimated_max_resident_size=35000
-                                              GpuProject: estimated_max_resident_size=140000
-                                                GpuHashJoin: estimated_max_resident_size=18233704
+                                          GpuEmitPartitions: estimated_max_resident_size=300000
+                                            GpuMergePartitions: estimated_max_resident_size=75000
+                                              GpuProject: estimated_max_resident_size=300000
+                                                GpuHashJoin: estimated_max_resident_size=18393704
                                                   GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                                     GpuEmitPartitions: estimated_max_resident_size=346464
                                                       GpuMergePartitions: estimated_max_resident_size=86616
@@ -1607,15 +1607,15 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             GpuFilter: calling_lanes=4, per batch: execute_node(#19 CudfFilter, batch)
                               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#18 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=177101530, certain=0
+budget=2147483648, accumulators=184424570, certain=0
 GpuUnload: estimated_max_resident_size=17694720
   GpuMergeSortedPartitions: estimated_max_resident_size=17694720
-    GpuSort: estimated_max_resident_size=9117360
-      GpuHashJoin: estimated_max_resident_size=30717360
+    GpuSort: estimated_max_resident_size=440000
+      GpuHashJoin: estimated_max_resident_size=34840000
         GpuCoalesceAllBatches: estimated_max_resident_size=270000
-          GpuEmitPartitions: estimated_max_resident_size=124
-            GpuMergePartitions: estimated_max_resident_size=31
-              GpuHashJoin: estimated_max_resident_size=2385921
+          GpuEmitPartitions: estimated_max_resident_size=524
+            GpuMergePartitions: estimated_max_resident_size=131
+              GpuHashJoin: estimated_max_resident_size=2386321
                 GpuCoalesceAllBatches: estimated_max_resident_size=125
                   GpuEmitPartitions: estimated_max_resident_size=608
                     GpuMergePartitions: estimated_max_resident_size=152
@@ -1624,13 +1624,13 @@ GpuUnload: estimated_max_resident_size=17694720
                 GpuEmitPartitions: estimated_max_resident_size=2385796
                   GpuMergePartitions: estimated_max_resident_size=596449
                     GpuLoadParquet: estimated_max_resident_size=2385796, source_bytes=596449, target_batch_bytes=596449, amplification=4.0
-        GpuEmitPartitions: estimated_max_resident_size=21600000
-          GpuMergePartitions: estimated_max_resident_size=5400000
-            GpuHashJoin: estimated_max_resident_size=48142080
+        GpuEmitPartitions: estimated_max_resident_size=34400000
+          GpuMergePartitions: estimated_max_resident_size=8600000
+            GpuHashJoin: estimated_max_resident_size=60942080
               GpuCoalesceAllBatches: estimated_max_resident_size=21600000
-                GpuEmitPartitions: estimated_max_resident_size=1800000
-                  GpuMergePartitions: estimated_max_resident_size=450000
-                    GpuHashJoin: estimated_max_resident_size=14393640
+                GpuEmitPartitions: estimated_max_resident_size=5000000
+                  GpuMergePartitions: estimated_max_resident_size=1250000
+                    GpuHashJoin: estimated_max_resident_size=17593640
                       GpuCoalesceAllBatches: estimated_max_resident_size=1800000
                         GpuEmitPartitions: estimated_max_resident_size=10999024
                           GpuMergePartitions: estimated_max_resident_size=2749756
@@ -1751,7 +1751,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             GpuFilter: calling_lanes=4, per batch: execute_node(#27 CudfFilter, batch)
                               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#26 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=1420227440, certain=108251870
+budget=2147483648, accumulators=1530169840, certain=108251870
 GpuUnload: estimated_max_resident_size=108021870
   GpuMergeSortedPartitions: estimated_max_resident_size=108021870
     GpuSort: estimated_max_resident_size=108021868
@@ -1761,30 +1761,30 @@ GpuUnload: estimated_max_resident_size=108021870
             GpuCoalesceAllBatches: estimated_max_resident_size=108021870
               GpuMergePartitions: estimated_max_resident_size=27005467
                 GpuAggregateBatches: estimated_max_resident_size=108021870
-                  GpuAggregate: estimated_max_resident_size=432087480
-                    GpuHashJoin: estimated_max_resident_size=324065608
+                  GpuAggregate: estimated_max_resident_size=528106920
+                    GpuHashJoin: estimated_max_resident_size=372075328
                       GpuCoalesceAllBatches: estimated_max_resident_size=162032805
-                        GpuHashJoin: estimated_max_resident_size=324065608
+                        GpuHashJoin: estimated_max_resident_size=372075328
                           GpuCoalesceAllBatches: estimated_max_resident_size=162032805
-                            GpuEmitPartitions: estimated_max_resident_size=124
-                              GpuMergePartitions: estimated_max_resident_size=31
-                                GpuHashJoin: estimated_max_resident_size=7741565
+                            GpuEmitPartitions: estimated_max_resident_size=524
+                              GpuMergePartitions: estimated_max_resident_size=131
+                                GpuHashJoin: estimated_max_resident_size=21504525
                                   GpuCoalesceAllBatches: estimated_max_resident_size=125
                                     GpuEmitPartitions: estimated_max_resident_size=608
                                       GpuMergePartitions: estimated_max_resident_size=152
                                         GpuFilter: estimated_max_resident_size=608
                                           GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                                  GpuEmitPartitions: estimated_max_resident_size=7741440
-                                    GpuMergePartitions: estimated_max_resident_size=1935360
-                                      GpuHashJoin: estimated_max_resident_size=7971440
+                                  GpuEmitPartitions: estimated_max_resident_size=21504000
+                                    GpuMergePartitions: estimated_max_resident_size=5376000
+                                      GpuHashJoin: estimated_max_resident_size=21894000
                                         GpuCoalesceAllBatches: estimated_max_resident_size=7741440
                                           GpuEmitPartitions: estimated_max_resident_size=3970624
                                             GpuMergePartitions: estimated_max_resident_size=992656
                                               GpuFilter: estimated_max_resident_size=3970624
                                                 GpuLoadParquet: estimated_max_resident_size=7941252, source_bytes=6900918, target_batch_bytes=6900918, amplification=4.0
-                                        GpuEmitPartitions: estimated_max_resident_size=230000
-                                          GpuMergePartitions: estimated_max_resident_size=57500
-                                            GpuHashJoin: estimated_max_resident_size=50190328
+                                        GpuEmitPartitions: estimated_max_resident_size=390000
+                                          GpuMergePartitions: estimated_max_resident_size=97500
+                                            GpuHashJoin: estimated_max_resident_size=50350328
                                               GpuCoalesceAllBatches: estimated_max_resident_size=230000
                                                 GpuEmitPartitions: estimated_max_resident_size=1226588
                                                   GpuMergePartitions: estimated_max_resident_size=306647
@@ -1853,7 +1853,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       GpuMergePartitions: none
                         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#12 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=138000000, certain=0
+budget=2147483648, accumulators=127050000, certain=0
 GpuUnload: estimated_max_resident_size=52500000
   GpuMergeSortedPartitions: estimated_max_resident_size=52500000
     GpuSort: estimated_max_resident_size=52500000
@@ -1861,15 +1861,15 @@ GpuUnload: estimated_max_resident_size=52500000
         GpuAggregateBatches: estimated_max_resident_size=52500000
           GpuAggregate: estimated_max_resident_size=3432692
             GpuProject: estimated_max_resident_size=2550000
-              GpuNestedLoopJoin: estimated_max_resident_size=7237500
+              GpuNestedLoopJoin: estimated_max_resident_size=4500000
                 GpuAggregateBatches: estimated_max_resident_size=2550000
                   GpuMergePartitions: estimated_max_resident_size=975000
                     GpuAggregateBatches: estimated_max_resident_size=3900000
                       GpuAggregate: estimated_max_resident_size=13271292
                         GpuFilter: estimated_max_resident_size=8677384
                           GpuLoadParquet: estimated_max_resident_size=13271296, source_bytes=4050126, target_batch_bytes=4050126, amplification=4.0
-                GpuMergePartitions: estimated_max_resident_size=4687500
-                  GpuHashJoin: estimated_max_resident_size=31361056
+                GpuMergePartitions: estimated_max_resident_size=1950000
+                  GpuHashJoin: estimated_max_resident_size=20411056
                     GpuCoalesceAllBatches: estimated_max_resident_size=5250000
                       GpuEmitPartitions: estimated_max_resident_size=17203580
                         GpuMergePartitions: estimated_max_resident_size=4300895
@@ -1937,7 +1937,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuFilter: calling_lanes=4, per batch: execute_node(#11 CudfFilter, batch)
                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#10 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=505607760, certain=0
+budget=2147483648, accumulators=519804240, certain=0
 GpuUnload: estimated_max_resident_size=118722780
   GpuMergeSortedPartitions: estimated_max_resident_size=118722780
     GpuSort: estimated_max_resident_size=118722780
@@ -1947,12 +1947,12 @@ GpuUnload: estimated_max_resident_size=118722780
             GpuCoalesceAllBatches: estimated_max_resident_size=118722780
               GpuMergePartitions: estimated_max_resident_size=29680695
                 GpuAggregateBatches: estimated_max_resident_size=118722780
-                  GpuAggregate: estimated_max_resident_size=9515084
-                    GpuHashJoin: estimated_max_resident_size=64892220
+                  GpuAggregate: estimated_max_resident_size=17527788
+                    GpuHashJoin: estimated_max_resident_size=76688700
                       GpuCoalesceAllBatches: estimated_max_resident_size=14008320
-                        GpuEmitPartitions: estimated_max_resident_size=1350000
-                          GpuMergePartitions: estimated_max_resident_size=337500
-                            GpuHashJoin: estimated_max_resident_size=17091060
+                        GpuEmitPartitions: estimated_max_resident_size=3750000
+                          GpuMergePartitions: estimated_max_resident_size=937500
+                            GpuHashJoin: estimated_max_resident_size=19491060
                               GpuCoalesceAllBatches: estimated_max_resident_size=1350000
                                 GpuEmitPartitions: estimated_max_resident_size=2059524
                                   GpuMergePartitions: estimated_max_resident_size=514881
@@ -2009,7 +2009,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuFilter: calling_lanes=4, per batch: execute_node(#5 CudfFilter, batch)
                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=494945775, certain=0
+budget=2147483648, accumulators=445112760, certain=0
 GpuUnload: estimated_max_resident_size=108021870
   GpuMergeSortedPartitions: estimated_max_resident_size=108021870
     GpuSort: estimated_max_resident_size=108021868
@@ -2019,8 +2019,8 @@ GpuUnload: estimated_max_resident_size=108021870
             GpuCoalesceAllBatches: estimated_max_resident_size=108021870
               GpuMergePartitions: estimated_max_resident_size=27005467
                 GpuAggregateBatches: estimated_max_resident_size=108021870
-                  GpuAggregate: estimated_max_resident_size=116869224
-                    GpuHashJoin: estimated_max_resident_size=88032643
+                  GpuAggregate: estimated_max_resident_size=17203200
+                    GpuHashJoin: estimated_max_resident_size=38199628
                       GpuCoalesceAllBatches: estimated_max_resident_size=4423680
                         GpuEmitPartitions: estimated_max_resident_size=3228068
                           GpuMergePartitions: estimated_max_resident_size=807017
@@ -2133,7 +2133,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                               GpuMergePartitions: none
                                                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#19 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=638929280, certain=2240475
+budget=2147483648, accumulators=647388000, certain=2240475
 GpuUnload: estimated_max_resident_size=156031590
   GpuMergeSortedPartitions: estimated_max_resident_size=156031590
     GpuSort: estimated_max_resident_size=156031588
@@ -2143,36 +2143,36 @@ GpuUnload: estimated_max_resident_size=156031590
             GpuCoalesceAllBatches: estimated_max_resident_size=156031590
               GpuMergePartitions: estimated_max_resident_size=39007897
                 GpuAggregateBatches: estimated_max_resident_size=156031590
-                  GpuAggregate: estimated_max_resident_size=12
-                    GpuHashJoin: estimated_max_resident_size=497
+                  GpuAggregate: estimated_max_resident_size=60
+                    GpuHashJoin: estimated_max_resident_size=977
                       GpuCoalesceAllBatches: estimated_max_resident_size=25
                         GpuEmitPartitions: estimated_max_resident_size=168
                           GpuMergePartitions: estimated_max_resident_size=42
                             GpuFilter: estimated_max_resident_size=168
                               GpuLoadParquet: estimated_max_resident_size=480, source_bytes=120, target_batch_bytes=120, amplification=4.0
-                      GpuEmitPartitions: estimated_max_resident_size=472
-                        GpuMergePartitions: estimated_max_resident_size=118
-                          GpuProject: estimated_max_resident_size=472
-                            GpuHashJoin: estimated_max_resident_size=140475
+                      GpuEmitPartitions: estimated_max_resident_size=872
+                        GpuMergePartitions: estimated_max_resident_size=218
+                          GpuProject: estimated_max_resident_size=872
+                            GpuHashJoin: estimated_max_resident_size=300875
                               GpuCoalesceAllBatches: estimated_max_resident_size=475
                                 GpuEmitPartitions: estimated_max_resident_size=2328
                                   GpuMergePartitions: estimated_max_resident_size=582
                                     GpuLoadParquet: estimated_max_resident_size=2328, source_bytes=582, target_batch_bytes=582, amplification=4.0
-                              GpuEmitPartitions: estimated_max_resident_size=140000
-                                GpuMergePartitions: estimated_max_resident_size=35000
-                                  GpuProject: estimated_max_resident_size=140000
-                                    GpuHashJoin: estimated_max_resident_size=5300960
+                              GpuEmitPartitions: estimated_max_resident_size=300000
+                                GpuMergePartitions: estimated_max_resident_size=75000
+                                  GpuProject: estimated_max_resident_size=300000
+                                    GpuHashJoin: estimated_max_resident_size=11359200
                                       GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                         GpuEmitPartitions: estimated_max_resident_size=346464
                                           GpuMergePartitions: estimated_max_resident_size=86616
                                             GpuLoadParquet: estimated_max_resident_size=346464, source_bytes=86616, target_batch_bytes=86616, amplification=4.0
-                                      GpuEmitPartitions: estimated_max_resident_size=5160960
-                                        GpuMergePartitions: estimated_max_resident_size=1290240
-                                          GpuHashJoin: estimated_max_resident_size=124544868
+                                      GpuEmitPartitions: estimated_max_resident_size=11059200
+                                        GpuMergePartitions: estimated_max_resident_size=2764800
+                                          GpuHashJoin: estimated_max_resident_size=130443108
                                             GpuCoalesceAllBatches: estimated_max_resident_size=5160960
-                                              GpuEmitPartitions: estimated_max_resident_size=2100000
-                                                GpuMergePartitions: estimated_max_resident_size=525000
-                                                  GpuHashJoin: estimated_max_resident_size=8259360
+                                              GpuEmitPartitions: estimated_max_resident_size=4500000
+                                                GpuMergePartitions: estimated_max_resident_size=1125000
+                                                  GpuHashJoin: estimated_max_resident_size=10659360
                                                     GpuCoalesceAllBatches: estimated_max_resident_size=2100000
                                                       GpuEmitPartitions: estimated_max_resident_size=4241992
                                                         GpuMergePartitions: estimated_max_resident_size=1060498
@@ -2319,7 +2319,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                 GpuMergePartitions: none
                                                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#20 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=527458680, certain=2240000
+budget=2147483648, accumulators=561476760, certain=2240000
 GpuUnload: estimated_max_resident_size=78643200
   GpuMergeSortedPartitions: estimated_max_resident_size=78643200
     GpuSort: estimated_max_resident_size=78643200
@@ -2329,38 +2329,38 @@ GpuUnload: estimated_max_resident_size=78643200
             GpuCoalesceAllBatches: estimated_max_resident_size=78643200
               GpuMergePartitions: estimated_max_resident_size=19660800
                 GpuAggregateBatches: estimated_max_resident_size=78643200
-                  GpuAggregate: estimated_max_resident_size=244
-                    GpuProject: estimated_max_resident_size=244
-                      GpuHashJoin: estimated_max_resident_size=698
+                  GpuAggregate: estimated_max_resident_size=524
+                    GpuProject: estimated_max_resident_size=524
+                      GpuHashJoin: estimated_max_resident_size=1498
                         GpuCoalesceAllBatches: estimated_max_resident_size=350
                           GpuEmitPartitions: estimated_max_resident_size=1708
                             GpuMergePartitions: estimated_max_resident_size=427
                               GpuFilter: estimated_max_resident_size=1708
                                 GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                        GpuEmitPartitions: estimated_max_resident_size=348
-                          GpuMergePartitions: estimated_max_resident_size=87
-                            GpuProject: estimated_max_resident_size=348
-                              GpuHashJoin: estimated_max_resident_size=2100350
+                        GpuEmitPartitions: estimated_max_resident_size=748
+                          GpuMergePartitions: estimated_max_resident_size=187
+                            GpuProject: estimated_max_resident_size=748
+                              GpuHashJoin: estimated_max_resident_size=4500750
                                 GpuCoalesceAllBatches: estimated_max_resident_size=350
                                   GpuEmitPartitions: estimated_max_resident_size=1708
                                     GpuMergePartitions: estimated_max_resident_size=427
                                       GpuFilter: estimated_max_resident_size=1708
                                         GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                                GpuEmitPartitions: estimated_max_resident_size=2100000
-                                  GpuMergePartitions: estimated_max_resident_size=525000
-                                    GpuProject: estimated_max_resident_size=2100000
-                                      GpuHashJoin: estimated_max_resident_size=106302240
+                                GpuEmitPartitions: estimated_max_resident_size=4500000
+                                  GpuMergePartitions: estimated_max_resident_size=1125000
+                                    GpuProject: estimated_max_resident_size=4500000
+                                      GpuHashJoin: estimated_max_resident_size=140159520
                                         GpuCoalesceAllBatches: estimated_max_resident_size=2100000
                                           GpuEmitPartitions: estimated_max_resident_size=4241992
                                             GpuMergePartitions: estimated_max_resident_size=1060498
                                               GpuLoadParquet: estimated_max_resident_size=4241992, source_bytes=1294702, target_batch_bytes=1294702, amplification=4.0
-                                        GpuEmitPartitions: estimated_max_resident_size=104202240
-                                          GpuMergePartitions: estimated_max_resident_size=26050560
-                                            GpuHashJoin: estimated_max_resident_size=129424352
+                                        GpuEmitPartitions: estimated_max_resident_size=135659520
+                                          GpuMergePartitions: estimated_max_resident_size=33914880
+                                            GpuHashJoin: estimated_max_resident_size=160881632
                                               GpuCoalesceAllBatches: estimated_max_resident_size=104202240
-                                                GpuEmitPartitions: estimated_max_resident_size=140000
-                                                  GpuMergePartitions: estimated_max_resident_size=35000
-                                                    GpuHashJoin: estimated_max_resident_size=37326672
+                                                GpuEmitPartitions: estimated_max_resident_size=300000
+                                                  GpuMergePartitions: estimated_max_resident_size=75000
+                                                    GpuHashJoin: estimated_max_resident_size=37486672
                                                       GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                                         GpuEmitPartitions: estimated_max_resident_size=346464
                                                           GpuMergePartitions: estimated_max_resident_size=86616
@@ -2368,7 +2368,7 @@ GpuUnload: estimated_max_resident_size=78643200
                                                       GpuEmitPartitions: estimated_max_resident_size=37186672
                                                         GpuMergePartitions: estimated_max_resident_size=9296668
                                                           GpuFilter: estimated_max_resident_size=37186672
-                                                            GpuLoadParquet: estimated_max_resident_size=37186672, source_bytes=37186623, target_batch_bytes=37186623, amplification=4.0
+                                                            GpuLoadParquet: estimated_max_resident_size=37186672, source_bytes=37186623, target_batch_bytes=33554432, amplification=4.0
                                               GpuEmitPartitions: estimated_max_resident_size=25222112
                                                 GpuMergePartitions: estimated_max_resident_size=6305528
                                                   GpuLoadParquet: estimated_max_resident_size=25222112, source_bytes=24000806, target_batch_bytes=24000806, amplification=4.0
@@ -2513,7 +2513,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                         GpuMergePartitions: none
                                                                           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#24 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=870512535, certain=2240600
+budget=2147483648, accumulators=886103815, certain=2240600
 GpuUnload: estimated_max_resident_size=132026730
   GpuMergeSortedPartitions: estimated_max_resident_size=132026730
     GpuSort: estimated_max_resident_size=132026728
@@ -2523,58 +2523,58 @@ GpuUnload: estimated_max_resident_size=132026730
             GpuCoalesceAllBatches: estimated_max_resident_size=234047385
               GpuMergePartitions: estimated_max_resident_size=58511846
                 GpuAggregateBatches: estimated_max_resident_size=234047385
-                  GpuAggregate: estimated_max_resident_size=12
-                    GpuProject: estimated_max_resident_size=12
-                      GpuHashJoin: estimated_max_resident_size=373
+                  GpuAggregate: estimated_max_resident_size=80
+                    GpuProject: estimated_max_resident_size=64
+                      GpuHashJoin: estimated_max_resident_size=853
                         GpuCoalesceAllBatches: estimated_max_resident_size=25
                           GpuEmitPartitions: estimated_max_resident_size=168
                             GpuMergePartitions: estimated_max_resident_size=42
                               GpuFilter: estimated_max_resident_size=168
                                 GpuLoadParquet: estimated_max_resident_size=480, source_bytes=120, target_batch_bytes=120, amplification=4.0
-                        GpuEmitPartitions: estimated_max_resident_size=348
-                          GpuMergePartitions: estimated_max_resident_size=87
-                            GpuProject: estimated_max_resident_size=348
-                              GpuHashJoin: estimated_max_resident_size=598
+                        GpuEmitPartitions: estimated_max_resident_size=748
+                          GpuMergePartitions: estimated_max_resident_size=187
+                            GpuProject: estimated_max_resident_size=748
+                              GpuHashJoin: estimated_max_resident_size=1398
                                 GpuCoalesceAllBatches: estimated_max_resident_size=350
                                   GpuEmitPartitions: estimated_max_resident_size=1708
                                     GpuMergePartitions: estimated_max_resident_size=427
                                       GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                                GpuEmitPartitions: estimated_max_resident_size=248
-                                  GpuMergePartitions: estimated_max_resident_size=62
-                                    GpuProject: estimated_max_resident_size=248
-                                      GpuHashJoin: estimated_max_resident_size=2100250
+                                GpuEmitPartitions: estimated_max_resident_size=648
+                                  GpuMergePartitions: estimated_max_resident_size=162
+                                    GpuProject: estimated_max_resident_size=648
+                                      GpuHashJoin: estimated_max_resident_size=4500650
                                         GpuCoalesceAllBatches: estimated_max_resident_size=250
                                           GpuEmitPartitions: estimated_max_resident_size=1120
                                             GpuMergePartitions: estimated_max_resident_size=280
                                               GpuLoadParquet: estimated_max_resident_size=1120, source_bytes=280, target_batch_bytes=280, amplification=4.0
-                                        GpuEmitPartitions: estimated_max_resident_size=2100000
-                                          GpuMergePartitions: estimated_max_resident_size=525000
-                                            GpuProject: estimated_max_resident_size=2100000
-                                              GpuHashJoin: estimated_max_resident_size=16231200
+                                        GpuEmitPartitions: estimated_max_resident_size=4500000
+                                          GpuMergePartitions: estimated_max_resident_size=1125000
+                                            GpuProject: estimated_max_resident_size=4500000
+                                              GpuHashJoin: estimated_max_resident_size=28461600
                                                 GpuCoalesceAllBatches: estimated_max_resident_size=2100000
                                                   GpuEmitPartitions: estimated_max_resident_size=4241992
                                                     GpuMergePartitions: estimated_max_resident_size=1060498
                                                       GpuLoadParquet: estimated_max_resident_size=4241992, source_bytes=1294702, target_batch_bytes=1294702, amplification=4.0
-                                                GpuEmitPartitions: estimated_max_resident_size=14131200
-                                                  GpuMergePartitions: estimated_max_resident_size=3532800
-                                                    GpuProject: estimated_max_resident_size=14131200
-                                                      GpuHashJoin: estimated_max_resident_size=14271200
+                                                GpuEmitPartitions: estimated_max_resident_size=23961600
+                                                  GpuMergePartitions: estimated_max_resident_size=5990400
+                                                    GpuProject: estimated_max_resident_size=23961600
+                                                      GpuHashJoin: estimated_max_resident_size=24261600
                                                         GpuCoalesceAllBatches: estimated_max_resident_size=14131200
                                                           GpuEmitPartitions: estimated_max_resident_size=15740564
                                                             GpuMergePartitions: estimated_max_resident_size=3935141
                                                               GpuFilter: estimated_max_resident_size=15740564
                                                                 GpuLoadParquet: estimated_max_resident_size=15740564, source_bytes=9837855, target_batch_bytes=9837855, amplification=4.0
-                                                        GpuEmitPartitions: estimated_max_resident_size=140000
-                                                          GpuMergePartitions: estimated_max_resident_size=35000
-                                                            GpuProject: estimated_max_resident_size=140000
-                                                              GpuHashJoin: estimated_max_resident_size=1940000
+                                                        GpuEmitPartitions: estimated_max_resident_size=300000
+                                                          GpuMergePartitions: estimated_max_resident_size=75000
+                                                            GpuProject: estimated_max_resident_size=300000
+                                                              GpuHashJoin: estimated_max_resident_size=5300000
                                                                 GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                                                   GpuEmitPartitions: estimated_max_resident_size=346464
                                                                     GpuMergePartitions: estimated_max_resident_size=86616
                                                                       GpuLoadParquet: estimated_max_resident_size=346464, source_bytes=86616, target_batch_bytes=86616, amplification=4.0
-                                                                GpuEmitPartitions: estimated_max_resident_size=1800000
-                                                                  GpuMergePartitions: estimated_max_resident_size=450000
-                                                                    GpuHashJoin: estimated_max_resident_size=171666640
+                                                                GpuEmitPartitions: estimated_max_resident_size=5000000
+                                                                  GpuMergePartitions: estimated_max_resident_size=1250000
+                                                                    GpuHashJoin: estimated_max_resident_size=174866640
                                                                       GpuCoalesceAllBatches: estimated_max_resident_size=1800000
                                                                         GpuEmitPartitions: estimated_max_resident_size=2220336
                                                                           GpuMergePartitions: estimated_max_resident_size=555084
@@ -2688,7 +2688,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                         GpuMergePartitions: none
                                                           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#16 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=846031360, certain=49140350
+budget=2147483648, accumulators=886191760, certain=49140350
 GpuUnload: estimated_max_resident_size=186037665
   GpuMergeSortedPartitions: estimated_max_resident_size=186037665
     GpuSort: estimated_max_resident_size=186037664
@@ -2698,40 +2698,40 @@ GpuUnload: estimated_max_resident_size=186037665
             GpuCoalesceAllBatches: estimated_max_resident_size=186037665
               GpuMergePartitions: estimated_max_resident_size=46509416
                 GpuAggregateBatches: estimated_max_resident_size=186037665
-                  GpuAggregate: estimated_max_resident_size=128
-                    GpuProject: estimated_max_resident_size=128
-                      GpuHashJoin: estimated_max_resident_size=21000350
+                  GpuAggregate: estimated_max_resident_size=280
+                    GpuProject: estimated_max_resident_size=280
+                      GpuHashJoin: estimated_max_resident_size=45000750
                         GpuCoalesceAllBatches: estimated_max_resident_size=350
                           GpuEmitPartitions: estimated_max_resident_size=1708
                             GpuMergePartitions: estimated_max_resident_size=427
                               GpuLoadParquet: estimated_max_resident_size=1708, source_bytes=427, target_batch_bytes=427, amplification=4.0
-                        GpuEmitPartitions: estimated_max_resident_size=21000000
-                          GpuMergePartitions: estimated_max_resident_size=5250000
-                            GpuProject: estimated_max_resident_size=21000000
-                              GpuHashJoin: estimated_max_resident_size=49000000
+                        GpuEmitPartitions: estimated_max_resident_size=45000000
+                          GpuMergePartitions: estimated_max_resident_size=11250000
+                            GpuProject: estimated_max_resident_size=45000000
+                              GpuHashJoin: estimated_max_resident_size=85800000
                                 GpuCoalesceAllBatches: estimated_max_resident_size=21000000
                                   GpuEmitPartitions: estimated_max_resident_size=12629564
                                     GpuMergePartitions: estimated_max_resident_size=3157391
                                       GpuLoadParquet: estimated_max_resident_size=12629564, source_bytes=12017922, target_batch_bytes=12017922, amplification=4.0
-                                GpuEmitPartitions: estimated_max_resident_size=28000000
-                                  GpuMergePartitions: estimated_max_resident_size=7000000
-                                    GpuProject: estimated_max_resident_size=28000000
-                                      GpuHashJoin: estimated_max_resident_size=28140000
+                                GpuEmitPartitions: estimated_max_resident_size=40800000
+                                  GpuMergePartitions: estimated_max_resident_size=10200000
+                                    GpuProject: estimated_max_resident_size=40800000
+                                      GpuHashJoin: estimated_max_resident_size=41100000
                                         GpuCoalesceAllBatches: estimated_max_resident_size=28000000
                                           GpuEmitPartitions: estimated_max_resident_size=18093704
                                             GpuMergePartitions: estimated_max_resident_size=4523426
                                               GpuLoadParquet: estimated_max_resident_size=18093704, source_bytes=14763916, target_batch_bytes=14763916, amplification=4.0
-                                        GpuEmitPartitions: estimated_max_resident_size=140000
-                                          GpuMergePartitions: estimated_max_resident_size=35000
-                                            GpuProject: estimated_max_resident_size=140000
-                                              GpuHashJoin: estimated_max_resident_size=1940000
+                                        GpuEmitPartitions: estimated_max_resident_size=300000
+                                          GpuMergePartitions: estimated_max_resident_size=75000
+                                            GpuProject: estimated_max_resident_size=300000
+                                              GpuHashJoin: estimated_max_resident_size=5300000
                                                 GpuCoalesceAllBatches: estimated_max_resident_size=140000
                                                   GpuEmitPartitions: estimated_max_resident_size=346464
                                                     GpuMergePartitions: estimated_max_resident_size=86616
                                                       GpuLoadParquet: estimated_max_resident_size=346464, source_bytes=86616, target_batch_bytes=86616, amplification=4.0
-                                                GpuEmitPartitions: estimated_max_resident_size=1800000
-                                                  GpuMergePartitions: estimated_max_resident_size=450000
-                                                    GpuHashJoin: estimated_max_resident_size=176447728
+                                                GpuEmitPartitions: estimated_max_resident_size=5000000
+                                                  GpuMergePartitions: estimated_max_resident_size=1250000
+                                                    GpuHashJoin: estimated_max_resident_size=179647728
                                                       GpuCoalesceAllBatches: estimated_max_resident_size=1800000
                                                         GpuEmitPartitions: estimated_max_resident_size=10999024
                                                           GpuMergePartitions: estimated_max_resident_size=2749756
@@ -2775,7 +2775,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
                     GpuMergePartitions: none
                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=11250250, certain=125
+budget=2147483648, accumulators=11250650, certain=125
 GpuUnload: estimated_max_resident_size=862500
   GpuProject: estimated_max_resident_size=3450000
     GpuAggregateBatches: estimated_max_resident_size=3750000
@@ -2783,8 +2783,8 @@ GpuUnload: estimated_max_resident_size=862500
         GpuCoalesceAllBatches: estimated_max_resident_size=3750000
           GpuMergePartitions: estimated_max_resident_size=937500
             GpuAggregateBatches: estimated_max_resident_size=3750000
-              GpuAggregate: estimated_max_resident_size=220
-                GpuHashJoin: estimated_max_resident_size=496601
+              GpuAggregate: estimated_max_resident_size=932
+                GpuHashJoin: estimated_max_resident_size=497001
                   GpuCoalesceAllBatches: estimated_max_resident_size=125
                     GpuEmitPartitions: estimated_max_resident_size=500
                       GpuMergePartitions: estimated_max_resident_size=125
@@ -2825,9 +2825,9 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=2700000, certain=0
-GpuUnload: estimated_max_resident_size=337500
-  GpuHashJoin: estimated_max_resident_size=124834932
+budget=2147483648, accumulators=5100000, certain=0
+GpuUnload: estimated_max_resident_size=937500
+  GpuHashJoin: estimated_max_resident_size=127234932
     GpuCoalesceAllBatches: estimated_max_resident_size=1350000
       GpuEmitPartitions: estimated_max_resident_size=2059524
         GpuMergePartitions: estimated_max_resident_size=514881

@@ -785,3 +785,89 @@ the §4.3 pricing in `memory_estimation.rs`, `fb_text.rs`'s `payload_text` arm (
 so a `CudfJoin` renders nothing and the payload golden will be empty until the writer chooses
 which of the nine fields to print), and step 6's pin flips. The #246 pin deferred from task 2
 also belongs here.
+
+##### Round 1, plan task 7 continued — step 5's planner half, and where the task stands
+
+Stopped on the human's `stop` order at a green line. **Nothing was reverted**: the round's one
+change is complete and every tier is green, so this is option 1 — a green partial.
+
+**What landed: step 5's planner half, the §4.3 pricing in `memory_estimation.rs`.** The `Join`
+arm's resident figure was `build bytes + probe rows × key width` — the frozen surface's
+accumulated probe keys (#136). It is now `build bytes + 16 × build rows + (build rows where the
+type answers unmatched build rows at the finish)`: the batch, the hash table its keys go into,
+and one byte a row saying which matched. Every term is a function of the **build** side now,
+where the old one grew with the probe. `HASH_TABLE_BYTES_PER_ROW = 16` is a named constant with
+its reason. `key_width` and the two arrow imports it needed are deleted — nothing else used them,
+and keeping a helper for a term that is gone is the dead code task 15 would have had to find.
+
+**Which formula the code follows, since the plan and §4.3 disagreed.** This step is the
+*planner's* resident model and the fbs/§4.3 disagreement is about the *executor's* per-call
+`scratch_bytes` — so this half does not depend on it. The pricing that does is step 5's executor
+half (`gpu_backend/join.rs`), not yet written; **it must follow the fbs**, `pairs × (8 + the
+residual's per-row bytes)`, and bound the same number `chunk_bytes` carries.
+
+**The test now separates the two models, where it did not before.**
+`a_build_preserving_join_is_charged_for_the_keys_it_accumulates` becomes
+`a_build_preserving_join_is_charged_for_its_matched_column`, and its assertion changed from
+`left > inner` to `left - inner == 10_000` — supplier's exact row count, one byte each. The
+inequality passes under **both** models (the old term was also positive), so it was a guard that
+could not go red; the equality fails against the old model with 750,000 (150,000 probe rows × 5)
+where it wants 10,000. Red measured before the change, green after.
+
+**Goldens: 15 `*.plans.txt`, regenerated and consistent with the code as committed.** Checked
+rather than asserted: with the `estimated_max_resident_size` and `budget=…` lines filtered out,
+every plan golden is **byte-identical** to `24ea9c03` — the trees and the `--- recipes ---`
+sections did not move, only the `--- memory ---` figures. No `.cpu.txt`, `.cost.txt`,
+`.result.txt`, `recipe-payloads.txt` or `cost-registry.csv` moved, and
+`cargo run -q -p cost-report -- --cost-diff --base 24ea9c03` reports **703 compared, 0 changed**.
+The accumulator totals move in **both** directions (one tpch section 104,000 → 136,000 as the
+hash table arrives, another 156,000 → 90,000 as the probe-key term leaves), which is what a model
+change looks like rather than a uniform inflation.
+
+**Where task 7 stands, step by step.**
+
+| step | state |
+|---|---|
+| 1 — the failing tests (`wire/tests.rs`, `gpu_tests/join.rs`) | **not started** |
+| 2 — run red | **not started** |
+| 3 — the writer (`wire/join.rs`, one leaf for three nodes) | **not started** |
+| 4 — the executor on the four session symbols | **not started** |
+| 5 — pricing | **half done**: the planner's resident model landed; the executor's `resident_bytes`/`scratch_bytes` not started |
+| 5a — `serialize_join_schema` | **not started** |
+| 5b — the chunk budget (`join_scratch_bytes`, `Writer::with_join_scratch`, the pipeline) | **not started** |
+| 6 — the pin flips | **not started** |
+| 7 — the device run and the recipe-line/payload goldens | **not started** |
+| the #246 pin deferred from task 2 | **not started** |
+
+**What the next round should do first, and why in that order.**
+1. **The wire switch and the executor rewrite have to land together.** `FbKind::Join` is what
+   `attach.rs` routes to and what `gpu_backend/join.rs` reads; changing one without the other
+   leaves the device build broken, and the device build is the only thing that compiles it. So
+   steps 3 and 4 are one unit of work, not two.
+2. **Nothing smaller is independently landable.** `serialize_join_schema` (5a) and
+   `join_scratch_bytes` (5b) are both dead code until `cudf_join` calls them, and an
+   `#[allow(dead_code)]` whose only reason is "a later step calls it" is the process-history
+   comment this chain has refused twice. Step 5's planner half was the one piece that stood alone,
+   which is why it is what landed.
+3. **The remote host is now a 23-second incremental compile check** (`./scripts/build-test-shadgpu.sh
+   --build` after the `rsync` line), so the gpu-tier files are no longer blind. Use it as the
+   loop for steps 3–4 rather than writing them unverified.
+
+**Additive enum variants the next round needs, surveyed so it does not re-derive them.** `FbKind`
+has `HashJoin{join_type}`, `CrossJoin`, `NestedLoopJoin` and needs `Join` →
+`fb::PlanNodeKind::CudfJoin`. `AbiSymbol` has four variants and needs `JoinBuild`, `JoinProbe`,
+`JoinFinish` (names `join_build`, `join_probe`, `join_finish`). `CallPattern` has `PerProbeBatch`
+and `AtDone` but no `JoinBuild`. The target line step 3 wants —
+`join_build(#4), per probe batch: join_probe, at done: join_finish` — needs two renderer rules in
+`recipes.rs`'s `impl Display for Recipe`: a pattern whose `text()` is empty prints no `": "`
+prefix, and a call whose target repeats the previous call's prints no `#seq kind`. Both are
+general rules rather than join special cases.
+
+**`fb_text.rs`'s `payload_text` arm is still undecided and still `_ => {}`.** Nothing forced the
+choice this round because no `CudfJoin` is written yet. The question to answer when it is: which
+of the nine fields a reader of `recipe-payloads.txt` needs in order to see a *wrong* plan. My
+reading, for the next round to accept or reject: `join_type`, `keys`, `null_equals_null`,
+`projection` and `chunk_bytes` are the five a wrong plan shows up in, and `build_schema` /
+`probe_schema` are the two a pad-type bug shows up in — seven of nine. `filter` and
+`filter_columns` are already rendered for the nested loop today and should stay, which makes it
+nine; the argument for fewer is that the two schemas are long and repeat the plan line's schema.

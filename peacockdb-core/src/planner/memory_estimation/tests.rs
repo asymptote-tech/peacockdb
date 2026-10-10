@@ -214,10 +214,11 @@ async fn a_target_lands_on_the_coarse_grid() {
 }
 
 #[tokio::test]
-async fn a_build_preserving_join_is_charged_for_the_keys_it_accumulates() {
-    // The finish pass holds the key columns of every probe row it has seen (#136),
-    // and the small table on the left is what keeps this a Left join — DataFusion
-    // swaps the sides, and remaps the type, when the right one is smaller.
+async fn a_build_preserving_join_is_charged_for_its_matched_column() {
+    // One byte per BUILD row saying which matched, where the frozen surface accumulated
+    // the probe's keys (#136) — so a Left costs its build's rows more than an Inner over
+    // the same sides. The small table on the left is what keeps this a Left join:
+    // DataFusion swaps the sides, and remaps the type, when the right one is smaller.
     let left = modelled(
         "SELECT s.s_name, c.c_name FROM supplier s LEFT JOIN customer c ON s.s_nationkey = c.c_nationkey",
         4,
@@ -230,9 +231,13 @@ async fn a_build_preserving_join_is_charged_for_the_keys_it_accumulates() {
         BUDGET,
     )
     .await;
-    assert!(
-        left.accumulator_bytes > inner.accumulator_bytes,
-        "a streamed probe under a build-preserving join costs nothing: {} vs {}",
+    // Exactly supplier's 10,000 rows, one byte each. The frozen surface's term was the
+    // PROBE's rows times its key width, so an inexact comparison passes under both models
+    // and says nothing: this is the arithmetic that separates them.
+    assert_eq!(
+        left.accumulator_bytes - inner.accumulator_bytes,
+        10_000,
+        "the matched column is one byte per BUILD row: {} vs {}",
         left.accumulator_bytes,
         inner.accumulator_bytes
     );
