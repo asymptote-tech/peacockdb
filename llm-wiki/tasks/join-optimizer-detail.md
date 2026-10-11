@@ -41,7 +41,9 @@ fixes #236 and #237):
   committed outputs byte for byte (Corpus verification below).
 - Task 8 measured every device-enabled case at sf40 (26, tpcds sf40 generated on shad-gpu) on an
   empty card; the trees and the two record pins are on the branch, the records in S3
-  (Task 8 below).
+  (Task 8 below). The Nsight passes over the 26 cases have not run: `calls.tsv` and `hbm.tsv`
+  hold three cases of an earlier run.
+- Tasks 10–18 are not started.
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,

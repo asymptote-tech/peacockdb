@@ -117,6 +117,94 @@ as a known limit.
   outputs (relation masks, edges, the cost callback, the budget, the postfix tree, return
   codes), the algorithm in brief, how it is tested.
 
+## Forwarders cost nothing, scatters cost their bytes
+
+`testdata/cost_model.conf` charges `GpuEmitPartitions`, `GpuMergePartitions`, `GpuUnion` and
+`GpuInterleave` their full output bytes under `cuda_shuffle_bytes`. Merge, Union and Interleave
+relabel lanes and move batches without a copy; Emit scatters rows. The conf gains
+`cuda_scatter_bytes 1.0` (`GpuEmitPartitions`) and `cuda_forward_bytes 0.0` (`GpuMergePartitions`,
+`GpuUnion`, `GpuInterleave`), and `cuda_shuffle_bytes` goes. The conf is the engine's and the
+prototype's alike, so the engine's `.cost.txt` goldens and its cost report move with it. DuckDB's
+cost (`testdata/duckdb_cost.py`) already charges streaming operators nothing; `design.md` says
+so, so the two sides are known to price the same work.
+
+## Join clusters are named
+
+A multi-join is a cluster of joins inside which the order may change. Each join node in
+`<mode>.cpu.txt` carries `mj=MJ<n>`, numbered per query in plan order, outermost first; a join
+in no cluster (a cross join, a join no rule may move) carries none. `.optimizer.txt` names its
+DPhyp calls by the same id.
+
+## Non-inner joins reorder under TES
+
+A cluster holds inner joins only, so a left, semi, anti or mark join is a wall: in tpcds q58 the
+`RightSemi` that restricts dates to one week sits above `date_dim ⋈ catalog_sales`, and the
+restriction reaches the fact table after a 1.4-million-row join. Each non-inner join gets a
+total eligibility set by conflict detection (CD-C, Moerkotte et al. 2013) and enters the cluster
+as a hyperedge, which `peacockdb-dphyp` already accepts; a cross join stays out. Named tpch
+queries that reorder only this way join the corpus, among them
+
+    SELECT c_name, o_orderkey
+    FROM customer
+    LEFT JOIN orders ON o_custkey = c_custkey
+    JOIN nation      ON n_nationkey = c_nationkey
+    WHERE n_name = 'FRANCE';
+
+as written `(customer ⟕ orders) ⋈ σ(nation)`, ≈ 1.55M rows then 62k; reordered
+`(customer ⋈ σ(nation)) ⟕ orders`, 6k rows then 62k. Answers stay equal to DuckDB's.
+
+## Dynamic filters from any build, through unions
+
+A dynamic filter is taken today only from a build that holds a filter and no join, and its key
+lifts through wiring, filters, plain projects and inner joins. tpch q5's `o_orderkey ⋈
+lineitem` has a join in its build; tpcds q5's date filter stops at the `GpuUnion` of each
+channel's sales and returns, over fact columns ordered by date. A build may hold joins — its
+values are the probe plan's measured output, as now — and a key lifts through `GpuUnion` and
+`GpuInterleave` into every branch. q5 of both benchmarks and q58 are run before and after, and
+the costs go in the detail file.
+
+## DuckDB's cost for the named queries
+
+`testdata/gen_duckdb_cost.sh` profiles q1..q22 and q1..q99 only, so no named tpch query has a
+DuckDB figure or a final ratio. It profiles every corpus query, the named ones included; the
+report reads them by name already. Which named queries leave room for the optimizer is written
+into the detail file.
+
+## `.optimizer.txt` that reads without the code
+
+Each section says what it measures. A DPhyp call is headed by its multi-join id; each relation
+`rN` lists its estimated rows, row width and the NDV of its edge columns; an edge whose column
+is an aggregate's output says so rather than printing the aggregate's name as if it were a
+function; the dynamic filter's ordering score and the build read from memory are worded as
+what they are; `C_out` names its units and that the second figure is the plan's own order under
+the same estimates. The plan diff stays as it is.
+
+## A markdown page per mode
+
+`run.py` writes `<mode>.optimizer.md` beside `<mode>.optimizer.txt`, from the same report data:
+a `## <query>` section each; per multi-join a table whose columns are its successive orders, the
+plan's first, and whose rows are the join tree drawn, what changed it (empty in the first
+column: DPhyp, a flip, a replan with its q-error) and its cost; and the dynamic filters applied,
+each as table, column, key range or values, and row groups before and after.
+
+## The report links to its evidence
+
+`cost_report.html` takes the commit it describes (`--sha`). A ratio cell other than 1.00 links
+to that query's section of `<mode>.optimizer.md` at that commit on GitHub. Rules fired becomes
+per mode: how many multi-joins changed order and how many dynamic filters applied, each linking
+to its lines in `<mode>.optimizer.txt`; DPhyp and flips count together. The `cost-report` job
+renders it with the commit's sha from the committed `.costs.txt` and publishes it beside the
+engine's page.
+
+## `optimizer.md`: the heuristics in one place
+
+`scripts/exec_model/optimizer.md`, at most 300 lines, every rule the optimizer applies and when:
+what triggers a dynamic filter and which nodes its key lifts through; what a multi-join is and
+how TES admits a non-inner join; the cost DPhyp is given — its formula, units, and which
+selectivities enter it (filters below a relation, join containment, the flat share for a residual
+predicate); orientation; what triggers a replan and what it re-optimizes. `design.md` keeps the
+why and points here for the rules.
+
 ## Not in this task
 
 The optimizer in Rust; real parallelism in the scheduler or the driver — the scheduler names
@@ -133,7 +221,14 @@ results beyond the exact key NDV of a finished build; measuring the optimizer on
   `testdata/benchmark-results/**`.
 - `peacockdb-dphyp/design.md`; `.github/workflows/{pipeline,exec-model-corpus}.yml`.
 - `llm-wiki/build-test.md`.
-- Nothing in the engine: `peacockdb-core/src/`, `cpp/`, the wire format.
+- `testdata/cost_model.conf` and what it moves: the engine's `.cost.txt` goldens, the
+  `cost-report` crate, `peacockdb-core/src/test_support/cost_model.rs` if it names a category.
+- `testdata/gen_duckdb_cost.sh`, `testdata/duckdb_cost.py`, the DuckDB profiles and
+  `.duckdb_cost.txt` goldens.
+- New named queries: `testdata/tpch-queries/`, `peacockdb-core/tests/common/corpus_cases.inc`,
+  their engine goldens.
+- `peacockdb-dphyp/` where a hyperedge TES needs is refused.
+- Nothing else in the engine: `peacockdb-core/src/`, `cpp/`, the wire format.
 
 ## Done when
 
@@ -143,4 +238,9 @@ above; every prototype tier is green, the CI ones in CI and the corpus ones on s
 the goldens, the `.optimizer.txt` files and the report, its wall time stated; `records.tsv` is
 in S3 and not in git, and nothing in CI reads it; the device-enabled benchmark cases are
 measured and committed; the cardinality golden is in and q64 is explained; the three documents
-exist, the DPhyp one within 200 lines; the wiki counts add up.
+exist, the DPhyp one within 200 lines; the wiki counts add up. Forwarders cost nothing in
+the conf; every join node carries its multi-join id; non-inner joins reorder under TES and the
+named queries that show it are in the corpus; dynamic filters come from builds with joins and
+lift through unions; every named query has a DuckDB cost; `.optimizer.txt` reads without the
+code, `<mode>.optimizer.md` holds each multi-join's evolution, and the published report links
+to both at its commit; `optimizer.md` exists within 300 lines; every answer equals DuckDB's.
