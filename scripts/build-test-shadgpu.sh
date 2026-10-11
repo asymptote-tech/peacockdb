@@ -12,7 +12,8 @@
 # USAGE
 #   ./scripts/build-test-shadgpu.sh --all                # build+push+patch+run
 #
-# Both runs take tens of minutes, hence a detached form for each:
+# Both runs are long — the gate tens of minutes, the benchmark about an hour — hence a
+# detached form for each:
 #   ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
 #   ./scripts/build-test-shadgpu.sh --benchmark-status    # going? finished? log tail
 #   ./scripts/build-test-shadgpu.sh --pull-benchmarks     # once it reports finished
@@ -71,6 +72,10 @@ BENCH_TARGET=peacock_gpu_benchmarks
 BENCH_STAGING=cpp/install/rust-benchmarks
 # Relative to testdata/ on both sides, so one name drives the remote export and the pull.
 BENCH_RECORD_REL=calibration/records.tsv
+# Every `<dataset>.sf<sf>` the case list times, each linked in from DATASETS_DIR on the host.
+# Space-separated: the remote script's `for` takes it as one line.
+BENCH_DATASETS=$(bench_datasets | tr '\n' ' ') \
+  || die "cannot read the datasets from $BENCH_CASES (the reason is above)"
 
 # Runner, log, exit code and run id of a detached run, per phase. Outside
 # cpp/install/, which --push-binaries mirrors with --delete.
@@ -464,7 +469,7 @@ $RUNG_ARGS_FN
       fi
       mapfile -t args <<< "\$args_text"
       # The measurement binary is staged here for its own assertions; its bench_ cases are
-      # the measurement --run-benchmarks owns, tens of minutes of device time, and they
+      # the measurement --run-benchmarks owns, about an hour of device time, and they
       # would write a tree from a gate run.
       skip=""
       case "\$tname" in $BENCH_TARGET) skip="--skip bench_" ;; esac
@@ -512,30 +517,32 @@ EOF
 remote_bench_script() {
   cat <<EOF
     export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
-    export PEACOCK_TPCH_SF40_DIR=$SF40_DIR
     export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_REPO/testdata/tpch-vec-queries/query_params.jsonl
 
     # The rust side resolves data as <testdata>/<dataset>.sf<sf> and nothing else, so a
-    # symlink is what lets sf40 live outside the repo without a second way to name a
+    # symlink is what lets a dataset live outside the repo without a second way to name a
     # dataset path — which is how a run ends up reading one dataset and reporting another.
     # Never replaces a real directory: that would be someone else's provisioning.
-    sf40_link=\$PEACOCK_TESTDATA_DIR/tpch.sf40
-    if [ -L "\$sf40_link" ]; then
-      have=\$(readlink "\$sf40_link")
-      if [ "\$have" != "\$PEACOCK_TPCH_SF40_DIR" ]; then
-        echo "!!! \$sf40_link -> \$have, expected \$PEACOCK_TPCH_SF40_DIR"
+    for name in $BENCH_DATASETS; do
+      link=\$PEACOCK_TESTDATA_DIR/\$name
+      want=$DATASETS_DIR/\$name
+      if [ -L "\$link" ]; then
+        have=\$(readlink "\$link")
+        if [ "\$have" != "\$want" ]; then
+          echo "!!! \$link -> \$have, expected \$want"
+          exit 1
+        fi
+      elif [ -e "\$link" ]; then
+        echo "!!! \$link exists and is not a symlink -- not touching it"
         exit 1
+      elif [ ! -d "\$want" ]; then
+        echo "!!! no dataset at \$want"
+        exit 1
+      else
+        ln -s "\$want" "\$link"
+        echo "==> linked \$link -> \$want"
       fi
-    elif [ -e "\$sf40_link" ]; then
-      echo "!!! \$sf40_link exists and is not a symlink -- not touching it"
-      exit 1
-    elif [ ! -d "\$PEACOCK_TPCH_SF40_DIR" ]; then
-      echo "!!! no sf40 dataset at \$PEACOCK_TPCH_SF40_DIR"
-      exit 1
-    else
-      ln -s "\$PEACOCK_TPCH_SF40_DIR" "\$sf40_link"
-      echo "==> linked \$sf40_link -> \$PEACOCK_TPCH_SF40_DIR"
-    fi
+    done
 
     # Per-command, never exported: the mkdir/find/wc below would load the patched glibc
     # under the host's own loader and SIGSEGV, and the run would report a bogus code having
@@ -668,7 +675,7 @@ EOF
   PUBLISH_DIR=$(mktemp -d)
   trap 'rm -rf "$PUBLISH_DIR"' EXIT
   names=$(python3 scripts/calibration/split_record.py --record "testdata/$BENCH_RECORD_REL" \
-            --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc \
+            --cases "$BENCH_CASES" \
             --out-dir "$PUBLISH_DIR") \
     || die "not published (the reason is above). The tree came home."
   s3=$(printf '%q ' "$REMOTE_AWS" "${CALIBRATION_S3[@]}")

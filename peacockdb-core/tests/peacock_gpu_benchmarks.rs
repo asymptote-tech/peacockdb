@@ -2,11 +2,11 @@
 //! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes
 //! it names. Asserts nothing about an answer — correctness is `test_gpu_corpus`.
 //!
-//! The `bench_` cases need a GPU and the sf40 dataset and take tens of minutes, so CI runs
-//! the binary with `--skip bench_` and gets the assertions below; a measuring run is
-//! `build-test-shadgpu.sh --build-benchmarks --run-benchmarks`, which builds it at
-//! `--release`. On the host directly it is `--nocapture --test-threads=1`, and the threads
-//! are not optional — cuDF and rmm share one process-wide pool.
+//! The `bench_` cases need a GPU and both sf40 datasets, tpch's and tpcds's, and take about
+//! an hour, so CI runs the binary with `--skip bench_` and gets the assertions below; a
+//! measuring run is `build-test-shadgpu.sh --build-benchmarks --run-benchmarks`, which
+//! builds it at `--release`. On the host directly it is `--nocapture --test-threads=1`,
+//! and the threads are not optional — cuDF and rmm share one process-wide pool.
 #![cfg(not(feature = "rust-only"))]
 
 use peacockdb_core::test_support::{BenchmarkCase, NOT_TIMED, benchmark_case, declared_for};
@@ -101,7 +101,22 @@ fn every_declared_mode_names_the_queries_its_file_will_hold() {
 fn the_sections_of_a_file_are_ordered_numerically() {
     let declared = declared_for("tpch", "40", "tp1_single");
     let names: Vec<&str> = declared.iter().map(|(name, _)| name.as_str()).collect();
-    assert_eq!(names, ["q1", "q6", "q17", "q19"], "6 before 17 before 19, not '17' before '6'");
+    assert_eq!(
+        names,
+        [
+            "aggregate-groupby",
+            "filter-project",
+            "nested-loop-join",
+            "q1",
+            "q6",
+            "q17",
+            "q19",
+            "shuffle-additive",
+            "shuffle-additive-avg",
+            "shuffle-stddev",
+        ],
+        "6 before 17 before 19, not '17' before '6'"
+    );
 }
 
 /// Where a mode's results land: one file per (dataset, mode), stemmed by the mode.

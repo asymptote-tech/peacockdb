@@ -350,6 +350,58 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
+/// Every case the list declares has its section in the committed tree.
+///
+/// The tree accumulates across runs and nothing else compares it with the list, so a case
+/// added and never measured would leave its file silently short. A query declared `none`
+/// is a marker section in every file of its dataset, as `declared_for` writes it.
+#[test]
+fn every_declared_case_has_a_section_in_the_tree() {
+    let cases = read_cases(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/corpus_benchmark_cases.inc"),
+        "corpus_query_benchmark!",
+    );
+    let mut files: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
+    for args in &cases {
+        for mode in modes(&args[3]) {
+            files
+                .entry((args[0].clone(), args[1].clone(), mode))
+                .or_default()
+                .insert(args[2].replace('_', "-"));
+        }
+    }
+    for args in cases.iter().filter(|args| args[3] == "none") {
+        for ((dataset, sf, _), queries) in files.iter_mut() {
+            if (dataset, sf) == (&args[0], &args[1]) {
+                queries.insert(args[2].replace('_', "-"));
+            }
+        }
+    }
+    assert!(!files.is_empty(), "the benchmark list declares no mode");
+
+    for ((dataset, sf, mode), declared) in &files {
+        let path = testdata_root().join(format!(
+            "benchmark-results/{dataset}.sf{sf}/{mode}.benchmark.txt"
+        ));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured",
+                path.display()
+            )
+        });
+        let present: BTreeSet<String> = ordered_sections(&text)
+            .into_iter()
+            .map(|(query, _)| query)
+            .collect();
+        let missing: Vec<&String> = declared.difference(&present).collect();
+        assert!(
+            missing.is_empty(),
+            "{} has no section for {missing:?}, which the case list declares at {mode}",
+            path.display()
+        );
+    }
+}
+
 /// The arguments of every `name(…)` invocation in a case list, one vector per line.
 fn read_cases(path: &Path, name: &str) -> Vec<Vec<String>> {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));

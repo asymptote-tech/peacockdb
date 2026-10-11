@@ -28,7 +28,8 @@ fixes #236 and #237):
   its relations and key edges — and its output tree is rebuilt into `GpuHashJoin`s with the
   translator's wiring.
 - Task 7. The bucket is reachable with the credentials on shad-gpu
-  (`/home/info/bin/aws`, the endpoint `upload_datasets.sh` uses).
+  (shad-gpu's aws CLI as build-test.md's *Datasets* names it, the endpoint `upload_datasets.sh`
+  uses).
 
 ## Known state
 
@@ -38,9 +39,9 @@ fixes #236 and #237):
 - Completeness reading: the corpus suites had run at `tp4-single` only after Tasks 6a, 6b and
   9; at `dd9fa865` they ran at the other four modes, and `run.py` over all five reproduced the
   committed outputs byte for byte (Corpus verification below).
-- Task 8 is not on the branch yet: its measurement waits for a free device. tpcds sf40 exists on
-  shad-gpu (`/home/info/peacock-datasets/testdata/tpcds.sf40`); the case list and the scripts'
-  dataset links are kept outside the branch until the run.
+- Task 8 measured every device-enabled case at sf40 (26, tpcds sf40 generated on shad-gpu) on an
+  empty card; the trees and the two record pins are on the branch, the records in S3
+  (Task 8 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,
@@ -57,10 +58,10 @@ fixes #236 and #237):
 ## Hosts
 
 - Local: `/usr/bin/python3` has pandas and pyarrow; the linuxbrew `python3` does not.
-- shad-gpu: shared with work outside this repo. Corpus suites run from a scratch copy in
-  `/tmp/peacock-opt` with its own Python 3.13 venv, DuckDB 1.5.4 and DPhyp built on the host
-  (its glibc 2.31 is older than a local build needs). `/home/info/peacockdb` is the gate's
-  checkout and is not touched. tpcds exists there at sf1 only.
+- shad-gpu: shared with work outside this repo. Corpus suites run from a scratch copy on the
+  host with its own Python 3.13 venv, DuckDB 1.5.4 and DPhyp built there (its glibc 2.31 is
+  older than a local build needs); the gate's checkout is not touched. tpcds exists there at
+  sf1 and sf40.
 
 ## Task 1
 
@@ -87,7 +88,7 @@ fixes #236 and #237):
   `min_raw`/`max_raw` and the column's scale. The value is built from a string, because
   `Decimal.scaleb` rounds past the context's 28 digits. It matches pyarrow 25 on all 844
   decimal chunks of both datasets. Pinned by `test_a_decimal_s_bounds_are_read_whatever_its_storage`.
-- `test_stats_embeddings.py` is run by hand. It links the generator into a temp dir and
+- `test_stats_embeddings.py` runs in no CI job. It links the generator into a temp dir and
   generates there (about 2 min locally), so `testdata/tpch.sf1` is left alone:
   `TMPDIR=/build/peacock/tmp DUCKDB=/build/peacock/duckdb-1.5.4/duckdb
   PEACOCK_EMBEDDINGS_CACHE=/build/peacock/embeddings/testdata/embeddings-cache
@@ -164,7 +165,7 @@ fixes #236 and #237):
 - Measured with coverage.py 7.16.2 on shad-gpu: the cheap tier (35 files), and the corpus files
   over the whole corpus — answers and optimized at `tp4-single`, `tp1-single` and `tp4-rowgroup`,
   dynamic filters and reassembled at `tp4-single` (80 shards). Then each function the corpus
-  never ran was read. The runners lived in a scratch copy, `/tmp/peacock-opt/t3`.
+  never ran was read. The runners lived in a scratch copy on the host.
 - Coverage of `scripts/exec_model/*.py` and `operators/` (tests excluded), in statements:
 
   | | package | corpus reaches | either tier reaches | `operators/` | corpus | either |
@@ -314,8 +315,8 @@ fixes #236 and #237):
   - `test_parquet_scan`: a `TableSource` injecting empties (probability 1) over three batches
     returns 7 = `max_batches()`; red with the injection-budget term dropped.
 - Proven with steps alone checked. Cheap tier local and on shad-gpu: 35 files, 352 passed. On
-  shad-gpu, from `/tmp/peacock-opt/t3a/work` (the worktree's `scripts/exec_model`, testdata linked to
-  `/tmp/peacock-opt/repo/testdata`, identical to the worktree's by `rsync -c`):
+  shad-gpu, from a scratch copy (the branch's `scripts/exec_model`, its testdata identical to
+  the branch's by `rsync -c`):
   `test_engine_answers` at `tp4-rowgroup` in 40 shards, 120 passed, q8 included, 16 min wall;
   at `tp4-single` shards 0, 13 and 26 of 40, 9 passed. q8 alone: 137,760 steps, cap 169,049,
   483 s.
@@ -326,7 +327,7 @@ fixes #236 and #237):
 
 ## Task 4
 
-- Layout. Files were moved with `mv`; the coordinator stages them, and git pairs the renames.
+- Layout. Files were moved with `mv`, and git pairs the renames once they are staged.
   - `engine/`: plan, node, layout, runtime, batch, executors, accounting, forwarder, limit,
     single_partition_driver, partitioned_driver, scheduler, adaptive.
   - `operators/`: unchanged.
@@ -439,7 +440,7 @@ fixes #236 and #237):
   Byte-identical and green on four: `/usr/bin/python3` 3.12.3, pandas 2.2.2, pyarrow 18.1;
   the venv with pyarrow 25.0.1; CI's `rapidsai/base:25.02-cuda12.0-py3.12` (3.12.9, pandas
   2.2.3, pyarrow 18.1, run by docker over the same data); shad-gpu 3.13.15, pandas 3.0.6,
-  pyarrow 25.0.1 (`/tmp/peacock-opt/t5`, synced with `rsync --delete`).
+  pyarrow 25.0.1 (a scratch copy synced with `rsync --delete`).
 - q64: where the error is born. The spec's guess, correlated filters across repeated tables, is
   not what the numbers show. Each half (store_sales for 1999, then 2000; 18 joins each) misses
   by three independence and default assumptions, none of them a correlation:
@@ -530,15 +531,15 @@ fixes #236 and #237):
     (`test_replan`) reads `.rows`, which both have. It gains `replans`.
   - `plans/engine_plan.plan_text` is `test_engine_plan`'s former `rendered` helper, moved into
     production. The round-trip test now runs over it.
-- Shown unchanged on shad-gpu, from `/tmp/peacock-opt/t6a` (rsync `--delete`, testdata linked to
-  the existing sf1 copies; `.py` sha256 equal to the worktree's), tp4-single, 10 shards each,
+- Shown unchanged on shad-gpu, from a scratch copy (rsync `--delete`, testdata linked to the
+  existing sf1 copies; `.py` sha256 equal to the branch's), tp4-single, 10 shards each,
   19 min: answers 120, optimized 100, dynamic filters 58, reassembled 100, no failures. The
   cardinality golden is unchanged (dataset tier, local).
 - `-mini.cpu.txt` rows are the engine's at joins only. A partial `GpuAggregate` emits once per
   batch, so its rows follow the backend's batching: join-int's is 4,875 in the engine's run and
   400 here. `test_run_corpus` compares the tree, the answer's rows and the joins' rows.
 - Tests: cheap tier 36 → 40 files, 355 → 380 cases (`test_report` 8, `test_report_text` 3,
-  `test_run` 9, `plans/test_answers` 5; counts after the review rounds below). Dataset tier gains `tests/test_run_corpus.py` (1): about 20 s locally, DPhyp
+  `test_run` 9, `plans/test_answers` 5; counts as of the end of this task). Dataset tier gains `tests/test_run_corpus.py` (1): about 20 s locally, DPhyp
   built in the step. It is on the cheap loop's `elsewhere` list. Each shown red:
   - recording: no priced sets; the flip test inverted; `JoinOrder`s not appended; replans not
     appended; refusals not appended; pipeline candidates, scans or probed builds dropped; the
@@ -552,7 +553,7 @@ fixes #236 and #237):
   - `test_run_corpus`: a writer ignoring the existing file, a renderer word changed. A writer
     always `WHOLE` stays green there, correctly: `WHOLE` keeps declared sections, as the engine's
     does. `test_run` holds that difference.
-- Sample on shad-gpu, out of the tree in `/tmp/peacock-opt/t6a/out`: tpch q3 q5 q9 and tpcds q3
+- Sample on shad-gpu, out of the tree, in the scratch copy: tpch q3 q5 q9 and tpcds q3
   q64 at tp4-single and tp1-rowgroup, two invocations side by side (`--jobs 6` and `4`), 2:21 and
   4:20 wall, peak RSS 4.6 and 7.0 GB per worker. Seconds as planned / optimized:
 
@@ -568,13 +569,13 @@ fixes #236 and #237):
   two runs per (query, mode) plus probes and replans. Estimate for 6b: 600 × ~2.5 process-min ÷ 20
   jobs ≈ 75 min, plus q8 at `tp4-rowgroup` (≈ 500 s a run). That is past the spec's forty
   minutes, so 6b profiles first.
-- `.optimizer.txt` size, before the format decision below: q64 at tp4-single was 29,572 lines,
+- `.optimizer.txt` size, before the format below: q64 at tp4-single was 29,572 lines,
   2.1 MB, 28,663 of them one line per priced set. Its 18-relation clusters exceed `MAX_PAIRS`
   (6,626 sets priced, then the plan's order kept and orientation alone), again in each of its 7
   replans, until memory sources cut the clusters to 8 relations. No set repeated within a call
   (all 72 calls of the sample).
 - q64 has no dynamic-filter candidate at tp4-single; tpcds q3 has one that prunes nothing (24 → 24).
-- Review round 1, every finding fixed:
+- Then:
   - Moved out of `tests/corpus.py` into production: the parquet reader into `plans/tables.py`,
     since `engine_nodes.build` is what reads scans through it. Running a plan went into
     `plans/engine_run.py` (`run_plan`, `execute`, `execute_lanes`, `by_lane`, `answer`,
@@ -594,7 +595,7 @@ fixes #236 and #237):
     pool and the writes. Both are tested cheaply: a task for a query no plan golden has fails
     with `KeyError` in both files next to an intact `skipped:` section and exits 1, and a
     missing dataset or library is refused.
-  - Format, the human's decision: per DPhyp call, `priced N sets`, the tree or `DPhyp stopped at
+  - Format: per DPhyp call, `priced N sets`, the tree or `DPhyp stopped at
     its budget of N pairs after pricing M sets: the plan's order kept`, the oriented tree, one
     line per chosen join (sides, rows, C_out), the tree's C_out beside the plan order's, the
     flips. `JoinOrder` gains `max_pairs`, `joins` (`ChosenJoin`) and `plan_cost`. Those sets
@@ -604,14 +605,14 @@ fixes #236 and #237):
     (each check removed), `max_pairs`, chosen joins over DPhyp's tree, `plan_cost` over the
     chosen tree (a plan DPhyp reorders, test_optimize's), and each new rendered line.
   - Proven again: cheap tier 40 files, 379 passed; dataset tier 4 + 3 + 1. On shad-gpu (`.py`
-    sha256 equal to the worktree's) the four suites at tp4-single: 120, 100, 58, 100, none
+    sha256 equal to the branch's) the four suites at tp4-single: 120, 100, 58, 100, none
     failed. The sample again, every answer equal to the planned one, 2:19 and 4:02 wall. tpch
     tp4-single q3 17.8 / 17.3, q5 31.4 / 28.7, q9 94.5 / 43.9; tp1-rowgroup q3 5.7 / 5.4, q5
     6.4 / 5.6, q9 13.8 / 14.2. tpcds tp4-single q3 12.1 / 10.7, q64 98.4 / 142.2; tp1-rowgroup
     q3 1.5 / 2.3, q64 11.3 / 43.9.
   - q64's section is now 1,178 lines and 198 KB at tp4-single (337 of them the plan diff), and
     954 lines and 116 KB at tp1-rowgroup. The tpcds sample file is 206 KB, the tpch one 40 KB.
-- Review round 2: `plans/answers.py` raises `AssertionError` by hand (`_require`) instead of
+- `plans/answers.py` raises `AssertionError` explicitly (`_require`) instead of
   `assert`, which `python -O` strips. Under `-O` the old compare passed a dropped row;
   `test_a_mismatch_is_raised_under_python_dash_o_too` runs it under `-O` in a subprocess and was
   red before. With `_require` disabled, three of the file's five tests go red. `_canonical` and
@@ -632,15 +633,15 @@ fixes #236 and #237):
   Stripping a `\r` before `\n` is Rust's too, but no count can show it: a field value is trimmed,
   and a bare kind has no `output_bytes`.
 - `GpuMemorySource`, the one prototype kind (`engine_plan.PROTOTYPE_KINDS` = `cost_model.FREE`),
-  costs nothing, outside the conf (the human's decision). A memory source hands back a build that a
+  costs nothing, outside the conf. A memory source hands back a build that a
   probe plan or a stopped run made and was priced for, kept where the plan reads it: free by
   nature, not because `ram_to_vram_bytes` is 0.0 today. Any other kind the conf lacks raises, as
   the engine panics.
 - Optimized = the final plan's run + every probe plan's run + every run a replan stopped
   (`run.priced`). All of it is work done. Check: q64's optimized `storage_read_bytes` equals the
   planned run's exactly at every mode (805,720,426 at tp4-single), so nothing is read twice.
-- A fourth output, `<bench>/<mode>.costs.txt` (the human kept it, under a name that does not
-  promise what the engine's `.cost.txt` is, a function of its `.cpu.txt`): per query `planned`,
+- A fourth output, `<bench>/<mode>.costs.txt` (named so that it does not promise what the
+  engine's `.cost.txt` is, a function of its `.cpu.txt`): per query `planned`,
   `optimized`, `probes`, `stopped` (total and bytes per category) and `fired` (`report.Fired`:
   probes, scans narrowed, DPhyp calls, calls whose tree's C_out is below the plan order's
   (`reordered`), calls stopped at budget, flips, replans, refusals). It merges like the other two,
@@ -687,7 +688,7 @@ fixes #236 and #237):
   That includes every lane's `batch_rows`/`batch_bytes`, which the hash decides. The per-dtype
   digests are pinned by a test that passed before the change. The cardinality golden is unchanged.
   The four corpus suites at tp4-single on shad-gpu, from the same copy (`.py` sha256 equal to the
-  worktree's, 120 files), 10 shards each over 16 processes: answers 120, optimized 100, dynamic
+  branch's, 120 files), 10 shards each over 16 processes: answers 120, optimized 100, dynamic
   filters 58, reassembled 100, none failed, 10 min wall (19 in 6a).
 - Seconds as planned / optimized, before → after: q64 tp4-single 98.4 / 142.2 → 34.7 / 52.7;
   q64 tp1-rowgroup 11.3 / 43.9 → 7.1 / 12.5; tpch q9 tp4-single 94.5 / 43.9 → 73.2 / 10.8.
@@ -698,10 +699,10 @@ fixes #236 and #237):
   rebuild of every scan per replan, gone with the read-once tables, and the Python estimation and
   DPhyp of 30 calls (9 stopped at the budget), which remain. Bytes cannot see either, so the report
   shows q64 as a saving. It is a cost of the prototype's replanning, not of the plan.
-- Full run on shad-gpu, `/tmp/peacock-opt/t6d` (rsync `--delete` from the worktree, sf1 linked as
+- Full run on shad-gpu, from a scratch copy (rsync `--delete` from the branch, sf1 linked as
   in 6a), `run.py --jobs 16` on 22 cores (another user held about four), both benches, all five
-  modes: 600 runs, 0 failed, 15:59 wall, peak RSS 7.7 GB in one worker. The first run, before the
-  review, took 16:27 and 7.5 GB; its `cpu.txt` and `optimizer.txt` are byte-identical to this
+  modes: 600 runs, 0 failed, 15:59 wall, peak RSS 7.7 GB in one worker. An earlier run, before
+  this task's last changes, took 16:27 and 7.5 GB; its `cpu.txt` and `optimizer.txt` are byte-identical to this
   one's. Each optimized answer held to the planned one. tpch: 39 run at each mode. tpcds: 81 run
   and 18 skipped (refused by the planner) at each mode. The tail is tpch q9 at tp4-rowgroup, 818 s
   planned (901 s in the first run) and 13.9 s optimized; then, in the first run, tpch q8
@@ -735,18 +736,18 @@ fixes #236 and #237):
   - `run.py`: probes or stopped runs left out of optimized, no cost file, no page;
   - `test_run_corpus`: no page, planned priced into optimized;
   - tables: the cached frame handed out shared; digests: `tolist` for `.array`.
-- Review round 1: no blocking or important finding; the human's decisions applied. The output is
+- The output is
   `<mode>.costs.txt`. The final ratio stays E × (O / P) / D and the page calls it projected, in
   its title and its one-sentence definition. The chips count effects (`Fired.reordered`,
   `narrowed`), with calls and probes in the hover. `GpuMemorySource` is free outside the conf.
-  Nits: the `run.py` docstring within its cap; Rust's line split, sum and rounding (above);
+  Also: the `run.py` docstring within its cap; Rust's line split, sum and rounding (above);
   `cost_text` moved into its one caller, the test; the engine's `.cost.txt`, not the prototype's
   file, is a function of its `.cpu.txt` (build-test.md, README); "once per task" for the table
   cache; the digest test named for what it pins; the README names the generating environment
   (shad-gpu, Python 3.13.15, pandas 3.0.6) and that pandas' `memory_usage(deep=True)` is the byte
   count. Regenerated as above; cheap tier 43 files, 398 passed; `test_run_corpus` 1; cardinality
   golden unchanged.
-- Review round 2: a row whose rules ran and changed nothing shows `nothing changed the plan` with
+- A row whose rules ran and changed nothing shows `nothing changed the plan` with
   its counts in the hover; `nothing fired` is kept for a row where no rule ran, as in
   `.optimizer.txt`. The re-render from the committed files changed only the rules cell of 10 rows
   (tpch q3, q19, q20, hash-join, join-int, mixed-join, rollup-over-join; tpcds q2, q78, q93). The
@@ -756,8 +757,7 @@ fixes #236 and #237):
 
 ## Task 7
 
-- Keys are by content, `<dataset>.sf<sf>/<sha256>.tsv` (the human's choice in review, over
-  the plan's fixed key): the bucket keeps no versions (`get-bucket-versioning` is empty), and a
+- Keys are by content, `<dataset>.sf<sf>/<sha256>.tsv`, not a fixed key: the bucket keeps no versions (`get-bucket-versioning` is empty), and a
   content key is never replaced. `testdata/calibration/records.sha256`, committed, maps each
   dataset to its sha256 in sha256sum's format (`<sha>  tpch.sf40/records.tsv`), so
   `sha256sum -c` also checks the fetched files. Bucket, endpoint, pin, `pinned_sha` and
@@ -771,18 +771,19 @@ fixes #236 and #237):
   dataset's (query, mode) set is exactly what `corpus_benchmark_cases.inc` declares. Queries and
   modes lose their `_` as the macro does (`stringify!($query).replace('_', "-")`). A refusal
   leaves the pin alone and exits 1 with the tree home. Each file is uploaded through
-  `REMOTE_AWS=/home/info/bin/aws` on stdin and read back under `bash -o pipefail`. Only then is
+  `REMOTE_AWS` (shad-gpu's aws CLI) on stdin and read back under `bash -o pipefail`. Only then is
   it pinned and moved to `testdata/calibration/<dataset>.sf<sf>/records.tsv`. The benchmark
   tree cannot be the reference for completeness: it accumulates across runs, and a record is one.
 - Migration: `tpch.sf40/records.tsv` copied server-side to
   `tpch.sf40/3aab8a668a606f8bf523b6ff688427c278473f09feb530f939816878446e2a7c.tsv`, read back
   with that sha256 (16,947,451 bytes, `text/tab-separated-values`). The old fixed-key object
-  `tpch.sf40/records.tsv` was then deleted by the coordinator.
+  `tpch.sf40/records.tsv` was then deleted.
 - `scripts/calibration/fetch_record.sh <dataset>.sf<sf> [--ssh HOST]` fetches the pinned key
   through a `.partial` and checks the sha256. `$AWS` (default `aws`) is the CLI on whichever host
-  makes the call: a CI runner's with the `S3_*` secrets, `/home/info/bin/aws` on shad-gpu (not
-  on a non-interactive ssh's PATH), the same through `--ssh shad-gpu` from a dev box. This
-  workstation has no aws CLI and no `~/.aws`, so it fetched through shad-gpu.
+  makes the call: a CI runner's with the `S3_*` secrets, shad-gpu's own named in full (it is not
+  on a non-interactive ssh's PATH; build-test.md's *Datasets* has it), the same through
+  `--ssh shad-gpu` from a dev box. A dev box without an aws CLI or credentials fetches through
+  shad-gpu.
 - Readers of the old path: the preamble test writes its own record (below); `call_cost.RECORD`
   is the fetched `tpch.sf40/records.tsv`; `create_nsys_profile.sh` and `nsys_hbm.py` keep the
   pulled `calibration/records.tsv`; `build-test.sh` keeps what it pulls and publishes nothing
@@ -807,7 +808,7 @@ fixes #236 and #237):
   now 848 with this task's 9 (`test_split.py` 8, the measured check 1), total 2817. The
   committed `calls.tsv`, `hbm.tsv` and panels cover three cases of an earlier q6/q19 run, whose
   record is in git's history; the page says so.
-- Review round 1 (redesign above, and): `split_record.py` spelled queries with `_` (red with a
+- Also: `split_record.py` spelled queries with `_` (red with a
   `scan_limit` case, then fixed); the host-record and `.rc` checks; the `capture=none` refusal
   (red with the check removed); the fetch script's usage takes the `AWS=` form, refuses a
   second `--ssh` and resolves its path before `cd`; the env var restored on panic; comment caps
@@ -823,17 +824,17 @@ fixes #236 and #237):
   it, and `fetch_record.sh --ssh shad-gpu scratch.sf40` fetched the same bytes; the object was
   then deleted, leaving the bucket as it was. `fetch_record.sh tpch.sf40` by the
   new key gave 174,690 rows, sha256 OK, through shad-gpu from here and on shad-gpu
-  (`/tmp/peacock-opt/t7`). The measured check passed in both places. `split_record.py` gives the
+  (in a scratch copy). The measured check passed in both places. `split_record.py` gives the
   sf40 record back byte for byte. Workflows parsed; every touched `run:` block and script passes
   `bash -n`; `--upload-record` is now an unknown flag.
-- Review round 2: `pull_one` (`shadgpu-env.sh`) returns 2 when the transfer fails and 1 only
+- `pull_one` (`shadgpu-env.sh`) returns 2 when the transfer fails and 1 only
   when the host has no file. The record's call site dies on 2 ("pulling … failed, so the copy
   here is broken and nothing was published") instead of reaching the host check, which would
   have called it a newer run. Shown with `resilient_rsync` stubbed to fail against a scratch
   `REMOTE_REPO`; the missing-file case still gives `record_home=0`. `create_nsys_profile.sh`'s
   two calls die on any non-zero code, as before, now after a "the transfer failed" line. The
-  two `record_home` blocks are merged and `names` is local to `publish_record`. No tree+pin
-  guard (the human's decision).
+  two `record_home` blocks are merged and `names` is local to `publish_record`. Nothing guards
+  the tree and the pin against being committed apart.
 
 ## Task 9
 
@@ -865,8 +866,8 @@ fixes #236 and #237):
     `pytest scripts/exec_model/tests` collects 787 tests, the 120 + 100 corpus queries among them.
     The README now selects the cheap tier as `pipeline.yml` does and warns off whole-folder
     pytest.
-  - The README said the coordinator owns the prototype and edits it directly, against
-    `prompts.md`; the paragraph went.
+  - The README described a workflow for editing the prototype that `prompts.md` contradicts;
+    the paragraph went.
   - A Python cost callback that raises is swallowed by ctypes ("Exception ignored on calling
     ctypes callback function"), answers 0, and `dphyp.solve` returns a tree: shown with a raising
     callback over a three-relation chain. A `StatsError` inside `SetEstimates.cost` would not stop
@@ -901,8 +902,8 @@ fixes #236 and #237):
     (identical for a cost that does not raise) has changed since.
   - manual: `test_stats_embeddings` 1 passed, 1:12; `fetch_record.sh --ssh shad-gpu tpch.sf40` and
     then `test_call_cost_measured`, 1 passed, both in a `git archive HEAD` extraction so the
-    worktree's `testdata/` was not written; the plain `fetch_record.sh tpch.sf40` on shad-gpu
-    with `/home/info/bin` on the PATH, in a scratch directory removed after. Both fetches: 174,690
+    checkout's `testdata/` was not written; the plain `fetch_record.sh tpch.sf40` on shad-gpu
+    with its aws CLI on the PATH, in a scratch directory removed after. Both fetches: 174,690
     rows, the pinned sha256.
   - `run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out …` into a scratch
     directory, 2 runs, 0 failed, 12 s; `cost_report.py` re-rendered the committed page
@@ -939,8 +940,8 @@ fixes #236 and #237):
 ## Corpus verification
 
 - `dd9fa865` checked again on shad-gpu after Tasks 6a, 6b and 9, with no code changed. Source: a
-  `git archive` of `scripts/exec_model`, `peacockdb-dphyp` and the testdata it reads, in
-  `/tmp/peacock-opt/cv`. sf1 is linked as in `t6d`. Python 3.13.15, pandas 3.0.6, pyarrow 25.0.1,
+  `git archive` of `scripts/exec_model`, `peacockdb-dphyp` and the testdata it reads, in a
+  scratch directory on the host. sf1 is linked as in Task 6b's full run. Python 3.13.15, pandas 3.0.6, pyarrow 25.0.1,
   DuckDB 1.5.4. DPhyp was built there and is byte-identical to the host's earlier build.
 - `run.py --jobs 16 --out full`, both benches, all five modes: 600 runs, 0 failed, 90 skipped
   (tpcds, 18 per mode), exit 0. Wall 16:48, peak RSS 7.0 GB. All 31 outputs are byte-identical to
@@ -958,3 +959,124 @@ fixes #236 and #237):
   0 failed, and no log has a `FAIL`, `Traceback`, `Error` or `Killed`. `test_engine_optimized`
   ran at `tp4-single` only. At the other four modes `run.py` stands in: it holds every optimized
   answer to the planned one, and the planned one is checked against DuckDB above.
+
+## Task 8
+
+- tpcds sf40 is on shad-gpu beside tpch's, where build-test.md's *Datasets* places the sf40
+  data: 24 files, 15,787,933,629 bytes (15 GB). Made with `generate_testdata.sh --bench tpcds
+  --sf 40` (DuckDB 1.5.4, threads=1, spill pinned on the dataset volume, sampled every 5 s,
+  aborting under 300 GiB free): 9 min 41 s, peak RSS 60 GiB, nothing spilled; 735 GB free
+  before, load ~1 on 22 cores. The 24 files' sha256 list hashes to `58610fc1…bb36`. The host's
+  copy of `generate_testdata.sh` differs from the repo's in comments only.
+- The case list is the device column of `corpus_cases.inc` whole: 14 new cases, 26 in all.
+  tpch `shuffle_additive_avg` at all five modes; `aggregate_groupby`, `filter_project`,
+  `shuffle_additive`, `shuffle_stddev`, `nested_loop_join` at `tp1_single`; tpcds q37, q82, q84,
+  q85 at `tp1_single`. q37 is not in the spec's list, but its device cell is `tp1_single`, so
+  "every query enabled on the device" includes it. `scan_limit` and `cross_join` are `none` on
+  the device and stay out.
+- `build-test-shadgpu.sh`'s run links every `<dataset>.sf<sf>` the case list names from
+  `DATASETS_DIR` (`shadgpu-env.sh`) rather than tpch's alone. The names come from the case
+  file by `sed`, checked non-empty before any phase runs. `build-test.sh` (verda-gpu) still
+  checks `tpch.sf40` only, and the page says what that means.
+- Red: the pin in `the_sections_of_a_file_are_ordered_numerically` moved to the ten tpch
+  `tp1_single` names before the cases were added; on shad-gpu it failed with left
+  `[q1, q6, q17, q19]`. Green after: 8 harness assertions pass and `--list` gives 26 `bench_`.
+- Before the full run, filtered runs beside a neighbour (not published) showed every new shape
+  plans and runs at sf40: the four tpcds cases (31.9 s for all four), filter-project (78 s,
+  most of it unloading ~96 M rows), nested-loop-join, shuffle-stddev.
+- First full run (`20261007T190853-1362626`, started 16:08 host time on an empty card, load 0.4)
+  was stopped at 17:08, rc 143, nothing pulled or published: a neighbour (30-70 GB, 99 %)
+  arrived during `shuffle-additive-avg` at `tp1-rowgroup`, whose last three runs went 47 s → 96,
+  177, 166 s, and whose `tp1-single` read 1.70 s against a 0.79 s run in the same ten. The record
+  is one run, so a filtered re-run cannot replace those rows; the whole run is repeated. The 22
+  cases before it took 57 min; the tpcds q84 case read 0.19 s here against 0.56 s in the smoke
+  run beside a 19 GB neighbour.
+- Second full run `20261007T212158-1467410`: started 18:22 host time after two polls 140 s apart
+  with no compute process on the card (load 0.04); 139.2 GiB free at the pool's install; a
+  monitor every 2 min saw no other process to the end. 34 passed in 3,601.56 s, rc 0, 255,220
+  record rows. `--pull-benchmarks` published `tpch.sf40/1013141a…def2.tsv` (254,160 rows,
+  26,092,745 bytes) and `tpcds.sf40/b6a0372e…0c90.tsv` (1,060 rows, 105,809 bytes) and pinned both;
+  `fetch_record.sh --ssh shad-gpu` fetched each as pinned, and `split_record.py` over the pulled
+  record gives the same bytes.
+- Trees: tpch's five files rewritten (26 sections in all with tpcds's), tpcds's
+  `tp1_single.benchmark.txt` new, 406,391 bytes over the six. Every trailer `build=release`,
+  `allocator=rmm-pool … 69.0GiB … of 139.2GiB free`.
+- `test_call_cost_measured` over the new tpch record: 22 cases, 25 mode pairs as measured,
+  0 wrong, 5 within 10 % (was 12, 17, 0, 3).
+- Proving: harness assertions 8/8 on shad-gpu (`--skip bench_`); rust-only `--lib` 604 passed
+  (2 ignored), `test_ci_coverage` 9, `test_corpus_goldens` 26 (the trees' trailer arithmetic, both
+  datasets); calibration tests 20; every touched script `bash -n`, the remote bench script rendered
+  and `bash -n`.
+- Step 5 over the tpcds cases: `create_nsys_profile.sh` named `goldens/tpch.sf1` and
+  `nsys_calls.py` matched cases to a golden on mode alone, so a capture holding tpcds cases would
+  have been refused after an hour's capture. Now `--plans-dir` is the goldens root and each (dataset, mode) is checked
+  against `<dataset>.sf1/<mode>.plans.txt`; the script checks each case-list dataset's directory
+  before the capture. `nsys_hbm.py` and `plot.py` already key on the whole case. Red first:
+  `test_each_case_is_checked_against_its_own_datasets_goldens` (a tpch and a tpcds case in one
+  capture, and a tpcds golden the run disagrees with refused naming q37) failed with
+  "goldens/tp1-single.plans.txt does not exist". The case-list reader is `bench_datasets` in
+  `shadgpu-env.sh`, shared by both scripts, whitespace-tolerant and refusing when it parses fewer
+  lines than `^\s*corpus_query_benchmark!` counts (dry runs: the committed list, an indented
+  `corpus_query_benchmark! ( tpcds , 1 , …)` read as `tpcds.sf1`, a `forty` sf refused 15/14, an
+  empty list refused).
+  `every_declared_case_has_a_section_in_the_tree` (rust-only), red with the tpcds tree moved
+  aside ("never measured") and with q85's section renamed ("no section for q85"); both restored,
+  sha256 unchanged. Proving at that point: calibration 21, rust-only `--lib` 604 (2 ignored),
+  `test_corpus_goldens` 27, `test_ci_coverage` 9; `bash -n` on the three scripts and the rendered
+  remote bench script.
+- Derived files. The panels are drawn again from the two pinned records (255,220 rows, 25,522
+  calls) with the committed three-case `hbm.tsv`: 67 panels and `index.html`, 18 files rewritten
+  and 50 added, none removed (icicle/ and query/ +23 each, compute/ +4: `CudfNestedLoopJoin`,
+  `CudfRepartition{Hash, 1→4}`, `CudfSort`, `CudfSortPreservingMerge`), 4.6 MB, matplotlib
+  3.9.2 on the dev box, 72 s. The pooled panels (load/, compute/, spread/, hbm/) now draw each
+  `<dataset>.sf<sf>` as a series with a legend. `calls.tsv` and `hbm.tsv` are not regenerated:
+  shad-gpu stopped answering ssh before either Nsight pass could start (port 22 timing out from
+  22:35 UTC for over two hours; its card was held by other users' jobs until then).
+- Sizes measured on shad-gpu before that, on one small case each: the counters capture's sqlite
+  grows 27 MB per second of run (q6 `tp1-single`, 13 s: 351 MB, 19 metrics at 20 kHz), ~100 GB
+  for the hour-long corpus; the trace capture of q6 `tp1-rowgroup` is 182 MB. A row per
+  execution, `hbm.tsv` over the corpus would be ~255 thousand rows and 25 MB, 97 % of it the six
+  rowgroup cases.
+- So the counters pass is a capture per case (`<test> --exact`), joined on the host with
+  `nsys_hbm.py --case` (python 3.8 there, `test_hbm.py` green under it) and deleted before the
+  next case, so the host holds one case's capture at a time; `nsys_hbm.py --parts` merges the
+  per-case outputs there and checks them against the whole record both ways; only `hbm.tsv`
+  comes home and stays in git. It is a row per call: each reading the median over the
+  executions, with `executions` and `samples` kept, 25,522 rows for the corpus.
+- Why the median over all ten and not fewer executions. From the committed three-case capture
+  (45 calls × 10 executions): a call with ≥ 10 samples sits a median 2.3 % from its own
+  10-execution median in any one execution (p90 26 %, all of that in small aggregates near the
+  10-sample line), and byte-weighted the error of one execution is 0.5 %, of a median of three
+  0.3 %, of five 0.2 %. By kind, a median of three: `CudfFilter` p90 1.1 %, `CudfScan` 3.5 %,
+  `CudfHashJoin{Inner}` 5.3 %, `CudfAggregate{Partial}` 17 %, `CudfAggregate{Merge}` 43 %.
+  Under 10 samples a call moves by up to its whole value at any count (p90 100 %). Three
+  executions would be enough for the bytes that matter, but fewer executions needs a count the
+  harness does not expose — `MEASURED_RUNS` is a constant in `src/test_support/` — and this task
+  changes nothing under `peacockdb-core/src/`, so the counters pass keeps ten and its median is
+  the reference itself. The case-at-a-time capture is what bounds the disk.
+- `hbm.tsv` has no S3 path: it stays in git, and the record's publish and `fetch_record.sh` are
+  as Task 7 left them.
+- Code: `nsys_hbm.py --record` repeats (one per published dataset file), reading through
+  `record.read_records`, which `plot.py` now shares; red first with a tpch and a tpcds case in one
+  capture joined onto their two records ("1 captured calls have no row"). The plot test with two
+  datasets read the saved figures' legends and was red with empty legends. Per call: red first
+  was `executions` missing from the join's output; shown red with the code changed under them,
+  the median of three executions (20/40/90 % of peak gives the 40 % call; with a mean it fails)
+  and a per-case join under another case's name (fails with its check removed); a merge missing
+  a case's part is refused naming it; `plot.hbm_points` gives the same points from a file a
+  row per execution and from its fold (`record.hbm_per_call`), and a different list when the
+  panel does not fold.
+- Colours: `plot.py` builds one series → colour map in `main` from every series in the records
+  and the hbm rows and hands it to every pooled panel, and every pooled panel carries a legend,
+  one series or two. So tpch is the same colour in a panel only tpch makes (`CudfNestedLoopJoin`,
+  `CudfRepartition{Hash, 1→4}`, hbm/) as beside tpcds. Red first: a kind only tpcds makes drew no
+  legend. Re-rendered: those three panels changed, the other 64 and `index.html` did not.
+- The counters pass covers the whole corpus: `create_nsys_profile.sh --metrics` under a
+  `PCK_TEST_FILTER` selecting fewer cases than the list is refused before any ssh, naming both
+  counts (dry run: `_q8` selects 3 of 26), since the merge is checked against every pinned
+  record; a case list of `none` lines alone is refused as declaring no timed case. `hbm_per_call`
+  decides per row, so files of both shapes fold together, and `plot.py` folds each `--hbm` file
+  as it reads it.
+- Proving: calibration tests 29 (`test_calls` 6, `test_hbm` 8, `test_plot` 7, `test_split` 8),
+  rust-only `test_corpus_goldens` 27 and `test_ci_coverage` 9, `bash -n` on the five touched
+  scripts, `pipeline.yml` parsed. `build-test.md`: Rust 1890, C++ 94, Python 859, total 2843.

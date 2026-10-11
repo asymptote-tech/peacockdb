@@ -62,8 +62,48 @@ PATCHED_LD="$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat"
 PATCHED_LD="$PATCHED_LD:/home/info/glibc-$BUILD_GLIBC/lib"
 PATCHED_LD="$PATCHED_LD:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\${LD_LIBRARY_PATH:-}"
 
-# sf40 lives outside the repo on the host and is read in place; 40 GB is not copied per run.
-SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+# The large datasets live outside the repo on the host, `<dataset>.sf<sf>` under this, and
+# are read in place; tens of GB are not copied per run.
+DATASETS_DIR=/home/info/peacock-datasets/testdata
+SF40_DIR=$DATASETS_DIR/tpch.sf40
+
+# The benchmark's case list, which names the datasets a run reads.
+BENCH_CASES=peacockdb-core/tests/common/corpus_benchmark_cases.inc
+
+# Every corpus_query_benchmark! line of the case list as `<dataset> <sf> <query> <modes>`, the
+# modes `|`-separated with no spaces. Read as `read_cases` and split_record.py read it — one
+# invocation per line, leading space allowed — and refused (return 1, nothing on stdout) unless
+# every invocation line parsed: a line skipped here is a dataset no run links in and a case
+# no capture takes.
+bench_lines() {
+  local w='[[:space:]]*' ident='\([A-Za-z_][A-Za-z0-9_]*\)' sf='\([0-9][0-9]*\)' lines parsed
+  lines=$(grep -c "^${w}corpus_query_benchmark!" "$BENCH_CASES") || lines=0
+  parsed=$(sed -n "s/^${w}corpus_query_benchmark!$w($w$ident$w,$w$sf$w,$w$ident$w,\([^)]*\)).*/\1 \2 \3 \4/p" \
+    "$BENCH_CASES")
+  if [ "$lines" -eq 0 ] || [ "$(grep -c . <<< "$parsed")" -ne "$lines" ]; then
+    echo "$BENCH_CASES: $lines corpus_query_benchmark! lines, $(grep -c . <<< "$parsed") of" \
+      "them read as (dataset, sf, query, modes)" >&2
+    return 1
+  fi
+  awk '{ modes = ""; for (i = 4; i <= NF; i++) modes = modes $i; print $1, $2, $3, modes }' \
+    <<< "$parsed"
+}
+
+# Each `<dataset>.sf<sf>` the case list times, once, a line each.
+bench_datasets() {
+  local lines
+  lines=$(bench_lines) || return 1
+  awk '{ print $1 ".sf" $2 }' <<< "$lines" | LC_ALL=C sort -u
+}
+
+# Each timed case, a line each: `<dataset> <sf> <query> <mode>`, the macro's spellings.
+# `none` declares a query timed at no mode, so it gives no case.
+bench_cases() {
+  local lines
+  lines=$(bench_lines) || return 1
+  awk '$4 != "none" { n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }' \
+    <<< "$lines"
+}
 
 # The host's aws CLI, with the S3 credentials in its ~/.aws. Not on a non-interactive ssh's
 # PATH, so named in full; a workstation reaches the buckets through it.

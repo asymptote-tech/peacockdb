@@ -24,3 +24,19 @@ corpus_query_benchmark!(tpch, 40, q1, tp1_single | tp1_rowgroup | tp4_single | t
 corpus_query_benchmark!(tpch, 40, q19, tp1_single);
 // A second join beside q19's; tp1-single only, for the reason q19 is.
 corpus_query_benchmark!(tpch, 40, q17, tp1_single);
+// The rest of the device column in `corpus_cases.inc`, each query at the modes it names there,
+// so that every (query, mode) the corpus enables on a device is timed. nested-loop-join reads
+// region and nation, which do not grow with sf, so its rows describe the host prologue.
+corpus_query_benchmark!(tpch, 40, shuffle_additive_avg, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized);
+corpus_query_benchmark!(tpch, 40, aggregate_groupby, tp1_single);
+corpus_query_benchmark!(tpch, 40, filter_project, tp1_single);
+corpus_query_benchmark!(tpch, 40, shuffle_additive, tp1_single);
+corpus_query_benchmark!(tpch, 40, shuffle_stddev, tp1_single);
+corpus_query_benchmark!(tpch, 40, nested_loop_join, tp1_single);
+
+// ── TPC-DS, sf40 ────────────────────────────────────────────────────────────
+// Every tpcds query the device runs, at tp1-single, the one mode its device cell names.
+corpus_query_benchmark!(tpcds, 40, q37, tp1_single);
+corpus_query_benchmark!(tpcds, 40, q82, tp1_single);
+corpus_query_benchmark!(tpcds, 40, q84, tp1_single);
+corpus_query_benchmark!(tpcds, 40, q85, tp1_single);

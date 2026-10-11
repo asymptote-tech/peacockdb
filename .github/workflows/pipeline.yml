@@ -383,7 +383,7 @@ jobs:
           #   Every number under testdata/benchmark-results/ assumes both.
           # peacock_gpu_benchmarks = the measurement harness, run below with --skip bench_:
           #   its own assertions about where a section goes and what a record row must hold.
-          #   The timed cases are tens of minutes of device time and are not a merge gate;
+          #   The timed cases are about an hour of device time and are not a merge gate;
           #   scripts/build-test-shadgpu.sh --run-benchmarks is what runs those.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.
@@ -640,7 +640,7 @@ jobs:
               tname=\${t##*/}
               echo "--- \$tname"
               # The measurement binary is staged here for its own assertions. Its bench_
-              # cases are the measurement, tens of minutes on a device, and they write a
+              # cases are the measurement, about an hour on a device, and they write a
               # benchmark tree — neither belongs in a correctness job.
               skip=""
               case "\$tname" in peacock_gpu_benchmarks) skip="--skip bench_" ;; esac
