@@ -19,14 +19,14 @@ from ...optimizer.report import (
 from ...optimizer.report_text import render
 
 STAR = JoinOrder(
-    relations=("MemorySource p0", "LoadParquet sales", "LoadParquet spread"),
+    mj="MJ1", relations=("MemorySource p0", "LoadParquet sales", "LoadParquet spread"),
     edges=((0b001, 0b010, "r0.dk = r1.sk"), (0b001, 0b100, "r0.dk = r2.pk")),
     priced=(PricedSet(0b011, 500.0, 8000.0), PricedSet(0b101, 50.0, 400.0), PricedSet(0b111, 500.0, 12000.25)),
     max_pairs=10_000, tree=((0, 2), 1), unsolved=None, oriented=((2, 0), 1),
     joins=(ChosenJoin(0b100, 0b001, 50.0, 400.0), ChosenJoin(0b101, 0b010, 500.0, 12000.25)),
     plan_cost=20000.25, flipped=((0b100, 0b001),))
 PAIR = JoinOrder(
-    relations=("MemorySource m0", "LoadParquet spread"), edges=((0b01, 0b10, "r0.dk = r1.pk"),),
+    mj="MJ2", relations=("MemorySource m0", "LoadParquet spread"), edges=((0b01, 0b10, "r0.dk = r1.pk"),),
     priced=(PricedSet(0b11, 100.0, 800.0),), max_pairs=1, tree=(0, 1), unsolved="budget", oriented=(0, 1),
     joins=(ChosenJoin(0b01, 0b10, 100.0, 800.0),), plan_cost=800.0, flipped=())
 
@@ -54,7 +54,7 @@ dynamic filters
   returns: row groups 2 -> 0
     rk: no keys
   build p0 read from memory: 50 rows
-join order 1: 3 relations
+join order MJ1: 3 relations
   r0 MemorySource p0
   r1 LoadParquet sales
   r2 LoadParquet spread
@@ -69,7 +69,7 @@ join order 1: 3 relations
   flipped: r2 builds, r0 probes
 replan 1: a build of 100 rows against 10.0 estimated (q-error 10.00) for GpuHashJoin on=[(dk@0, sk@0)]
   kept m0 (100 rows), m1 (1000 rows)
-  join order 1: 2 relations
+  join order MJ2: 2 relations
     r0 MemorySource m0
     r1 LoadParquet spread
     edge r0-r1: r0.dk = r1.pk
@@ -102,7 +102,7 @@ def test_a_report_where_nothing_fired_is_one_line():
 def test_a_cluster_left_as_it_was_says_the_plan_did_not_change():
     plan = "GpuUnload\n  GpuLoadParquet: t\n"
     text = render(OptimizerReport((), (), (), (PAIR,), (), (), plan, plan))
-    assert text.startswith("join order 1: 2 relations\n") and text.endswith("plan unchanged\n"), text
+    assert text.startswith("join order MJ2: 2 relations\n") and text.endswith("plan unchanged\n"), text
 
 
 if __name__ == "__main__":

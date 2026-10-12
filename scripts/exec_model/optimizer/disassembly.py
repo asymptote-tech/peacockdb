@@ -156,7 +156,7 @@ class _Disassembly:
                 if None not in positions:
                     hashed = tuple(positions)
                     break
-        part = _Part(EngineNode("GpuHashJoin", {}, schema, [build.node, probe.node]),
+        part = _Part(EngineNode("GpuHashJoin", {}, schema, [build.node, probe.node], mj=self.cluster.mj),
                      tuple(need), build.lanes, False, hashed)
         fields.update(_layout_fields(part, schema))
         return replace(part, node=replace(part.node, fields=fields))

@@ -60,12 +60,15 @@ class Edge:
 @dataclass(frozen=True)
 class MultiJoin:
     """`root` is the cluster's topmost join as the plan has it — the baseline order;
-    `output` names each of its output columns."""
+    `output` names each of its output columns. `joins` are the joins it holds and `mj` their
+    id, none until `named` has given one."""
 
     root: EngineNode
     relations: tuple[Relation, ...]
     edges: tuple[Edge, ...]
     output: tuple[RelColumn, ...]
+    joins: tuple[EngineNode, ...]
+    mj: str | None
 
 
 def is_reorderable(node: EngineNode) -> bool:
@@ -86,6 +89,27 @@ def clusters(plan: EngineNode) -> list[MultiJoin]:
     return found
 
 
+def named(plan: EngineNode) -> EngineNode:
+    """`plan` with each cluster's joins carrying its id, `MJ<n>`, numbered in `clusters`' order. A
+    plan is named whole or not at all, so a named one — a replan's — comes back unchanged.
+
+    The id is an attribute of the join nodes, not a table keyed by `id(node)`: `replaced`, a
+    replan's memory sources and a reorder all copy nodes, and `dataclasses.replace` copies it with
+    them where an identity-keyed table would lose them. Disassembly gives the joins it makes the
+    cluster's id."""
+    found = clusters(plan)
+    if not found or any(cluster.mj is not None for cluster in found):
+        return plan
+    return _labelled(plan, {id(join): f"MJ{number}" for number, cluster in enumerate(found, 1)
+                            for join in cluster.joins})
+
+
+def _labelled(node: EngineNode, ids: dict[int, str]) -> EngineNode:
+    """A copy of `node`'s tree, every node in `ids` carrying its id: the plan given is not changed."""
+    return dataclasses.replace(node, children=[_labelled(child, ids) for child in node.children],
+                               mj=ids.get(id(node), node.mj))
+
+
 def assemble(root: EngineNode) -> MultiJoin:
     """The cluster whose topmost join is `root`."""
     return _Assembly(root).multijoin()
@@ -97,16 +121,19 @@ class _Assembly:
         self.relations: list[Relation] = []
         self.index: dict[int, int] = {}
         self.edges: list[Edge] = []
+        self.joins: list[EngineNode] = []
         self._collect(root)
 
     def multijoin(self) -> MultiJoin:
         output = tuple(self.lift(self.root, i) for i in range(len(self.root.schema)))
-        return MultiJoin(self.root, tuple(self.relations), tuple(self.edges), output)
+        return MultiJoin(self.root, tuple(self.relations), tuple(self.edges), output, tuple(self.joins),
+                         self.root.mj)
 
     def _collect(self, node: EngineNode) -> None:
         if node.kind in _WIRING or _picks_columns(node):
             self._collect(node.children[0])
         elif is_reorderable(node):
+            self.joins.append(node)
             for child in node.children:
                 self._collect(child)
             self.edges += self._edges(node)

@@ -50,6 +50,9 @@ class EngineNode:
     fields: dict[str, str]
     schema: tuple[tuple[str, str], ...]
     children: list[EngineNode] = field(default_factory=list)
+    #: the id of the join cluster this join is in, `MJ<n>` (`optimizer/multijoin.named`): the
+    #: optimizer's mark, not a field of the engine's plan, so the plan text leaves it out
+    mj: str | None = None
 
 
 @dataclass(frozen=True)

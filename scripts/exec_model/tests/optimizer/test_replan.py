@@ -18,6 +18,7 @@ from ...engine.adaptive import BuildDone
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
 from ...engine.node import CpuBackendSelector
+from ...optimizer.multijoin import named
 from ...optimizer.replan import run_adaptive
 
 # Dates of year 5 with keys 500..599: 100 rows, which the estimator, taking the two columns as
@@ -49,13 +50,26 @@ UNION = f"""GpuUnload
         {year_five(4)}
         {scan('sales', ['sk'])}
 """
+# The customers' orders, run whole as the semi join's build, then the year's dates, which stop the
+# run: the replan reads that build from memory and the first cluster with it.
+SEMI = f"""GpuUnload
+  GpuHashJoin: join_type=RightSemi, on=[(ck@0, dk@0)], {L}, schema=[dk:Int64, sk:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[ck:Int64]
+      GpuHashJoin: join_type=Inner, on=[(ck@0, ok@0)], projection=[ck@0], {L}, schema=[ck:Int64]
+        GpuCoalesceAllBatches: lanes=1, batches=single, schema=[ck:Int64]
+          {scan('cust', ['ck'])}
+        {scan('orders', ['ok'])}
+    GpuHashJoin: join_type=Inner, on=[(dk@0, sk@0)], {L}, schema=[dk:Int64, sk:Int64]
+      {year_five(3)}
+      {scan('sales', ['sk'])}
+"""
 
 
 def adaptive_run(text):
     """The run, and again reading ahead: the same answer, the same replans at the same events."""
     stats = dataset()
     tables = ParquetTables(stats.directory)
-    plan = parse_plans(f"== q\n{text}", "test")["q"]
+    plan = named(parse_plans(f"== q\n{text}", "test")["q"])
     want, _ = execute(build(plan, tables))
     runs = [run_adaptive(plan, stats, tables, lanes=1, selector=CpuBackendSelector(), prefetch=ahead)
             for ahead in (False, True)]
@@ -82,6 +96,15 @@ def test_a_build_off_its_estimate_is_replanned_with_every_build_made_so_far_kept
 def test_a_replan_is_refused_where_something_outside_the_builds_has_started():
     run = adaptive_run(UNION)
     assert len(run.drivers) == 1 and [event.rows for event in run.refused] == [100]
+
+
+def test_a_replanned_cluster_keeps_its_id_when_one_before_it_is_read_from_memory():
+    run = adaptive_run(SEMI)
+    joins = [[(n.fields["join_type"], n.mj) for n in _nodes(plan) if n.kind == "GpuHashJoin"]
+             for plan in run.plans]
+    assert joins == [[("RightSemi", None), ("Inner", "MJ1"), ("Inner", "MJ2")],
+                     [("RightSemi", None), ("Inner", "MJ2")]]
+    assert [order.mj for order in run.replans[0].orders] == ["MJ2"]
 
 
 def _nodes(node):

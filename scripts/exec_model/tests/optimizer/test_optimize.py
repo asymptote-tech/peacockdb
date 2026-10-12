@@ -15,7 +15,7 @@ from .test_cardinality import dataset, scan
 from ...optimizer.cost import plan_cost
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
-from ...optimizer.join_order import optimize
+from ...optimizer.join_order import optimize, ordered
 
 L = "lanes=1, batches=multiple"
 DATES = f"""GpuCoalesceAllBatches: lanes=1, batches=single, schema=[dk:Int64]
@@ -62,6 +62,38 @@ def test_dphyp_joins_only_along_keys_and_a_residual_lands_where_its_relations_me
     joins = [n for n in _walk(optimized) if n.kind == "GpuHashJoin"]
     assert all(n.fields["on"] != "[]" for n in joins)
     assert sum("filter" in n.fields for n in joins) == 1
+
+
+# PLAN's sale keys, 500..590, one row each and shifted down by 500, joined to the orders, whose
+# keys are 0..4: key 0 meets eight orders. The plan builds the keys, estimated at a hundred though
+# the run makes ten, and probes the forty orders, which orientation turns round.
+TWO_CLUSTERS = f"""GpuUnload
+  GpuHashJoin: join_type=Inner, on=[(sk@0, ok@0)], {L}, schema=[sk:Int64, ok:Int64]
+    GpuProject: exprs=[sk@0 - 500 as sk], lanes=1, batches=single, schema=[sk:Int64]
+      GpuAggregateBatches: group_by=[sk@0], aggs=[], lanes=1, batches=single, schema=[sk:Int64]
+        GpuHashJoin: join_type=Inner, on=[(dk@0, pk@0)], projection=[sk@1], {L}, schema=[sk:Int64]
+          GpuCoalesceAllBatches: lanes=1, batches=single, schema=[dk:Int64, sk:Int64]
+            GpuHashJoin: join_type=Inner, on=[(dk@0, sk@0)], {L}, schema=[dk:Int64, sk:Int64]
+              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[dk:Int64]
+                GpuFilter: predicate=y@1 = 5, projection=[dk@0], {L}, schema=[dk:Int64]
+                  {scan('dates', ['dk', 'y'])}
+              {scan('sales', ['sk'])}
+          {scan('spread', ['pk'])}
+    {scan('orders', ['ok'])}
+"""
+
+
+def test_each_cluster_keeps_its_id_through_a_reorder_and_a_flip():
+    stats = dataset()
+    plan = parse_plans(f"== q\n{TWO_CLUSTERS}", "test")["q"]
+    optimized, (outer, inner) = ordered(plan, stats, lanes=1)
+    assert (outer.mj, inner.mj) == ("MJ1", "MJ2")
+    assert outer.flipped and sum(j.cost for j in inner.joins) < inner.plan_cost
+    assert [(n.kind, n.mj) for n in _walk(optimized) if n.mj or "Join" in n.kind] == [
+        ("GpuHashJoin", "MJ1"), ("GpuHashJoin", "MJ2"), ("GpuHashJoin", "MJ2")]
+    data = ParquetTables(stats.directory)
+    assert rows(plan, data) == [(0, 0)] * 8
+    assert rows(optimized, data) == rows(plan, data)
 
 
 def _walk(node):

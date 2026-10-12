@@ -147,10 +147,11 @@ python3 scripts/exec_model/cost_report.py --out "${TMPDIR:-/tmp}/exec-model-run"
 
 Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode:
 
-- `<bench>/<mode>.cpu.txt` — the optimized plan's run, in the engine's `cpu.txt` format;
-- `<bench>/<mode>.optimizer.txt` — what each rule did: dynamic filters, each DPhyp call and its
-  orientation, each replan, then a unified diff of the plan text; `nothing fired` where no rule
-  ran;
+- `<bench>/<mode>.cpu.txt` — the optimized plan's run, in the engine's `cpu.txt` format, plus one
+  field: each join in a cluster carries its cluster's id, `mj=MJ<n>`, before `output_rows`;
+- `<bench>/<mode>.optimizer.txt` — what each rule did: dynamic filters, each DPhyp call headed by
+  its cluster's id (`join order MJ<n>: K relations`) with its orientation, each replan, then a
+  unified diff of the plan text; `nothing fired` where no rule ran;
 - `<bench>/<mode>.costs.txt` — the planned and the optimized run priced by the engine's cost
   function, the optimized cost's probe-plan and stopped-run parts, and how often each rule fired;
 - `cost_report.html` — one page from every `.costs.txt` there, so a filtered run still renders
@@ -225,7 +226,7 @@ driver tests' mock executors.
 | `plans/engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
 | `plans/engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
 | `plans/engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
-| `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, `output_rows`, per-lane `in_rows`/`batch_rows` |
+| `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, a clustered join's `mj=`, `output_rows`, per-lane `in_rows`/`batch_rows` |
 | `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]`; a scan's columns read once per `ParquetTables`, since a replan builds every scan again |
 | `plans/goldens.py` | where the engine's goldens and this prototype's live, and the `== <query>` sections every golden is cut into |
 | `plans/cost_model.py` | the engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format, by `testdata/cost_model.conf`, read, summed and rounded as the Rust is; `GpuMemorySource` free, outside the conf |
@@ -240,10 +241,10 @@ driver tests' mock executors.
 | `optimizer/replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
 | `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what lanes and batch size would be chosen by where C_out sees no difference; no rule reads it yet. The record is fetched into `RECORD` (above) |
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
-| `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included |
+| `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included, and `named` gives each its id, `MJ<n>`, on every join it holds |
 | `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — dynamic filters, then DPhyp and orientation with the probes' builds known, then the adaptive run — and its report; each mode's lanes and batching, by name |
-| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after; `Fired`, how often each rule acted |
+| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (the cluster's id, relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after; `Fired`, how often each rule acted |
 | `optimizer/report_text.py` | that report as a `.optimizer.txt` section |
 | `run.py` | the corpus through the optimizer, [above](#runpy-the-corpus-through-the-optimizer) |
 | `cost_report.py` | each (query, mode)'s costs as a section of `<mode>.costs.txt` and back, and `cost_report.html` rendered from those files |

@@ -23,7 +23,7 @@ from .estimator import DEFAULT
 from .disassembly import baseline, planned_lanes, reassembled
 from ..plans.engine_expr import parse_columns
 from ..plans.engine_plan import EngineNode
-from .multijoin import MultiJoin, RelColumn, sided_columns
+from .multijoin import MultiJoin, RelColumn, named, sided_columns
 from .report import ChosenJoin, JoinOrder, PricedSet
 from .stats import Statistics
 
@@ -187,8 +187,9 @@ def optimize(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
 def ordered(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
             max_pairs: int = MAX_PAIRS, known: dict[str, Estimate] | None = None
             ) -> tuple[EngineNode, list[JoinOrder]]:
-    """`optimize`, and each DPhyp call it made, outermost cluster first. The sets priced are
-    read off the cost callback, which hands DPhyp the value it would have had."""
+    """`optimize`, and each DPhyp call it made, outermost cluster first, each cluster `named`. The
+    sets priced are read off the cost callback, which hands DPhyp the value it would have had."""
+    plan = named(plan)
     planned = estimator(plan, stats, known)
     orders = []
 
@@ -213,7 +214,7 @@ def ordered(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
         # The chosen joins' and the plan order's sets are estimated after DPhyp has returned, so
         # those it did not ask decide nothing.
         orders.append(JoinOrder(
-            tuple(_label(r.root) for r in cluster.relations),
+            cluster.mj, tuple(_label(r.root) for r in cluster.relations),
             tuple((e.left, e.right, _keys_text(cluster, e)) for e in edges), tuple(priced), max_pairs,
             tree, unsolved, oriented,
             tuple(ChosenJoin(b, p, sets.rows(b | p), sets.cost(b | p)) for b, p in _joins(oriented)),

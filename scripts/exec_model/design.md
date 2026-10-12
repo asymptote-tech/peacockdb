@@ -97,6 +97,13 @@ step has its shape.
   roots a relation even between inner joins, because an `IS NULL` there is what turns a left join
   into an anti join. Columns are `(relation, ordinal)` identities rather than positions, since a
   reordered tree renumbers every position.
+- **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
+  (`multijoin.named`, the first thing `join_order.ordered` does), and every join it holds carries
+  the id. It lives on the join node (`EngineNode.mj`), not in the plan text and not in a table
+  keyed by node identity: every rewrite copies nodes and the copy carries it, and disassembly
+  gives the joins it makes their cluster's. A replan's plan is named already and keeps its ids; a
+  cluster read from memory since leaves its number unused. `.cpu.txt` shows the id as `mj=MJ<n>`
+  on each clustered join, and `.optimizer.txt` heads each DPhyp call with it.
 - **Disassembly** (`disassembly.py`) derives each new join's wiring as the translator would
   rather than carrying the old plan's exchanges, which were placed for keys the new join may not
   use. A join over the same relations as one the plan had keeps that join's lanes — DataFusion's

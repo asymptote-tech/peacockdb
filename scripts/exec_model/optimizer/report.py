@@ -46,13 +46,14 @@ class ChosenJoin:
 
 @dataclass(frozen=True)
 class JoinOrder:
-    """One DPhyp call over a cluster. `edges` are its input — (left mask, right mask, keys) — and
-    `priced` every set it asked, in the order asked, within `max_pairs`. `tree` is the order it
-    returned, or the plan's own where it ran out of pairs (`unsolved`); `oriented` is that
-    tree with each join's build first, `joins` its joins bottom up, and `plan_cost` the plan's own
-    order's C_out. `flipped` is the (build, probe) of each join whose build is the other side
-    from the plan's join over the same two sides."""
+    """One DPhyp call over the cluster `mj` names. `edges` are its input — (left mask,
+    right mask, keys) — and `priced` every set it asked, in the order asked, within `max_pairs`.
+    `tree` is the order it returned, or the plan's own where it ran out of pairs (`unsolved`);
+    `oriented` is that tree with each join's build first, `joins` its joins bottom up, and
+    `plan_cost` the plan's own order's C_out. `flipped` is the (build, probe) of each join whose
+    build is the other side from the plan's join over the same two sides."""
 
+    mj: str
     relations: tuple[str, ...]
     edges: tuple[tuple[int, int, str], ...]
     priced: tuple[PricedSet, ...]

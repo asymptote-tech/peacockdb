@@ -4,8 +4,9 @@ rendered as the engine renders its own (`cpu.txt`).
 `plan_text/run_text.rs`'s shape: an `early_exit=` line, then per node the plan golden's line
 minus its schema plus `output_rows` and `output_bytes`, and under it `in_rows` — per child
 slot, the rows taken from each of that child's lanes — `batch_rows` and `batch_bytes`, per
-lane the size of every batch emitted. What differs from the engine's run is only what the
-backend is: bytes are pandas', and a lane's rows follow the prototype's hash.
+lane the size of every batch emitted. What differs from the engine's run is what the backend
+is — bytes are pandas', and a lane's rows follow the prototype's hash — and one field the
+engine's line lacks: a join in a cluster names it, `mj=MJ<n>`, before `output_rows`.
 """
 
 from __future__ import annotations
@@ -73,6 +74,8 @@ def render_run(plan: EngineNode, driver: PartitionedDriver) -> str:
 def _render_node(node, driver, at, depth, lines) -> None:
     emitted = driver.emitted[at]
     parts = [f"{key}={value}" for key, value in node.fields.items() if key != "schema"]
+    if node.mj is not None:
+        parts.append(f"mj={node.mj}")
     parts.append(f"output_rows={sum(rows for lane in emitted for rows, _ in lane)}")
     parts.append(f"output_bytes={sum(size for lane in emitted for _, size in lane)}")
     indent = "  " * depth

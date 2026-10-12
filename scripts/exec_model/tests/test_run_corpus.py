@@ -41,7 +41,7 @@ def test_run_writes_every_file_per_bench_and_the_report_and_a_filtered_run_keeps
             assert files["tpcds", kind] == "== q27\nskipped: refused by datafusion: SanityCheckPlan\n"
         optimizer = dict(sections(files["tpch", "optimizer"]))
         assert optimizer["filter-project"] == "nothing fired\n"
-        assert optimizer["join-int"].startswith("join order 1: 2 relations\n")
+        assert optimizer["join-int"].startswith("join order MJ1: 2 relations\n")
         assert optimizer["join-int"].endswith("plan unchanged\n")
         # Neither plan changed: the engine's tree, its answer's rows and each join's rows. A partial
         # aggregate emits per batch, so its rows follow the backend's batching and are not compared.

@@ -43,8 +43,8 @@ def render(report: OptimizerReport) -> str:
 
 def _orders(orders: tuple[JoinOrder, ...], indent: str) -> list[str]:
     lines = []
-    for number, order in enumerate(orders, 1):
-        lines.append(f"join order {number}: {len(order.relations)} relations")
+    for order in orders:
+        lines.append(f"join order {order.mj}: {len(order.relations)} relations")
         lines += [f"  r{i} {label}" for i, label in enumerate(order.relations)]
         lines += [f"  edge {_set(left)}-{_set(right)}: {keys}" for left, right, keys in order.edges]
         lines.append(f"  priced {len(order.priced)} sets")
