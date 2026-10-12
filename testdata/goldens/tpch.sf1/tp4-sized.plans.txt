@@ -57,6 +57,55 @@ GpuUnload: estimated_max_resident_size=337500
     GpuEmitPartitions: estimated_max_resident_size=123484932
       GpuMergePartitions: estimated_max_resident_size=30871233
         GpuLoadParquet: estimated_max_resident_size=123484932, source_bytes=117508953, target_batch_bytes=117508953, amplification=4.0
+== anti-join-reorder
+GpuUnload
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+    GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+        GpuHashJoin: join_type=LeftAnti, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+              GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+          GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
+            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
+              GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
+--- recipes ---
+GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
+        GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#12 CudfRepartition{Hash, 1→4}, batch)
+      GpuMergePartitions: none
+        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfProject{probe keys}, batch); at done: execute_node(#10 CudfCoalescePartitions, accumulated keys), execute_node(#11 CudfHashJoin{LeftAnti}, build, prior output)
+          GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#6 CudfCoalescePartitions, lane batches)
+            GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
+              GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#8 CudfRepartition{Hash, 1→4}, batch)
+            GpuMergePartitions: none
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#7 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=20400250, certain=3450000
+GpuUnload: estimated_max_resident_size=31
+  GpuHashJoin: estimated_max_resident_size=16950125
+    GpuCoalesceAllBatches: estimated_max_resident_size=125
+      GpuEmitPartitions: estimated_max_resident_size=608
+        GpuFilter: estimated_max_resident_size=152
+          GpuLoadParquet: estimated_max_resident_size=427, source_bytes=427, target_batch_bytes=427, amplification=1.4
+    GpuEmitPartitions: estimated_max_resident_size=16950000
+      GpuMergePartitions: estimated_max_resident_size=4237500
+        GpuHashJoin: estimated_max_resident_size=29561056
+          GpuCoalesceAllBatches: estimated_max_resident_size=3450000
+            GpuEmitPartitions: estimated_max_resident_size=18379060
+              GpuLoadParquet: estimated_max_resident_size=4594765, source_bytes=4594765, target_batch_bytes=4594765, amplification=4.0
+          GpuEmitPartitions: estimated_max_resident_size=12611056
+            GpuMergePartitions: estimated_max_resident_size=3152764
+              GpuLoadParquet: estimated_max_resident_size=12611056, source_bytes=12000403, target_batch_bytes=12000403, amplification=4.0
 == cross-join
 GpuUnload
   GpuCrossJoin: lanes=1, batches=multiple, schema=[r_regionkey:Int32, r_name:Utf8, r_comment:Utf8, n_nationkey:Int32, n_name:Utf8, n_regionkey:Int32, n_comment:Utf8]
@@ -224,6 +273,107 @@ GpuUnload: estimated_max_resident_size=258052245
             GpuEmitPartitions: estimated_max_resident_size=55263820
               GpuMergePartitions: estimated_max_resident_size=13815955
                 GpuLoadParquet: estimated_max_resident_size=55263820, source_bytes=52557643, target_batch_bytes=52557643, amplification=4.0
+== left-join-fixed
+GpuUnload
+  GpuProject: exprs=[c_name@1, o_orderkey@2, l_linenumber@0], lanes=4, batches=multiple, hashed_on=[o_orderkey@1], schema=[c_name:Utf8, o_orderkey:Int64, l_linenumber:Int64]
+    GpuHashJoin: join_type=Inner, on=[(l_orderkey@0, o_orderkey@1)], projection=[l_linenumber@1, c_name@2, o_orderkey@3], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[l_linenumber:Int64, c_name:Utf8, o_orderkey:Int64]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, l_linenumber:Int64]
+        GpuEmitPartitions: hash=[l_orderkey@0], lanes=4, batches=multiple, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, l_linenumber:Int64]
+          GpuFilter: predicate=l_shipdate@2 = 1995-03-15, projection=[l_orderkey@0, l_linenumber@1], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_linenumber:Int64]
+            GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_linenumber@3, l_shipdate@10], partition_groups=[[[22]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_linenumber:Int64, l_shipdate:Date32]
+      GpuEmitPartitions: hash=[o_orderkey@1], lanes=4, batches=multiple, hashed_on=[o_orderkey@1], schema=[c_name:Utf8, o_orderkey:Int64]
+        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
+          GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, o_orderkey@2], lanes=4, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
+            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
+              GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
+                GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+            GpuEmitPartitions: hash=[o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_custkey@1], schema=[o_orderkey:Int64, o_custkey:Int64]
+              GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
+                GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
+--- recipes ---
+GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=4, per batch: execute_node(#17 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+        GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
+          GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+            GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#14 CudfRepartition{Hash, 1→4}, batch)
+        GpuMergePartitions: none
+          GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfProject{probe keys}, batch copy), execute_node(#10 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#11 CudfCoalescePartitions, accumulated keys), execute_node(#12 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#13 CudfProject{build columns + 1 null}, prior output)
+            GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#6 CudfCoalescePartitions, lane batches)
+              GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
+                GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+            GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#8 CudfRepartition{Hash, 1→4}, batch)
+              GpuMergePartitions: none
+                GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#7 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=23323680, certain=2700000
+GpuUnload: estimated_max_resident_size=552960
+  GpuProject: estimated_max_resident_size=2211840
+    GpuHashJoin: estimated_max_resident_size=18411840
+      GpuCoalesceAllBatches: estimated_max_resident_size=2211840
+        GpuEmitPartitions: estimated_max_resident_size=3224768
+          GpuFilter: estimated_max_resident_size=806192
+            GpuLoadParquet: estimated_max_resident_size=1030135, source_bytes=1030135, target_batch_bytes=1030135, amplification=3.1
+      GpuEmitPartitions: estimated_max_resident_size=16200000
+        GpuMergePartitions: estimated_max_resident_size=4050000
+          GpuHashJoin: estimated_max_resident_size=41422112
+            GpuCoalesceAllBatches: estimated_max_resident_size=2700000
+              GpuEmitPartitions: estimated_max_resident_size=18000500
+                GpuLoadParquet: estimated_max_resident_size=4500125, source_bytes=4500125, target_batch_bytes=4500125, amplification=4.0
+            GpuEmitPartitions: estimated_max_resident_size=25222112
+              GpuMergePartitions: estimated_max_resident_size=6305528
+                GpuLoadParquet: estimated_max_resident_size=25222112, source_bytes=24000806, target_batch_bytes=24000806, amplification=4.0
+== left-join-reorder
+GpuUnload
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@1)], projection=[c_name@1, o_orderkey@3], lanes=4, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+    GpuEmitPartitions: hash=[c_nationkey@1], lanes=4, batches=multiple, hashed_on=[c_nationkey@1], schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+        GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, c_nationkey@2, o_orderkey@3], lanes=4, batches=multiple, schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+              GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+          GpuEmitPartitions: hash=[o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_custkey@1], schema=[o_orderkey:Int64, o_custkey:Int64]
+            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
+              GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
+--- recipes ---
+GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#16 CudfHashJoin{Inner}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
+        GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#14 CudfRepartition{Hash, 1→4}, batch)
+      GpuMergePartitions: none
+        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfProject{probe keys}, batch copy), execute_node(#10 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#11 CudfCoalescePartitions, accumulated keys), execute_node(#12 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#13 CudfProject{build columns + 1 null}, prior output)
+          GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#6 CudfCoalescePartitions, lane batches)
+            GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
+              GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#8 CudfRepartition{Hash, 1→4}, batch)
+            GpuMergePartitions: none
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#7 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=20400250, certain=3450000
+GpuUnload: estimated_max_resident_size=31
+  GpuHashJoin: estimated_max_resident_size=16950125
+    GpuCoalesceAllBatches: estimated_max_resident_size=125
+      GpuEmitPartitions: estimated_max_resident_size=608
+        GpuFilter: estimated_max_resident_size=152
+          GpuLoadParquet: estimated_max_resident_size=427, source_bytes=427, target_batch_bytes=427, amplification=1.4
+    GpuEmitPartitions: estimated_max_resident_size=16950000
+      GpuMergePartitions: estimated_max_resident_size=4237500
+        GpuHashJoin: estimated_max_resident_size=42172112
+          GpuCoalesceAllBatches: estimated_max_resident_size=3450000
+            GpuEmitPartitions: estimated_max_resident_size=18379060
+              GpuLoadParquet: estimated_max_resident_size=4594765, source_bytes=4594765, target_batch_bytes=4594765, amplification=4.0
+          GpuEmitPartitions: estimated_max_resident_size=25222112
+            GpuMergePartitions: estimated_max_resident_size=6305528
+              GpuLoadParquet: estimated_max_resident_size=25222112, source_bytes=24000806, target_batch_bytes=24000806, amplification=4.0
 == mixed-join
 GpuUnload
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(sum(l.l_quantity)@1) as sum(l.l_quantity), sum(sum(o.o_totalprice)@2) as sum(o.o_totalprice)], final=[count(*)@0, sum(l.l_quantity)@1, sum(o.o_totalprice)@2], lanes=1, batches=single, schema=[count(*):Int64, sum(l.l_quantity):Decimal128(25,2), sum(o.o_totalprice):Decimal128(25,2)]
@@ -2626,6 +2776,55 @@ GpuUnload: estimated_max_resident_size=337500
     GpuEmitPartitions: estimated_max_resident_size=123484932
       GpuMergePartitions: estimated_max_resident_size=30871233
         GpuLoadParquet: estimated_max_resident_size=123484932, source_bytes=117508953, target_batch_bytes=117508953, amplification=4.0
+== semi-join-reorder
+GpuUnload
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+    GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+        GpuHashJoin: join_type=LeftSemi, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+              GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+          GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
+            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
+              GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
+--- recipes ---
+GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#13 CudfHashJoin{Inner}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
+        GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#12 CudfRepartition{Hash, 1→4}, batch)
+      GpuMergePartitions: none
+        GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#9 CudfProject{probe keys}, batch); at done: execute_node(#10 CudfCoalescePartitions, accumulated keys), execute_node(#11 CudfHashJoin{LeftSemi}, build, prior output)
+          GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#6 CudfCoalescePartitions, lane batches)
+            GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
+              GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#8 CudfRepartition{Hash, 1→4}, batch)
+            GpuMergePartitions: none
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#7 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=20400250, certain=3450000
+GpuUnload: estimated_max_resident_size=31
+  GpuHashJoin: estimated_max_resident_size=16950125
+    GpuCoalesceAllBatches: estimated_max_resident_size=125
+      GpuEmitPartitions: estimated_max_resident_size=608
+        GpuFilter: estimated_max_resident_size=152
+          GpuLoadParquet: estimated_max_resident_size=427, source_bytes=427, target_batch_bytes=427, amplification=1.4
+    GpuEmitPartitions: estimated_max_resident_size=16950000
+      GpuMergePartitions: estimated_max_resident_size=4237500
+        GpuHashJoin: estimated_max_resident_size=29561056
+          GpuCoalesceAllBatches: estimated_max_resident_size=3450000
+            GpuEmitPartitions: estimated_max_resident_size=18379060
+              GpuLoadParquet: estimated_max_resident_size=4594765, source_bytes=4594765, target_batch_bytes=4594765, amplification=4.0
+          GpuEmitPartitions: estimated_max_resident_size=12611056
+            GpuMergePartitions: estimated_max_resident_size=3152764
+              GpuLoadParquet: estimated_max_resident_size=12611056, source_bytes=12000403, target_batch_bytes=12000403, amplification=4.0
 == shuffle-additive
 GpuUnload
   GpuProject: exprs=[l_returnflag@0, l_linestatus@1, count(*)@2 as cnt, sum(lineitem.l_quantity)@3 as sum_qty, sum(lineitem.l_extendedprice)@4 as sum_base_price], lanes=4, batches=single, hashed_on=[l_returnflag@0, l_linestatus@1], schema=[l_returnflag:Utf8, l_linestatus:Utf8, cnt:Int64, sum_qty:Decimal128(25,2), sum_base_price:Decimal128(25,2)]

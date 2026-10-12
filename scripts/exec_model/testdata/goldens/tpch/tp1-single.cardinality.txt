@@ -1,14 +1,20 @@
 # tpch tp1-single: each join's estimate against its rows in tp1-single-mini.cpu.txt
-# 69 joins: median q-error 1.09, 68.1% within 2x
+# 77 joins: median q-error 1.07, 70.1% within 2x
 # not run: q11 q22 scan-limit
 # tree differs: -
 # n: the join's place among its query's, in pre-order; joins: the joins in its subtree, itself included
 # query n kind/type joins true estimate q-error keys
 anti-join              1 Hash/RightAnti    1    1196041    1049982.0     1.14  c_custkey=o_custkey
+anti-join-reorder      1 Hash/Inner        2       1951       2000.2     1.03  n_nationkey=c_nationkey
+anti-join-reorder      2 Hash/LeftAnti     1      50004      50004.0     1.00  c_custkey=o_custkey
 cross-join             1 Cross/Cross       1        125        125.0     1.00  -
 hash-join              1 Hash/Inner        1    6001215    6001215.0     1.00  o_orderkey=l_orderkey
 join-int               1 Hash/Inner        1    1500000    1500000.0     1.00  c_custkey=o_custkey
 left-join              1 Hash/Left         1    6001215    6001215.0     1.00  o_orderkey=l_orderkey
+left-join-fixed        1 Hash/Inner        2       2528         50.3    50.29  l_orderkey=o_orderkey
+left-join-fixed        2 Hash/Left         1    1550004    1550004.0     1.00  c_custkey=o_custkey
+left-join-reorder      1 Hash/Inner        2      63551      62000.2     1.03  n_nationkey=c_nationkey
+left-join-reorder      2 Hash/Left         1    1550004    1550004.0     1.00  c_custkey=o_custkey
 mixed-join             1 Hash/Inner        1    4464071    1200243.0     3.72  o_orderkey=l_orderkey
 nested-limits          1 Cross/Cross       1        115        115.0     1.00  -
 nested-loop-join       1 NestedLoop/Inner  1         50         25.0     2.00  -
@@ -73,3 +79,5 @@ q21                    4 Hash/Inner        2    1828911     229422.4     7.97  o
 q21                    5 Hash/Inner        1    3793296    1200243.0     3.16  s_suppkey=l_suppkey
 rollup-over-join       1 Hash/Inner        1     150000     150000.0     1.00  n_nationkey=c_nationkey
 semi-join              1 Hash/RightSemi    1     303959     450018.0     1.48  c_custkey=o_custkey
+semi-join-reorder      1 Hash/Inner        2       4149       3999.8     1.04  n_nationkey=c_nationkey
+semi-join-reorder      2 Hash/LeftSemi     1      99996      99996.0     1.00  c_custkey=o_custkey

@@ -108,6 +108,14 @@ corpus_query!(tpch, 1, q7, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup
 corpus_query!(tpch, 1, q8, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 
+// Non-inner joins written in the costly order: three that may move, and left-join-fixed, which
+// may not. Never run on a device: the Left joins are #152 at every mode; semi and anti, as their
+// siblings, #152 at four modes and #220 at tp1-single.
+corpus_query!(tpch, 1, left_join_reorder, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, semi_join_reorder, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, anti_join_reorder, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, left_join_fixed, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
+
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, none, data_fusion_exact, golden_exact, schema_validation_enabled);

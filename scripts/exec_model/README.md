@@ -96,8 +96,8 @@ python3 scripts/exec_model/tests/test_run_corpus.py
 
 **Corpus.** Each file runs the planned queries it applies to, from one mode's plan golden,
 `PCK_MODE` (`tp4-single` by default), over whole sf1 tables against DuckDB: every one as planned
-(120), those with a dynamic-filter candidate pruned (58), and those with a join cluster
-disassembled and rebuilt (100) and reordered by DPhyp (100). A whole file is about a
+(124), those with a dynamic-filter candidate pruned (58), and those with a join cluster
+disassembled and rebuilt (104) and reordered by DPhyp (104). A whole file is about a
 process-minute per query at `tp4-single`, so run whole files on shad-gpu, in shards, and single
 queries locally:
 
@@ -168,18 +168,20 @@ no query accounts for; with it, only its own sections change — the rule `UPDAT
 that is not the planned one among them, gets a `failed:` section, and the run exits 1. Nothing
 compares the files with a previous copy.
 
-The committed files are one whole run under Python 3.13, pandas 3.0.6 and pyarrow 25.0.1, with
-the sf1 tables beside the tree. A batch's bytes are pandas' `memory_usage(deep=True)`, so another
-pandas moves every cost line: regenerate in that environment, and send exploratory runs elsewhere
-with `--out`. Python 3.13.0 and 3.13.15 give the same bytes.
+The committed files are one whole run under Python 3.13, pandas 3.0.6 and pyarrow 25.0.1, with the
+sf1 tables beside the tree; tpch's `left-join-reorder`, `semi-join-reorder`, `anti-join-reorder`
+and `left-join-fixed` sections came from a later `--query` run. A batch's bytes are pandas'
+`memory_usage(deep=True)`, so another pandas moves every cost line: regenerate in that
+environment, and send exploratory runs elsewhere with `--out`. Python 3.13.0 and 3.13.15 give the
+same bytes.
 
 ```
 python3 scripts/exec_model/run.py --jobs 16
 ```
 
-That is 600 (query, mode) runs in 15:59 wall at `--jobs 16` on shad-gpu's 22 cores, at most
-7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`, whose planned run takes
-about 14 minutes alone; the optimized one takes 14 seconds.
+A whole run is 620 (query, mode) runs now. The last one was 600, in 15:59 wall at `--jobs 16` on
+shad-gpu's 22 cores, at most 7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`,
+whose planned run takes about 14 minutes alone; the optimized one takes 14 seconds.
 A worker peaks at about 8 GB (tpcds `tp1-single`); size `--jobs` to free memory over that.
 
 ## What is here

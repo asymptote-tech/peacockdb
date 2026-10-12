@@ -891,8 +891,8 @@ NULLs (#80) — passes every tier. DuckDB answers exist only for the hand-writte
 gtests at sf40 (`testdata/gen_duckdb_goldens.sh`, `cpp/tests/gpu/test_tpch.cpp`), never for the
 engine's corpus.
 
-**Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 120
-queries, 8 of them skipped (4 over the 262144-byte cap, 4 not enabled).
+**Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 124
+queries, 9 of them skipped (5 over the 262144-byte cap, 4 not enabled).
 
 **Fix proposed:** a DuckDB golden beside each result golden, and a Rust test comparing them.
 The generator and both `duckdb-result.txt` files landed 2026-09-28; the comparison test, the
@@ -931,8 +931,8 @@ The generator and both `duckdb-result.txt` files landed 2026-09-28; the comparis
 - Each oracle enum gains an `ALL` const listing its variants — `CpuOracle`
   (`test_support/corpus.rs`), `GpuResultMode` (`test_support/corpus_gpu.rs`) and the new DuckDB
   one — and a test asserts every variant is named by some `corpus_query!` line, so an unused kind
-  is deleted rather than kept. Today `GpuResultMode::Skip` and `GoldenApprox` are unused: 113
-  lines say `golden_exact`, 2 `golden_approx_std`, 5 `live_cpu`.
+  is deleted rather than kept. Today `GpuResultMode::Skip` and `GoldenApprox` are unused: 116
+  lines say `golden_exact`, 2 `golden_approx_std`, 6 `live_cpu`.
 
 Measured by the first run (2026-09-28), over every section both files hold: no row count, string
 or NULL differs. tpch 39 queries: 22 identical, 6 differ in column names only, 5 in float or decimal
@@ -958,9 +958,9 @@ Expected divergences, to declare or to normalize in the comparator:
   candidate ticket to render the declared schema.
 - **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
   q27 and q72 (#23), q28 (#62). Not compared.
-- **Queries neither side checks** (10). Over the 262144-byte cap on both: tpch q16, anti-join,
-  filter-project, semi-join. Not enabled on ours: tpch q11 and q22, tpcds q24 and q54 (#190);
-  DuckDB answers them. **The spec for this ticket decides what to do about the over-cap
-  queries**: raise the cap, compare a digest of the normalized rows on both sides, or leave them
-  unchecked and say so.
+- **Queries neither side checks** (9). Over the 262144-byte cap on both: tpch q16, anti-join,
+  filter-project, semi-join, left-join-reorder. Not enabled on ours: tpch q11 and q22, tpcds q24
+  and q54 (#190); DuckDB answers the last three, and q11 is over its cap. **The spec for this
+  ticket decides what to do about the over-cap queries**: raise the cap, compare a digest of the
+  normalized rows on both sides, or leave them unchecked and say so.
 - **A real divergence** is a ticket, and its line in the declared list names it.
