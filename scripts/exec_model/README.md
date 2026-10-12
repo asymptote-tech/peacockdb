@@ -167,10 +167,10 @@ no query accounts for; with it, only its own sections change — the rule `UPDAT
 that is not the planned one among them, gets a `failed:` section, and the run exits 1. Nothing
 compares the files with a previous copy.
 
-The committed files are one whole run, on shad-gpu from a scratch copy of the tree with the sf1
-tables beside it, under Python 3.13.15, pandas 3.0.6 and pyarrow 25.0.1. A batch's bytes are
-pandas' `memory_usage(deep=True)`, so another pandas moves every cost line: regenerate in that
-environment, and send exploratory runs elsewhere with `--out`.
+The committed files are one whole run under Python 3.13, pandas 3.0.6 and pyarrow 25.0.1, with
+the sf1 tables beside the tree. A batch's bytes are pandas' `memory_usage(deep=True)`, so another
+pandas moves every cost line: regenerate in that environment, and send exploratory runs elsewhere
+with `--out`. Python 3.13.0 and 3.13.15 give the same bytes.
 
 ```
 python3 scripts/exec_model/run.py --jobs 16
@@ -179,6 +179,7 @@ python3 scripts/exec_model/run.py --jobs 16
 That is 600 (query, mode) runs in 15:59 wall at `--jobs 16` on shad-gpu's 22 cores, at most
 7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`, whose planned run takes
 about 14 minutes alone; the optimized one takes 14 seconds.
+A worker peaks at about 8 GB (tpcds `tp1-single`); size `--jobs` to free memory over that.
 
 ## What is here
 

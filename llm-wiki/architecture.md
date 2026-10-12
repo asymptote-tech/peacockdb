@@ -1256,10 +1256,12 @@ same bytes: how much data the query had to move. build-test.md has how each file
 
 **Peacock cost** is a re-reading of the execution golden rather than a second measurement:
 each node's `output_bytes` is binned into a category and multiplied by that category's weight
-from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total is Σ
-`output_bytes`; the weights exist so a phase can be priced without moving the goldens that
-record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
-because dropping a category rewrites the line list of every committed cost golden.
+from `testdata/cost_model.conf`. Every real category is 1.0 but one. The forwarders
+(`GpuMergePartitions`, `GpuUnion`, `GpuInterleave`) relabel lanes and hand batches on without
+a copy, so they sit at 0.0. The scatter (`GpuEmitPartitions`) is charged its bytes. The
+weights exist so a phase can be priced without moving the goldens that record it. Three
+placeholder phases sit at 0.0 and one category names no node at all — kept because dropping a
+category rewrites the line list of every committed cost golden.
 
 **The DuckDB oracle** runs each query twice — a deterministic profile with join-filter
 pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with

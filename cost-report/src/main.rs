@@ -2,8 +2,8 @@
 //!
 //! Reads only committed goldens, so it runs in the CI CPU tier with no GPU and
 //! no executor build:
-//!   - PeacockDB Σout = Σ `output_bytes` over a query's section of the per-mode
-//!                      `.cost.txt`, at the last mode its cpu run is enabled at.
+//!   - PeacockDB Σout = the `peacockdb_cost=` total of a query's section of the
+//!                      per-mode `.cost.txt`, at the last mode its cpu run is enabled at.
 //!   - DuckDB Σout    = pipeline-breaker materialized bytes computed from the
 //!                      `<q>.duckdb_cost.txt` profiling tree.
 //!   - coverage       = what `testdata/cost-registry.csv` declares per mode, which
@@ -513,9 +513,9 @@ fn build_dataset(
     dataset_key: &str,
 ) -> Dataset {
     // Each golden carries its own explicit total footer (peacockdb_cost= /
-    // duckdb_cost=), the single source of truth for that side's number; the
-    // per-node output_bytes/materialized values above it are the contribution
-    // breakdown that sums to it. We read only the footer (`read_total`).
+    // duckdb_cost=), the single source of truth for that side's number. PeacockDB's is
+    // Σ multiplier × the category lines above it (`cost_model.conf`); DuckDB's per-node
+    // materialized values are its breakdown. We read only the footer (`read_total`).
     // Rows come from the registry CSV, not a 1..=N range, so the synthetic
     // micro-queries (aggregate_groupby, mixed_join, …) appear alongside the numbered
     // ones as the spec requires. Numbered queries sort first, by number.
@@ -920,7 +920,8 @@ fn render_html(
     s.push_str(
         "<p class=\"caveat\"><strong>Provisional proxy, not execution cost.</strong> Both columns are \
          deterministic, measured byte sums — not wall-clock time. <em>PeacockDB Σout</em> = Σ per-operator \
-         output bytes (Arrow logical size). <em>DuckDB Σout</em> = bytes materialized at pipeline breakers; \
+         output bytes (Arrow logical size), a forwarder (merge, union, interleave) at nothing, as DuckDB's \
+         streaming operators are. <em>DuckDB Σout</em> = bytes materialized at pipeline breakers; \
          joins now count both inputs + their own output (aligned with PeacockDB), and a TABLE_SCAN counts \
          bytes_read from storage <em>plus</em> its post-filter output (mirroring PeacockDB's split scan + filter). \
          <strong>Remaining structural skew → red rows on selective queries:</strong> PeacockDB does NOT push \
@@ -1107,8 +1108,9 @@ fn render_markdown(
     let _ = write!(
         s,
         "_🔴 = ratio > {RATIO_GREEN_MAX} (PeacockDB Σout over {RATIO_GREEN_MAX}× DuckDB). Σout = measured \
-         output bytes; DuckDB side counts bytes materialized at pipeline breakers. The two engines emit \
-         different plan trees, so the ratio is a **provisional, directional-only** proxy — not a comparable \
+         output bytes, a forwarder (merge, union, interleave) at nothing; DuckDB side counts bytes \
+         materialized at pipeline breakers. The two engines emit different plan trees, so the ratio is \
+         a **provisional, directional-only** proxy — not a comparable \
          execution cost — and asserts nothing._\n"
     );
     s
@@ -1413,7 +1415,7 @@ fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
             fmt_delta(r.delta_pct()),
         );
     }
-    s.push_str("</table><p class=\"foot\">Σout = Σ per-operator output bytes (PeacockDB CPU cost). \
+    s.push_str("</table><p class=\"foot\">Σout = Σ per-operator output bytes, forwarders at nothing (PeacockDB CPU cost). \
         A regression (PeacockDB CPU Σout increased vs base) fails CI; exact integer compare, no tolerance. \
         New queries with no base .cost.txt are omitted.</p></body></html>");
     s

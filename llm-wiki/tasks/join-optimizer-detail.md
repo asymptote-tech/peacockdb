@@ -43,10 +43,12 @@ fixes #236 and #237):
   empty card; the trees and the two record pins are on the branch, the records in S3
   (Task 8 below). The Nsight passes over the 26 cases have not run: `calls.tsv` and `hbm.tsv`
   hold three cases of an earlier run.
-- Tasks 10–18 are not started.
+- Task 10: the conf prices forwarders at 0.0 and the scatter at its bytes; the engine's cost
+  goldens, the prototype's `.costs.txt` and `cost_report.html`, both tests and the documents
+  moved with it (Task 10 below). Tasks 11–18 are not started.
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (34 files), and q64 in the corpus answer,
+- Green otherwise: rust-only, DPhyp, the cheap tier (43 files, 402 cases), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
@@ -1082,3 +1084,77 @@ fixes #236 and #237):
 - Proving: calibration tests 29 (`test_calls` 6, `test_hbm` 8, `test_plot` 7, `test_split` 8),
   rust-only `test_corpus_goldens` 27 and `test_ci_coverage` 9, `bash -n` on the five touched
   scripts, `pipeline.yml` parsed. `build-test.md`: Rust 1890, C++ 94, Python 859, total 2843.
+
+## Task 10
+
+- The conf: `cuda_shuffle_bytes 1.0` (Emit, Merge, Union, Interleave) is now `cuda_scatter_bytes
+  1.0 GpuEmitPartitions` and `cuda_forward_bytes 0.0 GpuMergePartitions,GpuUnion,GpuInterleave`,
+  in the old line's place. `cuda_passthrough_bytes` is unchanged.
+- Neither parser names a category (`test_support/cost_model.rs`, `plans/cost_model.py`).
+  `test_cost_model.rs` did, in its synthetic tree, and held every golden's total to Σ
+  `output_bytes`, which a 0.0 category breaks. It now holds the category lines to Σ
+  `output_bytes` — every node's bytes still land in one — as
+  `cost_goldens_match_and_categories_hold_every_byte`.
+- Red first, over the committed conf: `a_forwarder_costs_nothing_and_a_scatter_costs_its_bytes`
+  (Rust) and `test_the_conf_prices_a_forwarder_at_nothing_and_a_scatter_at_its_bytes` (Python), a
+  scan's 30 bytes under one node of each kind. Both failed at `GpuMergePartitions`, 50 against 30.
+- The engine's goldens: `UPDATE_CANONICAL=1 cargo test -p peacockdb-core --features rust-only
+  --test test_cost_model` rewrote the ten `-mini.cost.txt`. Against the parent commit, all 551
+  sections: the old shuffle bytes are scatter + forward, every other category is unchanged, and the
+  total is lower by exactly the forward bytes; 332 sections moved. `cost-report --cost-diff --base
+  HEAD`: 551 compared, 332 changed, 0 regressions.
+- The `cost-report` crate names no category; its prose now says a forwarder counts nothing. Its
+  ratio, PeacockDB over DuckDB, green at ≤ 1.4:
+
+  | bench | rows with a ratio | ≤ 1.4 | median ratio |
+  |---|---|---|---|
+  | tpch | 20 | 5 → 9 | 1.955 → 1.45 |
+  | tpcds | 79 | 9 → 17 | 3.77 → 2.79 |
+
+  The biggest movers: tpcds q5 15.23 → 7.00, q6 49.74 → 32.72, q71 9.05 → 6.06, q42 14.56 → 9.75;
+  tpch q5 2.06 → 1.38, q8 1.80 → 1.22, q9 2.03 → 1.41, q2 3.96 → 2.90. Green now: tpch q5, q8,
+  q10, q17; tpcds q10, q13, q30, q35, q68, q69, q85, q94.
+- The prototype's outputs cannot be derived from the committed files. `<mode>.costs.txt` prices
+  the planned run, the probe plans and the stopped runs, and `<mode>.cpu.txt` holds only the final
+  run, so the per-node kinds that split the old shuffle bytes are in no file. Those bytes are
+  non-zero in 373 planned, 174 probe and 195 stopped rows of the ten files. So `run.py` ran over
+  the whole corpus, off shad-gpu, which did not answer ssh.
+- The local host gives shad-gpu's bytes when the versions match: Python 3.13.0, pandas 3.0.6, pyarrow
+  25.0.1. Under pandas 2.2.2 every string column differs (tpch q3's customer scan 9,899,610 bytes
+  against 3,749,610).
+- The run: one `run.py --bench B --mode M` per (bench, mode), tpch at `--jobs 2`, tpcds at
+  `--jobs 1`. `--jobs 4` took free memory to 0.5 GB within 90 s, and tpcds `tp1-single` at
+  `--jobs 2` to 1.3 GB; both were stopped. Wall 51:22 for tpch and 3:48:01 for tpcds, 4:39:23 in
+  all; one worker peaked at 8.0 GB (tpcds `tp1-single`), the lowest free memory was 2.8 GB; the
+  outputs are text, 16 MB of bytecode aside nothing else was written. Every run but the last
+  ended in `KeyError: 'cuda_scatter_bytes'` after writing its three files: the cost report it
+  renders reads every bench's and mode's `.costs.txt`, and those not yet rerun carried the old
+  categories. The last rendered it; `cost_report.py` alone renders the same bytes.
+- Against the parent commit, all 600 runs and 90 skipped sections: every `cpu.txt` and
+  `optimizer.txt` section byte-identical, every skipped section identical, and in each
+  `.costs.txt` row (planned, optimized, probes, stopped) the old shuffle bytes equal scatter +
+  forward, every other category is equal, the total is lower by exactly the forward bytes, and
+  `fired` is unchanged. 3,870 comparisons, 0 differ.
+- The prototype, before → after: tpch 195 runs, optimized cheaper at 55 → 55 and dearer at 1 → 1,
+  median optimized/planned 1.0000 → 1.0000, final ratio ≤ 1.4 for 17 → 17 of 20; tpcds 405 runs,
+  cheaper at 379 → 379, dearer at 5 → 5, median 0.6218 → 0.6240, final ≤ 1.4 for 64 → 64 of 79.
+  The final ratio takes the cheapest projected mode, a `tp1` one for most queries, where only a
+  union forwards. No tpch final ratio moved; tpcds q5 15.23 → 7.00, q2 3.53 → 2.53, q71 0.89 →
+  0.76, q14 2.10 → 1.86, and none rose. tpcds q5 is still dearer optimized, now by under 0.06 %;
+  q64 is cheaper at every mode, 0.83–0.92.
+- Proving: rust-only `--lib` 604 (2 ignored), `test_corpus_goldens` 27, `test_ci_coverage` 9,
+  `test_cost_model` 4, `test_cpu_corpus` 555; `cargo test -p cost-report` 36; `peacockdb-dphyp` 6;
+  cheap tier 43 files, 402 passed, again after the run; `test_run_corpus.py` 1; `run.py` over the
+  corpus, 600 runs, 0 failed. `build-test.md`: Rust 1891, C++ 94, Python 860, total 2845.
+- The golden check also holds each total to Σ `output_bytes` less the forwarders' bytes: the
+  category lines alone stay green when two multipliers trade places. Red with `vram_to_ram` at 0.0
+  and `ram_to_vram` at 1.0 (`tp1-rowgroup-mini.cpu.txt`: total 44,136,825,402 against
+  45,497,867,394 less 1,360,484,033), green with the conf restored, its sha256 unchanged.
+- `cost_report.py` refuses a `.costs.txt` section whose categories are not the conf's, naming the
+  file and query and saying `run.py` must run over it again, rather than a bare `KeyError`. Red
+  first: `test_a_cost_file_priced_under_another_conf_is_refused_naming_it` failed on
+  `KeyError: 'join_bytes'`. The committed page renders byte for byte as before.
+- Proving after that: `test_cost_model` 4, rust-only `--lib` 604 (2 ignored),
+  `test_corpus_goldens` 27, `test_ci_coverage` 9; `cargo test -p cost-report` 36; cheap tier 43
+  files, 403 passed; `test_duckdb_cost.py` 41. `build-test.md`: Rust 1891, C++ 94, Python 861,
+  total 2846.

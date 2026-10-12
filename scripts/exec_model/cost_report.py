@@ -95,14 +95,17 @@ def _run_text(cost: RunCost, model: CostModel) -> str:
         f"{category.name}={n}" for category, n in zip(model.categories, cost.bytes))
 
 
-def read_section(body: str, model: CostModel) -> QueryCost | Marker:
-    """A `<mode>.costs.txt` section back; its bytes are totalled by `model`'s multipliers."""
+def read_section(body: str, model: CostModel, source: str) -> QueryCost | Marker:
+    """A `<mode>.costs.txt` section back; its bytes are totalled by `model`'s multipliers. A section
+    whose categories are not `model`'s is refused, naming `source`."""
     if not body.startswith(RUNS[0] + " "):
         return body.splitlines()[0]
     lines = dict(line.split(" ", 1) for line in body.splitlines())
     runs = {}
     for name in RUNS:
         counted = dict(pair.split("=") for pair in lines[name].split())
+        if list(counted)[1:] != [c.name for c in model.categories]:
+            raise ValueError(f"{source}: priced under another cost_model.conf; run run.py over it again")
         runs[name] = RunCost(tuple(c.multiplier for c in model.categories),
                              tuple(int(counted[c.name]) for c in model.categories))
     rules = dict(pair.split("=") for pair in lines["fired"].split())
@@ -117,7 +120,7 @@ def collect(out: pathlib.Path, root: pathlib.Path, model: CostModel, benches=BEN
         runs: dict[str, dict] = {}
         for mode, path in files:
             for query, body in sections(path.read_text()) if path.exists() else ():
-                runs.setdefault(query, {})[mode] = read_section(body, model)
+                runs.setdefault(query, {})[mode] = read_section(body, model, f"{path} {query}")
         if not runs:
             continue
         goldens = root / "goldens" / f"{bench}.sf1"

@@ -3,8 +3,8 @@
 //! it under `UPDATE_CANONICAL=1`). Pure text — no executor, no dataset — so it runs in the
 //! plain CPU CI tier. The taxonomy + multipliers live in `test_support/cost_model.rs`.
 //!
-//! Byte-identity invariant: at today's all-1.0 multipliers the `.cost.txt` total
-//! equals `Σ output_bytes` over the `.cpu.txt` tree.
+//! Invariant: the category lines of a `.cost.txt` section sum to `Σ output_bytes` over its
+//! `.cpu.txt` tree, whatever the multipliers, so every node's bytes land in some category.
 //!
 //! `COST_FILTER=<substr>` restricts the run to `.cpu.txt` files whose name
 //! contains `<substr>` (regenerate a single golden).
@@ -29,8 +29,7 @@ fn sum_output_bytes(cpu_text: &str) -> u64 {
         .sum()
 }
 
-/// Σ of every `peacockdb_cost=` in the text — one per section — which is what the
-/// `.cpu.txt` beside it has to account for.
+/// Σ of every `peacockdb_cost=` in the text — one per section.
 fn cost_total(cost_text: &str) -> u64 {
     const KEY: &str = "peacockdb_cost=";
     let totals: Vec<u64> = cost_text
@@ -42,8 +41,31 @@ fn cost_total(cost_text: &str) -> u64 {
     totals.iter().sum()
 }
 
+/// Σ of every category line's bytes — `<category>=<bytes> # …` — over every section, which is
+/// what the `.cpu.txt` beside it has to account for.
+fn category_bytes(cost_text: &str) -> u64 {
+    cost_text
+        .lines()
+        .filter(|line| line.contains(" # "))
+        .map(|line| {
+            let (_, bytes) = line.split_once(" # ").unwrap().0.split_once('=').unwrap();
+            bytes.parse::<u64>().expect("a category's bytes")
+        })
+        .sum()
+}
+
+/// Σ of one category's line over every section.
+fn bytes_of(category: &str, cost_text: &str) -> u64 {
+    let key = format!("{category}=");
+    cost_text
+        .lines()
+        .filter_map(|line| line.strip_prefix(&key))
+        .map(|rest| rest.split(' ').next().unwrap().parse::<u64>().unwrap())
+        .sum()
+}
+
 #[test]
-fn cost_goldens_match_and_total_is_byte_identical() {
+fn cost_goldens_match_and_categories_hold_every_byte() {
     let update = std::env::var("UPDATE_CANONICAL").is_ok();
     let filter = std::env::var("COST_FILTER").ok();
     let model = CostModel::load();
@@ -87,12 +109,20 @@ fn cost_goldens_match_and_total_is_byte_identical() {
         );
         let actual = model.cost_text_from_sections(&cpu_text, name);
 
-        // Invariant: total == Σ output_bytes in the .cpu.txt (multipliers all 1.0).
-        let total = cost_total(&actual);
-        let expected_total = sum_output_bytes(&cpu_text);
+        let binned = category_bytes(&actual);
+        let expected = sum_output_bytes(&cpu_text);
         assert_eq!(
-            total, expected_total,
-            "{name}: .cost.txt total {total} != Σ output_bytes {expected_total} in .cpu.txt"
+            binned, expected,
+            "{name}: .cost.txt categories hold {binned} != Σ output_bytes {expected} in .cpu.txt"
+        );
+        // Every real category but the forwarders' counts in full, so a multiplier moved onto
+        // the wrong line (vram_to_ram's onto ram_to_vram, say) shows in the total.
+        let forward = bytes_of("cuda_forward_bytes", &actual);
+        let total = cost_total(&actual);
+        assert_eq!(
+            total,
+            expected - forward,
+            "{name}: .cost.txt total {total} != Σ output_bytes {expected} less the forwarders' {forward}"
         );
 
         let cost_path = cpu_path.with_file_name(name.replace(".cpu.txt", ".cost.txt"));
@@ -122,8 +152,8 @@ fn cost_goldens_match_and_total_is_byte_identical() {
 #[test]
 fn generator_bins_and_totals_synthetic_tree() {
     // Covers: a node with no args renders bare (`GpuMergePartitions, output_bytes=…`, no
-    // colon) and must still bin; nodes sharing a category sum; a category with no node
-    // lands at 0; total == Σ output_bytes (multipliers 1.0).
+    // colon) and must still bin; a category with no node lands at 0; the total is
+    // Σ multiplier × bytes, a forwarder's 20 at 0.0.
     let cpu = "\
 GpuSort: by=[x], output_bytes=10, output_rows=1
   GpuMergePartitions, output_bytes=20, output_rows=2
@@ -131,10 +161,28 @@ GpuSort: by=[x], output_bytes=10, output_rows=1
     let cost = CostModel::load().cost_text_from_cpu(cpu, "synthetic");
     assert!(cost.contains("storage_read_bytes=30 #"));
     assert!(cost.contains("cuda_sort_bytes=10 #"));
-    assert!(cost.contains("cuda_shuffle_bytes=20 #")); // bare MergePartitions binned
+    assert!(cost.contains("cuda_forward_bytes=20 #")); // bare MergePartitions binned
     assert!(cost.contains("cuda_window_bytes=0")); // a category with no node, present at 0
     assert!(cost.contains("ram_to_vram_bytes=0 # (placeholder, no node mapping)"));
-    assert_eq!(cost_total(&cost), 60); // 10 + 20 + 30 == Σ output_bytes
+    assert_eq!(category_bytes(&cost), 60); // 10 + 20 + 30 == Σ output_bytes
+    assert_eq!(cost_total(&cost), 40);
+}
+
+#[test]
+fn a_forwarder_costs_nothing_and_a_scatter_costs_its_bytes() {
+    let model = CostModel::load();
+    let above_a_scan = |kind: &str| {
+        format!(
+            "{kind}: lanes=4, batches=multiple, output_rows=2, output_bytes=20\n  \
+             GpuLoadParquet: table=t, output_rows=3, output_bytes=30"
+        )
+    };
+    for kind in ["GpuMergePartitions", "GpuUnion", "GpuInterleave"] {
+        let cost = model.cost_text_from_cpu(&above_a_scan(kind), kind);
+        assert_eq!(cost_total(&cost), 30, "{kind}");
+    }
+    let cost = model.cost_text_from_cpu(&above_a_scan("GpuEmitPartitions"), "scatter");
+    assert_eq!(cost_total(&cost), 50);
 }
 
 /// Every node kind is in the taxonomy, and every name in the taxonomy is a kind — read off the exhaustive match in `nodes::node_name`, which

@@ -182,6 +182,13 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   and was priced for; reading it again costs nothing by nature, not by a multiplier
   (`cost_model.FREE`), and the ram-to-vram transfer it would cost on the device is a 0.0
   placeholder in the conf. Any other kind the conf lacks raises, as the engine panics.
+- **Forwarders are free on both sides.** The engine's side charges each node's output bytes by
+  its category's multiplier: a scatter (`GpuEmitPartitions`, `cuda_scatter_bytes`) copies every
+  row and is charged its bytes; a forwarder (`GpuMergePartitions`, `GpuUnion`, `GpuInterleave`,
+  `cuda_forward_bytes`) relabels lanes and hands batches on without a copy, and is charged 0.0.
+  DuckDB's side (`testdata/duckdb_cost.py`, `node_materialized`) charges what a pipeline breaker
+  materialises and its streaming operators (`STREAMING_OPS`, `UNION` among them) nothing. The
+  engine still charges a projection and a filter, which DuckDB streams.
 - **The final ratio is projected.** `cost_report.html` takes, per query, the min over modes of
   E × (O / P) / D: E the engine's `-mini.cost.txt` figure, O / P the prototype's optimized over
   planned at that mode, D DuckDB's `duckdb_cost=`. O / D would carry the prototype's byte scale
@@ -194,10 +201,10 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
 
 The committed run: 600 (query, mode) runs, none failed. Optimized is cheaper in 55 tpch runs and
 379 tpcds runs, dearer in 6 — tpch q18 at `tp1-rowgroup` by 1 % (a flip and a replan after a
-build of 57 rows against 300,000 estimated), tpcds q5 at every mode by under 0.03 % — and equal
+build of 57 rows against 300,000 estimated), tpcds q5 at every mode by under 0.06 % — and equal
 in the rest. The final ratio is within the published report's 1.4 for 17 of 20 tpch rows and 64
 of 79 tpcds rows. Bytes do not see the prototype's own time: q64 replans 7 times at every mode
-and is cheaper at each (0.83–0.93), yet slower in wall time, which is Python estimation and
+and is cheaper at each (0.83–0.92), yet slower in wall time, which is Python estimation and
 DPhyp over 30 calls rather than anything in the plan.
 
 ## The runtime

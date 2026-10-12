@@ -14,7 +14,7 @@ import pathlib
 import tempfile
 from html.parser import HTMLParser
 
-from .harness import main
+from .harness import main, raises
 from .optimizer.test_report_text import EVERY_RULE
 from ..cost_report import MODES, Bench, QueryCost, Row, collect, read_section, render, section
 from ..optimizer.report import Fired, fired
@@ -50,8 +50,8 @@ def test_a_query_s_costs_are_a_section_that_reads_back_the_same():
         "probes peacockdb_cost=7 scan_bytes=7 join_bytes=0 ram_to_vram_bytes=0\n"
         "stopped peacockdb_cost=22 scan_bytes=20 join_bytes=4 ram_to_vram_bytes=0\n"
         "fired probes=1 narrowed=1 dphyp=2 reordered=1 budget=0 flips=1 replans=1 refused=0\n")
-    assert read_section(text, MODEL) == made
-    assert read_section("skipped: refused by datafusion: X\n", MODEL) == "skipped: refused by datafusion: X"
+    assert read_section(text, MODEL, "hand") == made
+    assert read_section("skipped: refused by datafusion: X\n", MODEL, "hand") == "skipped: refused by datafusion: X"
 
 
 class Cells(HTMLParser):
@@ -184,6 +184,17 @@ def test_the_rows_are_read_from_the_cost_files_the_engine_s_and_duckdb_s():
         benches = collect(out, root, MODEL)
     assert benches == [Bench("tpch", [Row("q3", {"tp1-single": made}, {"tp1-single": 1234}, 99),
                                       Row("q4", {"tp1-single": "failed: X"}, {}, None)])]
+
+
+def test_a_cost_file_priced_under_another_conf_is_refused_naming_it():
+    other = parse("scan_bytes 1.0 GpuLoadParquet\nshuffle_bytes 1.0 GpuHashJoin\nram_to_vram_bytes 0.0\n")
+    with tempfile.TemporaryDirectory() as scratch:
+        out = pathlib.Path(scratch) / "out"
+        (out / "tpch").mkdir(parents=True)
+        (out / "tpch" / "tp1-single.costs.txt").write_text(f"== q3\n{section(query_cost(200, 150), other)}")
+        with raises(ValueError, match=r"tpch/tp1-single\.costs\.txt q3: priced under another "
+                                      r"cost_model\.conf.*run\.py"):
+            collect(out, pathlib.Path(scratch) / "testdata", MODEL)
 
 
 if __name__ == "__main__":

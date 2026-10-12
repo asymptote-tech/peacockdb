@@ -1,7 +1,8 @@
 """The engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format: the
 categories and multipliers read from `testdata/cost_model.conf`, a hand-priced run, the total summed
-and rounded as Rust does, a kind the conf does not list, a memory source free, and the engine's own
-`.cost.txt` goldens derived again from their `cpu.txt`."""
+and rounded as Rust does, a kind the conf does not list, a memory source free, a forwarder free and a
+scatter charged by the committed conf, and the engine's own `.cost.txt` goldens derived again from
+their `cpu.txt`."""
 
 from __future__ import annotations
 
@@ -79,6 +80,20 @@ def test_a_memory_source_is_free_whatever_the_conf_says_and_the_only_kind_that_i
     # The conf's host-to-device category is 1.0 here: a kept build still costs nothing.
     assert FREE == PROTOTYPE_KINDS
     assert parse(CONF).price("GpuMemorySource: name=m0, output_bytes=64\n", "hand").total == 0
+
+
+#: A scan's 30 bytes under one node of the kind named, which outputs 20.
+ABOVE_A_SCAN = """\
+{kind}: lanes=4, batches=multiple, output_rows=2, output_bytes=20
+  GpuLoadParquet: table=t, output_rows=3, output_bytes=30
+"""
+
+
+def test_the_conf_prices_a_forwarder_at_nothing_and_a_scatter_at_its_bytes():
+    model = load()
+    for kind in ("GpuMergePartitions", "GpuUnion", "GpuInterleave"):
+        assert model.price(ABOVE_A_SCAN.format(kind=kind), kind).total == 30, kind
+    assert model.price(ABOVE_A_SCAN.format(kind="GpuEmitPartitions"), "scatter").total == 50
 
 
 def test_the_total_is_summed_in_order_and_rounded_as_f64_round_does():
