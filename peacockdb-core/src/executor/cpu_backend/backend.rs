@@ -68,6 +68,7 @@ impl Backend for CpuBackend {
                 lane,
                 &node.kind().schema().expect("a source is not a sink").fields,
             )?),
+            NodeRef::Empty(_) => NodeExecutors::Source(CpuSource::empty()),
             NodeRef::Filter(filter) => {
                 NodeExecutors::Exec(CpuExec::filter(filter, &input(0), ctx.clone())?)
             }

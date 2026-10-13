@@ -16,8 +16,8 @@ use crate::plan::{AggCall, PlanAgg};
 use crate::plan::{BatchLayout, ColumnOrder, NodeKind, PartitionLayout};
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{
-    GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCrossJoin, GpuFilter,
-    GpuHashJoin, GpuLimit, GpuNestedLoopJoin,
+    GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCrossJoin, GpuEmpty,
+    GpuFilter, GpuHashJoin, GpuLimit, GpuNestedLoopJoin, GpuUnload,
 };
 use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
@@ -890,6 +890,18 @@ fn a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub() {
         AbiSymbol::SliceHandle
     );
     assert_eq!(plan.wire_nodes(), 1, "the stub, and nothing else");
+}
+
+/// A relation DataFusion proved empty calls nothing, but it holds its slot on the wire with the
+/// stub a parent would have taken, so a plan of nothing else still has a root: `SELECT …
+/// WHERE false` plans as an unload over the empty relation alone.
+#[test]
+fn an_empty_relation_is_a_stub_with_no_recipe() {
+    let empty = GpuEmpty::new(columns_of(&["k"]));
+    let plan = attach_recipes(&GpuUnload::new(Box::new(empty), None), 0)
+        .expect("an unload over an empty relation is writable");
+    assert!(plan.get(0).is_none(), "the empty relation makes no call");
+    assert_eq!(plan.wire_nodes(), 1, "its stub, and nothing else");
 }
 
 /// The Rust child walk is total, as `NodeSession::node_children` is: every kind the schema

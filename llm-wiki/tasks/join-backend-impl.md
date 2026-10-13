@@ -1331,12 +1331,18 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   `wire/attach.rs:83` (no device call), `executor/cpu_backend/backend.rs:66`,
   `executor/gpu_backend/backend.rs:79`
 - Test: `planner/translator/tests.rs`, `tests/gpu_tests/join_cases.rs`
+- **Also moved, measured:** `planner/memory_estimation.rs`'s `sources()` (the sizing pass
+  counted the leaf as a source and refused at tp4-sized), `wire/attach.rs` writes the writer's
+  stub rather than nothing (a bare `EmptyExec` — `WHERE false`, `LIMIT 0` — had no root),
+  `testdata/cost_model.conf` and the 15 cost goldens' comment, the payload golden (+ pbench's
+  query), the registry's plan columns, `tests/rebuild.rs`'s nineteen kinds; the device case is
+  in `source_cases.rs`, not `join_cases.rs` — the detail file's task 9b record.
 
 **Interfaces:**
 - Produces: `pub(crate) struct GpuEmpty { kind: NodeKind }` with `GpuEmpty::new(schema: Schema)`;
   `NodeRef::Empty(&GpuEmpty)`; `ExecutorCategory::Source` for it; plan text `GpuEmpty: lanes=1, schema=[…]`.
 
-- [ ] **Step 1: The failing tests.**
+- [x] **Step 1: The failing tests.**
 
 ```rust
 #[tokio::test]
@@ -1369,8 +1375,8 @@ operator_case! {
 ```
   (`hash_join_over`, `build_given`, `build_batch` and `rows` are `join_cases.rs`'s fixtures at
   `:21-190`; where one is named otherwise, use that one.)
-- [ ] **Step 2: Run red** — `Unsupported("plan node EmptyExec")`.
-- [ ] **Step 3: The node.** In `plan/mod.rs`:
+- [x] **Step 2: Run red** — `Unsupported("plan node EmptyExec")`.
+- [x] **Step 3: The node.** In `plan/mod.rs`:
 
 ```rust
 /// A relation DataFusion proved empty (`EmptyExec`): one lane, no batch, on either engine.
@@ -1411,7 +1417,7 @@ impl GpuNode for GpuEmpty {
         return Ok(Box::new(GpuEmpty::new(Schema::new(empty.schema()))));
     }
 ```
-- [ ] **Step 4: Run green** (rust-only, then the harness on the device); pbench's
+- [x] **Step 4: Run green** (rust-only, then the harness on the device); pbench's
   `empty-side-left-join` plan golden regenerates in this commit.
 - [ ] **Step 5: Commit.** `git commit -m "an empty relation plans as GpuEmpty, a leaf that emits nothing"`.
 

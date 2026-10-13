@@ -5363,3 +5363,23 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             #22 CudfScan
                                               files: /tmp/peacock-plan-bytes-root/tpcds.sf1/store_sales.parquet
                                               schema: [ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_customer_sk:Int64]
+== pbench empty-side-left-join
+sha256=b6d04f51bcc698cf36a0af82ff516bbd00a426c9dfac74f4bcb325b83f684c61
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+      #4 CudfProject
+        t_id: t_id@1
+        d_id: d_id@0
+    GpuHashJoin: calling_lanes=1, join_build(#2 CudfJoin); per probe batch: join_probe
+        #2 CudfJoin
+          join_type: Right
+          keys: (d_k@1, t_k@1)
+          build_schema: [d_id:Int64, d_k:Int32]
+          probe_schema: [t_id:Int32, t_k:Int32]
+          projection: [0, 2]
+      GpuEmpty: none
+      GpuMergePartitions: none
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#1 CudfScan, row groups)
+            #1 CudfScan
+              files: /tmp/peacock-plan-bytes-root/pbench.sf1/tiny.parquet
+              schema: [t_id:Int32, t_k:Int32]

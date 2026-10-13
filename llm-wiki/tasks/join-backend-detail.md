@@ -1631,3 +1631,170 @@ reads "Object at location … not found". Names must be unique across `planner/t
   `GpuNestedLoopJoin: join_type=Full` today.
 - 10: the device harness already has a residual on all nine hash types and every nested-loop
   type over two probe batches. Step 2's "per type" lists should not add duplicates.
+
+#### Round 2, plan task 9b — a side DataFusion folds to nothing: `GpuEmpty` (review row 8)
+
+Plan, translator, null analysis, estimator, renderer, wire, both source executors, and tests.
+No C++ and no fbs change: the empty relation calls nothing, and its wire slot is the stub
+`CudfScan` the writer already made for hand-built leaves.
+
+**What shipped.**
+- `plan/`: `GpuEmpty { kind }`, `GpuEmpty::new(schema)` (`plan/source.rs`, beside the scan):
+  `NodeKind::Source`, one lane, `SingleBatch`, no validation of its own. `NodeRef::Empty`,
+  `ExecutorCategory::Source`, name `GpuEmpty`. The registry is nineteen kinds now.
+- Translator: the `EmptyExec` arm, before the refusals at the end of `node()`.
+- `planner/nullability.rs`: `vec![false; width]` — no row, no NULL. That is what spares a key read
+  from it #137's filter, though every field is declared nullable.
+- `planner/memory_estimation.rs`: `sources()` is the scans, not every `NodeKind::Source`. It
+  prices 0 rows through the leaf fallthrough that already answered 0, so it needs no arm of
+  its own.
+- `plan_text/node_text.rs`: no fields; the line is `GpuEmpty: lanes=1, batches=single, schema=[…]`.
+- `wire/attach.rs`: no recipe, and `writer.leaf()` — the stub a parent would have taken.
+- Executors: `CpuSource` and `GpuSource` each hold `read: Option<LaneRead>`. `None` is the empty
+  relation's lane, which answers `None` at its first `next_batch` and calls nothing.
+  `GpuBackend::executors_for` answers it before the recipe lookup, as it answers the forwarders.
+- `testdata/cost_model.conf`: `GpuEmpty` under `storage_read_bytes`, the source category, where
+  it always counts 0 bytes. `test_cost_model` requires every kind in exactly one category.
+- Tests (rust-only, +7): translator ×2 (the leaf under the swapped Right join at tp4; `WHERE false`
+  as `GpuUnload` over the leaf alone), `end_to_end!(pbench, empty_side_left_join)` at five modes
+  against DataFusion, `an_empty_relation_alone_answers_no_batch` at five modes, the estimator's
+  `an_empty_relation_is_not_a_source_the_budget_sizes`, the wire's
+  `an_empty_relation_is_a_stub_with_no_recipe`, and `an_empty_relation_says_no_column_holds_a_null`.
+  Grown: `rebuild::every_kind` (two fixtures, nineteen kinds), `cpu_backend/tests/backend.rs`'s
+  kind list, `plan_goldens.rs`'s recipe-numbering check (a `GpuEmpty` makes no call either), and
+  `PAYLOAD_QUERIES` (+ pbench `empty-side-left-join`, 22 queries over three datasets).
+- Device (+2, `source_cases.rs`): `an_empty_relation_emits_no_batch_on_either_engine` (the
+  harness's `GpuEmpty` case, which the kind guard requires), and
+  `a_left_join_over_an_empty_relation_pads_every_row_on_both_engines` — pbench's query planned at
+  five modes and run whole through the driver on both engines, eight padded rows each.
+
+**Divergences.** None found. The empty lane answers no batch on both engines, and both answer
+the query DuckDB's eight rows.
+
+**What the plan got wrong.**
+- **"`wire/attach.rs` writes no node" leaves `SELECT … WHERE false` with no root.** DataFusion
+  plans a bare `EmptyExec` for it — measured, and for `LIMIT 0` too — so the tree is `GpuUnload`
+  over the leaf, and a writer that wrote nothing ended with 0 unconsumed nodes. Shown red first
+  with the plan's version. The leaf writes the writer's stub; it is the first planned leaf that
+  is not a scan, and `Writer::leaf`'s comment says so.
+- **The estimator's `sources()` was the line that mattered**, not `:156`/`:185`. It counted
+  every `NodeKind::Source`, so at tp4-sized the sizing pass reached two sources and the planning
+  pass one, and the plan was refused. Red first through the estimator test and both end-to-end
+  cases at tp4-sized.
+- **`validate.rs:220`'s width arm is a tautology** — the schema's width against itself — and the
+  `_` arm already passes it. Not written.
+- **The `join_cases.rs` case proves nothing new.** The harness drives one node over a script and
+  never runs the children. A `GpuEmpty` child writes the same stub a `Given` child does, so the
+  case would be `right_with_no_build_batch_pads_every_probe_row` again. The shape under a join is
+  proved by the whole-plan device case instead.
+- **The plan named neither the payload golden nor the cost taxonomy.** `GpuEmpty: none` is a call
+  shape the payload coverage check demands a query for, and `cost_model.conf` must name every
+  kind. The second rewrites one comment per cost section (below).
+- **The query is a Right join over an empty build**, not a Left join over an empty probe:
+  DataFusion swaps it. Every lane meets `set_build(None)`, and Right owes its probe rows padded.
+
+**Goldens moved, by kind, checked by script.** No `.cpu.txt`, `.result.txt`, `duckdb-result.txt`,
+`gpu-result.txt` or `corpus_cases.inc`: the query's cpu and gpu cells stay off.
+
+| kind | files | what moved |
+|---|---|---|
+| `*.plans.txt` pbench | 5 | `empty-side-left-join` only, one hunk each: the refusal line → 18 lines at tp1 (5 nodes, 5 recipe lines, 5 memory lines, 3 headers) and 21 at tp4 (a `GpuMergePartitions` more in each part) |
+| `recipe-payloads.txt` | 1 | +20: the new section, a header, its digest and 18 lines. The stub prints nothing; the digest covers it |
+| `*-mini.cost.txt` | 15 | 726 lines, one per enabled cpu section: `# GpuLoadParquet` → `# GpuLoadParquet, GpuEmpty`. With that comment stripped, all 15 equal `7991fcf0` byte for byte |
+| `cost-registry.csv` | 1 | `empty_side_left_join`'s five plan columns `disabled` → `enabled`; `--numstat` 1/1 |
+
+**Cells.** `empty-side-left-join`'s ten cells become enable-able here; enabling them is task 14's.
+The five cpu cells answer as DataFusion at every mode (`end_to_end`) and as DuckDB's committed
+section row for row (the CLI at tp1 and tp4). The five gpu cells answer as the cpu at every mode on
+nebius-gpu (the whole-plan device case). The registry row still carries `155` on the tickets column.
+
+**#256 is unchanged.** `outer-on-true-empty` and `cross-empty-build` are refused in
+`scan_mapping::partition`, over a `ParquetExec` of a file with no row group. DataFusion never folds
+those to `EmptyExec`, so the new arm never sees them. #256's fix can now be one line in the scan
+arm: plan `GpuEmpty` where no row group survives. That would close #282 as well. Both are outside
+this task's scope.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base 7991fcf0`: 726 compared, **0
+changed, 0 regressions**. The cost comment moved and no figure did.
+
+**Red-green evidence.** Red first: the five SQL-level cases (translator ×2, estimator, end-to-end ×2)
+all on `unsupported: plan node EmptyExec`. With the node in, three stayed red on the sizing
+pass's two sources against one, and the wire case on "0 unconsumed nodes rather than one root".
+Then mutations, each applied by an asserted single match against the whole `--lib` tier
+(`test_cost_model` for M7), restored from a saved copy, `cmp`-checked, and the final diff read
+for each mutation's text:
+- M1 the translator arm off: 11 failed — both translator cases, the estimator case, both
+  end-to-end cases, the five pbench plan goldens, the payload golden.
+- M2 no stub on the wire: 7 failed — the wire case, the five pbench plan goldens (seqs renumber),
+  the payload golden.
+- M3 `sources()` back to every `NodeKind::Source`: 8 failed — the estimator case, both end-to-end
+  cases, the five pbench plan goldens (their memory sections).
+- M4 the null analysis saying `true`: 1 failed, `an_empty_relation_says_no_column_holds_a_null`.
+  That case was written after the code, so this is its only red.
+- M5 the cpu backend refusing the node: 3 failed — the kind-list case, both end-to-end cases.
+- M6 the leaf declared `MultipleBatches`: 8 failed — both translator cases, the five pbench plan
+  goldens, the payload golden.
+- M7 `GpuEmpty` out of `cost_model.conf`: 2 failed, both `test_cost_model` checks.
+- Device, D1, `GpuBackend` sending the node to the recipe lookup: exactly the two new device
+  cases failed ("GpuEmpty is at 0 in the tree, where the recipes hold no entry"), 603 passed.
+  Applied on the remote copy only, overwritten by the next sync, the file touched there before
+  the final build, which recompiled `peacockdb-core`.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S, 0 MiB
+in use; cuDF 25.02. Final tree synced, `./scripts/build-test-shadgpu.sh --build` rc 0, each binary
+run directly with `--test-threads=1`. **843 cases, all green**: `peacock_gpu_tests` 2,
+`peacock_plan_tests` 79, `peacock_join_session_tests` 53, `test_gpu_corpus` 95, `test_node_timing`
+1, `peacockdb_core_gpu_lib gpu_tests::` 605 (+2), `peacock_gpu_benchmarks --skip bench_` 8. Not
+run, per the override: the sf40 pair and the `bench_` cases. Disk 28 GB free of 96 before and
+after; nothing deleted.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 746 passed, 2 ignored; `test_cpu_corpus`
+1006; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage`
+11; `test_golden_format` 43; 0 failed.
+
+**Warnings.** None new. The rust-only build and test builds have none. The local gpu-feature
+lib-test build (`cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`) has the
+one pre-existing `AsArray`. `NodeRef::Empty`'s borrow is read by nobody, so it carries the
+`#[allow(dead_code)]` the three forwarders carry, with its reason.
+
+**Formatting.** Under edition 2024. Every touched file that was rustfmt-clean at HEAD is clean
+now; the four that gained a hunk were formatted whole through a temp copy. The rest report
+exactly their HEAD hunk counts: `cpu_backend/source.rs` 1, `gpu_backend/backend.rs` 4,
+`nullability.rs` 1. The three `mod.rs` were checked with stub children so rustfmt did not
+follow them.
+
+**build-test.md counts, counted off `--list`.** cpu block 1776 → 1783: `--lib` 741 → 748 — "End to
+end" 30 → 32, "Translator, one rule at a time" 37 → 39, "Memory estimation" 11 → 12, "Null
+analysis rules" 11 → 12, "Recipes per join type" 20 → 21. gpu block 710 → 712: `--lib --
+gpu_tests::` 603 → 605, "Operator harness" 374 → 376. Rust 2606 → 2615, grand total 3178 →
+3187 (the N columns summed by script: Rust 2615, C++ 171, Python 401). Prose rewritten: "End to
+end" (18 queries, twelve cases, the empty relation alone), "Recipe payloads golden" (pbench's
+member and why), "Recipes per join type" (the empty relation's stub), "Memory estimation", and
+"Operator harness" (the empty relation, alone and planned whole).
+
+**architecture.md sentences this round falsified** (the coordinator's, or task 15's rewrite):
+- "The node set" table has no `GpuEmpty` row (Source; one lane, no batch, no call).
+- "From node to seqs" has no `GpuEmpty` row: a stub `CudfScan`, never called, no recipe.
+
+**Ticket text made stale.**
+- #256 (`joins.md`): "a `GpuEmpty` the way #155's `EmptyExec` arm will need one" — it exists.
+- #257 (`df-upgrade.md`): "Today the engine refuses the plan — `unsupported: plan node
+  EmptyExec`, #155 … That arm lands in join-backend". It has landed; a bare `EmptyExec` now plans
+  and answers DataFusion's 0 rows. The ticket's later paragraph — the rule refusing first, on
+  #250 — is what still holds, and `in-is-null` still meets #250 at all five modes.
+- #217 (`corpus-coverage.md`): "DataFusion is expected to turn `LIMIT 0` into an empty relation
+  before a sort exists. Unconfirmed". It does: `… ORDER BY n_name LIMIT 0` and `… LIMIT 0` both
+  plan to a bare `EmptyExec`, which now plans as `GpuEmpty` and answers no row.
+
+**Drift found, not mine.** `planner/tests/null_analysis.rs`'s module doc says an anti or mark join
+is refused when NULLs can meet on both sides; that refusal went in task 9.
+`plan_goldens.rs`'s `PAYLOAD_QUERIES` doc said "the ten mode goldens" where pbench made fifteen;
+corrected in this change, since the line was being edited.
+
+**What plan task 9c inherits.** Nothing from this task touches the nested loop or `expr.cpp`.
+`indf-full-join` is as task 9 left it. Two shared files gained lines: `PAYLOAD_QUERIES`, now 22,
+reads pbench, so a 9c payload member can come from pbench without widening the loop; and
+`source_cases.rs` has the template for a whole-plan, two-engine device case (plan, `run` on
+each, `Device::open` over the whole tree), which 9c's promoted hash join can copy if the harness
+alone does not show it. For task 13: exec_model has no `GpuEmpty` and models no pbench query, so
+nothing there moved.

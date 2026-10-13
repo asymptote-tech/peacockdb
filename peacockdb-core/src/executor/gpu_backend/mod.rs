@@ -106,6 +106,12 @@ pub(crate) struct GpuProbingJoin {
 /// Declared here because `Backend::Source` names it, so a caller holding a `GpuBackend`
 /// reaches it without any file importing the type.
 pub(crate) struct GpuSource {
+    /// `None` for a `GpuEmpty`, a relation DataFusion proved empty: no seq, and no batch.
+    pub(crate) read: Option<LaneRead>,
+}
+
+/// The scan one lane of a `GpuLoadParquet` makes, a call per batch.
+pub(crate) struct LaneRead {
     pub(crate) site: CallSite,
     pub(crate) seq: Seq,
     pub(crate) kind: FbKind,

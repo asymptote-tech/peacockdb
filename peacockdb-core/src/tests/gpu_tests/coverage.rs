@@ -2,7 +2,7 @@
 //! source text, which is the reader-that-stops-at-the-first-match class — and checked
 //! against the node registry in both directions. The oracle for "every kind" is
 //! `every_kind`, which `a_node_rebuilt_over_its_own_children_is_the_node_it_was` holds to
-//! all eighteen. `inventory` collects per binary, and the cases are gpu-rung, so the guard
+//! all nineteen. `inventory` collects per binary, and the cases are gpu-rung, so the guard
 //! sits here and runs where they link.
 
 use std::collections::BTreeSet;

@@ -16,6 +16,7 @@ use datafusion::physical_plan::Partitioning;
 use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
 use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
+use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::{CrossJoinExec, HashJoinExec, NestedLoopJoinExec};
 use datafusion::physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
@@ -42,8 +43,8 @@ use crate::plan::{Batching, RowGroupMeta};
 use crate::plan::{BinaryOp, UnaryOp};
 use crate::plan::{Expr, NamedExpr};
 use crate::plan::{
-    GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter,
-    GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
+    GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty,
+    GpuFilter, GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
     GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{GpuNode, RowInterval};
@@ -175,6 +176,10 @@ pub(crate) fn node(
             "{}: window functions (#143)",
             plan.name()
         )));
+    }
+
+    if let Some(empty) = any.downcast_ref::<EmptyExec>() {
+        return Ok(Box::new(GpuEmpty::new(Schema::new(empty.schema()))));
     }
 
     if any.is::<PlaceholderRowExec>() {

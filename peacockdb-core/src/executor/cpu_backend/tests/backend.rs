@@ -14,9 +14,9 @@ use crate::plan::ColumnOrder;
 use crate::plan::RowInterval;
 use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
-    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
-    GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort,
-    GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
+    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty, GpuFilter, GpuHashJoin,
+    GpuInterleave, GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
+    GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
 };
 use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::common::JoinType;
@@ -143,6 +143,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
             columns(&GROUPED),
         )),
         Box::new(GpuUnload::new(streaming(), None)),
+        Box::new(GpuEmpty::new(columns(&GROUPED))),
     ]
 }
 
@@ -217,11 +218,12 @@ fn node_kind(node: &dyn GpuNode) -> u8 {
         NodeRef::Union(_) => 15,
         NodeRef::Interleave(_) => 16,
         NodeRef::Unload(_) => 17,
+        NodeRef::Empty(_) => 18,
     }
 }
 
 const LOAD_PARQUET: u8 = 0;
-const NODE_KINDS: u8 = 18;
+const NODE_KINDS: u8 = 19;
 
 fn category_built(node: &dyn GpuNode) -> ExecutorCategory {
     CpuBackend::executors_for(&ctx(), node, 0, 0)

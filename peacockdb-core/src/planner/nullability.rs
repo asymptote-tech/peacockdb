@@ -159,6 +159,8 @@ pub(crate) fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
     match as_node_ref(node) {
         // The leaf: what the surviving row groups actually hold.
         NodeRef::LoadParquet(load) => load.can_be_null.clone(),
+        // No row, so no NULL.
+        NodeRef::Empty(_) => vec![false; width],
 
         // A projection re-numbers columns and can compute new ones, so each is its own
         // question; a filter's projection is the same question over a subset.

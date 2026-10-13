@@ -12,7 +12,6 @@
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
 use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
-use crate::plan::NodeKind;
 use crate::plan::PlanError;
 use crate::plan::needs_finish;
 use crate::plan::{NodeRef, as_node_ref};
@@ -130,9 +129,11 @@ impl<'a> Tree<'a> {
         self.nodes.len() - 1
     }
 
+    /// The scans, which are what the budget sizes. A `GpuEmpty` reads nothing, and the
+    /// translator's second pass counts scans alone, so it is not one.
     fn sources(&self) -> Vec<usize> {
         (0..self.nodes.len())
-            .filter(|seq| matches!(self.nodes[*seq].kind(), NodeKind::Source { .. }))
+            .filter(|seq| matches!(as_node_ref(self.nodes[*seq]), NodeRef::LoadParquet(_)))
             .collect()
     }
 

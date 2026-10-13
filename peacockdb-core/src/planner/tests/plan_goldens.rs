@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::plan::GpuNode;
 use crate::plan::{ExecutorCategory, category_of};
+use crate::plan::{NodeRef, as_node_ref};
 use crate::plan_text::{render_plan, render_plan_memory};
 use crate::planner;
 use crate::planner::PlanKnobs;
@@ -164,14 +165,14 @@ const PAYLOAD_MODE: &str = "tp4_rowgroup";
 /// skip.
 ///
 /// Which half of that a test enforces, so a reader knows what rests on a person: the fb
-/// kinds and the call shapes are asserted against the ten mode goldens by
+/// kinds and the call shapes are asserted against the fifteen mode goldens by
 /// `the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce` — a mapping arm
 /// or a call pattern that appears there and not here goes red. The expression features are
 /// prose, checked by reading.
 ///
 /// So a query earns a place here by covering something no other query does. Adding one
 /// that covers nothing new adds lines no reader can check against anything.
-const PAYLOAD_QUERIES: [(&str, &str); 21] = [
+const PAYLOAD_QUERIES: [(&str, &str); 22] = [
     // Nested-loop join lives nowhere else in the corpus; the stddev query is the Welford
     // init, both merges and the finalize project; q13 is the outer join's finish pass.
     ("tpch", "q13"),
@@ -212,6 +213,9 @@ const PAYLOAD_QUERIES: [(&str, &str); 21] = [
     // q40 is a plain Right outer: probe-local, one call, no finish. The Right in q97 is a
     // Full outer's per-batch call, which is the same kind doing a different thing.
     ("tpcds", "q40"),
+    // The build side is a relation DataFusion proved empty: a `GpuEmpty`, which calls
+    // nothing and holds its slot with a stub scan no other planned query writes.
+    ("pbench", "empty-side-left-join"),
 ];
 
 /// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
@@ -271,10 +275,10 @@ fn digest_of(bytes: &[u8]) -> String {
 async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     let mode = mode_named(PAYLOAD_MODE);
     let mut text = String::new();
-    // The two datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
-    // CORPUS_DATASETS: this file is twenty-one chosen queries, and a dataset earns a place in it
+    // The three datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
+    // CORPUS_DATASETS: this file is twenty-two chosen queries, and a dataset earns a place in it
     // by covering a call shape no query here already carries.
-    for dataset in ["tpch", "tpcds"] {
+    for dataset in ["tpch", "tpcds", "pbench"] {
         let wanted: Vec<&str> = PAYLOAD_QUERIES
             .iter()
             .filter(|(bench, _)| *bench == dataset)
@@ -1102,7 +1106,9 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
                      another node",
                     node.name()
                 );
-                let makes_calls = category_of(*node) != ExecutorCategory::BatchForwarder;
+                // A forwarder routes and a `GpuEmpty` reads nothing: neither makes a call.
+                let makes_calls = category_of(*node) != ExecutorCategory::BatchForwarder
+                    && !matches!(as_node_ref(*node), NodeRef::Empty(_));
                 assert_eq!(
                     recipes.get(*position).is_some(),
                     makes_calls,

@@ -17,7 +17,7 @@ use crate::plan::RowGroupMeta;
 use crate::plan::ScanMetadata;
 use crate::plan::Schema;
 use crate::plan::{
-    AggregateBody, GpuAggregate, GpuCrossJoin, GpuFilter, GpuLimit, GpuLoadParquet,
+    AggregateBody, GpuAggregate, GpuCrossJoin, GpuEmpty, GpuFilter, GpuLimit, GpuLoadParquet,
     GpuMergePartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
@@ -267,4 +267,16 @@ fn a_cross_join_reads_its_projection_past_the_rowmarker() {
         )]))),
     );
     assert_eq!(can_be_null(&join), vec![true]);
+}
+
+/// A relation DataFusion proved empty has no row, so none of its columns holds a NULL —
+/// which is what spares a join key read from it #137's filter, though every field of it is
+/// declared nullable.
+#[test]
+fn an_empty_relation_says_no_column_holds_a_null() {
+    let schema = Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("a", DataType::Int64, true),
+        Field::new("b", DataType::Utf8, true),
+    ])));
+    assert_eq!(can_be_null(&GpuEmpty::new(schema)), vec![false, false]);
 }

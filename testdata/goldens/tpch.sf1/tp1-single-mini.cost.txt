@@ -1,5 +1,5 @@
 == q1
-storage_read_bytes=473345842 # GpuLoadParquet
+storage_read_bytes=473345842 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=442265186 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=1175 # GpuAggregate, GpuAggregateBatches
@@ -15,7 +15,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=1453284571
 == q2
-storage_read_bytes=64597547 # GpuLoadParquet
+storage_read_bytes=64597547 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=19624 # GpuFilter
 cuda_hash_join_bytes=50856828 # GpuHashJoin
 cuda_aggregate_bytes=5694968 # GpuAggregate, GpuAggregateBatches
@@ -31,7 +31,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=172722328
 == q3
-storage_read_bytes=168005022 # GpuLoadParquet
+storage_read_bytes=168005022 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=148950586 # GpuFilter
 cuda_hash_join_bytes=3893176 # GpuHashJoin
 cuda_aggregate_bytes=755304 # GpuAggregate, GpuAggregateBatches
@@ -47,7 +47,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=324636817
 == q4
-storage_read_bytes=104357930 # GpuLoadParquet
+storage_read_bytes=104357930 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=32002551 # GpuFilter
 cuda_hash_join_bytes=658325 # GpuHashJoin
 cuda_aggregate_bytes=216 # GpuAggregate, GpuAggregateBatches
@@ -63,7 +63,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=138201475
 == q5
-storage_read_bytes=300530541 # GpuLoadParquet
+storage_read_bytes=300530541 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=3698457 # GpuFilter
 cuda_hash_join_bytes=46656589 # GpuHashJoin
 cuda_aggregate_bytes=274 # GpuAggregate, GpuAggregateBatches
@@ -79,7 +79,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=358676667
 == q6
-storage_read_bytes=51609600 # GpuLoadParquet
+storage_read_bytes=51609600 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=3681660 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=34 # GpuAggregate, GpuAggregateBatches
@@ -95,7 +95,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=55291328
 == q7
-storage_read_bytes=129800738 # GpuLoadParquet
+storage_read_bytes=129800738 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=96222255 # GpuFilter
 cuda_hash_join_bytes=267201439 # GpuHashJoin
 cuda_aggregate_bytes=352 # GpuAggregate, GpuAggregateBatches
@@ -111,7 +111,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=673383087
 == q8
-storage_read_bytes=360867827 # GpuLoadParquet
+storage_read_bytes=360867827 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=9328529 # GpuFilter
 cuda_hash_join_bytes=6724960 # GpuHashJoin
 cuda_aggregate_bytes=150 # GpuAggregate, GpuAggregateBatches
@@ -127,7 +127,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=392774634
 == q9
-storage_read_bytes=489986506 # GpuLoadParquet
+storage_read_bytes=489986506 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=86645 # GpuFilter
 cuda_hash_join_bytes=121041363 # GpuHashJoin
 cuda_aggregate_bytes=11018 # GpuAggregate, GpuAggregateBatches
@@ -143,7 +143,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=737985651
 == q10
-storage_read_bytes=168595494 # GpuLoadParquet
+storage_read_bytes=168595494 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=60636749 # GpuFilter
 cuda_hash_join_bytes=58905027 # GpuHashJoin
 cuda_aggregate_bytes=15077964 # GpuAggregate, GpuAggregateBatches
@@ -159,7 +159,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=372173205
 == q11
-storage_read_bytes=58545778 # GpuLoadParquet
+storage_read_bytes=58545778 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=10 # GpuFilter
 cuda_hash_join_bytes=53693880 # GpuHashJoin
 cuda_aggregate_bytes=1446210 # GpuAggregate, GpuAggregateBatches
@@ -175,7 +175,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=169177895
 == q12
-storage_read_bytes=62948242 # GpuLoadParquet
+storage_read_bytes=62948242 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=503560 # GpuFilter
 cuda_hash_join_bytes=641067 # GpuHashJoin
 cuda_aggregate_bytes=110 # GpuAggregate, GpuAggregateBatches
@@ -191,7 +191,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=65237826
 == q13
-storage_read_bytes=104552062 # GpuLoadParquet
+storage_read_bytes=104552062 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=24119844 # GpuFilter
 cuda_hash_join_bytes=24932410 # GpuHashJoin
 cuda_aggregate_bytes=4875686 # GpuAggregate, GpuAggregateBatches
@@ -207,7 +207,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=160920238
 == q14
-storage_read_bytes=17506270 # GpuLoadParquet
+storage_read_bytes=17506270 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=3067814 # GpuFilter
 cuda_hash_join_bytes=4329303 # GpuHashJoin
 cuda_aggregate_bytes=68 # GpuAggregate, GpuAggregateBatches
@@ -223,7 +223,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=34577500
 == q15
-storage_read_bytes=33593743 # GpuLoadParquet
+storage_read_bytes=33593743 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=18245790 # GpuFilter
 cuda_hash_join_bytes=946136 # GpuHashJoin
 cuda_aggregate_bytes=970017 # GpuAggregate, GpuAggregateBatches
@@ -239,7 +239,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=55890561
 == q16
-storage_read_bytes=23568153 # GpuLoadParquet
+storage_read_bytes=23568153 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=1452073 # GpuFilter
 cuda_hash_join_bytes=11613830 # GpuHashJoin
 cuda_aggregate_bytes=12508085 # GpuAggregate, GpuAggregateBatches
@@ -255,7 +255,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=59998526
 == q17
-storage_read_bytes=394218499 # GpuLoadParquet
+storage_read_bytes=394218499 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=1658 # GpuFilter
 cuda_hash_join_bytes=255269 # GpuHashJoin
 cuda_aggregate_bytes=11325034 # GpuAggregate, GpuAggregateBatches
@@ -271,7 +271,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=411143742
 == q18
-storage_read_bytes=350346432 # GpuLoadParquet
+storage_read_bytes=350346432 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=464 # GpuFilter
 cuda_hash_join_bytes=536558160 # GpuHashJoin
 cuda_aggregate_bytes=72758540 # GpuAggregate, GpuAggregateBatches
@@ -287,7 +287,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=1052151414
 == q19
-storage_read_bytes=493517102 # GpuLoadParquet
+storage_read_bytes=493517102 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=7270075 # GpuFilter
 cuda_hash_join_bytes=3904 # GpuHashJoin
 cuda_aggregate_bytes=34 # GpuAggregate, GpuAggregateBatches
@@ -303,7 +303,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=500808260
 == q20
-storage_read_bytes=65016353 # GpuLoadParquet
+storage_read_bytes=65016353 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=29460893 # GpuFilter
 cuda_hash_join_bytes=288851 # GpuHashJoin
 cuda_aggregate_bytes=35172852 # GpuAggregate, GpuAggregateBatches
@@ -319,7 +319,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=143457545
 == q21
-storage_read_bytes=403320547 # GpuLoadParquet
+storage_read_bytes=403320547 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=129208606 # GpuFilter
 cuda_hash_join_bytes=244751781 # GpuHashJoin
 cuda_aggregate_bytes=24876 # GpuAggregate, GpuAggregateBatches
@@ -335,7 +335,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=789313929
 == q22
-storage_read_bytes=23981258 # GpuLoadParquet
+storage_read_bytes=23981258 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=2437090 # GpuFilter
 cuda_hash_join_bytes=496536 # GpuHashJoin
 cuda_aggregate_bytes=477 # GpuAggregate, GpuAggregateBatches
@@ -351,7 +351,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=29105722
 == aggregate-groupby
-storage_read_bytes=127525823 # GpuLoadParquet
+storage_read_bytes=127525823 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=138 # GpuAggregate, GpuAggregateBatches
@@ -367,7 +367,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=127526030
 == anti-join
-storage_read_bytes=198245267 # GpuLoadParquet
+storage_read_bytes=198245267 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=244904 # GpuFilter
 cuda_hash_join_bytes=155524935 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -383,7 +383,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=509784945
 == cross-join
-storage_read_bytes=2893 # GpuLoadParquet
+storage_read_bytes=2893 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -399,7 +399,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=49124
 == filter-project
-storage_read_bytes=145529464 # GpuLoadParquet
+storage_read_bytes=145529464 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=58253036 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -415,7 +415,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=262035536
 == hash-join
-storage_read_bytes=181904464 # GpuLoadParquet
+storage_read_bytes=181904464 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=193539184 # GpuHashJoin
 cuda_aggregate_bytes=86 # GpuAggregate, GpuAggregateBatches
@@ -431,7 +431,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=411818777
 == join-int
-storage_read_bytes=14025000 # GpuLoadParquet
+storage_read_bytes=14025000 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=6187500 # GpuHashJoin
 cuda_aggregate_bytes=616 # GpuAggregate, GpuAggregateBatches
@@ -447,7 +447,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=22051232
 == left-join
-storage_read_bytes=181904464 # GpuLoadParquet
+storage_read_bytes=181904464 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=193539184 # GpuHashJoin
 cuda_aggregate_bytes=129 # GpuAggregate, GpuAggregateBatches
@@ -463,7 +463,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=411818820
 == mixed-join
-storage_read_bytes=212846976 # GpuLoadParquet
+storage_read_bytes=212846976 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=143966290 # GpuHashJoin
 cuda_aggregate_bytes=86 # GpuAggregate, GpuAggregateBatches
@@ -479,7 +479,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=399375895
 == nested-limits
-storage_read_bytes=1625006 # GpuLoadParquet
+storage_read_bytes=1625006 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -495,7 +495,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=1626484
 == nested-loop-join
-storage_read_bytes=2893 # GpuLoadParquet
+storage_read_bytes=2893 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -511,7 +511,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=21410
 == nested-loop-left-join
-storage_read_bytes=2893 # GpuLoadParquet
+storage_read_bytes=2893 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -527,7 +527,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=22282
 == rollup-over-join
-storage_read_bytes=2587218 # GpuLoadParquet
+storage_read_bytes=2587218 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=2587114 # GpuHashJoin
 cuda_aggregate_bytes=7544 # GpuAggregate, GpuAggregateBatches
@@ -545,7 +545,7 @@ peacockdb_cost=5189184
 == scan-limit
 skipped: not enabled at this mode
 == semi-join
-storage_read_bytes=198245267 # GpuLoadParquet
+storage_read_bytes=198245267 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=244904 # GpuFilter
 cuda_hash_join_bytes=39533243 # GpuHashJoin
 cuda_aggregate_bytes=0 # GpuAggregate, GpuAggregateBatches
@@ -561,7 +561,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=277801561
 == shuffle-additive
-storage_read_bytes=255051646 # GpuLoadParquet
+storage_read_bytes=255051646 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=426 # GpuAggregate, GpuAggregateBatches
@@ -577,7 +577,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=255052498
 == shuffle-additive-avg
-storage_read_bytes=158282054 # GpuLoadParquet
+storage_read_bytes=158282054 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=459 # GpuAggregate, GpuAggregateBatches
@@ -593,7 +593,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=158282939
 == shuffle-stddev
-storage_read_bytes=158282054 # GpuLoadParquet
+storage_read_bytes=158282054 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=628 # GpuAggregate, GpuAggregateBatches

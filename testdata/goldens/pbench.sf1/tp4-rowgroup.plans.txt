@@ -190,7 +190,27 @@ GpuUnload: estimated_max_resident_size=130000
               GpuAggregate: estimated_max_resident_size=200276
                 GpuLoadParquet: estimated_max_resident_size=130952, source_bytes=319618, target_batch_bytes=319618, amplification=6.1
 == empty-side-left-join
-refused: unsupported: plan node EmptyExec
+GpuUnload
+  GpuProject: exprs=[t_id@1, d_id@0], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
+    GpuHashJoin: join_type=Right, on=[(d_k@1, t_k@1)], projection=[d_id@0, t_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, t_id:Int32]
+      GpuEmpty: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[t_id:Int32, t_k:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, join_build(#2 CudfJoin); per probe batch: join_probe
+      GpuEmpty: none
+      GpuMergePartitions: none
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#1 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=0, certain=0
+GpuUnload: estimated_max_resident_size=0
+  GpuProject: estimated_max_resident_size=0
+    GpuHashJoin: estimated_max_resident_size=110
+      GpuEmpty: estimated_max_resident_size=0
+      GpuMergePartitions: estimated_max_resident_size=110
+        GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
 == exists-null-keys
 GpuUnload
   GpuHashJoin: join_type=LeftSemi, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=4, batches=multiple, schema=[d_id:Int64]

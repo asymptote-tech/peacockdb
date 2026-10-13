@@ -67,6 +67,7 @@ async fn refused(sql: &str) -> PlanError {
 fn name_of(node: &dyn GpuNode) -> &'static str {
     match as_node_ref(node) {
         NodeRef::LoadParquet(_) => "LoadParquet",
+        NodeRef::Empty(_) => "Empty",
         NodeRef::Filter(_) => "Filter",
         NodeRef::Project(_) => "Project",
         NodeRef::Sort(_) => "Sort",
@@ -978,5 +979,36 @@ async fn a_cross_join_of_two_sides_of_no_column_keeps_one_rowmarker() {
     };
     assert_eq!(join.projection, Some(vec![0]));
     assert!(declares_the_rowmarker(descend(tree.as_ref(), 1)));
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+// A relation DataFusion proved empty (review row 8). `PropagateEmptyRelation` keeps an outer
+// join over one and folds every other operator above it away, so those are the two shapes.
+
+#[tokio::test]
+async fn an_empty_relation_plans_as_a_one_lane_leaf_under_the_join_that_kept_it() {
+    // pbench's `empty-side-left-join` over this dataset: DataFusion swaps the Left join into
+    // a Right one whose build side is the `EmptyExec`.
+    let tree = translated_at_tp4(
+        "SELECT n.n_name, r.r_name FROM nation n \
+         LEFT JOIN (SELECT * FROM region WHERE false) r ON n.n_regionkey = r.r_regionkey",
+        0,
+    )
+    .await;
+    let text = crate::plan_text::render_plan(tree.as_ref());
+    assert!(
+        text.contains("GpuEmpty: lanes=1, batches=single, schema=[r_regionkey:Int32, r_name:Utf8]"),
+        "{text}"
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn an_empty_relation_alone_is_the_whole_plan_under_its_unload() {
+    let tree = translated("SELECT n_name FROM nation WHERE false").await;
+    assert_eq!(
+        crate::plan_text::render_plan(tree.as_ref()),
+        "GpuUnload\n  GpuEmpty: lanes=1, batches=single, schema=[n_name:Utf8]\n"
+    );
     crate::plan::validate(tree.as_ref()).expect("the tree validates");
 }

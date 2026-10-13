@@ -144,7 +144,7 @@ pbench,1,cross_projection,enabled,enabled,enabled,enabled,enabled,enabled,enable
 pbench,1,decimal15_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,
 pbench,1,decimal15_key_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,,152 220
 pbench,1,decimal38_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,
-pbench,1,empty_side_left_join,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,155
+pbench,1,empty_side_left_join,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,outer_join,155
 pbench,1,exists_null_keys,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,220
 pbench,1,exists_or_mark,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,59 80
 pbench,1,finish_without_probe,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,semi_join corr_subquery,220

@@ -50,12 +50,14 @@ impl Backend for GpuBackend {
         post_order: usize,
         lane: usize,
     ) -> Result<NodeExecutors<Self>, PlanError> {
-        // Routing is the driver's, so a forwarder is answered before a recipe is looked
-        // for: its absence is what a forwarder means rather than a gap to report.
-        if let NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) =
-            as_node_ref(node)
-        {
-            return Ok(NodeExecutors::BatchForwarder(forwarder_for(node)));
+        // Routing is the driver's, and an empty relation reads nothing, so neither has a
+        // recipe to look for: its absence is what they mean rather than a gap to report.
+        match as_node_ref(node) {
+            NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
+                return Ok(NodeExecutors::BatchForwarder(forwarder_for(node)));
+            }
+            NodeRef::Empty(_) => return Ok(NodeExecutors::Source(GpuSource::empty())),
+            _ => {}
         }
         let recipe = ctx.recipes.get(post_order).ok_or_else(|| {
             PlanError::Invalid(format!(
@@ -148,8 +150,11 @@ impl Backend for GpuBackend {
                 NodeExecutors::Join(GpuJoin::new(site, recipe, join_type, scratch, &out(node))?)
             }
             NodeRef::Unload(_) => NodeExecutors::Unload(GpuExport::new(site, &input(0))),
-            NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
-                unreachable!("routing nodes are answered above")
+            NodeRef::MergePartitions(_)
+            | NodeRef::Union(_)
+            | NodeRef::Interleave(_)
+            | NodeRef::Empty(_) => {
+                unreachable!("routing nodes and the empty relation are answered above")
             }
         })
     }

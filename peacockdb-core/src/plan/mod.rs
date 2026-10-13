@@ -1,4 +1,4 @@
-//! What a plan is: the eighteen nodes, the vocabulary they are written in, and the rules a
+//! What a plan is: the nineteen nodes, the vocabulary they are written in, and the rules a
 //! tree has to satisfy.
 //!
 //! The IR is neither planner nor executor — it is what passes between them, and consumers
@@ -43,7 +43,7 @@ use common::{
 use exec_ops::{new_filter, new_project, new_sort};
 use join::{joined_layout, new_hash_join};
 use partition_ops::{new_emit_partitions, new_merge_partitions, new_merge_sorted_partitions};
-use source::{largest_batch_bytes, new_load_parquet};
+use source::{largest_batch_bytes, new_empty, new_load_parquet};
 use union::{new_interleave, new_union};
 
 /// What planning and validation return. Both are plan-time: a shape the engine cannot run
@@ -929,6 +929,19 @@ impl GpuLoadParquet {
     }
 }
 
+/// A relation DataFusion proved empty (`EmptyExec`): one lane that emits no batch, on either
+/// engine, and calls nothing on the device.
+#[derive(Debug)]
+pub(crate) struct GpuEmpty {
+    kind: NodeKind,
+}
+
+impl GpuEmpty {
+    pub(crate) fn new(schema: Schema) -> Self {
+        new_empty(schema)
+    }
+}
+
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
@@ -1098,6 +1111,9 @@ pub trait GpuNode: std::fmt::Debug + IntoAnyBox {
 /// match, the serializer — rather than a downcast chain per consumer.
 pub(crate) enum NodeRef<'a> {
     LoadParquet(&'a GpuLoadParquet),
+    // Nothing but the schema its kind carries, so no consumer reads the borrow.
+    #[allow(dead_code)]
+    Empty(&'a GpuEmpty),
     Filter(&'a GpuFilter),
     Project(&'a GpuProject),
     Sort(&'a GpuSort),
@@ -1142,6 +1158,8 @@ fn node_ref_of(any: &dyn std::any::Any) -> NodeRef<'_> {
 fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
     if let Some(n) = any.downcast_ref::<GpuLoadParquet>() {
         Some(NodeRef::LoadParquet(n))
+    } else if let Some(n) = any.downcast_ref::<GpuEmpty>() {
+        Some(NodeRef::Empty(n))
     } else if let Some(n) = any.downcast_ref::<GpuFilter>() {
         Some(NodeRef::Filter(n))
     } else if let Some(n) = any.downcast_ref::<GpuProject>() {
@@ -1208,7 +1226,7 @@ impl ExecutorCategory {
 /// mapping, and a second source of truth for it is a second thing to keep true.
 pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
     match as_node_ref(node) {
-        NodeRef::LoadParquet(_) => ExecutorCategory::Source,
+        NodeRef::LoadParquet(_) | NodeRef::Empty(_) => ExecutorCategory::Source,
         NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
             ExecutorCategory::Exec
         }
@@ -1234,6 +1252,7 @@ pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
 pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
     match node_ref_of(any) {
         NodeRef::LoadParquet(_) => "GpuLoadParquet",
+        NodeRef::Empty(_) => "GpuEmpty",
         NodeRef::Filter(_) => "GpuFilter",
         NodeRef::Project(_) => "GpuProject",
         NodeRef::Sort(_) => "GpuSort",

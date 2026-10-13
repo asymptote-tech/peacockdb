@@ -1,5 +1,5 @@
 //! `GpuLoadParquet` on the CPU: one call per batch, reading the row groups the mapping
-//! gave this lane.
+//! gave this lane. `GpuEmpty` is the same executor with nothing to read.
 //!
 //! The partitioner decided at plan time which row groups each of a lane's batches reads,
 //! and this reads exactly those — so a lane's batch count and its rows are the plan's
@@ -16,7 +16,7 @@ use datafusion::parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder,
 };
 
-use super::CpuSource;
+use super::{CpuSource, LaneRead};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallStats};
 use crate::plan::GpuLoadParquet;
@@ -54,47 +54,57 @@ impl CpuSource {
             node.projection.iter().map(|column| *column as usize),
         );
         Ok(Self {
-            file: node.file.clone(),
-            metadata,
-            projection,
-            rows_only: node.rows_only(),
-            batches: batches
-                .iter()
-                .map(|groups| groups.iter().map(|group| *group as usize).collect())
-                .collect(),
-            schema: Arc::new(schema.clone()),
+            read: Some(LaneRead {
+                file: node.file.clone(),
+                metadata,
+                projection,
+                rows_only: node.rows_only(),
+                batches: batches
+                    .iter()
+                    .map(|groups| groups.iter().map(|group| *group as usize).collect())
+                    .collect(),
+                schema: Arc::new(schema.clone()),
+            }),
         })
+    }
+
+    /// A `GpuEmpty`'s lane, which ends before its first batch.
+    pub(crate) fn empty() -> Self {
+        Self { read: None }
     }
 
     /// The next batch, or `None` where the mapping gave this lane nothing more.
     pub(crate) fn read_next(&mut self) -> Result<Option<(CpuBatch, CallStats)>, BackendError> {
-        let Some(groups) = self.batches.pop_front() else {
+        let Some(lane) = self.read.as_mut() else {
             return Ok(None);
         };
-        let file = std::fs::File::open(&self.file)
-            .map_err(|error| BackendError::new(format!("{}: {error}", self.file)))?;
+        let Some(groups) = lane.batches.pop_front() else {
+            return Ok(None);
+        };
+        let file = std::fs::File::open(&lane.file)
+            .map_err(|error| BackendError::new(format!("{}: {error}", lane.file)))?;
         let reader =
-            ParquetRecordBatchReaderBuilder::new_with_metadata(file, self.metadata.clone())
+            ParquetRecordBatchReaderBuilder::new_with_metadata(file, lane.metadata.clone())
                 .with_row_groups(groups)
-                .with_projection(self.projection.clone())
+                .with_projection(lane.projection.clone())
                 .build()
-                .map_err(|error| BackendError::new(format!("reading {}: {error}", self.file)))?;
+                .map_err(|error| BackendError::new(format!("reading {}: {error}", lane.file)))?;
         let read: Vec<RecordBatch> = reader
             .collect::<Result<Vec<RecordBatch>, _>>()
-            .map_err(|error| BackendError::new(format!("reading {}: {error}", self.file)))?;
+            .map_err(|error| BackendError::new(format!("reading {}: {error}", lane.file)))?;
         // One batch per call whatever the reader's own chunking: the plan decided how many
         // batches this lane has, and a node above counts calls.
         let batch = concat_batches(
             &read
                 .first()
                 .map(|first| first.schema())
-                .unwrap_or_else(|| self.schema.clone()),
+                .unwrap_or_else(|| lane.schema.clone()),
             read.iter(),
         )
         .map_err(|error| BackendError::new(format!("joining the row groups read: {error}")))?;
-        let batch = match self.rows_only {
-            true => rowmarker(batch.num_rows(), &self.schema)?,
-            false => check_batch_schema(batch, &self.schema)?,
+        let batch = match lane.rows_only {
+            true => rowmarker(batch.num_rows(), &lane.schema)?,
+            false => check_batch_schema(batch, &lane.schema)?,
         };
         Ok(Some((CpuBatch::new(batch), CallStats::default())))
     }

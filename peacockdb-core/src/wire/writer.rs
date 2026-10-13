@@ -100,8 +100,8 @@ impl<'a> Writer<'a> {
     }
 
     /// A leaf with nothing to call, occupying one slot: the stub `take` would have made for
-    /// its parent, made now so a seqless parent still has a root. Test-built trees only —
-    /// a planned tree has no leaf but a scan.
+    /// its parent, made now so a seqless parent still has a root. A `GpuEmpty` is the one
+    /// planned leaf that takes it; a test-built leaf is the other.
     pub(crate) fn leaf(&mut self) -> Seq {
         self.scan_of_nothing().0
     }

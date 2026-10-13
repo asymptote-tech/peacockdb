@@ -286,3 +286,18 @@ async fn a_limit_bounds_what_the_nodes_above_it_hold() {
         whole.accumulator_bytes
     );
 }
+
+/// A relation DataFusion proved empty reads nothing, so it has no batch to size and takes
+/// no share of the budget: the sizing pass and the planning pass both reach the one scan.
+#[tokio::test]
+async fn an_empty_relation_is_not_a_source_the_budget_sizes() {
+    let model = modelled_as(
+        "SELECT n.n_name, r.r_name FROM nation n \
+         LEFT JOIN (SELECT * FROM region WHERE false) r ON n.n_regionkey = r.r_regionkey",
+        4,
+        BatchSizing::Budgeted,
+    )
+    .await;
+    assert_eq!(model.sources.len(), 1, "{:?}", model.sources);
+    assert_eq!(model.resident[0], 0, "the empty relation holds nothing");
+}

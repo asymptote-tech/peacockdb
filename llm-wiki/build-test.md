@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3178 test cases — Rust 2606, C++ 171, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3187 test cases — Rust 2615, C++ 171, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1776 cases: `--lib` 741, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1783 cases: `--lib` 748, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -82,13 +82,14 @@ handed, and the record's preamble is what `record_header()` writes
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 30 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 32 |
 |---|---|--:|
 
-SQL in, rows out: 17 queries planned and run at all five modes against DataFusion on the same
+SQL in, rows out: 18 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and eleven cases no query list can
-carry: that DataFusion's partial aggregate does not skip grouping here, the call and pull
+to zero and holds equal releases at the end of every run — and twelve cases no query list can
+carry: that DataFusion's partial aggregate does not skip grouping here, that a relation
+DataFusion proved empty, planned alone, answers no batch at every mode, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
 trips, and that boundary under a drained lane, the model compared against what the calls
 measured, an answer under the wrong column names not being the same answer, the injected set
@@ -152,7 +153,7 @@ with its probe streamed; the co-partitioning and lane rules; anti and mark joins
 NULL keys, and a padded side's NULL seen by #137's filter; and the session config's own
 registration path declaring strings `Utf8`; writes its own parquet, so no dataset
 
-| Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 11 |
+| Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 12 |
 |---|---|--:|
 
 every rule in the can-this-column-be-NULL pass, on hand-built nodes — a source declares a
@@ -256,17 +257,17 @@ boundary over
 |---|---|--:|
 
 the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and call shape the
-mode goldens hold, and asserted to be one — plus `nested-limits`, for `CudfScan.rows_only` — so the membership grows when the mapping does — with
+mode goldens hold, and asserted to be one — plus `nested-limits`, for `CudfScan.rows_only` — so the membership grows when the mapping does; pbench's `empty-side-left-join` is the one whose `GpuEmpty` holds its slot with a stub scan — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 20 |
+| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 21 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, the joins first: the one `CudfJoin` each join
 node writes, per join type, and the session line it renders — build once, probe per batch,
 finish at done; plus a leaf outside the
 registry emitting the writer's stub and no recipe, which is how a hand-built node gets its
-recipe with no plan. The trivial kinds are not here — the plan goldens run them over every
+recipe with no plan, and an empty relation doing the same, so a plan of it alone has a root. The trivial kinds are not here — the plan goldens run them over every
 corpus query
 
 | Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 15 |
@@ -335,7 +336,7 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 37 |
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 39 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
@@ -511,14 +512,14 @@ real consumer, no node declares no column ([#63](tickets/joins.md#t63)), no sche
 names a view type the device cannot hold;
 layout canonical forms and equality; whether a hash survives a regrouping
 
-| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 11 |
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 12 |
 |---|---|--:|
 
 the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
 holds comes off the budget first, a batch is charged once per lane in force, a loader is priced
 by the batches its mapping makes, amplification is the widest point on the path, a target lands
-on the coarse grid, and constants that cannot be less and exceed the budget are a plan-time
-error
+on the coarse grid, constants that cannot be less and exceed the budget are a plan-time
+error, and an empty relation is no source the budget sizes
 
 | Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 27 |
 |---|---|--:|
@@ -558,7 +559,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 710 cases: `--lib -- gpu_tests::` 603, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 712 cases: `--lib -- gpu_tests::` 605, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -615,7 +616,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 374 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 376 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -624,8 +625,9 @@ device changes is red here rather than at a query's root. The upload round trip,
 — including the sink naming a column whose exported type is not the declared one — and
 `GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
 seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
-nine hash-join types with and without a residual, cross, a nested loop of every type and the
-scan — each case green or a `bug_` case
+nine hash-join types with and without a residual, cross, a nested loop of every type, the
+scan, and the empty relation, alone and planned whole under a join through the driver on both
+engines — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
 case. Then the joins along the dimensions the corpus varies: a crossing projection on every
 type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths,

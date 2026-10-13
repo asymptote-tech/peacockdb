@@ -1,7 +1,8 @@
 //! `GpuLoadParquet` through the harness: both backends read one parquet the test wrote
 //! from a synthetic batch, one batch per row group, with and without a pushed-down limit.
 //! The one helper this task adds is `write_parquet`, under the temp dir and removed after
-//! each case. Every case is green or a `bug_` test with its ticket above it.
+//! each case. Every case is green or a `bug_` test with its ticket above it. `GpuEmpty`, the
+//! source that reads nothing, closes the file: alone, and planned whole under a join.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
 use super::script::{Outcome, Script, run_both};
-use crate::plan::{GpuLoadParquet, RowGroupMeta, ScanMetadata, Schema};
+use crate::plan::{GpuEmpty, GpuLoadParquet, RowGroupMeta, ScanMetadata, Schema};
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::synthetic::{decimals, synthetic};
 
@@ -203,5 +204,62 @@ operator_case! {
             .map(|batch| batch.num_rows())
             .collect();
         assert_eq!(rows, vec![16; 4]);
+    }
+}
+
+// A relation DataFusion proved empty: one lane that ends before its first batch, and a plan
+// of it alone is one stub on the wire, which the device loads and never calls.
+operator_case! {
+    GpuEmpty,
+    fn an_empty_relation_emits_no_batch_on_either_engine() {
+        let empty = GpuEmpty::new(Schema::new(synthetic(0, 1).schema()));
+        let outcome = run_both(&empty, Script::Source { lane: 0 });
+        outcome.same(Order::AsEmitted);
+        assert!(outcome.gpu.as_ref().expect("the device answers").is_empty());
+    }
+}
+
+/// pbench's `empty-side-left-join`, planned at every mode and run whole through the driver on
+/// both engines: the empty relation is the build side of the Right join DataFusion swaps the
+/// `LEFT JOIN` into, so no lane gets a build batch and every probe row is padded — DuckDB's
+/// eight. The harness drives one node and never runs its children, so only a planned run
+/// puts the empty relation's stub on the device's wire under a join.
+#[tokio::test]
+async fn a_left_join_over_an_empty_relation_pads_every_row_on_both_engines() {
+    use crate::executor::{CpuBackend, GpuBackend, run};
+    use crate::test_support::{MODES, batches_to_sorted_str, data_dir_for, queries_dir_for};
+    let sql = std::fs::read_to_string(queries_dir_for("pbench").join("empty-side-left-join.sql"))
+        .expect("the query text");
+    for mode in &MODES {
+        let what = format!("empty-side-left-join at {}", mode.name);
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir_for("pbench", "1"),
+        )
+        .await
+        .expect("register pbench");
+        let plan = ctx
+            .sql(&sql)
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("a physical plan");
+        let (tree, _) = crate::planner::plan(&plan, mode.knobs_for("pbench"))
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        let rows = |batches: Vec<crate::executor::CpuBatch>| {
+            let batches: Vec<RecordBatch> =
+                batches.iter().map(|b| b.record_batch().clone()).collect();
+            let padded: usize = batches.iter().map(|b| b.column(1).null_count()).sum();
+            (batches_to_sorted_str(&batches), padded)
+        };
+        let cpu = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .unwrap_or_else(|why| panic!("{what} on the cpu: {why}"));
+        let device = super::device::Device::open(tree.as_ref());
+        let gpu = run::<GpuBackend>(tree.as_ref(), device.ctx(), None)
+            .unwrap_or_else(|why| panic!("{what} on the device: {why}"));
+        let (cpu, padded) = rows(cpu.batches);
+        assert_eq!(padded, 8, "{what}: every tiny row, padded, on the cpu");
+        assert_eq!(rows(gpu.batches), (cpu, 8), "{what}");
     }
 }

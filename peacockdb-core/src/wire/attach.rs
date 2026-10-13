@@ -102,6 +102,12 @@ fn emit(
         NodeRef::NestedLoopJoin(nested) => join::join(JoinNode::NestedLoop(nested), inputs, writer),
         NodeRef::Limit(limit_node) => limit(limit_node, inputs, writer),
         NodeRef::Unload(unload_node) => unload(unload_node, inputs, writer),
+        // A leaf that reads nothing calls nothing, and holds its slot with a stub so a
+        // plan of it alone still has a root.
+        NodeRef::Empty(_) => {
+            writer.leaf();
+            Ok(None)
+        }
         // The three that route rather than compute: not one call between them.
         NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => Ok(None),
     }

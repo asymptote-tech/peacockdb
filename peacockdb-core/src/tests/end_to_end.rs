@@ -375,6 +375,36 @@ end_to_end!(tpcds, q87);
 // A merge over state worth merging: the Welford init, both merges and the finalize
 // project. Every other aggregate here merges a sum.
 end_to_end!(tpch, shuffle_stddev, Some(WELFORD_TOLERANCE));
+// A relation DataFusion proved empty, kept under the Right join its swap makes of a `LEFT
+// JOIN`: the build side emits no batch on any lane, so every probe row is padded.
+end_to_end!(pbench, empty_side_left_join);
+
+/// A relation DataFusion proved empty with nothing above it but the unload: the plan is the
+/// one leaf, and it answers no batch at every mode.
+#[tokio::test]
+async fn an_empty_relation_alone_answers_no_batch() {
+    let data_dir = data_dir_for("pbench", "1");
+    for mode in &MODES {
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir,
+        )
+        .await
+        .expect("register the tables");
+        let plan = ctx
+            .sql("SELECT t_id FROM tiny WHERE false")
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("the query has a physical plan");
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
+            .unwrap_or_else(|error| panic!("at {}: {error}", mode.name));
+        let report = run::<crate::executor::CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .unwrap_or_else(|error| panic!("at {}: {error}", mode.name));
+        assert!(report.batches.is_empty(), "at {}", mode.name);
+    }
+}
 
 // ── the injected set ────────────────────────────────────────────────────────
 

@@ -69,6 +69,12 @@ struct Stage {
 /// `Backend` impl names it and `src/tests/injection.rs` builds one, so it is this
 /// subcomponent's API and `source` is its implementation.
 pub struct CpuSource {
+    /// `None` for a `GpuEmpty`, a relation DataFusion proved empty: no file, and no batch.
+    read: Option<LaneRead>,
+}
+
+/// The parquet one lane of a `GpuLoadParquet` reads.
+struct LaneRead {
     file: String,
     /// The footer, parsed once: a lane reads the same file once per batch, and re-parsing
     /// it per call is the whole of what a scan does besides decoding.
