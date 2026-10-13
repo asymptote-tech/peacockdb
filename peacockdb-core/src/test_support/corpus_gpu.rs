@@ -13,6 +13,7 @@ use datafusion::arrow::array::RecordBatch;
 
 use crate::executor::{GpuBackend, PlanIndex, run_with_hook};
 use crate::plan_text::render_run;
+use crate::wire::join_scratch_bytes;
 
 use super::corpus::{self, plan_at, run_cpu};
 use super::device_answer::{
@@ -42,7 +43,8 @@ pub(crate) async fn gpu_case(
     let validated = schema_validation(validation, &what);
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let index = PlanIndex::build(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
-    let mut session = Session::open(tree.as_ref(), &what);
+    let join_scratch = join_scratch_bytes(&mode.knobs_for(dataset));
+    let mut session = Session::open(tree.as_ref(), join_scratch, &what);
     let ctx = session.context();
     let hook = validated.then(|| gpu_schema_validator(&index));
     let report = run_with_hook::<GpuBackend>(tree.as_ref(), &ctx, None, hook)

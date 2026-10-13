@@ -125,7 +125,7 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
 async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str) {
     use super::{Oracle, run_and_check, sorted_rows};
     use crate::executor::{CallKind, PlanIndex};
-    use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, empty_build_answers_nothing};
+    use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, empty_build_owes_nothing};
     use crate::tests::injection::{Hash, planned_mode};
 
     let data_dir = data_dir_for(dataset, "1");
@@ -202,7 +202,7 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
         "{query}: the degenerate hash left no build lane empty, so nothing here was tested"
     );
     let owing_join = |node: usize| match as_node_ref(index.nodes[node].node) {
-        NodeRef::Join(join) => !empty_build_answers_nothing(join.join_type),
+        NodeRef::Join(join) => !empty_build_owes_nothing(join.join_type),
         _ => false,
     };
     // Every lane of an owing join reached `set_build`, the empty ones included. There is

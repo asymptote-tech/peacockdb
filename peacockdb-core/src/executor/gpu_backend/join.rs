@@ -1,353 +1,342 @@
-//! The joins on a device: the calls the recipe names, and the one it names that the frozen
-//! surface cannot make.
+//! The joins on a device: a session per lane, built once from the build side, probed once
+//! per batch and finished once — the four `peacock_join_*` symbols, and nothing else.
 //!
-//! `execute_node` erases every input handle it reads, and there is no copy symbol —
-//! `slice_handle` consumes its input too, so it moves rather than copies. Two recipes ask
-//! for one anyway, and both are refused by name rather than run against a dead handle: a
-//! streamed probe's second batch, whose build side the first call erased, and a Left or
-//! Full join's probe batch, which its key project and its join both read. #152 records
-//! them. #145's shared handle landed and retires neither: both copies are a second read of
-//! one handle, which is #152.
+//! The session holds the build table, the cuDF join object and the build-matched column
+//! between calls, so nothing here copies a handle or keeps probe keys: every handle a call
+//! is given is consumed, and every handle it answers is fresh.
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
+use datafusion::arrow::datatypes::{DataType, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 
-use super::{
-    CallSite, Consumed, GpuJoin, GpuProbingJoin, execute_node, hand_over, no_abi_calls, produced,
+use peacockdb_ffi::raw::{
+    PeacockNodeStats, peacock_join_build, peacock_join_finish, peacock_join_probe,
+    peacock_join_release,
 };
+
+use super::{CallSite, Consumed, GpuJoin, GpuProbingJoin, last_error, produced};
+use crate::common::logical_size_from_schema;
 use crate::executor::Batch;
 use crate::executor::GpuBatch;
 use crate::executor::node_timing_on;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
-use crate::plan::empty_build_answers_nothing;
-use crate::wire::{CallPattern, FbKind, Input, ProjectRole, Recipe, Seq};
+use crate::plan::{JoinFilterColumn, JoinSide, empty_build_owes_nothing, needs_finish};
+use crate::wire::{AbiSymbol, CallPattern, FbKind, Recipe, Seq};
 
-/// One call of a join's recipe: the seq, and the inputs it names in order. Each named
-/// input is one child slot — the C++ reads its output count off the first slot, so two
-/// handles in one would ask for two outputs and be refused for a buffer it never needed.
-#[derive(Clone)]
-pub(crate) struct JoinCall {
-    seq: Seq,
-    kind: FbKind,
-    inputs: Vec<Input>,
+/// The cuDF hash table per build row: a `static_multiset` of 8-byte slots at load factor
+/// 0.5, whatever the key width (design §4.3). The planner's resident model uses the same.
+const HASH_TABLE_BYTES_PER_ROW: u64 = 16;
+
+/// Each key-match pair's index maps, before the residual's own columns are gathered for it.
+const INDEX_BYTES_PER_PAIR: u64 = 8;
+
+/// What `chunk_bytes = 0` means to the session.
+const DEFAULT_CHUNK_BYTES: u64 = 1 << 30;
+
+/// What one join call may spend on pairs, as the session bounds it: `pairs × (8 + the
+/// residual's per-row bytes)`, chunked at `chunk_bytes` — `gpu_plan.fbs` has the formula.
+#[derive(Clone, Copy)]
+pub(crate) struct PairScratch {
+    /// Keyed pairs are one per match; a keyless join pairs every build row with every
+    /// probe row before its condition keeps any.
+    keyed: bool,
+    bytes_per_pair: u64,
+    chunk_bytes: u64,
+}
+
+impl PairScratch {
+    /// `chunk_bytes` is the plan's: what every `CudfJoin` in the buffer carries.
+    pub(crate) fn new(
+        keyed: bool,
+        filter_columns: &[JoinFilterColumn],
+        build: &ArrowSchema,
+        probe: &ArrowSchema,
+        chunk_bytes: u64,
+    ) -> Self {
+        let residual: u64 = filter_columns
+            .iter()
+            .map(|column| {
+                let side = match column.side {
+                    JoinSide::Build => build,
+                    JoinSide::Probe => probe,
+                };
+                width_on_device(side.field(column.index as usize).data_type())
+            })
+            .sum();
+        Self {
+            keyed,
+            bytes_per_pair: INDEX_BYTES_PER_PAIR + residual,
+            chunk_bytes: match chunk_bytes {
+                0 => DEFAULT_CHUNK_BYTES,
+                bytes => bytes,
+            },
+        }
+    }
+
+    /// A keyed probe is priced at one match per probe row, which is the estimate and not a
+    /// bound; a keyless one at the whole product. Either way the session never spends more
+    /// than one chunk at once.
+    pub(crate) fn bytes(&self, build_rows: u64, probe_rows: u64) -> u64 {
+        let pairs = match self.keyed {
+            true => probe_rows,
+            false => build_rows.saturating_mul(probe_rows),
+        };
+        pairs
+            .saturating_mul(self.bytes_per_pair)
+            .min(self.chunk_bytes)
+    }
+}
+
+/// A column's bytes per row as the session counts them (`filter_row_bytes`): the fixed width
+/// cuDF holds it at, and 16 for a variable-width one.
+fn width_on_device(data_type: &DataType) -> u64 {
+    match data_type {
+        DataType::Boolean => 1,
+        other => other.primitive_width().map_or(16, |width| width as u64),
+    }
 }
 
 impl GpuJoin {
-    /// `keys` is the schema of the probe keys a finishing join accumulates — the key
-    /// project's output, which is the node's key columns and nothing else.
+    /// `recipe` is the session line the wire published: `join_build`, `join_probe` and, for
+    /// a finishing type, `join_finish`, all on one `CudfJoin` seq.
     pub(crate) fn new(
         site: CallSite,
         recipe: &Recipe,
-        join_type: Option<JoinType>,
-        keys: Option<&ArrowSchema>,
+        join_type: JoinType,
+        scratch: PairScratch,
         output: &ArrowSchema,
     ) -> Result<Self, PlanError> {
-        let mut per_probe = Vec::new();
-        let mut at_done = Vec::new();
-        for call in &recipe.calls {
-            let (seq, kind) = call.target.ok_or_else(|| {
-                PlanError::Invalid(format!("a join's call takes a seq, and {call:?} does not"))
-            })?;
-            if call.inputs.is_empty() {
+        let expected: &[(AbiSymbol, CallPattern)] = if needs_finish(join_type) {
+            &[
+                (AbiSymbol::JoinBuild, CallPattern::JoinBuild),
+                (AbiSymbol::JoinProbe, CallPattern::PerProbeBatch),
+                (AbiSymbol::JoinFinish, CallPattern::AtDone),
+            ]
+        } else {
+            &[
+                (AbiSymbol::JoinBuild, CallPattern::JoinBuild),
+                (AbiSymbol::JoinProbe, CallPattern::PerProbeBatch),
+            ]
+        };
+        let published: Vec<(AbiSymbol, CallPattern)> = recipe
+            .calls
+            .iter()
+            .map(|call| (call.symbol, call.when))
+            .collect();
+        if published != expected {
+            return Err(PlanError::Invalid(format!(
+                "a {join_type:?} join is a session — {expected:?} — and its recipe is {recipe}"
+            )));
+        }
+        let seq = match recipe.calls.first().and_then(|call| call.target) {
+            Some((seq, FbKind::Join)) => seq,
+            other => {
                 return Err(PlanError::Invalid(format!(
-                    "{call:?} names no input to read"
+                    "a join session addresses one CudfJoin, and its recipe names {other:?}"
                 )));
             }
-            let placed = JoinCall {
-                seq,
-                kind,
-                inputs: call.inputs.clone(),
-            };
-            match call.when {
-                CallPattern::PerProbeBatch => per_probe.push(placed),
-                CallPattern::AtDone => at_done.push(placed),
-                other => {
-                    return Err(PlanError::Invalid(format!(
-                        "a join calls per probe batch and at done, and {call:?} is {other:?}"
-                    )));
-                }
-            }
-        }
-        if per_probe.is_empty() {
-            return Err(PlanError::Invalid(
-                "a join makes at least one call per probe batch".to_string(),
-            ));
+        };
+        if recipe
+            .calls
+            .iter()
+            .any(|call| call.target != Some((seq, FbKind::Join)))
+        {
+            return Err(PlanError::Invalid(format!(
+                "every call of a join session addresses its one seq, #{seq}: {recipe}"
+            )));
         }
         Ok(Self {
             site,
+            seq,
             join_type,
-            per_probe,
-            at_done,
-            keys_schema: keys.map(|schema| Arc::new(schema.clone()) as SchemaRef),
+            scratch,
             output: Arc::new(output.clone()),
         })
     }
 
-    /// This lane's build side finished with no batch. The type decides what it owes, and
-    /// the rule is the one the CPU reads too. A scatter no longer brings an owing type
-    /// here — the driver keeps its zero-row table and `set_build` takes it (#175) — so
-    /// what reaches the refusal is an upstream that emitted nothing at all (#212).
-    pub(crate) fn without_build_allowed(&self) -> Result<(), BackendError> {
-        // Cross and nested-loop joins carry no type here and owe nothing either: every row
-        // they emit is built from a build row, the Left form's padding included.
-        let owes_nothing = self.join_type.map_or(true, empty_build_answers_nothing);
-        if owes_nothing {
-            return Ok(());
-        }
-        Err(BackendError::new(
-            "this lane's build side is empty, and what this join owes is its probe side — \
-             which takes a call over a build table that does not exist (#212)",
-        ))
+    /// The session's hash table and `matched` column, for `rows` build rows.
+    pub(crate) fn built_bytes(&self, rows: u64) -> u64 {
+        let table = match self.scratch.keyed {
+            true => HASH_TABLE_BYTES_PER_ROW * rows,
+            false => 0,
+        };
+        let matched = match needs_finish(self.join_type) {
+            true => rows,
+            false => 0,
+        };
+        table + matched
     }
 
-    /// The build side, which is one batch per lane. It is held rather than consumed: which
-    /// call takes it, and whether it survives that call, is what the recipe says.
-    pub(crate) fn set_build(self, batch: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
-        let owes_nothing = match &batch {
-            Some(_) => false,
-            None => {
-                self.without_build_allowed()?;
-                true
+    /// The session begins here, with this lane's build batch or with none — the session
+    /// answers an absent build side itself, so every type takes this call.
+    pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
+        let mut calls = AbiCalls::armed(node_timing_on());
+        let owes_nothing = build.is_none() && empty_build_owes_nothing(self.join_type);
+        let (handle, taken) = match build {
+            Some(batch) => {
+                let taken = Consumed::of(&batch);
+                (batch.consume().1, taken)
             }
+            None => (0, Consumed::default()),
         };
+        let mut session = 0u64;
+        let mut stats = PeacockNodeStats::default();
+        let rc = unsafe {
+            peacock_join_build(
+                self.site.executor,
+                self.seq as u64,
+                handle,
+                &mut session,
+                &mut stats,
+            )
+        };
+        if rc != 0 {
+            return Err(self.failed(AbiSymbol::JoinBuild));
+        }
+        calls.record(AbiCall {
+            seq: self.seq,
+            target: AbiTarget::Node(FbKind::Join),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: 0,
+            out_bytes: 0,
+        });
         Ok((
             GpuProbingJoin {
                 join: self,
-                build: batch,
-                accumulated: Vec::new(),
-                probes: 0,
+                session,
+                build_rows: taken.rows,
+                build_bytes: taken.bytes,
                 owes_nothing,
             },
-            no_abi_calls(),
+            CallStats {
+                scratch_bytes: None,
+                calls,
+            },
+        ))
+    }
+
+    fn failed(&self, symbol: AbiSymbol) -> BackendError {
+        BackendError::new(format!(
+            "{}(#{}) node {} lane {}: {}",
+            symbol.name(),
+            self.seq,
+            self.site.node,
+            self.site.lane,
+            last_error(self.site.executor)
         ))
     }
 }
 
 impl GpuProbingJoin {
-    /// What this lane owes with no build side, read off the join type at `set_build`.
+    /// Read off the join type at `set_build`: no build batch, and a type every row of which
+    /// is built from a build row.
     pub(crate) fn owes_nothing(&self) -> bool {
         self.owes_nothing
     }
 
-    /// The build side, from `set_build` until the call that consumes it — `None` after,
-    /// because the surface has no copy and the recipe says which call takes it.
-    pub(crate) fn build_bytes(&self) -> usize {
-        self.build.as_ref().map_or(0, GpuBatch::byte_size)
+    /// What the session holds between calls: the build table, the hash table its keys went
+    /// into, and one byte a row saying which matched.
+    pub(crate) fn held_bytes(&self) -> u64 {
+        self.build_bytes + self.join.built_bytes(self.build_rows)
     }
 
-    /// The probe keys a finishing type keeps until its finish pass runs (#136).
-    pub(crate) fn accumulated_bytes(&self) -> usize {
-        self.accumulated.iter().map(GpuBatch::byte_size).sum()
-    }
-
-    /// Whether a probe call reads the build side at all. False for the build-side semi
-    /// family, whose probe call is the key project alone — and the accounting has to know,
-    /// because a transient charged for a read that never happens refuses work that fits.
-    pub(crate) fn probe_reads_build(&self) -> bool {
-        self.join
-            .per_probe
-            .iter()
-            .any(|call| call.inputs.iter().any(Input::is_build_side))
-    }
-
-    pub(crate) fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
-        self.probes += 1;
-        let mut out = Vec::new();
-        let mut batch = Some(batch);
-        let mut prior: Option<GpuBatch> = None;
-        let mut calls = AbiCalls::armed(node_timing_on());
-        for call in self.join.per_probe.clone() {
-            let kind = call.kind;
-            let produced = self.make(call, &mut batch, &mut prior, &mut calls)?;
-            match kind {
-                // The key project's output is the lane's growing key table, not an answer.
-                FbKind::Project(ProjectRole::ProbeKeys) => self.accumulated.push(produced),
-                _ => prior = Some(produced),
-            }
+    /// A probe call: the batch, an output of as many rows, and its pairs. A finish (no
+    /// batch): the unmatched build rows, priced as every one of them.
+    pub(crate) fn call_bytes(&self, n_rows: u64, n_bytes: u64) -> u64 {
+        let output = &self.join.output;
+        if n_rows == 0 && n_bytes == 0 {
+            return match needs_finish(self.join.join_type) {
+                true => logical_size_from_schema(output, self.build_rows as usize, 0) as u64,
+                false => 0,
+            };
         }
-        out.extend(prior);
-        Ok((
+        n_bytes
+            + logical_size_from_schema(output, n_rows as usize, 0) as u64
+            + self.join.scratch.bytes(self.build_rows, n_rows)
+    }
+
+    /// One probe batch, consumed. `None` where the type answers only at finish — LeftSemi,
+    /// LeftAnti and LeftMark — and one table, possibly of no rows, for every other.
+    pub(crate) fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Option<GpuBatch>> {
+        let taken = Consumed::of(&batch);
+        let (_, handle) = batch.consume();
+        let mut out = 0u64;
+        let mut stats = PeacockNodeStats::default();
+        let rc = unsafe {
+            peacock_join_probe(
+                self.join.site.executor,
+                self.session,
+                handle,
+                &mut out,
+                &mut stats,
+            )
+        };
+        if rc != 0 {
+            return Err(self.join.failed(AbiSymbol::JoinProbe));
+        }
+        Ok(self.answered(taken, out, stats))
+    }
+
+    /// After the last probe: one table for the five types that finish, `None` for the rest.
+    /// The session is released when this returns, by `Drop`.
+    pub(crate) fn finish_and_fetch(self) -> CallResult<Option<GpuBatch>> {
+        let mut out = 0u64;
+        let mut stats = PeacockNodeStats::default();
+        let rc = unsafe {
+            peacock_join_finish(self.join.site.executor, self.session, &mut out, &mut stats)
+        };
+        if rc != 0 {
+            return Err(self.join.failed(AbiSymbol::JoinFinish));
+        }
+        Ok(self.answered(Consumed::default(), out, stats))
+    }
+
+    /// The handle a call answered, priced by the node's output, and the call journalled —
+    /// handle 0 is a call that answered nothing, and it was still made.
+    fn answered(
+        &self,
+        taken: Consumed,
+        handle: u64,
+        stats: PeacockNodeStats,
+    ) -> (Option<GpuBatch>, CallStats) {
+        let seq: Seq = self.join.seq;
+        let out = (handle != 0).then(|| {
+            produced(
+                self.join.site.executor,
+                seq,
+                handle,
+                stats,
+                &self.join.output,
+            )
+        });
+        let mut calls = AbiCalls::armed(node_timing_on());
+        calls.record(AbiCall {
+            seq,
+            target: AbiTarget::Node(FbKind::Join),
+            call_index: 0,
+            in_rows: taken.rows,
+            in_bytes: taken.bytes,
+            out_rows: out.as_ref().map_or(0, |batch| batch.num_rows() as u64),
+            out_bytes: out.as_ref().map_or(0, |batch| batch.byte_size() as u64),
+        });
+        (
             out,
             CallStats {
                 scratch_bytes: None,
                 calls,
             },
-        ))
+        )
     }
+}
 
-    /// The question a streamed probe could not answer, in the calls the recipe names: the
-    /// keys concatenated, the finish join against the build side, and the pad where the
-    /// node's output is the joined schema.
-    pub(crate) fn finish_and_fetch(mut self) -> CallResult<Vec<GpuBatch>> {
-        if self.join.at_done.is_empty() {
-            return Ok((Vec::new(), no_abi_calls()));
-        }
-        if self.accumulated.is_empty() {
-            return self.finish_without_keys();
-        }
-        let mut prior: Option<GpuBatch> = None;
-        let mut none = None;
-        let mut calls = AbiCalls::armed(node_timing_on());
-        for call in self.join.at_done.clone() {
-            prior = Some(self.make(call, &mut none, &mut prior, &mut calls)?);
-        }
-        Ok((
-            prior.into_iter().collect(),
-            CallStats {
-                scratch_bytes: None,
-                calls,
-            },
-        ))
-    }
-
-    /// A lane whose probe was empty accumulated no keys, and the concat of none is a
-    /// refusal on this side (#173). What the finish would have computed is known without
-    /// it — nothing matched — so an anti join hands its build side up, which is the answer
-    /// and the one this backend can express. A semi join owes no rows and a mark join owes
-    /// a column of `false`, and neither is a table the frozen surface makes out of nothing.
-    ///
-    /// Decided by the node's type and not by the calls it published: a Left outer's finish
-    /// is a LeftAnti too, and its answer is those build rows PADDED — so a switch reading
-    /// the kind at done would hand a Left outer the wrong rows rather than refusing it.
-    fn finish_without_keys(mut self) -> CallResult<Vec<GpuBatch>> {
-        let owed = match self.join.join_type {
-            Some(JoinType::LeftAnti) => {
-                return Ok((self.build.take().into_iter().collect(), no_abi_calls()));
-            }
-            Some(JoinType::LeftSemi) => "no rows, which is a table of no rows",
-            Some(JoinType::LeftMark) => {
-                "every build row with a false mark, which is a \
-                                         table of literals"
-            }
-            Some(JoinType::Left | JoinType::Full) => {
-                "every build row padded with a typed NULL per probe column, which is a \
-                 table of literals"
-            }
-            other => {
-                return Err(BackendError::new(format!(
-                    "{other:?} publishes no finish, so a lane with no probe keys cannot \
-                     reach one"
-                )));
-            }
-        };
-        Err(BackendError::new(format!(
-            "this lane's probe was empty, so its finish has no keys to join against — and \
-             what it owes is {owed}, which the frozen surface cannot make without one \
-             (#173)"
-        )))
-    }
-
-    /// One call, its named inputs resolved to the handles this join is holding.
-    fn make(
-        &mut self,
-        call: JoinCall,
-        batch: &mut Option<GpuBatch>,
-        prior: &mut Option<GpuBatch>,
-        calls: &mut AbiCalls,
-    ) -> Result<GpuBatch, BackendError> {
-        let mut slots: Vec<Vec<u64>> = Vec::with_capacity(call.inputs.len());
-        // A join's call reads several named slots, so its input is their sum. Every slot
-        // is a batch this side is holding — the prior output included, since a join builds
-        // one from each call rather than passing the raw handle on.
-        let mut taken = Consumed::default();
-        for input in &call.inputs {
-            let (handles, slot) = match input {
-                Input::Batch => {
-                    let (handle, slot) = self.take(batch.take(), "the probe batch")?;
-                    (vec![handle], slot)
-                }
-                Input::BatchCopy => {
-                    let (handle, slot) = self.copy_of(batch)?;
-                    (vec![handle], slot)
-                }
-                Input::BuildSide => {
-                    let build = self.build.take();
-                    let (handle, slot) = self.take(build, "the build side")?;
-                    (vec![handle], slot)
-                }
-                Input::BuildSideCopy => {
-                    let build = self.build.take();
-                    let (handle, slot) = self.build_copy(build)?;
-                    (vec![handle], slot)
-                }
-                Input::AccumulatedKeys => hand_over(std::mem::take(&mut self.accumulated)),
-                Input::PriorOutput => {
-                    let (handle, slot) = self.take(prior.take(), "the call before it")?;
-                    (vec![handle], slot)
-                }
-                other => {
-                    return Err(BackendError::new(format!(
-                        "a join's call reads {other:?}, which no join recipe names"
-                    )));
-                }
-            };
-            taken.rows += slot.rows;
-            taken.bytes += slot.bytes;
-            slots.push(handles);
-        }
-        let (handle, stats) = execute_node(self.join.site, call.seq, call.kind, &slots)?;
-        let schema = self.schema_of(call.kind);
-        let out = produced(self.join.site.executor, call.seq, handle, stats, schema);
-        calls.record(AbiCall {
-            seq: call.seq,
-            target: AbiTarget::Node(call.kind),
-            call_index: 0,
-            in_rows: taken.rows,
-            in_bytes: taken.bytes,
-            out_rows: stats.rows,
-            out_bytes: out.byte_size() as u64,
-        });
-        Ok(out)
-    }
-
-    /// What the call produced is priced by: the key project's output is the keys, and
-    /// everything else is the node's own row.
-    fn schema_of(&self, kind: FbKind) -> &SchemaRef {
-        match (kind, &self.join.keys_schema) {
-            (FbKind::Project(ProjectRole::ProbeKeys), Some(keys)) => keys,
-            _ => &self.join.output,
-        }
-    }
-
-    fn take(&self, batch: Option<GpuBatch>, what: &str) -> Result<(u64, Consumed), BackendError> {
-        batch
-            .map(|batch| {
-                let taken = Consumed::of(&batch);
-                (batch.consume().1, taken)
-            })
-            .ok_or_else(|| BackendError::new(format!("{what} was already consumed")))
-    }
-
-    /// A copy of the probe batch, which the ABI cannot make either. A recipe names one
-    /// only where a later call in the same probe still needs that batch — the key project
-    /// of a Left or Full join, with the per-call join reading the batch after it — so
-    /// there is no arrangement of these two calls that leaves both a batch to read.
-    fn copy_of(&self, _batch: &mut Option<GpuBatch>) -> Result<(u64, Consumed), BackendError> {
-        Err(BackendError::new(
-            "this join's recipe copies its probe batch — the key project keeps the keys \
-             and the join below it reads the same batch — and the ABI has no copy, so \
-             neither call can run without erasing the other's input (#152)",
-        ))
-    }
-
-    /// The build side, where the recipe asked for a copy of it. The first probe batch can
-    /// have the original; a second has nothing to be given, because the call that read it
-    /// erased it.
-    fn build_copy(&self, build: Option<GpuBatch>) -> Result<(u64, Consumed), BackendError> {
-        match build {
-            Some(build) => {
-                let taken = Consumed::of(&build);
-                Ok((build.consume().1, taken))
-            }
-            None => Err(BackendError::new(format!(
-                "this join's recipe copies its build side per probe batch and the ABI has \
-                 no copy: probe batch {} has no build side left, since the call for batch \
-                 1 erased it (#152)",
-                self.probes
-            ))),
-        }
+/// A lane that drained, finished or failed gives its session back; release is idempotent,
+/// so the one after a finish costs nothing.
+impl Drop for GpuProbingJoin {
+    fn drop(&mut self) {
+        unsafe { peacock_join_release(self.join.site.executor, self.session) }
     }
 }

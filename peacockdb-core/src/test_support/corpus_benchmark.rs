@@ -14,7 +14,7 @@ use crate::executor::{
 };
 use crate::plan::GpuNode;
 use crate::plan_text::{render_timings, timed_device_us};
-use crate::wire::attach_recipes;
+use crate::wire::{attach_recipes, join_scratch_bytes};
 
 use super::corpus::plan_at;
 use super::gpu_session::Session;
@@ -162,6 +162,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     set_node_timing(NodeTiming::Events);
 
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
+    let join_scratch = join_scratch_bytes(&mode.knobs_for(dataset));
 
     // Off across the warm-up, and set rather than assumed: the switch is process-global
     // and this binary runs every case in one process, so a case that only turned it on
@@ -169,7 +170,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     // query. The capture's containment check catches exactly that, and did.
     set_nvtx_ranges(false);
     for _ in 0..BENCH_WARMUP_RUNS {
-        run_once(tree.as_ref(), &what);
+        run_once(tree.as_ref(), join_scratch, &what);
     }
     // After the warm-up, not before: the warm-up is not written to the record, so ranging
     // it would leave the capture one execution longer than the file it joins against —
@@ -184,7 +185,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     let mut runs = Vec::with_capacity(MEASURED_RUNS);
     for _ in 0..MEASURED_RUNS {
         let started = Instant::now();
-        let (report, regions) = run_once(tree.as_ref(), &what);
+        let (report, regions) = run_once(tree.as_ref(), join_scratch, &what);
         // Read after the run rather than inside it: `GpuUnload` copies the root off the
         // device, so the driver has returned only once the device is actually finished.
         // Under events nothing else would guarantee that — the node walk returns while
@@ -214,7 +215,8 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     // Attached once more here rather than reached for through the session: `Session::open`
     // hands its plan to the driver and the driver consumes it. `attach_recipes` reads the
     // finished tree and builds a buffer, which is host work outside every measured run.
-    let recipes = attach_recipes(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let recipes =
+        attach_recipes(tree.as_ref(), join_scratch).unwrap_or_else(|e| panic!("{what}: {e}"));
     let declared = declared_steps(&recipes);
     // One append for the case rather than one per run: the file is opened, its heading
     // checked and its lock taken each time, and ten of that says nothing ten times.
@@ -298,7 +300,7 @@ fn second_smallest(mut runs: Vec<Run>) -> Run {
 ///
 /// No budget, so the accountant records without ever tripping — a benchmark that refuses
 /// to finish reports nothing, and the mode's budget already sized the batches at plan time.
-fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
+fn run_once(tree: &dyn GpuNode, join_scratch: u64, what: &str) -> (RunReport, Vec<Region>) {
     // In the measured path rather than beside the install, which is the whole point: the
     // install was once lost with the file that held it, and a check standing next to what
     // it guards goes the same way. `install_rmm_pool` is idempotent, so asking here is
@@ -319,7 +321,7 @@ fn run_once(tree: &dyn GpuNode, what: &str) -> (RunReport, Vec<Region>) {
          prologue that is not release's; build it with \
          `scripts/build-test-shadgpu.sh --build-benchmarks`"
     );
-    let mut session = Session::open(tree, what);
+    let mut session = Session::open(tree, join_scratch, what);
     let ctx = session.context();
     let report = run::<GpuBackend>(tree, &ctx, None).unwrap_or_else(|e| panic!("{what}: {e}"));
 

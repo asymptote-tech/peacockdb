@@ -4,26 +4,24 @@
 //! `hash_join` are `join_cases.rs`'s. Every case is green or a `bug_` test with its ticket
 //! above it; nothing here repairs.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, AsArray, Int32Array};
+use datafusion::arrow::array::Int32Array;
 use datafusion::arrow::compute::kernels::numeric::rem;
 use datafusion::arrow::compute::{cast, concat_batches};
-use datafusion::arrow::datatypes::{DataType, Field, Int64Type, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{JoinType, ScalarValue};
 
 use super::join_cases::{
-    BUILD_COPY, build_batch, empty_build, gpu_refuses_with, hash_join, hash_join_with, one_probe,
-    padded, probe_batch, residual, script, side, two_probes,
+    build_batch, empty_build, hash_join, hash_join_with, one_probe, padded, probe_batch, residual,
+    script, side, two_probes,
 };
 use super::script::{Script, run_both};
-use crate::executor::BackendError;
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
-use crate::tests::compare::{Order, Slot};
+use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -108,14 +106,13 @@ fn decimal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
 pub(crate) fn crossing_projection(join_type: JoinType) -> Vec<u32> {
     match join_type {
         // both sides: probe's s, build's f64, probe's id, build's d
-        JoinType::Inner | JoinType::Right => vec![13, 4, 8, 6],
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => vec![13, 4, 8, 6],
         // build side only: d, f64, id
         JoinType::LeftSemi | JoinType::LeftAnti => vec![6, 4, 0],
         // build side and the mark: mark, s, id
         JoinType::LeftMark => vec![8, 5, 0],
         // probe side only: b, i64, id
         JoinType::RightSemi | JoinType::RightAnti => vec![7, 3, 0],
-        JoinType::Left | JoinType::Full => unreachable!("#152 refuses the first probe batch"),
     }
 }
 
@@ -282,13 +279,11 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it; the projection is
-// proved over one batch above.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device() {
+    fn a_right_join_with_a_crossing_projection_over_two_probe_batches_agrees() {
         let node = hash_join(JoinType::Right, false, false, Some(crossing_projection(JoinType::Right)));
-        gpu_refuses_with(&run_both(&node, two_probes()), BUILD_COPY);
+        run_both(&node, two_probes()).same(Order::Any);
     }
 }
 
@@ -428,36 +423,17 @@ operator_case! {
     }
 }
 
-// #59 — the anti join's hardcoded `EQUAL` reaches the second column of a composite key: a
-// null `i32` on the probe matches the build rows of its `key` whose `i32` is null too, and
-// the device drops them where SQL keeps them. The cpu keeps 30 of 32 build rows, the
-// device 27, and every row the device alone dropped carries the null.
+// A null `i32` in the probe's second key column matches nothing under the SQL default, so
+// the anti join keeps every build row no probe pair equals: 30 of 32, by hand.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device() {
+    fn a_left_anti_join_on_a_composite_key_with_a_null_second_column_keeps_its_rows() {
         let node = hash_join_keyed(JoinType::LeftAnti, Key::Composite, None);
         let outcome = run_both(&node, composite_anti_script_with_a_null_second_key());
-        let kept = |side: &Result<Vec<Slot>, BackendError>| -> RecordBatch {
-            let batches: Vec<RecordBatch> = side.as_ref().expect("answers").concat();
-            concat_batches(&batches[0].schema(), &batches).expect("one schema")
-        };
-        let (cpu, gpu) = (kept(&outcome.cpu), kept(&outcome.gpu));
-        assert_eq!(cpu.num_rows(), 30, "the cpu keeps every build row no probe pair equals");
-        assert_eq!(gpu.num_rows(), 27, "the device matches the null pair too");
-        let device_kept: HashSet<i64> =
-            gpu.column(0).as_primitive::<Int64Type>().values().iter().copied().collect();
-        let ids = cpu.column(0).as_primitive::<Int64Type>();
-        let dropped_beyond_the_cpu: Vec<usize> = (0..cpu.num_rows())
-            .filter(|r| !device_kept.contains(&ids.value(*r)))
-            .collect();
-        assert_eq!(dropped_beyond_the_cpu.len(), 3);
-        for row in dropped_beyond_the_cpu {
-            assert!(
-                cpu.column(2).is_null(row),
-                "build row {} was dropped over a non-null second key",
-                ids.value(row)
-            );
-        }
+        outcome.same(Order::Any);
+        let kept = outcome.gpu.as_ref().expect("the device answers").concat();
+        let kept = concat_batches(&kept[0].schema(), &kept).expect("one schema");
+        assert_eq!(kept.num_rows(), 30, "every build row no probe pair equals");
     }
 }
 
@@ -516,12 +492,11 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it, residual or not.
 operator_case! {
     GpuHashJoin,
-    fn bug_an_inner_join_with_a_residual_refuses_its_second_probe_batch_on_the_device() {
+    fn an_inner_join_with_a_residual_over_two_probe_batches_agrees() {
         let node = hash_join_with(JoinType::Inner, false, residual(), None);
-        gpu_refuses_with(&run_both(&node, two_probes()), BUILD_COPY);
+        run_both(&node, two_probes()).same(Order::Any);
     }
 }
 

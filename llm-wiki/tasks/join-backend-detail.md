@@ -880,3 +880,195 @@ Starts at plan task 7 steps 3–4 together (the wire switch and the session exec
 rest of task 7, then task 8, reporting after each plan task for its own commit. Hosts at
 dispatch: nebius-gpu up, L40S idle, **14 GB free of 96** (unchanged since 2026-10-09); verda
 unlocatable (`VERDA_CLIENT_ID` unset), so every CPU run is local.
+
+#### Round 2, plan task 7 — the device on the session, and `CudfJoin` on the wire
+
+Steps 3 and 4 landed together, with 5's executor half, 5a, 5b, the step-6 flips, the #246 pin
+and step 7's goldens. No C++ and no fbs change: `CudfJoin` and the four symbols were
+join-session-cpp's. The old three fbs tables, their `execute_*_join`, their `fb_text.rs` arms and
+`read.rs`'s child-walk arms stay for task 15, since nothing writes them now but the C++ and the
+walk still read them.
+
+**What shipped.**
+- `wire/`: `FbKind::Join` (one kind, no field — the type is the node's own now),
+  `AbiSymbol::{JoinBuild, JoinProbe, JoinFinish}`, `CallPattern::JoinBuild`, `Call::join`.
+  `wire/join.rs` is one writer over `JoinNode::{Hash, NestedLoop, Cross}` (a cross is Inner
+  with no key and no condition). `CudfJoin` is a leaf (`writer.node(0, …)`): the two inputs
+  stay in the pool and the walk's own `reduce` gathers them under a structural `CudfUnion`, so
+  seqs stay the C++'s post-order with no change to `writer.rs`'s rules. Gone as dead with the
+  writers: `FbKind::{HashJoin, CrossJoin, NestedLoopJoin}`, `ProjectRole::{ProbeKeys, NullPad,
+  Narrow}`, `Input::{BatchCopy, BuildSide, BuildSideCopy, AccumulatedKeys}`,
+  `Input::is_build_side`, `attach.rs`'s `cross_join`, `node_writer::null_literal`.
+- The recipe line is `join_build(#4 CudfJoin); per probe batch: join_probe; at done:
+  join_finish`, from three general renderer rules in `recipes.rs`: a call addressing the
+  previous call's seq names no target, a call with nothing to pass has no parentheses, a pattern
+  whose text is empty has no prefix. The plan's `join_build(#4), …` dropped the kind and used
+  `, ` between phases; every other line in the goldens keeps `#seq kind` and `; `, so this one
+  does too. The payload section prints a session's payload once, not once per call.
+- `fb_text.rs`'s `CudfJoin` arm: **all nine fields** — `join_type`, `keys` (when any),
+  `filter`, `filter_columns`, `null_equals_null` (when true), `build_schema`, `probe_schema`,
+  `projection`, `chunk_bytes` (when not 0). Round 1's reading accepted. The two schemas decided
+  it: they are what an absent side and every pad are typed from, so a wrong pad type is visible
+  in this golden and in no other text; that they repeat the children's plan lines is the price.
+- `gpu_backend/join.rs` on the four symbols: `set_build` always makes `join_build` (handle 0 for
+  no batch), `probe_and_fetch`/`finish_and_fetch` answer `Option` (handle 0 is `None`), `Drop`
+  releases. Every call journals one `AbiCall` on the join's seq, target `Node(FbKind::Join)`.
+  `GpuJoin::new` refuses a recipe that is not the session line for the node's type. The
+  `one_batch` adapter, `without_build_allowed`, `JoinCall`, `make`, `copy_of`, `build_copy`,
+  `finish_without_keys`, `key_schema` are gone.
+- Pricing (step 5's executor half), **the fbs formula**: resident = build bytes + 16 B a build
+  row (keyed only) + 1 B a row of `matched` (finishing types); probe scratch = `n_bytes` + the
+  output priced at `n_rows` + `pairs × (8 + residual bytes a row)`, capped at `chunk_bytes`
+  (0 → 1 GiB); pairs = `n_rows` keyed (one match a row — an estimate), build rows × `n_rows`
+  keyless; residual bytes are cuDF's fixed width per filter column, 1 for a bool, 16 for a
+  variable-width one (`filter_row_bytes`). Finish scratch = the output priced at build rows.
+  Device runs carry no budget (`corpus_gpu.rs` passes `None`), so nothing in the corpus can
+  trip on it; `a_join_calls_pair_scratch_is_the_sessions_chunked_formula` and
+  `a_session_holds_its_build_its_hash_table_and_its_matched_column` hold the two figures.
+- 5a: `serialize_join_schema` in `wire/join.rs` wraps `serialize_schema`'s #249 refusal with
+  the side. 5b: `join_scratch_bytes(knobs)` in `wire/mod.rs`, written by
+  `Writer::with_join_scratch`, carried as `RecipePlan::join_scratch_bytes()` for the executor.
+- `plan/join.rs`: `needs_finish(join_type)` (the five), which `capability` now reads; and
+  `empty_build_answers_nothing` → `empty_build_owes_nothing` everywhere (driver, cpu, tests).
+
+**What the plan got wrong, and what this round decided instead.**
+- **The pipeline never builds recipes** — `planner/pipeline.rs` returns a tree and a model, and
+  only tests and the harness call `attach_recipes`. So the budget reaches the writer as a second
+  argument, `attach_recipes(root, join_scratch_bytes)`: planned queries pass
+  `join_scratch_bytes(&knobs)` (plan goldens, `corpus_gpu.rs`, `corpus_benchmark.rs`,
+  `node_timing.rs` through `DevicePlan.join_scratch`, `record/tests.rs`, the wire device walk),
+  hand-built trees pass 0. `Session::open` (`test_support/gpu_session.rs`) takes it too.
+  `join_scratch_bytes` is in `wire/` because nothing in a production build calls it, and wire's
+  `allow(dead_code)` is the one already covering that.
+- **`owes_nothing` is "no batch" only**, not the sketch's `taken.rows == 0`. Measured reasoning,
+  not taste: the device corpus compares its per-node lists with the cpu goldens, and the cpu's
+  adapter cannot drain a zero-row-build lane until task 8. Task 8 must switch **both** engines
+  to the row count in one commit, and regenerate whatever cpu sections the skipped calls move.
+- **Nine harness cases split by call rather than agreeing.** Same rows, different slots: the
+  cpu answers in its one probe call what the session answers at finish — the build-side semi
+  family over a residual (single-batch probe, cpu one legacy call) and every Left nested loop
+  (DataFusion's `NestedLoopJoinExec` emits the unmatched build rows in the same call). Pinned
+  `bug_` under #220 with `the_cpu_answers_in_its_probe_call_what_the_device_finishes`
+  (`tests/gpu_tests/script.rs`): the cpu's finish slot empty, the device's not, every row of
+  the calls together the same (nullability relaxed — one export calls a column non-nullable
+  when none of its rows is NULL). Rust-only twin:
+  `wire::tests::bug_the_cpu_answers_a_filtered_build_side_semi_join_in_its_probe_call`, and
+  `the_recipe_and_the_executor_take_the_same_path_through_every_cell` skips those three cells.
+- **No live-join count exists** for `dropping_a_probing_join_releases_its_session`; it asks the
+  device to finish the dropped id and reads `unknown join N`.
+- The plan's step 6 counted the #59 residual pins among those that flip to `same`; the two with
+  a residual are among the nine above instead.
+
+**Pins, by ticket.** `join_cases.rs` 43 `bug_` → 7 (#152 ×26, #173 ×4 and #59 ×7 flipped to
+the positive case on the same script; #212 ×3 became `bug_*_with_no_build_batch_is_refused_on_the_cpu`
+over `no_build_then_a_probe()`, asserting the device's 16 padded rows and the cpu's `NO_BUILD`;
+#220 ×3 new; #243 unchanged). `join_dimension_cases.rs` 3 → 0 (#152 ×2, and the #59 composite
+pin now `a_left_anti_join_on_a_composite_key_with_a_null_second_column_keeps_its_rows`, 30 of 32
+by hand beside `same`; `crossing_projection` has real Left/Full arms). `nested_cases.rs`: #152 ×2
+flipped, #215's refusal gone (the device answers; the case is one of the four #220 pins); #207's cross projection and #215/#190's projected Left kept their cpu halves;
+#220 ×4 new; #246 new — `bug_a_like_against_a_column_pattern_is_refused_on_the_device`, the pin
+deferred from task 2, green on the device. `nested_schema_cases.rs`: #207 flipped to
+`a_cross_join_with_a_projection_declares_the_kept_columns_the_device_holds`.
+`wire/gpu_tests/mod.rs`: the walk drives sessions per lane; `driven()`/`PROVEN` name
+`FbKind::Join`; the one-`HashJoin{LeftSemi}`-call test became
+`a_semi_join_with_a_residual_the_ast_cannot_take_is_one_session` (build, probe, finish).
+Consts gone: `BUILD_COPY`, `PROBE_COPY`, `NO_KEYS`, `INNER_ONLY`, `device_answers_as_if_null_equals_null`.
+`NO_BUILD`, `TWO_OF_SIXTEEN`, `THREE_OF_SIXTEEN` stay for task 8.
+
+**Goldens moved, and only these.** The 15 `*.plans.txt` — with every `--- recipes ---`
+section stripped, all 15 are byte-identical to `84561b80`; inside it, after `#N`
+normalization, the only changed lines are join lines: 75 per tpch mode, 656 per tpcds mode,
+27 per pbench tp1 mode (design §5.7's 75 and 656 exactly). `recipe-payloads.txt` regenerated
+(`UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1`): 268 `CudfJoin` addresses where 272
+old-kind ones were. No `.cpu.txt`, `.cost.txt`, `.result.txt`, `gpu-result.txt` or registry
+change. One trap: the regeneration run reports
+`the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce` red because it reads
+the goldens mid-rewrite; a plain rerun afterwards is green.
+
+**Cost gate:** `cargo run -q -p cost-report -- --cost-diff --base 84561b80` → 703 compared,
+0 changed, 0 regressions.
+
+**Red-green evidence. Eleven mutations, each applied with an asserted single match, each
+restored from a saved copy and checked with `cmp`, the final tree read back by grep.**
+Rust-only, `--lib -- wire::tests` (20 cases):
+- M1 `writer.node(0, …)` → `node(2, …)` (the join takes child stubs): 6 failed, the leaf case
+  among them. (A first attempt matched nothing after rustfmt reflowed the line and reported 20
+  passed; it is not counted.)
+- M2 every join finishes: 4 failed, the recipe-line and same-path cases among them.
+- M3 projection never written: 1 failed, `every_join_node_writes_one_cudf_join_leaf`.
+- M4 `chunk_bytes: 0` always: 1 failed, `a_budgeted_join_carries_its_chunk_budget`.
+- M5 the side dropped from the #249 message: 1 failed, the list pin.
+- M6 the empty-pattern prefix rule removed: 1 failed, `a_join_recipe_line_is_the_session`.
+- M7 the repeated-target rule removed: 1 failed, the same.
+- M8 the 1 GiB cap removed: 1 failed, the budget case.
+Device, `peacockdb_core_gpu_lib`:
+- D1 `owes_nothing` ignoring whether a batch came: 132 failed across the harness.
+- D2 `Drop` releasing nothing: 1 failed, `dropping_a_probing_join_releases_its_session`.
+- D3 `matched` priced at 0: 1 failed, the residency case.
+
+**A fifth workstation trap, paid for this round: `rsync -a` can leave a mutation compiled.**
+It copies the local mtime, and a file restored locally after the mutated copy was synced and
+built carries an mtime older than that build, so cargo calls the crate fresh. The first
+"clean" device run after the mutations failed exactly D3's assertion (`left: 64`). `touch` the
+restored file on the remote before the clean build; the rerun recompiled four binaries and
+went green.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S,
+0 MiB in use; cuDF 25.02 (`CUDF_VERSION_MAJOR 25`, `MINOR 2`); tree synced uncommitted,
+`./scripts/build-test-shadgpu.sh --build`, each binary run directly with `--test-threads=1`.
+**821 cases, all green** (the 816 baseline plus five):
+
+| binary | result |
+|---|---|
+| `peacockdb_core_gpu_lib gpu_tests::` | **585 passed**, 0 failed |
+| `test_gpu_corpus` | **95 passed** |
+| `test_node_timing` | **1 passed** |
+| `peacock_gpu_benchmarks --skip bench_` | **8 passed**, 3 filtered out |
+| `peacock_gpu_tests` / `peacock_plan_tests` / `peacock_join_session_tests` | **2 / 77 / 53 passed** |
+
+Not run, per the override: `peacock_cpu_tests` (local), the sf40 pair, the `bench_` cases. The
+C++ binaries were not rebuilt (no C++ changed). Disk: 12 GB free of 96 after this round's
+builds (14 at dispatch); nothing deleted.
+
+**Local, rust-only, fresh after every edit:** `cargo test --features rust-only -p
+peacockdb-core --lib --tests -- --test-threads=2` — `--lib` 724 passed, 2 ignored;
+`test_cpu_corpus` 983; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18;
+`test_ci_coverage` 11; `test_golden_format` 43; 0 failed anywhere.
+
+**Warnings.** None new. `cargo build --features rust-only -p peacockdb-core` and the rust-only
+lib tests are clean. The gpu-feature lib test build has one, pre-existing in an untouched file
+(`aggregate_dimension_cases.rs`'s unused `AsArray`). `cargo-cudf.sh build -p peacockdb-core
+--features gpu` and `-p peacockdb` report 26 dead-code warnings, every one in a file this round
+did not change (`executor/mod.rs` 241–920, `driver/{measurements,mod}.rs`, `instrument.rs`,
+`driver/index.rs:171`): test-support items unused by a non-test build, pre-existing.
+
+**Formatting.** Files rustfmt-clean at HEAD were formatted whole through a temp copy (so `mod`
+children are not followed); in the rest only this round's hunks were fixed. What rustfmt still
+reports in touched files is pre-existing: `gpu_backend/backend.rs` (4 hunks),
+`gpu_tests/{abi,accumulate,exec,mod}.rs`, `join_dimension_cases.rs:192`.
+
+**build-test.md counts (coordinator's file).** `--lib` 730 → 726: "Recipes per join type"
+24 → 20 (its prose describes the recipe seq sets that are gone; it is now the `CudfJoin` each
+node writes and the session line). Device `--lib -- gpu_tests::` 580 → 585: "Executors on a
+device" 32 → 36 (prose: the session lifecycle, `Drop`, `owes_nothing`, the journal and region
+per call, residency and pair scratch — not "Inner at one probe batch … the refusals");
+"Operator harness" 355 → 356 (#246). cpu block 1742 → 1738, gpu block 687 → 692, Rust 2549 →
+2550, grand total 3119 → 3120. "Recipe walk on a device" stays 21; its "the inner and semi
+joins' one call" is now a session's build, probe and finish.
+
+**architecture.md sentences this round falsified** (the coordinator's to correct): "Four of
+the sixteen wire kinds have no writer … `CudfJoin`, whose writer lands with the join backend"
+(now the three old join tables have none); the "From node to seqs" rows for `GpuHashJoin` and
+`GpuCrossJoin`, `GpuNestedLoopJoin`; Joins' opening "Everything below is `join.cpp` and the
+recipe choreography, which still serve every plan" (the device is on the session; only the
+cpu still runs the decomposition); "What a streamed probe costs" and the #152/#136 rows of
+"What the frozen surface costs", true now of the cpu alone; the "Three refusals" paragraph's
+#173 and #212 device halves.
+
+**What task 8 inherits.** Flip the #220 ×7 pins (four `nested_cases.rs`, three `join_cases.rs`)
+and the wire twin back to agreement, and drop `the_cpu_answers_in_its_probe_call_what_the_device_finishes`
+with its last user; the #212 ×3 `_refused_on_the_cpu` pins to `*_pads_every_probe_row` (or
+`returns`); #190/#207/#208 pins as the plan lists. Switch `owes_nothing` to the row count on
+**both** engines together (above). Delete `cpu_backend/backend.rs`'s `one_batch`,
+`CpuJoin::without_build_allowed`, `CpuProbingJoin::build`, `feeds_owing_build`, the
+scatter-drop exception and `dimensions.rs`'s use of it.

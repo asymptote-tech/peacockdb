@@ -43,7 +43,7 @@ GpuUnload
       GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfCrossJoin, build copy, batch)
+  GpuCrossJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -103,8 +103,8 @@ GpuUnload
             GpuLoadParquet: table=fact, projections=[f_id@0, f_kdec15@6], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_kdec15:Decimal128(15,2)]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=4, per batch: execute_node(#7 CudfProject, batch)
-    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+  GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
           GpuMergePartitions: none
@@ -173,7 +173,7 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#7 CudfProject{probe keys}, batch); at done: execute_node(#8 CudfCoalescePartitions, accumulated keys), execute_node(#9 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#10 CudfProject{narrow}, prior output)
+  GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe; at done: join_finish
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
         GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
@@ -210,8 +210,8 @@ GpuUnload
           GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuFilter: calling_lanes=1, per batch: execute_node(#8 CudfFilter, batch)
-    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfProject{probe keys}, batch); at done: execute_node(#5 CudfCoalescePartitions, accumulated keys), execute_node(#6 CudfHashJoin{LeftMark}, build, prior output), execute_node(#7 CudfProject{narrow}, prior output)
+  GpuFilter: calling_lanes=1, per batch: execute_node(#6 CudfFilter, batch)
+    GpuHashJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -305,8 +305,8 @@ GpuUnload
             GpuLoadParquet: table=fact, projections=[f_id@0, f_kf64@5], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_kf64:Float64]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=4, per batch: execute_node(#7 CudfProject, batch)
-    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+  GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
           GpuMergePartitions: none
@@ -340,7 +340,7 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#5 CudfProject{probe keys}, batch copy), execute_node(#6 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#7 CudfCoalescePartitions, accumulated keys), execute_node(#9 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#10 CudfProject{build columns + 1 null}, prior output)
+  GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe; at done: join_finish
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
         GpuMergePartitions: none
@@ -382,8 +382,8 @@ GpuUnload
             GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
-    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#7 CudfHashJoin{Inner}, build copy, batch)
+  GpuProject: calling_lanes=4, per batch: execute_node(#9 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
           GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
@@ -451,7 +451,7 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfProject{probe keys}, batch copy), execute_node(#7 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#8 CudfCoalescePartitions, accumulated keys), execute_node(#10 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#11 CudfProject{build columns + 1 null}, prior output)
+  GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe; at done: join_finish
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
         GpuMergePartitions: none
@@ -485,8 +485,8 @@ GpuUnload
         GpuLoadParquet: table=dim, projections=[d_id@0, d_name@17], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_id:Int64, d_name:Utf8]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -517,8 +517,8 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -546,8 +546,8 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfNestedLoopJoin, build, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -579,8 +579,8 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfNestedLoopJoin, build, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -612,7 +612,7 @@ GpuUnload
       GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+  GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -655,7 +655,7 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#7 CudfHashJoin{RightSemi}, build copy, batch)
+  GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
         GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
@@ -693,7 +693,7 @@ GpuUnload
             GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32, f_qty:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#8 CudfHashJoin{RightSemi}, build copy, batch)
+  GpuHashJoin: calling_lanes=4, join_build(#8 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
         GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
@@ -737,7 +737,7 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Right}, build copy, batch)
+  GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
         GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
@@ -834,14 +834,14 @@ GpuUnload
                   GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_w:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#44 CudfNestedLoopJoin, build, batch)
-      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#34 CudfCoalescePartitions, lane batches)
-        GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#33 CudfNestedLoopJoin, build, batch)
-          GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#24 CudfCoalescePartitions, lane batches)
-            GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#23 CudfNestedLoopJoin, build, batch)
-              GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
-                GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#13 CudfNestedLoopJoin, build, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#49 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#47 CudfJoin); per probe batch: join_probe; at done: join_finish
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#37 CudfCoalescePartitions, lane batches)
+        GpuNestedLoopJoin: calling_lanes=1, join_build(#35 CudfJoin); per probe batch: join_probe; at done: join_finish
+          GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#26 CudfCoalescePartitions, lane batches)
+            GpuNestedLoopJoin: calling_lanes=1, join_build(#24 CudfJoin); per probe batch: join_probe; at done: join_finish
+              GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#15 CudfCoalescePartitions, lane batches)
+                GpuNestedLoopJoin: calling_lanes=1, join_build(#13 CudfJoin); per probe batch: join_probe; at done: join_finish
                   GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                     GpuMergePartitions: none
                       GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
@@ -854,25 +854,25 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuProject: calling_lanes=4, per batch: execute_node(#6 CudfProject, batch)
                             GpuFilter: calling_lanes=4, per batch: execute_node(#5 CudfFilter, batch)
                               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
-              GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#20 CudfCoalescePartitions, lane batches), execute_node(#21 CudfAggregate{Merge}, prior output); at done: execute_node(#22 CudfProject{finalize}, prior output)
+              GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#21 CudfCoalescePartitions, lane batches), execute_node(#22 CudfAggregate{Merge}, prior output); at done: execute_node(#23 CudfProject{finalize}, prior output)
                 GpuMergePartitions: none
-                  GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#18 CudfCoalescePartitions, lane batches), execute_node(#19 CudfAggregate{Merge}, prior output)
-                    GpuAggregate: calling_lanes=4, per batch: execute_node(#17 CudfAggregate{Partial}, batch)
-                      GpuFilter: calling_lanes=4, per batch: execute_node(#16 CudfFilter, batch)
-                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#15 CudfScan, row groups)
-          GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#30 CudfCoalescePartitions, lane batches), execute_node(#31 CudfAggregate{Merge}, prior output); at done: execute_node(#32 CudfProject{finalize}, prior output)
+                  GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#19 CudfCoalescePartitions, lane batches), execute_node(#20 CudfAggregate{Merge}, prior output)
+                    GpuAggregate: calling_lanes=4, per batch: execute_node(#18 CudfAggregate{Partial}, batch)
+                      GpuFilter: calling_lanes=4, per batch: execute_node(#17 CudfFilter, batch)
+                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#16 CudfScan, row groups)
+          GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#32 CudfCoalescePartitions, lane batches), execute_node(#33 CudfAggregate{Merge}, prior output); at done: execute_node(#34 CudfProject{finalize}, prior output)
             GpuMergePartitions: none
-              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#28 CudfCoalescePartitions, lane batches), execute_node(#29 CudfAggregate{Merge}, prior output)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#27 CudfAggregate{Partial}, batch)
-                  GpuFilter: calling_lanes=4, per batch: execute_node(#26 CudfFilter, batch)
-                    GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#25 CudfScan, row groups)
-      GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#41 CudfCoalescePartitions, lane batches), execute_node(#42 CudfAggregate{Merge}, prior output); at done: execute_node(#43 CudfProject{finalize}, prior output)
+              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#30 CudfCoalescePartitions, lane batches), execute_node(#31 CudfAggregate{Merge}, prior output)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#29 CudfAggregate{Partial}, batch)
+                  GpuFilter: calling_lanes=4, per batch: execute_node(#28 CudfFilter, batch)
+                    GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
+      GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#44 CudfCoalescePartitions, lane batches), execute_node(#45 CudfAggregate{Merge}, prior output); at done: execute_node(#46 CudfProject{finalize}, prior output)
         GpuMergePartitions: none
-          GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#39 CudfCoalescePartitions, lane batches), execute_node(#40 CudfAggregate{Merge}, prior output)
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#38 CudfAggregate{Partial}, batch)
-              GpuProject: calling_lanes=4, per batch: execute_node(#37 CudfProject, batch)
-                GpuFilter: calling_lanes=4, per batch: execute_node(#36 CudfFilter, batch)
-                  GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#35 CudfScan, row groups)
+          GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#42 CudfCoalescePartitions, lane batches), execute_node(#43 CudfAggregate{Merge}, prior output)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch)
+              GpuProject: calling_lanes=4, per batch: execute_node(#40 CudfProject, batch)
+                GpuFilter: calling_lanes=4, per batch: execute_node(#39 CudfFilter, batch)
+                  GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#38 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=5236016, certain=0
 GpuUnload: estimated_max_resident_size=430000
@@ -927,7 +927,7 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#5 CudfHashJoin{RightAnti}, build copy, batch)
+  GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
         GpuMergePartitions: none
@@ -958,7 +958,7 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#5 CudfProject{probe keys}, batch copy), execute_node(#6 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#7 CudfCoalescePartitions, accumulated keys), execute_node(#9 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#10 CudfProject{build columns + 1 null}, prior output)
+  GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe; at done: join_finish
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
         GpuMergePartitions: none
@@ -989,7 +989,7 @@ GpuUnload
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#5 CudfHashJoin{Right}, build copy, batch)
+  GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
         GpuMergePartitions: none
@@ -1019,8 +1019,8 @@ GpuUnload
         GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_id:Int64, d_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
-    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Right}, build copy, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -1046,7 +1046,7 @@ GpuUnload
       GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_id:Int64, d_k:Int32]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{RightSemi}, build copy, batch)
+  GpuHashJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -1198,8 +1198,8 @@ GpuUnload
           GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_us@10], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_ts_us:Timestamp(Microsecond, None)]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=4, per batch: execute_node(#6 CudfProject, batch)
-    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#5 CudfHashJoin{Inner}, build copy, batch)
+  GpuProject: calling_lanes=4, per batch: execute_node(#7 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
           GpuMergePartitions: none
@@ -1264,8 +1264,8 @@ GpuUnload
             GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_ku32:UInt32]
 --- recipes ---
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=4, per batch: execute_node(#7 CudfProject, batch)
-    GpuHashJoin: calling_lanes=4, per probe batch: execute_node(#6 CudfHashJoin{Inner}, build copy, batch)
+  GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
+    GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
           GpuMergePartitions: none

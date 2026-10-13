@@ -27,7 +27,7 @@ use crate::executor::{
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::Schema;
-use crate::plan::empty_build_answers_nothing;
+use crate::plan::empty_build_owes_nothing;
 use crate::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuLoadParquet, GpuMergeSortedPartitions, GpuUnload,
     NodeRef, as_node_ref,
@@ -602,7 +602,7 @@ pub(crate) fn planned_mode(name: &'static str, root: &dyn GpuNode) -> PlannedMod
         match as_node_ref(node) {
             NodeRef::LoadParquet(load) => mode.lanes = mode.lanes.max(load.partition_groups.len()),
             NodeRef::EmitPartitions(_) => mode.shuffles = true,
-            NodeRef::Join(join) if !empty_build_answers_nothing(join.join_type) => {
+            NodeRef::Join(join) if !empty_build_owes_nothing(join.join_type) => {
                 mode.owes_probe_when_empty = true
             }
             _ => {}

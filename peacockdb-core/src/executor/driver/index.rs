@@ -9,9 +9,7 @@
 use crate::executor::{IndexedNode, JoinShape, PlanIndex, PlanShape};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::{
-    ExecutorCategory, NodeRef, as_node_ref, category_of, empty_build_answers_nothing,
-};
+use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, category_of, empty_build_owes_nothing};
 
 pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanError> {
     let mut nodes = Vec::new();
@@ -140,7 +138,7 @@ fn feeds_owing_build(nodes: &[IndexedNode<'_>], from: usize) -> bool {
                 return false;
             }
             return match as_node_ref(nodes[node].node) {
-                NodeRef::Join(join) => !empty_build_answers_nothing(join.join_type),
+                NodeRef::Join(join) => !empty_build_owes_nothing(join.join_type),
                 // Cross and nested-loop joins carry no type and owe nothing, which is the
                 // same answer their executors give `set_build(None)` by another route.
                 _ => false,

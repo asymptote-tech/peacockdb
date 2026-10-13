@@ -7,7 +7,7 @@ use std::fmt;
 
 use super::generated::peacock::plan as fb;
 use super::read::node_at;
-use super::{CallPattern, FbKind, Input, Payloads, ProjectRole, Recipe, RecipePlan, fb_text};
+use super::{CallPattern, FbKind, Payloads, ProjectRole, Recipe, RecipePlan, fb_text};
 use crate::plan::GpuNode;
 use crate::plan::category_of;
 
@@ -118,10 +118,15 @@ fn render_recipe_node(
         // Under the call it belongs to, indented past the tree, so a long payload reads
         // as this node's rather than as the next line of the plan.
         let indent = format!("{}    ", "  ".repeat(depth));
+        let mut previous = None;
         for call in &recipe.calls {
             let Some((seq, kind)) = call.target else {
                 continue;
             };
+            // A session's three calls address one seq, and its payload is printed once.
+            if previous.replace(seq) == Some(seq) {
+                continue;
+            }
             let _ = writeln!(text, "{indent}#{seq} {kind}");
             // Expect rather than default: a seq with no node is the numbering outrunning
             // the tree, and printing nothing there would render a plan whose every later
@@ -149,12 +154,7 @@ impl fmt::Display for FbKind {
         match self {
             Self::Scan => write!(f, "CudfScan"),
             Self::Filter => write!(f, "CudfFilter"),
-            Self::Project(ProjectRole::ProbeKeys) => write!(f, "CudfProject{{probe keys}}"),
             Self::Project(ProjectRole::Finalize) => write!(f, "CudfProject{{finalize}}"),
-            Self::Project(ProjectRole::NullPad { nulls }) => {
-                write!(f, "CudfProject{{build columns + {nulls} null}}")
-            }
-            Self::Project(ProjectRole::Narrow) => write!(f, "CudfProject{{narrow}}"),
             Self::PlainProject => write!(f, "CudfProject"),
             Self::Aggregate { merge } => {
                 write!(
@@ -167,9 +167,7 @@ impl fmt::Display for FbKind {
             Self::SortPreservingMerge => write!(f, "CudfSortPreservingMerge"),
             Self::CoalescePartitions => write!(f, "CudfCoalescePartitions"),
             Self::Repartition { lanes } => write!(f, "CudfRepartition{{Hash, 1→{lanes}}}"),
-            Self::HashJoin { join_type } => write!(f, "CudfHashJoin{{{join_type:?}}}"),
-            Self::CrossJoin => write!(f, "CudfCrossJoin"),
-            Self::NestedLoopJoin => write!(f, "CudfNestedLoopJoin"),
+            Self::Join => write!(f, "CudfJoin"),
         }
     }
 }
@@ -177,17 +175,26 @@ impl fmt::Display for FbKind {
 /// `per batch: execute_node(#3 CudfFilter, batch)`, the calls grouped under the pattern
 /// that drives them — which is how the mapping table reads them too, per probe call and
 /// at finish. What the plan line already carries is not repeated: a golden that states a
-/// thing twice is one a reader stops checking.
+/// thing twice is one a reader stops checking. So a call addressing the seq the call
+/// before it did names no target, a call with nothing to pass has no parentheses, and a
+/// pattern the symbol already says has no prefix: `join_build(#4 CudfJoin); per probe
+/// batch: join_probe; at done: join_finish`.
 impl fmt::Display for Recipe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut groups: Vec<(CallPattern, Vec<String>)> = Vec::new();
+        let mut previous = None;
         for call in &self.calls {
-            let target = match call.target {
-                Some((seq, kind)) => format!("#{seq} {kind}, "),
-                None => String::new(),
+            let mut arguments: Vec<String> = Vec::new();
+            if let Some((seq, kind)) = call.target {
+                if previous.replace(seq) != Some(seq) {
+                    arguments.push(format!("#{seq} {kind}"));
+                }
+            }
+            arguments.extend(call.inputs.iter().map(|input| input.text().to_string()));
+            let text = match arguments.is_empty() {
+                true => call.symbol.name().to_string(),
+                false => format!("{}({})", call.symbol.name(), arguments.join(", ")),
             };
-            let inputs: Vec<&str> = call.inputs.iter().map(Input::text).collect();
-            let text = format!("{}({target}{})", call.symbol.name(), inputs.join(", "));
             match groups.last_mut() {
                 Some((when, calls)) if *when == call.when => calls.push(text),
                 _ => groups.push((call.when, vec![text])),
@@ -195,7 +202,10 @@ impl fmt::Display for Recipe {
         }
         let phases: Vec<String> = groups
             .iter()
-            .map(|(when, calls)| format!("{}: {}", when.text(), calls.join(", ")))
+            .map(|(when, calls)| match when.text() {
+                "" => calls.join(", "),
+                when => format!("{when}: {}", calls.join(", ")),
+            })
             .collect();
         write!(f, "{}", phases.join("; "))
     }

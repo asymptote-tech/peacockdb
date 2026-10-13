@@ -17,7 +17,9 @@ use crate::test_support::{
     CORPUS_DATASETS, MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections,
     queries_dir_for, section_differences, testdata_root,
 };
-use crate::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
+use crate::wire::{
+    Payloads, attach_recipes, check_seq_kinds, depth, join_scratch_bytes, render_plan_recipes,
+};
 
 fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
     let mut found: Vec<(String, PathBuf)> = std::fs::read_dir(queries_dir_for(dataset))
@@ -74,7 +76,7 @@ async fn render_query(
         Ok((tree, model)) => format!(
             "{}--- recipes ---\n{}--- memory ---\n{}",
             render_plan(tree.as_ref()),
-            recipes_of(tree.as_ref()),
+            recipes_of(tree.as_ref(), join_scratch_bytes(&knobs)),
             render_plan_memory(tree.as_ref(), &model)
         ),
         Err(e) => format!("refused: {}\n", relative_to_testdata(&e.to_string())),
@@ -86,8 +88,8 @@ async fn render_query(
 /// `not runnable`, never `refused:` — the plan plans, validates and runs on the CPU, and
 /// what failed is the crossing to the device. Naming its ticket is not decoration: the
 /// meta test below asserts that every line of this shape names a ticket that exists.
-fn recipes_of(tree: &dyn GpuNode) -> String {
-    match attach_recipes(tree) {
+fn recipes_of(tree: &dyn GpuNode, join_scratch: u64) -> String {
+    match attach_recipes(tree, join_scratch) {
         Ok(plan) => render_plan_recipes(tree, &plan, Payloads::Omitted),
         Err(e) => format!("not runnable: {}\n", relative_to_testdata(&e.to_string())),
     }
@@ -302,9 +304,10 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 .create_physical_plan()
                 .await
                 .expect("the query plans");
-            let (tree, _) =
-                planner::plan(&plan, mode.knobs_for(dataset)).expect("this mode runs it");
-            let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
+            let knobs = mode.knobs_for(dataset);
+            let (tree, _) = planner::plan(&plan, knobs).expect("this mode runs it");
+            let recipes = attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs))
+                .expect("a plan's recipes are structural");
             text.push_str(&format!("== {dataset} {name}\n"));
             text.push_str(&format!("sha256={}\n", digest_of(recipes.bytes())));
             text.push_str(&render_plan_recipes(
@@ -390,10 +393,11 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
             };
             // A query the engine refuses has no recipes to check; a query it plans has to
             // publish seqs that resolve.
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
+            let knobs = mode.knobs_for(dataset);
+            let Ok((tree, _)) = planner::plan(&plan, knobs) else {
                 continue;
             };
-            match attach_recipes(tree.as_ref()) {
+            match attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs)) {
                 Ok(recipes) => {
                     checked += 1;
                     if let Err(e) = check_seq_kinds(&recipes) {
@@ -1044,10 +1048,11 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
+            let knobs = mode.knobs_for(dataset);
+            let Ok((tree, _)) = planner::plan(&plan, knobs) else {
                 continue;
             };
-            let Ok(recipes) = attach_recipes(tree.as_ref()) else {
+            let Ok(recipes) = attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs)) else {
                 continue;
             };
             let index = crate::executor::PlanIndex::build(tree.as_ref()).expect("the plan indexes");

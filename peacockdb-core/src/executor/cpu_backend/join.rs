@@ -31,7 +31,7 @@ use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use crate::plan::{
-    JoinSide, emits_both_sides, empty_build_answers_nothing, finish_join_type, per_call_join_type,
+    JoinSide, emits_both_sides, empty_build_owes_nothing, finish_join_type, per_call_join_type,
 };
 
 /// What a join does per call, built once. The `Option`s are the capability matrix in the
@@ -39,7 +39,7 @@ use crate::plan::{
 pub(crate) struct Calls {
     /// Whether a lane whose build side produced no batch owes no rows — the join type's
     /// own answer, read once where the node is in hand.
-    empty_build_answers_nothing: bool,
+    empty_build_owes_nothing: bool,
     /// The join this probe batch runs, if any — absent for the build-side semi family,
     /// whose probe call is the key project alone.
     per_call: Option<Arc<dyn ExecutionPlan>>,
@@ -70,7 +70,7 @@ impl CpuJoin {
         if capability.answers_in_one_call() {
             return Ok(Self {
                 calls: Calls {
-                    empty_build_answers_nothing: empty_build_answers_nothing(node.join_type),
+                    empty_build_owes_nothing: empty_build_owes_nothing(node.join_type),
                     per_call: Some(hash_join(node, node.join_type, build, probe, ctx.as_ref())?),
                     keys: None,
                     finish: None,
@@ -90,7 +90,7 @@ impl CpuJoin {
         let pad = finish_project(node, finish.schema(), build, probe)?;
         Ok(Self {
             calls: Calls {
-                empty_build_answers_nothing: empty_build_answers_nothing(node.join_type),
+                empty_build_owes_nothing: empty_build_owes_nothing(node.join_type),
                 per_call,
                 keys: Some(keys),
                 finish: Some(finish),
@@ -150,7 +150,7 @@ impl CpuJoin {
         Calls {
             // A cross join and a nested-loop join both emit rows built from a build row,
             // the Left form's padding included, so an empty build side is an empty answer.
-            empty_build_answers_nothing: true,
+            empty_build_owes_nothing: true,
             per_call: Some(join),
             keys: None,
             finish: None,
@@ -167,7 +167,7 @@ impl CpuJoin {
     /// scatter's zero-row table instead (#175), so only an upstream that emitted nothing
     /// at all reaches the refusal (#212).
     pub(crate) fn without_build_allowed(&self) -> Result<(), BackendError> {
-        if self.calls.empty_build_answers_nothing {
+        if self.calls.empty_build_owes_nothing {
             return Ok(());
         }
         Err(BackendError::new(

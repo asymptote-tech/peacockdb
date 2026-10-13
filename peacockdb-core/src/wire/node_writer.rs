@@ -295,18 +295,8 @@ pub(crate) fn repartition<'a>(
     })
 }
 
-/// A typed NULL literal, which is what pads a probe column an anti join never emitted.
-pub(crate) fn null_literal<'a>(
-    b: &mut FlatBufferBuilder<'a>,
-    field: &Field,
-) -> Result<WIPOffset<fb::Expr<'a>>, PlanError> {
-    let null = datafusion::common::ScalarValue::try_from(field.data_type())
-        .map_err(|e| PlanError::Unsupported(format!("no null scalar for {}: {e}", field.name())))?;
-    write_expr(b, &Expr::Literal(null))
-}
-
-/// One column's declared field, for a caller that needs its name or its type — a key
-/// project naming what it kept, a pad literal typed by what it stands in for.
+/// One column's declared field, for a caller that needs its name — a join key written as
+/// the column it reads.
 pub(crate) fn field_at(schema: &Schema, ordinal: u32) -> &Field {
     schema
         .fields

@@ -7,6 +7,7 @@
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use super::accumulate::State;
+use super::join::PairScratch;
 use super::{
     GpuAccumulator, GpuEmitter, GpuExec, GpuExport, GpuJoin, GpuPartitionAccumulator,
     GpuProbingJoin, GpuSource,
@@ -25,8 +26,8 @@ use super::CallSite;
 use crate::executor::{GpuBackend, GpuContext};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::per_call_join_type;
 use crate::plan::{NodeRef, as_node_ref};
+use datafusion::common::JoinType;
 
 /// The threshold a batch aggregate compacts at, until the driver derives one from the
 /// budget the way the loader's batch size is derived (#142).
@@ -128,29 +129,23 @@ impl Backend for GpuBackend {
             NodeRef::EmitPartitions(_) => {
                 NodeExecutors::PartitionEmitter(GpuEmitter::new(site, recipe, &out(node))?)
             }
-            NodeRef::Join(join) => {
-                // A join that answers in one call has no finish pass, so what its per-call
-                // type would be is a question with no answer — asking it is the defect, and
-                // the `unreachable!` behind it is doing its job. The cpu backend guards on
-                // the same capability at `cpu_backend/join.rs`, and one question answered
-                // two ways is how the two backends drift.
-                let one_call = join.capability()?.answers_in_one_call();
-                // The key table this lane accumulates is the probe's key columns under the
-                // probe's names, which is what the key project the recipe names emits.
-                let keys = (!one_call && per_call_join_type(join.join_type).is_none())
-                    .then(|| key_schema(&input(1), &join.keys));
-                NodeExecutors::Join(GpuJoin::new(
-                    site,
-                    recipe,
-                    Some(join.join_type),
-                    keys.as_ref(),
-                    &out(node),
-                )?)
-            }
-            NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {
-                // Neither has a join type of its own on the wire, and neither publishes a
-                // finish, so there is no answer for one over no keys to be wrong about.
-                NodeExecutors::Join(GpuJoin::new(site, recipe, None, None, &out(node))?)
+            // One session executor for the three nodes, as the wire writes one `CudfJoin`.
+            NodeRef::Join(_) | NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {
+                let (join_type, keyed, filter_columns) = match as_node_ref(node) {
+                    NodeRef::Join(join) => (join.join_type, true, &join.filter_columns[..]),
+                    NodeRef::NestedLoopJoin(join) => {
+                        (join.join_type, false, &join.filter_columns[..])
+                    }
+                    _ => (JoinType::Inner, false, &[][..]),
+                };
+                let scratch = PairScratch::new(
+                    keyed,
+                    filter_columns,
+                    &input(0),
+                    &input(1),
+                    ctx.recipes.join_scratch_bytes(),
+                );
+                NodeExecutors::Join(GpuJoin::new(site, recipe, join_type, scratch, &out(node))?)
             }
             NodeRef::Unload(_) => NodeExecutors::Unload(GpuExport::new(site, &input(0))),
             NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
@@ -158,17 +153,6 @@ impl Backend for GpuBackend {
             }
         })
     }
-}
-
-/// The probe's key columns in the order the join hashes them, keeping the probe's own
-/// names — the shape `recipe::join::key_project` writes, and the schema its output is
-/// priced by.
-fn key_schema(probe: &ArrowSchema, keys: &[(u32, u32)]) -> ArrowSchema {
-    ArrowSchema::new(
-        keys.iter()
-            .map(|(_, probe_ordinal)| probe.field(*probe_ordinal as usize).clone())
-            .collect::<Vec<_>>(),
-    )
 }
 
 /// A source holds nothing between calls: the handle a read produces is its output, and
@@ -267,13 +251,14 @@ impl PartitionEmitterExecutor<GpuBackend> for GpuEmitter {
     }
 }
 
-/// Before its build side arrives a join holds only the calls it will make.
+/// Before its build side arrives a join holds nothing; `set_build` builds the hash table
+/// and the `matched` column over the batch it consumes.
 impl Executor for GpuJoin {
     fn resident_bytes(&self) -> usize {
         0
     }
-    fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
-        n_bytes
+    fn scratch_bytes(&self, n_rows: u64, _n_bytes: usize) -> usize {
+        self.built_bytes(n_rows) as usize
     }
 }
 
@@ -285,48 +270,26 @@ impl JoinExecutor<GpuBackend> for GpuJoin {
 }
 
 impl Executor for GpuProbingJoin {
-    /// The build side for as long as this join holds it, and the probe keys a finishing
-    /// type keeps until its finish pass runs.
+    /// What the session holds until it is released.
     fn resident_bytes(&self) -> usize {
-        self.build_bytes() + self.accumulated_bytes()
+        self.held_bytes() as usize
     }
-    /// The build side only where a probe call reads it: the build-side semi family's probe
-    /// call is the key project, and charging it the build side would refuse a query that
-    /// fits, since the accountant reads this before the call rather than after it.
-    fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
-        if self.probe_reads_build() {
-            self.build_bytes() + n_bytes
-        } else {
-            n_bytes
-        }
+    /// The probe batch, an output as long, and the pairs the session bounds by
+    /// `chunk_bytes`; at finish, the unmatched build rows.
+    fn scratch_bytes(&self, n_rows: u64, n_bytes: usize) -> usize {
+        self.call_bytes(n_rows, n_bytes as u64) as usize
     }
 }
 
 impl ProbingJoin<GpuBackend> for GpuProbingJoin {
     fn probe_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Option<GpuBatch>> {
-        let (out, stats) = GpuProbingJoin::probe_and_fetch(self, batch)?;
-        Ok((one_batch(out)?, stats))
+        GpuProbingJoin::probe_and_fetch(self, batch)
     }
     fn finish_and_fetch(self) -> CallResult<Option<GpuBatch>> {
-        let (out, stats) = GpuProbingJoin::finish_and_fetch(self)?;
-        Ok((one_batch(out)?, stats))
+        GpuProbingJoin::finish_and_fetch(self)
     }
     fn owes_nothing(&self) -> bool {
         GpuProbingJoin::owes_nothing(self)
-    }
-}
-
-/// One batch per call (#220). The device already answers at most one — each recipe call
-/// returns a single handle — so this names a second as a protocol error rather than
-/// concatenating one that cannot occur. Scaffolding until task 7 puts the device on the
-/// session, whose calls answer an `Option` by construction.
-fn one_batch(mut out: Vec<GpuBatch>) -> Result<Option<GpuBatch>, BackendError> {
-    match out.len() {
-        0 => Ok(None),
-        1 => Ok(out.pop()),
-        several => Err(BackendError::new(format!(
-            "a device join call answered {several} batches, and a call answers at most one"
-        ))),
     }
 }
 

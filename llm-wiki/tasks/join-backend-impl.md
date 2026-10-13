@@ -994,7 +994,7 @@ pub trait ProbingJoin<B: Backend>: Executor {
   rendered `join_build(#N), per probe batch: join_probe, at done: join_finish`;
   `GpuJoin { site, seq, join_type, output }`, `GpuProbingJoin { join: u64 /*session id*/, … }`.
 
-- [ ] **Step 1: The failing tests.** `wire/tests.rs`: `every_join_node_writes_one_cudf_join_leaf`
+- [x] **Step 1: The failing tests.** `wire/tests.rs`: `every_join_node_writes_one_cudf_join_leaf`
   (three cases: hash, nested loop, cross; the payload is `CudfJoin` with `build_schema`,
   `probe_schema`, `projection` and `null_equals_null` as the node says, and no child stub);
   `a_join_recipe_line_is_the_session` (the rendered line for Left: `join_build(#4), per probe batch:
@@ -1002,8 +1002,13 @@ pub trait ProbingJoin<B: Backend>: Executor {
   `a_session_probed_three_times_answers_each`, `dropping_a_probing_join_releases_its_session`
   (the executor's live-join count back to zero), `an_empty_build_under_inner_owes_nothing`,
   `a_build_preserving_finish_answers_once`.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The writer.** `wire/join.rs` keeps `wire_join_type`, `filter_column`, `column` and
+  **Landed with more**: in `gpu_tests/join.rs` the journal-and-region case, the residency case
+  and the pair-scratch formula; in `wire/tests.rs` the flag and the leaf's inputs gathered under
+  a union. No live-join count exists, so the drop case asks the device about the released id.
+  The line keeps the format's `; ` between phases and the kind beside the seq:
+  `join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish`.
+- [x] **Step 2: Run red.** Measured by mutation after green — each one is in the detail file.
+- [x] **Step 3: The writer.** `wire/join.rs` keeps `wire_join_type`, `filter_column`, `column` and
   gains one writer for the three nodes:
 
 ```rust
@@ -1026,7 +1031,7 @@ pub(crate) fn join(node: JoinNode<'_>, inputs: &[&Schema], writer: &mut Writer) 
   ColumnRef pairs, the residual and its `filter_columns`, the projection (present-but-empty is
   written as an empty vector, absent as no field — design D15), and `null_equals_null`.
   `JoinNode` is an enum over `&GpuHashJoin | &GpuNestedLoopJoin | &GpuCrossJoin`.
-- [ ] **Step 4: The executor.** `GpuJoin::set_build`:
+- [x] **Step 4: The executor.** `GpuJoin::set_build`:
 
 ```rust
 pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
@@ -1052,14 +1057,19 @@ pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJ
   `empty_build_owes_nothing(t)` is today's `empty_build_answers_nothing` renamed, in `plan/join.rs`,
   with a nested loop or cross reading as Inner/its own type. The `per_probe`/`at_done` lists,
   `make`, `copy_of`, `build_copy`, `finish_without_keys`, `JoinCall` go.
-- [ ] **Step 5: Pricing** (design §4.3): `resident_bytes` = build bytes + 16 × build rows (the
-  hash table) + build rows (the `matched` column) for the build-preserving types; `scratch_bytes`
-  = `n_bytes` + the output estimate + 8 B per key-match pair (bounded by the build's rows × the
-  batch's rows for a nested loop). `memory_estimation.rs`'s `Join` arm drops the accumulated-key
+  **`owes_nothing` is `build.is_none() && …`, not the sketch's `taken.rows == 0`.** A zero-row
+  build batch still goes through the session, as today's adapters do: the cpu cannot drain that
+  lane until task 8, and one engine skipping calls the other makes moves the device's per-node
+  lists off the cpu goldens. Task 8 switches both engines to the row count together.
+- [x] **Step 5: Pricing** (design §4.3): `resident_bytes` = build bytes + 16 × build rows (the
+  hash table, keyed joins only) + build rows (the `matched` column) for the build-preserving
+  types; `scratch_bytes` = `n_bytes` + the output estimate + `pairs × (8 + the residual's per-row
+  bytes)` — `gpu_plan.fbs`'s formula, not a flat 8 B a pair — bounded by `chunk_bytes`; pairs are
+  one per probe row keyed, the build's rows × the batch's rows keyless. `memory_estimation.rs`'s `Join` arm drops the accumulated-key
   term and adds the 16 B/row and the `matched` column;
   `memory_estimation/tests.rs:217` (`a_build_preserving_join_is_charged_for_the_keys_it_accumulates`)
   becomes `a_build_preserving_join_is_charged_for_its_matched_column`.
-- [ ] **Step 5a: The schema writer refuses what it cannot name.** `CudfJoin`'s `build_schema` and
+- [x] **Step 5a: The schema writer refuses what it cannot name.** `CudfJoin`'s `build_schema` and
   `probe_schema` are what the session reads pad types and an absent side's types from, so a field
   the wire cannot type must not be written as `Null`. repartition-keys (Task 5c, #249) already
   made `serialize_schema` refuse an unmapped type in every schema, so `cudf_join` calls it with `?`
@@ -1085,7 +1095,7 @@ pub(super) fn serialize_join_schema<'a>(b: &mut FlatBufferBuilder<'a>, schema: &
   `a_right_join_whose_lane_got_no_build_batch_pads_a_timestamp_build_column`; in `wire/tests.rs`,
   `bug_a_join_side_holding_a_list_column_is_not_runnable` (#249; a `List<Int32>` probe column: the plan
   says "not runnable" naming the column).
-- [ ] **Step 5b: The chunk budget.** `CudfJoin.chunk_bytes` (join-session-cpp's field; `0` reads
+- [x] **Step 5b: The chunk budget.** `CudfJoin.chunk_bytes` (join-session-cpp's field; `0` reads
   as 1 GiB in C++) is written from the plan's budget, so a budgeted mode's joins stay inside it and
   the accountant prices what they hold. The pipeline passes the budget to the writer
   (`Writer::with_join_scratch(bytes)`), and `cudf_join` writes it:
@@ -1102,9 +1112,11 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
 ```
 
   Step 5's pricing bounds a join's per-call scratch by the same number, so the accountant and the
-  session agree. Test (`wire/tests.rs`): `a_budgeted_join_carries_its_chunk_budget` (tp4-sized:
+  session agree. **The pipeline never builds recipes**, so the budget reaches the writer as
+  `attach_recipes(root, join_scratch_bytes)`, and the executor prices by
+  `RecipePlan::join_scratch_bytes`; `join_scratch_bytes(knobs)` lives in `wire/mod.rs`. Test (`wire/tests.rs`): `a_budgeted_join_carries_its_chunk_budget` (tp4-sized:
   `chunk_bytes == budget / 16`; tp1-single: `0`).
-- [ ] **Step 6: Flip the pins this task changes, in this commit** (task 10 lists them all):
+- [x] **Step 6: Flip the pins this task changes, in this commit** (task 10 lists them all):
   the #152 pins (30: the device now answers every probe batch; the cpu always did) →
   `*_agrees` over the same script; the #173 pins (4: the device's finish over no probe batch
   answers) → `*_agrees`; the #59 pins (10: the session honours `null_equals_null` for anti and
@@ -1116,7 +1128,10 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
   `bug_*_with_no_build_batch_is_refused_on_the_cpu` (#212, until task 8; the device's rows asserted hand-counted, the cpu's
   `NO_BUILD` refusal asserted); `nested_cases.rs:438` keeps the cpu's `THREE_OF_SIXTEEN`;
   `nested_cases.rs:255` (#207, "dropped on both") keeps the cpu's `TWO_OF_SIXTEEN`.
-- [ ] **Step 7: Run green on the device** — `scripts/build-test-shadgpu.sh` with
+  **Nine cases expected to agree split by call instead**: the cpu answers in its one probe call
+  what the session answers at finish (the filtered build-side semi family, the Left nested loop).
+  Same rows, different slots — pinned `bug_` under #220 for task 8 to flip.
+- [x] **Step 7: Run green on the device** — `scripts/build-test-shadgpu.sh` with
   `PCK_TEST_FILTER='gpu_backend::gpu_tests::join|join_cases|nested_cases|nested_schema_cases|join_dimension_cases'`,
   every case green. In this commit too, task 12 step 1's regeneration: the plan goldens' join
   recipe lines become the session's and `recipe-payloads.txt` gains `CudfJoin` payloads — the

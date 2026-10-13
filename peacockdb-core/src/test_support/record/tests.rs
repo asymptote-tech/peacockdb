@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::executor::nodes_as_recorded;
 use crate::planner;
 use crate::test_support::{data_dir_for, mode_named, queries_dir_for};
-use crate::wire::{Payloads, attach_recipes, render_plan_recipes};
+use crate::wire::{Payloads, attach_recipes, join_scratch_bytes, render_plan_recipes};
 
 use super::declared_steps;
 
@@ -37,7 +37,8 @@ async fn a_rows_node_seq_names_the_steps_its_recipes_line_prints() {
         .await
         .expect("q6 plans");
     let (tree, _) = planner::plan(&plan, mode.knobs()).expect("this mode runs q6");
-    let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
+    let recipes = attach_recipes(tree.as_ref(), join_scratch_bytes(&mode.knobs()))
+        .expect("a plan's recipes are structural");
 
     let declared = declared_steps(&recipes);
     let nodes = nodes_as_recorded(tree.as_ref()).expect("the tree indexes");

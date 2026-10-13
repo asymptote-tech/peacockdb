@@ -1122,6 +1122,8 @@ pub struct DevicePlan {
     /// The session the plan was made in, kept for as long as the plan is.
     _ctx: SessionContext,
     tree: Box<dyn GpuNode>,
+    /// The mode's `join_scratch_bytes`, which every join's session chunks by.
+    join_scratch: u64,
     what: String,
 }
 

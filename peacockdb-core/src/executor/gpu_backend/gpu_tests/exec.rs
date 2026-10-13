@@ -295,7 +295,7 @@ fn a_recipe_whose_calls_wait_for_done_is_refused_by_an_exec_executor() {
         keys,
         None,
     ));
-    let recipes = attach_recipes(tree.as_ref()).expect("the payloads are writable");
+    let recipes = attach_recipes(tree.as_ref(), 0).expect("the payloads are writable");
     let refused = match GpuExec::new(
         CallSite { executor: std::ptr::null_mut(), node: 0, lane: 0 },
         recipes.get(1).expect("the accumulator makes ABI calls"),

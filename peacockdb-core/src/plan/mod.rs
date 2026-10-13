@@ -1304,6 +1304,12 @@ pub(crate) fn capability(
     join::capability(join_type, has_filter)
 }
 
+/// Whether a join owes rows only its last probe batch can settle — what a session's
+/// `join_finish` answers for: Left, Full and the build-side semi family.
+pub(crate) fn needs_finish(join_type: JoinType) -> bool {
+    join::needs_finish(join_type)
+}
+
 /// The sides whose unmatched rows are never emitted, as `(build, probe)`: there a NULL key
 /// matches nothing, so it is dropped before the shuffle rather than skewing a lane (#137).
 pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
@@ -1316,8 +1322,8 @@ pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
 /// empty answer and the lane can end without a call. False for the three types that
 /// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
 /// making it takes a call over a build table that does not exist.
-pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
-    join::empty_build_answers_nothing(join_type)
+pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
+    join::empty_build_owes_nothing(join_type)
 }
 
 /// What the per-probe-batch join emits, which is not what the node is: a Left emits this

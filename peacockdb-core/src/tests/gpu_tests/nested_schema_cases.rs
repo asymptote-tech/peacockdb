@@ -1,11 +1,10 @@
 //! What a `GpuCrossJoin` and a `GpuNestedLoopJoin` hand the device up, read at the handle:
 //! each with and without a projection, every output handle held to the node's declared
-//! schema. One probe batch each, since the second is #152's refusal. The builders and
-//! scripts are `nested_cases.rs`'s. Every case is green or a `bug_` test with its ticket
+//! schema. One probe batch each. The builders and scripts are `nested_cases.rs`'s. Every case is green or a `bug_` test with its ticket
 //! above it; nothing here repairs.
 
 use super::nested_cases::{cross, inner, left, one_probe};
-use super::script::{assert_holds_as_declared, divergences_on_device};
+use super::script::assert_holds_as_declared;
 
 operator_case! {
     GpuCrossJoin,
@@ -14,17 +13,10 @@ operator_case! {
     }
 }
 
-// #207 — the device hands a cross join's sixteen columns up whatever the node's projection
-// declares: two declared, sixteen held, the second one the build side's key.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_with_a_projection_holds_every_column_on_the_device() {
-        assert_eq!(
-            divergences_on_device(&cross(Some(vec![0, 8])), one_probe()),
-            vec![Some(
-                "2 columns declared, 16 held; 1 p_id: Int64 vs b_key INT32".to_string()
-            )]
-        );
+    fn a_cross_join_with_a_projection_declares_the_kept_columns_the_device_holds() {
+        assert_holds_as_declared(&cross(Some(vec![0, 8])), one_probe());
     }
 }
 

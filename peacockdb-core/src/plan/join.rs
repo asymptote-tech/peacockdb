@@ -420,14 +420,14 @@ pub(crate) fn capability(
         // The build side is complete before the first probe call, so a probe row unmatched
         // in this batch is unmatched everywhere; only build-side rows need the finish.
         JoinType::Right => streaming(false),
-        JoinType::Left | JoinType::Full => streaming(true),
+        JoinType::Left | JoinType::Full => streaming(needs_finish(join_type)),
         JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
             // The per-call join disappears: a probe call is only the key project, and the
             // build side is not touched until the finish consumes it. The filtered forms
             // are one legacy call over a probe side the planner made single-batch.
             Ok(JoinCapability {
                 probe_streams: !has_filter,
-                needs_finish: true,
+                needs_finish: needs_finish(join_type),
             })
         }
         JoinType::RightSemi | JoinType::RightAnti if has_filter => {
@@ -437,6 +437,20 @@ pub(crate) fn capability(
             )))
         }
         JoinType::RightSemi | JoinType::RightAnti => streaming(false),
+    }
+}
+
+/// Whether a join owes rows only its last probe batch can settle: the build rows nothing
+/// matched (Left, Full) or the build side's own answer (the semi family). These five are
+/// what a session's `join_finish` answers for, whatever the node's keys or residual.
+pub(crate) fn needs_finish(join_type: JoinType) -> bool {
+    match join_type {
+        JoinType::Left
+        | JoinType::Full
+        | JoinType::LeftSemi
+        | JoinType::LeftAnti
+        | JoinType::LeftMark => true,
+        JoinType::Inner | JoinType::Right | JoinType::RightSemi | JoinType::RightAnti => false,
     }
 }
 
@@ -458,7 +472,7 @@ pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
 /// empty answer and the lane can end without a call. False for the three types that
 /// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
 /// making it takes a call over a build table that does not exist.
-pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
+pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
     match join_type {
         JoinType::Inner
         | JoinType::Left

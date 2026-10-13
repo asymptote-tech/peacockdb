@@ -35,15 +35,26 @@ pub(crate) struct Writer<'a> {
     /// Created and not yet taken as somebody's child, oldest first.
     pool: Vec<WIPOffset<fb::PlanNode<'a>>>,
     next_seq: Seq,
+    join_scratch_bytes: u64,
 }
 
 impl<'a> Writer<'a> {
     pub(crate) fn new() -> Self {
+        Self::with_join_scratch(0)
+    }
+
+    /// A writer whose joins carry `bytes` as their `chunk_bytes`: one plan, one budget.
+    pub(crate) fn with_join_scratch(bytes: u64) -> Self {
         Self {
             builder: FlatBufferBuilder::new(),
             pool: Vec::new(),
             next_seq: 0,
+            join_scratch_bytes: bytes,
         }
+    }
+
+    pub(crate) fn join_scratch_bytes(&self) -> u64 {
+        self.join_scratch_bytes
     }
 
     /// Build one addressed node: take `arity` inputs, stub whatever is missing, number it.

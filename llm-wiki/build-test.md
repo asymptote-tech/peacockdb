@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3119 test cases — Rust 2549, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3120 test cases — Rust 2550, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1742 cases: `--lib` 730, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1738 cases: `--lib` 726, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -258,12 +258,12 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one, so the membership grows when the mapping does — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [an_outer_join_that_preserves_its_build_side_keeps_the_keys_and_finishes_with_an_anti_join](../peacockdb-core/src/wire/tests.rs) | 24 |
+| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 20 |
 |---|---|--:|
 
-the kinds whose recipe is more than one call, `GpuHashJoin` first: per join type, the seq set
-it emits and when each call is made, against the capability matrix, and whether the CPU
-executor makes the finish pass the recipe's `AtDone` says it does; plus a leaf outside the
+the kinds whose recipe is more than one call, the joins first: the one `CudfJoin` each join
+node writes, per join type, and the session line it renders — build once, probe per batch,
+finish at done; plus a leaf outside the
 registry emitting the writer's stub and no recipe, which is how a hand-built node gets its
 recipe with no plan. The trivial kinds are not here — the plan goldens run them over every
 corpus query
@@ -556,7 +556,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 687 cases: `--lib -- gpu_tests::` 580, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 692 cases: `--lib -- gpu_tests::` 585, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -613,7 +613,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 355 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 356 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -670,7 +670,7 @@ because its masks and NULL placeholders are the one payload the plan line does n
 one read re-walks every query to check the kinds a device has run against the kinds the file
 claims, in both directions. Eleven spot-checks read what the device holds between calls, each
 a literal schema written from the plan before any ran — `avg`'s partial, merge and finalize,
-`sum`'s partial, the filter, the project, the inner and semi joins' one call, the nested
+`sum`'s partial, the filter, the project, the inner and semi joins' session build, probe and finish, the nested
 aggregates' inner finalize and outer `max` — and one `bug_`: the rollup's grouping id held
 `Int32` where the plan says `UInt8` (#65)
 
@@ -685,16 +685,15 @@ what [#201](archive/archived-tickets.md#t201) was. Two of the nineteen need no d
 call and `pmod` on a negative hash, and ride here anyway, because the module is the gate and
 splits nowhere
 
-| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 32 |
+| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 36 |
 |---|---|--:|
 
 each one handed its node's recipe — the exec nodes one batch at a time (filter, project,
 per-batch sort, aggregate with and without its finalize, the export with a row range, and an
 accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating
 sort, the state merge, the Welford merge, the mid-plan limit), and the joins what the matrix says a device
-runs: Inner at one probe batch, LeftAnti streamed through its finish pass, the scatter's N
-handles, and the refusals — Left and Full outright, a second probe batch, a zero-input collapse
-— each naming its ticket; plans hand-built over six rows the test writes itself, since the ABI
+runs on the session: its lifecycle, `Drop` releasing it, `owes_nothing`, the journal and region
+per call, its residency and pair scratch, and the scatter's N handles; plans hand-built over six rows the test writes itself, since the ABI
 loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has
 none of: six of the seven categories built from a live session's recipes, and a node asked for
 at the wrong post-order refused, so the number is an address. The partition accumulator is the

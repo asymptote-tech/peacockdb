@@ -10,7 +10,10 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::JoinType;
 
-use super::script::{Outcome, Script, each_answers, run_both};
+use super::script::{
+    Outcome, Script, each_answers, run_both,
+    the_cpu_answers_in_its_probe_call_what_the_device_finishes,
+};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuCrossJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
     JoinSide, Schema,
@@ -116,6 +119,29 @@ fn decimal_residual() -> (Expr, Vec<JoinFilterColumn>) {
             JoinFilterColumn {
                 side: JoinSide::Probe,
                 index: 3,
+            },
+        ],
+    )
+}
+
+/// `b_s LIKE p_s`: each build string matched against the probe row's string as a pattern —
+/// a pattern that is a column, which the device's `LIKE` does not take.
+fn like_column_residual() -> (Expr, Vec<JoinFilterColumn>) {
+    (
+        Expr::Like {
+            expr: Box::new(Expr::column(0, "b_s")),
+            pattern: Box::new(Expr::column(1, "p_s")),
+            negated: false,
+            case_insensitive: false,
+        },
+        vec![
+            JoinFilterColumn {
+                side: JoinSide::Build,
+                index: 5,
+            },
+            JoinFilterColumn {
+                side: JoinSide::Probe,
+                index: 5,
             },
         ],
     )
@@ -227,11 +253,8 @@ fn cpu_projected(node: &dyn GpuNode, script: Script, keep: &[usize]) -> Vec<Vec<
         .collect()
 }
 
-const BUILD_COPY: &str =
-    "probe batch 2 has no build side left, since the call for batch 1 erased it (#152)";
 const TWO_OF_SIXTEEN: &str = "number of columns(16) must match number of fields(2) in schema";
 const THREE_OF_SIXTEEN: &str = "number of columns(16) must match number of fields(3) in schema";
-const INNER_ONLY: &str = "non-AST-able NestedLoopJoin filter is only supported for Inner joins";
 
 // The cross join: the product of the two sides, every column of both.
 
@@ -242,25 +265,24 @@ operator_case! {
     }
 }
 
-// #152 — the recipe copies the build side per probe batch, and the first call erased it.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&cross(None), two_probes()), BUILD_COPY);
+    fn a_cross_join_over_two_probe_batches_agrees() {
+        run_both(&cross(None), two_probes()).same(Order::Any);
     }
 }
 
-// #207 — neither backend applies a cross join's projection: the cpu refuses the sixteen
-// columns it declared two of, and the device hands all sixteen to an export told two.
+// #207 — the cpu does not apply a cross join's projection and refuses the sixteen columns
+// it declared two of; the device's session applies it.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_projection_is_dropped_on_both() {
+    fn bug_a_cross_join_projection_is_dropped_on_the_cpu() {
         let outcome = run_both(&cross(Some(vec![0, 8])), one_probe());
-        let (cpu, gpu) = outcome.both_refuse();
-        assert!(cpu.contains(TWO_OF_SIXTEEN), "{cpu}");
-        assert!(
-            gpu.contains("2 declared precisions for a table of 16 columns"),
-            "{gpu}"
+        cpu_refuses_with(&outcome, TWO_OF_SIXTEEN);
+        assert_same(
+            &cpu_projected(&cross(None), one_probe(), &[0, 8]),
+            outcome.gpu.as_ref().expect("the device answers"),
+            Order::Any,
         );
     }
 }
@@ -307,12 +329,10 @@ operator_case! {
     }
 }
 
-// #152 — the Inner recipe copies the build side per probe batch, and the first call
-// erased it.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_an_inner_nested_loop_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&inner(None), two_probes()), BUILD_COPY);
+    fn an_inner_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&inner(None), two_probes()).same(Order::Any);
     }
 }
 
@@ -354,10 +374,16 @@ operator_case! {
 
 // The Left nested loop: one probe batch, the unmatched build rows padded.
 
+// #220 — the cpu's Left nested loop answers its unmatched build rows in its one probe call;
+// the session answers them at finish.
 operator_case! {
     GpuNestedLoopJoin,
-    fn a_left_nested_loop_join_pads_the_unmatched() {
-        run_both(&left(None), one_probe()).same(Order::Any);
+    fn bug_a_left_nested_loop_join_answers_its_unmatched_rows_in_its_probe_call_on_the_cpu() {
+        let outcome = run_both(&left(None), one_probe());
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
+            outcome.cpu.as_ref().expect("the cpu answers"),
+            outcome.gpu.as_ref().expect("the device answers"),
+        );
     }
 }
 
@@ -367,25 +393,37 @@ operator_case! {
     fn bug_a_left_nested_loop_join_projection_is_dropped_on_the_cpu() {
         let outcome = run_both(&left(Some(vec![0, 8])), one_probe());
         cpu_refuses_with(&outcome, TWO_OF_SIXTEEN);
-        assert_same(
+        // #220 too: the device's unmatched rows arrive at finish.
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
             &cpu_projected(&left(None), one_probe(), &[0, 8]),
             outcome.gpu.as_ref().expect("the device answers"),
-            Order::Any,
         );
     }
 }
 
+// #220 — the cpu's Left nested loop answers its unmatched build rows in its one probe call;
+// the session answers them at finish.
 operator_case! {
     GpuNestedLoopJoin,
-    fn a_left_nested_loop_join_over_a_zero_row_build_is_zero_rows() {
-        run_both(&left(None), empty_build()).same(Order::Any);
+    fn bug_a_left_nested_loop_join_over_a_zero_row_build_finishes_with_nothing_on_the_cpu() {
+        let outcome = run_both(&left(None), empty_build());
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
+            outcome.cpu.as_ref().expect("the cpu answers"),
+            outcome.gpu.as_ref().expect("the device answers"),
+        );
     }
 }
 
+// #220 — the cpu's Left nested loop answers its unmatched build rows in its one probe call;
+// the session answers them at finish.
 operator_case! {
     GpuNestedLoopJoin,
-    fn a_left_nested_loop_join_over_a_zero_row_probe_pads_every_build_row() {
-        run_both(&left(None), empty_probe()).same(Order::Any);
+    fn bug_a_left_nested_loop_join_over_a_zero_row_probe_pads_every_build_row_in_its_probe_call_on_the_cpu() {
+        let outcome = run_both(&left(None), empty_probe());
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
+            outcome.cpu.as_ref().expect("the cpu answers"),
+            outcome.gpu.as_ref().expect("the device answers"),
+        );
     }
 }
 
@@ -424,34 +462,51 @@ operator_case! {
     }
 }
 
-// #215 — the planner admits a Left nested loop over any predicate; the device's
-// cross-then-mask path is written for Inner alone and throws at its guard.
+// #220 — the cpu's Left nested loop answers its unmatched build rows in its one probe call;
+// the session answers them at finish.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device() {
-        let node = nested_with(JoinType::Left, decimal_residual(), None);
-        gpu_refuses_with(&run_both(&node, one_probe()), INNER_ONLY);
+    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_answers_its_unmatched_rows_in_its_probe_call_on_the_cpu() {
+        let outcome = run_both(&nested_with(JoinType::Left, decimal_residual(), None), one_probe());
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
+            outcome.cpu.as_ref().expect("the cpu answers"),
+            outcome.gpu.as_ref().expect("the device answers"),
+        );
     }
 }
 
-// #215 on the device and #190 on the cpu: with a projection neither side answers.
+// #190 — with a projection the cpu still refuses its own sixteen columns; the device's
+// session answers the Left form over the non-AST predicate too.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_refused_on_both() {
+    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_dropped_on_the_cpu() {
         let node = nested_with(JoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
         let outcome = run_both(&node, one_probe());
-        let cpu = &outcome.cpu.as_ref().expect_err("the cpu drops the projection").message;
-        assert!(cpu.contains(THREE_OF_SIXTEEN), "{cpu}");
-        let gpu = &outcome.gpu.as_ref().expect_err("the device has no Left mask path").message;
-        assert!(gpu.contains(INNER_ONLY), "{gpu}");
+        cpu_refuses_with(&outcome, THREE_OF_SIXTEEN);
+        // #220 too: the device's unmatched rows arrive at finish.
+        let unprojected = nested_with(JoinType::Left, decimal_residual(), None);
+        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
+            &cpu_projected(&unprojected, one_probe(), &[13, 4, 8]),
+            outcome.gpu.as_ref().expect("the device answers"),
+        );
     }
 }
 
-// The path's empty shapes, Inner only: Left is a refusal whatever the input.
+// #246 — a LIKE whose pattern is a column: the cpu answers, the device refuses at
+// `expr.cpp`'s guard.
+operator_case! {
+    GpuNestedLoopJoin,
+    fn bug_a_like_against_a_column_pattern_is_refused_on_the_device() {
+        let node = nested_with(JoinType::Inner, like_column_residual(), None);
+        gpu_refuses_with(&run_both(&node, one_probe()), "LIKE pattern must be a string literal");
+    }
+}
+
+// The path's empty shapes, Inner only.
 
 operator_case! {
     GpuNestedLoopJoin,
-    fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_build_answers_nothing() {
+    fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_build_owes_nothing() {
         let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, empty_build()).same(Order::Any);
     }
