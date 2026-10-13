@@ -10,13 +10,14 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 | | |
 |---|---|
 | state | `building` since 2026-10-09 |
-| developer rounds | 1 dispatched 2026-10-09 |
+| developer rounds | 1 dispatched 2026-10-09, stopped by the human mid plan task 7; 2 dispatched 2026-10-13 |
 | review rounds | none |
 | tickets filed | none. Next free is **267**; master reserved 264–279 for this chain |
 
 ## Hosts, and the device recipe now proven (2026-10-09)
 
-- **nebius-gpu `dmitry@89.169.109.150`**, `computeinstance-e00tnrse7ayntnzcyt` — up, L40S,
+- **nebius-gpu, reached as the `~/.ssh/config` alias `nebius-gpu`, never by IP** (the board's
+  override; the IP once quoted here is gone), `computeinstance-e00tnrse7ayntnzcyt` — up, L40S,
   46,068 MiB VRAM with 0 MiB in use, cuDF 25.02 from `~/data/miniforge3/envs/rapids-cuda-12.2`,
   sf1 tpch/tpcds/pbench present in `~/peacockdb-J/testdata`.
 - **Disk is the standing risk and it is getting tighter: 14 GB free of 96** after task 7's first
@@ -871,3 +872,11 @@ reading, for the next round to accept or reject: `join_type`, `keys`, `null_equa
 `probe_schema` are the two a pad-type bug shows up in — seven of nine. `filter` and
 `filter_columns` are already rendered for the nested loop today and should stay, which makes it
 nine; the argument for fewer is that the two schemas are long and repeat the plan line's schema.
+
+### Round 2 — dispatched 2026-10-13
+
+Fresh developer: round 1's died with the run the human stopped, so there is nobody to resume.
+Starts at plan task 7 steps 3–4 together (the wire switch and the session executor), then the
+rest of task 7, then task 8, reporting after each plan task for its own commit. Hosts at
+dispatch: nebius-gpu up, L40S idle, **14 GB free of 96** (unchanged since 2026-10-09); verda
+unlocatable (`VERDA_CLIENT_ID` unset), so every CPU run is local.
