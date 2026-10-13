@@ -389,9 +389,9 @@ GpuUnload: output_rows=13257, output_bytes=107731
   GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=13257, output_bytes=107731
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[221,205,233,235,246,219,213,215,205,154]] batch_bytes=[[1918,1780,1772,1699,1707,1707,1885,1772,1926,1390],[1991,2145,1942,1796,1885,2024,2121,2015,2137,1552],[5452,5241,5566,5420,5347,5582,5404,5493,5428,4193],[1796,1666,1894,1910,1999,1780,1731,1747,1666,1252]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@0], output_rows=8, output_bytes=33
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[33]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[33]]
       GpuEmitPartitions: hash=[t_k@0], lanes=4, batches=multiple, hashed_on=[t_k@0], output_rows=8, output_bytes=33
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[33]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[33]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
           GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=33
@@ -409,9 +409,9 @@ GpuUnload: output_rows=40229, output_bytes=492844
   GpuHashJoin: join_type=Full, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=4, batches=multiple, output_rows=40229, output_bytes=492844
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171,0],[245,264,239,221,232,249,261,248,263,191,0],[671,645,685,667,658,687,665,676,668,516,0],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298,0]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096,0],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340,0],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322,0],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152,0]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
       GpuEmitPartitions: hash=[t_k@1], lanes=4, batches=multiple, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
           GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
@@ -429,9 +429,9 @@ GpuUnload: output_rows=40229, output_bytes=492844
   GpuHashJoin: join_type=Right, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=4, batches=multiple, output_rows=40229, output_bytes=492844
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
       GpuEmitPartitions: hash=[t_k@1], lanes=4, batches=multiple, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
           GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66

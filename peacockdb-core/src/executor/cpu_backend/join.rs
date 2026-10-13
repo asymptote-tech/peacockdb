@@ -1,56 +1,61 @@
-//! The joins on the CPU: the decomposition the recipe names, one DataFusion operator per
-//! call it names.
+//! The joins on the CPU: one DataFusion join stream per lane, alive from `set_build` to
+//! `finish_and_fetch` — the device's session in DataFusion's terms.
 //!
-//! A streamed probe cannot know which build rows matched, so the types that owe their
-//! build side a row keep the probe keys per batch and answer once at done (#136). This
-//! backend runs that decomposition rather than one whole join at done — the plan says the
-//! probe streams, and an executor holding it all would be a different plan wearing the
-//! same shape, and a poor oracle for the one the device runs.
+//! The build side is collected and hashed once, at the first poll; each probe call feeds
+//! one batch through a channel and reads what the stream has ready; the finish closes the
+//! channel and reads the rest, which is where a Left, Full or build-side semi join emits
+//! what only the last probe batch can settle. Every call answers one batch or none, as the
+//! session does (#220).
 
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{Field, Schema as ArrowSchema, SchemaRef};
-use datafusion::common::{JoinSide as DfJoinSide, JoinType, ScalarValue};
-use datafusion::execution::TaskContext;
+use datafusion::common::{JoinSide as DfJoinSide, JoinType};
+use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_expr::expressions::{Column, Literal};
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
 use datafusion::physical_plan::joins::{
     CrossJoinExec, HashJoinExec, NestedLoopJoinExec, PartitionMode,
 };
 use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::{ExecutionPlan, execute_stream};
+use futures::channel::mpsc;
+use futures::{FutureExt, StreamExt, TryStreamExt};
 
 use super::expr_physical::physical_expr;
-use super::{CpuJoin, CpuProbingJoin, declared_as, placeholder, run_node};
+use super::single_node::fed;
+use super::{CpuJoin, CpuProbingJoin, declared_as, placeholder};
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
-use crate::plan::{
-    JoinSide, emits_both_sides, empty_build_owes_nothing, finish_join_type, per_call_join_type,
-};
+use crate::plan::{JoinSide, empty_build_owes_nothing, needs_finish};
 
-/// What a join does per call, built once. The `Option`s are the capability matrix in the
-/// only form an executor needs it: a call it does not make is a call it does not have.
-pub(crate) struct Calls {
-    /// Whether a lane whose build side produced no batch owes no rows — the join type's
-    /// own answer, read once where the node is in hand.
-    empty_build_owes_nothing: bool,
-    /// The join this probe batch runs, if any — absent for the build-side semi family,
-    /// whose probe call is the key project alone.
-    per_call: Option<Arc<dyn ExecutionPlan>>,
-    /// The probe keys this batch contributes to the accumulation (#136).
-    keys: Option<Arc<dyn ExecutionPlan>>,
-    finish: Option<Arc<dyn ExecutionPlan>>,
-    /// The build rows nothing matched, padded out to the joined schema.
-    pad: Option<Arc<dyn ExecutionPlan>>,
-    key_schema: SchemaRef,
+/// The DataFusion join a lane will run, over stand-ins for its two sides until the build
+/// side arrives.
+pub(crate) struct Plan {
+    /// A two-child join: the build side first, the probe side second.
+    join: Arc<dyn ExecutionPlan>,
+    /// The cross join's kept columns, over the crossed table — the one join DataFusion
+    /// gives no projection of its own (#207).
+    projection: Option<Arc<dyn ExecutionPlan>>,
+    /// The node's own type: a cross join's is Inner.
+    join_type: JoinType,
     output: SchemaRef,
     ctx: Arc<TaskContext>,
+}
+
+/// One lane's join, running.
+pub(crate) struct Stream {
+    /// The probe side's channel; closed by the finish, which is what ends the stream.
+    probe: Option<mpsc::UnboundedSender<RecordBatch>>,
+    joined: SendableRecordBatchStream,
+    join_type: JoinType,
+    output: SchemaRef,
 }
 
 impl CpuJoin {
@@ -60,46 +65,40 @@ impl CpuJoin {
         probe: &ArrowSchema,
         ctx: Arc<TaskContext>,
     ) -> Result<Self, PlanError> {
-        let capability = node.capability()?;
-        let output = node
-            .kind()
-            .schema()
-            .expect("a join is not a sink")
-            .fields
-            .clone();
-        if capability.answers_in_one_call() {
-            return Ok(Self {
-                calls: Calls {
-                    empty_build_owes_nothing: empty_build_owes_nothing(node.join_type),
-                    per_call: Some(hash_join(node, node.join_type, build, probe, ctx.as_ref())?),
-                    keys: None,
-                    finish: None,
-                    pad: None,
-                    key_schema: Arc::new(ArrowSchema::empty()),
-                    output,
-                    ctx,
-                },
-            });
+        // The matrix's refusals stand until the planner lifts them (#153, #159).
+        node.capability()?;
+        let mut on: Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)> =
+            Vec::with_capacity(node.keys.len());
+        for (build_ordinal, probe_ordinal) in &node.keys {
+            on.push((
+                key_column(build, *build_ordinal)?,
+                key_column(probe, *probe_ordinal)?,
+            ));
         }
-        let per_call = match per_call_join_type(node.join_type) {
-            Some(join_type) => Some(hash_join(node, join_type, build, probe, ctx.as_ref())?),
+        let filter = match &node.filter {
+            Some(expr) => Some(join_filter(
+                expr,
+                &node.filter_columns,
+                build,
+                probe,
+                ctx.as_ref(),
+            )?),
             None => None,
         };
-        let (keys, key_schema) = key_project(node, probe)?;
-        let finish = finish_join(node, build, &key_schema)?;
-        let pad = finish_project(node, finish.schema(), build, probe)?;
-        Ok(Self {
-            calls: Calls {
-                empty_build_owes_nothing: empty_build_owes_nothing(node.join_type),
-                per_call,
-                keys: Some(keys),
-                finish: Some(finish),
-                pad,
-                key_schema,
-                output,
-                ctx,
-            },
-        })
+        let join = HashJoinExec::try_new(
+            placeholder(build),
+            placeholder(probe),
+            on,
+            filter,
+            &node.join_type,
+            kept(&node.projection),
+            // The build side is one resident table, which is what CollectLeft means here as
+            // well as on the device.
+            PartitionMode::CollectLeft,
+            node.null_equals_null,
+        )
+        .map_err(|error| PlanError::Invalid(format!("GpuHashJoin: {error}")))?;
+        Ok(Self::of(Arc::new(join), None, node.join_type, node, ctx))
     }
 
     pub(crate) fn cross(
@@ -109,9 +108,33 @@ impl CpuJoin {
         ctx: Arc<TaskContext>,
     ) -> Result<Self, PlanError> {
         let cross = CrossJoinExec::new(placeholder(build), placeholder(probe));
-        Ok(Self {
-            calls: Self::one_call(Arc::new(cross), node.kind(), ctx),
-        })
+        let projection = match &node.projection {
+            Some(columns) => {
+                let crossed = cross.schema();
+                let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> =
+                    Vec::with_capacity(columns.len());
+                for ordinal in columns {
+                    let field = field_at(crossed.as_ref(), *ordinal)?;
+                    exprs.push((
+                        key_column(crossed.as_ref(), *ordinal)?,
+                        field.name().clone(),
+                    ));
+                }
+                let project = ProjectionExec::try_new(exprs, placeholder(crossed.as_ref()))
+                    .map_err(|error| {
+                        PlanError::Invalid(format!("GpuCrossJoin's projection: {error}"))
+                    })?;
+                Some(Arc::new(project) as Arc<dyn ExecutionPlan>)
+            }
+            None => None,
+        };
+        Ok(Self::of(
+            Arc::new(cross),
+            projection,
+            JoinType::Inner,
+            node,
+            ctx,
+        ))
     }
 
     pub(crate) fn nested_loop(
@@ -132,67 +155,65 @@ impl CpuJoin {
             placeholder(probe),
             Some(filter),
             &node.join_type,
-            None,
+            kept(&node.projection),
         )
         .map_err(|error| PlanError::Invalid(format!("GpuNestedLoopJoin: {error}")))?;
-        Ok(Self {
-            calls: Self::one_call(Arc::new(join), node.kind(), ctx),
-        })
+        Ok(Self::of(Arc::new(join), None, node.join_type, node, ctx))
     }
 
-    /// The shape every join with no finish takes: one call per probe batch and nothing at
-    /// done.
-    fn one_call(
+    fn of(
         join: Arc<dyn ExecutionPlan>,
-        kind: &crate::plan::NodeKind,
+        projection: Option<Arc<dyn ExecutionPlan>>,
+        join_type: JoinType,
+        node: &dyn GpuNode,
         ctx: Arc<TaskContext>,
-    ) -> Calls {
-        Calls {
-            // A cross join and a nested-loop join both emit rows built from a build row,
-            // the Left form's padding included, so an empty build side is an empty answer.
-            empty_build_owes_nothing: true,
-            per_call: Some(join),
-            keys: None,
-            finish: None,
-            pad: None,
-            key_schema: Arc::new(ArrowSchema::empty()),
-            output: kind.schema().expect("a join is not a sink").fields.clone(),
-            ctx,
+    ) -> Self {
+        Self {
+            plan: Plan {
+                join,
+                projection,
+                join_type,
+                output: node
+                    .kind()
+                    .schema()
+                    .expect("a join is not a sink")
+                    .fields
+                    .clone(),
+                ctx,
+            },
         }
     }
 
-    /// This lane's build side finished with no batch, which a small table scattered over
-    /// many lanes produces routinely for the types that owe nothing. What it owes is the
-    /// join type's answer; for the three that owe their probe side the driver keeps the
-    /// scatter's zero-row table instead (#175), so only an upstream that emitted nothing
-    /// at all reaches the refusal (#212).
-    pub(crate) fn without_build_allowed(&self) -> Result<(), BackendError> {
-        if self.calls.empty_build_owes_nothing {
-            return Ok(());
-        }
-        Err(BackendError::new(
-            "this lane's build side is empty, and what this join owes is its probe side — \
-             which takes a call over a build table that does not exist (#212)",
-        ))
-    }
-
-    /// The build side, which is one batch per lane: the planner puts a
-    /// `GpuCoalesceAllBatches` under it, so this is every row it will ever hold. `None` is
-    /// a lane whose build side finished with no batch, which the join type decides on.
+    /// The stream starts here, over this lane's build batch or over none: an absent build
+    /// side is an empty build table (#212), so every type takes this call and the type and
+    /// the row count decide what the lane owes, as on the device.
     pub(crate) fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
-        let owes_nothing = match &batch {
-            Some(_) => false,
-            None => {
-                CpuJoin::without_build_allowed(&self)?;
-                true
-            }
-        };
+        let build: Vec<RecordBatch> = batch.map(CpuBatch::into_record_batch).into_iter().collect();
+        let build_rows: usize = build.iter().map(RecordBatch::num_rows).sum();
+        let build_bytes = build.iter().map(RecordBatch::get_array_memory_size).sum();
+        let plan = self.plan;
+        let (probe, fed_probe) = mpsc::unbounded::<RecordBatch>();
+        let sides = vec![
+            futures::stream::iter(build.into_iter().map(Ok)).boxed(),
+            fed_probe.map(Ok).boxed(),
+        ];
+        let running = fed(&plan.join, sides)
+            .and_then(|join| match &plan.projection {
+                Some(project) => project.clone().with_new_children(vec![join]),
+                None => Ok(join),
+            })
+            .and_then(|joined| execute_stream(joined, plan.ctx.clone()))
+            .map_err(|error| BackendError::new(format!("starting the join: {error}")))?;
         Ok((
             CpuProbingJoin {
-                build: batch.map(CpuBatch::into_record_batch),
-                calls: self.calls,
-                accumulated: Vec::new(),
-                owes_nothing,
+                stream: Stream {
+                    probe: Some(probe),
+                    joined: running,
+                    join_type: plan.join_type,
+                    output: plan.output,
+                },
+                build_bytes,
+                owes_nothing: build_rows == 0 && empty_build_owes_nothing(plan.join_type),
             },
             CallStats::default(),
         ))
@@ -200,239 +221,96 @@ impl CpuJoin {
 }
 
 impl CpuProbingJoin {
-    /// The build side, resident from `set_build` until the call that consumes it.
+    /// The build side, held by the stream from `set_build` until the join is dropped.
     pub(crate) fn build_bytes(&self) -> usize {
-        self.build
-            .as_ref()
-            .map_or(0, RecordBatch::get_array_memory_size)
+        self.build_bytes
     }
 
-    /// What this lane owes with no build side, read off the join type at `set_build`.
+    /// Read off the join type and the build side's rows at `set_build`, as the device does.
     pub(crate) fn owes_nothing(&self) -> bool {
         self.owes_nothing
     }
 
-    /// The build side a probe or finish call joins against. Absent only where the lane
-    /// owes nothing, and the driver drains such a lane rather than calling it.
-    fn build(&self) -> Result<&RecordBatch, BackendError> {
-        self.build.as_ref().ok_or_else(|| {
-            BackendError::new("a join whose build side is absent was probed rather than drained")
-        })
-    }
-
-    /// The probe keys a finishing type keeps until its finish pass runs (#136).
-    pub(crate) fn accumulated_bytes(&self) -> usize {
-        self.accumulated
-            .iter()
-            .map(RecordBatch::get_array_memory_size)
-            .sum()
-    }
-
-    /// Whether a probe call reads the build side at all. False for the build-side semi
-    /// family, whose probe call is the key project alone — and the accounting has to know,
-    /// because a transient charged for a read that never happens refuses work that fits.
-    pub(crate) fn probe_reads_build(&self) -> bool {
-        self.calls.per_call.is_some()
-    }
-
-    pub(crate) fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
-        // The chunked form; `backend.rs` folds it to the one batch a call answers (#220).
-        let batch = batch.into_record_batch();
-        if let Some(keys) = &self.calls.keys {
-            let kept = run_node(keys, vec![vec![batch.clone()]], &self.calls.ctx)?;
-            self.accumulated.extend(kept);
+    /// One probe batch through the stream. `None` for LeftSemi, LeftAnti and LeftMark, which
+    /// answer at the finish alone; one batch, possibly of no rows, for every other type.
+    pub(crate) fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
+        let stream = &mut self.stream;
+        stream
+            .probe
+            .as_ref()
+            .expect("the probe side stays open until the finish consumes the join")
+            .unbounded_send(batch.into_record_batch())
+            .map_err(|error| BackendError::new(format!("feeding the probe side: {error}")))?;
+        let chunks = ready(&mut stream.joined)?;
+        if answers_at_finish_only(stream.join_type) {
+            stream.owed_nothing(&chunks, "a probe call")?;
+            return Ok((None, CallStats::default()));
         }
-        let Some(join) = &self.calls.per_call else {
-            return Ok((Vec::new(), CallStats::default()));
-        };
-        let joined = run_node(
-            join,
-            vec![vec![self.build()?.clone()], vec![batch]],
-            &self.calls.ctx,
-        )?;
-        Ok((declared(joined, &self.calls.output)?, CallStats::default()))
+        Ok((Some(stream.one_batch(chunks)?), CallStats::default()))
     }
 
-    /// The question a streamed probe could not answer: which build rows nothing matched.
-    pub(crate) fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
-        let Some(finish) = &self.calls.finish else {
-            return Ok((Vec::new(), CallStats::default()));
-        };
-        let keys = concat_batches(&self.calls.key_schema, self.accumulated.iter())
-            .map_err(|error| BackendError::new(format!("joining the probe keys: {error}")))?;
-        let build = self.build()?.clone();
-        let unmatched = run_node(finish, vec![vec![build], vec![keys]], &self.calls.ctx)?;
-        let out = match &self.calls.pad {
-            Some(pad) => run_node(pad, vec![unmatched], &self.calls.ctx)?,
-            None => unmatched,
-        };
-        Ok((declared(out, &self.calls.output)?, CallStats::default()))
+    /// After the last probe: one batch for the five types that finish, `None` for the rest.
+    pub(crate) fn finish_and_fetch(mut self) -> CallResult<Option<CpuBatch>> {
+        let stream = &mut self.stream;
+        drop(stream.probe.take());
+        let chunks: Vec<RecordBatch> =
+            futures::executor::block_on((&mut stream.joined).try_collect())
+                .map_err(|error| BackendError::new(format!("finishing the join: {error}")))?;
+        if !needs_finish(stream.join_type) {
+            stream.owed_nothing(&chunks, "the finish")?;
+            return Ok((None, CallStats::default()));
+        }
+        Ok((Some(stream.one_batch(chunks)?), CallStats::default()))
     }
 }
 
-fn declared(batches: Vec<RecordBatch>, schema: &SchemaRef) -> Result<Vec<CpuBatch>, BackendError> {
-    batches
-        .into_iter()
-        .map(|batch| declared_as(batch, schema).map(CpuBatch::new))
-        .collect()
+impl Stream {
+    /// What one call answers: every chunk DataFusion split it into, as one batch under the
+    /// names the node declares, and a batch of no rows where it yielded none (#208).
+    fn one_batch(&self, chunks: Vec<RecordBatch>) -> Result<CpuBatch, BackendError> {
+        let joined = concat_batches(&self.joined.schema(), chunks.iter())
+            .map_err(|error| BackendError::new(format!("joining a call's chunks: {error}")))?;
+        declared_as(joined, &self.output).map(CpuBatch::new)
+    }
+
+    /// A call the device answers with handle 0 must have nothing to drop here, or the two
+    /// engines part on a row the cpu would lose.
+    fn owed_nothing(&self, chunks: &[RecordBatch], call: &str) -> Result<(), BackendError> {
+        let rows: usize = chunks.iter().map(RecordBatch::num_rows).sum();
+        match rows {
+            0 => Ok(()),
+            _ => Err(BackendError::new(format!(
+                "{call} of a {:?} join answers nothing, and DataFusion emitted {rows} rows there",
+                self.join_type
+            ))),
+        }
+    }
 }
 
-/// The join a probe batch runs: the node's keys and residual, and the type the call emits
-/// — the node's own where nothing finishes, the per-call one where something does.
-fn hash_join(
-    node: &GpuHashJoin,
-    join_type: JoinType,
-    build: &ArrowSchema,
-    probe: &ArrowSchema,
-    registry: &TaskContext,
-) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
-    let mut on: Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)> =
-        Vec::with_capacity(node.keys.len());
-    for (build_ordinal, probe_ordinal) in &node.keys {
-        on.push((
-            key_column(build, *build_ordinal)?,
-            key_column(probe, *probe_ordinal)?,
-        ));
+/// Every chunk the stream has ready. Polling until it is pending answers one probe batch
+/// whole only because the build side is already in hand and nothing is spawned beneath the
+/// stream, which is how `set_build` builds it.
+fn ready(stream: &mut SendableRecordBatchStream) -> Result<Vec<RecordBatch>, BackendError> {
+    let mut chunks = Vec::new();
+    while let Some(Some(chunk)) = stream.next().now_or_never() {
+        chunks.push(chunk.map_err(|error| BackendError::new(format!("probing: {error}")))?);
     }
-    let filter = match &node.filter {
-        Some(expr) => Some(join_filter(
-            expr,
-            &node.filter_columns,
-            build,
-            probe,
-            registry,
-        )?),
-        None => None,
-    };
-    let projection = node
-        .projection
+    Ok(chunks)
+}
+
+/// The build-side semi family: its rows are build rows, so none is settled before the last
+/// probe batch has gone past.
+fn answers_at_finish_only(join_type: JoinType) -> bool {
+    matches!(
+        join_type,
+        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark
+    )
+}
+
+fn kept(projection: &Option<Vec<u32>>) -> Option<Vec<usize>> {
+    projection
         .as_ref()
-        .map(|columns| columns.iter().map(|column| *column as usize).collect());
-    let join = HashJoinExec::try_new(
-        placeholder(build),
-        placeholder(probe),
-        on,
-        filter,
-        &join_type,
-        projection,
-        // The build side is one resident table, which is what CollectLeft means here as
-        // well as on the device.
-        PartitionMode::CollectLeft,
-        node.null_equals_null,
-    )
-    .map_err(|error| PlanError::Invalid(format!("GpuHashJoin: {error}")))?;
-    Ok(Arc::new(join))
-}
-
-/// The probe keys this batch contributes, under the names they carry in the accumulation.
-fn key_project(
-    node: &GpuHashJoin,
-    probe: &ArrowSchema,
-) -> Result<(Arc<dyn ExecutionPlan>, SchemaRef), PlanError> {
-    let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = Vec::with_capacity(node.keys.len());
-    for (_, probe_ordinal) in &node.keys {
-        let field = field_at(probe, *probe_ordinal)?;
-        exprs.push((key_column(probe, *probe_ordinal)?, field.name().clone()));
-    }
-    let project = ProjectionExec::try_new(exprs, placeholder(probe))
-        .map_err(|error| PlanError::Invalid(format!("the probe key project: {error}")))?;
-    let schema = project.schema();
-    Ok((Arc::new(project), schema))
-}
-
-/// The finish join, against the accumulated probe keys. Their ordinals are `0..k` and
-/// their names are the probe's, since the key project is what built that table — no
-/// residual and no projection, because the question is only which build rows matched.
-fn finish_join(
-    node: &GpuHashJoin,
-    build: &ArrowSchema,
-    keys: &SchemaRef,
-) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
-    let mut on: Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)> =
-        Vec::with_capacity(node.keys.len());
-    for (position, (build_ordinal, _)) in node.keys.iter().enumerate() {
-        on.push((
-            key_column(build, *build_ordinal)?,
-            key_column(keys, position as u32)?,
-        ));
-    }
-    let join = HashJoinExec::try_new(
-        placeholder(build),
-        placeholder(keys),
-        on,
-        None,
-        &finish_join_type(node.join_type),
-        None,
-        PartitionMode::CollectLeft,
-        node.null_equals_null,
-    )
-    .map_err(|error| PlanError::Invalid(format!("the finish join: {error}")))?;
-    Ok(Arc::new(join))
-}
-
-/// The node's declared row out of what the finish emitted, or `None` where the finish
-/// already emits it.
-///
-/// Two shapes, and the difference is whether the finish's output has a probe half. An
-/// outer join's does not — its finish is an anti join over the build side — so the probe
-/// columns it owes are typed NULLs and the project is always needed. The build-side semi
-/// family's output IS the row, so it needs a project only to cut a projection down: a
-/// LeftSemi over three build columns declaring two of them, which is where q20 was
-/// answering with a column the plan did not ask for.
-fn finish_project(
-    node: &GpuHashJoin,
-    emitted: SchemaRef,
-    build: &ArrowSchema,
-    probe: &ArrowSchema,
-) -> Result<Option<Arc<dyn ExecutionPlan>>, PlanError> {
-    if emits_both_sides(node.join_type) {
-        return pad_project(node, build, probe).map(Some);
-    }
-    let Some(kept) = node.projection.as_ref() else {
-        return Ok(None);
-    };
-    let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = Vec::with_capacity(kept.len());
-    for ordinal in kept {
-        let field = field_at(emitted.as_ref(), *ordinal)?;
-        exprs.push((
-            key_column(emitted.as_ref(), *ordinal)?,
-            field.name().clone(),
-        ));
-    }
-    ProjectionExec::try_new(exprs, placeholder(emitted.as_ref()))
-        .map(|project| Some(Arc::new(project) as Arc<dyn ExecutionPlan>))
-        .map_err(|error| PlanError::Invalid(format!("the finish project: {error}")))
-}
-
-/// What the node declares, out of an anti join that emitted build columns only: each kept
-/// column in the projection's order, a build one read from the anti join's output and a
-/// probe one as a typed NULL.
-fn pad_project(
-    node: &GpuHashJoin,
-    build: &ArrowSchema,
-    probe: &ArrowSchema,
-) -> Result<Arc<dyn ExecutionPlan>, PlanError> {
-    let build_width = build.fields().len() as u32;
-    let kept: Vec<u32> = match &node.projection {
-        Some(columns) => columns.clone(),
-        None => (0..build_width + probe.fields().len() as u32).collect(),
-    };
-    let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> = Vec::with_capacity(kept.len());
-    for ordinal in kept {
-        if ordinal < build_width {
-            let field = field_at(build, ordinal)?;
-            exprs.push((key_column(build, ordinal)?, field.name().clone()));
-            continue;
-        }
-        let field = field_at(probe, ordinal - build_width)?;
-        let null = ScalarValue::try_from(field.data_type()).map_err(|error| {
-            PlanError::Invalid(format!("a typed NULL for {}: {error}", field.name()))
-        })?;
-        exprs.push((Arc::new(Literal::new(null)), field.name().clone()));
-    }
-    let project = ProjectionExec::try_new(exprs, placeholder(build))
-        .map_err(|error| PlanError::Invalid(format!("the pad project: {error}")))?;
-    Ok(Arc::new(project))
+        .map(|columns| columns.iter().map(|column| *column as usize).collect())
 }
 
 /// The residual, rebuilt against the intermediate schema its column map names — the same
@@ -475,6 +353,3 @@ fn field_at(schema: &ArrowSchema, ordinal: u32) -> Result<&Arc<Field>, PlanError
         ))
     })
 }
-
-#[cfg(test)]
-mod tests;

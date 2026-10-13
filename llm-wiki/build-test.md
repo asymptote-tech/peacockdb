@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3120 test cases — Rust 2550, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3150 test cases — Rust 2580, C++ 169, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,24 +22,22 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1738 cases: `--lib` 726, `test_cpu_corpus` 983, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1768 cases: `--lib` 733, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 982 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1005 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
 DuckDB's, the cpu's, the device's — and whether its device run is schema-validated, expanded
 to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 177 lines, 144 of them running at
+checked against plain DataFusion at `target_partitions = 1`. 177 lines, 148 of them running at
 the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
-[#199](tickets/corpus-coverage.md#t199), `tpcds/q77` three by [#212](tickets/joins.md#t212),
-`tpch/scan-limit` two by [#186](tickets/corpus-coverage.md#t186), and `pbench`'s
-`scalar-subquery-cross` running at the two tp1 modes only. **33 lines are out
-entirely** and they are exactly the 33 `duckdb_none` lines: `tpch/q11`, `tpch/q22` and `tpcds/q24`
-on [#190](tickets/joins.md#t190), `tpcds/q54`, and 29 of pbench's, which is what a dataset written
-to provoke open tickets looks like — 24 shapes our planner refuses, 5 narrowed by #190. 703 cells,
+[#199](tickets/corpus-coverage.md#t199), `tpch/scan-limit` two by [#186](tickets/corpus-coverage.md#t186), and `pbench`'s
+`scalar-subquery-cross` running at the two tp1 modes only. **29 lines are out
+entirely** and they are exactly the 29 `duckdb_none` lines, all of them pbench's, which is what a
+dataset written to provoke open tickets looks like. 726 cells,
 plus six checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that a hyphenated query resolves its authority and has its result section, that an
@@ -51,8 +49,8 @@ Then the DuckDB tier, 273 of the count and the only independent oracle over the 
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
-for `gpu-result.txt`. Today 110 lines are `duckdb_exact`, 16 `duckdb_approx`, 14
-`duckdb_fingerprint` (the over-cap sections), 33 `duckdb_none` (one side does not answer) and
+for `gpu-result.txt`. Today 113 lines are `duckdb_exact`, 16 `duckdb_approx`, 15
+`duckdb_fingerprint` (the over-cap sections), 29 `duckdb_none` (one side does not answer) and
 4 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
@@ -285,7 +283,7 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 109 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 110 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -295,15 +293,15 @@ hook's words, and `None` leaving the report as `run` makes it): the schedule and
 the calls not made, what each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
-script, the empty build lane a join owes rows for reaching `SetBuild` while every other empty
-lane still drops ([#175](archive/archived-tickets.md#t175)), and the mock against its own
+script, every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
+batch, a zero-row build draining like none, and the mock against its own
 script; then the measurement side: the ABI-call record indexed by the lanes a node is driven on,
 holding the backend's calls and not the driver's own, a backend that names no seq leaving every
 entry unmeasured, the timing tree rendered with what each node cost, a call without a region and
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 72 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 79 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
@@ -317,10 +315,11 @@ DataFusion widens still building. Then `declared_as` against its declaration: #2
 column declared without one refused by name and count, the rule itself over the columns, and a
 batch of another width refused for the width — at a differing count column *i* is not field
 *i*'s column, so a violation read off that pairing would name a NULL the batch does not hold
-there and hide the count that explains it. One case is here because the device tier cannot
-reach it without a card: a build side that produced no batch at all is refused by name for the
-three types that owe their probe rows ([#212](tickets/joins.md#t212)) and answers `owes_nothing` for
-the six that do not
+there and hide the count that explains it. Then the join stream: one batch per call however DataFusion
+chunks it, nothing per probe for the build-side semi family, a zero-row probe answered by a zero-row
+batch, the nested-loop and cross projections, the cross join over a zero-row build, and a build
+side with no rows — no batch or an empty one — joined as an empty table, `owes_nothing` only for
+the types that owe no probe row
 
 | Executor contract, both engines | [executor::cpu_backend::tests::contract](../peacockdb-core/src/executor/cpu_backend/tests/contract.rs) | 1 |
 |---|---|--:|
@@ -348,11 +347,11 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 44 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
 |---|---|--:|
 
-the accountant's formula, cache and two checks on plain figures; the plan index's numbering,
-per-lane slots and which lanes feed a build side that owes rows; the scheduler's corners
+the accountant's formula, cache and two checks on plain figures; the plan index's numbering
+and per-lane slots; the scheduler's corners
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
 

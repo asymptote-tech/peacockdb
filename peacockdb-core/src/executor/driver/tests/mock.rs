@@ -85,7 +85,7 @@ pub(crate) enum EmitRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JoinRule {
-    /// What a lane with no build batch owes, which a mock join has no type to derive: the
+    /// What a lane with an empty build side owes, which a mock join has no type to derive: the
     /// six types every row of which is built from a build row owe nothing, and the three
     /// that preserve unmatched probe rows owe their probe side (#212).
     pub owes_nothing_when_empty: bool,
@@ -281,9 +281,8 @@ pub(crate) struct MockJoin {
 
 pub(crate) struct MockProbing {
     script: Script,
+    /// What decides `owes_nothing`, with the rule: no batch and a batch of no rows alike.
     build_rows: usize,
-    /// Whether a build batch arrived at all, which is what decides `owes_nothing`.
-    built: bool,
 }
 
 pub(crate) struct MockUnload {
@@ -520,7 +519,6 @@ impl JoinExecutor<Mock> for MockJoin {
         Ok((
             MockProbing {
                 script: self.script,
-                built: batch.is_some(),
                 build_rows: batch.map_or(0, |batch| batch.rows),
             },
             stats,
@@ -556,10 +554,10 @@ impl ProbingJoin<Mock> for MockProbing {
         ))
     }
 
-    /// A script says what a join owes with no build side, since a mock join has no type.
-    /// A lane that did build owes its probe side whatever the rule says.
+    /// A script says what a join owes over an empty build side, since a mock join has no
+    /// type. A lane whose build side holds a row owes its probe side whatever the rule says.
     fn owes_nothing(&self) -> bool {
-        !self.built && self.script.join.owes_nothing_when_empty
+        self.build_rows == 0 && self.script.join.owes_nothing_when_empty
     }
 }
 

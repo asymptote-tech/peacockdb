@@ -173,7 +173,6 @@ impl GpuJoin {
     /// answers an absent build side itself, so every type takes this call.
     pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
         let mut calls = AbiCalls::armed(node_timing_on());
-        let owes_nothing = build.is_none() && empty_build_owes_nothing(self.join_type);
         let (handle, taken) = match build {
             Some(batch) => {
                 let taken = Consumed::of(&batch);
@@ -195,6 +194,7 @@ impl GpuJoin {
         if rc != 0 {
             return Err(self.failed(AbiSymbol::JoinBuild));
         }
+        let owes_nothing = taken.rows == 0 && empty_build_owes_nothing(self.join_type);
         calls.record(AbiCall {
             seq: self.seq,
             target: AbiTarget::Node(FbKind::Join),
@@ -232,8 +232,8 @@ impl GpuJoin {
 }
 
 impl GpuProbingJoin {
-    /// Read off the join type at `set_build`: no build batch, and a type every row of which
-    /// is built from a build row.
+    /// Read off the join type at `set_build`: a build side of no rows, batch or none, and a
+    /// type every row of which is built from a build row.
     pub(crate) fn owes_nothing(&self) -> bool {
         self.owes_nothing
     }

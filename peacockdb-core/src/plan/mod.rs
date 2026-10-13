@@ -763,19 +763,6 @@ pub(crate) struct JoinCapability {
     pub(crate) needs_finish: bool,
 }
 
-impl JoinCapability {
-    /// Whether the whole join is one call: no probe keys kept and no finish pass.
-    ///
-    /// True where nothing needs a finish, and also where the probe cannot stream — the
-    /// planner makes that probe a single batch, and one call over the whole of it is the
-    /// plain join node the wire has always carried. Asked by the recipe writer for what to
-    /// publish and by an executor for what to build, because answering it twice is how a
-    /// filtered semi join ended up on the finish path with its residual dropped.
-    pub(crate) fn answers_in_one_call(&self) -> bool {
-        !self.probe_streams || !self.needs_finish
-    }
-}
-
 /// An equi-join: the build side is one batch per lane, the probe streams unless the
 /// capability matrix says otherwise, and lane p of each side holds exactly the rows that
 /// can match lane p of the other.
@@ -1286,13 +1273,6 @@ pub(crate) fn finalize_columns(
     aggregate::finalize_columns(body, state, output)
 }
 
-/// Whether the join's output carries a column from each side. False for the two semi
-/// families and for a mark join, whose row is one side's — read by an executor deciding
-/// whether the columns it owes have to be invented or only selected.
-pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
-    join::emits_both_sides(join_type)
-}
-
 /// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
 /// the engine: an outer join's residual filter is applied after the outer gather and drops
 /// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
@@ -1324,24 +1304,6 @@ pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
 /// making it takes a call over a build table that does not exist.
 pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
     join::empty_build_owes_nothing(join_type)
-}
-
-/// What the per-probe-batch join emits, which is not what the node is: a Left emits this
-/// batch's matches and waits for the finish, and a Full also emits the probe rows this
-/// batch had no match for — batch-local, because the build side was complete before the
-/// first call.
-///
-/// `None` is the build-side semi family, whose probe call is only the key project.
-pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
-    join::per_call_join_type(join_type)
-}
-
-/// The join the finish pass runs against the accumulated keys. Left and Full ask which
-/// build rows nothing ever matched; the semi family asks its own question, and asks it
-/// with the node's own NULL semantics, so the pass substitutes for a legacy single call
-/// rather than improving on it (#59, #80).
-pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
-    join::finish_join_type(join_type)
 }
 
 /// How many columns a join emits before any projection of its own — the count half of

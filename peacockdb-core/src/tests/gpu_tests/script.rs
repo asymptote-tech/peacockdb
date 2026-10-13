@@ -2,9 +2,6 @@
 //! `drive` makes them on any `Backend` through `executors_for`, so what runs is the trait
 //! and not a constructor; `run_both` does it on each and hands back both results.
 
-use std::sync::Arc;
-
-use datafusion::arrow::datatypes::{Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::execution::context::SessionContext;
 
@@ -115,42 +112,6 @@ impl Outcome {
             .expect_err("the device was expected to refuse");
         (&cpu.message, &gpu.message)
     }
-}
-
-/// #220's pin on the cpu's call structure: it answers in its one probe call what the
-/// device's session answers at finish. The rows of every call taken together are the same;
-/// the finish's slot holds a batch on the device and none on the cpu.
-pub(crate) fn the_cpu_answers_in_its_probe_call_what_the_device_finishes(
-    cpu: &[Slot],
-    gpu: &[Slot],
-) {
-    assert!(
-        cpu.last().is_some_and(|finish| finish.is_empty()),
-        "the cpu answers at finish too: #220 is closed here, and this pin with it"
-    );
-    assert!(
-        gpu.last().is_some_and(|finish| !finish.is_empty()),
-        "the device's session answers at finish"
-    );
-    // Nullable, since one call's export declares a column non-nullable where none of its
-    // rows held a NULL, and the next call's rows may hold one.
-    let every_row = |slots: &[Slot]| -> Slot {
-        slots
-            .concat()
-            .iter()
-            .map(|batch| {
-                let fields: Vec<Field> = batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|field| field.as_ref().clone().with_nullable(true))
-                    .collect();
-                RecordBatch::try_new(Arc::new(Schema::new(fields)), batch.columns().to_vec())
-                    .expect("the same columns, every one nullable")
-            })
-            .collect()
-    };
-    assert_same(&[every_row(cpu)], &[every_row(gpu)], Order::Any);
 }
 
 /// A `bug_` test's assertion: both answered, each with exactly these slots.

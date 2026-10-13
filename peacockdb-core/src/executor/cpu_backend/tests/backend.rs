@@ -262,8 +262,7 @@ fn every_node_kind_builds_the_executor_its_category_names() {
 
 /// The accountant reads `scratch_bytes` BEFORE the call, so a transient charged for a read
 /// that never happens refuses a query that fits. The build-side semi family's probe call
-/// is the key project alone — it does not touch the build side — and this charged it
-/// anyway until the review found it.
+/// answers nothing, and the build side it reads is the one the residency already counts.
 #[test]
 fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
     let build = grouped(vec![Some("a"), Some("b")], vec![Some(1), Some(2)]);
@@ -281,18 +280,20 @@ fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
     assert_eq!(
         probing.scratch_bytes(2, 64),
         64,
-        "a probe call that only projects keys transiently costs the batch"
+        "a probe call transiently costs the batch"
     );
     assert_eq!(
         probing.resident_bytes(),
         build_bytes,
-        "and the build side is still held until the finish consumes it"
+        "and the build side is held until the join is done"
     );
 }
 
-/// An Inner join, whose probe call does read the build side, so the charge is right there.
+/// An Inner join's probe call is charged its batch alone: the stream hashed the build side
+/// once and holds it, which the residency already counts, so charging it again per call
+/// would count one table twice.
 #[test]
-fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
+fn an_inner_joins_probe_is_charged_only_its_batch() {
     let build = grouped(vec![Some("a"), Some("b")], vec![Some(1), Some(2)]);
     let build_bytes = build.record_batch().get_array_memory_size();
     let inner = CpuJoin::hash(
@@ -303,7 +304,8 @@ fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
     )
     .expect("an inner join builds");
     let (probing, _) = inner.set_build(Some(build)).expect("the build side is set");
-    assert_eq!(probing.scratch_bytes(2, 64), build_bytes + 64);
+    assert_eq!(probing.scratch_bytes(2, 64), 64);
+    assert_eq!(probing.resident_bytes(), build_bytes);
 }
 
 /// A mid-plan limit holds nothing between calls, whatever its offset — which is the whole

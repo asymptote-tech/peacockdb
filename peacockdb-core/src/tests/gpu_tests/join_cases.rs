@@ -11,7 +11,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::JoinType;
 
-use super::script::{Script, run_both, the_cpu_answers_in_its_probe_call_what_the_device_finishes};
+use super::script::{Script, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
@@ -207,8 +207,6 @@ fn no_probe() -> Script {
     script(Some(build_batch(32)), Vec::new())
 }
 
-const NO_BUILD: &str = "this lane's build side is empty, and what this join owes is its probe side — which takes a call over a build table that does not exist (#212)";
-
 // One probe batch, every type.
 
 operator_case! {
@@ -392,8 +390,9 @@ operator_case! {
 }
 
 // A residual filter where the matrix admits one: Inner, and the build-side semi family
-// over a single-batch probe. Left/Right/Full with one are refused at plan time (#153),
-// RightSemi/RightAnti too (#159), so those have no row.
+// over a single-batch probe, which answers at finish as it does unfiltered. Left/Right/Full
+// with one are refused at plan time (#153), RightSemi/RightAnti too (#159), so those have
+// no row.
 
 operator_case! {
     GpuHashJoin,
@@ -402,42 +401,24 @@ operator_case! {
     }
 }
 
-// #220 — over a residual the cpu answers the build-side semi family in its one probe call;
-// the session answers it at finish, as it does unfiltered.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_semi_join_with_a_residual_filter_answers_in_its_probe_call_on_the_cpu() {
-        let outcome = run_both(&hash_join(JoinType::LeftSemi, false, true, None), one_probe());
-        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
-            outcome.cpu.as_ref().expect("the cpu answers"),
-            outcome.gpu.as_ref().expect("the device answers"),
-        );
+    fn a_left_semi_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::LeftSemi, false, true, None), one_probe()).same(Order::Any);
     }
 }
 
-// #220 — over a residual the cpu answers the build-side semi family in its one probe call;
-// the session answers it at finish, as it does unfiltered.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_with_a_residual_filter_answers_in_its_probe_call_on_the_cpu() {
-        let outcome = run_both(&hash_join(JoinType::LeftAnti, false, true, None), one_probe());
-        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
-            outcome.cpu.as_ref().expect("the cpu answers"),
-            outcome.gpu.as_ref().expect("the device answers"),
-        );
+    fn a_left_anti_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::LeftAnti, false, true, None), one_probe()).same(Order::Any);
     }
 }
 
-// #220 — over a residual the cpu answers the build-side semi family in its one probe call;
-// the session answers it at finish, as it does unfiltered.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_mark_join_with_a_residual_filter_answers_in_its_probe_call_on_the_cpu() {
-        let outcome = run_both(&hash_join(JoinType::LeftMark, false, true, None), one_probe());
-        the_cpu_answers_in_its_probe_call_what_the_device_finishes(
-            outcome.cpu.as_ref().expect("the cpu answers"),
-            outcome.gpu.as_ref().expect("the device answers"),
-        );
+    fn a_left_mark_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::LeftMark, false, true, None), one_probe()).same(Order::Any);
     }
 }
 
@@ -448,8 +429,9 @@ operator_case! {
     }
 }
 
-// Empty inputs, one case per type and shape. A zero-row build batch is a build table, and
-// the device pads over it like the cpu; only a build lane with no batch at all is #212.
+// Empty inputs, one case per type and shape. A zero-row build batch owes what no build
+// batch owes: the six types built from build rows drain, and the three that keep probe
+// rows pad over it on both engines.
 
 operator_case! {
     GpuHashJoin,
@@ -563,16 +545,15 @@ operator_case! {
     }
 }
 
-// #212 — the cpu refuses a build side that produced no batch for the three types that owe
-// their probe rows; the device's session answers it.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_with_no_build_batch_is_refused_on_the_cpu() {
+    fn right_with_no_build_batch_pads_every_probe_row() {
         let outcome = run_both(&join(JoinType::Right), no_build_then_a_probe());
+        outcome.same(Order::Any);
         let device = outcome.gpu.as_ref().expect("the session answers an absent build");
         assert_eq!(rows(device), 16, "every probe row, padded");
-        let why = outcome.cpu_refuses();
-        assert!(why.contains(NO_BUILD), "{why}");
     }
 }
 
@@ -611,16 +592,15 @@ operator_case! {
     }
 }
 
-// #212 — the cpu refuses a build side that produced no batch for the three types that owe
-// their probe rows; the device's session answers it.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_with_no_build_batch_is_refused_on_the_cpu() {
+    fn full_with_no_build_batch_pads_every_probe_row() {
         let outcome = run_both(&join(JoinType::Full), no_build_then_a_probe());
+        outcome.same(Order::Any);
         let device = outcome.gpu.as_ref().expect("the session answers an absent build");
         assert_eq!(rows(device), 16, "every probe row, padded");
-        let why = outcome.cpu_refuses();
-        assert!(why.contains(NO_BUILD), "{why}");
     }
 }
 
@@ -806,16 +786,15 @@ operator_case! {
     }
 }
 
-// #212 — the cpu refuses a build side that produced no batch for the three types that owe
-// their probe rows; the device's session answers it.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_anti_with_no_build_batch_is_refused_on_the_cpu() {
+    fn right_anti_with_no_build_batch_returns_every_probe_row() {
         let outcome = run_both(&join(JoinType::RightAnti), no_build_then_a_probe());
+        outcome.same(Order::Any);
         let device = outcome.gpu.as_ref().expect("the session answers an absent build");
         assert_eq!(rows(device), 16, "every probe row");
-        let why = outcome.cpu_refuses();
-        assert!(why.contains(NO_BUILD), "{why}");
     }
 }
 

@@ -199,13 +199,6 @@ enum Emits {
     ProbeSide,
 }
 
-/// Whether the join's output carries a column from each side. False for the two semi
-/// families and for a mark join, whose row is one side's — read by an executor deciding
-/// whether the columns it owes have to be invented or only selected.
-pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
-    matches!(emits(join_type), Emits::BothSides)
-}
-
 fn emits(join_type: JoinType) -> Emits {
     match join_type {
         JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => Emits::BothSides,
@@ -422,9 +415,8 @@ pub(crate) fn capability(
         JoinType::Right => streaming(false),
         JoinType::Left | JoinType::Full => streaming(needs_finish(join_type)),
         JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
-            // The per-call join disappears: a probe call is only the key project, and the
-            // build side is not touched until the finish consumes it. The filtered forms
-            // are one legacy call over a probe side the planner made single-batch.
+            // The finish answers for these. The filtered forms take their probe side as
+            // one batch, which the planner coalesces.
             Ok(JoinCapability {
                 probe_streams: !has_filter,
                 needs_finish: needs_finish(join_type),
@@ -481,33 +473,6 @@ pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
         | JoinType::LeftMark
         | JoinType::RightSemi => true,
         JoinType::Right | JoinType::Full | JoinType::RightAnti => false,
-    }
-}
-
-/// What the per-probe-batch join emits, which is not what the node is: a Left emits this
-/// batch's matches and waits for the finish, and a Full also emits the probe rows this
-/// batch had no match for — batch-local, because the build side was complete before the
-/// first call.
-///
-/// `None` is the build-side semi family, whose probe call is only the key project.
-pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
-    match join_type {
-        JoinType::Left => Some(JoinType::Inner),
-        JoinType::Full => Some(JoinType::Right),
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => None,
-        other => unreachable!("{other:?} needs no finish pass"),
-    }
-}
-
-/// The join the finish pass runs against the accumulated keys. Left and Full ask which
-/// build rows nothing ever matched; the semi family asks its own question, and asks it
-/// with the node's own NULL semantics, so the pass substitutes for a legacy single call
-/// rather than improving on it (#59, #80).
-pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
-    match join_type {
-        JoinType::Left | JoinType::Full => JoinType::LeftAnti,
-        semi @ (JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark) => semi,
-        other => unreachable!("{other:?} needs no finish pass"),
     }
 }
 

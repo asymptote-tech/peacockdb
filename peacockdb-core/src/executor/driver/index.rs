@@ -9,7 +9,7 @@
 use crate::executor::{IndexedNode, JoinShape, PlanIndex, PlanShape};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, category_of, empty_build_owes_nothing};
+use crate::plan::{ExecutorCategory, category_of};
 
 pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanError> {
     let mut nodes = Vec::new();
@@ -35,10 +35,6 @@ pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanErro
             lanes: node.lanes,
         })
         .collect();
-
-    for index in 0..nodes.len() {
-        nodes[index].feeds_owing_build = feeds_owing_build(&nodes, index);
-    }
 
     let mut slots = 0;
     for node in &mut nodes {
@@ -95,7 +91,6 @@ fn walk<'a>(
         ready_lanes: 0,
         slot_base: 0,
         post_order: 0,
-        feeds_owing_build: false,
     });
     heights.push(height);
     let children: Vec<usize> = node
@@ -122,32 +117,6 @@ fn walk<'a>(
     nodes[index].post_order = *post_order;
     *post_order += 1;
     index
-}
-
-/// The climb behind [`IndexedNode::feeds_owing_build`], after the walk has filled every
-/// `parent` and `children`: up from `from` to the first join, and then which of its
-/// children we arrived through and what its type owes.
-fn feeds_owing_build(nodes: &[IndexedNode<'_>], from: usize) -> bool {
-    let mut child = from;
-    let mut at = nodes[from].parent;
-    while let Some(node) = at {
-        if nodes[node].category == ExecutorCategory::Join {
-            // The build side is child zero, which is what makes BUILD_SLOT zero. Anything
-            // else under a join is the probe side and keeps dropping.
-            if nodes[node].children.first() != Some(&child) {
-                return false;
-            }
-            return match as_node_ref(nodes[node].node) {
-                NodeRef::Join(join) => !empty_build_owes_nothing(join.join_type),
-                // Cross and nested-loop joins carry no type and owe nothing, which is the
-                // same answer their executors give `set_build(None)` by another route.
-                _ => false,
-            };
-        }
-        child = node;
-        at = nodes[node].parent;
-    }
-    false
 }
 
 /// `[start, end)` per node. Pre-order makes every subtree contiguous, so the end is the

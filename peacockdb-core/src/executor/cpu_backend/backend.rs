@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::TaskContext;
 
@@ -245,54 +244,27 @@ impl JoinExecutor<CpuBackend> for CpuJoin {
 }
 
 impl Executor for CpuProbingJoin {
-    /// The build side for as long as this join lives, and the probe keys a finishing type
-    /// keeps until its finish pass runs.
+    /// The build side, which the stream hashed once and holds for as long as this join
+    /// lives.
     fn resident_bytes(&self) -> usize {
-        self.build_bytes() + self.accumulated_bytes()
+        self.build_bytes()
     }
-    /// The build side only where a probe call reads it: the build-side semi family's probe
-    /// call is the key project, and charging it the build side would refuse a query that
-    /// fits, since the accountant reads this before the call rather than after it.
+    /// The batch alone: no call re-reads the build side, which the residency already
+    /// counts, and charging it again would refuse a query that fits.
     fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
-        if self.probe_reads_build() {
-            self.build_bytes() + n_bytes
-        } else {
-            n_bytes
-        }
+        n_bytes
     }
 }
 
 impl ProbingJoin<CpuBackend> for CpuProbingJoin {
     fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
-        let (chunks, stats) = CpuProbingJoin::probe_and_fetch(self, batch)?;
-        Ok((one_batch(chunks)?, stats))
+        CpuProbingJoin::probe_and_fetch(self, batch)
     }
     fn finish_and_fetch(self) -> CallResult<Option<CpuBatch>> {
-        let (chunks, stats) = CpuProbingJoin::finish_and_fetch(self)?;
-        Ok((one_batch(chunks)?, stats))
+        CpuProbingJoin::finish_and_fetch(self)
     }
     fn owes_nothing(&self) -> bool {
         CpuProbingJoin::owes_nothing(self)
-    }
-}
-
-/// One batch per call (#220), by concatenating what DataFusion chunked. Scaffolding until
-/// task 8 gives the cpu one long-lived stream per lane, which answers one batch by
-/// construction; the join's own code still returns the chunks it ran.
-fn one_batch(chunks: Vec<CpuBatch>) -> Result<Option<CpuBatch>, BackendError> {
-    match chunks.len() {
-        0 => Ok(None),
-        1 => Ok(chunks.into_iter().next()),
-        _ => {
-            let schema = chunks[0].record_batch().schema();
-            let batches: Vec<RecordBatch> = chunks
-                .into_iter()
-                .map(CpuBatch::into_record_batch)
-                .collect();
-            concat_batches(&schema, batches.iter())
-                .map(|batch| Some(CpuBatch::new(batch)))
-                .map_err(|error| BackendError::new(format!("joining a call's chunks: {error}")))
-        }
     }
 }
 

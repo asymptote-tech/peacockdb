@@ -145,8 +145,8 @@ fn expected(join_type: JoinType, has_filter: bool) -> Outcome {
                 Outcome::Streams { finish: true }
             }
         }
-        // The per-call join disappears — a probe call is only the key project — so the
-        // filtered form gives up streaming instead of the finish.
+        // The finish answers for these; the filtered form takes its probe side as one
+        // batch.
         JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
             if has_filter {
                 Outcome::SingleBatchProbe { finish: true }

@@ -117,15 +117,15 @@ async fn an_injected_run_makes_different_calls_from_the_plan_it_came_from() {
 
 /// The shape the degenerate hash was not run against until #175's fix: every key in lane
 /// 0 leaves the other lanes' build sides empty, and Right, Full and RightAnti owe their
-/// probe side over that. The driver keeps the scatter's zero-row table for those, and
-/// what the CPU's join computes over it is checked against DataFusion on the same SQL —
-/// `Right` is the build-side pad, `RightAnti` is every probe row. Each asserts on the
-/// calls too, so a run that never reached an empty build lane cannot pass for the wrong
-/// reason.
+/// probe side over that. The scatter drops those lanes' empty outputs, so the join's
+/// build side ends with no batch, and what the CPU's join answers over `set_build(None)`
+/// is checked against DataFusion on the same SQL — `Right` is the build-side pad,
+/// `RightAnti` is every probe row (#212). Each asserts on the calls too, so a run that
+/// never reached such a lane cannot pass for the wrong reason.
 async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str) {
     use super::{Oracle, run_and_check, sorted_rows};
     use crate::executor::{CallKind, PlanIndex};
-    use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, empty_build_owes_nothing};
+    use crate::plan::{NodeRef, as_node_ref, empty_build_owes_nothing};
     use crate::tests::injection::{Hash, planned_mode};
 
     let data_dir = data_dir_for(dataset, "1");
@@ -181,19 +181,20 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
         &format!("{dataset}/{query} at {name} with a degenerate hash"),
     );
 
-    // The lanes the answer was made over: a scatter feeding an owing build side emitted
-    // a zero-row table on some lane, and no lane of an owing join was left to ask what
-    // it owed. The plan's other joins owe nothing and still take that route.
+    // The lanes the answer was made over: an owing join whose build child emitted no
+    // batch on some lane, so that lane set its build side with none.
     let index = PlanIndex::build(injected.as_ref()).expect("the plan indexes");
+    let owing_join = |node: usize| match as_node_ref(index.nodes[node].node) {
+        NodeRef::Join(join) => !empty_build_owes_nothing(join.join_type),
+        _ => false,
+    };
     let empty_build_lanes: usize = (0..index.len())
-        .filter(|node| {
-            index.nodes[*node].category == ExecutorCategory::PartitionEmitter
-                && index.feeds_owing_build(*node)
-        })
+        .filter(|node| owing_join(*node))
         .map(|node| {
-            report.emitted[node]
+            let build = index.nodes[node].children[0];
+            report.emitted[build]
                 .iter()
-                .filter(|lane| !lane.is_empty() && lane.iter().all(|batch| batch.rows == 0))
+                .filter(|lane| lane.is_empty())
                 .count()
         })
         .sum();
@@ -201,10 +202,6 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
         empty_build_lanes > 0,
         "{query}: the degenerate hash left no build lane empty, so nothing here was tested"
     );
-    let owing_join = |node: usize| match as_node_ref(index.nodes[node].node) {
-        NodeRef::Join(join) => !empty_build_owes_nothing(join.join_type),
-        _ => false,
-    };
     // Every lane of an owing join reached `set_build`, the empty ones included. There is
     // one route for a build side whether it produced a batch or not, so what this asserts
     // is that no lane was skipped — the way a lane could still lose its probe rows.
@@ -225,7 +222,7 @@ async fn an_empty_build_lane_answers_like_the_oracle(dataset: &str, query: &str)
 }
 
 /// `Right` is left_join(probe, build) with left_policy = NULLIFY, which *is* the
-/// build-side pad — computed by `operators/join.cpp:299` on the device and by DataFusion's
+/// build-side pad — computed by the join session on the device and by DataFusion's
 /// join on the CPU, and checked here against the oracle rather than argued.
 #[tokio::test]
 async fn a_right_join_with_an_empty_build_pads_every_probe_row() {

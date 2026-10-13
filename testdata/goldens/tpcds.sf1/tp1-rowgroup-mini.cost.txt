@@ -335,7 +335,21 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=3167534302
 == q24
-skipped: not enabled at this mode
+storage_read_bytes=305291818 # GpuLoadParquet
+cuda_filter_bytes=24105 # GpuFilter
+cuda_hash_join_bytes=54500248 # GpuHashJoin
+cuda_aggregate_bytes=16604 # GpuAggregate, GpuAggregateBatches
+cuda_sort_bytes=114 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
+cuda_join_bytes=57 # GpuNestedLoopJoin, GpuCrossJoin
+cuda_window_bytes=0 # (placeholder, no node mapping)
+cuda_limit_bytes=0 # GpuLimit
+cuda_shuffle_bytes=0 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
+cuda_passthrough_bytes=55324332 # GpuProject, GpuCoalesceAllBatches
+vram_to_ram_bytes=57 # GpuUnload
+ram_to_vram_bytes=0 # (placeholder, no node mapping)
+cuda_decompress_bytes=0 # (placeholder, no node mapping)
+cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
+peacockdb_cost=415157335
 == q25
 storage_read_bytes=243576727 # GpuLoadParquet
 cuda_filter_bytes=3722 # GpuFilter
@@ -673,7 +687,21 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=98930935
 == q54
-skipped: not enabled at this mode
+storage_read_bytes=156213392 # GpuLoadParquet
+cuda_filter_bytes=4145 # GpuFilter
+cuda_hash_join_bytes=4763042 # GpuHashJoin
+cuda_aggregate_bytes=48042 # GpuAggregate, GpuAggregateBatches
+cuda_sort_bytes=46 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
+cuda_join_bytes=25729 # GpuNestedLoopJoin, GpuCrossJoin
+cuda_window_bytes=0 # (placeholder, no node mapping)
+cuda_limit_bytes=0 # GpuLimit
+cuda_shuffle_bytes=105345438 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
+cuda_passthrough_bytes=56637054 # GpuProject, GpuCoalesceAllBatches
+vram_to_ram_bytes=23 # GpuUnload
+ram_to_vram_bytes=0 # (placeholder, no node mapping)
+cuda_decompress_bytes=0 # (placeholder, no node mapping)
+cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
+peacockdb_cost=323036911
 == q55
 storage_read_bytes=95837550 # GpuLoadParquet
 cuda_filter_bytes=12674 # GpuFilter

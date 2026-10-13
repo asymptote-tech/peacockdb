@@ -76,7 +76,7 @@ Estimate: [`../reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-c
 | `peacockdb-core/src/wire/join.rs`, `attach.rs`, `mod.rs`, `recipes.rs` | `CudfJoin`; the session recipe line |
 | `peacockdb-core/src/executor/mod.rs` | the trait change |
 | `peacockdb-core/src/executor/gpu_backend/{join.rs,mod.rs,backend.rs}` | the session typestate |
-| `peacockdb-core/src/executor/cpu_backend/{join.rs,mod.rs,backend.rs,channel.rs (new)}` | the stream per lane |
+| `peacockdb-core/src/executor/cpu_backend/{join.rs,mod.rs,backend.rs,single_node.rs}` | the stream per lane |
 | `peacockdb-core/src/executor/driver/{single_partition.rs,partitioned.rs,index.rs}`, `driver/tests/mock.rs` | `set_build(None)`, `owes_nothing`, scaffolding gone |
 | `peacockdb-core/src/planner/memory_estimation.rs` | the session's pricing |
 | `peacockdb-core/src/tests/**`, `planner/tests/**`, `plan/tests/**`, `executor/**/tests*`, `wire/tests.rs`, `wire/gpu_tests/mod.rs`, `tests/end_to_end/dimensions.rs`, `tests/injection.rs` | §5.7 |
@@ -1141,15 +1141,19 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
 ### Task 8: The cpu on one DataFusion stream per lane
 
 **Files:**
-- Create: `peacockdb-core/src/executor/cpu_backend/channel.rs`
+- Create: `peacockdb-core/src/executor/cpu_backend/channel.rs` — **not created**: see step 3
 - Modify: `peacockdb-core/src/executor/cpu_backend/join.rs` (all), `cpu_backend/mod.rs:83-92`, `cpu_backend/backend.rs:239-275`
 - Test: `executor/cpu_backend/tests/join.rs` (rewritten)
+- **Also moved, measured:** `single_node.rs` (`fed`), the driver's `feeds_owing_build` and
+  scatter-drop exception, the mock, `gpu_backend/join.rs`'s `owes_nothing`, `plan/`'s four dead
+  decomposition helpers, `wire/tests.rs`, `dimensions.rs`, the device harness pins, and the 23
+  cpu cells of task 14 step 1 (#190 ×20, #212 ×3) — the detail file's task 8 record.
 
 **Interfaces:**
 - Produces: `CpuJoin { plan: Arc<dyn Fn(Arc<dyn ExecutionPlan>, Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>>>, join_type, output, ctx }`;
   `CpuProbingJoin { tx: Option<UnboundedSender<RecordBatch>>, stream: SendableRecordBatchStream, join_type, output, owes_nothing }`.
 
-- [ ] **Step 1: The failing tests** (rust-only):
+- [x] **Step 1: The failing tests** (rust-only):
   `every_type_answers_at_most_one_batch_per_probe_call` (nine types, hash and nested loop, a
   probe batch producing more rows than `batch_size`: one batch out), 
   `the_build_side_semi_family_answers_nothing_per_probe` (Review Focus 2: `None`, not a zero-row
@@ -1157,8 +1161,14 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
   these, `joins/hash_join.rs:1543-1567`), `a_nested_loop_join_applies_its_projection` (#190),
   `a_cross_join_applies_its_projection` (#207), `a_cross_join_over_a_zero_row_build_answers_one_zero_row_batch`
   (#208), `set_build_none_runs_over_an_empty_build` (#212: Right pads every probe row).
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The channel input** (`channel.rs`), the measured shape of `scratchpad/stream-probe`:
+  **Landed with more:** `a_zero_row_probe_between_two_with_rows_is_answered_by_a_zero_row_batch`
+  and `a_zero_row_build_batch_owes_what_no_build_batch_owes`; the semi-family case covers the
+  filtered forms too, which is what makes it red against the old executor.
+- [x] **Step 2: Run red.** All eight red for their own reasons; then mutations, in the detail file.
+- [x] **Step 3: The channel input** (`channel.rs`), the measured shape of `scratchpad/stream-probe`.
+  **Not as sketched:** `single_node.rs`'s `StreamSourceExec` already hands out any stream, so its
+  child-replacing half became `fed(node, streams)` and both sides are streams through it — the
+  build a replayed one, the probe an unbounded channel. A `ChannelExec` would have been a copy.
 
 ```rust
 #[derive(Debug)]
@@ -1200,7 +1210,7 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
 }
 ```
 
-- [ ] **Step 4: The executor.** `set_build(build)`: `left = MemoryExec::try_new(&[vec![build.unwrap_or_else(|| RecordBatch::new_empty(build_schema))]], …)`;
+- [x] **Step 4: The executor.** `set_build(build)`: `left = MemoryExec::try_new(&[vec![build.unwrap_or_else(|| RecordBatch::new_empty(build_schema))]], …)`;
   `(right, tx) = ChannelExec::new(probe_schema)`; the plan is `HashJoinExec::try_new(left, right, on, filter, &join_type, projection, PartitionMode::CollectLeft, null_equals_null)`,
   `NestedLoopJoinExec::try_new(left, right, Some(filter), &join_type, projection)` (the projection
   passed — #190), or `ProjectionExec::try_new(kept, Arc::new(CrossJoinExec::new(left, right)))` (#207);
@@ -1211,16 +1221,25 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   type, else one concatenated batch, cast with `declared_as`. `owes_nothing` reads the type and
   the build's row count, as the device's does. `Calls`, `key_project`, `finish_join`,
   `finish_project`, `pad_project` go.
-- [ ] **Step 5: Flip the pins this task changes, in this commit:** the #190 pins (4: the cpu
+  **As landed:** `CpuJoin` holds the join built over placeholders (and a cross join's
+  `ProjectionExec`) and feeds it with `with_new_children`, not a closure; the finish collects with
+  `block_on`, since nothing more will arrive. A probe call's scratch is its batch alone.
+- [x] **Step 5: Flip the pins this task changes, in this commit:** the #190 pins (4: the cpu
   applies a nested loop's projection), the #208 pins (2: one zero-row batch over a zero-row build),
   `nested_cases.rs:255` and `:438` (their cpu halves, left by task 7) and the three #212 pins
   (task 7's `bug_*_refused_on_the_cpu` → `*_with_no_build_batch_pads_every_probe_row`, both backends)
   → the positive cases over the same scripts. The `TWO_OF_SIXTEEN`, `THREE_OF_SIXTEEN`, `NO_BUILD`
   consts go with their last user.
-- [ ] **Step 6: Run green** (rust-only); then the harness on the device
+  **Also:** task 7's #220 ×7 and their wire twin flip to agreement, and
+  `the_cpu_answers_in_its_probe_call_what_the_device_finishes` goes. The #208 harness pins show
+  agreement and not the zero-row batch: over a zero-row build both engines drain.
+- [x] **Step 6: Run green** (rust-only); then the harness on the device
   (`PCK_TEST_FILTER='join_cases|nested_cases|join_dimension_cases'`), every case green; the cpu
   corpus tier's join cells green, their per-node goldens regenerated in this commit (one batch per
   call, none per probe for the build-side semi family — task 12's step 2 moves here).
+  **Measured:** task 6's adapter had already concatenated, so only the Left nested loop's
+  finish (q9, `scalar-subquery-cross`, `nested-loop-left-join`) and the dropped scatter empties
+  (`sparse-build-*`, q16 at tp4) moved. Run on the whole device list, not only the harness.
 - [ ] **Step 7: Commit.** `git commit -m "the cpu's joins are one DataFusion stream per lane, one batch per call (#220, #190, #207, #208)"`.
 
 ### Task 9: The refusals lifted
@@ -1530,8 +1549,8 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 
 - [ ] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
   estimate's per-query table order, `reports/join-rewrite-cell-estimate.md` §7), set
-  **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (and cpu modes for #190's
-  four and #212's q77 rows) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
+  **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (the cpu modes for #190's
+  four and #212's q77 rows landed in task 8, with their oracles) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
   cell the CSV still calls `disabled` is not written and the case reports `ok` anyway
   (`build-test.md`, "Consequences worth knowing before you regenerate"; it cost `repartition-keys`
   a round). Then run on
@@ -1539,7 +1558,7 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
   green, ticket the rest: tpch rollup_over_join gains `65`, tpcds q78 `60`, tpcds q32 at tp4
   `199`, as the estimate expects. The stale `183` rows' join cells are among the batches. A line
   whose first cells this batch turns on (tpch q11 and q22, tpcds q24 and q54, whose cpu cells #190
-  kept off) moves its `duckdb_oracle` off `duckdb_none` in the same commit, to the variant its first
+  kept off — done in task 8) moves its `duckdb_oracle` off `duckdb_none` in the same commit, to the variant its first
   DuckDB case passes under (tpch q11 → `duckdb_fingerprint`, being over the cap): `duckdb_none`
   over two sections that both exist fails.
 - [ ] **Step 2:** pbench's join rows: enable their cells (the float rows stay commented out on

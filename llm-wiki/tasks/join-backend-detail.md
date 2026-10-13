@@ -1072,3 +1072,199 @@ with its last user; the #212 ×3 `_refused_on_the_cpu` pins to `*_pads_every_pro
 **both** engines together (above). Delete `cpu_backend/backend.rs`'s `one_batch`,
 `CpuJoin::without_build_allowed`, `CpuProbingJoin::build`, `feeds_owing_build`, the
 scatter-drop exception and `dimensions.rs`'s use of it.
+
+#### Round 2, plan task 8 — the cpu on one DataFusion stream per lane
+
+Rust only in the code it changes, plus one line of the device's (`owes_nothing`), proved on
+nebius-gpu. Closes the cpu halves of #220, #212, #190, #207 and #208.
+
+**What shipped.**
+- `cpu_backend/join.rs`, rewritten. `CpuJoin` holds a `join::Plan`: the DataFusion join built
+  once over placeholders (`HashJoinExec` with the node's projection and `CollectLeft`,
+  `NestedLoopJoinExec` with the node's projection — #190 — or `CrossJoinExec`), and for a
+  projecting cross join a `ProjectionExec` over the crossed schema (#207). `set_build(Option)`
+  feeds the build side as a replayed stream (none is an empty build table, #212) and the probe
+  side through an unbounded `futures` channel, then executes once. A probe call sends its batch
+  and reads every chunk the stream has ready (`now_or_never` until pending); the finish drops the
+  sender and collects to the end. Every call answers one batch, concatenated and relabelled with
+  `declared_as`, a zero-row one where DataFusion yielded none (#208); `None` per probe for
+  LeftSemi, LeftAnti and LeftMark and at finish for the four non-finishing types, each checked
+  to have dropped no row. `owes_nothing` is `build rows == 0 && empty_build_owes_nothing(type)`,
+  a cross join reading as Inner. `CpuJoin::hash` still calls `node.capability()?`, so the #153
+  and #159 refusals stand on the cpu until task 9.
+- `single_node.rs`: `fed(node, streams)`, the child-replacing half of `execute_single_node`,
+  which both now call. `StreamSourceExec` already took any stream, so no `ChannelExec`.
+- `backend.rs`: `one_batch` gone, the trait impls delegate. A probing join's residency is its
+  build side; a probe call's scratch is its batch alone, since nothing re-reads the build side
+  per call any more.
+- Gone: `Calls`, `key_project`, `finish_join`, `finish_project`, `pad_project`,
+  `without_build_allowed`, `CpuProbingJoin::{build, accumulated, accumulated_bytes,
+  probe_reads_build}`, `cpu_backend/join/tests.rs`; in `plan/`, `JoinCapability::answers_in_one_call`,
+  `per_call_join_type`, `finish_join_type`, `emits_both_sides` (dead with the decomposition, and
+  on the spec's step-9 list); in the driver, `IndexedNode::feeds_owing_build`,
+  `PlanIndex::feeds_owing_build`, `index.rs`'s climb and its test, and the scatter-drop
+  exception — every zero-row scatter output is dropped, and an owing lane gets `set_build(None)`.
+- `owes_nothing` is the row count on **both** engines: `gpu_backend/join.rs` reads
+  `taken.rows == 0`, the mock reads its build rows, and `executor/mod.rs`'s trait doc says so.
+- `has_finish_pass` (the `TEST_ONLY_ITEMS` pair) now asks the executor: `set_build(None)`, then
+  whether the finish answers a batch.
+
+**Divergences found, and how each resolved** — every one by the cpu mirroring the device:
+
+| divergence | device | cpu before | resolution |
+|---|---|---|---|
+| filtered build-side semi family | answers at finish | answered in its one probe call | cpu at finish (#220) |
+| Left nested loop | pads at finish | padded in the probe call | cpu at finish (#220) — q9, `scalar-subquery-cross`, `nested-loop-left-join` goldens moved |
+| absent build, Right/Full/RightAnti | pads every probe row | refused (#212) | cpu runs over an empty build table |
+| cross join over a zero-row build | one zero-row table | nothing | cpu answers one zero-row batch (#208) |
+| nested-loop and cross projections | applied | dropped, refused by width | applied (#190, #207) |
+| a zero-row build batch | probed (no batch only drained) | probed | both drain, on the row count |
+| zero-row scatter output under an owing build | kept (shared driver) | kept | dropped on both; the lane gets `set_build(None)` |
+
+None is left open, and no ticket was filed.
+
+**What the plan got wrong.**
+- **No `channel.rs`.** `single_node.rs`'s `StreamSourceExec` hands out any stream, so a
+  `ChannelExec` would have been its copy. The build side is a replayed stream too, not a
+  `MemoryExec`. `CpuJoin` holds a plan template and `with_new_children`, not a closure.
+- **The finish drains with `block_on`, not `now_or_never`**: nothing more will arrive, so
+  waiting is correct there and polling is not.
+- **The goldens barely moved.** Step 6 expected the cpu goldens to move for "one batch per call,
+  none per probe". Task 6's adapter already concatenated, so only two shapes moved, both below.
+- **#208's harness pins cannot show the zero-row batch.** Over a zero-row build a cross join
+  owes nothing on the row count, so both engines drain and the harness sees no slot. The two
+  pins flip to agreement; the zero-row batch itself is pinned at node level,
+  `cpu_backend::tests::join::a_cross_join_over_a_zero_row_build_answers_one_zero_row_batch`.
+- **The accounting moved and the plan is silent on it.** `an_inner_joins_probe_is_charged_the_build_side_it_reads`
+  became `an_inner_joins_probe_is_charged_only_its_batch`; the ignored #182 case's comment
+  explained the old double charge and now does not.
+- **Task 14 step 1's cpu cells landed here**, at the dispatch's request: tpch q11 and q22, tpcds
+  q24 and q54 at every mode (#190 ×20) and q77's three tp4 cells (#212 ×3) — the estimate's 23
+  exactly. Registry first, then `.inc`, then `PCK_UPDATE_SECTIONS=1` on those cases. Every cell
+  passed against DataFusion and every DuckDB case is green: q22, q24 and q54 under
+  `duckdb_exact`, q11 under `duckdb_fingerprint` (27,604 rows, over the cap), q77 unchanged.
+  q11's `gpu_oracle` had to move `golden_exact` → `live_cpu`, as tpch q16's is:
+  `each_declarations_two_oracles_suit_each_other` refuses a golden oracle over a fingerprint.
+  The gpu cells and the `tickets` column are untouched (190 and 212 stay on those rows): task
+  14 decides the gpu cells and strikes tickets.
+- **A fixture that was wrong all along.** `wire/tests.rs`'s `join()` declares `[k, label, fk, v]`
+  for all nine types. Invisible while `has_finish_pass` read a field; the behavioural reading
+  runs a finish and `declared_as` refuses a two-column LeftSemi answer. The two cell tests use
+  `typed_join`, which declares what each type emits, the mark `Boolean`.
+
+**Goldens moved, by kind.** No `.plans.txt`, `recipe-payloads.txt`, `gpu-result.txt` or
+`duckdb-result.txt`.
+
+| kind | sections | what moved |
+|---|---|---|
+| `.cpu.txt`, Left nested loop at finish | tpch `nested-loop-left-join` ×5, tpcds q9 ×5, pbench `scalar-subquery-cross` ×2 | `[[51]]` → `[[50,1]]` and `[[1]]` → `[[1,0]]` up to the unload |
+| `.cpu.txt`, zero-row scatter output dropped | pbench `sparse-build-{right,full,anti}` ×3 tp4, tpch q16 ×3 tp4 | an owing build side's empty lanes, `[0]` → `[]` at the emit and the coalesce |
+| `.cpu.txt` + `.cost.txt`, new cells | tpch q11, q22; tpcds q24, q54 at five modes; tpcds q77 at three | new sections |
+| `.cost.txt` | `nested-loop-left-join` ×5 | +46 bytes, the finish's own batch |
+| `mini.result.txt` | tpch q11 (fingerprint), q22; tpcds q24, q54 | new sections; q77's author mode `tp1-rowgroup` → `tp4-sized`, rows unchanged |
+| `cost-registry.csv` | 5 rows | 23 cpu cells `enabled`; `--numstat` 5/5, no CRLF |
+
+A second whole-tier `UPDATE_CANONICAL=1` run left every golden byte-identical. The owes-nothing
+switch moved no golden: no enabled corpus lane gets a zero-row build batch.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base a9ae581c`: 703 compared, 5
+changed, **5 regressions, none over 10%** — `nested-loop-left-join` at every mode, +46 bytes
+(+0.19%, +0.17% at tp4-single). The 23 new sections have no base and are omitted.
+
+**Red-green evidence.** Red first, against the old executor: the eight new cases in
+`cpu_backend/tests/join.rs` all failed for the reason each names (chunks > 1, a semi-family probe
+answering, a zero-row probe answering two batches, `owes_nothing` false over a zero-row build,
+#212 refused, both projections refused by width, the cross join answering nothing);
+`an_inner_joins_probe_is_charged_only_its_batch` 1384 against 64; the two rewritten flow cases
+(`a_zero_row_scatter_output_is_dropped_under_every_join_type`,
+`holds_and_releases_balance_over_a_plan_with_empty_lanes`). The new flow case's first red was my
+script's — `Script::source` appends, so a second `build` entry is never read — and M9 is its
+proof. Then mutations, each applied with an asserted single match, restored from a saved
+copy and checked with `cmp`:
+- M1 `owes_nothing` on build bytes (batch presence): 1 failed, the zero-row build case.
+- M2 the semi family answering per probe: 2 failed.
+- M3 the first chunk only: 3 failed, the one-batch case among them.
+- M4 the nested loop's projection not passed: 1 failed (#190).
+- M5 the cross projection dropped: 1 failed (#207).
+- M6 `None` for a call with no chunk: 1 failed, the #208 case alone. **DataFusion yields a
+  zero-row chunk for a zero-row hash or nested-loop probe**, so the `new_empty` path is guarded by
+  the cross case only.
+- M7 no finish answering: 14 failed, both wire cell tests among them.
+- M8 empties kept at the scatter: 8 failed, `dimensions`' two among them.
+- M9 the mock's owes-nothing on batch presence: 1 failed, the new flow case.
+- M10 the #212 refusal reinstated in `set_build`: 6 failed — the #212 case, `dimensions`' two
+  and `tests::end_to_end::{tpcds_q93, tpcds_q97, tpch_anti_join}`.
+- D1, device, `owes_nothing` on `handle == 0`: 18 failed in `peacockdb_core_gpu_lib`, every
+  `*_over_a_zero_row_build_*` and `*_over_both_sides_empty_*` case of the six owes-nothing types,
+  the cross and nested-loop ones and `join_dimension_cases`' crossing-projection LeftAnti. That
+  set is the device's witness for the row-count switch. Restored, touched on the remote, rebuilt.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S,
+0 MiB in use; cuDF 25.02. Final tree synced, `./scripts/build-test-shadgpu.sh --build` rc 0, each
+binary run directly with `--test-threads=1`. **821 cases, all green**, unchanged from task 7:
+`peacockdb_core_gpu_lib gpu_tests::` 585, `test_gpu_corpus` 95, `test_node_timing` 1,
+`peacock_gpu_benchmarks --skip bench_` 8, `peacock_gpu_tests` 2, `peacock_plan_tests` 77,
+`peacock_join_session_tests` 53. Disk 12 GB free during the round's builds, 28 GB at its end;
+I deleted nothing, so something outside this task freed the difference.
+
+**A sixth workstation trap: the board's rsync line deletes `.run-state/`.** It is not gitignored,
+so `--delete-after` removes it, and a detached build logging there never starts — the redirect
+fails and nothing reports it. Log outside the tree (`~/t8-build.log`).
+
+**Local, rust-only, fresh on the final tree:** `cargo test --features rust-only -p peacockdb-core
+--lib --test test_cpu_corpus --test test_corpus_goldens --test test_cost_model --test
+test_module_layout --test test_ci_coverage --test test_golden_format -- --test-threads=2` —
+`--lib` 731 passed, 2 ignored; `test_cpu_corpus` 1006; `test_corpus_goldens` 26;
+`test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage` 11; `test_golden_format` 43.
+
+**Warnings.** None new. rust-only build and test builds: none. The gpu lib test build: the one
+pre-existing `AsArray`. `cargo-cudf.sh build -p peacockdb-core --features gpu`: the same 26
+pre-existing, by file and item (`nodes_as_recorded` moved from `index.rs:171` to `:138`).
+
+**Formatting.** `cpu_backend/join.rs` and `cpu_backend/tests/join.rs` formatted whole through a
+temp copy; every other touched file is either rustfmt-clean or reports exactly the hunks it
+reported at `a9ae581c`.
+
+**build-test.md counts (coordinator's file).** cpu block 1738 → 1768: `--lib` 726 → 733,
+`test_cpu_corpus` 983 → 1006. Rust 2550 → 2580, grand total 3120 → 3150. Device block unchanged.
+Rows, with the prose now false:
+- "Corpus, cpu" 982 → 1005: "144 of them running" → 148, `tpcds/q77` no longer among the
+  partly disabled; "33 lines are out entirely … `tpch/q11`, `tpch/q22` and `tpcds/q24` on #190,
+  `tpcds/q54`, and 29 of pbench's" → 29, all pbench's; "703 cells" → 726; "110 lines are
+  `duckdb_exact` … 14 `duckdb_fingerprint` … 33 `duckdb_none`" → 113, 15, 29.
+- "CPU backend executors" 72 → 79: "a build side that produced no batch at all is refused by
+  name for the three types that owe their probe rows" is now "is joined over an empty build
+  table"; add one batch per call however DataFusion chunks it, nothing per probe for the
+  build-side semi family, a zero-row probe answered by a zero-row batch, both projections, the
+  cross join over a zero-row build, and a zero-row build owing what none owes.
+- "Drivers over a mock backend" 109 → 110: "the empty build lane a join owes rows for reaching
+  `SetBuild` while every other empty lane still drops" → every empty scatter lane drops, and an
+  owing lane reaches `SetBuild` with no batch; plus a zero-row build draining like none.
+- "Driver internals" 44 → 43: "which lanes feed a build side that owes rows" goes.
+
+**architecture.md sentences this round falsified** (the coordinator's to correct): the
+capability matrix's Left outer ("the accumulated probe keys are resident"), build-side semi
+family ("the per-call join disappears: a probe call is only the key project") and nested-loop
+Left ("the finish trick accumulates keys") rows; "What the finish pass computes" (both engines
+are sessions now); the hash-skew paragraph's "One exception: a scatter feeding the build side of
+a Right, Full or RightAnti join keeps its zero-row table … The index decides it"; "A
+build-preserving join's residency grows with the probe side"; "except the scatter lane under a
+join that owes its probe rows"; the determinism breaks' "Right, Full and RightAnti refuse when
+the build side sends no batch (#212)" and "a nested-loop Left make[s] no call over no probe
+batch"; and the "Three refusals" paragraph's #212 clause. Task 7's list still stands beside
+these, and its "true now of the cpu alone" items are now true of neither engine.
+
+**Drift found, not mine.** `planner/tests/plan_goldens.rs:178-191`'s reasons for the payload
+subset describe the recipe task 7 retired ("a key project per batch", "one legacy call that hands
+the build side over").
+
+**What plan task 4 inherits.** The cpu applies nested-loop and cross projections, which the
+placeholder's drop through a join projection needs, and tpcds q9's cpu cells are green with its
+Left nested loops in the session's shape. Four more lines carry cpu cells task 4's regeneration
+will rewrite if they hold a zero-column projection: tpch q11, q22, tpcds q24, q54.
+
+**What plan task 9 inherits.** On the cpu the #153 and #159 refusals are `CpuJoin::hash`'s one
+`node.capability()?` line and `the_filtered_column_refuses_five_cells_by_ticket`; the stream
+answers every type with a residual as DataFusion's own join, and `NestedLoopJoinExec` takes
+every type. The planner's probe-side coalesce is no longer needed by either engine.
+`JoinCapability.probe_streams` is still read by the planner and the wire.

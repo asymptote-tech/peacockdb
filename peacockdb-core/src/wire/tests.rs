@@ -82,6 +82,20 @@ fn columns_of(columns: &[&str]) -> Schema {
 /// `dim(k, label)` joined to `fact(fk, v)`. `filter` is a residual over both sides, which
 /// the session evaluates per pair whatever the type.
 fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuHashJoin {
+    declaring(
+        join_type,
+        filter,
+        projection,
+        columns_of(&["k", "label", "fk", "v"]),
+    )
+}
+
+fn declaring(
+    join_type: JoinType,
+    filter: bool,
+    projection: Option<Vec<u32>>,
+    output: Schema,
+) -> GpuHashJoin {
     let build = Given::input(BatchLayout::SingleBatch, &["k", "label"]);
     let probe = Given::input(BatchLayout::MultipleBatches, &["fk", "v"]);
     let (residual, columns) = if filter {
@@ -106,7 +120,7 @@ fn join(join_type: JoinType, filter: bool, projection: Option<Vec<u32>>) -> GpuH
         columns,
         false,
         projection,
-        columns_of(&["k", "label", "fk", "v"]),
+        output,
     )
 }
 
@@ -439,8 +453,7 @@ fn a_join_leaves_its_inputs_for_the_walk_to_gather() {
 
 /// Every cell of both dimensions — nine join types crossed with a residual filter — and
 /// one claim about each: the recipe finishes exactly where the session does, and the cpu
-/// executor finishes there too. The three cells #220 still splits are
-/// `bug_the_cpu_answers_a_filtered_build_side_semi_join_in_its_probe_call`'s.
+/// executor finishes there too.
 #[test]
 fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
     let build = columns_of(&["k", "label"]);
@@ -448,7 +461,7 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
     let mut cells = 0;
     for join_type in ALL_TYPES {
         for residual in [false, true] {
-            let node = join(join_type, residual, None);
+            let node = typed_join(join_type, residual);
             let executor_finishes = cpu_finishes(&node, &build, &probe);
             if node.capability().is_err() {
                 assert!(
@@ -470,9 +483,6 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
                 "{join_type:?} with residual={residual}: {recipe}"
             );
             cells += 1;
-            if residual && is_build_side_semi(join_type) {
-                continue;
-            }
             assert_eq!(
                 recipe_finishes,
                 executor_finishes.expect("a cell the matrix allows is one the executor builds"),
@@ -487,14 +497,14 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
     );
 }
 
-// #220 — the cpu answers the filtered build-side semi family in its one probe call over a
-// single-batch probe; the session answers it at finish, as it does unfiltered.
+/// The filtered build-side semi family answers at the finish on the cpu, as the session
+/// does and as it does unfiltered (#220).
 #[test]
-fn bug_the_cpu_answers_a_filtered_build_side_semi_join_in_its_probe_call() {
+fn the_cpu_finishes_a_filtered_build_side_semi_join_as_the_session_does() {
     let build = columns_of(&["k", "label"]);
     let probe = columns_of(&["fk", "v"]);
     for join_type in [JoinType::LeftSemi, JoinType::LeftAnti, JoinType::LeftMark] {
-        let node = join(join_type, true, None);
+        let node = typed_join(join_type, true);
         let recipe = recipe_for(&node);
         assert!(
             recipe
@@ -504,8 +514,8 @@ fn bug_the_cpu_answers_a_filtered_build_side_semi_join_in_its_probe_call() {
             "{join_type:?}: the session finishes"
         );
         assert!(
-            !cpu_finishes(&node, &build, &probe).expect("the cpu builds it"),
-            "{join_type:?}: the cpu finishes too — #220 is closed here, and this pin with it"
+            cpu_finishes(&node, &build, &probe).expect("the cpu builds it"),
+            "{join_type:?}: the cpu finishes"
         );
     }
 }
@@ -522,11 +532,22 @@ const ALL_TYPES: [JoinType; 9] = [
     JoinType::RightAnti,
 ];
 
-fn is_build_side_semi(join_type: JoinType) -> bool {
-    matches!(
-        join_type,
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark
-    )
+/// [`join`] declaring what its type emits, since these cells run the cpu executor, which
+/// answers under the node's declaration and refuses one of another width.
+fn typed_join(join_type: JoinType, filter: bool) -> GpuHashJoin {
+    let emitted = match join_type {
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => {
+            columns_of(&["k", "label", "fk", "v"])
+        }
+        JoinType::LeftSemi | JoinType::LeftAnti => columns_of(&["k", "label"]),
+        JoinType::LeftMark => Schema::new(Arc::new(ArrowSchema::new(vec![
+            Field::new("k", DataType::Int64, true),
+            Field::new("label", DataType::Int64, true),
+            Field::new("mark", DataType::Boolean, false),
+        ]))),
+        JoinType::RightSemi | JoinType::RightAnti => columns_of(&["fk", "v"]),
+    };
+    declaring(join_type, filter, None, emitted)
 }
 
 fn recipe_for(node: &GpuHashJoin) -> Recipe {

@@ -240,10 +240,31 @@ fn a_lane_with_no_build_batch_calls_set_build_none() {
     assert_accounted(&report);
 }
 
+/// A build batch of no rows owes what no build batch owes: the lane drains. Both backends
+/// read the row count, so a zero-row build is not a lane of probe calls on one engine and
+/// none on the other.
+#[test]
+fn a_lane_whose_build_batch_holds_no_row_drains_like_one_with_none() {
+    let plan = join_plan(1);
+    let script = Script::default()
+        .source("build", vec![vec![spec(0, 8)]])
+        .source("probe", vec![vec![spec(10, 80), spec(10, 80)]]);
+    let report = run(plan.as_ref(), &script);
+    assert_eq!(count(&report, CallKind::SetBuild), 1);
+    assert_eq!(count(&report, CallKind::Probe), 0, "the lane owed nothing");
+    assert_eq!(
+        count(&report, CallKind::ReleaseUnwanted),
+        2,
+        "one drop per probe batch"
+    );
+    assert_eq!(count(&report, CallKind::Finish), 0);
+    assert_accounted(&report);
+}
+
 /// The other side of the same call: a lane whose type owes its probe side over an empty
 /// build probes it, batch by batch, and finishes. What the probe answers over a build table
-/// that is not there is the executor's business — the real backends refuse it today, pinned
-/// as #212 in `tests/gpu_tests/join_cases.rs`; this mock names no join type.
+/// that is not there is the executor's business — both backends run the join over an empty
+/// build table (#212); this mock names no join type.
 #[test]
 fn a_lane_that_owes_its_probe_side_probes_it() {
     let plan = join_plan(1);
@@ -275,7 +296,7 @@ fn a_lane_that_owes_its_probe_side_probes_it() {
 /// unload <- join <- [coalesce <- emit(4) <- source(build, 1), filter <- source(probe, 4)]
 ///
 /// The build side scattered over four lanes, with every build row sent to lane 0: the
-/// other three lanes' build sides are a typed zero-row table each.
+/// other three lanes' scatter outputs are zero-row tables, dropped at the emit.
 fn scattered_build_plan(join_type: JoinType) -> Box<dyn GpuNode> {
     unload(join_of(
         join_type,
@@ -291,8 +312,8 @@ fn scattered_build_script() -> Script {
         .with_emit(EmitRule::ToLane(0))
 }
 
-/// A mock join whose type owes its probe side, so a lane handed no build batch fails the
-/// run rather than passing for the wrong reason.
+/// A mock join whose type owes its probe side, so a lane handed no build batch probes
+/// rather than drains.
 fn owing_probe() -> JoinRule {
     JoinRule {
         owes_nothing_when_empty: false,
@@ -302,24 +323,35 @@ fn owing_probe() -> JoinRule {
 }
 
 /// The driver-level claim, asserted where the routing happens rather than through the
-/// answer it eventually produces: a test on the rows would pass for the wrong reason if
-/// the join happened to produce them some other way.
+/// answer it eventually produces: under a type that owes its probe side the empty lanes
+/// are dropped at the emit like any other, and each still sets its build side — with no
+/// batch — and probes.
 #[test]
-fn an_empty_build_lane_reaches_set_build_rather_than_no_build() {
+fn a_zero_row_scatter_output_is_dropped_under_every_join_type() {
     for join_type in [JoinType::Right, JoinType::Full, JoinType::RightAnti] {
         let plan = scattered_build_plan(join_type);
         let script = scattered_build_script().with_join(owing_probe());
         let report = run(plan.as_ref(), &script);
+        assert!(
+            calls(&report, CallKind::Emit)
+                .iter()
+                .all(|event| event.outputs == 1),
+            "{join_type:?}: an empty lane was queued"
+        );
         assert_eq!(
             count(&report, CallKind::SetBuild),
             4,
             "{join_type:?}: every lane set its build side, the three empty ones included"
         );
+        assert_eq!(
+            count(&report, CallKind::Probe),
+            4,
+            "{join_type:?}: and every lane probed the probe side it owes"
+        );
     }
 }
 
-/// The guard from the other side. Without it the change is "keep every empty lane", which
-/// is 389,331 batches instead of a few hundred.
+/// The same drop under the types that owe nothing, where the empty lanes drain instead.
 #[test]
 fn a_join_type_that_owes_nothing_still_drops_its_empty_lanes() {
     for join_type in [
@@ -403,23 +435,23 @@ fn a_build_batch_does_not_become_a_probe_call() {
     );
 }
 
-/// Zero rows is not zero bytes: a kept empty batch still carries buffers, takes
-/// `acct.hold` and owes a matching release. An imbalance surfaces days later as a budget
-/// error on an unrelated query.
+/// Zero rows is not zero bytes: a dropped empty batch still carried buffers, and nothing
+/// may stay held for it. An imbalance surfaces days later as a budget error on an
+/// unrelated query.
 #[test]
 fn holds_and_releases_balance_over_a_plan_with_empty_lanes() {
     let plan = scattered_build_plan(JoinType::Right);
     let script = scattered_build_script().with_join(owing_probe());
     let report = run(plan.as_ref(), &script);
     // Node numbering is pre-order: 0 unload, 1 join, 2 coalesce, 3 emit.
-    let emitted: Vec<(u64, usize)> = report.emitted[3]
+    let emitted: Vec<Vec<(u64, usize)>> = report.emitted[3]
         .iter()
-        .map(|lane| (lane[0].rows, lane[0].bytes))
+        .map(|lane| lane.iter().map(|batch| (batch.rows, batch.bytes)).collect())
         .collect();
     assert_eq!(
         emitted,
-        vec![(4, 32), (0, 8), (0, 8), (0, 8)],
-        "the three empty lanes were kept, each holding its buffers"
+        vec![vec![(4, 32)], vec![], vec![], vec![]],
+        "the three empty lanes were dropped, and only the hot one emitted"
     );
     assert_accounted(&report);
 }

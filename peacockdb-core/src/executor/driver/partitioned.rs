@@ -427,10 +427,9 @@ impl<'a, B: Backend> Driver<'a, B> {
         let mut emitted = 0;
         for (lane, out) in outputs.into_iter().enumerate() {
             // Empty scatter outputs are dropped so nothing empty traverses a chain because
-            // of hash skew -- except where the join above owes rows for an empty build
-            // side, which is the one case the drop turns into a refusal (#175). The index
-            // worked that out from the tree; this is a lookup, not a walk.
-            if out.num_rows() == 0 && !self.index.feeds_owing_build(node) {
+            // of hash skew. A join above answers a lane its build side never reached
+            // through `set_build(None)`, whatever its type owes.
+            if out.num_rows() == 0 {
                 continue;
             }
             let held = Held::of(out);

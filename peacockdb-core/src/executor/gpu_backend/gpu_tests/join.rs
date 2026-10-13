@@ -135,7 +135,8 @@ fn dropping_a_probing_join_releases_its_session() {
 
 /// A lane with no build batch owes nothing for the six types every row of which is built
 /// from a build row, and its probe rows for the three that preserve them — read off the
-/// type at `set_build`, the one `join_build(0)` still makes.
+/// type at `set_build`, the one `join_build(0)` still makes. A batch of no rows is the
+/// harness's `*_over_a_zero_row_build_*` cases, which both engines drain.
 #[test]
 fn an_empty_build_under_inner_owes_nothing() {
     let out = joined(false);

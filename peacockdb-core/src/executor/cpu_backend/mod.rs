@@ -79,18 +79,16 @@ pub struct CpuSource {
     schema: SchemaRef,
 }
 
-/// A join before its build side arrives.
+/// A join before its build side arrives: the DataFusion join it will run.
 pub struct CpuJoin {
-    calls: join::Calls,
+    plan: join::Plan,
 }
 
-/// A join with its build side set, taking probe batches.
+/// A join with its build side set: one DataFusion stream for the lane's life, fed a probe
+/// batch a call.
 pub struct CpuProbingJoin {
-    /// `None` is a build side that finished without a batch, which only reaches here for
-    /// a type that owes nothing — the probe calls the driver would make are drained.
-    build: Option<RecordBatch>,
-    calls: join::Calls,
-    accumulated: Vec<RecordBatch>,
+    stream: join::Stream,
+    build_bytes: usize,
     owes_nothing: bool,
 }
 
@@ -697,7 +695,8 @@ pub(crate) fn physical_expr(
     expr_physical::physical_expr(expr, input, registry)
 }
 
-/// Whether the CPU executor for this join keeps probe keys and answers at done.
+/// Whether the CPU executor for this join answers at done: asked of the executor itself,
+/// over an absent build side, where every finishing type answers a batch of no rows.
 ///
 /// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
 /// the test compares the answer against the recipe's `AtDone` call. The question crosses
@@ -709,7 +708,11 @@ pub(crate) fn has_finish_pass(
     probe: &ArrowSchema,
     ctx: Arc<TaskContext>,
 ) -> Result<bool, PlanError> {
-    CpuJoin::hash(node, build, probe, ctx).map(|executor| executor.has_finish_pass())
+    CpuJoin::hash(node, build, probe, ctx).map(|join| {
+        let (probing, _) = join.set_build(None).expect("an absent build side is a join");
+        let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
+        finished.is_some()
+    })
 }
 
 #[cfg(test)]
