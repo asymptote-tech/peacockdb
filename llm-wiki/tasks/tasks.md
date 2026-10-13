@@ -9,9 +9,11 @@ branch, which is why two chains need no locking.
 > **Host override, from 2026-10-08 until the human lifts it.** It overrides the specs and
 > `build-test.md` wherever they disagree.
 >
-> - **shad-gpu is down.** Build and run the GPU tests on **nebius-gpu**,
->   `dmitry@89.169.109.150`: an NVIDIA L40S with 46 GB, Ubuntu 24.04 and glibc 2.39, so it needs
->   no glibc patch. Use the address; not every host has the alias.
+> - **shad-gpu is down.** Build and run the GPU tests on **nebius-gpu**: an NVIDIA L40S with
+>   46 GB, Ubuntu 24.04 and glibc 2.39, so it needs no glibc patch.
+> - **Reach it as `nebius-gpu`, the `~/.ssh/config` entry, never by IP.** Its IP has changed
+>   (89.169.109.150 is gone) and can change again; the entry is the one place that tracks it.
+>   Older detail files quote the old address; do not copy it from them.
 > - **Only what needs the GPU goes there.** The device build (`build-test-shadgpu.sh --build`)
 >   and the device runs happen on nebius-gpu. Every CPU build and run stays local, as
 >   `build-test.md` describes: rust-only, the CPU tiers, the C++ CPU tests, cost-report.
@@ -21,7 +23,7 @@ branch, which is why two chains need no locking.
 > - **Sync the working tree, uncommitted, before every build. Do not commit to build.** Every
 >   commit stays green as before, and no work-in-progress push spends a CI run. From the workspace
 >   root:
->   `rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ dmitry@89.169.109.150:peacockdb-J/`.
+>   `rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ nebius-gpu:peacockdb-J/`.
 >   `--delete-after`, not `--delete`: otherwise the first sync deletes before the `.gitignore` files
 >   arrive, and so deletes the ignored data and build dirs it should keep.
 >   The filter keeps build dirs, target dirs and generated data on both sides.
@@ -121,10 +123,10 @@ calls it until join-backend.
 Planner, wire, both executors and the driver onto the session; every join refusal lifted but #250's off-spine IN; the
 `NOT IN` rewrite; the corpus and pbench cells turned on, compared with the committed estimate.
 
-### 9. [`verify-26.02.md`](verify-26.02.md) — closes no ticket — state: approved to build
+### 9. [`verify-26.02.md`](verify-26.02.md) — closes no ticket — state: new
 
 Every tier on shad-gpu's cuDF 26.02 environment, fixes, and the tpch sf40 benchmark of the cells
-the chain turned on, against 25.02; the evidence #244 waits on.
+the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to be built for now.
 
 ## Chain K (base: master)
 
