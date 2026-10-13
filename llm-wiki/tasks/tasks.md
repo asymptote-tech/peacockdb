@@ -134,10 +134,14 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 > GPU" note and overrides the specs, `build-test.md` and the coordinator's `done` rule wherever
 > they disagree.
 >
-> - **GPU tests run on nebius-gpu**, `dmitry@89.169.109.150`, under chain J's host override
->   above, with every rule there unless it is named here: GPU builds and runs only, CPU work stays
+> - **GPU tests run on nebius-gpu**, under chain J's host override above, with every rule
+>   there unless it is named here: GPU builds and runs only, CPU work stays
 >   local; cuDF 25.02; the `rsync --delete-after` sync, uncommitted; `build-test-shadgpu.sh
 >   --build` and the staged binaries run directly, never `--run`; sf40 and benchmarks out.
+> - **Reach it as `nebius-gpu`, the `~/.ssh/config` entry, never by IP.** Its IP has changed
+>   (89.169.109.150 is gone) and can change again; the entry is the one place that tracks it.
+>   Older detail files quote the old address; do not copy it from them. The sync target is
+>   `nebius-gpu:peacockdb-K/`.
 > - **This chain works in `~/peacockdb-K`, never `~/peacockdb-J`.** The sf1 data is already in its
 >   `testdata/`, hard-linked from chain J's copy; never edit those files in place.
 > - **Sharing the card with chain J is allowed.** If a run fails on memory while chain J's is on
