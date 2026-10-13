@@ -155,20 +155,27 @@ fn an_equi_join_whose_build_side_is_many_batches_names_the_node_that_fixes_it() 
     );
 }
 
-#[test]
-fn a_join_that_cannot_stream_its_probe_over_many_batches_names_the_node_that_fixes_it() {
-    // A filtered semi join is one legacy call over the whole probe side, so the planner
-    // owes it a single batch there — the capability matrix is what says so.
-    let join = joining(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
-        datafusion::common::JoinType::LeftSemi,
-        Some(Expr::binary(
+const EVERY_JOIN_TYPE: [datafusion::common::JoinType; 9] = [
+    datafusion::common::JoinType::Inner,
+    datafusion::common::JoinType::Left,
+    datafusion::common::JoinType::Right,
+    datafusion::common::JoinType::Full,
+    datafusion::common::JoinType::LeftSemi,
+    datafusion::common::JoinType::RightSemi,
+    datafusion::common::JoinType::LeftAnti,
+    datafusion::common::JoinType::RightAnti,
+    datafusion::common::JoinType::LeftMark,
+];
+
+/// `k < fk`, reading one column of each side.
+fn both_sides_filter() -> (Expr, Vec<JoinFilterColumn>) {
+    (
+        Expr::binary(
             Expr::column(0, "k"),
             BinaryOp::Lt,
             Expr::column(1, "fk"),
             DataType::Boolean,
-        )),
+        ),
         vec![
             JoinFilterColumn {
                 side: JoinSide::Build,
@@ -179,37 +186,28 @@ fn a_join_that_cannot_stream_its_probe_over_many_batches_names_the_node_that_fix
                 index: 0,
             },
         ],
-    );
-    invalid(
-        join.validate_schemas_and_partitions(),
-        "cannot stream its probe",
-    );
+    )
 }
 
 #[test]
-fn a_join_shape_the_capability_matrix_refuses_is_refused_at_validation() {
-    let join = joining(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::SingleBatch), &["fk"]),
-        datafusion::common::JoinType::Left,
-        Some(Expr::binary(
-            Expr::column(0, "k"),
-            BinaryOp::Lt,
-            Expr::column(1, "fk"),
-            DataType::Boolean,
-        )),
-        vec![
-            JoinFilterColumn {
-                side: JoinSide::Build,
-                index: 0,
-            },
-            JoinFilterColumn {
-                side: JoinSide::Probe,
-                index: 0,
-            },
-        ],
-    );
-    unsupported(join.validate_schemas_and_partitions(), "#153");
+fn a_filtered_equi_join_of_every_type_streams_its_probe() {
+    // The session matches a build row across probe calls, residual or not, so no type
+    // needs its probe side whole (#153, #159).
+    for join_type in EVERY_JOIN_TYPE {
+        let (filter, filter_columns) = both_sides_filter();
+        let join = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            Some(filter),
+            filter_columns,
+        );
+        assert_eq!(
+            join.validate_schemas_and_partitions(),
+            Ok(()),
+            "{join_type:?}"
+        );
+    }
 }
 
 #[test]
@@ -250,36 +248,26 @@ fn a_cross_join_over_several_lanes_names_the_node_that_fixes_it() {
 }
 
 #[test]
-fn a_left_nested_loop_join_streaming_its_probe_names_the_node_that_fixes_it() {
-    // Its finish pass accumulates keys and a predicate join has none, so the probe side
-    // has to be whole before the join runs.
-    let join = GpuNestedLoopJoin::new(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
-        datafusion::common::JoinType::Left,
-        Expr::binary(
-            Expr::column(0, "k"),
-            BinaryOp::Lt,
-            Expr::column(1, "fk"),
-            DataType::Boolean,
-        ),
-        vec![
-            JoinFilterColumn {
-                side: JoinSide::Build,
-                index: 0,
-            },
-            JoinFilterColumn {
-                side: JoinSide::Probe,
-                index: 0,
-            },
-        ],
-        None,
-        columns(&["k", "fk"]),
-    );
-    invalid(
-        join.validate_schemas_and_partitions(),
-        "GpuCoalesceAllBatches",
-    );
+fn a_nested_loop_join_of_every_type_streams_its_probe() {
+    // The session finishes a nested loop as it does an equi-join, so the Left form no longer
+    // needs its probe whole and the other seven are no longer refused (#160).
+    for join_type in EVERY_JOIN_TYPE {
+        let (filter, filter_columns) = both_sides_filter();
+        let join = GpuNestedLoopJoin::new(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            filter,
+            filter_columns,
+            None,
+            columns(&["k", "fk"]),
+        );
+        assert_eq!(
+            join.validate_schemas_and_partitions(),
+            Ok(()),
+            "{join_type:?}"
+        );
+    }
 }
 
 #[test]

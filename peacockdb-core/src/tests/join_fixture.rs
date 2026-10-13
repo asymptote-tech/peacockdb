@@ -20,10 +20,12 @@ use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::{ExecutionPlan, Partitioning};
 use datafusion::prelude::ParquetReadOptions;
 
+use crate::executor::{CpuBackend, run};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::planner;
 use crate::planner::{BatchSizing, PlanKnobs};
+use crate::test_support::batches_to_sorted_str;
 
 /// Lanes for the co-partitioned cases.
 pub(crate) const LANES: usize = 4;
@@ -116,6 +118,33 @@ impl Fixture {
         planner::plan(&plan, knobs(BatchSizing::OneBatchPerRowGroup))
             .map(|_| ())
             .expect_err(sql)
+    }
+
+    /// The query planned and run on the cpu at four lanes, its rows checked against
+    /// DataFusion's own answer to the same SQL; the row count, for a hand count beside it.
+    pub(crate) async fn answers_as_datafusion(&self, sql: &str) -> usize {
+        let expected = self
+            .ctx
+            .sql(sql)
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e}"))
+            .collect()
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
+        let tree = planned(&self.plan(sql).await).unwrap_or_else(|e| panic!("{sql}: {e}"));
+        let report = run::<CpuBackend>(tree.as_ref(), &self.ctx.task_ctx(), None)
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
+        let actual: Vec<RecordBatch> = report
+            .batches
+            .iter()
+            .map(|batch| batch.record_batch().clone())
+            .collect();
+        assert_eq!(
+            batches_to_sorted_str(&actual),
+            batches_to_sorted_str(&expected),
+            "{sql}"
+        );
+        actual.iter().map(RecordBatch::num_rows).sum()
     }
 
     pub(crate) async fn scan(&self, table: &str) -> Arc<dyn ExecutionPlan> {

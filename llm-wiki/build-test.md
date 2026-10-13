@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3164 test cases — Rust 2592, C++ 171, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3178 test cases — Rust 2606, C++ 171, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1777 cases: `--lib` 742, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1776 cases: `--lib` 741, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -123,7 +123,7 @@ one input per rule, each built to break the rule it is aimed at: a plan that vio
 unreachable from SQL because translation inserts the fix, so a hand-built input is the only
 thing that shows the guard going red
 
-| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 24 |
+| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 23 |
 |---|---|--:|
 
 what each of the three join kinds requires of its inputs, and the distribution a join declares
@@ -147,9 +147,10 @@ a prefix
 | Planner join capability | [planner::tests::join_capability](../peacockdb-core/src/planner/tests/join_capability.rs) | 14 |
 |---|---|--:|
 
-every hash join type crossed with a residual filter, the co-partitioning and lane rules, the
-null analysis both ways, and the session config's own registration path declaring strings
-`Utf8`; writes its own parquet, so no dataset
+every hash join type crossed with a residual filter and every nested-loop type, each planning
+with its probe streamed; the co-partitioning and lane rules; anti and mark joins planning over
+NULL keys, and a padded side's NULL seen by #137's filter; and the session config's own
+registration path declaring strings `Utf8`; writes its own parquet, so no dataset
 
 | Null analysis rules | [a_scalar_function_can_be_null_even_over_operands_that_cannot](../peacockdb-core/src/planner/tests/null_analysis.rs) | 11 |
 |---|---|--:|
@@ -189,7 +190,9 @@ and whether the filter landed below the shuffle
 |---|---|--:|
 
 every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
-the message a user sees
+the message a user sees. Five once refused, each now run on the cpu against DataFusion's own
+answer: a residual on Left, Right and Full joins and on the right-handed semi pair, anti and
+mark joins over NULL keys, and a nested loop of each of seven types
 
 | Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 3 |
 |---|---|--:|
@@ -555,7 +558,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 695 cases: `--lib -- gpu_tests::` 588, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 710 cases: `--lib -- gpu_tests::` 603, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -612,7 +615,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 359 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 374 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -621,11 +624,12 @@ device changes is red here rather than at a query's root. The upload round trip,
 — including the sink naming a column whose exported type is not the declared one — and
 `GpuLimit` proved the harness on the operators whose recipe carries no seq; then every
 seq-bearing operator — the exec three, both aggregates, the three accumulators, the scatter,
-nine hash-join types, cross, nested-loop and the scan — each case green or a `bug_` case
+nine hash-join types with and without a residual, cross, a nested loop of every type and the
+scan — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
 case. Then the joins along the dimensions the corpus varies: a crossing projection on every
 type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths,
-the composite's null second key pinned under #59;
+the composite's null second key answered as SQL's;
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
 the nested loop's cross-then-mask path. String keys are `Utf8`; the join cases declare no
 view type. Then the aggregates,

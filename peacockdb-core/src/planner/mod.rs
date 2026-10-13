@@ -115,15 +115,8 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
 #[derive(Debug)]
 pub(crate) struct NullAwareNotIn;
 
-/// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
-/// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
-/// executor hardcodes.
-pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
-    nullability::refuse_null_unsafe_joins(root)
-}
-
 /// A DataFusion physical plan as a node tree, without the pipeline around it: no
-/// validation, no null analysis and no memory model.
+/// validation and no memory model.
 ///
 /// `#[cfg(test)]` because only tests want a tree without the pipeline: `plan_text/tests.rs`
 /// and `planner/memory_estimation/tests.rs`. They are the reason this exists rather than

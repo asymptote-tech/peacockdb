@@ -17,6 +17,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
   - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
   - [#264 — the device refuses a group key that is not a bare column](#t264)
+  - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -328,6 +329,20 @@ smallest fix is a planner one, and the device needs no new arm.
 [#240](../archive/archived-tickets.md#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
 three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
 until this ticket had a number.
+
+<a id="t267"></a>
+### #267 — a Single-mode aggregate over a scan split into lanes is refused at tp4
+DataFusion plans an aggregate `mode=Single` where its input is one partition. The planner can map
+that input to several lanes, and `aggregate_sequence` (`translator/aggregate.rs`) then finalizes
+on every lane with no merge below it. Validation refuses the plan: "a finalizing merge over several
+lanes needs its input hashed on a subset of its group columns". The Final arm merges first; the
+Single arm passes `Shuffle::None` and does not.
+
+The small-table rule hides it: a source under 5 MB plans one lane, so a larger one is needed.
+
+**Corpus queries:** `pbench/not-in-uncorrelated` at the three tp4 modes, where the `NOT IN`
+rewrite's `count(*)` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
+`sub` gets four lanes. Its tp1 cells plan. Found when join-backend lifted #160, which refused first.
 
 ## Sort / Limit
 

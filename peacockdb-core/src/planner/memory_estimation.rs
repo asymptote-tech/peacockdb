@@ -14,6 +14,7 @@ use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
 use crate::plan::NodeKind;
 use crate::plan::PlanError;
+use crate::plan::needs_finish;
 use crate::plan::{NodeRef, as_node_ref};
 
 pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
@@ -241,10 +242,7 @@ impl<'a> Tree<'a> {
             NodeRef::Join(join) => {
                 let build = self.children[seq][0];
                 let rows = self.rows(build);
-                let matched = match join.capability() {
-                    Ok(capability) if capability.needs_finish => rows,
-                    _ => 0,
-                };
+                let matched = if needs_finish(join.join_type) { rows } else { 0 };
                 Some(self.bytes(build) + rows * HASH_TABLE_BYTES_PER_ROW + matched)
             }
             NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {

@@ -177,18 +177,14 @@ const PAYLOAD_QUERIES: [(&str, &str); 21] = [
     ("tpch", "q13"),
     ("tpch", "shuffle-stddev"),
     ("tpch", "nested-loop-join"),
-    // The Left form of it, which is the one shape whose probe side is a single batch: its
-    // call takes the build side rather than a copy, because with one call there is no
-    // second batch for the build side to still be there for.
+    // The Left form of it, the one nested loop here whose session finishes: it pads the
+    // build rows no probe row matched.
     ("tpch", "nested-loop-left-join"),
-    // q22 is the build-side semi family's finish, whose join type is the node's OWN
-    // LeftAnti: a key project per batch, then coalesce and that join at done. The other
-    // LeftAnti here is a Left outer's DERIVED finish — different keys, no projection, and
-    // a pad project after it — so neither covers the other.
+    // q22's LeftAnti is the build-side semi family: its session answers nothing per probe
+    // and everything at the finish, where q13's Left answers per probe and pads at the end.
     ("tpch", "q22"),
-    // q21 is the single-batch probe, where a filtered semi or anti join is one legacy call
-    // that hands the build side over rather than copying it — the same join types as q22
-    // and q13, and a different shape.
+    // q21's LeftSemi and LeftAnti carry a residual, which the `CudfJoin` payload writes as
+    // `filter` and `filter_columns` — q22's join type with a condition on each pair.
     ("tpch", "q21"),
     // q15 is the aggregate that finalizes on its own: one batch in one lane is already the
     // whole of every group, so the init node carries the finalize and its recipe is the
@@ -748,6 +744,34 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     // join, and only an Inner is a cross join by another name — a Left owes its preserved
     // side rows a cross join never emits. tpcds q9 is fifteen of the same shape.
     ("scalar-subquery-cross", "GpuNestedLoopJoin: join_type=Left"),
+    // Lifted from a refusal by join-backend: a residual on an outer or right-handed semi join
+    // (#153, #159), a nested loop of any type (#160), and anti and mark joins over keys NULL on
+    // both sides (#59). `not-in-uncorrelated` plans at tp1 only, refused here on #267.
+    ("left-join-residual", "GpuHashJoin: join_type=Left"),
+    ("right-join-residual", "GpuHashJoin: join_type=Right"),
+    ("full-join-residual", "GpuHashJoin: join_type=Full"),
+    ("probe-exists-residual", "GpuHashJoin: join_type=RightSemi"),
+    (
+        "probe-not-exists-residual",
+        "GpuHashJoin: join_type=RightAnti",
+    ),
+    ("not-in-correlated", "GpuHashJoin: join_type=RightAnti"),
+    ("nl-full", "GpuNestedLoopJoin: join_type=Full"),
+    ("nl-right", "GpuNestedLoopJoin: join_type=Right"),
+    ("nl-left-semi", "GpuNestedLoopJoin: join_type=LeftSemi"),
+    ("nl-left-anti", "GpuNestedLoopJoin: join_type=LeftAnti"),
+    ("nl-mark", "GpuNestedLoopJoin: join_type=LeftMark"),
+    ("nl-right-semi", "GpuNestedLoopJoin: join_type=RightSemi"),
+    ("nl-right-anti", "GpuNestedLoopJoin: join_type=RightAnti"),
+    ("indf-full-join", "GpuNestedLoopJoin: join_type=Full"),
+    ("not-exists-null-keys", "GpuHashJoin: join_type=LeftAnti"),
+    (
+        "anti-null-preserved-condition",
+        "GpuHashJoin: join_type=LeftAnti",
+    ),
+    ("exists-or-mark", "GpuHashJoin: join_type=LeftMark"),
+    ("mark-cross-residual", "GpuHashJoin: join_type=LeftMark"),
+    ("not-in-under-or", "GpuHashJoin: join_type=LeftMark"),
 ];
 
 #[test]

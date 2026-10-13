@@ -1,10 +1,8 @@
-//! The joins. All three take their build side as one batch per lane and stream the probe
-//! where the capability matrix allows it; the equi-join is co-partitioned, while cross and
-//! nested-loop need both inputs in one lane, having no key to co-locate on (#140).
+//! The joins. All three take their build side as one batch per lane and stream the probe;
+//! the equi-join is co-partitioned, while cross and nested-loop need both inputs in one
+//! lane, having no key to co-locate on (#140).
 
-use super::{
-    GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinCapability, JoinFilterColumn, JoinSide,
-};
+use super::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinFilterColumn, JoinSide};
 use std::any::Any;
 
 use super::ColumnRef;
@@ -70,18 +68,7 @@ impl GpuNode for GpuNestedLoopJoin {
             self.projection.as_ref(),
             &input_schema(self.build.as_ref()),
             &input_schema(self.probe.as_ref()),
-        )?;
-        if self.join_type == JoinType::Left
-            && input_layout(self.probe.as_ref()).batch_layout != BatchLayout::SingleBatch
-        {
-            return Err(PlanError::Invalid(
-                "GpuNestedLoopJoin{Left}: its probe side must be one batch — the finish pass \
-                 accumulates keys and a predicate join has none, so the planner puts a \
-                 GpuCoalesceAllBatches below it"
-                    .to_string(),
-            ));
-        }
-        Ok(())
+        )
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -388,53 +375,11 @@ fn collect_column_refs<'a>(expr: &'a Expr, into: &mut Vec<&'a ColumnRef>) {
     }
 }
 
-/// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// the engine: an outer join's residual filter is applied after the outer gather and drops
-/// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
-/// semi family.
-pub(crate) fn capability(
-    join_type: JoinType,
-    has_filter: bool,
-) -> Result<JoinCapability, PlanError> {
-    let streaming = |needs_finish| {
-        Ok(JoinCapability {
-            probe_streams: true,
-            needs_finish,
-        })
-    };
-    match join_type {
-        JoinType::Inner => streaming(false),
-        JoinType::Left | JoinType::Right | JoinType::Full if has_filter => {
-            Err(PlanError::Unsupported(format!(
-                "{join_type:?} join with a residual filter: the executor applies it after the \
-                 outer gather, so a padded row's NULLs drop it (#153)"
-            )))
-        }
-        // The build side is complete before the first probe call, so a probe row unmatched
-        // in this batch is unmatched everywhere; only build-side rows need the finish.
-        JoinType::Right => streaming(false),
-        JoinType::Left | JoinType::Full => streaming(needs_finish(join_type)),
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
-            // The finish answers for these. The filtered forms take their probe side as
-            // one batch, which the planner coalesces.
-            Ok(JoinCapability {
-                probe_streams: !has_filter,
-                needs_finish: needs_finish(join_type),
-            })
-        }
-        JoinType::RightSemi | JoinType::RightAnti if has_filter => {
-            Err(PlanError::Unsupported(format!(
-                "{join_type:?} join with a residual filter: no swapped mixed_* variant exists — \
-                 keeping the emitted side as the build turns it into a Left form (#159)"
-            )))
-        }
-        JoinType::RightSemi | JoinType::RightAnti => streaming(false),
-    }
-}
-
 /// Whether a join owes rows only its last probe batch can settle: the build rows nothing
 /// matched (Left, Full) or the build side's own answer (the semi family). These five are
-/// what a session's `join_finish` answers for, whatever the node's keys or residual.
+/// what a session's `join_finish` answers for, whatever the node's keys or residual. Every
+/// other type answers each probe row in its own call: the build side is complete before the
+/// first probe call, so a probe row unmatched in this batch is unmatched everywhere.
 pub(crate) fn needs_finish(join_type: JoinType) -> bool {
     match join_type {
         JoinType::Left
@@ -539,14 +484,6 @@ impl GpuNode for GpuHashJoin {
                  GpuCoalesceAllBatches below it"
                     .to_string(),
             ));
-        }
-        let capability = self.capability()?;
-        if !capability.probe_streams && probe.batch_layout != BatchLayout::SingleBatch {
-            return Err(PlanError::Invalid(format!(
-                "GpuHashJoin{{{:?}}} with a residual filter cannot stream its probe — the planner \
-                 inserts GpuCoalesceAllBatches below it",
-                self.join_type
-            )));
         }
         if let Some(filter) = &self.filter {
             check_filter_columns(

@@ -2525,26 +2525,25 @@ GpuUnload
                                                   GpuFilter: predicate=cs_ship_date_sk@0 IS NOT NULL, lanes=1, batches=multiple, schema=[cs_ship_date_sk:Int64, cs_ship_addr_sk:Int64, cs_call_center_sk:Int64, cs_warehouse_sk:Int64, cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
                                                     GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ship_date_sk:Int64, cs_ship_addr_sk:Int64, cs_call_center_sk:Int64, cs_warehouse_sk:Int64, cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
                                                       GpuLoadParquet: table=catalog_sales, projections=[cs_ship_date_sk@2, cs_ship_addr_sk@10, cs_call_center_sk@11, cs_warehouse_sk@14, cs_order_number@17, cs_ext_ship_cost@28, cs_net_profit@33], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11]]], lanes=4, batches=multiple, schema=[cs_ship_date_sk:Int64, cs_ship_addr_sk:Int64, cs_call_center_sk:Int64, cs_warehouse_sk:Int64, cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
-                        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[cs_order_number@1], schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
-                          GpuEmitPartitions: hash=[cs_order_number@1], lanes=4, batches=multiple, hashed_on=[cs_order_number@1], schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
-                            GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
-                              GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11]]], lanes=4, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
+                        GpuEmitPartitions: hash=[cs_order_number@1], lanes=4, batches=multiple, hashed_on=[cs_order_number@1], schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
+                          GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
+                            GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11]]], lanes=4, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
                     GpuEmitPartitions: hash=[cr_order_number@0], lanes=4, batches=multiple, hashed_on=[cr_order_number@0], schema=[cr_order_number:Int64]
                       GpuMergePartitions: lanes=1, batches=multiple, schema=[cr_order_number:Int64]
                         GpuLoadParquet: table=catalog_returns, projections=[cr_order_number@16], partition_groups=[[[0]],[[1]],[],[]], lanes=4, batches=multiple, schema=[cr_order_number:Int64]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#46 CudfProject, batch)
-    GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
+    GpuProject: calling_lanes=1, per batch: execute_node(#44 CudfProject, batch)
       GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
-        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#42 CudfCoalescePartitions, lane batches), execute_node(#43 CudfAggregate{Merge}, prior output); at done: execute_node(#44 CudfProject{finalize}, prior output)
+        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#41 CudfCoalescePartitions, lane batches), execute_node(#42 CudfAggregate{Merge}, prior output); at done: execute_node(#43 CudfProject{finalize}, prior output)
           GpuMergePartitions: none
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch)
-              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#38 CudfCoalescePartitions, lane batches), execute_node(#39 CudfAggregate{Merge}, prior output); at done: execute_node(#40 CudfProject{finalize}, prior output)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch)
-                  GpuHashJoin: calling_lanes=4, join_build(#35 CudfJoin); per probe batch: join_probe; at done: join_finish
-                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#32 CudfCoalescePartitions, lane batches)
-                      GpuHashJoin: calling_lanes=4, join_build(#30 CudfJoin); per probe batch: join_probe; at done: join_finish
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#40 CudfAggregate{Partial}, batch)
+              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#37 CudfCoalescePartitions, lane batches), execute_node(#38 CudfAggregate{Merge}, prior output); at done: execute_node(#39 CudfProject{finalize}, prior output)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
+                  GpuHashJoin: calling_lanes=4, join_build(#34 CudfJoin); per probe batch: join_probe; at done: join_finish
+                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#31 CudfCoalescePartitions, lane batches)
+                      GpuHashJoin: calling_lanes=4, join_build(#29 CudfJoin); per probe batch: join_probe; at done: join_finish
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#26 CudfCoalescePartitions, lane batches)
                           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#25 CudfRepartition{Hash, 1→4}, batch)
                             GpuMergePartitions: none
@@ -2576,15 +2575,14 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                   GpuFilter: calling_lanes=1, per batch: execute_node(#13 CudfFilter, batch)
                                                     GpuMergePartitions: none
                                                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#12 CudfScan, row groups)
-                        GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#29 CudfCoalescePartitions, lane batches)
-                          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
-                            GpuMergePartitions: none
-                              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
-                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#34 CudfRepartition{Hash, 1→4}, batch)
+                        GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
+                          GpuMergePartitions: none
+                            GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
+                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#33 CudfRepartition{Hash, 1→4}, batch)
                       GpuMergePartitions: none
-                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#33 CudfScan, row groups)
+                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#32 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=477011614, certain=25947864
+budget=2147483648, accumulators=451063750, certain=0
 GpuUnload: estimated_max_resident_size=4300
   GpuProject: estimated_max_resident_size=4300
     GpuProject: estimated_max_resident_size=5200
@@ -2596,7 +2594,7 @@ GpuUnload: estimated_max_resident_size=4300
                 GpuAggregate: estimated_max_resident_size=86492880
                   GpuHashJoin: estimated_max_resident_size=90425164
                     GpuCoalesceAllBatches: estimated_max_resident_size=61986564
-                      GpuHashJoin: estimated_max_resident_size=125414676
+                      GpuHashJoin: estimated_max_resident_size=104022504
                         GpuCoalesceAllBatches: estimated_max_resident_size=74960496
                           GpuEmitPartitions: estimated_max_resident_size=148
                             GpuMergePartitions: estimated_max_resident_size=37
@@ -2628,10 +2626,9 @@ GpuUnload: estimated_max_resident_size=4300
                                                   GpuFilter: estimated_max_resident_size=5600438
                                                     GpuMergePartitions: estimated_max_resident_size=5600438
                                                       GpuLoadParquet: estimated_max_resident_size=22401752, source_bytes=21986016, target_batch_bytes=21986016, amplification=4.0
-                        GpuCoalesceAllBatches: estimated_max_resident_size=25947864
-                          GpuEmitPartitions: estimated_max_resident_size=4555692
-                            GpuMergePartitions: estimated_max_resident_size=1138923
-                              GpuLoadParquet: estimated_max_resident_size=4555692, source_bytes=4494346, target_batch_bytes=4494346, amplification=4.0
+                        GpuEmitPartitions: estimated_max_resident_size=4555692
+                          GpuMergePartitions: estimated_max_resident_size=1138923
+                            GpuLoadParquet: estimated_max_resident_size=4555692, source_bytes=4494346, target_batch_bytes=4494346, amplification=4.0
                     GpuEmitPartitions: estimated_max_resident_size=3932284
                       GpuMergePartitions: estimated_max_resident_size=983071
                         GpuLoadParquet: estimated_max_resident_size=3932284, source_bytes=1152598, target_batch_bytes=1152598, amplification=4.0
@@ -20796,26 +20793,25 @@ GpuUnload
                                                   GpuFilter: predicate=ws_ship_date_sk@0 IS NOT NULL, lanes=1, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_warehouse_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                                                     GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_warehouse_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                                                       GpuLoadParquet: table=web_sales, projections=[ws_ship_date_sk@2, ws_ship_addr_sk@11, ws_web_site_sk@13, ws_warehouse_sk@15, ws_order_number@17, ws_ext_ship_cost@28, ws_net_profit@33], partition_groups=[[[0]],[[1,2]],[[3]],[[4,5]]], lanes=4, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_warehouse_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
-                        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
-                          GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
-                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
-                              GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0]],[[1,2]],[[3]],[[4,5]]], lanes=4, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                        GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                          GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                            GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0]],[[1,2]],[[3]],[[4,5]]], lanes=4, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
                     GpuEmitPartitions: hash=[wr_order_number@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
                       GpuMergePartitions: lanes=1, batches=multiple, schema=[wr_order_number:Int64]
                         GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[wr_order_number:Int64]
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#46 CudfProject, batch)
-    GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
+  GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
+    GpuProject: calling_lanes=1, per batch: execute_node(#44 CudfProject, batch)
       GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
-        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#42 CudfCoalescePartitions, lane batches), execute_node(#43 CudfAggregate{Merge}, prior output); at done: execute_node(#44 CudfProject{finalize}, prior output)
+        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#41 CudfCoalescePartitions, lane batches), execute_node(#42 CudfAggregate{Merge}, prior output); at done: execute_node(#43 CudfProject{finalize}, prior output)
           GpuMergePartitions: none
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch)
-              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#38 CudfCoalescePartitions, lane batches), execute_node(#39 CudfAggregate{Merge}, prior output); at done: execute_node(#40 CudfProject{finalize}, prior output)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch)
-                  GpuHashJoin: calling_lanes=4, join_build(#35 CudfJoin); per probe batch: join_probe; at done: join_finish
-                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#32 CudfCoalescePartitions, lane batches)
-                      GpuHashJoin: calling_lanes=4, join_build(#30 CudfJoin); per probe batch: join_probe; at done: join_finish
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#40 CudfAggregate{Partial}, batch)
+              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#37 CudfCoalescePartitions, lane batches), execute_node(#38 CudfAggregate{Merge}, prior output); at done: execute_node(#39 CudfProject{finalize}, prior output)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
+                  GpuHashJoin: calling_lanes=4, join_build(#34 CudfJoin); per probe batch: join_probe; at done: join_finish
+                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#31 CudfCoalescePartitions, lane batches)
+                      GpuHashJoin: calling_lanes=4, join_build(#29 CudfJoin); per probe batch: join_probe; at done: join_finish
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#26 CudfCoalescePartitions, lane batches)
                           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#25 CudfRepartition{Hash, 1→4}, batch)
                             GpuMergePartitions: none
@@ -20847,15 +20843,14 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                   GpuFilter: calling_lanes=1, per batch: execute_node(#13 CudfFilter, batch)
                                                     GpuMergePartitions: none
                                                       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#12 CudfScan, row groups)
-                        GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#29 CudfCoalescePartitions, lane batches)
-                          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
-                            GpuMergePartitions: none
-                              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
-                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#34 CudfRepartition{Hash, 1→4}, batch)
+                        GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
+                          GpuMergePartitions: none
+                            GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
+                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#33 CudfRepartition{Hash, 1→4}, batch)
                       GpuMergePartitions: none
-                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#33 CudfScan, row groups)
+                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#32 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=240142638, certain=12948912
+budget=2147483648, accumulators=227193726, certain=0
 GpuUnload: estimated_max_resident_size=4300
   GpuProject: estimated_max_resident_size=4300
     GpuProject: estimated_max_resident_size=5200
@@ -20867,7 +20862,7 @@ GpuUnload: estimated_max_resident_size=4300
                 GpuAggregate: estimated_max_resident_size=43163040
                   GpuHashJoin: estimated_max_resident_size=45456092
                     GpuCoalesceAllBatches: estimated_max_resident_size=30933512
-                      GpuHashJoin: estimated_max_resident_size=62586408
+                      GpuHashJoin: estimated_max_resident_size=52396576
                         GpuCoalesceAllBatches: estimated_max_resident_size=37407968
                           GpuEmitPartitions: estimated_max_resident_size=748
                             GpuMergePartitions: estimated_max_resident_size=187
@@ -20899,10 +20894,9 @@ GpuUnload: estimated_max_resident_size=4300
                                                   GpuFilter: estimated_max_resident_size=3664043
                                                     GpuMergePartitions: estimated_max_resident_size=3664043
                                                       GpuLoadParquet: estimated_max_resident_size=14656172, source_bytes=10730498, target_batch_bytes=10730498, amplification=4.0
-                        GpuCoalesceAllBatches: estimated_max_resident_size=12948912
-                          GpuEmitPartitions: estimated_max_resident_size=2759080
-                            GpuMergePartitions: estimated_max_resident_size=689770
-                              GpuLoadParquet: estimated_max_resident_size=2759080, source_bytes=2021319, target_batch_bytes=2021319, amplification=4.0
+                        GpuEmitPartitions: estimated_max_resident_size=2759080
+                          GpuMergePartitions: estimated_max_resident_size=689770
+                            GpuLoadParquet: estimated_max_resident_size=2759080, source_bytes=2021319, target_batch_bytes=2021319, amplification=4.0
                     GpuEmitPartitions: estimated_max_resident_size=2293052
                       GpuMergePartitions: estimated_max_resident_size=573263
                         GpuLoadParquet: estimated_max_resident_size=2293052, source_bytes=573263, target_batch_bytes=573263, amplification=4.0

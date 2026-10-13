@@ -11,7 +11,6 @@ use crate::plan::Batching;
 use crate::plan::KeyDistribution;
 use crate::plan::PlanAgg;
 use crate::plan::PlanError;
-use crate::plan::capability;
 use crate::plan::{BinaryOp, Expr};
 use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{NodeRef, as_node_ref};
@@ -517,7 +516,6 @@ async fn an_equi_join_is_co_partitioned_by_a_scatter_on_each_side() {
     // Lane p of one side holds exactly the rows that can match lane p of the other.
     assert_eq!(join.keys.len(), 1);
     assert!(!join.null_equals_null);
-    assert!(join.capability().unwrap().probe_streams);
     validate_all(tree.as_ref());
 }
 
@@ -539,17 +537,35 @@ async fn a_broadcast_shaped_join_runs_in_one_lane_until_140() {
 }
 
 #[tokio::test]
-async fn an_outer_join_with_a_residual_filter_is_refused() {
-    // Not a limitation of the engine: the shipping executor applies the filter after
-    // the outer gather, so a padded row's NULLs drop it (#153).
-    let err = capability(datafusion::common::JoinType::Left, true).unwrap_err();
+async fn an_outer_join_with_a_residual_filter_streams_its_probe() {
+    // The residual reads both sides, so it stays on the join (#153); the probe streams
+    // under it as under every join.
+    let tree = translated_at_tp4(
+        "SELECT c.c_name, s.s_name FROM customer c LEFT JOIN supplier s \
+         ON c.c_nationkey = s.s_nationkey AND s.s_acctbal > c.c_acctbal",
+        0,
+    )
+    .await;
+    let join = find(tree.as_ref(), &|node| {
+        matches!(as_node_ref(node), NodeRef::Join(_))
+    })
+    .unwrap_or_else(|| panic!("no join in {}", shape(tree.as_ref())));
+    let NodeRef::Join(node) = as_node_ref(join) else {
+        unreachable!()
+    };
     assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#153")),
-        "{err}"
+        node.filter.is_some(),
+        "the residual was pushed below the join"
     );
-    // The build-side semi family keeps its finish pass and gives up streaming instead.
-    let filtered_semi = capability(datafusion::common::JoinType::LeftSemi, true).unwrap();
-    assert!(!filtered_semi.probe_streams && filtered_semi.needs_finish);
+    assert!(
+        !matches!(
+            as_node_ref(join.children()[1]),
+            NodeRef::CoalesceAllBatches(_)
+        ),
+        "{}",
+        shape(tree.as_ref())
+    );
+    validate_all(tree.as_ref());
 }
 
 #[tokio::test]
@@ -763,19 +779,51 @@ async fn a_predicate_free_inner_nested_loop_merges_its_probe() {
     validate_all(tree.as_ref());
 }
 
-// #160 — the executor rejects anything but Inner and Left, so a type switch that accepts
-// every JoinType does not make the rest run. Task 9 lifts this and flips the test.
+/// pbench's `outer-on-true-empty`, `tiny LEFT JOIN empty ON true`, as DataFusion swaps it: a
+/// predicate-free Right nested loop whose build side has no row. The empty side is `tiny`
+/// filtered by what no footer statistic prunes, since a scan whose row groups all prune is
+/// refused (#256). DuckDB answers every `tiny` row, padded: eight.
 #[tokio::test]
-async fn bug_a_predicate_free_outer_nested_loop_is_refused() {
+async fn a_predicate_free_outer_nested_loop_pads_its_preserved_side() {
+    use datafusion::arrow::array::{Array, AsArray};
+    use datafusion::arrow::datatypes::Int32Type;
     use datafusion::common::JoinType;
-    let plan = predicate_free_nested_loop(JoinType::Right).await;
-    let err = Translator::new(4, Batching::Off)
-        .translate(&plan)
-        .expect_err("this shape should not plan");
-    assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#160")),
-        "{err}"
+    use datafusion::physical_plan::joins::NestedLoopJoinExec;
+    let data = crate::test_support::data_dir_for("pbench", "1");
+    let ctx = crate::register_tables_for(crate::build_session_state(4), &data)
+        .await
+        .expect("register pbench");
+    let side = async |sql: &str| {
+        ctx.sql(sql)
+            .await
+            .expect("plan the side")
+            .create_physical_plan()
+            .await
+            .expect("physical plan")
+    };
+    let build = side("SELECT t_id AS e_id FROM tiny WHERE t_id + 1 < 0").await;
+    let probe = side("SELECT t_id FROM tiny").await;
+    let plan: Arc<dyn ExecutionPlan> = Arc::new(
+        NestedLoopJoinExec::try_new(build, probe, None, &JoinType::Right, None)
+            .expect("a predicate-free nested loop"),
     );
+    let (tree, _) = crate::planner::plan(
+        &plan,
+        crate::tests::join_fixture::knobs(crate::planner::BatchSizing::OneBatchPerRowGroup),
+    )
+    .expect("a predicate-free Right nested loop plans (#160)");
+    let report =
+        crate::executor::run::<crate::executor::CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .expect("it runs");
+    let (mut padded, mut kept) = (0, Vec::new());
+    for batch in &report.batches {
+        let batch = batch.record_batch();
+        padded += batch.column(0).null_count();
+        kept.extend(batch.column(1).as_primitive::<Int32Type>().iter().flatten());
+    }
+    kept.sort();
+    assert_eq!(kept, (0..8).collect::<Vec<i32>>(), "every tiny row, once");
+    assert_eq!(padded, 8, "each of them padded");
 }
 
 // #63 — a table of no columns reads as no rows on a device, so where DataFusion plans rows and

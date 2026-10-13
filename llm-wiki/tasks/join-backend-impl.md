@@ -1268,32 +1268,44 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
 - Modify: `peacockdb-core/src/plan/join.rs:400-445` (capability), `:505-575` (validation), `:60-90` (nested loop validation);
   `planner/translator/nodes.rs:246-301,465-514`; `planner/pipeline.rs:75`, `planner/mod.rs:108-114`, `planner/nullability.rs` (the refusal)
 - Test: `planner/tests/join_refusals.rs:16,30,52,64,76`, `join_capability.rs:128-182,309,376,448`, `translator/tests.rs:542`, `plan/tests/joins.rs:159,190,253`
+- **Also moved, measured:** `plan/validate.rs`'s `declared_width` (a nested loop's width by its
+  type — the plan missed it, and it refused every projection-free semi-family nested loop),
+  `planner/memory_estimation.rs` and `executor/cpu_backend/join.rs` (the last two readers of
+  `capability`), `wire/tests.rs`' same-path test, `cpu_backend/tests/join.rs`' five cells,
+  `tests/join_fixture.rs` (`answers_as_datafusion`), the device harness (`join_cases.rs`,
+  `nested_cases.rs`), the registry's pbench plan columns, and ticket #267 — the detail file's
+  task 9 record.
 
 **Interfaces:**
 - Produces: `pub(crate) fn needs_finish(join_type: JoinType) -> bool` (Left, Full, LeftSemi,
-  LeftAnti, LeftMark); `JoinCapability`, `capability`, `answers_in_one_call`, `per_call_join_type`,
-  `finish_join_type` gone.
+  LeftAnti, LeftMark) — task 7 already added it; `JoinCapability`, `capability`,
+  `GpuHashJoin::capability`, `refuse_null_unsafe_joins` gone. (`answers_in_one_call`,
+  `per_call_join_type` and `finish_join_type` went in task 8.)
 
-- [ ] **Step 1: Flip the tests.** `join_refusals.rs`' five: #153, #159 and #160's become
+- [x] **Step 1: Flip the tests.** `join_refusals.rs`' five: #153, #159 and #160's become
   plans-and-answers tests (`an_outer_join_with_a_residual_filter_plans_and_answers_as_datafusion`,
-  … `_159`, `a_nested_loop_join_of_every_type_plans`), each comparing the cpu's answer with
+  `a_swapped_semi_or_anti_join_with_a_residual_filter_plans_and_answers_as_datafusion`,
+  `a_nested_loop_join_of_every_type_plans`), each comparing the cpu's answer with
   DataFusion's own collect over the same SQL. The two `_59_80` ones (`:52`, `:64`: a `NOT EXISTS`
   and a mark join over keys NULL on both sides) become
-  `an_anti_join_over_null_keys_plans_with_not_exists_semantics` and its mark twin — the physical
+  `an_anti_join_over_null_keys_plans_with_not_exists_semantics` and
+  `a_mark_join_over_null_keys_plans_with_in_semantics` — the physical
   refusal goes because every type now honours `null_equals_null`, which is `NOT EXISTS`'s meaning;
   what `NOT IN` needs beyond that is task 2's rewrite, and what it cannot answer is task 2's
   narrowed refusal, which **stays** (the planner tests of task 2 hold it). Task 5's
   `bug_a_predicate_free_outer_nested_loop_is_refused` (#160) flips to
-  `a_predicate_free_outer_nested_loop_pads_its_preserved_side` (8 padded rows over `empty`, as
-  DuckDB answers). pbench's hand-off: `PBENCH_JOINS` (pbench's `plan_goldens` test) gains each
-  query this task lifts from a refusal, with the join line its plan golden now shows.
+  `a_predicate_free_outer_nested_loop_pads_its_preserved_side` (8 padded rows, as DuckDB answers
+  `outer-on-true-empty`; over pbench's `tiny` filtered empty, since `empty` itself meets #256).
+  pbench's hand-off: `PBENCH_JOINS` gains 19 queries this task lifts from a refusal, with the
+  join line its plan golden now shows (`not-in-uncorrelated` is refused at tp4 on #267).
   `join_capability.rs`'s matrix (`expected()` at :128) becomes nine rows
   of `(type, needs_finish)` × filtered/not, and :182 asserts no probe-side `GpuCoalesceAllBatches`
-  anywhere; :309 and :376 assert planning; :448 asserts Right, Full, LeftSemi nested loops plan.
+  anywhere; :309 and :376 assert planning (:376 also that the padded side's NULL reaches #137's
+  filter); :448 asserts all nine nested-loop types plan with the probe streamed.
   `translator/tests.rs:542` and `plan/tests/joins.rs:159,190,253` follow (the probe-coalesce rule
   and the streaming-Left-nested-loop rule are gone).
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3:** narrow the NULL-key refusal, do not drop it: the physical
+- [x] **Step 2: Run red.** 15 red, each on the refusal or validation it names.
+- [x] **Step 3:** narrow the NULL-key refusal, do not drop it: the physical
   `refuse_null_unsafe_joins` (`nullability.rs`, `planner/mod.rs:108-114`, `pipeline.rs:75`) and
   `hardcodes_null_equality` go — they existed because the C++ hardcoded NULL = NULL for anti and
   mark, which the session no longer does — and `nullability.rs` keeps `can_be_null`,
@@ -1301,11 +1313,14 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   2's logical refusal of an IN or NOT IN read off a WHERE's AND/OR spine where it can meet a NULL); replace `capability` with `needs_finish`; in
   `hash_join` the probe is never coalesced; `nested_loop_join` accepts every type and never
   coalesces its probe (`GpuNestedLoopJoin`'s Left single-batch validation goes); the nested-loop
-  `check_projection` reads the node's `JoinType`. The two unreachable refusals stay
+  `check_projection` reads the node's `JoinType` (already true since task 5), and so must
+  `validate.rs`'s `declared_width`. The two unreachable refusals stay
   (`common.rs:94` mark column; `column_ordinal_of`'s bare-column key).
-- [ ] **Step 4: Run green** (rust-only, then the harness on the device); plan goldens regenerate
-  (probe-side coalesces disappear; nested loops beyond Inner/Left appear in pbench).
-- [ ] **Step 5: Commit.** `git commit -m "every join shape plans: #153, #159, #160 lifted; the NULL-key refusal narrowed to IN off the spine"`.
+- [x] **Step 4: Run green** (rust-only, then the harness on the device); plan goldens regenerate
+  (probe-side coalesces disappear; nested loops beyond Inner/Left appear in pbench), and with them
+  the cpu and cost goldens of the four queries that lost a coalesce, the payload golden, and the
+  registry's pbench plan columns.
+- [ ] **Step 5: Commit.** `git commit -m "every join shape plans: #153, #159, #160 lifted; the NULL-key refusal narrowed to IN off the spine"` — the coordinator's.
 
 ### Task 9b: A side DataFusion folds to nothing — `GpuEmpty` (review row 8)
 

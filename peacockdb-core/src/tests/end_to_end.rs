@@ -330,17 +330,16 @@ macro_rules! injected_queries {
 //
 // nested-loop Inner, and the smallest plan in the corpus that carries a join at all.
 // injected: tpch/nested-loop-join
-// nested-loop Left: the one mode whose probe side is a single batch, so its call takes the
-// build side rather than a copy of it.
+// nested-loop Left: the finish pads the build rows no probe row matched.
 // injected: tpch/nested-loop-left-join
 // RightAnti — the probe-side semi family, answered per batch with no finish pass.
 // injected: tpch/anti-join
-// Left outer: the finish pass, and the only cell with no device path at all (#152).
+// Left outer: the finish pass.
 end_to_end!(tpch, left_join);
 // Inner, multi-key Inner, Inner with a residual filter, LeftSemi and RightSemi in one plan.
 end_to_end!(tpch, q20);
-// LeftAnti with a residual filter, which the matrix answers in one legacy call over a
-// probe side the planner made single-batch.
+// LeftAnti with a residual filter, its probe streamed and its build rows settled at the
+// finish.
 end_to_end!(tpch, q21);
 // Full outer: Right's per-batch call and Left's finish, in one node.
 // injected: tpcds/q97

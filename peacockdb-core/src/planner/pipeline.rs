@@ -12,7 +12,7 @@ use std::sync::Arc;
 use datafusion::physical_plan::ExecutionPlan;
 
 use super::translator::Translator;
-use super::{BatchSizing, MemoryModel, PlanKnobs, estimate, refuse_null_unsafe_joins};
+use super::{BatchSizing, MemoryModel, PlanKnobs, estimate};
 use crate::plan::Batching;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
@@ -72,7 +72,6 @@ fn checked(
 ) -> Result<(Box<dyn GpuNode>, MemoryModel), PlanError> {
     validate(tree.as_ref())?;
     check_output_schema(tree.as_ref(), &root.schema())?;
-    refuse_null_unsafe_joins(tree.as_ref())?;
     let model = estimate(tree.as_ref(), budget)?;
     Ok((tree, model))
 }

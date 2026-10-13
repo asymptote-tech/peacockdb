@@ -465,9 +465,8 @@ fn a_null_key_matches_a_null_key_in_the_finish_pass_when_the_node_says_so() {
     );
 }
 
-/// The matrix's second dimension. A residual filter is not decoration: the matrix refuses
-/// five of its cells (#153, #159), and the four it admits answer where their unfiltered
-/// twins do — so every cell above has a twin here.
+/// The matrix's second dimension. A residual filter is not decoration: every cell above has a
+/// twin here, and each answers where its unfiltered twin does.
 ///
 /// `k * 10 = v` reads both sides, which is what makes it a residual rather than something
 /// DataFusion would have pushed below the join. It keeps the `(2, 20)` pair and drops
@@ -502,8 +501,7 @@ fn filtered(join_type: JoinType, output: &[(&str, DataType)]) -> GpuHashJoin {
     let (filter, filter_columns) = residual();
     GpuHashJoin::new(
         side(&dim_columns(), BatchLayout::SingleBatch),
-        // The planner coalesces a filtered semi join's probe side, and this is that batch.
-        side(&fact_columns(), BatchLayout::SingleBatch),
+        side(&fact_columns(), BatchLayout::MultipleBatches),
         join_type,
         vec![(0, 0)],
         Some(filter),
@@ -560,33 +558,43 @@ fn the_filtered_column_answers_where_the_unfiltered_one_does() {
     }
 }
 
-/// The five cells the matrix refuses — the three outer forms and the two right-handed semi
-/// ones — each for a defect or a missing cuDF variant rather than for anything the engine
-/// decided, so each names the ticket a reader would follow.
+/// The five cells the matrix refused — the three outer forms (#153) and the two right-handed
+/// semi ones (#159) — over two probe batches. A residual changes which pairs match: `(2, 21)`
+/// and `(4, 40)` are probe rows nothing keeps, and `1` and `3` build rows nothing matches.
 #[test]
-fn the_filtered_column_refuses_five_cells_by_ticket() {
-    let cases: [(JoinType, &str); 5] = [
-        (JoinType::Left, "#153"),
-        (JoinType::Right, "#153"),
-        (JoinType::Full, "#153"),
-        (JoinType::RightSemi, "#159"),
-        (JoinType::RightAnti, "#159"),
+fn the_five_filtered_cells_the_matrix_refused_answer() {
+    let cases: [(JoinType, Vec<(&str, DataType)>, Vec<&str>); 5] = [
+        (
+            JoinType::Left,
+            both_sides(),
+            vec!["2|b|2|20", "1|a|-|-", "3|c|-|-"],
+        ),
+        (
+            JoinType::Right,
+            both_sides(),
+            vec!["2|b|2|20", "-|-|2|21", "-|-|4|40"],
+        ),
+        (
+            JoinType::Full,
+            both_sides(),
+            vec!["2|b|2|20", "1|a|-|-", "3|c|-|-", "-|-|2|21", "-|-|4|40"],
+        ),
+        (JoinType::RightSemi, fact_columns(), vec!["2|20"]),
+        (JoinType::RightAnti, fact_columns(), vec!["2|21", "4|40"]),
     ];
-    for (join_type, ticket) in cases {
-        let node = filtered(join_type, &both_sides());
-        let refused = match CpuJoin::hash(
+    for (join_type, output, expected) in cases {
+        let node = filtered(join_type, &output);
+        let join = CpuJoin::hash(
             &node,
             &columns(&dim_columns()).fields,
             &columns(&fact_columns()).fields,
             ctx(),
-        ) {
-            Err(refused) => refused,
-            Ok(_) => panic!("{join_type:?} with a residual is refused by the matrix"),
-        };
-        let message = format!("{refused}");
-        assert!(
-            message.contains(ticket),
-            "{join_type:?} has to name {ticket}: {message}"
+        )
+        .unwrap_or_else(|e| panic!("{join_type:?} with a residual builds: {e}"));
+        assert_eq!(
+            drive(join),
+            rows(&expected),
+            "{join_type:?} with a residual"
         );
     }
 }

@@ -487,5 +487,5 @@ Not [#208](#t208), which is this shape at run time: the cpu's cross join emittin
 device emits a zero-row batch. #208 cannot be reached from the corpus until this closes, because
 the plan is refused before either backend sees it.
 
-**Corpus queries:** pbench's `cross-empty-build`, its plan cells disabled on this ticket. The row
-carries `208` as well, the ticket it is written for and will show once this lifts.
+**Corpus queries:** pbench's `cross-empty-build` (with `208`, which it shows once this lifts) and
+`outer-on-true-empty` (since #160 lifted), their plan cells disabled on this ticket.

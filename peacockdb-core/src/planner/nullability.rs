@@ -1,11 +1,10 @@
-//! Which columns can be NULL, on either tree, and the join shape refused because of it.
+//! Which columns can be NULL, on either tree, and the `IN` shape refused because of it.
 //!
 //! Two analyses of one question: `can_be_null` reads a planned GpuNode tree, and the
 //! rewrites that run before one exists read a DataFusion `LogicalPlan` with
 //! `logical_can_be_null`. Both read the data, not the declared types — every column in both
-//! benchmarks is declared nullable, keys included. Three join types hardcode
-//! `cudf::null_equality::EQUAL` whatever the plan's flag says (`cpp/src/operators/join.cpp`),
-//! which is set semantics rather than SQL's, so a NULL that can meet a NULL there is refused.
+//! benchmarks is declared nullable, keys included. An `IN` whose NULL answer a filter reads
+//! is refused where either side can hold one (#250): a mark join answers no NULL.
 //! Where either analysis cannot decide, a column is possibly-NULL: a false positive costs a
 //! refusal or a rewrite a reader can see, a false negative is a wrong answer.
 
@@ -21,43 +20,6 @@ use crate::plan::Expr;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{NodeRef, as_node_ref};
-
-/// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
-/// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
-/// executor hardcodes.
-pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
-    for child in root.children() {
-        refuse_null_unsafe_joins(child)?;
-    }
-    let NodeRef::Join(join) = as_node_ref(root) else {
-        return Ok(());
-    };
-    if !hardcodes_null_equality(join.join_type) || join.null_equals_null {
-        return Ok(());
-    }
-    let (build, probe) = (root.children()[0], root.children()[1]);
-    let (build_nulls, probe_nulls) = (can_be_null(build), can_be_null(probe));
-    let meeting = join.keys.iter().find(|(b, p)| {
-        nullable_at(&build_nulls, *b) && nullable_at(&probe_nulls, *p)
-    });
-    match meeting {
-        Some((b, p)) => Err(PlanError::Unsupported(format!(
-            "{:?} join on a key that can be NULL on both sides (build @{b}, probe @{p}) with \
-             null_equals_null=false: the executor matches NULL to NULL there whatever the \
-             flag says, which is set semantics rather than SQL's (#59, #80)",
-            join.join_type
-        ))),
-        None => Ok(()),
-    }
-}
-
-/// The three where the executor's `null_equality` is not the plan's to choose.
-fn hardcodes_null_equality(join_type: JoinType) -> bool {
-    matches!(
-        join_type,
-        JoinType::LeftAnti | JoinType::RightAnti | JoinType::LeftMark
-    )
-}
 
 fn nullable_at(columns: &[bool], ordinal: u32) -> bool {
     columns.get(ordinal as usize).copied().unwrap_or(true)

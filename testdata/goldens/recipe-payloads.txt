@@ -45,10 +45,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           files: /tmp/peacock-plan-bytes-root/tpch.sf1/nation.parquet
           schema: [n_nationkey:Int32, n_name:Utf8, n_regionkey:Int32, n_comment:Utf8]
 == tpch nested-loop-left-join
-sha256=9ac3fbddf975ee499ce80a480a86940037a7a1738298efe9e22d957443ec5873
+sha256=2d5729e25d000411e1b29f5fd57bab29bd0635e5a112b67fb88d447180843c38
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuNestedLoopJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish
-      #4 CudfJoin
+  GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe; at done: join_finish
+      #3 CudfJoin
         join_type: Left
         filter: (r_regionkey@0 Gt n_regionkey@1)
         filter_columns: [Left@0, Right@2]
@@ -60,12 +60,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           #0 CudfScan
             files: /tmp/peacock-plan-bytes-root/tpch.sf1/region.parquet
             schema: [r_regionkey:Int32, r_name:Utf8, r_comment:Utf8]
-    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
-        #3 CudfCoalescePartitions
-      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
-          #2 CudfScan
-            files: /tmp/peacock-plan-bytes-root/tpch.sf1/nation.parquet
-            schema: [n_nationkey:Int32, n_name:Utf8, n_regionkey:Int32, n_comment:Utf8]
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+        #2 CudfScan
+          files: /tmp/peacock-plan-bytes-root/tpch.sf1/nation.parquet
+          schema: [n_nationkey:Int32, n_name:Utf8, n_regionkey:Int32, n_comment:Utf8]
 == tpch q13
 sha256=75ebcdd44a9b56594bd009ca81a8e0da99a381782c8f4e616f3a6c9081adeba6
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
@@ -256,49 +254,49 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                             schema: [l_suppkey:Int64, l_extendedprice:Decimal128, l_discount:Decimal128, l_shipdate:Date32]
 == tpch q21
-sha256=ddee7cf464db95b0c5ba775cb39165737be015bf8e4925b452af0d941fbff9ba
+sha256=9d95fa8aec97a8996f6cfe15f2aeee83043aada034c3925fdff0874258fa84bf
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#46 CudfSortPreservingMerge, all lanes)
-      #46 CudfSortPreservingMerge
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#44 CudfSortPreservingMerge, all lanes)
+      #44 CudfSortPreservingMerge
         by: numwait@1 desc nulls first, s_name@0 asc nulls last
         fetch: 100
-    GpuSort: calling_lanes=4, per batch: execute_node(#45 CudfSort, batch)
-        #45 CudfSort
+    GpuSort: calling_lanes=4, per batch: execute_node(#43 CudfSort, batch)
+        #43 CudfSort
           by: numwait@1 desc nulls first, s_name@0 asc nulls last
           fetch: 100
-      GpuProject: calling_lanes=4, per batch: execute_node(#44 CudfProject, batch)
-          #44 CudfProject
+      GpuProject: calling_lanes=4, per batch: execute_node(#42 CudfProject, batch)
+          #42 CudfProject
             s_name: s_name@0
             numwait: count(*)@1
-        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#41 CudfCoalescePartitions, lane batches), execute_node(#42 CudfAggregate{Merge}, prior output); at done: execute_node(#43 CudfProject{finalize}, prior output)
-            #41 CudfCoalescePartitions
-            #42 CudfAggregate{Merge}
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#39 CudfCoalescePartitions, lane batches), execute_node(#40 CudfAggregate{Merge}, prior output); at done: execute_node(#41 CudfProject{finalize}, prior output)
+            #39 CudfCoalescePartitions
+            #40 CudfAggregate{Merge}
               mode: Merge
               group_by: s_name@0
               count(*): sum(count(*)@1)
-            #43 CudfProject{finalize}
+            #41 CudfProject{finalize}
               s_name: s_name@0
               count(*): count(*)@1
-          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#40 CudfRepartition{Hash, 1→4}, batch)
-              #40 CudfRepartition{Hash, 1→4}
+          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#38 CudfRepartition{Hash, 1→4}, batch)
+              #38 CudfRepartition{Hash, 1→4}
                 partitioning: Hash, 4
                 hash: s_name@0
-            GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#39 CudfCoalescePartitions, lane batches)
-                #39 CudfCoalescePartitions
+            GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#37 CudfCoalescePartitions, lane batches)
+                #37 CudfCoalescePartitions
               GpuMergePartitions: none
-                GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#37 CudfCoalescePartitions, lane batches), execute_node(#38 CudfAggregate{Merge}, prior output)
-                    #37 CudfCoalescePartitions
-                    #38 CudfAggregate{Merge}
+                GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#35 CudfCoalescePartitions, lane batches), execute_node(#36 CudfAggregate{Merge}, prior output)
+                    #35 CudfCoalescePartitions
+                    #36 CudfAggregate{Merge}
                       mode: Merge
                       group_by: s_name@0
                       count(*): sum(count(*)@1)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
-                      #36 CudfAggregate{Partial}
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#34 CudfAggregate{Partial}, batch)
+                      #34 CudfAggregate{Partial}
                         mode: Partial
                         group_by: s_name@0
                         count(*): count(1)
-                    GpuHashJoin: calling_lanes=4, join_build(#34 CudfJoin); per probe batch: join_probe; at done: join_finish
-                        #34 CudfJoin
+                    GpuHashJoin: calling_lanes=4, join_build(#32 CudfJoin); per probe batch: join_probe; at done: join_finish
+                        #32 CudfJoin
                           join_type: LeftAnti
                           keys: (l_orderkey@1, l_orderkey@0)
                           filter: (l_suppkey@1 NotEq l_suppkey@0)
@@ -306,10 +304,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           build_schema: [s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
                           probe_schema: [l_orderkey:Int64, l_suppkey:Int64]
                           projection: [0]
-                      GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#29 CudfCoalescePartitions, lane batches)
-                          #29 CudfCoalescePartitions
-                        GpuHashJoin: calling_lanes=4, join_build(#27 CudfJoin); per probe batch: join_probe; at done: join_finish
-                            #27 CudfJoin
+                      GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#28 CudfCoalescePartitions, lane batches)
+                          #28 CudfCoalescePartitions
+                        GpuHashJoin: calling_lanes=4, join_build(#26 CudfJoin); per probe batch: join_probe; at done: join_finish
+                            #26 CudfJoin
                               join_type: LeftSemi
                               keys: (l_orderkey@1, l_orderkey@0)
                               filter: (l_suppkey@1 NotEq l_suppkey@0)
@@ -406,32 +404,28 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                         #11 CudfScan
                                                           files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                                                           schema: [l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
-                          GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#26 CudfCoalescePartitions, lane batches)
-                              #26 CudfCoalescePartitions
-                            GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#25 CudfRepartition{Hash, 1→4}, batch)
-                                #25 CudfRepartition{Hash, 1→4}
-                                  partitioning: Hash, 4
-                                  hash: l_orderkey@0
-                              GpuMergePartitions: none
-                                GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#24 CudfScan, row groups)
-                                    #24 CudfScan
-                                      files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
-                                      schema: [l_orderkey:Int64, l_suppkey:Int64]
-                      GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#33 CudfCoalescePartitions, lane batches)
-                          #33 CudfCoalescePartitions
-                        GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#32 CudfRepartition{Hash, 1→4}, batch)
-                            #32 CudfRepartition{Hash, 1→4}
-                              partitioning: Hash, 4
-                              hash: l_orderkey@0
-                          GpuMergePartitions: none
-                            GpuFilter: calling_lanes=4, per batch: execute_node(#31 CudfFilter, batch)
-                                #31 CudfFilter
-                                  predicate: (l_receiptdate@3 Gt l_commitdate@2)
-                                  projection: [0, 1]
-                              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#30 CudfScan, row groups)
-                                  #30 CudfScan
+                          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#25 CudfRepartition{Hash, 1→4}, batch)
+                              #25 CudfRepartition{Hash, 1→4}
+                                partitioning: Hash, 4
+                                hash: l_orderkey@0
+                            GpuMergePartitions: none
+                              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#24 CudfScan, row groups)
+                                  #24 CudfScan
                                     files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
-                                    schema: [l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
+                                    schema: [l_orderkey:Int64, l_suppkey:Int64]
+                      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#31 CudfRepartition{Hash, 1→4}, batch)
+                          #31 CudfRepartition{Hash, 1→4}
+                            partitioning: Hash, 4
+                            hash: l_orderkey@0
+                        GpuMergePartitions: none
+                          GpuFilter: calling_lanes=4, per batch: execute_node(#30 CudfFilter, batch)
+                              #30 CudfFilter
+                                predicate: (l_receiptdate@3 Gt l_commitdate@2)
+                                projection: [0, 1]
+                            GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#29 CudfScan, row groups)
+                                #29 CudfScan
+                                  files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
+                                  schema: [l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
 == tpch q22
 sha256=90e262bcfddd0979b269367b6b4ed73ea4f4f3806f58abfa67c80ac4ff1b7706
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
@@ -2558,67 +2552,67 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                                         files: /tmp/peacock-plan-bytes-root/tpcds.sf1/store_sales.parquet
                                                                                         schema: [ss_sold_date_sk:Int64, ss_item_sk:Int64]
 == tpcds q16
-sha256=b01c278698d204794932c4be872c083ae3c442f690819cb078cafa517063deb9
+sha256=416360859d1d8e0af388d6cec2f2996fb0a59cd1878a9cfaa6d2444930d04f18
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
-  GpuProject: calling_lanes=1, per batch: execute_node(#46 CudfProject, batch)
-      #46 CudfProject
+  GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
+      #45 CudfProject
         order count: order count@0
         total shipping cost: total shipping cost@1
         total net profit: total net profit@2
-    GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
-        #45 CudfProject
+    GpuProject: calling_lanes=1, per batch: execute_node(#44 CudfProject, batch)
+        #44 CudfProject
           order count: count(alias1)@0
           total shipping cost: sum(alias2)@1
           total net profit: sum(alias3)@2
           count(DISTINCT cs1.cs_order_number): count(alias1)@0
       GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
-        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#42 CudfCoalescePartitions, lane batches), execute_node(#43 CudfAggregate{Merge}, prior output); at done: execute_node(#44 CudfProject{finalize}, prior output)
-            #42 CudfCoalescePartitions
-            #43 CudfAggregate{Merge}
+        GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#41 CudfCoalescePartitions, lane batches), execute_node(#42 CudfAggregate{Merge}, prior output); at done: execute_node(#43 CudfProject{finalize}, prior output)
+            #41 CudfCoalescePartitions
+            #42 CudfAggregate{Merge}
               mode: Merge
               group_by: 
               count(alias1): sum(count(alias1)@0)
               sum(alias2): sum(sum(alias2)@1)
               sum(alias3): sum(sum(alias3)@2)
-            #44 CudfProject{finalize}
+            #43 CudfProject{finalize}
               count(alias1): count(alias1)@0
               sum(alias2): sum(alias2)@1
               sum(alias3): sum(alias3)@2
           GpuMergePartitions: none
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch)
-                #41 CudfAggregate{Partial}
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#40 CudfAggregate{Partial}, batch)
+                #40 CudfAggregate{Partial}
                   mode: Partial
                   group_by: 
                   count(alias1): count(alias1@0)
                   sum(alias2): sum(alias2@1)
                   sum(alias3): sum(alias3@2)
-              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#38 CudfCoalescePartitions, lane batches), execute_node(#39 CudfAggregate{Merge}, prior output); at done: execute_node(#40 CudfProject{finalize}, prior output)
-                  #38 CudfCoalescePartitions
-                  #39 CudfAggregate{Merge}
+              GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#37 CudfCoalescePartitions, lane batches), execute_node(#38 CudfAggregate{Merge}, prior output); at done: execute_node(#39 CudfProject{finalize}, prior output)
+                  #37 CudfCoalescePartitions
+                  #38 CudfAggregate{Merge}
                     mode: Merge
                     group_by: alias1@0
                     alias2: sum(alias2@1)
                     alias3: sum(alias3@2)
-                  #40 CudfProject{finalize}
+                  #39 CudfProject{finalize}
                     alias1: alias1@0
                     alias2: alias2@1
                     alias3: alias3@2
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch)
-                    #37 CudfAggregate{Partial}
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
+                    #36 CudfAggregate{Partial}
                       mode: Partial
                       group_by: cs_order_number@0
                       alias2: sum(cs_ext_ship_cost@1)
                       alias3: sum(cs_net_profit@2)
-                  GpuHashJoin: calling_lanes=4, join_build(#35 CudfJoin); per probe batch: join_probe; at done: join_finish
-                      #35 CudfJoin
+                  GpuHashJoin: calling_lanes=4, join_build(#34 CudfJoin); per probe batch: join_probe; at done: join_finish
+                      #34 CudfJoin
                         join_type: LeftAnti
                         keys: (cs_order_number@0, cr_order_number@0)
                         build_schema: [cs_order_number:Int64, cs_ext_ship_cost:Decimal128, cs_net_profit:Decimal128]
                         probe_schema: [cr_order_number:Int64]
-                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#32 CudfCoalescePartitions, lane batches)
-                        #32 CudfCoalescePartitions
-                      GpuHashJoin: calling_lanes=4, join_build(#30 CudfJoin); per probe batch: join_probe; at done: join_finish
-                          #30 CudfJoin
+                    GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#31 CudfCoalescePartitions, lane batches)
+                        #31 CudfCoalescePartitions
+                      GpuHashJoin: calling_lanes=4, join_build(#29 CudfJoin); per probe batch: join_probe; at done: join_finish
+                          #29 CudfJoin
                             join_type: LeftSemi
                             keys: (cs_order_number@1, cs_order_number@1)
                             filter: (cs_warehouse_sk@0 NotEq cs_warehouse_sk@1)
@@ -2724,22 +2718,20 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                           #12 CudfScan
                                                             files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
                                                             schema: [cs_ship_date_sk:Int64, cs_ship_addr_sk:Int64, cs_call_center_sk:Int64, cs_warehouse_sk:Int64, cs_order_number:Int64, cs_ext_ship_cost:Decimal128, cs_net_profit:Decimal128]
-                        GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#29 CudfCoalescePartitions, lane batches)
-                            #29 CudfCoalescePartitions
-                          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
-                              #28 CudfRepartition{Hash, 1→4}
-                                partitioning: Hash, 4
-                                hash: cs_order_number@1
-                            GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
-                                #27 CudfScan
-                                  files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
-                                  schema: [cs_warehouse_sk:Int64, cs_order_number:Int64]
-                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#34 CudfRepartition{Hash, 1→4}, batch)
-                        #34 CudfRepartition{Hash, 1→4}
+                        GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#28 CudfRepartition{Hash, 1→4}, batch)
+                            #28 CudfRepartition{Hash, 1→4}
+                              partitioning: Hash, 4
+                              hash: cs_order_number@1
+                          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
+                              #27 CudfScan
+                                files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
+                                schema: [cs_warehouse_sk:Int64, cs_order_number:Int64]
+                    GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#33 CudfRepartition{Hash, 1→4}, batch)
+                        #33 CudfRepartition{Hash, 1→4}
                           partitioning: Hash, 4
                           hash: cr_order_number@0
-                      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#33 CudfScan, row groups)
-                          #33 CudfScan
+                      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#32 CudfScan, row groups)
+                          #32 CudfScan
                             files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_returns.parquet
                             schema: [cr_order_number:Int64]
 == tpcds q39

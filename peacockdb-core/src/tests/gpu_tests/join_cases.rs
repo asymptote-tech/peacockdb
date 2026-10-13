@@ -1,6 +1,6 @@
 //! `GpuHashJoin` through the harness: a build batch first and once, the probe streamed,
-//! nine types over the same two prefixed synthetic sides joined on `key`. The filtered
-//! forms exist only where the capability matrix admits one.
+//! nine types over the same two prefixed synthetic sides joined on `key`, each with and
+//! without a residual filter.
 //! The sides, scripts and `hash_join` are `pub(crate)` for `join_dimension_cases.rs`.
 //! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
@@ -44,8 +44,9 @@ pub(crate) fn padded(fields: Vec<Field>) -> Vec<Field> {
 
 /// What each type emits before any projection: both sides, the build side, the probe
 /// side, or the build side and a mark. A side an outer join pads is nullable, as
-/// DataFusion's join schema declares it and so as the planner would.
-fn output_of(join_type: JoinType) -> Vec<Field> {
+/// DataFusion's join schema declares it and so as the planner would. `nested_cases.rs`
+/// declares its nested loops by it too.
+pub(crate) fn output_of(join_type: JoinType) -> Vec<Field> {
     match join_type {
         JoinType::Inner => [side("b_"), side("p_")].concat(),
         JoinType::Left => [side("b_"), padded(side("p_"))].concat(),
@@ -389,10 +390,10 @@ operator_case! {
     }
 }
 
-// A residual filter where the matrix admits one: Inner, and the build-side semi family
-// over a single-batch probe, which answers at finish as it does unfiltered. Left/Right/Full
-// with one are refused at plan time (#153), RightSemi/RightAnti too (#159), so those have
-// no row.
+// A residual filter, every type. The build-side semi family answers at finish as it does
+// unfiltered; the outer forms pad what the residual leaves unmatched (#153), and the
+// right-handed semi forms keep or drop each probe row by it (#159). The probe streams under
+// every one, so the five lifted forms and the semi family run over two probe batches.
 
 operator_case! {
     GpuHashJoin,
@@ -419,6 +420,62 @@ operator_case! {
     GpuHashJoin,
     fn a_left_mark_join_with_a_residual_filter_agrees() {
         run_both(&hash_join(JoinType::LeftMark, false, true, None), one_probe()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Left, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Right, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Full, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_semi_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::RightSemi, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_anti_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::RightAnti, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_semi_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftSemi, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_anti_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftAnti, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_mark_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftMark, false, true, None), two_probes()).same(Order::Any);
     }
 }
 

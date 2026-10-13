@@ -37,7 +37,6 @@ use crate::plan::BatchLayout;
 use crate::plan::PlanError;
 use crate::plan::ROWMARKER;
 use crate::plan::Schema;
-use crate::plan::capability;
 use crate::plan::null_key_droppable;
 use crate::plan::{Batching, RowGroupMeta};
 use crate::plan::{BinaryOp, UnaryOp};
@@ -262,9 +261,6 @@ pub(crate) fn hash_join(
     t: &Translator,
     join: &HashJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    let has_filter = join.filter().is_some();
-    let capability = capability(*join.join_type(), has_filter)?;
-
     let mut keys = Vec::with_capacity(join.on().len());
     for (left, right) in join.on() {
         // Each side's key is an ordinal into that side, so each is read against that
@@ -301,9 +297,6 @@ pub(crate) fn hash_join(
     }
     if batches(build.as_ref()) != BatchLayout::SingleBatch {
         build = Box::new(GpuCoalesceAllBatches::new(build));
-    }
-    if !capability.probe_streams && batches(probe.as_ref()) != BatchLayout::SingleBatch {
-        probe = Box::new(GpuCoalesceAllBatches::new(probe));
     }
 
     let (filter, filter_columns) = match join.filter() {
@@ -543,12 +536,6 @@ pub(crate) fn nested_loop_join(
     join: &NestedLoopJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
     let join_type = *join.join_type();
-    if !matches!(join_type, JoinType::Inner | JoinType::Left) {
-        return Err(PlanError::Unsupported(format!(
-            "nested-loop join type {join_type:?} — the executor rejects anything but \
-             Inner and Left (#160)"
-        )));
-    }
     // DataFusion uses a nested-loop join with no predicate where the product itself is
     // what the query asked for — tpcds q9 pairs one-row aggregates that way. Only an
     // Inner is a cross join by another name: every other type owes its preserved side
@@ -573,12 +560,7 @@ pub(crate) fn nested_loop_join(
         ),
     };
     let build = build_side(t, join.left())?;
-    let mut probe = merged(node(t, join.right())?);
-    // A Left form emits its unmatched build rows in the same pass, so it cannot
-    // stream: #136's finish trick accumulates keys and a predicate join has none.
-    if join_type == JoinType::Left && batches(probe.as_ref()) != BatchLayout::SingleBatch {
-        probe = Box::new(GpuCoalesceAllBatches::new(probe));
-    }
+    let probe = merged(node(t, join.right())?);
     let (projection, schema) = past_rowmarkers(join, join_type, projected(join.projection()));
     Ok(Box::new(GpuNestedLoopJoin::new(
         build,

@@ -1720,10 +1720,8 @@ GpuUnload: output_rows=1, output_bytes=43
                                   in_rows=[] batch_rows=[[73049]] batch_bytes=[[894852]]
                             GpuLoadParquet: table=catalog_sales, projections=[cs_ship_date_sk@2, cs_ship_addr_sk@10, cs_call_center_sk@11, cs_warehouse_sk@14, cs_order_number@17, cs_ext_ship_cost@28, cs_net_profit@33], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, output_rows=1441548, output_bytes=105052814
                               in_rows=[] batch_rows=[[1441548]] batch_bytes=[[105052814]]
-                    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1441548, output_bytes=23425156
-                      in_rows=[[1441548]] batch_rows=[[1441548]] batch_bytes=[[23425156]]
-                      GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, output_rows=1441548, output_bytes=23425156
-                        in_rows=[] batch_rows=[[1441548]] batch_bytes=[[23425156]]
+                    GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, output_rows=1441548, output_bytes=23425156
+                      in_rows=[] batch_rows=[[1441548]] batch_bytes=[[23425156]]
                 GpuLoadParquet: table=catalog_returns, projections=[cr_order_number@16], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=144067, output_bytes=1170545
                   in_rows=[] batch_rows=[[144067]] batch_bytes=[[1170545]]
 == q17
@@ -7168,10 +7166,8 @@ GpuUnload: output_rows=1, output_bytes=43
                                   in_rows=[] batch_rows=[[73049]] batch_bytes=[[894852]]
                             GpuLoadParquet: table=web_sales, projections=[ws_ship_date_sk@2, ws_ship_addr_sk@11, ws_web_site_sk@13, ws_warehouse_sk@15, ws_order_number@17, ws_ext_ship_cost@28, ws_net_profit@33], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=52425109
                               in_rows=[] batch_rows=[[719384]] batch_bytes=[[52425109]]
-                    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=719384, output_bytes=11689990
-                      in_rows=[[719384]] batch_rows=[[719384]] batch_bytes=[[11689990]]
-                      GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11689990
-                        in_rows=[] batch_rows=[[719384]] batch_bytes=[[11689990]]
+                    GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11689990
+                      in_rows=[] batch_rows=[[719384]] batch_bytes=[[11689990]]
                 GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=71654, output_bytes=582189
                   in_rows=[] batch_rows=[[71654]] batch_bytes=[[582189]]
 == q95

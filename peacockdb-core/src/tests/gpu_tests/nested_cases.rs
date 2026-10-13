@@ -1,9 +1,7 @@
 //! `GpuCrossJoin` and `GpuNestedLoopJoin` through the harness: a build batch first and
-//! once, the probe streamed where the matrix lets it — the cross join and the Inner
-//! nested loop stream, the Left nested loop takes one probe batch and pads at finish —
-//! over the same two
-//! prefixed synthetic sides the hash join uses. Every case is green or a `bug_` test with
-//! its ticket above it; nothing here repairs.
+//! once, the probe streamed — the finishing types answer what they owe at finish — over
+//! the same two prefixed synthetic sides the hash join uses, a nested loop of every type.
+//! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;
 
@@ -11,6 +9,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::JoinType;
 
+use super::join_cases::output_of;
 use super::script::{Outcome, Script, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuCrossJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
@@ -37,16 +36,6 @@ fn side(prefix: &str) -> Vec<Field> {
         .collect()
 }
 
-/// `[build columns…, probe columns…]`, the probe side nullable where a Left form pads it,
-/// as DataFusion's join schema declares it and so as the planner would.
-fn joined(pads_probe: bool) -> Vec<Field> {
-    let probe = side("p_").into_iter().map(|f| {
-        let nullable = pads_probe || f.is_nullable();
-        f.with_nullable(nullable)
-    });
-    side("b_").into_iter().chain(probe).collect()
-}
-
 fn output(fields: Vec<Field>, projection: &Option<Vec<u32>>) -> Schema {
     let fields = match projection {
         None => fields,
@@ -63,7 +52,7 @@ fn leaf(prefix: &str, batches: BatchLayout) -> Box<dyn GpuNode> {
 }
 
 pub(crate) fn cross(projection: Option<Vec<u32>>) -> GpuCrossJoin {
-    let output = output(joined(false), &projection);
+    let output = output(output_of(JoinType::Inner), &projection);
     GpuCrossJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
         leaf("p_", BatchLayout::MultipleBatches),
@@ -145,23 +134,17 @@ fn like_column_residual() -> (Expr, Vec<JoinFilterColumn>) {
     )
 }
 
-/// Inner streams its probe; Left takes one batch, since a predicate join has no keys for
-/// the finish trick to accumulate.
+/// A nested loop of any type, its probe streamed.
 fn nested_with(
     join_type: JoinType,
     predicate: (Expr, Vec<JoinFilterColumn>),
     projection: Option<Vec<u32>>,
 ) -> GpuNestedLoopJoin {
     let (filter, filter_columns) = predicate;
-    let (pads_probe, probe_batches) = match join_type {
-        JoinType::Inner => (false, BatchLayout::MultipleBatches),
-        JoinType::Left => (true, BatchLayout::SingleBatch),
-        other => panic!("the harness builds Inner and Left nested loops, not {other:?}"),
-    };
-    let output = output(joined(pads_probe), &projection);
+    let output = output(output_of(join_type), &projection);
     GpuNestedLoopJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
-        leaf("p_", probe_batches),
+        leaf("p_", BatchLayout::MultipleBatches),
         join_type,
         filter,
         filter_columns,
@@ -353,6 +336,59 @@ operator_case! {
     GpuNestedLoopJoin,
     fn a_left_nested_loop_join_with_no_build_batch_is_never_probed() {
         run_both(&left(None), no_build()).same(Order::Any);
+    }
+}
+
+// The seven types beyond Inner and Left (#160), each over two probe batches: the build-side
+// semi family and Full answer the build rows at finish, Right, RightSemi and RightAnti each
+// probe row in its own call.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::Right, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::Full, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_semi_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftSemi, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_anti_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftAnti, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_mark_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftMark, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_semi_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::RightSemi, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_anti_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::RightAnti, None), two_probes()).same(Order::Any);
     }
 }
 

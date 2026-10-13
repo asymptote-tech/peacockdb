@@ -463,15 +463,6 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
         for residual in [false, true] {
             let node = typed_join(join_type, residual);
             let executor_finishes = cpu_finishes(&node, &build, &probe);
-            if node.capability().is_err() {
-                assert!(
-                    executor_finishes.is_err(),
-                    "{join_type:?} with residual={residual} is refused by the matrix and \
-                     the executor built it anyway"
-                );
-                cells += 1;
-                continue;
-            }
             let recipe = recipe_for(&node);
             let recipe_finishes = recipe
                 .calls
@@ -485,7 +476,7 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
             cells += 1;
             assert_eq!(
                 recipe_finishes,
-                executor_finishes.expect("a cell the matrix allows is one the executor builds"),
+                executor_finishes.expect("every cell is one the executor builds"),
                 "{join_type:?} with residual={residual}: the recipe and the cpu executor \
                  disagree about the finish"
             );

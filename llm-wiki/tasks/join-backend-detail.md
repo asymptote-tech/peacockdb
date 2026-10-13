@@ -12,7 +12,7 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 | state | `building` since 2026-10-09 |
 | developer rounds | 1 dispatched 2026-10-09, stopped by the human mid plan task 7; 2 dispatched 2026-10-13 |
 | review rounds | none |
-| tickets filed | none. Next free is **267**; master reserved 264–279 for this chain |
+| tickets filed | #267 (plan task 9). Next free is **268**; master reserved 264–279 for this chain |
 
 ## Hosts, and the device recipe now proven (2026-10-09)
 
@@ -1453,3 +1453,181 @@ projection. #63's device cells stay off for task 14 to run: tpcds q9, pbench
 `scalar-subquery-cross` and `cross-projection`. Their registry rows still carry `63`.
 nested-limits' device cells stay on #186: its part scan's `limit=28` is still refused beside
 row groups.
+
+#### Round 2, plan task 9 — the refusals lifted (#153, #159, #160; #59's narrowed to #250)
+
+Planner, validation, the cpu executor's last refusal line, and tests. No C++, no fbs, no device
+code: the session already answered every shape, so the device needed only harness cases.
+
+**What shipped.**
+- `plan/`: `JoinCapability`, `capability` and `GpuHashJoin::capability` gone; `needs_finish`
+  (task 7's) is the one fact left beside "every probe streams". `GpuHashJoin`'s "cannot stream
+  its probe" check and `GpuNestedLoopJoin`'s Left single-batch check gone. `validate.rs`'s
+  `declared_width` counts a nested loop's columns by its join type, as the hash join's arm did.
+- Translator: `hash_join` never coalesces its probe; `nested_loop_join` takes all nine types and
+  never coalesces its probe.
+- `planner/nullability.rs`: the physical `refuse_null_unsafe_joins` and `hardcodes_null_equality`
+  gone, and `pipeline.rs`'s call with them. **Narrowed, not deleted:** what refuses a NULL now is
+  task 2's `refuse_nullable_in_off_the_spine` (#250), which stays, beside `can_be_null`,
+  `logical_can_be_null` and `in_subquery_may_meet_null`. The module doc says so.
+- `cpu_backend/join.rs`: `node.capability()?` gone. `memory_estimation.rs` reads `needs_finish`.
+- The two unreachable refusals stay: the mark column in a filter (`common.rs`) and a key that is
+  not a bare column (`column_ordinal_of`), both still pinned in `join_capability.rs`.
+- Tests: the five `join_refusals.rs` cases answer on the cpu against DataFusion through a new
+  `Fixture::answers_as_datafusion`, each with a hand count (Left 10, Right 1000, Full 1005;
+  RightSemi 5, RightAnti 995; anti 3, mark 8; seven nested-loop types). `join_capability.rs`'s
+  matrix plans all 18 cells with the probe streamed, and its 9-type nested-loop case replaces the
+  refusal. The #160 pin flipped to `a_predicate_free_outer_nested_loop_pads_its_preserved_side`.
+  `plan/tests/joins.rs`: two validation refusals became one nine-type case each, a third merged
+  away. `cpu_backend/tests/join.rs`: the five refused cells answer. `PBENCH_JOINS` +19.
+- Device harness: `join_cases.rs` +8 (a residual on Left, Right, Full, RightSemi, RightAnti, and
+  the build-side semi family over two probe batches); `nested_cases.rs` +7 (Right, Full, the
+  three Left semi forms, RightSemi, RightAnti), `nested_with` building any type from
+  `join_cases::output_of`, now shared.
+
+**Divergences.** None found. All 15 new device cases agree with the cpu slot by slot.
+
+**What the plan got wrong.**
+- **A third site refused the shape.** `declared_width` counted both sides for every nested
+  loop, which refused a projection-free LeftSemi nested loop as "declares 2 columns and its two
+  sides produces 4". The hand-built matrix found it. No corpus query reaches the arm: every
+  semi-family nested loop DataFusion plans carries a projection, which takes the projection arm.
+- **`needs_finish` already existed** (task 7), and `answers_in_one_call`, `per_call_join_type`,
+  `finish_join_type` went in task 8, so the Interfaces line was mostly done.
+- **"8 padded rows over `empty`" cannot run over `empty`.** pbench's `empty.parquet` has no row
+  group and meets #256 at plan time. The flipped pin builds the same predicate-free Right nested
+  loop over `tiny` filtered empty by a predicate no footer prunes (`t_id + 1 < 0`), and asserts
+  DuckDB's 8 rows for `outer-on-true-empty`.
+- **The registry move is plan columns, not `plan_status`.** `plan_status` is whether DataFusion
+  plans the query, and it did all along.
+- **Two lifted queries meet something else.** `outer-on-true-empty` now reaches #256 (was #160).
+  `not-in-uncorrelated` plans at tp1 but at the three tp4 modes fails validation inside an
+  aggregate: DataFusion plans the rewrite's `count(*)` over `sub` as `mode=Single`, pbench's
+  small-table rule is off so `sub` gets four lanes, and `aggregate_sequence` finalizes on four
+  lanes with no merge. Not a join and out of the spec's restriction: filed as
+  [#267](../tickets/corpus-coverage.md#t267). The CLI, whose small-table rule keeps `sub` in one
+  lane, answers it. The two rows carry `256` and `267` beside their old tickets.
+- **Comments the lift made false**, fixed here: `plan_goldens.rs`'s payload reasons for
+  `nested-loop-left-join`, q21 and q22, and `end_to_end.rs`'s for the Left nested loop, q21 and
+  `left_join` (the last two were drift from task 7).
+
+**Goldens moved, by kind, checked by script.** No `.result.txt`, `duckdb-result.txt`,
+`gpu-result.txt` or `corpus_cases.inc`.
+
+| kind | files | sections per mode | what moved |
+|---|---|---|---|
+| `*.plans.txt` pbench | 5 | 23 | 20 lifted (19 plan; `not-in-uncorrelated` plans at tp1, #267's text at tp4); `nl-left`, `nl-left-decimal` lose a probe coalesce; `outer-on-true-empty`'s refusal #160 → #256 |
+| `*.plans.txt` tpch | 5 | 2 | q21 (2 coalesces), `nested-loop-left-join` (1) |
+| `*.plans.txt` tpcds | 5 | 2 | q16, q94 (1 each) |
+| `recipe-payloads.txt` | 1 | 3 of 21 | `nested-loop-left-join`, q21, q16: seqs renumbered, digests |
+| `*-mini.cpu.txt` tpch, tpcds | 10 | 2 | the same four queries |
+| `*-mini.cost.txt` tpch, tpcds | 10 | 2 | derived |
+| `cost-registry.csv` | 1 | 21 rows | 20 pbench rows' plan columns, 97 cells `disabled` → `enabled` (19 × 5 + 2); tickets on two |
+
+The arithmetic. In every tpch and tpcds plan golden, once coalesce lines are dropped, seqs
+normalized and `--- memory ---` figures set aside, the file equals the base. The one exception
+is tpch tp4-sized, whose two q21 lineitem scans read one batch per lane where they read two.
+The sizer derives the batch from the memory model, and the coalesce no longer costs anything.
+In the `.cpu.txt` files `GpuCoalesceAllBatches` is the only node kind whose count changed. tpch
+goes 76→73 at tp1 and 102→99 or 104→101 at tp4, so −3. tpcds goes 618→616, 767→765 and 775→773,
+so −2. With each coalesce and its `in_rows` line dropped, nine files equal the base. The tenth
+is tpch tp4-sized, which differs on those scans' batching alone; every `output_rows` holds. The
+payload sections are equal once seqs, indentation, digests and the coalesce are set aside.
+pbench's `.cpu.txt` did not move: every lifted cell and both `nl-left` cpu cells are off.
+
+**Which cpu cells become enable-able: all 20 newly planned pbench queries, measured, left to
+task 14.** Each was run through the CLI (rust-only, tp1 and tp4) and compared with its committed
+DuckDB section: full rows for 15, rows plus per-column non-null counts for the five over the cap.
+All 40 runs agree. Enabling them is task 14 step 2's: registry first, `duckdb_oracle` off
+`duckdb_none`. Caveats: `not-in-uncorrelated`'s tp4 cells wait on #267; `indf-full-join`
+plans as a Full nested loop over `IS NOT DISTINCT FROM`, which the device's AST refuses until 9c;
+`outer-on-true-empty` waits on #256.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base d7042a8c`: 726 compared, 20
+changed, **20 improvements, 0 regressions**. These are the four queries that lost a coalesce, at
+five modes. q21 −16.78% at tp1 (904.54 → 752.75 MB) and −8.44% at tp4; q16 −14.77% / −4.40…4.62%;
+q94 −14.60% / −4.36…4.57%; `nested-loop-left-join` −9.94% (24.16 → 21.76 KB, the 2,458 bytes the
+nation coalesce emitted) and −8.90% at tp4-single.
+
+**Red-green evidence.** Red first: 15 lib cases, each on the refusal or validation it names.
+One red was mine. Both `join_refusals` and `join_capability` named a fixture `nlj-types`, so one
+deleted the other's parquet mid-run. Renamed. Then mutations, each applied by an asserted single
+match against the whole `--lib` tier, restored from a saved copy and checked with `cmp`. The
+production diff was then read line by line.
+- M1 the filtered semi family's probe coalesce back: 17 failed — the matrix case, all 15 plan
+  goldens, the payload golden.
+- M2 the #160 refusal back: 8 failed — both nested-loop type cases, the flipped pin, pbench ×5.
+- M3 the Left nested loop's probe coalesce back: 12 failed — the nested-loop case, pbench and
+  tpch goldens, the payload golden.
+- M4 `declared_width` counting both sides: 1 failed, the hand-built nested-loop matrix alone.
+- M5 the cpu refusing a residual on Left/Right/Full/RightSemi/RightAnti: 4 failed — the five
+  cells, both SQL residual cases, the wire same-path case.
+- M6 the estimator's matched column priced at 0: 16 failed — the residency case and 15 goldens.
+- Device, one build: D1 = M5, D2 the cpu refusing a nested loop beyond Inner and Left. 12
+  failed, exactly the 5 + 7 new harness cases, 591 passed. Restored, `cmp`-checked, touched,
+  re-synced; the final build ran 603 green.
+
+**The device run, recorded.** nebius-gpu, NVIDIA L40S, 0 MiB in use; cuDF 25.02; the final tree
+synced, `./scripts/build-test-shadgpu.sh --build` rc 0, each binary run directly with
+`--test-threads=1`. **841 cases, all green**: `peacock_gpu_tests` 2, `peacock_plan_tests` 79,
+`peacock_join_session_tests` 53, `test_gpu_corpus` 95, `test_node_timing` 1,
+`peacockdb_core_gpu_lib gpu_tests::` 603 (+15), `peacock_gpu_benchmarks --skip bench_` 8. Not
+run, per the override: the sf40 pair and the `bench_` cases. The 20 newly planned pbench
+queries' device cells are off, so no corpus cell of theirs ran; the node-level cases above are
+the device's evidence for every type with a residual and every nested-loop type. Disk 28 GB free
+of 96 throughout; nothing deleted.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 739 passed, 2 ignored; `test_cpu_corpus`
+1006; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage`
+11; `test_golden_format` 43.
+
+**Warnings.** None new. The rust-only build and lib-test build have none. On nebius,
+`cargo-cudf.sh build -p peacockdb-core --features gpu` (with `CUDF_ROOT` set, which the script
+demands) gives the same 26 pre-existing ones, by file (`executor/mod.rs` 14, `instrument.rs` 5,
+`driver/{measurements,mod}.rs` 3 + 3, `driver/index.rs` 1). The gpu lib-test build gives the one
+pre-existing `AsArray`.
+
+**Formatting.** The crate is edition 2024, and `rustfmt --edition 2021` re-sorts its imports
+the other way — a trap worth the line. Every touched file was rustfmt-clean at HEAD under 2024
+but `nullability.rs`. Those that gained hunks were formatted whole through a temp copy, and every
+touched file is clean now. `nullability.rs` reports one pre-existing hunk where it had two.
+`plan_goldens.rs` is 1,145 lines, 1,121 at HEAD and over the cap already; `PBENCH_JOINS` grew it.
+
+**build-test.md counts, counted off `--list`.** cpu block 1777 → 1776: `--lib` 742 → 741, "Join
+declarations" 24 → 23. "Planner join capability" 14, "Planner join refusals" 10, "Translator"
+37 and "CPU backend executors" 80 (+1 in "Executor contract") hold. gpu block 695 → 710: `--lib
+-- gpu_tests::` 588 → 603, "Operator harness" 359 → 374. Rust 2592 → 2606, grand total 3164 →
+3178. Prose rewritten in this change: "Planner join capability" (every cell plans; the null
+analysis' new witness), "Planner join refusals" (the five shapes that now answer), "Operator
+harness" (a residual on every hash type, every nested-loop type; the #59 composite pin's
+sentence, stale since task 7).
+
+**architecture.md sentences this round falsified** (the coordinator's, or task 15's rewrite):
+- the node table's `GpuHashJoin` row, "the capability matrix below" — it is two facts now;
+- the matrix's build-side semi row, "the filtered forms, which take a single-batch probe";
+- its "Nested-loop Left" row, "with a single-batch probe", and the absence of the seven other
+  nested-loop types;
+- the whole "Four shapes are refused at plan time" paragraph. The two narrower refusals beside
+  it stand, and #250's off-spine `IN` is the NULL refusal now;
+- "Keys rather than probe rows, because the alternative is … the single-batch probe";
+- "anti and mark stay `EQUAL` until the planner distinguishes `NOT IN` from `NOT EXISTS`".
+
+**Ticket text made stale.** #153, #159, #160, #59 and #80 each say their pbench rows are refused
+"at all five modes". They now plan, and answer as DuckDB on the cpu. These close with this task.
+#256's corpus line gained `outer-on-true-empty`, in this change. Drift, not mine: #282
+(corpus-coverage, master's) describes #256's defect.
+
+**A trap for the next test writer.** `join_fixture::Fixture::new(name)` makes its directory from
+the process id and the name. Two modules using one name race in one test binary, and the loser
+reads "Object at location … not found". Names must be unique across `planner/tests/`.
+
+**What plan tasks 9b and 9c inherit.**
+- 9b: `empty-side-left-join` is still refused on `EmptyExec`. `cross-empty-build` and
+  `outer-on-true-empty` are refused on #256, whose ticket names a `GpuEmpty` as one fix. Both
+  rows' DuckDB answers are committed.
+- 9c: `indf-full-join` now plans as `GpuNestedLoopJoin{Full}` over `d_k IS NOT DISTINCT FROM t_k`
+  and answers as DuckDB on the cpu (2,009 rows). Its device run would meet the AST's refusal. The
+  promotion to a hash join moves its five plan sections and its `PBENCH_JOINS` row, which reads
+  `GpuNestedLoopJoin: join_type=Full` today.
+- 10: the device harness already has a residual on all nine hash types and every nested-loop
+  type over two probe batches. Step 2's "per type" lists should not add duplicates.

@@ -65,8 +65,6 @@ impl CpuJoin {
         probe: &ArrowSchema,
         ctx: Arc<TaskContext>,
     ) -> Result<Self, PlanError> {
-        // The matrix's refusals stand until the planner lifts them (#153, #159).
-        node.capability()?;
         let mut on: Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)> =
             Vec::with_capacity(node.keys.len());
         for (build_ordinal, probe_ordinal) in &node.keys {

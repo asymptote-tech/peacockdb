@@ -258,9 +258,17 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
             projection: Some(columns),
             ..
         }) => (columns.len(), "its projection"),
-        NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => (
+        NodeRef::CrossJoin(_) => (
             width_of(node.children()[0]) + width_of(node.children()[1]),
             "its two sides",
+        ),
+        NodeRef::NestedLoopJoin(join) => (
+            emitted_columns(
+                join.join_type,
+                width_of(node.children()[0]),
+                width_of(node.children()[1]),
+            ),
+            "the sides its join type emits",
         ),
         NodeRef::Aggregate(aggregate) => aggregate_width(&aggregate.body),
         NodeRef::AggregateBatches(aggregate) => aggregate_width(&aggregate.body),

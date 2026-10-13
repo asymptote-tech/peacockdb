@@ -769,18 +769,8 @@ impl GpuNestedLoopJoin {
     }
 }
 
-/// What the capability matrix says about one join mode: whether the probe side can stream
-/// batch by batch, and whether the lane owes a pass at done for what a streamed probe
-/// cannot know — which build rows matched at least once (#136).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct JoinCapability {
-    pub(crate) probe_streams: bool,
-    pub(crate) needs_finish: bool,
-}
-
-/// An equi-join: the build side is one batch per lane, the probe streams unless the
-/// capability matrix says otherwise, and lane p of each side holds exactly the rows that
-/// can match lane p of the other.
+/// An equi-join: the build side is one batch per lane, the probe streams, and lane p of each
+/// side holds exactly the rows that can match lane p of the other.
 #[derive(Debug)]
 pub(crate) struct GpuHashJoin {
     kind: NodeKind,
@@ -821,10 +811,6 @@ impl GpuHashJoin {
             projection,
             schema,
         )
-    }
-
-    pub(crate) fn capability(&self) -> Result<JoinCapability, PlanError> {
-        capability(self.join_type, self.filter.is_some())
     }
 }
 
@@ -1291,17 +1277,6 @@ pub(crate) fn finalize_columns(
     output: &Schema,
 ) -> Result<Vec<NamedExpr>, PlanError> {
     aggregate::finalize_columns(body, state, output)
-}
-
-/// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// the engine: an outer join's residual filter is applied after the outer gather and drops
-/// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
-/// semi family.
-pub(crate) fn capability(
-    join_type: JoinType,
-    has_filter: bool,
-) -> Result<JoinCapability, PlanError> {
-    join::capability(join_type, has_filter)
 }
 
 /// Whether a join owes rows only its last probe batch can settle — what a session's
