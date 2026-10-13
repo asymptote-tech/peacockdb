@@ -3,9 +3,12 @@
 #include "peacock/operators.h"
 #include "peacock/expr.h"
 
+#include <cudf/column/column_factories.hpp>
 #include <cudf/io/parquet.hpp>
+#include <cudf/io/parquet_metadata.hpp>
 #include <cudf/concatenate.hpp>
 #include <cudf/table/table.hpp>
+#include <cudf/scalar/scalar.hpp>
 #include <cudf/unary.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
@@ -14,6 +17,25 @@
 #include <string>
 
 namespace peacock {
+
+/// A scan of no column: the rows the chosen row groups hold, read off the footer, as the one
+/// non-null INT8 column of zeros the plan declares in their place (#63). Nothing is decoded.
+static TableResult rows_of(std::vector<std::string> const& paths,
+                           std::vector<cudf::size_type> const& rgs, uint64_t limit) {
+  auto meta = cudf::io::read_parquet_metadata(cudf::io::source_info{paths});
+  int64_t rows = 0;
+  if (rgs.empty()) {
+    rows = meta.num_rows();
+  } else {
+    auto const& groups = meta.rowgroup_metadata();
+    for (auto g : rgs) rows += groups.at(static_cast<std::size_t>(g)).at("num_rows");
+  }
+  if (limit > 0) rows = std::min<int64_t>(rows, static_cast<int64_t>(limit));
+  cudf::numeric_scalar<int8_t> zero(0, true);
+  std::vector<std::unique_ptr<cudf::column>> cols;
+  cols.push_back(cudf::make_column_from_scalar(zero, static_cast<cudf::size_type>(rows)));
+  return TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), {"__rowmarker__"});
+}
 
 TableResult execute_scan(const fb::CudfScan* scan,
                          cudf::host_span<const uint32_t> row_groups_override) {
@@ -33,6 +55,21 @@ TableResult execute_scan(const fb::CudfScan* scan,
     }
     paths.push_back(std::move(s));
   }
+
+  // Row-group pruning: decode ONLY the groups the serializer computed (the same
+  // DataFusion PruningPredicate the CPU path prunes with) unless this call overrides
+  // them — with the RG→partition map, or one batch of the loader.
+  // An empty override defers to the node's list, and an empty list reads all (#16).
+  std::vector<cudf::size_type> rgs;
+  if (!row_groups_override.empty()) {
+    rgs.reserve(row_groups_override.size());
+    for (auto rg : row_groups_override) rgs.push_back(static_cast<cudf::size_type>(rg));
+  } else if (auto* own = scan->row_groups()) {
+    rgs.reserve(own->size());
+    for (auto rg : *own) rgs.push_back(static_cast<cudf::size_type>(rg));
+  }
+
+  if (scan->rows_only()) return rows_of(paths, rgs, scan->limit());
 
   // Build column name list from file_schema + projection.
   std::vector<std::string> all_names;
@@ -62,18 +99,6 @@ TableResult execute_scan(const fb::CudfScan* scan,
     opts.set_num_rows(static_cast<cudf::size_type>(scan->limit()));
   }
 
-  // Row-group pruning: decode ONLY the groups the serializer computed (the same
-  // DataFusion PruningPredicate the CPU path prunes with) unless this call overrides
-  // them — with the RG→partition map, or one batch of the loader.
-  // An empty override defers to the node's list, and an empty list reads all (#16).
-  std::vector<cudf::size_type> rgs;
-  if (!row_groups_override.empty()) {
-    rgs.reserve(row_groups_override.size());
-    for (auto rg : row_groups_override) rgs.push_back(static_cast<cudf::size_type>(rg));
-  } else if (auto* own = scan->row_groups()) {
-    rgs.reserve(own->size());
-    for (auto rg : *own) rgs.push_back(static_cast<cudf::size_type>(rg));
-  }
   if (!rgs.empty()) {
     opts.set_row_groups({rgs});
   }

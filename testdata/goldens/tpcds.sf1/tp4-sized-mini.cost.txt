@@ -136,12 +136,12 @@ cuda_join_bytes=1680 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
 cuda_shuffle_bytes=1040 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
-cuda_passthrough_bytes=1550 # GpuProject, GpuCoalesceAllBatches
+cuda_passthrough_bytes=3095942 # GpuProject, GpuCoalesceAllBatches
 vram_to_ram_bytes=85 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=926575504
+peacockdb_cost=929669896
 == q10
 storage_read_bytes=228705565 # GpuLoadParquet
 cuda_filter_bytes=81910085 # GpuFilter
@@ -520,12 +520,12 @@ cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
 cuda_shuffle_bytes=163221310 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
-cuda_passthrough_bytes=45839746 # GpuProject, GpuCoalesceAllBatches
+cuda_passthrough_bytes=45839868 # GpuProject, GpuCoalesceAllBatches
 vram_to_ram_bytes=9 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=437273365
+peacockdb_cost=437273487
 == q39
 storage_read_bytes=673318918 # GpuLoadParquet
 cuda_filter_bytes=254885 # GpuFilter
@@ -1128,12 +1128,12 @@ cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
 cuda_limit_bytes=0 # GpuLimit
 cuda_shuffle_bytes=163221310 # GpuEmitPartitions, GpuMergePartitions, GpuUnion, GpuInterleave
-cuda_passthrough_bytes=45839746 # GpuProject, GpuCoalesceAllBatches
+cuda_passthrough_bytes=45892958 # GpuProject, GpuCoalesceAllBatches
 vram_to_ram_bytes=9 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=441820659
+peacockdb_cost=441873871
 == q88
 skipped: not enabled at this mode
 == q90

@@ -487,6 +487,16 @@ pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -
     }
 }
 
+/// The sides whose columns a join type emits, as `(build, probe)` — the side half of
+/// [`emits`]; a mark comes after both.
+pub(crate) fn emitted_sides(join_type: JoinType) -> (bool, bool) {
+    match emits(join_type) {
+        Emits::BothSides => (true, true),
+        Emits::BuildSide | Emits::BuildSideAndMark => (true, false),
+        Emits::ProbeSide => (false, true),
+    }
+}
+
 impl GpuNode for GpuHashJoin {
     fn kind(&self) -> &NodeKind {
         &self.kind

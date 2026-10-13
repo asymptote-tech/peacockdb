@@ -17,8 +17,8 @@ use crate::plan::RowGroupMeta;
 use crate::plan::ScanMetadata;
 use crate::plan::Schema;
 use crate::plan::{
-    AggregateBody, GpuAggregate, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergePartitions,
-    GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
+    AggregateBody, GpuAggregate, GpuCrossJoin, GpuFilter, GpuLimit, GpuLoadParquet,
+    GpuMergePartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{GpuNode, RowInterval};
@@ -222,4 +222,49 @@ fn a_nested_loop_join_pads_the_side_its_type_drops_and_then_projects() {
         ]))),
     );
     assert_eq!(can_be_null(&join), vec![true, false]);
+}
+
+/// A scan of no column, which declares `__rowmarker__` (#63).
+fn rowmarker_source() -> Box<dyn GpuNode> {
+    let scan = ScanMetadata {
+        file: "/t.parquet".to_string(),
+        groups: vec![RowGroupMeta {
+            index: 0,
+            rows: 100,
+            bytes: 0,
+        }],
+        can_be_null: Vec::new(),
+    };
+    Box::new(GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        vec![vec![vec![0]]],
+        &scan,
+        None,
+        Schema::rowmarker(),
+    ))
+}
+
+#[test]
+fn a_scan_of_no_column_says_its_marker_holds_no_null() {
+    // The marker is a literal zero per row: one column, never NULL, whatever the footer says
+    // of the columns the scan does not read.
+    assert_eq!(can_be_null(rowmarker_source().as_ref()), vec![false]);
+}
+
+#[test]
+fn a_cross_join_reads_its_projection_past_the_rowmarker() {
+    // A cross join over a side of no column drops the marker through its projection; read
+    // unprojected, the crossed table reports the marker's `false` for the column it kept.
+    let join = GpuCrossJoin::new(
+        rowmarker_source(),
+        source(&[true]),
+        Some(vec![1]),
+        Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(
+            "c0",
+            DataType::Int64,
+            true,
+        )]))),
+    );
+    assert_eq!(can_be_null(&join), vec![true]);
 }

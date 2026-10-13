@@ -259,7 +259,12 @@ pub(crate) fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
             &child(0),
             &child(1),
         ),
-        NodeRef::CrossJoin(_) => [child(0), child(1)].concat(),
+        NodeRef::CrossJoin(join) => join_output_can_be_null(
+            JoinType::Inner,
+            join.projection.as_ref(),
+            &child(0),
+            &child(1),
+        ),
     }
 }
 

@@ -64,6 +64,7 @@ fn walk(node: &dyn GpuNode) -> Result<(), PlanError> {
         walk(child)?;
     }
     node.validate_schemas_and_partitions()?;
+    declares_a_column(node)?;
     structural(node)?;
     declared_width(node)?;
     device_holdable_types(node)?;
@@ -193,6 +194,20 @@ pub(crate) fn check_output_schema(
     Ok(())
 }
 
+/// A device table's row count is its first column's, so a table of no columns reads as no
+/// rows whatever it held. Where DataFusion plans rows and no column, the translator declares
+/// `__rowmarker__` instead (#63); a node declaring nothing was built some other way.
+fn declares_a_column(node: &dyn GpuNode) -> Result<(), PlanError> {
+    match node.kind().schema() {
+        Some(schema) if schema.fields.fields().is_empty() => Err(PlanError::Invalid(format!(
+            "{}: it declares no column, which a device table reads as no rows — the planner \
+             declares __rowmarker__ where DataFusion has rows and no column (#63)",
+            node.name()
+        ))),
+        _ => Ok(()),
+    }
+}
+
 /// A node's declared column count against the parameters that produce those columns. The
 /// two are written in different places — the schema comes from DataFusion, the parameters
 /// from this layer's own rebasing — and a node emitting a different number of columns from
@@ -217,6 +232,7 @@ fn declared_width(node: &dyn GpuNode) -> Result<(), PlanError> {
         return Ok(());
     };
     let (emitted, from) = match kind {
+        NodeRef::LoadParquet(load) if load.rows_only() => (1, "a read of rows alone"),
         NodeRef::LoadParquet(load) => (load.projection.len(), "the columns it reads"),
         NodeRef::Project(project) => (project.exprs.len(), "its expression list"),
         NodeRef::Filter(filter) => match &filter.projection {

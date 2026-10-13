@@ -46,6 +46,13 @@ impl GpuNode for GpuLoadParquet {
                 }
             }
         }
+        if self.rows_only() && self.kind.schema() != Some(&Schema::rowmarker()) {
+            return Err(PlanError::Invalid(format!(
+                "{}: it reads no column, so it declares __rowmarker__ and nothing else — the \
+                 rows it answers (#63)",
+                self.table
+            )));
+        }
         Ok(())
     }
 
@@ -70,6 +77,11 @@ pub(crate) fn new_load_parquet(
         sort_order: SortOrder::NotSpecified,
         batch_layout: BatchLayout::MultipleBatches,
     };
+    // The marker a scan of no column answers is a literal, never NULL.
+    let can_be_null = match projection.is_empty() {
+        true => vec![false],
+        false => scan.can_be_null.clone(),
+    };
     GpuLoadParquet {
         kind: NodeKind::Source { layout, schema },
         table,
@@ -77,7 +89,7 @@ pub(crate) fn new_load_parquet(
         projection,
         partition_groups,
         survivors: scan.groups.clone(),
-        can_be_null: scan.can_be_null.clone(),
+        can_be_null,
         limit,
     }
 }

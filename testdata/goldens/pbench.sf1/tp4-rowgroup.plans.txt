@@ -35,10 +35,10 @@ GpuUnload: estimated_max_resident_size=55000
 refused: invalid plan: no surviving row groups: what an empty scan means is the caller's decision, not an empty map — the wire format reads that as one unmapped partition
 == cross-projection
 GpuUnload
-  GpuCrossJoin: lanes=1, batches=multiple, schema=[f_id:Int64]
-    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
-      GpuMergePartitions: lanes=1, batches=multiple, schema=[]
-        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[]
+  GpuCrossJoin: projection=[f_id@1], lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[__rowmarker__:Int8]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
+        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
     GpuMergePartitions: lanes=1, batches=multiple, schema=[f_id:Int64]
       GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_id:Int64]
 --- recipes ---
@@ -50,10 +50,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuMergePartitions: none
       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=16, certain=8
-GpuUnload: estimated_max_resident_size=8
-  GpuCrossJoin: estimated_max_resident_size=16421
-    GpuCoalesceAllBatches: estimated_max_resident_size=8
+budget=2147483648, accumulators=32, certain=16
+GpuUnload: estimated_max_resident_size=16
+  GpuCrossJoin: estimated_max_resident_size=16429
+    GpuCoalesceAllBatches: estimated_max_resident_size=16
       GpuMergePartitions: estimated_max_resident_size=0
         GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=4.0
     GpuMergePartitions: estimated_max_resident_size=16413
@@ -800,17 +800,17 @@ GpuUnload
           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
             GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64]
-                GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64]
-                  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
-                    GpuMergePartitions: lanes=1, batches=multiple, schema=[]
-                      GpuProject: exprs=[], lanes=4, batches=multiple, schema=[]
+                GpuNestedLoopJoin: join_type=Left, filter=true, projection=[count(*)@1], lanes=1, batches=multiple, schema=[count(*):Int64]
+                  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[__rowmarker__:Int8]
+                    GpuMergePartitions: lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
+                      GpuProject: exprs=[0 as __rowmarker__], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
                         GpuFilter: predicate=t_id@0 = 1, lanes=4, batches=multiple, schema=[t_id:Int32]
                           GpuLoadParquet: table=tiny, projections=[t_id@0], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32]
                   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                     GpuMergePartitions: lanes=1, batches=multiple, schema=[count(*):Int64]
                       GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], lanes=4, batches=single, schema=[count(*):Int64]
                         GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[count(*):Int64]
-                          GpuProject: exprs=[], lanes=4, batches=multiple, schema=[]
+                          GpuProject: exprs=[0 as __rowmarker__], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
                             GpuFilter: predicate=(f_qty@0 >= 1) AND (f_qty@0 <= 20), lanes=4, batches=multiple, schema=[f_qty:Int32]
                               GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, schema=[f_qty:Int32]
               GpuAggregateBatches: group_by=[], aggs=[sum(avg(fact.f_amount)$sum@0) as avg(fact.f_amount)$sum, sum(avg(fact.f_amount)$count@1) as avg(fact.f_amount)$count], final=[CAST(avg(fact.f_amount)$sum@0 / CAST(avg(fact.f_amount)$count@1 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(fact.f_amount)], lanes=1, batches=single, schema=[avg(fact.f_amount):Decimal128(19,6)]
@@ -829,7 +829,7 @@ GpuUnload
         GpuMergePartitions: lanes=1, batches=multiple, schema=[count(*):Int64]
           GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], lanes=4, batches=single, schema=[count(*):Int64]
             GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[count(*):Int64]
-              GpuProject: exprs=[], lanes=4, batches=multiple, schema=[]
+              GpuProject: exprs=[0 as __rowmarker__], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
                 GpuFilter: predicate=d_w@0 >= 0, lanes=4, batches=multiple, schema=[d_w:Int32]
                   GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_w:Int32]
 --- recipes ---
@@ -874,7 +874,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                 GpuFilter: calling_lanes=4, per batch: execute_node(#39 CudfFilter, batch)
                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#38 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=5236016, certain=0
+budget=2147483648, accumulators=5236032, certain=0
 GpuUnload: estimated_max_resident_size=430000
   GpuProject: estimated_max_resident_size=430000
     GpuNestedLoopJoin: estimated_max_resident_size=878000
@@ -883,17 +883,17 @@ GpuUnload: estimated_max_resident_size=430000
           GpuCoalesceAllBatches: estimated_max_resident_size=520000
             GpuNestedLoopJoin: estimated_max_resident_size=520000
               GpuCoalesceAllBatches: estimated_max_resident_size=180000
-                GpuNestedLoopJoin: estimated_max_resident_size=180008
-                  GpuCoalesceAllBatches: estimated_max_resident_size=8
-                    GpuMergePartitions: estimated_max_resident_size=11
-                      GpuProject: estimated_max_resident_size=44
+                GpuNestedLoopJoin: estimated_max_resident_size=180016
+                  GpuCoalesceAllBatches: estimated_max_resident_size=16
+                    GpuMergePartitions: estimated_max_resident_size=22
+                      GpuProject: estimated_max_resident_size=88
                         GpuFilter: estimated_max_resident_size=220
                           GpuLoadParquet: estimated_max_resident_size=220, source_bytes=55, target_batch_bytes=55, amplification=4.0
                   GpuAggregateBatches: estimated_max_resident_size=180000
                     GpuMergePartitions: estimated_max_resident_size=45000
                       GpuAggregateBatches: estimated_max_resident_size=180000
                         GpuAggregate: estimated_max_resident_size=88668
-                          GpuProject: estimated_max_resident_size=9852
+                          GpuProject: estimated_max_resident_size=19704
                             GpuFilter: estimated_max_resident_size=49264
                               GpuLoadParquet: estimated_max_resident_size=49264, source_bytes=120280, target_batch_bytes=120280, amplification=7.2
               GpuAggregateBatches: estimated_max_resident_size=340000
@@ -911,8 +911,8 @@ GpuUnload: estimated_max_resident_size=430000
       GpuAggregateBatches: estimated_max_resident_size=18000
         GpuMergePartitions: estimated_max_resident_size=4500
           GpuAggregateBatches: estimated_max_resident_size=18000
-            GpuAggregate: estimated_max_resident_size=86580
-              GpuProject: estimated_max_resident_size=9620
+            GpuAggregate: estimated_max_resident_size=86596
+              GpuProject: estimated_max_resident_size=19244
                 GpuFilter: estimated_max_resident_size=48112
                   GpuLoadParquet: estimated_max_resident_size=48112, source_bytes=12028, target_batch_bytes=12028, amplification=7.2
 == sparse-build-anti

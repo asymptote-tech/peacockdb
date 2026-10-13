@@ -26,14 +26,14 @@ skipped: not enabled at this mode
 early_exit=none
 GpuUnload: output_rows=160000, output_bytes=1300000
   in_rows=[[160000]] batch_rows=[[16384,16384,16384,16384,16384,16384,16384,16384,16384,12544]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,101920]]
-  GpuCrossJoin: lanes=1, batches=multiple, output_rows=160000, output_bytes=1300000
+  GpuCrossJoin: projection=[f_id@1], lanes=1, batches=multiple, output_rows=160000, output_bytes=1300000
     in_rows=[[8],[20000]] batch_rows=[[16384,16384,16384,16384,16384,16384,16384,16384,16384,12544]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,101920]]
-    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=0
-      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[0]]
-      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=0
-        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[0]]
-        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=0
-          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[0],[],[],[]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=9
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[9]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=9
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[9]]
+        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=9
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[9],[],[],[]]
     GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
       in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[16640,16640,16640,16640,16640,16640,16640,16640,16640,12740]]
       GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=162500

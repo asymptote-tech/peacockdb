@@ -74,6 +74,8 @@ pub struct CpuSource {
     /// it per call is the whole of what a scan does besides decoding.
     metadata: ArrowReaderMetadata,
     projection: ProjectionMask,
+    /// A read of no column, answered as the `__rowmarker__` the plan declares (#63).
+    rows_only: bool,
     /// The row groups per batch this lane still owes, front first.
     batches: VecDeque<Vec<usize>>,
     schema: SchemaRef,

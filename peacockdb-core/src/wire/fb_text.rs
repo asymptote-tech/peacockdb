@@ -28,6 +28,9 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
             if scan.limit() > 0 {
                 field("limit", scan.limit().to_string());
             }
+            if scan.rows_only() {
+                field("rows_only", "true".to_string());
+            }
         }
         fb::PlanNodeKind::CudfFilter => {
             let filter = node.node_as_cudf_filter().expect("a filter");

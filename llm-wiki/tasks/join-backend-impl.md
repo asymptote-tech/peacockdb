@@ -769,19 +769,30 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
 - Produces: `pub(crate) const ROWMARKER: &str = "__rowmarker__";` in `plan/mod.rs`; plan validation
   refuses a zero-column schema with `PlanError::Invalid("… declares no column …")`.
 
-- [ ] **Step 1: The failing tests.** (a) `translated_at_tp4("SELECT count(*) FROM lineitem", 0)`
+- [x] **Step 1: The failing tests.** (a) `translated_at_tp4("SELECT count(*) FROM lineitem", 0)`
   has a `GpuProject: exprs=[Int8(0) AS __rowmarker__]` and no `exprs=[]`; (b) tpch `nested-limits`'
   zero-column scan declares `__rowmarker__`; (c) validation refuses a hand-built `GpuProject` with
   no expression; (d) in `nested_cases.rs`, `a_cross_join_of_two_rowmarker_sides_keeps_one_placeholder`
   — both backends answer `|B|×|P|` rows of one `__rowmarker__` column.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The project arm.** Where DataFusion's `ProjectionExec` has no expression, plan
+  **Landed with more**, and (a) changed: the minimal dataset has no `lineitem`, and a one-table
+  `count(*)` is answered from statistics (#158), so (a) is `count(*)` over a join. Translator: the
+  Left nested loop over a marker build (q9's) and the cross join of two marker sides, each asserting
+  the projection itself and running the whole-tree `validate`; validation: a rows-only scan
+  declaring anything but the marker; the cpu reader's rows-only answer; the scan's nullability leaf;
+  the harness's marker project (`exec_cases.rs`); the project refusal as a gtest.
+- [x] **Step 2: Run red.** Seven of the rust-only cases red for their own reasons; the device's by
+  mutation after green. Both in the detail file.
+- [x] **Step 3: The project arm.** Where DataFusion's `ProjectionExec` has no expression, plan
   `GpuProject::new(input, vec![NamedExpr { expr: Expr::Literal(ScalarValue::Int8(Some(0))), name: ROWMARKER.into() }], Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(ROWMARKER, DataType::Int8, false)]))))`.
   Consumers: `count(1)` over it reads rows, not the column; a join above drops it through its
   projection (task 9 makes the projection apply on every type); a join whose kept columns would
   be none keeps one placeholder — its projection is `[ordinal of one placeholder]` and its schema
   `[__rowmarker__]`.
-- [ ] **Step 4: The scan arm.** A `ParquetExec` projecting no column declares `[__rowmarker__]`.
+  **As landed:** only a keyless join can meet a marker side — a side with a key has a column, and
+  DataFusion never embeds an empty projection into a join (`try_embed_projection`) — so
+  `translator/common.rs`'s `past_rowmarkers` runs on the cross and nested-loop arms alone, reading
+  which sides a type emits from `plan::emitted_sides`. The schema is `Schema::rowmarker()`.
+- [x] **Step 4: The scan arm.** A `ParquetExec` projecting no column declares `[__rowmarker__]`.
   The wire says so explicitly: today an empty `projection` means *all* columns
   (`scan.cpp:45-53`), so the signal is a new field, appended to `CudfScan`:
 
@@ -820,13 +831,22 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
   count); a harness case in `source_cases.rs`, `a_rows_only_scan_agrees_on_both_backends`.
   `recipe-payloads.txt` moves for the scans that set the field (tpch nested-limits'), regenerated
   in this task's commit (`PEACOCK_REWRITE_RECIPE_BYTES=1`).
-- [ ] **Step 5: The refusal.** `project.cpp`'s empty-expression arm throws
+  **As landed:** nested-limits was not in the payload subset, so it is added as the 21st query —
+  nothing else would show `rows_only`; tpcds q87's marker project moves the file too. The gtest
+  reads customer, not nation: nation has one row group, so "that group's count" is the whole
+  count and proves nothing. `GpuLoadParquet::rows_only()` is the empty projection; the scan
+  declares `[false]` nullability and validation counts its width as one.
+- [x] **Step 5: The refusal.** `project.cpp`'s empty-expression arm throws
   `"CudfProject with no expression: the plan declares __rowmarker__ (#63)"`; validation refuses a
-  zero-column schema at every node.
-- [ ] **Step 6: Run green**; in the same commit, every golden the placeholder moves: plan goldens
+  zero-column schema at every node. **As landed:** the refusal comes before `take_input`, so it
+  consumes nothing.
+- [x] **Step 6: Run green**; in the same commit, every golden the placeholder moves: plan goldens
   (tpcds q38, q87, q88, q9, q90, q96: the 19 nodes; tpch nested-limits' scan), the cpu per-node and
   cost goldens of those queries, and the payload golden. tpcds q9's cpu cells and the nested-limits
   cpu cells stay green (the cpu applies the projections since task 8).
+  **Measured:** pbench moves too — `scalar-subquery-cross`'s three marker projects and
+  `cross-projection`'s scan of no column — and every plan golden's `--- memory ---` section
+  re-prices the marker. No answer moved.
 - [ ] **Step 7: Commit.** `git commit -m "#63: __rowmarker__ is a column the plan declares"`.
 
 ### Task 5: A predicate-free nested loop is a cross join only when Inner

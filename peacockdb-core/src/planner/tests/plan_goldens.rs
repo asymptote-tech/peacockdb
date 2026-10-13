@@ -171,7 +171,7 @@ const PAYLOAD_MODE: &str = "tp4_rowgroup";
 ///
 /// So a query earns a place here by covering something no other query does. Adding one
 /// that covers nothing new adds lines no reader can check against anything.
-const PAYLOAD_QUERIES: [(&str, &str); 20] = [
+const PAYLOAD_QUERIES: [(&str, &str); 21] = [
     // Nested-loop join lives nowhere else in the corpus; the stddev query is the Welford
     // init, both merges and the finalize project; q13 is the outer join's finish pass.
     ("tpch", "q13"),
@@ -194,6 +194,9 @@ const PAYLOAD_QUERIES: [(&str, &str); 20] = [
     // whole of every group, so the init node carries the finalize and its recipe is the
     // partial plus a finalize project. Every other finalize here rides a merge.
     ("tpch", "q15"),
+    // nested-limits' region scan reads no column: `rows_only` is a field no other scan sets,
+    // and the call shape is every scan's, so the coverage check cannot ask for it.
+    ("tpch", "nested-limits"),
     ("tpcds", "q14"),
     ("tpcds", "q97"),
     ("tpcds", "q61"),
@@ -273,7 +276,7 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     let mode = mode_named(PAYLOAD_MODE);
     let mut text = String::new();
     // The two datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
-    // CORPUS_DATASETS: this file is twenty chosen queries, and a dataset earns a place in it
+    // CORPUS_DATASETS: this file is twenty-one chosen queries, and a dataset earns a place in it
     // by covering a call shape no query here already carries.
     for dataset in ["tpch", "tpcds"] {
         let wanted: Vec<&str> = PAYLOAD_QUERIES

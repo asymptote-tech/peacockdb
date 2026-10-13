@@ -777,3 +777,158 @@ async fn bug_a_predicate_free_outer_nested_loop_is_refused() {
         "{err}"
     );
 }
+
+// #63 — a table of no columns reads as no rows on a device, so where DataFusion plans rows and
+// no column the plan declares `__rowmarker__` instead, and a join above drops it again.
+
+/// Every node, parents before children.
+fn every(root: &dyn GpuNode) -> Vec<&dyn GpuNode> {
+    let mut nodes = vec![root];
+    for child in root.children() {
+        nodes.extend(every(child));
+    }
+    nodes
+}
+
+fn declares_no_column(node: &dyn GpuNode) -> bool {
+    node.kind()
+        .schema()
+        .is_some_and(|schema| schema.fields.fields().is_empty())
+}
+
+fn declares_the_rowmarker(node: &dyn GpuNode) -> bool {
+    node.kind().schema() == Some(&crate::plan::Schema::rowmarker())
+}
+
+fn field_names(node: &dyn GpuNode) -> Vec<String> {
+    let schema = node.kind().schema().expect("not a sink");
+    schema
+        .fields
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_projection_of_no_column_declares_the_rowmarker() {
+    // `count(*)` over a join reads rows and no column, so DataFusion projects the join down
+    // to nothing — tpcds q88's shape, eight times over.
+    use datafusion::common::ScalarValue;
+    let tree = translated_at_tp4(
+        "SELECT count(*) FROM customer, nation WHERE c_nationkey = n_nationkey",
+        0,
+    )
+    .await;
+    let nodes = every(tree.as_ref());
+    assert!(
+        !nodes.iter().any(|node| declares_no_column(*node)),
+        "{}",
+        shape(tree.as_ref())
+    );
+    let marker = nodes
+        .iter()
+        .find_map(|node| match as_node_ref(*node) {
+            NodeRef::Project(project) if declares_the_rowmarker(*node) => Some(project),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no project declares the marker: {}", shape(tree.as_ref())));
+    assert_eq!(marker.exprs.len(), 1);
+    assert_eq!(marker.exprs[0].name, crate::plan::ROWMARKER);
+    assert_eq!(
+        marker.exprs[0].expr,
+        Expr::Literal(ScalarValue::Int8(Some(0)))
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_scan_of_no_column_declares_the_rowmarker_and_the_cross_join_drops_it() {
+    // tpch nested-limits' and pbench cross-projection's shape: region contributes rows and
+    // nothing else, and a project cannot go below a scan.
+    let tree = translated("SELECT p_partkey FROM part, region").await;
+    let nodes = every(tree.as_ref());
+    let scan = nodes
+        .iter()
+        .find_map(|node| match as_node_ref(*node) {
+            NodeRef::LoadParquet(load) if load.table == "region" => Some(*node),
+            _ => None,
+        })
+        .expect("a scan of region");
+    assert!(
+        declares_the_rowmarker(scan),
+        "the scan declares {:?}",
+        field_names(scan)
+    );
+    let cross = nodes
+        .iter()
+        .find(|node| matches!(as_node_ref(**node), NodeRef::CrossJoin(_)))
+        .expect("a cross join");
+    let NodeRef::CrossJoin(join) = as_node_ref(*cross) else {
+        unreachable!("found as a cross join")
+    };
+    // `[__rowmarker__, p_partkey]` crossed, and only the key kept.
+    assert_eq!(join.projection, Some(vec![1]));
+    assert_eq!(field_names(*cross), vec!["p_partkey"]);
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_left_nested_loop_over_a_side_of_no_column_drops_the_rowmarker() {
+    // tpcds q9's: a scalar subquery over `FROM reason WHERE r_reason_sk = 1` reads no column
+    // of the outer side, so the predicate-free Left join's build is rows alone.
+    let tree = translated(
+        "SELECT (SELECT count(*) FROM nation WHERE n_regionkey = 1) AS a \
+         FROM region WHERE r_regionkey = 1",
+    )
+    .await;
+    let nodes = every(tree.as_ref());
+    assert!(
+        !nodes.iter().any(|node| declares_no_column(*node)),
+        "{}",
+        shape(tree.as_ref())
+    );
+    let join = nodes
+        .iter()
+        .find(|node| matches!(as_node_ref(**node), NodeRef::NestedLoopJoin(_)))
+        .unwrap_or_else(|| panic!("a nested loop: {}", shape(tree.as_ref())));
+    assert!(
+        declares_the_rowmarker(join.children()[0]),
+        "the build declares {:?}",
+        field_names(join.children()[0])
+    );
+    let NodeRef::NestedLoopJoin(nested) = as_node_ref(*join) else {
+        unreachable!("found as a nested loop")
+    };
+    // `[__rowmarker__, a]`, the marker dropped.
+    assert_eq!(nested.projection, Some(vec![1]));
+    assert!(
+        !field_names(*join).contains(&crate::plan::ROWMARKER.to_string()),
+        "the join keeps the marker: {:?}",
+        field_names(*join)
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_cross_join_of_two_sides_of_no_column_keeps_one_rowmarker() {
+    // No sql over this dataset keeps the shape — DataFusion answers such a count from
+    // statistics — so the two sides are projected to nothing by hand.
+    use datafusion::physical_plan::joins::CrossJoinExec;
+    use datafusion::physical_plan::projection::ProjectionExec;
+    let nothing = |plan: Arc<dyn ExecutionPlan>| -> Arc<dyn ExecutionPlan> {
+        Arc::new(ProjectionExec::try_new(vec![], plan).expect("a projection of no column"))
+    };
+    let build = nothing(plan("SELECT r_regionkey FROM region").await);
+    let probe = nothing(plan("SELECT n_nationkey FROM nation").await);
+    let cross: Arc<dyn ExecutionPlan> = Arc::new(CrossJoinExec::new(build, probe));
+    let tree = Translator::new(1, Batching::Off)
+        .translate(&cross)
+        .expect("translate the plan");
+    let NodeRef::CrossJoin(join) = as_node_ref(descend(tree.as_ref(), 1)) else {
+        panic!("expected a cross join: {}", shape(tree.as_ref()));
+    };
+    assert_eq!(join.projection, Some(vec![0]));
+    assert!(declares_the_rowmarker(descend(tree.as_ref(), 1)));
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}

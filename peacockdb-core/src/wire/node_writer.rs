@@ -91,6 +91,7 @@ pub(crate) fn scan<'a>(
             file_paths: Some(paths),
             file_schema: Some(schema),
             limit: node.limit.unwrap_or(0) as u64,
+            rows_only: node.rows_only(),
             ..Default::default()
         },
     );

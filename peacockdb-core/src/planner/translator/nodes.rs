@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
-use datafusion::common::ScalarValue;
+use datafusion::common::{JoinType, ScalarValue};
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::Partitioning;
@@ -35,6 +35,7 @@ use super::expr::translate_expr;
 use super::scan_mapping::{parquet_table_name, partition, survivor_metadata};
 use crate::plan::BatchLayout;
 use crate::plan::PlanError;
+use crate::plan::ROWMARKER;
 use crate::plan::Schema;
 use crate::plan::capability;
 use crate::plan::null_key_droppable;
@@ -73,6 +74,17 @@ pub(crate) fn node(
     }
     if let Some(project) = any.downcast_ref::<ProjectionExec>() {
         let input = node(t, project.input())?;
+        if project.expr().is_empty() {
+            // Rows and no column — what `count(*)` over a join reads (#63).
+            return Ok(Box::new(GpuProject::new(
+                input,
+                vec![NamedExpr::new(
+                    Expr::Literal(ScalarValue::Int8(Some(0))),
+                    ROWMARKER,
+                )],
+                Schema::rowmarker(),
+            )));
+        }
         let input_schema = project.input().schema();
         let mut exprs = Vec::with_capacity(project.expr().len());
         for (expr, name) in project.expr() {
@@ -113,11 +125,9 @@ pub(crate) fn node(
         // With no key to co-locate on, both sides are one lane — the probe as much as
         // the build, though only the build is also one batch.
         let probe = merged(node(t, cross.right())?);
+        let (projection, schema) = past_rowmarkers(cross, JoinType::Inner, None);
         return Ok(Box::new(GpuCrossJoin::new(
-            build,
-            probe,
-            None,
-            Schema::new(cross.schema()),
+            build, probe, projection, schema,
         )));
     }
     if let Some(nested) = any.downcast_ref::<NestedLoopJoinExec>() {
@@ -456,9 +466,14 @@ pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn Gp
     let lanes = lanes_for(t, &scan.groups, config.limit);
     let partition_groups = partition(&scan.groups, lanes, batching_for_source(t))?;
 
-    let projection = match &config.projection {
+    let projection: Vec<u32> = match &config.projection {
         Some(columns) => columns.iter().map(|c| *c as u32).collect(),
         None => (0..config.file_schema.fields().len() as u32).collect(),
+    };
+    // A scan of no column declares the marker itself: a project cannot go below it (#63).
+    let schema = match projection.is_empty() {
+        true => Schema::rowmarker(),
+        false => Schema::new(parquet.schema()),
     };
     Ok(Box::new(GpuLoadParquet::new(
         parquet_table_name(parquet).unwrap_or_default(),
@@ -466,7 +481,7 @@ pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn Gp
         partition_groups,
         &scan,
         config.limit,
-        Schema::new(parquet.schema()),
+        schema,
     )))
 }
 
@@ -527,7 +542,6 @@ pub(crate) fn nested_loop_join(
     t: &Translator,
     join: &NestedLoopJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    use datafusion::common::JoinType;
     let join_type = *join.join_type();
     if !matches!(join_type, JoinType::Inner | JoinType::Left) {
         return Err(PlanError::Unsupported(format!(
@@ -541,11 +555,13 @@ pub(crate) fn nested_loop_join(
     // rows a cross join never emits, so it keeps the node and joins over `true`.
     let (predicate, filter_columns) = match join.filter() {
         None if join_type == JoinType::Inner => {
+            let (projection, schema) =
+                past_rowmarkers(join, join_type, projected(join.projection()));
             return Ok(Box::new(GpuCrossJoin::new(
                 build_side(t, join.left())?,
                 merged(node(t, join.right())?),
-                projected(join.projection()),
-                Schema::new(join.schema()),
+                projection,
+                schema,
             )));
         }
         None => (Expr::Literal(ScalarValue::Boolean(Some(true))), Vec::new()),
@@ -563,13 +579,14 @@ pub(crate) fn nested_loop_join(
     if join_type == JoinType::Left && batches(probe.as_ref()) != BatchLayout::SingleBatch {
         probe = Box::new(GpuCoalesceAllBatches::new(probe));
     }
+    let (projection, schema) = past_rowmarkers(join, join_type, projected(join.projection()));
     Ok(Box::new(GpuNestedLoopJoin::new(
         build,
         probe,
         join_type,
         predicate,
         filter_columns,
-        projected(join.projection()),
-        Schema::new(join.schema()),
+        projection,
+        schema,
     )))
 }

@@ -3712,7 +3712,7 @@ GpuUnload: estimated_max_resident_size=3500
 GpuUnload: skip=0, fetch=100
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
     GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-      GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+      GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
         GpuHashJoin: join_type=RightSemi, on=[(c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)], null_equals_null=true, lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
           GpuAggregateBatches: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], final=[], lanes=1, batches=single, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
             GpuAggregate: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
@@ -3803,7 +3803,7 @@ budget=2147483648, accumulators=323042472, certain=8100000
 GpuUnload: estimated_max_resident_size=25923636
   GpuAggregateBatches: estimated_max_resident_size=25923636
     GpuAggregate: estimated_max_resident_size=10978425
-      GpuProject: estimated_max_resident_size=1219825
+      GpuProject: estimated_max_resident_size=2439650
         GpuHashJoin: estimated_max_resident_size=94305268
           GpuAggregateBatches: estimated_max_resident_size=16545832
             GpuAggregate: estimated_max_resident_size=4300000
@@ -9551,7 +9551,7 @@ refused by datafusion: This feature is not implemented: Physical plan does not s
 GpuUnload
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
     GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-      GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+      GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
         GpuHashJoin: join_type=RightAnti, on=[(c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)], null_equals_null=true, lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
           GpuAggregateBatches: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], final=[], lanes=1, batches=single, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
             GpuAggregate: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
@@ -9642,7 +9642,7 @@ budget=2147483648, accumulators=323042472, certain=8100000
 GpuUnload: estimated_max_resident_size=25923636
   GpuAggregateBatches: estimated_max_resident_size=25923636
     GpuAggregate: estimated_max_resident_size=10978425
-      GpuProject: estimated_max_resident_size=1219825
+      GpuProject: estimated_max_resident_size=2439650
         GpuHashJoin: estimated_max_resident_size=94305268
           GpuAggregateBatches: estimated_max_resident_size=16545832
             GpuAggregate: estimated_max_resident_size=4300000
@@ -9690,7 +9690,7 @@ GpuUnload
       GpuProject: exprs=[count(*)@0 as h12_to_12_30], lanes=1, batches=single, schema=[h12_to_12_30:Int64]
         GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
           GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-            GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+            GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
               GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                 GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                   GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9709,7 +9709,7 @@ GpuUnload
           GpuProject: exprs=[count(*)@0 as h11_30_to_12], lanes=1, batches=single, schema=[h11_30_to_12:Int64]
             GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
               GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                   GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                     GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                       GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9728,7 +9728,7 @@ GpuUnload
               GpuProject: exprs=[count(*)@0 as h11_to_11_30], lanes=1, batches=single, schema=[h11_to_11_30:Int64]
                 GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                   GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                    GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                    GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                       GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                         GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                           GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9747,7 +9747,7 @@ GpuUnload
                   GpuProject: exprs=[count(*)@0 as h10_30_to_11], lanes=1, batches=single, schema=[h10_30_to_11:Int64]
                     GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                       GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                        GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                        GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                           GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                             GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                               GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9766,7 +9766,7 @@ GpuUnload
                       GpuProject: exprs=[count(*)@0 as h10_to_10_30], lanes=1, batches=single, schema=[h10_to_10_30:Int64]
                         GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                           GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                            GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                            GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                               GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                                 GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                                   GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9785,7 +9785,7 @@ GpuUnload
                           GpuProject: exprs=[count(*)@0 as h9_30_to_10], lanes=1, batches=single, schema=[h9_30_to_10:Int64]
                             GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                               GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                   GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                                     GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                                       GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9803,7 +9803,7 @@ GpuUnload
                             GpuProject: exprs=[count(*)@0 as h8_30_to_9], lanes=1, batches=single, schema=[h8_30_to_9:Int64]
                               GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                                 GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                  GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                  GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                     GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                                         GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9820,7 +9820,7 @@ GpuUnload
                             GpuProject: exprs=[count(*)@0 as h9_to_9_30], lanes=1, batches=single, schema=[h9_to_9_30:Int64]
                               GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                                 GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                  GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                  GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                     GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
                                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
                                         GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -9992,8 +9992,8 @@ GpuUnload: estimated_max_resident_size=25923636
     GpuCrossJoin: estimated_max_resident_size=51847272
       GpuProject: estimated_max_resident_size=25923636
         GpuAggregateBatches: estimated_max_resident_size=25923636
-          GpuAggregate: estimated_max_resident_size=144
-            GpuProject: estimated_max_resident_size=16
+          GpuAggregate: estimated_max_resident_size=148
+            GpuProject: estimated_max_resident_size=33
               GpuHashJoin: estimated_max_resident_size=2160300
                 GpuCoalesceAllBatches: estimated_max_resident_size=108
                   GpuFilter: estimated_max_resident_size=122
@@ -10011,8 +10011,8 @@ GpuUnload: estimated_max_resident_size=25923636
         GpuCrossJoin: estimated_max_resident_size=51847272
           GpuProject: estimated_max_resident_size=25923636
             GpuAggregateBatches: estimated_max_resident_size=25923636
-              GpuAggregate: estimated_max_resident_size=144
-                GpuProject: estimated_max_resident_size=16
+              GpuAggregate: estimated_max_resident_size=148
+                GpuProject: estimated_max_resident_size=33
                   GpuHashJoin: estimated_max_resident_size=2160300
                     GpuCoalesceAllBatches: estimated_max_resident_size=108
                       GpuFilter: estimated_max_resident_size=122
@@ -10030,8 +10030,8 @@ GpuUnload: estimated_max_resident_size=25923636
             GpuCrossJoin: estimated_max_resident_size=51847272
               GpuProject: estimated_max_resident_size=25923636
                 GpuAggregateBatches: estimated_max_resident_size=25923636
-                  GpuAggregate: estimated_max_resident_size=144
-                    GpuProject: estimated_max_resident_size=16
+                  GpuAggregate: estimated_max_resident_size=148
+                    GpuProject: estimated_max_resident_size=33
                       GpuHashJoin: estimated_max_resident_size=2160300
                         GpuCoalesceAllBatches: estimated_max_resident_size=108
                           GpuFilter: estimated_max_resident_size=122
@@ -10049,8 +10049,8 @@ GpuUnload: estimated_max_resident_size=25923636
                 GpuCrossJoin: estimated_max_resident_size=51847272
                   GpuProject: estimated_max_resident_size=25923636
                     GpuAggregateBatches: estimated_max_resident_size=25923636
-                      GpuAggregate: estimated_max_resident_size=144
-                        GpuProject: estimated_max_resident_size=16
+                      GpuAggregate: estimated_max_resident_size=148
+                        GpuProject: estimated_max_resident_size=33
                           GpuHashJoin: estimated_max_resident_size=2160300
                             GpuCoalesceAllBatches: estimated_max_resident_size=108
                               GpuFilter: estimated_max_resident_size=122
@@ -10068,8 +10068,8 @@ GpuUnload: estimated_max_resident_size=25923636
                     GpuCrossJoin: estimated_max_resident_size=51847272
                       GpuProject: estimated_max_resident_size=25923636
                         GpuAggregateBatches: estimated_max_resident_size=25923636
-                          GpuAggregate: estimated_max_resident_size=144
-                            GpuProject: estimated_max_resident_size=16
+                          GpuAggregate: estimated_max_resident_size=148
+                            GpuProject: estimated_max_resident_size=33
                               GpuHashJoin: estimated_max_resident_size=2160300
                                 GpuCoalesceAllBatches: estimated_max_resident_size=108
                                   GpuFilter: estimated_max_resident_size=122
@@ -10087,8 +10087,8 @@ GpuUnload: estimated_max_resident_size=25923636
                         GpuCrossJoin: estimated_max_resident_size=51847272
                           GpuProject: estimated_max_resident_size=25923636
                             GpuAggregateBatches: estimated_max_resident_size=25923636
-                              GpuAggregate: estimated_max_resident_size=144
-                                GpuProject: estimated_max_resident_size=16
+                              GpuAggregate: estimated_max_resident_size=148
+                                GpuProject: estimated_max_resident_size=33
                                   GpuHashJoin: estimated_max_resident_size=2160300
                                     GpuCoalesceAllBatches: estimated_max_resident_size=108
                                       GpuFilter: estimated_max_resident_size=122
@@ -10105,8 +10105,8 @@ GpuUnload: estimated_max_resident_size=25923636
                           GpuCrossJoin: estimated_max_resident_size=51847272
                             GpuProject: estimated_max_resident_size=25923636
                               GpuAggregateBatches: estimated_max_resident_size=25923636
-                                GpuAggregate: estimated_max_resident_size=144
-                                  GpuProject: estimated_max_resident_size=16
+                                GpuAggregate: estimated_max_resident_size=148
+                                  GpuProject: estimated_max_resident_size=33
                                     GpuHashJoin: estimated_max_resident_size=2160300
                                       GpuCoalesceAllBatches: estimated_max_resident_size=108
                                         GpuFilter: estimated_max_resident_size=122
@@ -10122,8 +10122,8 @@ GpuUnload: estimated_max_resident_size=25923636
                                           GpuLoadParquet: estimated_max_resident_size=14854425, source_bytes=14854425, target_batch_bytes=14854425, amplification=1.0
                             GpuProject: estimated_max_resident_size=25923636
                               GpuAggregateBatches: estimated_max_resident_size=25923636
-                                GpuAggregate: estimated_max_resident_size=144
-                                  GpuProject: estimated_max_resident_size=16
+                                GpuAggregate: estimated_max_resident_size=148
+                                  GpuProject: estimated_max_resident_size=33
                                     GpuHashJoin: estimated_max_resident_size=2160300
                                       GpuCoalesceAllBatches: estimated_max_resident_size=108
                                         GpuFilter: estimated_max_resident_size=122
@@ -10170,14 +10170,14 @@ GpuUnload
                                                       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                                                         GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64, avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
                                                           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64]
-                                                            GpuNestedLoopJoin: join_type=Left, filter=true, lanes=1, batches=multiple, schema=[count(*):Int64]
-                                                              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
-                                                                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                                            GpuNestedLoopJoin: join_type=Left, filter=true, projection=[count(*)@1], lanes=1, batches=multiple, schema=[count(*):Int64]
+                                                              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[__rowmarker__:Int8]
+                                                                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                                                   GpuFilter: predicate=r_reason_sk@0 = 1, lanes=1, batches=multiple, schema=[r_reason_sk:Int64]
                                                                     GpuLoadParquet: table=reason, projections=[r_reason_sk@0], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[r_reason_sk:Int64]
                                                               GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                                                                 GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                                                  GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                                                  GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                                                     GpuFilter: predicate=(ss_quantity@0 >= 1) AND (ss_quantity@0 <= 20), lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                                                       GpuLoadParquet: table=store_sales, projections=[ss_quantity@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                                           GpuAggregateBatches: group_by=[], aggs=[sum(avg(store_sales.ss_ext_discount_amt)$sum@0) as avg(store_sales.ss_ext_discount_amt)$sum, sum(avg(store_sales.ss_ext_discount_amt)$count@1) as avg(store_sales.ss_ext_discount_amt)$count], final=[CAST(avg(store_sales.ss_ext_discount_amt)$sum@0 / CAST(avg(store_sales.ss_ext_discount_amt)$count@1 AS Decimal128(11,0)) AS Decimal128(11,6)) as avg(store_sales.ss_ext_discount_amt)], lanes=1, batches=single, schema=[avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
@@ -10190,7 +10190,7 @@ GpuUnload
                                                             GpuLoadParquet: table=store_sales, projections=[ss_quantity@10, ss_net_paid@20], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_net_paid:Decimal128(7,2)]
                                                   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                                                     GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                                      GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                                      GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                                         GpuFilter: predicate=(ss_quantity@0 >= 21) AND (ss_quantity@0 <= 40), lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                                           GpuLoadParquet: table=store_sales, projections=[ss_quantity@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                               GpuAggregateBatches: group_by=[], aggs=[sum(avg(store_sales.ss_ext_discount_amt)$sum@0) as avg(store_sales.ss_ext_discount_amt)$sum, sum(avg(store_sales.ss_ext_discount_amt)$count@1) as avg(store_sales.ss_ext_discount_amt)$count], final=[CAST(avg(store_sales.ss_ext_discount_amt)$sum@0 / CAST(avg(store_sales.ss_ext_discount_amt)$count@1 AS Decimal128(11,0)) AS Decimal128(11,6)) as avg(store_sales.ss_ext_discount_amt)], lanes=1, batches=single, schema=[avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
@@ -10203,7 +10203,7 @@ GpuUnload
                                                 GpuLoadParquet: table=store_sales, projections=[ss_quantity@10, ss_net_paid@20], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_net_paid:Decimal128(7,2)]
                                       GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                                         GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                                          GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                                          GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                             GpuFilter: predicate=(ss_quantity@0 >= 41) AND (ss_quantity@0 <= 60), lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                               GpuLoadParquet: table=store_sales, projections=[ss_quantity@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                   GpuAggregateBatches: group_by=[], aggs=[sum(avg(store_sales.ss_ext_discount_amt)$sum@0) as avg(store_sales.ss_ext_discount_amt)$sum, sum(avg(store_sales.ss_ext_discount_amt)$count@1) as avg(store_sales.ss_ext_discount_amt)$count], final=[CAST(avg(store_sales.ss_ext_discount_amt)$sum@0 / CAST(avg(store_sales.ss_ext_discount_amt)$count@1 AS Decimal128(11,0)) AS Decimal128(11,6)) as avg(store_sales.ss_ext_discount_amt)], lanes=1, batches=single, schema=[avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
@@ -10216,7 +10216,7 @@ GpuUnload
                                     GpuLoadParquet: table=store_sales, projections=[ss_quantity@10, ss_net_paid@20], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_net_paid:Decimal128(7,2)]
                           GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                             GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                              GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                              GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                                 GpuFilter: predicate=(ss_quantity@0 >= 61) AND (ss_quantity@0 <= 80), lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                                   GpuLoadParquet: table=store_sales, projections=[ss_quantity@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                       GpuAggregateBatches: group_by=[], aggs=[sum(avg(store_sales.ss_ext_discount_amt)$sum@0) as avg(store_sales.ss_ext_discount_amt)$sum, sum(avg(store_sales.ss_ext_discount_amt)$count@1) as avg(store_sales.ss_ext_discount_amt)$count], final=[CAST(avg(store_sales.ss_ext_discount_amt)$sum@0 / CAST(avg(store_sales.ss_ext_discount_amt)$count@1 AS Decimal128(11,0)) AS Decimal128(11,6)) as avg(store_sales.ss_ext_discount_amt)], lanes=1, batches=single, schema=[avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
@@ -10229,7 +10229,7 @@ GpuUnload
                         GpuLoadParquet: table=store_sales, projections=[ss_quantity@10, ss_net_paid@20], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_net_paid:Decimal128(7,2)]
               GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                 GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                  GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                  GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                     GpuFilter: predicate=(ss_quantity@0 >= 81) AND (ss_quantity@0 <= 100), lanes=1, batches=multiple, schema=[ss_quantity:Int64]
                       GpuLoadParquet: table=store_sales, projections=[ss_quantity@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]]], lanes=1, batches=multiple, schema=[ss_quantity:Int64]
           GpuAggregateBatches: group_by=[], aggs=[sum(avg(store_sales.ss_ext_discount_amt)$sum@0) as avg(store_sales.ss_ext_discount_amt)$sum, sum(avg(store_sales.ss_ext_discount_amt)$count@1) as avg(store_sales.ss_ext_discount_amt)$count], final=[CAST(avg(store_sales.ss_ext_discount_amt)$sum@0 / CAST(avg(store_sales.ss_ext_discount_amt)$count@1 AS Decimal128(11,0)) AS Decimal128(11,6)) as avg(store_sales.ss_ext_discount_amt)], lanes=1, batches=single, schema=[avg(store_sales.ss_ext_discount_amt):Decimal128(11,6)]
@@ -10342,7 +10342,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuFilter: calling_lanes=1, per batch: execute_node(#136 CudfFilter, batch)
             GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#135 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=9058870650, certain=0
+budget=2147483648, accumulators=9058870720, certain=0
 GpuUnload: estimated_max_resident_size=225475344
   GpuProject: estimated_max_resident_size=225475345
     GpuNestedLoopJoin: estimated_max_resident_size=619286860
@@ -10373,14 +10373,14 @@ GpuUnload: estimated_max_resident_size=225475344
                                                       GpuCoalesceAllBatches: estimated_max_resident_size=74890504
                                                         GpuNestedLoopJoin: estimated_max_resident_size=74890504
                                                           GpuCoalesceAllBatches: estimated_max_resident_size=25923636
-                                                            GpuNestedLoopJoin: estimated_max_resident_size=25923671
-                                                              GpuCoalesceAllBatches: estimated_max_resident_size=35
-                                                                GpuProject: estimated_max_resident_size=33
+                                                            GpuNestedLoopJoin: estimated_max_resident_size=25923706
+                                                              GpuCoalesceAllBatches: estimated_max_resident_size=70
+                                                                GpuProject: estimated_max_resident_size=67
                                                                   GpuFilter: estimated_max_resident_size=305
                                                                     GpuLoadParquet: estimated_max_resident_size=305, source_bytes=305, target_batch_bytes=305, amplification=1.0
                                                               GpuAggregateBatches: estimated_max_resident_size=25923636
                                                                 GpuAggregate: estimated_max_resident_size=2781558
-                                                                  GpuProject: estimated_max_resident_size=309062
+                                                                  GpuProject: estimated_max_resident_size=618124
                                                                     GpuFilter: estimated_max_resident_size=2781559
                                                                       GpuLoadParquet: estimated_max_resident_size=2781559, source_bytes=2781559, target_batch_bytes=2781559, amplification=1.0
                                                           GpuAggregateBatches: estimated_max_resident_size=48966868
@@ -10393,7 +10393,7 @@ GpuUnload: estimated_max_resident_size=225475344
                                                             GpuLoadParquet: estimated_max_resident_size=14126655, source_bytes=14126655, target_batch_bytes=14126655, amplification=1.0
                                                   GpuAggregateBatches: estimated_max_resident_size=25923636
                                                     GpuAggregate: estimated_max_resident_size=2781558
-                                                      GpuProject: estimated_max_resident_size=309062
+                                                      GpuProject: estimated_max_resident_size=618124
                                                         GpuFilter: estimated_max_resident_size=2781559
                                                           GpuLoadParquet: estimated_max_resident_size=2781559, source_bytes=2781559, target_batch_bytes=2781559, amplification=1.0
                                               GpuAggregateBatches: estimated_max_resident_size=48966868
@@ -10406,7 +10406,7 @@ GpuUnload: estimated_max_resident_size=225475344
                                                 GpuLoadParquet: estimated_max_resident_size=14126655, source_bytes=14126655, target_batch_bytes=14126655, amplification=1.0
                                       GpuAggregateBatches: estimated_max_resident_size=25923636
                                         GpuAggregate: estimated_max_resident_size=2781558
-                                          GpuProject: estimated_max_resident_size=309062
+                                          GpuProject: estimated_max_resident_size=618124
                                             GpuFilter: estimated_max_resident_size=2781559
                                               GpuLoadParquet: estimated_max_resident_size=2781559, source_bytes=2781559, target_batch_bytes=2781559, amplification=1.0
                                   GpuAggregateBatches: estimated_max_resident_size=48966868
@@ -10419,7 +10419,7 @@ GpuUnload: estimated_max_resident_size=225475344
                                     GpuLoadParquet: estimated_max_resident_size=14126655, source_bytes=14126655, target_batch_bytes=14126655, amplification=1.0
                           GpuAggregateBatches: estimated_max_resident_size=25923636
                             GpuAggregate: estimated_max_resident_size=2781558
-                              GpuProject: estimated_max_resident_size=309062
+                              GpuProject: estimated_max_resident_size=618124
                                 GpuFilter: estimated_max_resident_size=2781559
                                   GpuLoadParquet: estimated_max_resident_size=2781559, source_bytes=2781559, target_batch_bytes=2781559, amplification=1.0
                       GpuAggregateBatches: estimated_max_resident_size=48966868
@@ -10432,7 +10432,7 @@ GpuUnload: estimated_max_resident_size=225475344
                         GpuLoadParquet: estimated_max_resident_size=14126655, source_bytes=14126655, target_batch_bytes=14126655, amplification=1.0
               GpuAggregateBatches: estimated_max_resident_size=25923636
                 GpuAggregate: estimated_max_resident_size=2781558
-                  GpuProject: estimated_max_resident_size=309062
+                  GpuProject: estimated_max_resident_size=618124
                     GpuFilter: estimated_max_resident_size=2781559
                       GpuLoadParquet: estimated_max_resident_size=2781559, source_bytes=2781559, target_batch_bytes=2781559, amplification=1.0
           GpuAggregateBatches: estimated_max_resident_size=48966868
@@ -10452,7 +10452,7 @@ GpuUnload
           GpuProject: exprs=[count(*)@0 as amc], lanes=1, batches=single, schema=[amc:Int64]
             GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
               GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                   GpuHashJoin: join_type=Inner, on=[(wp_web_page_sk@0, ws_web_page_sk@0)], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64, ws_web_page_sk:Int64]
                     GpuCoalesceAllBatches: lanes=1, batches=single, schema=[wp_web_page_sk:Int64]
                       GpuFilter: predicate=(wp_char_count@1 >= 5000) AND (wp_char_count@1 <= 5200), projection=[wp_web_page_sk@0], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64]
@@ -10469,7 +10469,7 @@ GpuUnload
           GpuProject: exprs=[count(*)@0 as pmc], lanes=1, batches=single, schema=[pmc:Int64]
             GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
               GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
                   GpuHashJoin: join_type=Inner, on=[(wp_web_page_sk@0, ws_web_page_sk@0)], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64, ws_web_page_sk:Int64]
                     GpuCoalesceAllBatches: lanes=1, batches=single, schema=[wp_web_page_sk:Int64]
                       GpuFilter: predicate=(wp_char_count@1 >= 5000) AND (wp_char_count@1 <= 5200), projection=[wp_web_page_sk@0], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64]
@@ -10533,7 +10533,7 @@ GpuUnload: estimated_max_resident_size=1700
           GpuProject: estimated_max_resident_size=6474456
             GpuAggregateBatches: estimated_max_resident_size=6474456
               GpuAggregate: estimated_max_resident_size=747
-                GpuProject: estimated_max_resident_size=83
+                GpuProject: estimated_max_resident_size=166
                   GpuHashJoin: estimated_max_resident_size=2161500
                     GpuCoalesceAllBatches: estimated_max_resident_size=540
                       GpuFilter: estimated_max_resident_size=517
@@ -10550,7 +10550,7 @@ GpuUnload: estimated_max_resident_size=1700
           GpuProject: estimated_max_resident_size=6474456
             GpuAggregateBatches: estimated_max_resident_size=6474456
               GpuAggregate: estimated_max_resident_size=747
-                GpuProject: estimated_max_resident_size=83
+                GpuProject: estimated_max_resident_size=166
                   GpuHashJoin: estimated_max_resident_size=2161500
                     GpuCoalesceAllBatches: estimated_max_resident_size=540
                       GpuFilter: estimated_max_resident_size=517
@@ -10990,7 +10990,7 @@ GpuUnload: estimated_max_resident_size=4300
 GpuUnload: skip=0, fetch=100
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
     GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-      GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+      GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
         GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@0)], lanes=1, batches=multiple, schema=[s_store_sk:Int64, ss_store_sk:Int64]
           GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_store_sk:Int64]
             GpuFilter: predicate=s_store_name@1 = ese, projection=[s_store_sk@0], lanes=1, batches=multiple, schema=[s_store_sk:Int64]
@@ -11026,8 +11026,8 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
 budget=2147483648, accumulators=29106444, certain=0
 GpuUnload: estimated_max_resident_size=25923636
   GpuAggregateBatches: estimated_max_resident_size=25923636
-    GpuAggregate: estimated_max_resident_size=144
-      GpuProject: estimated_max_resident_size=16
+    GpuAggregate: estimated_max_resident_size=148
+      GpuProject: estimated_max_resident_size=33
         GpuHashJoin: estimated_max_resident_size=2160300
           GpuCoalesceAllBatches: estimated_max_resident_size=108
             GpuFilter: estimated_max_resident_size=122

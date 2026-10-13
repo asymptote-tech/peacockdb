@@ -1012,12 +1012,12 @@ GpuUnload: output_rows=1, output_bytes=43
 early_exit=GpuUnload@6,GpuLimit@3
 GpuUnload: skip=3, fetch=20, output_rows=20, output_bytes=163
   in_rows=[[115]] batch_rows=[[20]] batch_bytes=[[163]]
-  GpuCrossJoin: lanes=1, batches=multiple, output_rows=115, output_bytes=935
+  GpuCrossJoin: projection=[k@1], lanes=1, batches=multiple, output_rows=115, output_bytes=935
     in_rows=[[5],[23]] batch_rows=[[115]] batch_bytes=[[935]]
-    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=5, output_bytes=0
-      in_rows=[[5]] batch_rows=[[5]] batch_bytes=[[0]]
-      GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], limit=23, lanes=1, batches=multiple, output_rows=5, output_bytes=0
-        in_rows=[] batch_rows=[[5]] batch_bytes=[[0]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=5, output_bytes=6
+      in_rows=[[5]] batch_rows=[[5]] batch_bytes=[[6]]
+      GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], limit=23, lanes=1, batches=multiple, output_rows=5, output_bytes=6
+        in_rows=[] batch_rows=[[5]] batch_bytes=[[6]]
     GpuProject: exprs=[p_partkey@0 as k], lanes=1, batches=multiple, output_rows=23, output_bytes=187
       in_rows=[[23]] batch_rows=[[23]] batch_bytes=[[187]]
       GpuLimit: skip=5, fetch=23, lanes=1, batches=multiple, output_rows=23, output_bytes=187

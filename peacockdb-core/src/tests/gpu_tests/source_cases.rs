@@ -169,3 +169,39 @@ operator_case! {
         read_both("zero-rows", &synthetic(0, 1), 16, None).same(Order::AsEmitted);
     }
 }
+
+// #63 — a scan of no column reads rows alone: the cpu off the reader's row count, the device
+// off the footer, each as one non-null Int8 zero per row.
+operator_case! {
+    GpuLoadParquet,
+    fn a_rows_only_scan_agrees_on_both_backends() {
+        let batch = synthetic(64, 1);
+        let path = write_parquet("rows-only", &batch, 16);
+        let columns = scan(&path, batch.schema(), None);
+        let groups = ScanMetadata {
+            file: columns.file.clone(),
+            groups: columns.survivors.clone(),
+            can_be_null: Vec::new(),
+        };
+        let rows_only = GpuLoadParquet::new(
+            "t".to_string(),
+            Vec::new(),
+            columns.partition_groups.clone(),
+            &groups,
+            None,
+            Schema::rowmarker(),
+        );
+        let outcome = run_both(&rows_only, Script::Source { lane: 0 });
+        std::fs::remove_file(&path).expect("the file this case wrote");
+        outcome.same(Order::AsEmitted);
+        let rows: Vec<usize> = outcome
+            .gpu
+            .as_ref()
+            .expect("the device answers")
+            .iter()
+            .flatten()
+            .map(|batch| batch.num_rows())
+            .collect();
+        assert_eq!(rows, vec![16; 4]);
+    }
+}

@@ -206,6 +206,11 @@ pub(crate) struct AggStateColumns {
     pub(crate) positions: Vec<u32>,
 }
 
+/// The one column of a table DataFusion plans with none. A device table's row count is its
+/// first column's, so a table of no columns reads as no rows; the plan declares this column
+/// instead, a literal zero per row, and a join above drops it through its projection (#63).
+pub(crate) const ROWMARKER: &str = "__rowmarker__";
+
 /// Column types in order — the index *is* the ordinal every plan reference uses — plus
 /// what those columns mean.
 #[derive(Debug, Clone, PartialEq)]
@@ -225,6 +230,16 @@ impl Schema {
             group_keys: Vec::new(),
             agg_state: Vec::new(),
         }
+    }
+
+    /// `[__rowmarker__: Int8]`, never NULL: what a node declares where DataFusion has rows
+    /// and no column (#63).
+    pub(crate) fn rowmarker() -> Self {
+        Self::new(Arc::new(ArrowSchema::new(vec![Field::new(
+            ROWMARKER,
+            DataType::Int8,
+            false,
+        )])))
     }
 
     /// The state columns an aggregate output carries, or `None` once the schema is
@@ -907,6 +922,11 @@ impl GpuLoadParquet {
 }
 
 impl GpuLoadParquet {
+    /// Reads no column, only rows, which it answers as `__rowmarker__` (#63).
+    pub(crate) fn rows_only(&self) -> bool {
+        self.projection.is_empty()
+    }
+
     pub(crate) fn rows(&self) -> u64 {
         self.survivors.iter().map(|group| group.rows).sum()
     }
@@ -1310,6 +1330,11 @@ pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
 /// [`emits`], which is the same fact its carry-over rule reads.
 pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -> usize {
     join::emitted_columns(join_type, build, probe)
+}
+
+/// The sides whose columns a join type emits, as `(build, probe)`; a mark comes after both.
+pub(crate) fn emitted_sides(join_type: JoinType) -> (bool, bool) {
+    join::emitted_sides(join_type)
 }
 
 pub(crate) fn resolve(name: &str) -> Result<AggSpec, PlanError> {

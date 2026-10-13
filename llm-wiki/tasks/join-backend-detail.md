@@ -1268,3 +1268,188 @@ will rewrite if they hold a zero-column projection: tpch q11, q22, tpcds q24, q5
 answers every type with a residual as DataFusion's own join, and `NestedLoopJoinExec` takes
 every type. The planner's probe-side coalesce is no longer needed by either engine.
 `JoinCapability.probe_streams` is still read by the planner and the wire.
+
+#### Round 2, plan task 4 — `__rowmarker__` is a column the plan declares (#63)
+
+Planner, validation, both scans, the wire's `CudfScan.rows_only`, and `project.cpp`'s refusal.
+An fbs change, so the rust-only tier was re-proved in full. Closes #63's mechanism; its device
+cells stay off for task 14.
+
+**What shipped.**
+- `plan/mod.rs`: `ROWMARKER` and `Schema::rowmarker()` (`[__rowmarker__: Int8]`, not nullable);
+  `GpuLoadParquet::rows_only()` (the empty projection); `emitted_sides(join_type)`, the side half
+  of `join.rs`'s `emits`.
+- Translator: a `ProjectionExec` of no expression plans `GpuProject [0 as __rowmarker__]`; a scan
+  of no column declares the marker itself. `translator/common.rs`'s `past_rowmarkers` renumbers a
+  keyless join's projection past a marker side and drops the marker, or keeps one alone where the
+  join would keep nothing; the cross and both nested-loop arms call it.
+- Validation: no node declares no column (`declares_a_column`, in the walk); a rows-only scan
+  counts one column in `declared_width` and must declare the marker (`source.rs`). The scan's
+  nullability leaf is `[false]`.
+- `planner/nullability.rs`: the `CrossJoin` arm reads its projection, through the rule the
+  nested loop uses. It ignored it, harmless while no cross join had one; this task gives cross
+  joins one, so the arm reported the marker's `false` for the column kept, which could skip a
+  #137 filter above it. Found by reading task 5's note, not by a test; red first.
+- cpu: `CpuSource` answers a rows-only read as one `Int8` zero a row of the rows it read.
+- Wire and device: `CudfScan.rows_only: bool = false`, appended; `node_writer.rs` sets it,
+  `fb_text.rs` renders it. `scan.cpp`'s `rows_of` reads the footer (`read_parquet_metadata`),
+  sums the chosen row groups' `num_rows`, caps at `limit`, and builds the column. Nothing is
+  decoded. The row-group block moved above the arm. `project.cpp`'s empty-expression arm
+  throws `CudfProject with no expression: the plan declares __rowmarker__ (#63)`, before
+  `take_input`, so the refusal consumes nothing.
+
+**What the plan got wrong.**
+- **pbench carries the shape too.** `scalar-subquery-cross`'s three marker projects (q9's shape
+  by construction) and `cross-projection`'s scan of no column, at every mode. The plan named
+  tpcds and tpch only.
+- **The payload golden would not have shown `rows_only`.** nested-limits was not in the payload
+  subset, and the coverage check reads kinds and call shapes, not fields. So it is the 21st
+  payload query, with the reason beside it.
+- **Step 1(a)'s SQL cannot run.** The minimal dataset has no `lineitem`, and DataFusion answers a
+  one-table `count(*)` from statistics (#158). The case uses `count(*)` over a join, q88's shape.
+- **The gtest's nation scan proves nothing about row groups.** nation is one row group, so "that
+  group's count" equals the whole. The case reads customer: 150,000 whole, 27,120 for group 1,
+  10 under `limit=10`.
+- **Only keyless joins meet a marker.** A keyed side has a column, and DataFusion never embeds an
+  empty projection into a join (`try_embed_projection` returns `None` for no indices). So step
+  3's "task 9 makes the projection apply on every type" does not bear on the marker. Both
+  engines already apply the keyless projections: the device from task 7, the cpu from task 8.
+  Four joins per mode set gain a projection: tpcds q9's innermost Left nested loop, pbench's two,
+  and nested-limits' cross join.
+- **The memory sections move.** The estimator prices the marker at its bytes. Neither the plan nor
+  the design says so.
+- **One divergence the plan's arm creates, not reachable today.** The device's rows-only read
+  caps at `limit` per call, as `set_num_rows` does for a column read. The cpu reader ignores a
+  scan's limit (#186, pinned by `bug_a_limit_over_one_row_group_is_ignored_on_the_cpu`). The two
+  differ only where a limit is under a batch's rows. nested-limits' region scan is `limit=23` over
+  5 rows, and its device cells are off on #186. chain K's limits task takes the limit out of both
+  readers, and this line goes with it.
+
+**Goldens moved, by kind, checked arithmetically.** No `.result.txt`, `duckdb-result.txt`,
+`gpu-result.txt`, `cost-registry.csv` or `corpus_cases.inc`: no answer moved.
+
+| kind | files | what moved, per mode |
+|---|---|---|
+| `*.plans.txt` tpcds | 5 | 19 marker projects; q9's innermost nested loop gains `projection=[count(*)@1]`; 1–2 pass-throughs; 24–31 `--- memory ---` lines |
+| `*.plans.txt` pbench | 5 | 3 marker projects, 1 rows-only scan, 2 keyless joins with a projection, 2–4 pass-throughs, 11–13 memory lines |
+| `*.plans.txt` tpch | 5 | nested-limits: the rows-only scan, its coalesce, the cross join's `projection=[k@1]`, 4 memory lines |
+| `recipe-payloads.txt` | 1 | nested-limits added, `rows_only: true` on its region scan; q87's `#86 CudfProject` gains `__rowmarker__: 0` and a new digest |
+| `*-mini.cpu.txt` | 15 | 33 sections, every enabled cpu cell of the nine queries |
+| `*-mini.cost.txt` | 15 | derived from those 33 |
+
+Read by a script, not by eye. In the plan goldens every changed line is one of five kinds: a
+marker project, a rows-only scan, a pass-through over one (`GpuCoalesceAllBatches`,
+`GpuMergePartitions`), a keyless join, or a memory line. Nothing else changed, and no
+`schema=[]` is left in any golden. In the `.cpu.txt` files the node-kind counts are identical
+before and after, and so is every `output_rows`, `batch_rows` and `in_rows`. Only bytes moved,
+on 136 marker-project lines, 20 scan lines, 34 coalesce and 8 merge lines, and 17 keyless-join
+headers (the projection text only; their bytes did not move). Arithmetic: tpcds tp1 is 19
+projects × 2 lines = 38, tp4 is 8 × 2 = 16, since q88, q90 and q96 run at tp1 only. The marker
+costs 1⅛ bytes a row, an `Int8` and its validity bit (550,263 rows → 619,046 bytes).
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base 29937e22`: 726 compared,
+33 changed, **33 regressions, none over 10%** — the 33 sections above, by `peacockdb_cost`:
+tpcds q9 +3,094,392…3,094,446 bytes (+0.33%) at all five modes; q87 +53,211…53,212 (+0.01–0.03%)
+at five; q88 +43,877 and +43,948 (+0.01%) at tp1; pbench `scalar-subquery-cross` +11,254 and
++11,259 (+0.94%) at tp1; q96 +984 and +994, q90 +355 and +358, q38 +121…122, pbench
+`cross-projection` +18 (tp1) and +27 (tp4), tpch nested-limits +12 — all +0.00% at two decimals.
+Pre-accepted by the board.
+
+**Red-green evidence.** Red first: seven rust-only cases, each for its own reason. The three
+translator cases found `exprs=[]` and `schema=[]`; the two-marker cross join had no projection;
+validation passed a project of no expression, and refused a rows-only scan as "declares 1
+columns and the columns it reads produces 0"; and the cpu reader answered zero columns. Two
+added later went red first as well: the cross join's nullability (`[false, true]` against
+`[true]`) and the marker scan's (R8 below). Then mutations, each applied with an asserted single
+match against the whole `--lib` tier, restored from a saved copy and checked with `cmp`. The
+whole working diff was snapshotted before the run and compared byte for byte after.
+- R1 the project arm off: 17 failed — three translator cases, ten plan goldens with the payload
+  golden, `tests::end_to_end::{tpcds_q38, tpcds_q87, a_two_key_group_by_over_many_rows_…}`.
+- R2 `past_rowmarkers` a no-op: 19 failed, but **none of the translator join cases**. They read
+  declared names, and `validate_all` runs each node's own check, not the walk's
+  `declared_width`. Tightened: each now asserts the projection and runs `plan::validate`. Re-run,
+  3 of 7 red where 0 were.
+- R3 the keep-one-alone branch off: 1 failed, the two-marker cross join.
+- R4 `declares_a_column` off: 1 failed, the project refusal.
+- R5 the cpu reader not rows-only: 3 failed — its case, `tests::end_to_end::tpch_nested_limits`
+  and `limits::a_limit_slices_at_most_two_batches_and_stops_the_scan`.
+- R6 `rows_only` not written: 1 failed, the payload golden.
+- R7 the scan's marker check off: 1 failed.
+- R8 the scan's `[false]` leaf off: **0 failed**. Added
+  `a_scan_of_no_column_says_its_marker_holds_no_null`; re-run, 1 failed.
+- R9 the scan arm declaring DataFusion's empty schema: 14 failed.
+- R10 `declared_width`'s rows-only arm off: 14 failed.
+- Device, both in one build since they redden different tests: D1 the `rows_only` arm off
+  (`if (false)`): `ScanRowsOnlyAnswersTheRowCount` and `a_rows_only_scan_agrees_on_both_backends`.
+  D2 the project refusal off: `AProjectOfNoExpressionIsRefused` (the empty table is then refused
+  by `register_handle`, which does not name the marker). 3 failed, 77 and 586 passed. Restored,
+  `cmp`-checked, touched before the re-sync, and the next build re-ran both gtests green.
+- `the_rowmarker_project_answers_a_zero_a_row_on_both` (`exec_cases.rs`) has no mutation. It pins
+  what cuDF's `compute_column` makes of a bare `INT8` literal, the device path every marker
+  project takes. Nothing in this task's code could be broken to redden it.
+
+**The device run, recorded.** nebius-gpu, NVIDIA L40S, 0 MiB in use; cuDF 25.02; final tree
+synced, `./scripts/build-test-shadgpu.sh --build` rc 0, each binary run directly with
+`--test-threads=1`. **826 cases, all green**: `peacock_gpu_tests` 2, `peacock_plan_tests` 79
+(+2), `peacock_join_session_tests` 53, `test_gpu_corpus` 95, `test_node_timing` 1,
+`peacockdb_core_gpu_lib gpu_tests::` 588 (+3), `peacock_gpu_benchmarks --skip bench_` 8. Not
+run, per the override: the sf40 pair and the `bench_` cases. Disk 28 GB free of 96 throughout;
+nothing deleted.
+
+**Local.** `peacock_cpu_tests` 15 passed, from `/tmp/dkb-cppbuild`. It had gone, so it was
+re-configured: `cmake -S cpp -B /tmp/dkb-cppbuild -G Ninja -DCMAKE_BUILD_TYPE=Release
+-DCMAKE_CUDA_ARCHITECTURES=89`, gcc-12 and nvcc from the rapids env as compilers, ccache as
+the launcher, `-Dcudf_ROOT=` that env, `link_pool=1`, then `--target peacock_cpu_tests`.
+Rust-only on the final tree: `--lib` 740 passed, 2 ignored;
+`test_cpu_corpus` 1006; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18;
+`test_ci_coverage` 11; `test_golden_format` 43.
+
+**Warnings.** None new. rust-only build and test builds: none. On nebius,
+`cargo-cudf.sh build -p peacockdb-core --features gpu` gives the same 26 pre-existing dead-code
+warnings, none in a file this task touched. The gpu lib-test build gives the one pre-existing
+`AsArray`. `build-test-shadgpu.sh`'s log shows no warning at all, since it builds with
+`--message-format=json`; re-running the same build through `cargo-cudf.sh` replays them.
+
+**Formatting.** `cpu_backend/tests/source.rs`, `translator/{common,nodes,tests}.rs` were
+rustfmt-clean at HEAD and were formatted whole through a temp copy. Every other touched `.rs`
+reports exactly its HEAD hunk count. The C++ hunks went through `git clang-format --diff HEAD`,
+applied by hand, since applying it needs the files staged.
+
+**build-test.md counts (coordinator's file).** cpu block 1768 → 1777: `--lib` 733 → 742.
+"Translator, one rule at a time" 33 → 37; "Plan types" 38 → 40; "CPU backend executors" 79 → 80;
+"Null analysis rules" 9 → 11. gpu block 692 → 695: `--lib -- gpu_tests::` 585 → 588; "Operator
+harness" 356 → 359. "Plan-executor (C++)" 77 → 79, so C++ 169 → 171. Rust 2580 → 2592, grand
+total 3150 → 3164. Each row was counted off `--list`, not by adding deltas. Prose now short of
+the truth:
+- "Plan types": its rules list lacks "no node declares no column (#63)".
+- "CPU backend executors": the loader also answers a read of no column as `__rowmarker__`.
+- "Plan-executor (C++)": add a scan of no column answering its row count from the footer
+  (whole, one row group, under a limit), and a project of no expression refused.
+- "Recipe payloads golden": "chosen as a cover over every fb kind and call shape" — one member,
+  nested-limits, is there for a field, `rows_only`.
+- "Operator harness": the marker project, a cross join of two marker sides, a rows-only scan.
+
+**architecture.md sentences this round falsified** (the coordinator's to correct): the
+`CudfScan` row of the payload table (`file_paths`, `projection`, `limit` …; "`scan.cpp` —
+`cudf::io::read_parquet(opts)`, with `.columns(projected)` …"). It now has a `rows_only` field,
+and that read decodes nothing: it reads the footer and builds the marker. And the
+`CudfScan.limit` → `set_num_rows` row, which caps a rows-only read's count instead. The
+`CudfProject` row is not false, but it now refuses an empty expression list.
+
+**Drift found, not mine.** #63's ticket (`tickets/joins.md`) describes the mechanism this
+round replaced: `project.cpp`'s `__rowcount__`, and `execute_cross_join`, gone with task 7. Its
+"Fix proposed" (a rows-only cross-join arm) is superseded. It is the coordinator's to archive
+with the chain.
+
+**A seventh workstation trap, small.** `ssh nebius-gpu 'nohup … &'` can sit until its `timeout`
+and exit 124 even with `-n` and `< /dev/null`, while the detached job runs. Read the job's own
+log and rc file, never the ssh status.
+
+**What plan task 9 inherits.** `past_rowmarkers` reads `emitted_sides`, so it already covers
+every join type. Lifting #160 needs nothing more for a nested loop over a marker side, though no
+SQL reaches a non-Inner, non-Left one today. Hash joins never meet a marker, so the #153 and
+#159 lifts need nothing from this task. The null analysis now honours every keyless join's
+projection. #63's device cells stay off for task 14 to run: tpcds q9, pbench
+`scalar-subquery-cross` and `cross-projection`. Their registry rows still carry `63`.
+nested-limits' device cells stay on #186: its part scan's `limit=28` is still refused beside
+row groups.

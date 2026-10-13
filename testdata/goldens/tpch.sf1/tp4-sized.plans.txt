@@ -257,9 +257,9 @@ GpuUnload: estimated_max_resident_size=258052245
                 GpuLoadParquet: estimated_max_resident_size=55285864, source_bytes=52577862, target_batch_bytes=52577862, amplification=4.0
 == nested-limits
 GpuUnload: skip=3, fetch=20
-  GpuCrossJoin: lanes=1, batches=multiple, schema=[k:Int64]
-    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
-      GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], limit=23, lanes=1, batches=multiple, schema=[]
+  GpuCrossJoin: projection=[k@1], lanes=1, batches=multiple, schema=[k:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[__rowmarker__:Int8]
+      GpuLoadParquet: table=region, projections=[], partition_groups=[[[0]]], limit=23, lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
     GpuProject: exprs=[p_partkey@0 as k], lanes=1, batches=multiple, schema=[k:Int64]
       GpuLimit: skip=5, fetch=23, lanes=1, batches=multiple, schema=[p_partkey:Int64]
         GpuLoadParquet: table=part, projections=[p_partkey@0], partition_groups=[[[0,1]]], limit=28, lanes=1, batches=multiple, schema=[p_partkey:Int64]
@@ -272,10 +272,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
       GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
         GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=10, certain=5
-GpuUnload: estimated_max_resident_size=5
-  GpuCrossJoin: estimated_max_resident_size=229
-    GpuCoalesceAllBatches: estimated_max_resident_size=5
+budget=2147483648, accumulators=20, certain=10
+GpuUnload: estimated_max_resident_size=10
+  GpuCrossJoin: estimated_max_resident_size=234
+    GpuCoalesceAllBatches: estimated_max_resident_size=10
       GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
     GpuProject: estimated_max_resident_size=224
       GpuLimit: estimated_max_resident_size=224

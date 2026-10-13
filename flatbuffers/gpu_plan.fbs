@@ -351,6 +351,10 @@ table CudfScan {
   /// groups per call (`execute_scan_rowgroups`) — so both are reachable only from
   /// a hand-built plan.
   batches: [ScanBatch];
+  /// Read no column, only how many rows the chosen row groups hold, answered as one
+  /// non-null INT8 column `__rowmarker__` of zeros (#63): an empty `projection` means every
+  /// column, so a scan of none needs saying. `projection` and `file_schema` go unread.
+  rows_only: bool = false;
 }
 
 /// Apply a boolean predicate, discarding non-matching rows.

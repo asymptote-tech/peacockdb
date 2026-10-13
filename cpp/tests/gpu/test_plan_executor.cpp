@@ -1328,6 +1328,65 @@ TEST(ScanRowGroups, SubsetsUnionToTheWholeScan) {
   EXPECT_EQ(keys, whole);
 }
 
+/// customer.parquet read for its rows alone (#63), as a plan declares a scan of no column.
+static std::vector<uint8_t> customer_rows_plan(flatbuffers::FlatBufferBuilder& fbb,
+                                               uint64_t limit) {
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, {{"__rowmarker__", fb::DataType_Int8}});
+  fb::CudfScanBuilder sb(fbb);
+  sb.add_file_paths(paths);
+  sb.add_file_schema(schema);
+  sb.add_limit(limit);
+  sb.add_rows_only(true);
+  auto scan = sb.Finish();
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union()));
+}
+
+TEST(PlanExecutor, ScanRowsOnlyAnswersTheRowCount) {
+  flatbuffers::FlatBufferBuilder fbb, limited_fbb;
+  auto buf = customer_rows_plan(fbb, /*limit=*/0);
+  {
+    WholePlan plan(buf);
+    const auto& result = plan.result();
+    ASSERT_EQ(result.num_columns(), 1);
+    EXPECT_EQ(result.num_rows(), 150000);
+    EXPECT_EQ(result.column_names[0], "__rowmarker__");
+    auto marker = result.view().column(0);
+    EXPECT_EQ(marker.type().id(), cudf::type_id::INT8);
+    EXPECT_EQ(marker.null_count(), 0);
+    std::vector<int8_t> host(marker.size());
+    cudaMemcpy(host.data(), marker.data<int8_t>(), host.size(), cudaMemcpyDeviceToHost);
+    EXPECT_EQ(std::count(host.begin(), host.end(), int8_t{0}), 150000);
+  }
+  // One row group of the two, as a loader's batch names it: that group's rows.
+  peacock::NodeSession session(buf.data(), buf.size());
+  std::vector<uint32_t> second{1};
+  auto handle = session.execute_scan_rowgroups(0, second, nullptr);
+  EXPECT_EQ(session.table_for(handle).num_rows(), 27120);
+  // A pushed-down limit caps the count as it caps a read.
+  EXPECT_EQ(WholePlan(customer_rows_plan(limited_fbb, /*limit=*/10)).result().num_rows(), 10);
+}
+
+TEST(PlanExecutor, AProjectOfNoExpressionIsRefused) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto path = fbb.CreateString(parquet_path("customer"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, {{"c_custkey", fb::DataType_Int64}});
+  auto scan = fb::CreateCudfScan(fbb, paths, schema);
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{});
+  auto aliases = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  auto plan = finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+  try {
+    WholePlan run(plan);
+    FAIL() << "a project of no expression answered";
+  } catch (const std::exception& e) {
+    EXPECT_NE(std::string(e.what()).find("__rowmarker__"), std::string::npos) << e.what();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The measurement side: what a region records, and the coordinate that tells two
 // calls of one seq apart. Nothing on the execution path reads any of it, so these

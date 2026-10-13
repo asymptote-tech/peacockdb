@@ -1,3 +1,29 @@
+== tpch nested-limits
+sha256=7b7ef0f3710534c14bebd58d38cede3e5b2d0de33b17a7ffeb9d17f3963b8676
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuCrossJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe
+      #4 CudfJoin
+        join_type: Inner
+        build_schema: [__rowmarker__:Int8]
+        probe_schema: [k:Int64]
+        projection: [1]
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        #1 CudfCoalescePartitions
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+          #0 CudfScan
+            files: /tmp/peacock-plan-bytes-root/tpch.sf1/region.parquet
+            schema: [__rowmarker__:Int8]
+            limit: 23
+            rows_only: true
+    GpuProject: calling_lanes=1, per batch: execute_node(#3 CudfProject, batch)
+        #3 CudfProject
+          k: p_partkey@0
+      GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+            #2 CudfScan
+              files: /tmp/peacock-plan-bytes-root/tpch.sf1/part.parquet
+              schema: [p_partkey:Int64]
+              limit: 28
 == tpch nested-loop-join
 sha256=653e7bd0fbf7d33792bd9373eb3a400330dce0eded2fbd4df5a651cb3bc4bfcf
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
@@ -4397,7 +4423,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           files: /tmp/peacock-plan-bytes-root/tpcds.sf1/customer.parquet
                                           schema: [c_customer_sk:Int64, c_current_addr_sk:Int64]
 == tpcds q87
-sha256=26084daf1a10f76f6523d39325931eced46898c35fa0fbbc0be83641952a5c3b
+sha256=e994a32a3dcd8e7aac3072b102a2230888e9871a27d588d182d263c4c2987003
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#90 CudfCoalescePartitions, lane batches), execute_node(#91 CudfAggregate{Merge}, prior output); at done: execute_node(#92 CudfProject{finalize}, prior output)
       #90 CudfCoalescePartitions
@@ -4421,6 +4447,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               count(*): count(1)
           GpuProject: calling_lanes=4, per batch: execute_node(#86 CudfProject, batch)
               #86 CudfProject
+                __rowmarker__: 0
             GpuHashJoin: calling_lanes=4, join_build(#84 CudfJoin); per probe batch: join_probe
                 #84 CudfJoin
                   join_type: RightAnti

@@ -419,3 +419,41 @@ operator_case! {
         run_both(&node, empty_probe()).same(Order::Any);
     }
 }
+
+// #63 — a side of rows and no column is `[__rowmarker__]`, and a cross join of two such sides
+// keeps one marker: its projection names one, since it would otherwise keep nothing.
+
+fn rowmarkers(rows: usize) -> RecordBatch {
+    let zeros: datafusion::arrow::array::ArrayRef =
+        Arc::new(datafusion::arrow::array::Int8Array::from(vec![0i8; rows]));
+    RecordBatch::try_new(Schema::rowmarker().fields.clone(), vec![zeros]).expect("one Int8 column")
+}
+
+operator_case! {
+    GpuCrossJoin,
+    fn a_cross_join_of_two_rowmarker_sides_keeps_one_placeholder() {
+        let join = GpuCrossJoin::new(
+            Given::of(Schema::rowmarker(), BatchLayout::SingleBatch),
+            Given::of(Schema::rowmarker(), BatchLayout::MultipleBatches),
+            Some(vec![0]),
+            Schema::rowmarker(),
+        );
+        let outcome = run_both(
+            &join,
+            script(Some(rowmarkers(3)), vec![rowmarkers(4), rowmarkers(5)]),
+        );
+        outcome.same(Order::Any);
+        let rows: usize = outcome
+            .cpu
+            .as_ref()
+            .expect("the cpu answers")
+            .iter()
+            .flatten()
+            .map(|batch| {
+                assert_eq!(batch.schema().fields(), Schema::rowmarker().fields.fields());
+                batch.num_rows()
+            })
+            .sum();
+        assert_eq!(rows, 3 * 4 + 3 * 5);
+    }
+}

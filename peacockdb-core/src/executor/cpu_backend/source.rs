@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::array::{ArrayRef, Int8Array, RecordBatch};
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{Schema as ArrowSchema, SchemaRef};
 use datafusion::parquet::arrow::ProjectionMask;
@@ -57,6 +57,7 @@ impl CpuSource {
             file: node.file.clone(),
             metadata,
             projection,
+            rows_only: node.rows_only(),
             batches: batches
                 .iter()
                 .map(|groups| groups.iter().map(|group| *group as usize).collect())
@@ -91,11 +92,19 @@ impl CpuSource {
             read.iter(),
         )
         .map_err(|error| BackendError::new(format!("joining the row groups read: {error}")))?;
-        Ok(Some((
-            CpuBatch::new(check_batch_schema(batch, &self.schema)?),
-            CallStats::default(),
-        )))
+        let batch = match self.rows_only {
+            true => rowmarker(batch.num_rows(), &self.schema)?,
+            false => check_batch_schema(batch, &self.schema)?,
+        };
+        Ok(Some((CpuBatch::new(batch), CallStats::default())))
     }
+}
+
+/// `rows` rows of the one column a read of no column declares: a zero each, never NULL (#63).
+fn rowmarker(rows: usize, declared: &SchemaRef) -> Result<RecordBatch, BackendError> {
+    let zeros: ArrayRef = Arc::new(Int8Array::from(vec![0; rows]));
+    RecordBatch::try_new(declared.clone(), vec![zeros])
+        .map_err(|error| BackendError::new(format!("the scan's row marker: {error}")))
 }
 
 /// The rows under the schema the node declares. The parquet reader answers under the file's
