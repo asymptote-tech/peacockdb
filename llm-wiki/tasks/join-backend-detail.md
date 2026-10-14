@@ -3566,3 +3566,16 @@ Its real-wiki case names #205 and #251 (both open) and #191 (archived). The corp
 reads the archive as well as the open files, so an archived number cannot turn it red. The
 other hits in `peacockdb-core/src` are comments, and `scripts/` and `peacockdb-core/tests/`
 have none.
+
+**CI on `b77afa35` (run 38539000073), the last code commit:** both cuDF legs, the 25.02 GPU build,
+and every cost-report step but the gate green; the gate red at 251 regressions, 173 past 10%,
+pre-accepted; `gpu-tests` red, exempt. CI's half of `done` is met.
+
+**Stalled at `completeness approved`, 2026-10-14.** The device half is not: the full override binary
+list has not passed on the final tree (the run on `28b0d074` stopped at tpcds q64 in
+`test_gpu_corpus` when nebius-gpu dropped, and two device mutations were not run). nebius-gpu now
+answers on 89.169.110.152 with a **changed ED25519 host key** (`SHA256:duKEQ7TW…`), which
+strict checking refuses. That is either a reprovisioned instance — then `~/peacockdb-J`, its sf1
+testdata and the cuDF 25.02 env may be gone, and the override's recipe starts from scratch — or
+something worse; accepting the key is the human's call, not an agent's. Once the host is trusted
+again: sync, `--build`, run the whole override list, record it here, and write `done`.
