@@ -3057,3 +3057,44 @@ Plan tasks 7, 8, 4, 9, 9b, 9c, 10, 11–13, 14 (tpch, tpcds, pbench), 15 and 16 
 per developer dispatch, each green on rust-only and on nebius-gpu. PR #179 opened against
 `ENS-join-session-cpp`, 24 commits. Owed before `completeness approved`: the whole-task cost diff
 against the branch point `3d9a122e` (spec risk 1), for the PR body; the coordinator cannot run it.
+
+## Review round 1 — 2026-10-14, on `7fa0013c`: 0 blocking, 7 important, 12 nits
+
+Checked clean by the reviewer: the 56 pins (none deleted), the pbench shape guard (45 queries), the
+registry ↔ `.inc` ↔ `gpu-result.txt` agreement, the `NOT IN` rewrite worked by hand, #137's sides
+for all nine types, the archived tickets' links. Q1 (task 13's deleted cuDF-call guard): not a
+coverage loss — the model it compared against is gone and the 53 session gtests cover the calls;
+record it as a departure in the signoff. Q2 (25 dead-code warnings): none looks like this branch's
+by reading; only a build settles it (I7).
+
+Important, routed to the developer unless marked *coordinator*:
+1. `test_support/order_hazard.rs:170-185` `tie_at_a_cut` compares only the two rows at the cut; a
+   three-row tie (a=(1,p),(2,q),(3,q),(4,s), b=(1,10),(2,10),(3,10),(4,30), `ORDER BY b.w LIMIT 2`)
+   passes when the cpu orders the two (q,10) at the cut. Read the whole tie group; also an offset
+   cut is read only when the `GlobalLimitExec` is the sort's direct parent. Add the case.
+2. `cpp/src/operators/scan.cpp:33` `rows_of` caps per call at `limit`, so a rows-only scan with a
+   limit beside row groups answers batches × min(rows, limit) where the base refused (#186). Refuse
+   it as `read_parquet` does; pin it under #186. Needs a device run.
+3. `tests/gpu_tests/join_schema_cases.rs` has no Left/Full cases (header still says they refuse,
+   #152), nor nested-loop types past Inner/Left in `nested_schema_cases.rs`. Add them; fix header.
+4. `build-test.md:702-708` device-schema row: Left/Full "refuse"; "Five" `bug_` pins → four.
+5. *coordinator* — #214 (`corpus-coverage.md:427,439-444`) describes `without_build` and #212's
+   refusal, which this branch removed; reword to what is still broken or close.
+6. #267 has no `bug_` test (planner, `// #267`); its line 345 says `count(*)` where the rewrite
+   writes `count(lit(1i32))` (*coordinator* for the text).
+7. The spec's no-dead-code-warning bar: list the 25 `--features gpu` warnings at `3d9a122e` and at
+   HEAD; if equal, the signoff reads the bar as "no new warning".
+
+Nits: (1) comments over 10 lines — `gpu_backend/mod.rs:1-11`, `planner/tests/join_refusals.rs:1-11`,
+`wire/mod.rs:338-348`, `tests/common/corpus_cases.inc:265-276`; (2) *coordinator* — tickets the diff
+lengthened: #257 29→43 and its line 175 stale on `EmptyExec`, #205, #199, #225, #56, #60; (3)
+*coordinator* — `corpus-coverage.md:466` #205 reads as if `not-in-uncorrelated`'s device cells are off;
+(4) *coordinator* — `coding-style.md:165` "30 of the 46" now 47; (5) `wire/tests.rs:458` compares
+`needs_finish` with itself; (6) stale comments `driver/tests/flow.rs:388`, `tests/test_cpu_corpus.rs:143`;
+(7) `plan/join.rs:406-411`, `plan/mod.rs:1314-1319` docs still say "produced no batch"; (8)
+*coordinator* — `architecture.md:881` `GpuEmpty` "routed as a merge"; (9) `wire/writer.rs:42`
+`Writer::new` test-only; (10) `memory_estimation.rs:248` a finishing nested loop priced without its
+matched byte; (11) *coordinator* — PR body over 10 lines; (12) signoff: name the retired guard and
+`pub trait IntoAnyBox`.
+
+Also owed before the PR settles: the whole-task cost diff against `3d9a122e` (spec risk 1).
