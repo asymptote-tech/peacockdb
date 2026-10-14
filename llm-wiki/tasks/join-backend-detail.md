@@ -3550,3 +3550,19 @@ red (exempt). The cost-report job is red for a reason the board did not accept:
 `cost-report`'s `the_index_reads_the_anchors_of_every_wiki_file` names #152 as an open `joins.md`
 ticket, and plan task 16 archived it. Its own doc says the fix is to swap in an open number. Red
 since task 16's push, unnoticed through two review rounds because the job was expected red.
+
+### Round 5 — CI's cost-report test
+
+`the_index_reads_the_anchors_of_every_wiki_file` asserted #152 resolves to `tickets/joins.md`;
+plan task 16 (`a192c7bb`) moved #152's anchor to the archive. The test now names #243, open in
+`joins.md`. Its other two numbers still hold: #205 in `tickets/corpus-coverage.md`, #103 in
+the archive. Red at HEAD: `cargo test -p cost-report`, 40 passed, 1 failed (line 1780). Green
+after: 41 passed, 0 failed, and the only warning is the old `sha_links` one.
+
+Swept for the other 17 archived numbers asserted as open. Nothing else needed changing.
+`duckdb_oracle/tests.rs` passes #80 to a fixture `closed` predicate and asserts it is not open.
+Its real-wiki case names #205 and #251 (both open) and #191 (archived). The corpus's
+`duckdb_divergent` lines name only #205 and #251. `every_refusal_names_a_ticket_that_exists`
+reads the archive as well as the open files, so an archived number cannot turn it red. The
+other hits in `peacockdb-core/src` are comments, and `scripts/` and `peacockdb-core/tests/`
+have none.
