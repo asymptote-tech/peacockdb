@@ -69,7 +69,8 @@ them now, `stale-cells` having turned on the four device modes that a closed #18
 Validation was off for all five, so that run says nothing about the names and the refusal still
 stands at every mode; the row keeps no `225` only because no cell of it is off.
 
-**Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
+**Corpus queries:** `tpch/shuffle-stddev` (schema validation only). `tpcds/q39` at every mode and
+`tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off here.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -175,11 +176,11 @@ one: a keyless aggregate answers one row whatever arrived.
 
 **Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
 `tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
-behind them. And four device cells whose cpu cells answer: `tpch/q11` at the three tp4 modes and
-`tpch/q22` at `tp4-single`. There the cpu's identity rows reach the `.cpu.txt` section the device
+behind them. And seven device cells whose cpu cells answer: `tpch/q11` and `tpcds/q32` at the three
+tp4 modes and `tpch/q22` at `tp4-single`. There the cpu's identity rows reach the `.cpu.txt` section the device
 is held to, and the device answers the same rows as DuckDB. An empty lane comes from
 tp4-single cutting a table of fewer row groups than lanes into four (q22's customer), or from an
-Inner join with no build rows in a lane (q11's one nation). Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
+Inner join with no build rows in a lane (q11's one nation, q32's one-lane build). Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
 where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
 site have no corpus query.
 
@@ -210,9 +211,9 @@ reads state columns by reference. q66's five cpu cells, which run the same trans
 are green. What is missing is a device run: nothing has put a summed quotient on a device.
 
 **Corpus queries:** `tpcds/q66` — twelve `sum(<month>_sales / w_warehouse_sq_ft)` over a two-branch
-union. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`). Closing #55 enables none
-of them: the four multi-batch modes are held by #152, and tp1-single by #220, the cpu's join
-batching. Registry row 67 tags `55 152 220`.
+union. Its five gpu cells are on since join-backend's task 14, which ran them on an L40S under
+cuDF 25.02: each matched the cpu's sections and its answer met DuckDB, so registry row 67 tags
+nothing. That is the corpus half of the proof; the walk test below is still owed.
 
 **Fix proposed:** no code change — a proof, then archive. Add a walk test beside
 `each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
@@ -243,11 +244,10 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 55's duplicate ordinal is #228.
 
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
-q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. Two reach it on a device,
-`pbench/rollup-small-keys` and `tpch/rollup-over-join`, all five device cells of each off here,
-the validator refusing the width at the first `GpuAggregate`. The tpcds rows are off first on
-#152, #212 or #220, and no longer on #189 or #206: the shuffle stopped hashing the id and the kernel has
-its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
+q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
+device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
+meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
+id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
 window queries that never run.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
@@ -461,8 +461,8 @@ zero-row batch are different arrivals: a global merge over nothing is #199's sit
 which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
 
 **Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
-rows (`mini.result.txt`). Its device cell is off on this ticket (`corpus_cases.inc`); the device
-never ran its other four modes. The 12 bytes are the device's one zero-row batch: three `Utf8`
+rows (`mini.result.txt`). Its device cells are off on this ticket. Measured since the join
+session: its tp4 cells pass on the device, and its tp1 cells meet [#225](#t225) first. The 12 bytes are the device's one zero-row batch: three `Utf8`
 columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
 `select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
 
@@ -527,7 +527,8 @@ than answering it, the AST path still computing a double. Same class as
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
-`Decimal128` row. The likely fix is `cudf_ast_can_evaluate` refusing a bare decimal literal as it already
+`Decimal128` row. **Corpus queries:** `tpcds/q5`, whose `0.00 as return_amt` and `net_loss` the
+schema hook refuses as FLOAT64 at every mode, ahead of #65. The likely fix is `cudf_ast_can_evaluate` refusing a bare decimal literal as it already
 refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t57"></a>
@@ -545,9 +546,8 @@ run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
 
 **Corpus queries:** `tpcds/q39` — `CASE mean WHEN 0 THEN NULL ELSE stdev/mean END` in a project
 and `CASE mean WHEN 0 THEN 0 ELSE stdev/mean END > 1` in a filter, each twice per plan (the CTE is
-read twice). All five gpu cells are off and registry row 40 tags `57` alone. At tp1-single this
-is the refusal (`corpus_cases.inc:284`); the other four modes have not run on a device and may
-meet [#152](joins.md#t152) next.
+read twice). All five gpu cells are off, and registry row 40 tags `57 225`: since the join
+session, every mode meets [#225](#t225)'s Welford names at the aggregate below the filter first.
 
 **Fix proposed:** [fix 7 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix7), about 20 lines in `build_column_case`.
 Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
@@ -572,8 +572,9 @@ Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `cudf
 which compares strings, and a merge reads state columns by reference.
 
 **Corpus queries:** `tpcds/q2`, whose `sum(CASE WHEN d_day_name = 'Sunday' …)` repeats the shape
-per weekday. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`), also held by #152 at
-every mode; registry row 3 tags `56 152`. The harness test's comment counts the shape 48 times
+per weekday. Its five gpu cells are off, on [#60](#t60)'s `round` as measured: every per-node
+section matches the cpu's and the answer's sums agree, so nothing of this shape showed; registry row
+3 tags `56 60`. The harness test's comment counts the shape 48 times
 in the corpus.
 
 **Fix proposed:** likely fixed already. `a_grouped_sum_of_a_case_over_a_string_equality_agrees`
@@ -595,9 +596,10 @@ Re-emulated over q78's committed answer, exactly five `ratio` cells split under 
 q2 takes the same kernel seven times per row. This ticket used to describe an anti join and memory
 pressure on q78 ([`reports/corpus-fixes.md` fix 6](../reports/corpus-fixes.md#fix6) found neither), and called `round` proven by q54.
 
-**Corpus queries:** tpcds q78 and q2, both off first on #152. After #152, q78 at `gpu_tp1_single`
-must differ from the golden in exactly the five `ratio` cells before this fix and in nothing
-after. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
+**Corpus queries:** tpcds q78 and q2, every gpu cell off on this ticket. Measured on an L40S
+(join-backend's task 14): q78 differs from the golden in exactly the five `ratio` cells at all
+five modes, `2.7800000000000002` among them, and DuckDB says `2.78`; q2 matches every per-node
+section and differs in its answer, its row count and column sums agreeing to the printed digit. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
 from nation;` (tpch): two rows differ on the device today.
 
 **Fix proposed:** [fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6), in `expr.cpp`. `places == 0` keeps

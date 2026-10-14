@@ -2507,3 +2507,176 @@ answer on both engines), #220 (75 rows carry it now, none of them tpch's).
 - **tpcds q78 (#60) and q32 at tp4 (#199) are the estimate's other NEXT cells.** tpcds's rows
   carrying `65` (q5, q14, q18, q22, q77, q80) should refuse as the tpch rollup did, at the schema
   hook.
+
+#### Round 2, plan task 14, tpcds — the device cells, in batches
+
+The tpcds dataset only; pbench is the next dispatch. The tpch method unchanged: registry first,
+then `corpus_cases.inc`, the tree synced, `--build`, `test_gpu_corpus` filtered on the batch under
+`PCK_WRITE_GPU_RESULT=1`, `gpu-result.txt` brought home by `scp` before the next sync, then the
+`duckdb_gpu_tpcds_*` and `device_order_tpcds_*` cases and the corpus tier's ten meta checks
+locally. Batches in the estimate's §7 order, the rows whose every ticket closes in this chain.
+Before the first run, a scan of every tp4 cpu section for a keyless `GpuAggregateBatches` at
+`lanes=4` with a 0 in `in_rows` (#199's shape) found q32 at the three tp4 modes and nothing else.
+
+**Running ledger.** One line per batch, written when the batch's DuckDB cases were green.
+
+| batch | queries | gpu cells enabled | off, on which ticket | device | DuckDB |
+|---|---|--:|---|---|---|
+| 1 | q1, q3, q4, q6, q7 | 25 | none | 25/25 in 74 s | 25/25, coverage guard green |
+| 2 | q8, q9, q10, q11, q13 | 25 | none | 25/25 in 56 s | 25/25 |
+| 3 | q15, q16, q19, q21, q23 | 25 | none | 25/25 in 50 s | 25/25 |
+| 4 | q24, q25, q26, q29, q30 | 25 | none | 25/25 in 97 s | 25/25 |
+| 5 | q31, q32, q33, q34, q35 | 22 | q32 at tp4-single, tp4-rowgroup, tp4-sized: [#199](../tickets/corpus-coverage.md#t199) | 22/25 in 40 s; q32's three tp4 cells red on the `.cpu.txt` section alone | 25/25, q32's three tp4 answers included, before they were turned off |
+| 6 | q37, q38, q40, q41, q42 | 24 (q37's tp1-single was on) | none | 25/25 in 35 s; the next recording dropped q32's tp4 sections | 25/25 |
+| 7 | q43, q45, q46, q48, q50 | 25 | none | 25/25 in 68 s | 25/25 |
+| 8 | q52, q54, q55, q56, q58 | 25 | none | 25/25 in 36 s | 25/25, q58 under `duckdb_divergent(251, …)` |
+| 9 | q59, q60, q61, q62, q64 | 25 | none | 25/25 in 65 s | 25/25 |
+| 10 | q65, q68, q69, q71, q73 | 25 | none | 25/25 in 43 s | 25/25 |
+| 11 | q74, q75, q76, q78, q79 | 20 | q78 at all five: [#60](../tickets/corpus-coverage.md#t60) | 20/25 in 51 s; q78 red on its answer alone | 20/20; q78's five red, `2.7800000000000002` against DuckDB's `2.78` |
+| 12 | q81, q82, q83, q84, q85 | 22 (q82, q84, q85's tp1-single were on) | none | 25/25 in 45 s; q78's sections dropped | 25/25 |
+| 13 | q87, q88, q90, q91, q92 | 19 (q88, q90 at the two tp1 modes, as on the cpu) | none | 19/19 in 29 s | 19/19 |
+| 14 | q93, q94, q95, q96, q97, q99 | 27 (q96 at the two tp1 modes) | none | 27/27 in 39 s | 27/27 |
+| 15 | q66 | 5 | none | 5/5 in 24 s | 5/5, under `duckdb_divergent(251, …)` |
+
+Batch 15 came out of the probe below, not out of the estimate's FLIP list. No batch exposed a
+defect of this chain's code. Every cause met is an open ticket outside the spec's scope, on the
+mechanism its ticket names; no ticket was filed, and the next free is still **268**.
+
+**The probe of the rows whose own tickets stand.** q2, q5, q14, q17, q18, q22, q39, q66, q77 and
+q80 carry a ticket that does not close here, so their cells are not this task's to enable. But
+their `152`/`220`/`212` tags could be struck only if the other ticket really holds them. So I
+enabled all ten in the `.inc` alone, ran them on the device without recording, and restored the
+file. 8 of 50 passed:
+
+| query | what the device met, every mode unless named | tickets column |
+|---|---|---|
+| q14, q18, q22, q77, q80 | #65: `__grouping_id: UInt8 vs INT32` at the first `GpuAggregate` | `65 220` / `65 152 212 220` / `65 152 220` → `65` |
+| q5 | #210: `return_amt` and `net_loss` `Decimal128(7, 2) vs FLOAT64` at a `GpuProject`, before #65 | `65 152` → `65 210` |
+| q17 | tp1 modes: #225's Welford names at the `GpuAggregate`; the three tp4 modes pass | `205` → `205 225` |
+| q39 | #225's Welford names, at the aggregate below #57's filter | `57 220` → `57 225` |
+| q2 | every per-node section matches, the answer differs; see below | `56 152` → `56 60` |
+| q66 | **all five pass** | `55 152 220` → none, enabled as batch 15 |
+
+- **q66 is enabled.** #55's own text calls itself most likely stale, and here its five cells
+  matched every cpu section and the golden, then met DuckDB under the line's #251 oracle. A green
+  cell held off by a ticket that never showed is the shape this task exists to turn on. #55 stays
+  open: its fix asks for a walk test, which is not this task's. If the coordinator reads q66 as
+  #55's to enable, revert batch 15: five cells, one row, 50 lines of `gpu-result.txt`.
+- **q17's tp4 cells pass and stay off.** Its line is `duckdb_divergent(205)`, and chain K's
+  empty-sorts rewrites q17's result section. Enabling three cells of a row another chain is moving
+  invites a conflict for nothing.
+- **q2, read further.** One more device run of q2 at tp1-single, recorded to a scratch
+  `gpu-result-25.02.txt` with q2 enabled on the remote's registry copy (restored, md5-checked).
+  The answer is over the cap there and under it in `mini.result.txt`: the device's digits are
+  longer. Its fingerprint gives 2,513 rows, every column non-null, and each column's sum, min and
+  max equal to the cpu's rows to the printed digit. So the rows agree and the digits do not —
+  #60's one-ulp `round`, seven columns of it, as the estimate said. #56's shape did not show.
+
+**Per query, the end state.** 339 device cells turned on: 334 of the estimate's FLIP cells, and
+q66's five. The tpcds device column goes 4 → 343 of 396, on 71 lines. No cpu cell moved: q24 and
+q54's `duckdb_oracle` left `duckdb_none` in task 8, already `duckdb_exact`.
+
+| query | gpu on, by this task | gpu off, and why | tickets column |
+|---|---|---|---|
+| the 62 lines of §7's FLIP rows bar those below | all five | — | `152 220`, `220`, `152`, `190`, `63`, `59 80 152 220`, `80 152 220` → none |
+| q37, q82, q84, q85 | 1r, 4s, 4r, 4z (1s was on) | — | `152` → none |
+| q88, q90, q96 | 1s, 1r | 4s, 4r, 4z on both engines: #199 | `152 199 220` → `199` |
+| q32 | 1s, 1r | 4s, 4r, 4z: #199 | `220` → `199` |
+| q78 | — | all five: #60 | `152` → `60` |
+| q66 | all five | — | `55 152 220` → none |
+| q2, q5, q14, q17, q18, q22, q39, q77, q80 | — | all five, as the probe table says | as the probe table says |
+
+No tpcds row carries 152, 220, 212, 190, 63, 59 or 80 now.
+
+**The #199 cells, read.** q32's three tp4 cells failed on the `.cpu.txt` section alone, at the
+merge above the keyless `GpuAggregateBatches`: `in_rows=[[1]]` on the device against `[[4]]`.
+Its keyless sum sits over an Inner join whose build lands in lane 2 alone (`in_rows=[[0,0,1,0]]`),
+so the cpu answers an identity row for each of the four lanes and the device one. The device's
+answer, `12129.44` at all three modes, was recorded before the compare and met DuckDB under
+`duckdb_exact` before the cells were turned off.
+
+**q78, read.** All five cells failed on the answer alone: every per-node section matched. Sorted
+as sets against `mini.result.txt`, 100 rows each, exactly five rows differ, each in `ratio` alone:
+`2.7800000000000002`, `1.3599999999999999`, `2.5300000000000002`, `1.6400000000000001`,
+`1.9100000000000001` against `2.78`, `1.36`, `2.53`, `1.64`, `1.91`. That is #60's emulation to the
+cell. The five modes' answers are identical.
+
+**Against the estimate (§7), for plan task 16.**
+- **Every tpcds FLIP cell turned on: 334 of 334**, the M and M-L rows included (q6, q9, q24, q41,
+  q54, q64, q71, q75, q97 had never run on a device). Task 10's order guard refused none.
+- **NEXT, all eight confirmed:** q78 ×5 on #60, q32 at the tp4 modes on #199, each on the
+  mechanism §3 names.
+- **STAY, 50 predicted off, 45 stayed off.** q66 ×5 turned on: #55 was stale, as its ticket and
+  §4 suspected. Of the 45, the cause §4 names first was the one met for q14, q18, q22, q77 and q80
+  (#65). It was not for q5 (#210 before #65, §3's "also"), q17 (#225 at tp1, §3's "then"; tp4
+  passes), q39 (#225, not #57) or q2 (#60, §3's "then"; #56 never showed).
+- **The 9 cpu-and-gpu STAY cells of q88, q90 and q96 at tp4** stayed off on #199, as §4 said.
+- Categorical prediction for tpcds: 334 FLIP. Measured: 339 on.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S, 0
+MiB in use; cuDF 25.02. Sixteen cycles — fifteen batches and the probe — each the tree synced
+with the board's rsync line and `./scripts/build-test-shadgpu.sh --build` rc 0, 18–42 s, an
+incremental rebuild of the four Rust binaries. Then the final tree, built (rc 0, no warning in its
+log) and run unrecorded, every binary the override lists, `--test-threads=1` on the Rust ones.
+**1,396 cases, all green:**
+
+| binary | passed |
+|---|--:|
+| `peacock_gpu_tests` | 2 |
+| `peacock_plan_tests` | 81 |
+| `peacock_join_session_tests` | 53 |
+| `test_gpu_corpus` | 567 (228 + 339; 343 of them tpcds cells), 685 s |
+| `test_node_timing` | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 684 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 |
+
+Not run, per the override: the sf40 pair and the `bench_` cases. Disk 28 GB free of 96 before and
+after every build; nothing deleted. The remote and local `gpu-result.txt` have the same md5.
+
+**`gpu-result.txt`, read.** 24,568 lines added, none removed: 339 new sections, no fingerprint
+among the 343. The re-recorded tp1-single sections of q37, q82, q84 and q85 did not move. The
+`cudf=25.02` line is unchanged. q32's tp4 and q78's sections were written and then pruned by the
+next recording, as the writer drops cells the registry no longer enables.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 761 passed, 2 ignored; `test_cpu_corpus`
+1595 (1189 + 339 `duckdb_gpu_*` + 67 `device_order_*`); `test_corpus_goldens` 26;
+`test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage` 11; `test_golden_format` 43; 0
+failed, no warning.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base 302ed3a3`: 726 compared, **0
+changed, 0 regressions**. No cpu golden moved.
+
+**build-test.md, counted off the runs.** cpu block 1981 → 2387 (`test_cpu_corpus` 1189 → 1595;
+"Corpus, cpu" 1188 → 1594, the DuckDB tier 406 → 745, the order tier 50 → 117). gpu block 924 →
+1263 (`test_gpu_corpus` 228 → 567; "Corpus, device" 227 → 566, its tpcds sentence rewritten).
+Rust 3025 → 3770, grand total 3595 → 4340, the N columns summed by script.
+
+**`corpus_cases.inc`'s tpcds comments** said which of #152 and #220 held each batch's device
+cells. They now say the device column once, at the top of the section, and each batch comment
+names only its off cells and their tickets.
+
+**Tickets whose corpus lines this made stale, rewritten:** #199 (q32 ×3), #60 (q78 and q2,
+measured), #65 (five rows reach it on a device, q5 meets #210 first), #210 (q5, its first corpus
+line), #225 (q39, q17 at tp1), #55 (q66 on, the walk test still owed), #56 (q2 off on #60), #57
+(q39 meets #225 first), #205 (q17's tp4 cells pass), #220 (ten pbench rows carry it, no tpch or
+tpcds row), #190 (q24 and q54 answer on both engines), #63 (q9 answers at every mode), #212 (q77
+runs past it, off on #65).
+
+**What pbench should expect.**
+- **The device agreed with the cpu's per-node sections wherever a cell ran**, at every mode: of
+  351 cell runs in the batches, 343 passed first time, and the 8 that did not were #199's three
+  and #60's five, each on its known mechanism. tpcds is the first dataset where #137's `IS NOT NULL` filters and real NULL join keys
+  (`ss_sold_date_sk` holds 129,850) ran on the device. No divergence showed, so nothing here asks
+  the cpu to mirror the device.
+- **The schema hook is where an out-of-chain ticket shows first.** #65, #210 and #225 each refused
+  a batch before any answer existed. pbench's `rollup-small-keys` carries `65`, and should
+  refuse the same way.
+- **#199 can only come from a tp4 cell.** None of pbench's tp4 sections has the shape today. A
+  pbench row first enabled at tp4 can bring it, so scan its keyless `GpuAggregateBatches` for a 0
+  in `in_rows` before the run.
+- **A run is quick.** A batch of 19–27 tpcds cells took 29–97 s; the whole device corpus, 567
+  cells, 685 s. Most of a cycle is the sync and the build, under a minute together.
+
+**Coordinator's decision on q66 (2026-10-14).** Its five cells stay on: they pass on the device and
+against DuckDB, and a green cell left off is coverage withheld for no reason. #55 stays open for the
+walk test it still owes; its row no longer carries the cells, which is the record of what it blocks.

@@ -178,8 +178,7 @@ reordered columns would be a wrong answer with matching shapes.
 
 **Corpus queries:** nine registry rows. `tpch/q11` and `tpch/q22` answer on both engines;
 their device cells off at tp4 are [#199](corpus-coverage.md#t199)'s, and their rows no longer
-carry `190`. `tpcds/q24` and `tpcds/q54` answer on the cpu at all five modes, their device cells
-not yet run. pbench's `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and
+carry `190`. `tpcds/q24` and `tpcds/q54` answer on both engines at all five modes. pbench's `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and
 `like-column-pattern` are off on both engines, waiting for join-backend's pbench cells.
 
 <a id="t63"></a>
@@ -201,9 +200,9 @@ since nothing between device nodes checks a column count ([#164](corpus-coverage
 **Corpus queries:** `tpcds/q9` — a CASE over fifteen scalar subqueries (a `count(*)` and two
 `avg`s per bucket) on `FROM reason WHERE r_reason_sk = 1`, planned as a chain of cross joins over
 seven `GpuProject: exprs=[]` (`tpcds.sf1/tp1-single.plans.txt`), and `pbench`'s
-`scalar-subquery-cross`, which is that shape by construction and carries this ticket. All five of
-q9's gpu cells are off and registry row 10 tags `63` alone. Only tp1-single has run on a device (`corpus_cases.inc:257`);
-the other four may meet [#152](#t152) next. `pbench/cross-projection` is the second arm, measured:
+`scalar-subquery-cross`, which is that shape by construction and carries this ticket. q9 answers
+on the device at all five modes since join-backend's task 14, and its row carries no ticket.
+`pbench/cross-projection` is the second arm, measured:
 a scan projected to no columns, which cuDF's cross join refuses at all five modes.
 
 **Fix proposed:** fix 4 of `reports/corpus-fixes.md`. Give the placeholder one name in
@@ -232,7 +231,8 @@ join's empty scatter lane drops as it should, so the aggregate emits nothing. Pi
 (`gpu_tests/join_cases.rs`), and on the driver by
 `a_join_that_owes_its_probe_side_without_a_build_side_is_refused` (`driver/tests/flow.rs`).
 
-**Corpus queries:** `tpcds/q77` alone. pbench's three `sparse-build-*` rows were written for this
+**Corpus queries:** `tpcds/q77` alone, which plans and runs past it on both engines now; its
+device cells are off on [#65](corpus-coverage.md#t65)'s grouping id, at the schema hook. pbench's three `sparse-build-*` rows were written for this
 ticket and do not reach it — the scatter above feeds their build side — so, measured, they are off on #152 and #220.
 
 <a id="t173"></a>
@@ -367,13 +367,10 @@ first differing line, and the merge renders above the join. `in_rows` is the dri
 batches a node takes, the same code for both engines. These were the first cells where the device
 completed a plan and only the golden caught the difference.
 
-**Corpus queries:** 75 registry rows carry `220` — tpcds 65, pbench 10 — its cause at
-`tp1-single`, where the device gets past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4
-q18, `tpch` q3 q4 q14 q15. Plus `tpch/hash-join`, `cross-join`, `nested-loop-left-join`,
-`anti-join` and `semi-join`, and the ten pbench rows its device cycle measured here. No tpch row
-carries it now: join-backend's task 14 ran every tpch device cell it held, and each answered. `tpcds/q9` and `pbench/scalar-subquery-cross` joined
-them in join-backend's task 5, on the nested-loop shape above. Every device cell through a join
-lands here once #152 clears.
+**Corpus queries:** ten registry rows carry `220`, all pbench's, the ten its device cycle
+measured here. The first ones seen were `tpcds` q93 q96 q38 q48 q4 q18 and `tpch` q3 q4 q14 q15.
+No tpch or tpcds row carries it now: join-backend's task 14 ran every device cell they held, and
+each answered or met another ticket.
 
 **Fix proposed:** on the cpu. `declared` in `cpu_backend/join.rs` returns one batch: each chunk
 through `declared_as`, then `concat_batches`. No chunks gives `RecordBatch::new_empty(schema)`,
