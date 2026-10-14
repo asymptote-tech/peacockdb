@@ -463,9 +463,8 @@ unload: Unload
                                       q16_date_dim_where: Exec, predicate=((d_date >= 2002-02-01) and (d_date <= 2002-04-02)), lanes=1
                                         q16_date_dim: Source, rows_per_group=100000, lanes=1
                                     q16_catalog_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
-                          q16_siblings_all: BatchAccumulator, lanes=1, single_batch
-                            q16_siblings: Exec, exprs=[other_order_number, other_warehouse_sk], lanes=1
-                              q16_sibling_catalog_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
+                          q16_siblings: Exec, exprs=[other_order_number, other_warehouse_sk], lanes=1
+                            q16_sibling_catalog_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
                       q16_returns_all: BatchAccumulator, lanes=1, single_batch
                         q16_catalog_returns: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
 == q17
@@ -3280,9 +3279,8 @@ unload: Unload
                                       q94_date_dim_where: Exec, predicate=((d_date >= 1999-02-01) and (d_date <= 1999-04-02)), lanes=1
                                         q94_date_dim: Source, rows_per_group=100000, lanes=1
                                     q94_web_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
-                          q94_siblings_all: BatchAccumulator, lanes=1, single_batch
-                            q94_siblings: Exec, exprs=[other_order_number, other_warehouse_sk], lanes=1
-                              q94_sibling_web_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
+                          q94_siblings: Exec, exprs=[other_order_number, other_warehouse_sk], lanes=1
+                            q94_sibling_web_sales: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
                       q94_returns_all: BatchAccumulator, lanes=1, single_batch
                         q94_web_returns: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
 == q95

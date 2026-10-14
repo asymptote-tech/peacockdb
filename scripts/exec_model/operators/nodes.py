@@ -43,7 +43,6 @@ from . import (
     exec_ops,
     joins,
     partition_ops,
-    recipe_join,
     source,
     validation,
 )
@@ -62,12 +61,7 @@ class PandasNode(GpuNode):
         row_interval: RowInterval | None = None,
         validator: Callable[["PandasNode"], None] | None = None,
         schema=None,
-        recipe_factory: Callable[[int | None], Executor] | None = None,
     ):
-        #: the second backend, where a node has one: an executor that answers by emitting
-        #: FlatBuffers nodes and making `execute_node` calls (`recipe_join.py`). Only the
-        #: joins carry one — the join is what the emulation was written to prove.
-        self._recipe_factory = recipe_factory
         self._schema = schema
         self._row_interval = row_interval
         self._validator = validator
@@ -108,7 +102,7 @@ class PandasNode(GpuNode):
             return NodeExecutors(self._category, forwarder=self._forwarder)
         return NodeExecutors(
             self._category,
-            backends=ExecutorBackends(cpu=self._factory, gpu=self._recipe_factory),
+            backends=ExecutorBackends(cpu=self._factory),
         )
 
     def validate_schemas_and_partitions(self) -> None:
@@ -536,8 +530,8 @@ def hash_join(
     """`fanout` is the optimizer's cardinality estimate for this join, carried as a node
     property so the executor built from it can model its own scratch. `probe_schema` is
     the probe side's column list, consulted only when an outer finish saw no probe batch.
-    `residual` is the non-equi predicate `CudfHashJoin.filter` carries, over the joined
-    row's own column names."""
+    `residual` is the non-equi predicate `CudfJoin.filter` carries, over the joined row's
+    own column names."""
     return PandasNode(
         name,
         NodeKind.INTERMEDIATE,
@@ -545,10 +539,6 @@ def hash_join(
         ExecutorCategory.JOIN,
         [build, probe],
         factory=lambda lane: joins.HashJoin(
-            join_type, build_keys, probe_keys, null_equals_null, f"{name}.p{lane}", fanout,
-            probe_schema, residual,
-        ),
-        recipe_factory=lambda lane: recipe_join.RecipeHashJoin(
             join_type, build_keys, probe_keys, null_equals_null, f"{name}.p{lane}", fanout,
             probe_schema, residual,
         ),
@@ -565,17 +555,13 @@ def cross_join(name, build, probe) -> PandasNode:
         ExecutorCategory.JOIN,
         [build, probe],
         factory=lambda lane: joins.CrossJoin(f"{name}.p{lane}"),
-        recipe_factory=lambda lane: recipe_join.RecipeCrossJoin(f"{name}.p{lane}"),
     )
 
 
 @_records_its_recipe
 def nested_loop_join(name, build, probe, join_type, predicate) -> PandasNode:
-    """`CudfNestedLoopJoin` — a cross product cut down by a predicate over both sides.
-
-    Inner streams its probe side; Left takes a single-batch probe, so the planner puts a
-    `GpuCoalesceAllBatches` under the probe side of one (see `join_types.capability`).
-    """
+    """`GpuNestedLoopJoin` — a cross product cut down by a predicate over both sides, any
+    of the nine types, its probe streamed. `predicate=None` is the literal `true`."""
     return PandasNode(
         name,
         NodeKind.INTERMEDIATE,
@@ -583,7 +569,4 @@ def nested_loop_join(name, build, probe, join_type, predicate) -> PandasNode:
         ExecutorCategory.JOIN,
         [build, probe],
         factory=lambda lane: joins.NestedLoopJoin(join_type, predicate, f"{name}.p{lane}"),
-        recipe_factory=lambda lane: recipe_join.RecipeNestedLoopJoin(
-            join_type, predicate, f"{name}.p{lane}"
-        ),
     )

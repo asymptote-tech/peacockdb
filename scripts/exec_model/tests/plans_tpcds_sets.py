@@ -8,10 +8,8 @@ thing the query keeps and the probe the thing that streams — the opposite assi
 star, and the one that decides whether these queries fit in memory.
 
 Two of them (q16, q94) also carry a residual: `EXISTS (… AND cs1.warehouse <> cs2.warehouse)`
-is a semi join with a non-equi predicate, which the matrix says needs a single-batch probe,
-because #136's finish pass sees accumulated keys and a keys-only table cannot evaluate a
-predicate over both sides. That is the same shape as TPC-H q21, on the queries it was
-predicted for.
+is a semi join with a non-equi predicate — TPC-H q21's shape. The predicate is part of each
+pair's match, so the probe streams as any semi join's does.
 
 `count(DISTINCT x)` appears here too and is not a join at all: it lowers to two aggregates,
 the first grouping by `x` and the second counting the groups.
@@ -74,9 +72,8 @@ def _split_shipment(t, tag, channel, prefix, returns_table, return_key, state, p
     none.
 
     The `EXISTS` is a self-join of the fact table on the order number with `warehouse <>
-    warehouse` as a residual — a filtered semi join, which the capability matrix refuses to
-    stream, so its probe side is collected. Projecting that probe to two columns first is
-    what keeps it affordable: 1.4M rows of two integers rather than of the whole table.
+    warehouse` as a residual — a filtered semi join, its probe projected to the two columns
+    the key and the residual read.
 
     `count(DISTINCT order_number)` is the two-aggregate form — group by the order number,
     then count the groups — and the two sums ride along in the first of them, since summing
@@ -108,8 +105,7 @@ def _split_shipment(t, tag, channel, prefix, returns_table, return_key, state, p
     )
     candidate_schema = dict(corpus.schema_of(sales[0]).dtypes)
     split = semi(
-        f"{tag}_exists", candidates,
-        N.coalesce_all(f"{tag}_siblings_all", other_warehouse),
+        f"{tag}_exists", candidates, other_warehouse,
         [order], ["other_order_number"], schema=candidate_schema,
         residual=Binary("!=", Col(warehouse), Col("other_warehouse_sk")),
     )
@@ -395,8 +391,7 @@ def plan_q97(t):
     The only query in the corpus that needs a **full** outer join, and it needs one because
     the three counts are over three different halves of the same relationship — a left join
     would answer two of them and lose the third. Full is build-preserving: unmatched probe
-    rows come out as the probe streams, and unmatched build rows at the finish, which is the
-    two-sided version of #136's pass.
+    rows come out as the probe streams, and unmatched build rows at the finish.
 
     Both sides are `DISTINCT` pairs, which is a grouped aggregate with no aggregates, and
     that is what makes them small enough to join at all.

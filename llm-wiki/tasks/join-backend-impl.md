@@ -1560,24 +1560,26 @@ operator_case! {
 **Files:**
 - Modify: `cpp/tests/gpu/test_plan_executor.cpp:375,427,609,1054`
 
-- [ ] **Step 1:** `HashJoinNationRegion`, `HashJoinWithProjection`, `AggregateGroupBy`,
+- [x] **Step 1:** `HashJoinNationRegion`, `HashJoinWithProjection`, `AggregateGroupBy`,
   `JoinProjectSort` build a `CudfJoin` leaf instead of `CudfHashJoin` and drive it through
   `peacock_join_build`/`_probe`/`_finish` (the helper `run_join(session, build, probe)` in the
-  file), asserting the same 25/25/5/25 rows.
-- [ ] **Step 2:** device cycle, the plan-executor target.
-- [ ] **Step 3: Commit.** `git commit -m "plan-executor: the join gtests drive the session"`.
+  file), asserting the same 25/25/5/25 rows. (No `run_join` existed: it is new, with the
+  `NodeSession` methods the file already drives, and `WholePlan` walks the wire's layout —
+  both sides and the leaf under one structural union. Detail file, round 2 tasks 11–13.)
+- [x] **Step 2:** device cycle, the plan-executor target.
+- [x] **Step 3: Commit.** `git commit -m "plan-executor: the join gtests drive the session"`.
 
 ### Task 12: The goldens, checked current
 
 Each regeneration below lands in the commit of the code that moves it (task 7 the recipe line,
 task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confirms no diff is left.
 
-- [ ] **Step 1: The recipe line** (run in task 7's commit; here, re-run for no diff). `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test -p peacockdb-core --lib plan_goldens`
+- [x] **Step 1: The recipe line** (run in task 7's commit; here, re-run for no diff). `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test -p peacockdb-core --lib plan_goldens`
   (with the `/tmp` testdata symlink `build-test.md:646` names): every join's recipe line becomes
   the session's (75 per tpch mode, 656 per tpcds mode); `recipe-payloads.txt` loses its 134 join
   recipe lines and gains `CudfJoin` payloads. Review: the diff touches join recipe lines and
   payload bytes only. Commit `"goldens: a join's recipe is its session"`.
-- [ ] **Step 2: Check** that the cpu per-node and cost goldens are current: task 8 regenerated
+- [x] **Step 2: Check** that the cpu per-node and cost goldens are current: task 8 regenerated
   them with the cpu's stream, tasks 3, 4 and 5 with their own changes. `UPDATE_CANONICAL=1` over
   the corpus cpu tier and `test_cost_model` produce no diff; if one does, it belongs to step 1's
   commit and lands there, with `mini.result.txt` byte-identical.
@@ -1588,16 +1590,18 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 - Delete: `scripts/exec_model/operators/recipe_join.py`
 - Modify: `scripts/exec_model/operators/{nodes.py:551,568,586,join_types.py:82-121,recipe.py:392,cudf_calls.py}`, `node.py:109`, `tests/corpus.py:461`, `tests/test_join_capability.py`
 
-- [ ] **Step 1:** `BACKENDS` (`test_join_capability.py:157`) keeps the pandas oracle only; the four
+- [x] **Step 1:** `BACKENDS` (`test_join_capability.py:157`) keeps the pandas oracle only; the four
   recipe-only tests (:421, :438, :481, :516) go; :329, :349, :365, :623 flip to "answers as the
   oracle"; :527 (`…_is_wrong_today_which_is_153`) flips to the right answer; the guards :654 and
   :666 read the session's `cpp/src/operators/join_session.cpp` (its `fb::JoinType_` arms and its cuDF calls, which
   `cudf_calls.py` models: `hash_join`, `distinct_hash_join`, `mixed_left_semi_join`,
   `conditional_*`, `contains`, `gather`, `apply_boolean_mask`, `cross_join`).
-- [ ] **Step 2:** `join_types.py`'s capability follows design §4.1 (two facts per type);
-  `recipe.py`'s `copy_handle` goes.
-- [ ] **Step 3:** `python -m pytest scripts/exec_model/tests -q` green.
-- [ ] **Step 4: Commit.** `git commit -m "exec_model: the recipe join retires"`.
+- [x] **Step 2:** `join_types.py`'s capability follows design §4.1 (two facts per type);
+  `recipe.py`'s `copy_handle` goes. (All of `recipe.py` and `cudf_calls.py` went: with
+  `recipe_join.py` gone nothing imports them, and task 15's grep over `scripts` names their
+  join models. The cuDF-call guard went with them; see the detail file.)
+- [x] **Step 3:** `python -m pytest scripts/exec_model/tests -q` green.
+- [x] **Step 4: Commit.** `git commit -m "exec_model: the recipe join retires"`.
 
 ### Task 14: The cells, in batches
 

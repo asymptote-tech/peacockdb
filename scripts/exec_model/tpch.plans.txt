@@ -321,13 +321,11 @@ unload: Unload
                                   supplier: Source, rows_per_group=10000, lanes=1
                             late: Exec, predicate=(l_receiptdate > l_commitdate), lanes=1
                               lineitem: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
-                    l2_all: BatchAccumulator, lanes=1, single_batch
-                      l2_keys: Exec, exprs=[l2_orderkey, l2_suppkey], lanes=1
-                        l2_lineitem: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
-                l3_all: BatchAccumulator, lanes=1, single_batch
-                  l3_keys: Exec, exprs=[l3_orderkey, l3_suppkey], lanes=1
-                    l3_late: Exec, predicate=(l_receiptdate > l_commitdate), lanes=1
-                      l3_lineitem: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
+                    l2_keys: Exec, exprs=[l2_orderkey, l2_suppkey], lanes=1
+                      l2_lineitem: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
+                l3_keys: Exec, exprs=[l3_orderkey, l3_suppkey], lanes=1
+                  l3_late: Exec, predicate=(l_receiptdate > l_commitdate), lanes=1
+                    l3_lineitem: Source, rows_per_group=250000, target_batch_rows=250000, lanes=1
 == q22
 unload: Unload
   sort_merge: PartitionAccumulator, by=['cntrycode'], ascending=[True], lanes=1, single_batch, sorted_on=[0]

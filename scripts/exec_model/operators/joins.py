@@ -1,10 +1,10 @@
-"""The pandas join backend — build side set once, probe side streamed per the matrix.
+"""The pandas join backend — the build side set once, the probe side streamed.
 
-Three executors, one per wire node kind: `HashJoin` (`CudfHashJoin`, nine join types),
-`CrossJoin` (`CudfCrossJoin`) and `NestedLoopJoin` (`CudfNestedLoopJoin`, Inner and Left).
-Which types may stream a probe side, and what each call emits, is `join_types.capability`
-— one function, so this backend and the recipe emulation in `recipe_join.py` cannot hold
-different opinions about the matrix.
+Three executors, one per plan node: `HashJoin` (`GpuHashJoin`, nine join types, with an
+optional residual), `CrossJoin` (`GpuCrossJoin`) and `NestedLoopJoin` (`GpuNestedLoopJoin`,
+nine join types over a predicate). On the wire all three are one `CudfJoin` answered by the
+device's join session, and each executor here answers its calls as the session does: one
+answer per probe batch, then a finish for the five types `join_types.needs_finish` names.
 
 Per call and at finish, by family:
 
@@ -15,25 +15,21 @@ Per call and at finish, by family:
 | RIGHT_SEMI / RIGHT_ANTI | this batch's probe rows with / without a match | nothing |
 | LEFT / FULL | matches (+ unmatched probe rows for FULL) | unmatched build rows, null-padded |
 | LEFT_SEMI / LEFT_ANTI / LEFT_MARK | nothing | build rows with / without a match, or all plus `mark` |
-| CROSS, NESTED LOOP Inner | build × probe batch (predicate-filtered for the NLJ) | nothing |
-| NESTED LOOP Left | single-batch probe | — |
+| CROSS | build × probe batch | nothing |
+
+A residual is part of each pair's match, never a filter after it: a pair it rejects is no
+match, so an outer type pads that row and a semi or anti type counts it unmatched.
 
 The probe-local half of that table is not a convention: with the build side complete, a
 probe row that matched nothing in this batch matched nothing anywhere, so its emission is
 decided locally. The build-preserving half is the opposite claim, which is why it needs a
-finish pass.
-
-**The prototype cheats where the real implementation cannot.** "Which build rows matched at
-least once across all probe batches" is kept here as a boolean array over the build frame —
-free in-process, and exactly the thing that never crosses the C ABI. The v1 GPU path
-accumulates each probe batch's keys and runs one anti/semi join at finish (#136); that is
-what `recipe_join.py` models, and running both backends over the same plans is what makes
-this file an oracle rather than a second guess.
+finish pass. "Which build rows matched across every probe batch" is a boolean array over the
+build frame, as the session's `matched` column is.
 
 **Null key equality is explicit**, because pandas and SQL disagree: `merge` matches NaN
 keys to each other. With `null_equals_null=False` a row with any null key matches nothing,
-implemented by holding those rows out of the merge and treating them as unmatched. Anti and
-mark ignore the flag and stay at EQUAL, as the C++ does (#80, #59).
+implemented by holding those rows out of the merge and treating them as unmatched. The flag
+is one rule for every type, anti and mark included.
 """
 
 from __future__ import annotations
@@ -45,7 +41,7 @@ from ..batch import CallStats
 from ..executors import JoinExecutor
 from . import join_types as J
 from .frame import PandasBatch, concatenate, no_scratch, scratch_of, normalize
-from .join_types import JoinType, capability, joined_names, joined_projection
+from .join_types import JoinType, joined_names, joined_projection
 
 #: suffix the probe side wears inside a merge, so a shared column name cannot collapse two
 #: columns into one. The wire keeps both and lets `projection` choose; so does this.
@@ -67,7 +63,7 @@ def merged_scratch(resident: int, build_rows: int, fanout: float, n_rows: int, n
     derive — but it does not have to. `fanout` is a node property the optimizer supplies at
     plan time and the executor is constructed with, so the estimate is already in `&self`
     by the time this is called. That is what keeps the trait unchanged while the model
-    stays correct. Shared with the recipe backend so both model one thing one way.
+    stays correct.
     """
     if n_rows == 0:
         return resident
@@ -78,7 +74,11 @@ def merged_scratch(resident: int, build_rows: int, fanout: float, n_rows: int, n
 
 
 class _PandasJoin(JoinExecutor):
-    """What the three share: the build frame, the residency it is, and the call protocol."""
+    """What the three share: the build frame, the residency it is, and the call protocol.
+
+    Every probe streams, so the protocol is one answer per `probe_and_fetch` and the
+    family's own rows at `finish_and_fetch`.
+    """
 
     def __init__(self, name: str, fanout: float):
         self.name = name
@@ -96,9 +96,6 @@ class _PandasJoin(JoinExecutor):
         build_rows = len(self.build) if self.build is not None else 0
         return merged_scratch(self.resident_bytes(), build_rows, self.fanout, n_rows, n_bytes)
 
-    def _capability(self) -> J.Capability:
-        raise NotImplementedError
-
     def set_build(self, batch: PandasBatch) -> CallStats:
         if self.build is not None:
             raise AssertionError(f"{self.name}: set_build called twice")
@@ -112,12 +109,6 @@ class _PandasJoin(JoinExecutor):
         if self.build is None:
             raise AssertionError(f"{self.name}: probed before set_build")
         self.probe_calls += 1
-        if not self._capability().streams and self.probe_calls > 1:
-            raise AssertionError(
-                f"{self.name}: this join takes a single-batch probe "
-                f"({self._capability().reason}); the planner inserts GpuCoalesceAllBatches "
-                "under the probe side"
-            )
         probe = batch.consume()
         self._probe_columns = list(probe.columns)
         self._transients = []
@@ -141,7 +132,7 @@ class _PandasJoin(JoinExecutor):
 
 
 class HashJoin(_PandasJoin):
-    """`CudfHashJoin`: equi-join on key pairs, with an optional residual filter."""
+    """`GpuHashJoin`: equi-join on key pairs, with an optional residual filter."""
 
     def __init__(
         self,
@@ -164,17 +155,9 @@ class HashJoin(_PandasJoin):
         #: the probe side's declared columns — consulted only when an outer finish must
         #: null-pad columns no probe batch ever showed it
         self.probe_schema = probe_schema
-        #: a residual (non-equi) predicate over the joined row, as `CudfHashJoin.filter`
+        #: a residual (non-equi) predicate over the joined row, as `CudfJoin.filter`
         self.residual = residual
         self.matched: np.ndarray | None = None
-        #: set when a single-batch probe already emitted everything, finish included
-        self._finished = False
-        refusal = self._capability().refusal
-        if refusal is not None:
-            raise NotImplementedError(f"{name}: {refusal}")
-
-    def _capability(self) -> J.Capability:
-        return capability(self.join_type, has_filter=self.residual is not None)
 
     def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
         build = frame.copy()
@@ -185,17 +168,6 @@ class HashJoin(_PandasJoin):
     # -- probe -------------------------------------------------------------------
 
     def _probe(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
-        frames = self._probe_output(probe)
-        if self._capability().streams:
-            return frames
-        # A single-batch probe is the whole join in one call, which is what the legacy
-        # path does: nothing waits for a finish, because there is no second batch for it
-        # to wait through.
-        self._finished = True
-        frames += self._finish_frames()
-        return [normalize(concatenate(frames))] if len(frames) > 1 else frames
-
-    def _probe_output(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
         pairs = self._matching_pairs(probe)
         self._transients = [pairs]
         if len(pairs):
@@ -236,9 +208,8 @@ class HashJoin(_PandasJoin):
         probe_keys = [f"{k}{_PROBE_TAG}" for k in self.probe_keys]
         # Rows whose key is null are held OUT of the merge rather than dropped, so an
         # outer type can still emit them as unmatched. That is the whole difference
-        # between null_equals_null false and true. Anti and mark are EQUAL regardless.
-        equal_nulls = self.null_equals_null or self.join_type in J.IGNORES_NULL_EQUALS_NULL
-        if equal_nulls:
+        # between null_equals_null false and true.
+        if self.null_equals_null:
             build_live, probe_live = self.build, probe
         else:
             build_live = self.build[self.build[self.build_keys].notna().all(axis=1)]
@@ -264,8 +235,7 @@ class HashJoin(_PandasJoin):
     def _joined(self, pairs: pd.DataFrame, probe_columns) -> pd.DataFrame:
         """`[build…, probe…]` cut down by the join's `projection`, named as the query sees it.
 
-        The same rule the recipe path states as the node's `projection` field, computed by
-        the same function, so the two backends produce one schema rather than two.
+        The same rule the wire states as `CudfJoin.projection`, by name rather than ordinal.
         """
         build_names = list(self._build_columns().columns)
         probe_names = list(probe_columns)
@@ -282,13 +252,8 @@ class HashJoin(_PandasJoin):
     # -- finish ------------------------------------------------------------------
 
     def _finish(self) -> list[pd.DataFrame]:
-        if self._finished:
-            return []
-        return self._finish_frames()
-
-    def _finish_frames(self) -> list[pd.DataFrame]:
-        """The build rows the probe side never matched — the pass #136 is about."""
-        if self.join_type not in J.BUILD_PRESERVING:
+        """The build rows by whether any probe batch matched them."""
+        if not J.needs_finish(self.join_type):
             return []
         build = self._build_columns()
         if self.join_type is JoinType.LEFT_SEMI:
@@ -330,25 +295,24 @@ class HashJoin(_PandasJoin):
 
 
 class CrossJoin(_PandasJoin):
-    """`CudfCrossJoin` — build × probe batch, one output per call, nothing at finish."""
+    """`GpuCrossJoin` — build × probe batch, one output per call, nothing at finish. Inner
+    only: a predicate-free join of any other type is a nested loop over the literal true."""
 
     def __init__(self, name: str = "cross_join", fanout: float = TRIVIAL_FANOUT):
         super().__init__(name, fanout)
-
-    def _capability(self) -> J.Capability:
-        return J.Capability(streams=True, needs_finish=False)
 
     def _probe(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
         return [normalize(self.build.merge(probe, how="cross"))]
 
 
 class NestedLoopJoin(_PandasJoin):
-    """`CudfNestedLoopJoin` — the cross product filtered by a predicate.
+    """`GpuNestedLoopJoin` — every pair of build row and probe row, kept where the
+    predicate holds. `predicate=None` is the literal `true` a predicate-free join of any
+    type but Inner carries, which is what makes a Left over an empty probe pad every row.
 
-    Inner streams its probe side, as a cross join does. Left does not: its unmatched build
-    rows need the finish pass, and #136's trick accumulates *keys*, which a predicate join
-    has none of — so the planner gives it a single-batch probe and the whole join happens
-    in one call, exactly as the legacy path does it.
+    Every type streams, as the hash join's do: a batch's pairs are decided by (the whole
+    build, this batch), and the five types that finish read the `matched` flags the batches
+    set. Columns are named as `merge(how="cross")` names them, pads included.
     """
 
     def __init__(
@@ -361,31 +325,60 @@ class NestedLoopJoin(_PandasJoin):
         super().__init__(name, fanout)
         self.join_type = join_type
         self.predicate = predicate
-        refusal = self._capability().refusal
-        if refusal is not None:
-            raise NotImplementedError(f"{name}: {refusal}")
+        self.matched: np.ndarray | None = None
+        #: the crossed frame's column names, learned from the first probe batch
+        self._names: list[str] | None = None
 
-    def _capability(self) -> J.Capability:
-        return capability(self.join_type, has_filter=self.predicate is not None,
-                          nested_loop=True)
+    def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
+        self.matched = np.zeros(len(frame), dtype=bool)
+        return normalize(frame.copy())
 
     def _probe(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
+        probe = normalize(probe)
         crossed = self.build.merge(probe, how="cross")
         self._transients = [crossed]
+        self._names = list(crossed.columns)
         if self.predicate is None:
-            return [normalize(crossed)]
-        keep = self.predicate.evaluate(crossed).fillna(False).astype(bool)
+            keep = np.ones(len(crossed), dtype=bool)
+        else:
+            keep = self.predicate.evaluate(crossed).fillna(False).astype(bool).to_numpy()
+        # A cross merge is build-row-major: pair i is (i // len(probe), i % len(probe)).
+        self.matched[np.repeat(np.arange(len(self.build)), len(probe))[keep]] = True
+        hit = np.isin(np.arange(len(probe)), np.tile(np.arange(len(probe)), len(self.build))[keep])
+
+        if self.join_type in J.FINISH_ONLY:
+            return []
+        if self.join_type is JoinType.RIGHT_SEMI:
+            return [normalize(probe[hit])]
+        if self.join_type is JoinType.RIGHT_ANTI:
+            return [normalize(probe[~hit])]
         matches = normalize(crossed[keep])
-        if self.join_type is JoinType.INNER:
+        if self.join_type in (JoinType.INNER, JoinType.LEFT) or hit.all():
             return [matches]
-        # LEFT: the build rows no probe row satisfied, right columns null-padded. One
-        # call, so this is not a finish pass — it is the whole join.
-        hit = crossed.index.isin(crossed.index[keep])
-        matched_build = set(np.repeat(np.arange(len(self.build)), len(probe))[hit].tolist())
-        missing = [i for i in range(len(self.build)) if i not in matched_build]
-        if not missing:
-            return [matches]
-        padded = self.build.iloc[missing].copy()
-        for column in probe.columns:
-            padded[column] = np.nan
-        return [normalize(concatenate([matches, padded[list(matches.columns)]]))]
+        # RIGHT / FULL: this batch's unmatched probe rows, build columns null-padded.
+        width = len(self.build.columns)
+        padded = pd.DataFrame({c: np.nan for c in self._names[:width]}, index=range((~hit).sum()))
+        for name, column in zip(self._names[width:], probe.columns):
+            padded[name] = probe[column][~hit].to_numpy()
+        return [concatenate([matches, padded])]
+
+    def _finish(self) -> list[pd.DataFrame]:
+        """The build rows by whether any probe batch's pair matched them."""
+        if not J.needs_finish(self.join_type):
+            return []
+        if self.join_type is JoinType.LEFT_SEMI:
+            return [normalize(self.build[self.matched])]
+        if self.join_type is JoinType.LEFT_ANTI:
+            return [normalize(self.build[~self.matched])]
+        if self.join_type is JoinType.LEFT_MARK:
+            return [normalize(self.build.assign(mark=self.matched))]
+        # LEFT / FULL: unmatched build rows, probe columns null-padded.
+        if self._names is None:
+            raise ValueError(
+                f"{self.name}: a {self.join_type.name} finish saw no probe batch, so the "
+                "probe columns to null-pad are unknown"
+            )
+        width = len(self.build.columns)
+        out = normalize(self.build[~self.matched])
+        out.columns = self._names[:width]
+        return [out.assign(**{c: np.nan for c in self._names[width:]})]

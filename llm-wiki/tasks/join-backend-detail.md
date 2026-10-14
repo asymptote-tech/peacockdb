@@ -2144,3 +2144,219 @@ guard, the chunked paths, the cross join's order).
   level on the device before its cells turn on, so a pbench cell that fails there is a planning
   or driver question, not a join-arm one. `PBENCH_SHAPES` must gain a row for any pbench join
   query added, or the guard goes red.
+
+#### Round 2, plan tasks 11–13 — the plan-executor gtests on the session, the goldens checked current, exec_model's recipe join retired
+
+Three tasks in disjoint files, one commit each. No production code, no fbs, no Rust.
+
+##### Task 11 — the four plan-executor gtests drive the session
+
+**What shipped.** `cpp/tests/gpu/test_plan_executor.cpp` only. `run_join(session, seq, build,
+probe)` builds, probes, finishes and releases one session over one batch each side, and
+expects exactly one of the probe and the finish to answer. `WholePlan` recognises the
+layout the wire writes a join in (`is_join_union`): the build side, the probe side and the
+`CudfJoin` leaf under one structural union. It runs the two sides, hands their handles to
+`run_join` at the leaf's seq, and counts the union's seq without executing it.
+`nation_join_region(fbb, projection)` builds that layout once for all four tests. Nation is
+the build side, so the output is still `[nation…, region…]`: the projections (1, 2, 5 / 5 /
+1, 5) and every assertion are unchanged — 25 rows of 7 columns, 25 of 3, 5 groups of 5, and
+ALGERIA in AFRICA first. 61 lines in, 142 out.
+
+**What the plan got wrong.**
+- **No `run_join` existed in the file.** It is new. It calls `NodeSession::join_*`, not the
+  C symbols: the file drives `NodeSession` throughout, and the symbols wrap those methods.
+- **"Build a `CudfJoin` leaf" left the sides nowhere to go.** A leaf has no children, so
+  the two scans need a place in the tree to get a seq. The wire's own answer is a structural
+  union over `[build, probe, join]` (`wire/writer.rs`'s `reduce`), and the test uses it.
+  The seqs therefore match what a real plan hands the C++.
+
+**Red-green.** The session existed before the tests moved onto it, so there was no red
+before the change. Mutations stand in, each on the remote copy only and rebuilt with
+`cmake --build cpp/build --target peacock_plan_tests`:
+- D1, the session's Inner arm answers nothing (`return std::nullopt` ahead of
+  `inner_join_size`): **exactly the four red**, each "the probe answered 0 and the finish 0".
+- D2 + D3 together. D2: the Inner/Left arm skips `projected`. D3: `execute_hash_join`
+  throws on entry. **Three red**: `HashJoinWithProjection` (7 columns),
+  `AggregateGroupBy` (25 groups of 1), `JoinProjectSort`. `HashJoinNationRegion` stayed
+  green with the old operator throwing, so no case in the binary reaches it.
+- The first D2 pattern matched twice (the pairs path repeats the line) and the
+  asserted-single-match script wrote nothing. It was re-anchored on three lines and is not
+  counted twice.
+- Restored from saved copies, md5 equal to local (`join_session.cpp` 6defdc79…,
+  `join.cpp` eb943efd…). The tree was re-synced, then **both files touched on the remote**
+  (rsync's mtime trap). The final `--build` recompiled both.
+
+**Local.** `/tmp/dkb-cppbuild` `ninja peacock_plan_tests`: compiles and links with no
+warning. `git clang-format` was applied to the changed lines only (three hunks).
+
+##### Task 12 — the goldens checked current: nothing moved
+
+- **Step 1.** `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test --features
+  rust-only -p peacockdb-core --lib plan_goldens`: **26 passed**. All 15 `*.plans.txt` and
+  `recipe-payloads.txt` were rewritten (their mtimes are the run's), and `git diff` is empty.
+  The end state is the plan's: the session line on 75 joins per tpch mode and 656 per tpcds
+  mode, and no `CudfHashJoin`, `CudfCrossJoin` or `CudfNestedLoopJoin` in any golden.
+  The payload coverage case did not go red mid-rewrite this time (task 7's trap), since
+  nothing was being rewritten to a different content.
+- **Step 2.** `UPDATE_CANONICAL=1` over `test_cpu_corpus`: **1031 passed**. 33 files
+  rewritten: 15 `.cpu.txt`, 15 `.cost.txt`, 3 `mini.result.txt`. Diff empty. Then
+  `test_cost_model` under the same variable: 3 passed, no diff. With no file changed, #213's
+  lost section cannot have happened.
+- **What the plan got wrong.** pbench now carries 54 session lines per tp1 mode and 51 per
+  tp4 mode, not task 7's 27: tasks 9–10 made more pbench joins plan. Nothing to regenerate.
+
+##### Task 13 — exec_model: the recipe join retires
+
+**What shipped.**
+- **Deleted** `operators/recipe_join.py`, `operators/recipe.py` and
+  `operators/cudf_calls.py`, about 1,250 lines in all.
+- `join_types.py`: the two facts of §4.1. `NEEDS_FINISH` / `needs_finish()` name the five
+  finishing types, as `plan::needs_finish` does, and `FINISH_ONLY` stays.
+  `Capability`/`capability()`, `PROBE_LOCAL`, `ONE_SIDED` and `IGNORES_NULL_EQUALS_NULL` are
+  gone.
+- `joins.py`:
+  - every probe streams, and no join refuses;
+  - a residual is part of each pair's match on every type;
+  - `null_equals_null` is one rule for every type, anti and mark included (#59, #80);
+  - `NestedLoopJoin` answers all nine types (#160) with a `matched` flag per build row, and
+    `predicate=None` is the literal `true`.
+- `nodes.py`, `node.py`, `tests/corpus.py`: `recipe_factory`, `RecipeJoinBackendSelector`
+  and `PCK_BACKEND` are gone.
+- **Two corpus lowerings collected their probe for a reason §4.1 removed.** TPC-H q21 (`l2`,
+  `l3`) and TPC-DS q16/q94 (`siblings`) put a `coalesce_all` under the probe of a filtered
+  semi/anti join. The collects are dropped. `plans.py --write` then moved the prototype's
+  plan goldens by exactly those four `BatchAccumulator`s and nothing else.
+- README: the file table, a "The joins" section in place of "The two join backends", the
+  corpus' `PCK_BACKEND` paragraph gone, and F11/F12 brought to the current tests.
+- `.github/workflows/exec-model-corpus.yml`: the `backend` input and `PCK_BACKEND` are gone.
+  Checked mechanically: the YAML parses with `filter` as its only input, and the rendered
+  `run:` block passes `bash -n`.
+
+**`test_join_capability.py`, case by case** (21 → 17):
+- **Removed, recipe-only:** the node-sequence case, the build-copy count, the
+  single-batch-no-copy case and the legacy single call (plan :421, :438, :481, :516).
+- **Flipped:**
+  - :329, the outer residual refusal → `…_keeps_its_unmatched_rows` (Left, Right and Full at
+    every config);
+  - :349, the second-batch refusal → `test_a_filtered_semi_join_streams_its_probe_side`
+    (asserts more than one probe call);
+  - :365, the #159 refusal → `test_a_right_semi_join_with_a_residual_filter_answers_as_the_oracle`;
+  - :527, the #153 pin → `test_a_left_join_pads_the_build_rows_its_residual_rejects`, counted
+    by hand: under `v > 80`, D matches ten probe rows and no pair passes, and E matches no
+    key, so both come back padded;
+  - :564, the null-key asymmetry → `test_null_keys_follow_null_equals_null_for_every_type`,
+    counted by hand. Under the SQL default anti keeps C and D and mark marks D false; under
+    `true` anti keeps C alone and mark marks D true.
+- **:623** (the recipe layer throws for a filtered RightSemi) has no shape left. Its
+  replacement is :365's flip.
+- **New:**
+  - `test_every_join_type_matches_the_oracle_as_a_nested_loop` (all nine; was Inner and Left);
+  - `test_a_predicate_free_nested_loop_over_an_empty_probe_pads_every_build_row`;
+  - `test_the_types_that_finish_are_the_build_preserving_five`.
+- **`on_oracle`** crosses the sides and applies the whole ON clause per pair. That is the
+  oracle for every residual and nested-loop case, written from the SQL.
+- **The join-type guard** reads `cpp/src/operators/join_session.cpp`, and its nine
+  `fb::JoinType_` names equal the enum.
+
+**What the plan got wrong, and what was decided.**
+- **`recipe.py` and `cudf_calls.py` went whole, not just `copy_handle`.** Once
+  `recipe_join.py` is gone, nothing imports either. Their join models
+  (`CudfHashJoin`, `execute_hash_join`, …) are what task 15's grep over `scripts` names.
+- **The cuDF-call guard (:666) went with them. This departs from design §4.6**, which
+  retargets it to the session's file. With no model left, the guard would hold a list of
+  function names that nothing runs, and code kept only to satisfy a test is the
+  antipattern. If the human wants that name registry kept, it is one file and one test to
+  restore against `join_session.cpp`. Its free cuDF calls are `apply_boolean_mask`,
+  `binary_operation`, `conditional_{inner,left}_join[_size]`, `conditional_left_semi_join`,
+  `cross_join`, `gather`, `mixed_left_semi_join`, `repeat`, `sequence` and `tile`. The hash
+  joins are member calls, which the guard's regex never saw.
+- **The plan missed :564**, which pinned #80/#59's always-EQUAL anti and mark. It is
+  flipped.
+- **The nested loop's refusal beyond Inner and Left (#160) was in the model too.** With
+  `capability()` gone the executor must answer every type, and it does.
+- **Left unchanged:** `merged_scratch` still prices a per-call rebuild of the build side
+  (#136's) into a join's scratch, where §4.3 prices the session's resident build. §4.6 asks
+  the model to follow §4.1, not §4.3.
+
+**Red-green.** The 17 cases were written first, against the old model (with only
+`needs_finish` added so the file imports). **8 red, each for the reason meant**: the
+nested-loop and empty-probe cases on "takes a single-batch probe", the residual-rides case
+and the filtered semi on the same, the outer and Left-pads cases on the #153 refusal, the
+RightSemi case on #159's, and the null-key case on its anti assertion. Then 17/17 green.
+Mutations of `joins.py`, each applied by asserted single match, restored by copy and
+checked with `cmp`:
+- **M1**, anti and mark EQUAL again: 1 red (the null-key case).
+- **M2**, the nested loop's Left/Full finish answers nothing: 2 red.
+- **M3**, the nested loop never pads a Right/Full probe row: 1 red.
+- **M4**, the residual ignored: 4 red. The filtered-semi case stayed green under M4, since
+  every key passes `v > 50` either way. It now uses `v > 80`, where key 3 drops out, with
+  a precondition on the expected labels, and goes red under M4.
+
+**Counts, off pytest collection** (`python3 -m pytest scripts/exec_model/tests
+--collect-only`): 328 at HEAD (from a `git archive` copy) → 324. The cost-report set
+(every file but `test_tpch`, `test_tpch_corpus`, `test_tpcds`) is 216 → 212; `test_tpch`
+stays 19 and the corpus 93. Each non-corpus file was run as CI runs it (`python3 <file>`),
+at HEAD and now. Only the join file differs (21 → 17); the other ten are equal and green.
+
+**The corpus, since every anti and mark join in it now runs under the SQL default.** No
+lowering sets `null_equals_null`, so each one used to run as EQUAL and now does not. Both
+corpus files ran in six `PCK_SHARD` processes over sf1, with DuckDB 1.5.4 from
+`~/.local/bin`. **93 of 93 pass**: TPC-H 22, TPC-DS 71. Three of them — q21, q16 and q94 —
+first failed on "plan changed". Each process had loaded the old lowering and then read the
+plan golden I rewrote mid-run. Re-run alone on the new lowerings, all three pass. No corpus
+answer depended on the old EQUAL rule. Then, on the final tree, `python3 -m pytest
+scripts/exec_model/tests -q`: **324 passed** in 46 minutes, the corpus included, in one
+process. The calibration set under `scripts/` is unaffected and green, 12 of 12, with
+matplotlib installed outside the tree.
+
+##### The device run, recorded
+
+nebius-gpu, NVIDIA L40S, 0 MiB in use; cuDF 25.02. The final tree was synced and the two
+restored files touched. `./scripts/build-test-shadgpu.sh --build` gave rc 0 with no warning
+in its log. Each binary was run directly, the Rust ones with `--test-threads=1`. **924
+cases, all green:**
+
+| binary | passed |
+|---|--:|
+| `peacock_gpu_tests` | 2 |
+| `peacock_plan_tests` | 81 |
+| `peacock_join_session_tests` | 53 |
+| `test_gpu_corpus` | 95 |
+| `test_node_timing` | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 684 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 |
+
+Not run, per the override: the sf40 pair and the `bench_` cases. Disk: 28 GB free of 96
+before and after. Nothing was deleted.
+
+**Local, rust-only, fresh on the final tree:**
+
+| target | result |
+|---|---|
+| `--lib` | 761 passed, 2 ignored |
+| `test_cpu_corpus` | 1031 |
+| `test_corpus_goldens` | 26 |
+| `test_cost_model` | 3 |
+| `test_module_layout` | 18 |
+| `test_ci_coverage` | 11 |
+| `test_golden_format` | 43 |
+
+0 failed anywhere and no warning. No golden moved, so there is no cost diff.
+
+**build-test.md.** The header went 3308 → 3304 and Python 401 → 397; the sum of the N
+columns was re-checked by script. "Exec-model prototype" is 216 → 212, its prose is
+rewritten, and its example is renamed. "Exec-model corpus" loses `PCK_BACKEND=recipe`.
+"Plan-executor" says how a join runs; its count stays 81.
+
+**What tasks 14–16 inherit.**
+- 15: every grep in its step 2 is already empty over `scripts`.
+- 15: `hacks-audit.md:422` still describes `copy_handle` and its test as live. That is one
+  of the join items step 3 marks resolved.
+- 14: exec_model has no `GpuEmpty`, no `IS [NOT] DISTINCT FROM` and no pbench query, so
+  nothing there waits on cells.
+
+**Coordinator's note on task 13's deleted guard, for the review round.** Design §4.6 and plan task 13
+step 1 keep the exec_model cuDF-call guard, pointed at `join_session.cpp`; the developer deleted it
+with `cudf_calls.py`, reasoning that with no model of those calls left it checks names nothing runs.
+That is a coverage removal no human authorized, so the reviewer is asked to judge it: restore it
+against the session, or agree it can no longer go red for a reason that matters.
