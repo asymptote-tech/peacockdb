@@ -185,3 +185,14 @@ them. Each cell enabled with its DuckDB case green.
 
 `build-test-shadgpu.sh`: a cycle for the harness, then the corpus in batches by dataset and mode
 (about five queries per round where cells are new).
+
+## Signoff — 2026-10-14
+
+Solved under its constraints: both engines run every join on the session; every refusal but #250's
+is lifted; the 18 tickets are archived; cpu +150 and device +670 cells, each held to DuckDB. Shortcuts:
+the cost gate is red (251 rises, 173 past 10%, `reports/join-backend-cost-rises.md`), pre-accepted by
+the board; the dead-code bar is read as "no new warning" (26 at base and head); exec_model's cuDF-call
+guard is retired rather than moved (§4.6), its model gone; `IS NOT DISTINCT FROM` keys merge to one
+lane rather than shuffle (§4.1); a rows-only scan beside row groups now refuses on #186; `IntoAnyBox`
+joins the crate's public surface; q66's cells are on with #55 open. Device runs were on nebius-gpu
+under the board's override; shad-gpu's `gpu-tests` job and the sf40 tier are deferred.

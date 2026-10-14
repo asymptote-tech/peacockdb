@@ -9,7 +9,7 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 
 | | |
 |---|---|
-| state | `completing` since 2026-10-14, PR #179 against `ENS-join-session-cpp` |
+| state | `completeness approved` since 2026-10-14, PR #179 against `ENS-join-session-cpp` |
 | developer rounds | 1 dispatched 2026-10-09, stopped by the human mid plan task 7; 2 dispatched 2026-10-13 |
 | review rounds | none |
 | tickets filed | #267 (plan task 9). Next free is **268**; master reserved 264–279 for this chain |
@@ -3532,3 +3532,15 @@ ping until 08:34, while the local network was fine. Still owed on a device:
 
 The red-first of every device test above stands (build 1). nebius-gpu had 27 GB free before
 both builds, and nothing was deleted there.
+
+## Completeness closed — 2026-10-14
+
+Reviewer: 0 blocking, 0 important. Analyst: 2 important, both fixed in `28b0d074`, and six
+`architecture.md` sentences, five corrected by the coordinator in `a717202c` and the sixth (the
+finish call) made true by the code in `28b0d074`. Signoff written to the spec. Board → `completeness
+approved`.
+
+**Owed before `done`.** (1) The device run on `28b0d074` is incomplete: nebius-gpu stopped answering
+at about 07:50 during `test_gpu_corpus` (tpcds q64 reached, all green), and the round's two device
+mutations were not run. The full override binary list must pass on the final tree, recorded here.
+(2) CI green on the PR head except `gpu-tests` (exempt) and cost-report (pre-accepted).
