@@ -268,9 +268,33 @@ static std::string get_string_value(const cudf::column_view& col,
   }
 }
 
+/// One join session over one build batch and one probe batch: built, probed, finished and
+/// released, as the driver runs a lane. Every join in this file is Inner, which answers at
+/// its probe and owes nothing at finish, so exactly one of the two calls answers.
+static uint64_t run_join(peacock::NodeSession& session, uint64_t seq, uint64_t build,
+                         uint64_t probe) {
+  peacock::NodeStats stats{};
+  const uint64_t join = session.join_build(seq, build, &stats);
+  const uint64_t probed = session.join_probe(join, probe, &stats);
+  const uint64_t finished = session.join_finish(join, &stats);
+  session.join_release(join);
+  EXPECT_NE(probed == 0, finished == 0)
+      << "the probe answered " << probed << " and the finish " << finished;
+  return probed != 0 ? probed : finished;
+}
+
+/// The layout the wire writes a join in: its build side, its probe side and the `CudfJoin`
+/// leaf, gathered under one structural union that nothing executes.
+static bool is_join_union(const fb::PlanNode* node) {
+  if (node->node_type() != fb::PlanNodeKind_CudfUnion) return false;
+  auto* inputs = node->node_as_CudfUnion()->inputs();
+  return inputs && inputs->size() == 3 && inputs->Get(2)->node_type() == fb::PlanNodeKind_CudfJoin;
+}
+
 /// A hand-built plan driven node by node, children first, each node handed its
 /// children's handles — the same walk the engine's driver makes over a real
 /// plan, and the only way a plan is executed since the whole-plan entry point retired.
+/// A join is the one node `execute_node` refuses, so its sides go through `run_join`.
 ///
 /// The seq a node takes is its post-order position, counted here as the walk reaches it.
 /// `NodeSession` indexes with the same `node_children` in the same order, so the two
@@ -289,6 +313,14 @@ class WholePlan {
   /// file is single-partition, so a node emitting more than one is a test that has
   /// outgrown the walker rather than a result to pick from.
   uint64_t run(const fb::PlanNode* node, uint64_t& seq) {
+    if (is_join_union(node)) {
+      auto* inputs = node->node_as_CudfUnion()->inputs();
+      const uint64_t build = run(inputs->Get(0), seq);
+      const uint64_t probe = run(inputs->Get(1), seq);
+      const uint64_t answer = run_join(session_, seq++, build, probe);
+      ++seq;  // the union: indexed, never executed
+      return answer;
+    }
     std::vector<uint64_t> handles;
     std::vector<uint64_t> counts;
     for (auto* child : peacock::node_children(node)) {
@@ -406,10 +438,13 @@ TEST(PlanExecutor, FilterNation) {
   EXPECT_EQ(result.num_rows(), 10);
 }
 
-TEST(PlanExecutor, HashJoinNationRegion) {
-  flatbuffers::FlatBufferBuilder fbb;
-
-  // Left: nation (n_nationkey, n_name, n_regionkey, n_comment)
+/// nation ⋈ region on n_regionkey = r_regionkey, nation the build side, laid out as the
+/// wire lays a join out (`is_join_union`). Inner answers the build's columns, then the
+/// probe's: n_nationkey(0), n_name(1), n_regionkey(2), n_comment(3), r_regionkey(4),
+/// r_name(5), r_comment(6); a `projection` keeps those ordinals.
+static flatbuffers::Offset<fb::PlanNode> nation_join_region(
+    flatbuffers::FlatBufferBuilder& fbb,
+    const std::optional<std::vector<uint32_t>>& projection = std::nullopt) {
   auto nation_path = fbb.CreateString(parquet_path("nation"));
   auto nation_paths = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
@@ -423,7 +458,6 @@ TEST(PlanExecutor, HashJoinNationRegion) {
   auto nation_node = make_plan_node(
       fbb, fb::PlanNodeKind_CudfScan, nation_scan.Union());
 
-  // Right: region (r_regionkey, r_name, r_comment)
   auto region_path = fbb.CreateString(parquet_path("region"));
   auto region_paths = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
@@ -436,19 +470,27 @@ TEST(PlanExecutor, HashJoinNationRegion) {
   auto region_node = make_plan_node(
       fbb, fb::PlanNodeKind_CudfScan, region_scan.Union());
 
-  // Join keys: n_regionkey (col 2 in left) = r_regionkey (col 0 in right)
   auto lk = make_col_ref(fbb, 2);
   auto rk = make_col_ref(fbb, 0);
   auto join_key = fb::CreateJoinKey(fbb, lk, rk);
   auto keys_vec = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::JoinKey>>{join_key});
+  auto proj_vec = projection ? fbb.CreateVector(*projection)
+                             : flatbuffers::Offset<flatbuffers::Vector<uint32_t>>{};
+  auto join = fb::CreateCudfJoin(fbb, fb::JoinType_Inner, keys_vec, /*filter=*/0,
+                                 /*filter_columns=*/0, /*null_equals_null=*/false, nation_schema,
+                                 region_schema, proj_vec);
+  auto join_node = make_plan_node(fbb, fb::PlanNodeKind_CudfJoin, join.Union());
 
-  auto join = fb::CreateCudfHashJoin(
-      fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node);
-  auto join_node =
-      make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
-  auto buf = finish_plan(fbb, join_node);
+  auto sides = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::PlanNode>>{nation_node, region_node, join_node});
+  auto join_union = fb::CreateCudfUnion(fbb, sides);
+  return make_plan_node(fbb, fb::PlanNodeKind_CudfUnion, join_union.Union());
+}
+
+TEST(PlanExecutor, HashJoinNationRegion) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = finish_plan(fbb, nation_join_region(fbb));
 
   WholePlan plan(buf);
   const auto& result = plan.result();
@@ -460,53 +502,8 @@ TEST(PlanExecutor, HashJoinNationRegion) {
 
 TEST(PlanExecutor, HashJoinWithProjection) {
   flatbuffers::FlatBufferBuilder fbb;
-
-  // nation
-  auto nation_path = fbb.CreateString(parquet_path("nation"));
-  auto nation_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
-  auto nation_schema = make_schema(fbb, {
-      {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8},
-      {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8},
-  });
-  auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
-  auto nation_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, nation_scan.Union());
-
-  // region
-  auto region_path = fbb.CreateString(parquet_path("region"));
-  auto region_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
-  auto region_schema = make_schema(fbb, {
-      {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8},
-      {"r_comment", fb::DataType_Utf8},
-  });
-  auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
-  auto region_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, region_scan.Union());
-
-  // Join keys: n_regionkey (col 2) = r_regionkey (col 0)
-  auto lk = make_col_ref(fbb, 2);
-  auto rk = make_col_ref(fbb, 0);
-  auto join_key = fb::CreateJoinKey(fbb, lk, rk);
-  auto keys_vec = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<fb::JoinKey>>{join_key});
-
-  // Output projection: keep only n_name(1), n_regionkey(2), r_name(5)
-  // Full join output: [n_nationkey(0), n_name(1), n_regionkey(2),
-  //   n_comment(3), r_regionkey(4), r_name(5), r_comment(6)]
-  std::vector<uint32_t> proj{1, 2, 5};
-  auto proj_vec = fbb.CreateVector(proj);
-
-  auto join = fb::CreateCudfHashJoin(
-      fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, proj_vec);
-  auto join_node =
-      make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
-  auto buf = finish_plan(fbb, join_node);
+  // n_name(1), n_regionkey(2), r_name(5) of the join's seven.
+  auto buf = finish_plan(fbb, nation_join_region(fbb, std::vector<uint32_t>{1, 2, 5}));
 
   WholePlan plan(buf);
   const auto& result = plan.result();
@@ -643,47 +640,8 @@ TEST(PlanExecutor, AggregateCount) {
 TEST(PlanExecutor, AggregateGroupBy) {
   flatbuffers::FlatBufferBuilder fbb;
 
-  // First: join nation and region, project r_name only.
-  auto nation_path = fbb.CreateString(parquet_path("nation"));
-  auto nation_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
-  auto nation_schema = make_schema(fbb, {
-      {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8},
-      {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8},
-  });
-  auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
-  auto nation_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, nation_scan.Union());
-
-  auto region_path = fbb.CreateString(parquet_path("region"));
-  auto region_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
-  auto region_schema = make_schema(fbb, {
-      {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8},
-      {"r_comment", fb::DataType_Utf8},
-  });
-  auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
-  auto region_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, region_scan.Union());
-
-  // Join: n_regionkey (col 2) = r_regionkey (col 0)
-  // Output projection: r_name only → col 5 in full output
-  auto lk = make_col_ref(fbb, 2);
-  auto rk = make_col_ref(fbb, 0);
-  auto join_key = fb::CreateJoinKey(fbb, lk, rk);
-  auto keys_vec = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<fb::JoinKey>>{join_key});
-  std::vector<uint32_t> join_proj{5};
-  auto join_proj_vec = fbb.CreateVector(join_proj);
-
-  auto join = fb::CreateCudfHashJoin(
-      fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, join_proj_vec);
-  auto join_node =
-      make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
+  // First: join nation and region, keep r_name(5) only.
+  auto join_node = nation_join_region(fbb, std::vector<uint32_t>{5});
 
   // Aggregate: GROUP BY r_name (col 0), count(*)
   auto group_expr = make_col_ref(fbb, 0);
@@ -1149,48 +1107,8 @@ TEST(PlanExecutor, PassthroughNodes) {
 TEST(PlanExecutor, JoinProjectSort) {
   flatbuffers::FlatBufferBuilder fbb;
 
-  // nation scan
-  auto nation_path = fbb.CreateString(parquet_path("nation"));
-  auto nation_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{nation_path});
-  auto nation_schema = make_schema(fbb, {
-      {"n_nationkey", fb::DataType_Int32},
-      {"n_name", fb::DataType_Utf8},
-      {"n_regionkey", fb::DataType_Int32},
-      {"n_comment", fb::DataType_Utf8},
-  });
-  auto nation_scan = fb::CreateCudfScan(fbb, nation_paths, nation_schema);
-  auto nation_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, nation_scan.Union());
-
-  // region scan
-  auto region_path = fbb.CreateString(parquet_path("region"));
-  auto region_paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{region_path});
-  auto region_schema = make_schema(fbb, {
-      {"r_regionkey", fb::DataType_Int32},
-      {"r_name", fb::DataType_Utf8},
-      {"r_comment", fb::DataType_Utf8},
-  });
-  auto region_scan = fb::CreateCudfScan(fbb, region_paths, region_schema);
-  auto region_node = make_plan_node(
-      fbb, fb::PlanNodeKind_CudfScan, region_scan.Union());
-
-  // Join: n_regionkey (col 2) = r_regionkey (col 0)
-  // Project: n_name(1), r_name(5) from full join output
-  auto lk = make_col_ref(fbb, 2);
-  auto rk = make_col_ref(fbb, 0);
-  auto join_key = fb::CreateJoinKey(fbb, lk, rk);
-  auto keys_vec = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<fb::JoinKey>>{join_key});
-  std::vector<uint32_t> join_proj{1, 5};
-  auto join_proj_vec = fbb.CreateVector(join_proj);
-
-  auto join = fb::CreateCudfHashJoin(
-      fbb, fb::JoinType_Inner, keys_vec,
-      /*filter=*/0, /*filter_columns=*/0, nation_node, region_node, join_proj_vec);
-  auto join_node =
-      make_plan_node(fbb, fb::PlanNodeKind_CudfHashJoin, join.Union());
+  // Join, keeping n_name(1) and r_name(5).
+  auto join_node = nation_join_region(fbb, std::vector<uint32_t>{1, 5});
 
   auto cb = fb::CreateCudfCoalesceBatches(fbb, /*target_batch_size=*/65536,
                                           join_node);
