@@ -9,7 +9,7 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 
 | | |
 |---|---|
-| state | `reviewing` since 2026-10-14, PR #179 against `ENS-join-session-cpp` |
+| state | `completing` since 2026-10-14, PR #179 against `ENS-join-session-cpp` |
 | developer rounds | 1 dispatched 2026-10-09, stopped by the human mid plan task 7; 2 dispatched 2026-10-13 |
 | review rounds | none |
 | tickets filed | #267 (plan task 9). Next free is **268**; master reserved 264–279 for this chain |
@@ -3288,3 +3288,12 @@ of the remote tree.
 
 **Hosts.** nebius-gpu had 27 GB free before and after; nothing was deleted there. Locally, the two
 archive trees and their target dirs (the base's was 4.6 GB) were removed after their counts.
+
+## Review round 2 — 2026-10-14, on `4094f10b`: 0 blocking, 0 important, 4 nits
+
+17 of round 1's 19 closed; nit 12 is the signoff's. I1's widened tie and nit 5's rewritten
+`has_finish_pass` were each shown able to go red. I2's refusal judged right: neither engine's scan
+limit is designed (#186), and one refusal rule is what #186's fix will change. Round 1's nit 2
+(tickets over length) left partly open: #205, #199, #225, #56, #60 stay long; not reopened, since a
+nit does not reopen a task. The four new nits fixed by the coordinator in `a356266e`.
+Board → `completing`.
