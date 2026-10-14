@@ -175,9 +175,11 @@ one: a keyless aggregate answers one row whatever arrived.
 
 **Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
 `tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
-behind them. An empty lane comes from
-tp4-single cutting a one-row-group table into four, or from an Inner join with no build rows in a
-lane. Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
+behind them. And four device cells whose cpu cells answer: `tpch/q11` at the three tp4 modes and
+`tpch/q22` at `tp4-single`. There the cpu's identity rows reach the `.cpu.txt` section the device
+is held to, and the device answers the same rows as DuckDB. An empty lane comes from
+tp4-single cutting a table of fewer row groups than lanes into four (q22's customer), or from an
+Inner join with no build rows in a lane (q11's one nation). Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
 where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
 site have no corpus query.
 
@@ -241,9 +243,10 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 55's duplicate ordinal is #228.
 
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
-q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device — all
-five of its device cells off here, the validator refusing the width. The rest are off first on #152,
-#212 or #220, and no longer on #189 or #206: the shuffle stopped hashing the id and the kernel has
+q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. Two reach it on a device,
+`pbench/rollup-small-keys` and `tpch/rollup-over-join`, all five device cells of each off here,
+the validator refusing the width at the first `GpuAggregate`. The tpcds rows are off first on
+#152, #212 or #220, and no longer on #189 or #206: the shuffle stopped hashing the id and the kernel has
 its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
 window queries that never run.
 

@@ -14,24 +14,20 @@
 
 // --- tpch ---------------------------------------------------------------------
 corpus_query!(tpch, 1, q6, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-// q1 runs everywhere on both engines; q17 at every cpu mode and at tp1-single on the
-// device, where its other four modes are #152's build-side copy.
+// q1 and q17 run everywhere on both engines.
 corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q14, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q19, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q12, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-// THE DEVICE COLUMN. q6 runs at all five modes and q19 at tp1-single; every other device
-// cell is off against a ticket. The two causes that hold almost all of them: #152 refuses a join
-// whose recipe copies a side the ABI cannot copy (by name rather than by crash), and #220 is the
-// cpu splitting a join's output into more batches than the device, seen first at the aggregate
-// merge's in_rows above it. #95, the hash scatter refusing a decimal key, was a third until
-// repartition-keys closed it; no row carries it now.
-// T19 is where the rest are settled query by query.
-corpus_query!(tpch, 1, q13, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q15, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q17, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q3, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but six:
+// q11 and q22 at tp4 modes where a keyless merge meets a lane with no arrival (#199), the rollup
+// (#65), mixed-join (#168), nested-limits and scan-limit (#186). The joins' own blockers, #152's
+// side copies and #220's batch splits, went with the join session.
+corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q10, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 1, the five smallest tpch plans the rollout list carries.
 // scan-limit's rows are not determined — an unordered LIMIT over lineitem — so its modes
@@ -42,24 +38,21 @@ corpus_query!(tpch, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, go
 // anyway — `an_undetermined_lines_rows_are_compared_only_against_committed_files` holds both.
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit in
 // the scan alone and the cpu backend's reader does not apply it — six million rows for ten.
-// filter-project, aggregate-groupby and shuffle-additive run everywhere; cross-join is off on #220.
+// filter-project, aggregate-groupby, cross-join and shuffle-additive run everywhere.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_exact, data_fusion_subset, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, filter_project, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, aggregate_groupby, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, cross_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, cross_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, shuffle_additive, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 2, the five smallest joins. semi-join and anti-join return whole `orders` rows,
 // which is over the result cap, so the device compares against a live cpu run.
-// nested-loop-join runs at tp1-single. Off: #152's copy shapes for left-join (its probe
-// batch) and hash-join (its build side) at four modes; at tp1-single hash-join is #220's
-// in_rows at the merge, and semi-join and anti-join are #220's join batching at the unload.
-// A row keeping `183` has modes never run past the string class.
-corpus_query!(tpch, 1, hash_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, left_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, semi_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, anti_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, nested_loop_join, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// All five run everywhere on both engines.
+corpus_query!(tpch, 1, hash_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, semi_join, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, anti_join, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, nested_loop_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 4, the small end of the tpch list emptied, and two firsts.
 // shuffle-additive-avg runs everywhere on both engines.
@@ -67,47 +60,44 @@ corpus_query!(tpch, 1, nested_loop_join, all_modes, tp1_single, duckdb_exact, da
 // mode is exact: tp1-single matches DataFusion to the digit, and it is the mode with a single
 // lane and so nothing to reassociate. The other four differ by ~3e-15 — the association order
 // of the Welford merge rather than its arithmetic, since a wrong merge would not come right at
-// one lane. shuffle-stddev runs everywhere on both engines; nested-loop-left-join is off on
-// #220's join batching, nested-limits on #186 (two intervals on one path, scan-limit's refusal),
-// and mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
+// one lane. shuffle-stddev and nested-loop-left-join run everywhere on both engines;
+// nested-limits is off on #186 (two intervals on one path, scan-limit's refusal), and
+// mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
 corpus_query!(tpch, 1, shuffle_additive_avg, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225
 corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, nested_loop_left_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, nested_loop_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_limits, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 5, the tpch list from here being aggregates over joins, and the cpu is where it
 // showed. q22's nested-loop join projects, which the cpu applies since its joins became
-// DataFusion streams; its device cells are task 14's.
-// On the device every query here aggregates over a join: #152's build-side copy where the join
-// sees several probe batches, and at tp1-single, which reaches past it, the golden's `in_rows`
-// at the merge for q16, the rollup and q18, and q4's join itself — all #220's batching.
+// DataFusion streams. On the device the rollup is off on #65: its grouping id is INT32 where
+// the plan says UInt8, and the schema hook refuses the first `GpuAggregate`. q22 is off at
+// tp4-single on #199: that mode deals customer's two row groups to four lanes, and over the two
+// empty ones the keyless avg's merge has an identity row on the cpu and none on the device.
 corpus_query!(tpch, 1, rollup_over_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q4, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q16, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, q18, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q22, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q4, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q16, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, q18, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q22, all_modes, tp1_single | tp1_rowgroup | tp4_rowgroup | tp4_sized, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 6, the rest of tpch bar q7, q8 and q2. q11 is the first corpus query whose
 // nested-loop join projects, which the cpu applies; over the result cap, so DuckDB is
-// compared by fingerprint, and its device cells are task 14's.
-// tp1-single is the only mode whose join gets a single probe batch, so it is the only one past
-// #152's build-side copy, and what it meets there is per query: #220's join batching for q20,
-// q21 and q9, #220's `in_rows` at the merge for q5.
-corpus_query!(tpch, 1, q20, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q5, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q9, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q11, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, q21, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// compared by fingerprint and the device against a live cpu run. Its three tp4 cells are off on
+// #199: GERMANY's one nation row lands in one of four lanes, so three lanes of the keyless sum
+// above the join get nothing, as q22's do at tp4-single.
+corpus_query!(tpch, 1, q20, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q5, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q9, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q11, all_modes, tp1_single | tp1_rowgroup, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, q21, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 7, the end of tpch: three queries rather than five, because these are its deepest
 // plans and the regeneration cost has moved into the queries rather than their number.
-// #152 at four modes each, and at tp1-single, the mode that always reaches the unload, all
-// three run the whole device plan and meet #220's join batching — q7 and q8 at the merge
-// above their joins, q2 at its min aggregate.
-corpus_query!(tpch, 1, q7, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q8, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, q2, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// All three run everywhere on both engines.
+corpus_query!(tpch, 1, q7, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q8, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // --- tpcds --------------------------------------------------------------------
 corpus_query!(tpcds, 1, q41, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -254,9 +244,8 @@ corpus_query!(tpcds, 1, q64, all_modes, none, duckdb_exact, data_fusion_exact, g
 // queries run at every cpu mode. On the device at tp1-single, their other modes never run: q6 is
 // #152's probe-batch copy; q9 fails in the CASE over its scalar subqueries, `copy_if_else`
 // refusing two branch types (#63); q13 and q14 are #220's `in_rows`.
-// join_int's five device cells are #152 at four modes and #220 at tp1-single, the sixth cell in
-// the rollout the device ran and the golden caught.
-corpus_query!(tpch, 1, join_int, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// join_int runs everywhere on both engines.
+corpus_query!(tpch, 1, join_int, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q6, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q9, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q13, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);

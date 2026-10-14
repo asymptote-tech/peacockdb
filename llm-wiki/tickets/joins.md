@@ -176,10 +176,11 @@ plan — `check_projection` validates it and the node's declared schema derives 
 rather than answering wrongly only because `declared_as` compares counts first; a projection that
 reordered columns would be a wrong answer with matching shapes.
 
-**Corpus queries:** nine registry rows, 45 cpu cells, all off at all five modes — `tpch/q11`,
-`tpch/q22`, `tpcds/q24`, `tpcds/q54`, and pbench's `nl-inner`, `nl-left`, `nl-projection`,
-`nl-left-decimal` and `like-column-pattern`. Their device cells have never run and cannot until
-the cpu answers: a gpu cell needs a cpu cell at the same mode.
+**Corpus queries:** nine registry rows. `tpch/q11` and `tpch/q22` answer on both engines;
+their device cells off at tp4 are [#199](corpus-coverage.md#t199)'s, and their rows no longer
+carry `190`. `tpcds/q24` and `tpcds/q54` answer on the cpu at all five modes, their device cells
+not yet run. pbench's `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and
+`like-column-pattern` are off on both engines, waiting for join-backend's pbench cells.
 
 <a id="t63"></a>
 ### #63 — a zero-column placeholder survives the cross join and shifts every ordinal above it
@@ -366,10 +367,11 @@ first differing line, and the merge renders above the join. `in_rows` is the dri
 batches a node takes, the same code for both engines. These were the first cells where the device
 completed a plan and only the golden caught the difference.
 
-**Corpus queries:** 97 registry rows carry `220`, its cause at `tp1-single`, where the device gets
-past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4 q18, `tpch` q3 q4 q14 q15. Plus
-`tpch/hash-join`, `cross-join`, `nested-loop-left-join`, `anti-join` and `semi-join`, and the ten
-pbench rows its device cycle measured here. `tpcds/q9` and `pbench/scalar-subquery-cross` joined
+**Corpus queries:** 75 registry rows carry `220` — tpcds 65, pbench 10 — its cause at
+`tp1-single`, where the device gets past #152. The first ones seen: `tpcds` q93 q96 q38 q48 q4
+q18, `tpch` q3 q4 q14 q15. Plus `tpch/hash-join`, `cross-join`, `nested-loop-left-join`,
+`anti-join` and `semi-join`, and the ten pbench rows its device cycle measured here. No tpch row
+carries it now: join-backend's task 14 ran every tpch device cell it held, and each answered. `tpcds/q9` and `pbench/scalar-subquery-cross` joined
 them in join-backend's task 5, on the nested-loop shape above. Every device cell through a join
 lands here once #152 clears.
 
