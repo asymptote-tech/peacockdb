@@ -9,7 +9,7 @@ PR targets `ENS-join-session-cpp`. Spec [`join-backend.md`](join-backend.md) (fr
 
 | | |
 |---|---|
-| state | `building` since 2026-10-09 |
+| state | `reviewing` since 2026-10-14, PR #179 against `ENS-join-session-cpp` |
 | developer rounds | 1 dispatched 2026-10-09, stopped by the human mid plan task 7; 2 dispatched 2026-10-13 |
 | review rounds | none |
 | tickets filed | #267 (plan task 9). Next free is **268**; master reserved 264–279 for this chain |
@@ -3050,3 +3050,10 @@ met an open ticket, and #267 was filed in plan task 9. Next free is still **268*
 `build-test.md` name #136, #137 and #154 without a link, so task 15's commit stands on its own.
 `git grep -nE 'joins\.md#t(155|152|153|80|59|215|208|207|190|63|212|173|136|137|159|160|220)\b|corpus-coverage\.md#t154\b|\]\(#t(…)\)'`
 over `llm-wiki scripts peacockdb-core cpp` is empty outside the archive.
+
+### Round 2 closed, 2026-10-14
+
+Plan tasks 7, 8, 4, 9, 9b, 9c, 10, 11–13, 14 (tpch, tpcds, pbench), 15 and 16 committed one or two
+per developer dispatch, each green on rust-only and on nebius-gpu. PR #179 opened against
+`ENS-join-session-cpp`, 24 commits. Owed before `completeness approved`: the whole-task cost diff
+against the branch point `3d9a122e` (spec risk 1), for the PR body; the coordinator cannot run it.
