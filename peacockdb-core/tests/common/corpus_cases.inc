@@ -268,68 +268,69 @@ corpus_query!(tpcds, 1, q92, all_modes, all_modes, duckdb_exact, data_fusion_exa
 // with the small-table rule off, so `fact` splits across four lanes at tp4 and the
 // one-row-group tables leave three empty. llm-wiki/tasks/pbench.md, and -detail.md beside it.
 //
-// Every runnable gpu cell was run once on an L40S under cuDF 25.02 and settled on what it
-// measured: 30 are on, and an off cell carries the ticket it failed on. 157 could not be run —
-// a gpu cell needs a cpu cell at its mode. Of the 29 rows with no cpu cell, 24 are refused by
-// the planner, 21 of them citing their ticket on the golden's `refused:` line; the other 5 plan
-// fine and the cpu backend refuses them at run time, on #190. Three queries are absent, on #255.
-corpus_query!(pbench, 1, anti_null_preserved_condition, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
+// BOTH COLUMNS. Every line runs on both engines at every mode it plans at, but these. Three are
+// refused at plan time: `cross-empty-build` and `outer-on-true-empty` over a file with no row
+// group (#256), `in-is-null` (#250). `not-in-uncorrelated` at tp4 is refused too (#267), and
+// `scalar-subquery-cross` at tp4 meets #199 on both engines. On the device alone,
+// `like-column-pattern` meets #246, `rollup-small-keys` #65 and `timestamp-s-key-group` #264.
+// Three queries are absent, on #255.
+corpus_query!(pbench, 1, anti_null_preserved_condition, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, bool_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, cross_projection, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, cross_projection, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, decimal15_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, decimal15_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, decimal15_key_join, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, decimal38_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, empty_side_left_join, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, exists_null_keys, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, exists_or_mark, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, finish_without_probe, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, full_join_null_keys, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, full_join_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, empty_side_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, exists_null_keys, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, exists_or_mark, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, finish_without_probe, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, full_join_null_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, full_join_residual, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, in_is_null, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, indf_full_join, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, inner_join_hot_keys, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, indf_full_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, inner_join_hot_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, int8_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, left_join_null_keys, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, left_join_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, like_column_pattern, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, mark_cross_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_full, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_inner, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_left, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_left_anti, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_left_decimal, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_left_semi, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_mark, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_projection, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_right, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_right_anti, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, nl_right_semi, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_exists_null_keys, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_in_correlated, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_in_uncorrelated, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_in_under_or, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_not_in, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_or_not_in, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, left_join_null_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, left_join_residual, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, like_column_pattern, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, mark_cross_residual, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_full, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_inner, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_left, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_left_anti, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_left_decimal, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_left_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_mark, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_projection, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_right, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_right_anti, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, nl_right_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, not_exists_null_keys, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, not_in_correlated, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, not_in_uncorrelated, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_divergent(205), data_fusion_exact, golden_exact, schema_validation_enabled); // zero rows, no batch: #205
+corpus_query!(pbench, 1, not_in_under_or, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, not_not_in, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, not_or_not_in, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, outer_on_true_empty, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, probe_exists_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, probe_not_exists_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, right_join_null_keys, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, right_join_residual, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, probe_exists_residual, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, probe_not_exists_residual, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, right_join_null_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, right_join_residual, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, rollup_small_keys, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, scalar_subquery_cross, tp1_single | tp1_rowgroup, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, sparse_build_anti, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, sparse_build_full, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, sparse_build_right, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, scalar_subquery_cross, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, sparse_build_anti, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, sparse_build_full, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, sparse_build_right, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_left, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_probe_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, timestamp_ms_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, timestamp_ns_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, timestamp_s_key_group, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled); // device: #264, a cast group key
 corpus_query!(pbench, 1, timestamp_us_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, ts_key_join, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(pbench, 1, ts_key_join, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, uint_key_group, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(pbench, 1, uint_key_join, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(pbench, 1, uint_key_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // #243 — the cpu keys -0.0 and NaN by their BITS, so the three float rows land with their SQL,
 // their plan goldens and their DuckDB answers, and their lines commented out for the task that

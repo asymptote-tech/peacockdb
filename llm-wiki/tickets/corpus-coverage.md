@@ -345,7 +345,8 @@ The small-table rule hides it: a source under 5 MB plans one lane, so a larger o
 
 **Corpus queries:** `pbench/not-in-uncorrelated` at the three tp4 modes, where the `NOT IN`
 rewrite's `count(*)` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
-`sub` gets four lanes. Its tp1 cells plan. Found when join-backend lifted #160, which refused first.
+`sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
+which refused first.
 
 ## Sort / Limit
 
@@ -460,8 +461,11 @@ zero-row batch are different arrivals: a global merge over nothing is #199's sit
 (`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
 which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
 
-**Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
-rows (`mini.result.txt`). Its device cells are off on this ticket. Measured since the join
+**Corpus queries:** `tpcds/q17` at `tp1-single`, the first enabled corpus query that answers zero
+rows (`mini.result.txt`). `pbench/not-in-uncorrelated` at the two tp1 modes is the second, and it
+reaches the no-batch half without a sort: its cross join's build is empty, so the lane ends with
+no call, and the root receives nothing on both engines. Its line is `duckdb_divergent(205)`, as
+q17's is. Its device cells are off on this ticket. Measured since the join
 session: its tp4 cells pass on the device, and its tp1 cells meet [#225](#t225) first. The 12 bytes are the device's one zero-row batch: three `Utf8`
 columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
 `select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).

@@ -1605,7 +1605,7 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 
 ### Task 14: The cells, in batches
 
-- [ ] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
+- [x] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
   estimate's per-query table order, `reports/join-rewrite-cell-estimate.md` §7), set
   **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (the cpu modes for #190's
   four and #212's q77 rows landed in task 8, with their oracles) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
@@ -1619,17 +1619,17 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
   kept off — done in task 8) moves its `duckdb_oracle` off `duckdb_none` in the same commit, to the variant its first
   DuckDB case passes under (tpch q11 → `duckdb_fingerprint`, being over the cap): `duckdb_none`
   over two sections that both exist fails.
-- [ ] **Step 2:** pbench's join rows: enable their cells (the float rows stay commented out on
+- [x] **Step 2:** pbench's join rows: enable their cells (the float rows stay commented out on
   #243), and each row this task first answers moves its `duckdb_oracle` off `duckdb_none` the same
   way; `test_cpu_corpus`'s registry test and `every_device_cell_has_a_cpu_cell_at_the_same_mode`
   green after each batch.
-- [ ] **Step 2b: The collapse readings pbench left to this task.** `collapse-not-in` (pbench.md's
+- [x] **Step 2b: The collapse readings pbench left to this task.** `collapse-not-in` (pbench.md's
   collapse table, the uncorrelated `not-in-uncorrelated` after the rewrite): read its tp4 plan
   goldens and record in the detail file where `GpuMergePartitions` puts the outer side in one lane
   (the rewrite's joins against one-row counts), as pbench's detail file did for the other three.
-- [ ] **Step 3:** strike each closed ticket from a row only when every off cell on it carries
+- [x] **Step 3:** strike each closed ticket from a row only when every off cell on it carries
   another (`registry.rs:229-240`).
-- [ ] **Step 4: Commit** per batch: `"cells: <dataset> <queries> on (#152 …)"`.
+- [x] **Step 4: Commit** per batch: `"cells: <dataset> <queries> on (#152 …)"`.
 
 ### Task 15: Nothing of the old join path survives
 

@@ -2680,3 +2680,181 @@ runs past it, off on #65).
 **Coordinator's decision on q66 (2026-10-14).** Its five cells stay on: they pass on the device and
 against DuckDB, and a green cell left off is coverage withheld for no reason. #55 stays open for the
 walk test it still owes; its row no longer carries the cells, which is the record of what it blocks.
+
+#### Round 2, plan task 14, pbench — the join rows on both engines, and the task's closing steps
+
+The pbench dataset, cpu and gpu. Unlike tpch and tpcds, most pbench join rows had no cpu cell:
+task 9 made twenty newly planned queries enable-able, 9b `empty-side-left-join`, 9c
+`indf-full-join`, and task 8 the five `190` rows. So each of the first four batches turned the cpu
+cells on first: registry, then `corpus_cases.inc` with the line's `duckdb_oracle` off
+`duckdb_none`, then `PCK_UPDATE_SECTIONS=1` over the batch's `cpu_pbench_*` cases, then the whole
+`test_cpu_corpus`. The device half then ran as tpch's and tpcds's did: registry, `.inc`, the tree
+synced, `--build`, `test_gpu_corpus` filtered on the batch under `PCK_WRITE_GPU_RESULT=1`,
+`gpu-result.txt` brought home by `scp` before the next sync (the md5s compared each time), then
+`test_cpu_corpus` whole. Before the first device run, every enabled pbench tp4 section was scanned
+for #199's shape: pbench has no keyless `GpuAggregateBatches` at `lanes=4` at all.
+
+**Running ledger.** One line per batch, written when the batch's DuckDB cases were green.
+
+| batch | queries | cpu cells | gpu cells | off, on which ticket | device | DuckDB, and the tier |
+|---|---|--:|--:|---|---|---|
+| 1 | `left-`, `right-`, `full-join-residual`, `probe-exists-residual`, `probe-not-exists-residual` | 25 | 25 | none | 25/25 in 22 s | 30/30; `test_cpu_corpus` 1752 |
+| 2 | `anti-null-preserved-condition`, `exists-or-mark`, `mark-cross-residual`, `not-exists-null-keys`, `not-in-correlated`, `not-in-under-or`, `not-in-uncorrelated` | 32 | 32 | `not-in-uncorrelated` at tp4, both engines: [#267](../tickets/corpus-coverage.md#t267) | 32/32 in 33 s | 39/39, `not-in-uncorrelated` under `duckdb_divergent(205)`; 1791 |
+| 3 | `nl-right`, `nl-full`, `nl-left-semi`, `nl-left-anti`, `nl-right-semi`, `nl-right-anti`, `nl-mark` | 35 | 35 | none | 35/35 in 33 s | 42/42; 1833 |
+| 4 | `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal`, `like-column-pattern`, `indf-full-join`, `empty-side-left-join` | 35 | 30 | `like-column-pattern`'s five device cells: [#246](../tickets/joins.md#t246) | 40/40 in 45 s (10 re-records); the `like` probe 0/5, unrecorded | 37/37; 1869 |
+| 5 | `inner-join-hot-keys`, `left-`, `right-`, `full-join-null-keys`, `exists-null-keys`, `finish-without-probe` | — | 30 | none | 30/30 in 37 s | 30/30; 1905 |
+| 6 | `sparse-build-right`, `-full`, `-anti`, `not-not-in`, `not-or-not-in` | — | 25 | none | 25/25 in 29 s | 25/25; 1935 |
+| 7 | `decimal15-key-join`, `ts-key-join`, `uint-key-join`, `cross-projection`, `scalar-subquery-cross` | — | 21 (`uint-key-join`'s 1s was on; `scalar-subquery-cross` at the two tp1 modes) | `scalar-subquery-cross` at tp4 stays off on both engines: [#199](../tickets/corpus-coverage.md#t199) | 22/22 in 28 s (one re-record) | 21/21; 1960 |
+
+No batch exposed a defect of this chain's code. One line met an open ticket on a mechanism the
+design keeps, below. No ticket was filed; the next free is still **268**.
+
+**`not-in-uncorrelated`, read.** Its first DuckDB case failed: "ours has 0 columns against 1 in
+DuckDB's". Both answers have zero rows, so `sub` holds a NULL and `NOT IN` is empty, as SQL says.
+Our section is a bare `++`/`++`, because the root receives no batch at all. The rewrite plans a
+`GpuCrossJoin` whose build is `count(*) FROM sub WHERE s_y IS NULL` filtered by `= 0`, so it has zero
+rows. Design §3.8 says an empty Inner build owes nothing, so the lane ends without a call. Then the
+Right nested loop above it gets no probe batch, and the unload renders no header. That is
+[#205](../tickets/corpus-coverage.md#t205)'s second half, "an empty answer must still have a
+schema", reached without a sort. `tpcds/q17` is the same `++` under `duckdb_divergent(205)`, so the
+line took that oracle. The device answers the same `++` at both tp1 modes (`gpu-result.txt`). Not
+this chain's defect: the cpu and the device agree with each other and with the design's empty-build
+rule, and #205 names the unload's fix.
+
+**`like-column-pattern`, measured before striking `190`.** With its device cells enabled in the
+`.inc` alone, an unrecorded run failed all five at the nested loop's probe: `LIKE pattern must be a
+string literal`. That is #246's own refusal. The `.inc` was restored from a saved copy and touched.
+The next sync carried it.
+
+**Per row, the end state.** 127 cpu cells and 198 device cells turned on. pbench goes 137 → 264
+cpu cells and 51 → 249 device cells. 26 lines left `duckdb_none`: 16 to `duckdb_exact`, 9 to
+`duckdb_fingerprint` with `gpu_oracle` `live_cpu` (over the cap, as the line's other fingerprinted
+rows are), and 1 to `duckdb_divergent(205)`. Three `duckdb_none` lines remain, all refused at plan
+time.
+
+| row | on, by this task | off, and why | tickets column |
+|---|---|---|---|
+| `left-`, `right-`, `full-join-residual` | cpu and gpu, all five | — | `153` → none |
+| `probe-exists-residual`, `probe-not-exists-residual` | cpu and gpu, all five | — | `159` → none |
+| `anti-null-preserved-condition`, `exists-or-mark`, `mark-cross-residual`, `not-exists-null-keys`, `not-in-correlated`, `not-in-under-or` | cpu and gpu, all five | — | `59 80` → none |
+| `not-in-uncorrelated` | cpu and gpu at 1s, 1r | tp4, both engines: #267 | `59 80 267` → `267` |
+| the seven `nl-*` of #160 | cpu and gpu, all five | — | `160` → none |
+| `nl-inner`, `nl-left`, `nl-projection` | cpu and gpu, all five | — | `152 190` → none |
+| `nl-left-decimal` | cpu and gpu, all five | — | `190 215` → none |
+| `like-column-pattern` | cpu, all five | gpu, all five: #246 | `190 246` → `246` |
+| `indf-full-join` | cpu and gpu, all five | — | `155 160` → none |
+| `empty-side-left-join` | cpu and gpu, all five | — | `155` → none |
+| `inner-join-hot-keys`, `right-join-null-keys`, `decimal15-key-join`, `ts-key-join`, `not-not-in`, `not-or-not-in`, `sparse-build-right`, `sparse-build-anti` | gpu, all five | — | `152 220` → none |
+| `left-join-null-keys`, `full-join-null-keys`, `sparse-build-full` | gpu, all five | — | `152` → none |
+| `exists-null-keys`, `finish-without-probe` | gpu, all five | — | `220` → none |
+| `uint-key-join` | gpu at 1r, 4s, 4r, 4z (1s was on) | — | `152` → none |
+| `cross-projection` | gpu, all five | — | `63` → none |
+| `scalar-subquery-cross` | gpu at 1s, 1r | tp4, both engines: #199 | `63 199` → `199` |
+| `cross-empty-build` | — | all, refused at plan time: #256 | `208 256` → `256` |
+| `outer-on-true-empty` | — | all, refused at plan time: #256 | `160 256` → `256` |
+
+Untouched: `in-is-null` (#250), the three float rows (commented out, #243), and the two non-join
+rows `rollup-small-keys` (#65) and `timestamp-s-key-group` (#264). `208` and `160` were struck from
+the two #256 rows by step 3's rule: every off cell there carries `256`. #208's evidence is its node
+pins, and #256 names `cross-empty-build` as the row that shows it once the scan lifts.
+
+**Step 3 across all three datasets.** A scan of every registry row for the eighteen tickets this
+task closes (155, 152, 173, 212, 159, 59, 80, 137, 220, 190, 207, 208, 136, 153, 160, 215, 63,
+154) finds none. tpch's and tpcds's rows were already clean after their dispatches, so this pass
+struck only pbench's.
+
+**Step 2b, `collapse-not-in`: not reached.** pbench.md's collapse table asks for the
+`GpuMergePartitions` that puts the rewrite's joins against one-row counts in one lane, read off the
+tp4 plan goldens. All three tp4 sections of `not-in-uncorrelated` are a `refused:` line: #267's
+"a finalizing merge over several lanes needs its input hashed …". The rewrite's `count(*)` over
+`sub` is a `mode=Single` aggregate that the planner splits across four lanes. Validation refuses
+before any join is placed, so there is no merge to read. At tp1 every node is `lanes=1` and nothing
+collapses. The reading moves with #267's fix; the other three collapses stand as pbench-detail.md
+recorded them.
+
+**`gpu-result.txt`, read.** 552,495 lines added and none removed (git's numstat shows 226 removed,
+which is its alignment; a section-by-section comparison against HEAD finds all 51 old sections
+unmoved and none lost). 198 new sections, 90 of them fingerprints. The `cudf=25.02` line is
+unchanged. The file is 6.1 MB, against tpcds's 2.4 MB. pbench's answers are its tables' rows: the
+`not-in-*` sections run 18,000 lines at each of five modes. The eleven re-recorded sections
+(`nl-left-anti` and `nl-left-semi` at all five, `uint-key-join` at 1s) did not move.
+
+**Goldens moved, by kind.** No `.plans.txt`, `recipe-payloads.txt` or `duckdb-result.txt`, and no
+tpch or tpcds file. The section diff against HEAD finds exactly the 26 rows in each of the five
+`.cpu.txt` and five `.cost.txt` (25 at tp4, where `not-in-uncorrelated` stays `skipped:`) and in
+`mini.result.txt`, nothing else. Each was a `skipped:` stub. `test_cost_model` re-derives every
+`.cost.txt` section green.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base bf4734f7`: 726 compared, **0
+changed, 0 regressions**. The 127 new pbench sections have no base section, so the diff has
+nothing to compare them with; no existing section moved.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S, 0
+MiB in use; cuDF 25.02. Seven batch cycles, each the tree synced with the board's rsync line and
+`./scripts/build-test-shadgpu.sh --build` rc 0 in 22–25 s, with `df -h ~` before and after. Then
+the final tree, built (rc 0, no warning in its log) and run unrecorded, every binary the override
+lists, `--test-threads=1` on the Rust ones. **1,594 cases, all green:**
+
+| binary | passed |
+|---|--:|
+| `peacock_gpu_tests` | 2 |
+| `peacock_plan_tests` | 81 |
+| `peacock_join_session_tests` | 53 |
+| `test_gpu_corpus` | 765 (567 + 198; 249 of them pbench cells), 690 s |
+| `test_node_timing` | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 684 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 |
+
+Not run, per the override: the sf40 pair and the `bench_` cases. Two comment-only edits to
+`corpus_cases.inc` followed that run, so the tree was synced once more and rebuilt (rc 0).
+`--list` gave 765 again, and `not-in-uncorrelated` and the registry case passed on it. Disk 28 GB
+free of 96 before and after every build; nothing deleted. The remote and local `gpu-result.txt`
+files have the same md5 in all three datasets. Logs on the host: `~/t14pb-b{1..7}.log`,
+`~/t14pb-likeprobe.log`, `~/t14pb-full/`.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 761 passed, 2 ignored; `test_cpu_corpus`
+1960 (1595 + 127 cpu cells + 198 `duckdb_gpu_*` + 40 `device_order_*`); `test_corpus_goldens` 26;
+`test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage` 11; `test_golden_format` 43; 0
+failed, no warning.
+
+**build-test.md, counted off the runs.** cpu block 2387 → 2752 (`test_cpu_corpus` 1595 → 1960;
+"Corpus, cpu" 1594 → 1959: cpu cells 726 → 853, the DuckDB tier 745 → 943, the order tier
+117 → 157). gpu block 1263 → 1461 (`test_gpu_corpus` 567 → 765; "Corpus, device" 566 → 764).
+Rust 3770 → 4333, grand total 4340 → 4903, the N columns summed by script. Prose rewritten: the
+"Corpus, cpu" line count and the out-entirely lines (29 → 3), the oracle tally, and pbench's
+sentences in "Corpus, device".
+
+**`corpus_cases.inc`'s pbench header** said 30 device cells were on and 29 rows had no cpu cell.
+It now names the off cells and their tickets. `not-in-uncorrelated`'s line carries a trailing
+comment for #205, as `timestamp-s-key-group`'s does for #264.
+
+**Tickets whose corpus lines this made stale, rewritten:** #153, #80, #59, #159, #160 (their pbench
+rows answer on both engines), #215 (`nl-left-decimal` answers), #190 (no row carries it;
+`like-column-pattern` is #246's), #208 and #256 (the two rows carry `256` alone), #207 and #63
+(`cross-projection` answers; `scalar-subquery-cross` at tp1 on the device, tp4 on #199), #212 (the
+`sparse-build-*` rows answer), #220 (no row carries it), #246 (measured now), #267 (tp1 answers),
+#205 (`not-in-uncorrelated` is its second corpus query).
+
+**Against the estimate, for plan task 16.** The estimate counts tpch and tpcds only, and its note
+under §2 moves the cpu figure to 48 once pbench's five `190` rows landed. Measured for those five:
+25 cells on, every mode of each, `like-column-pattern`'s included, so join-backend's cpu total is
+the note's 48. The other 102 pbench cpu cells and all 198 device cells are outside the estimate. The spec's Registry section asks for
+`empty-side-left-join` and `indf-full-join` "with the rest". Both are on at every mode on both
+engines.
+
+**Task 14's totals, every dataset.** Cells turned on by plan task 14, and the 23 cpu cells of its
+step 1 that landed in plan task 8. "Off" lists only cells on a row this task worked on.
+
+| dataset | engine | on | off, on which ticket |
+|---|---|--:|---|
+| tpch | cpu | 10 (task 8: q11, q22) | — |
+| tpch | gpu | 133 | q11 ×3 and q22 ×1 at tp4: #199; `rollup-over-join` ×5: #65 |
+| tpcds | cpu | 13 (task 8: q24, q54 ×10, q77 ×3) | — |
+| tpcds | gpu | 339 | q32 ×3 at tp4: #199; q78 ×5: #60; the probed rows' 45 on their own tickets (#65, #210, #225, #60, #205) |
+| pbench | cpu | 127 | `not-in-uncorrelated` ×3 at tp4: #267; `scalar-subquery-cross` ×3 at tp4: #199; `cross-empty-build`, `outer-on-true-empty` ×10: #256; `in-is-null` ×5: #250 |
+| pbench | gpu | 198 | the same 21 as the cpu, plus `like-column-pattern` ×5: #246 |
+| **all** | cpu | **150** | |
+| **all** | gpu | **670** | |
+
+Against the estimate's tpch-and-tpcds prediction: gpu 431 FLIP categorically (about 306 weighted),
+472 measured. cpu 23 predicted for tpch and tpcds, 23 measured.
