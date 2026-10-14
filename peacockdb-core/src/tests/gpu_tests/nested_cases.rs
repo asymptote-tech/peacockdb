@@ -5,12 +5,14 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::JoinType;
+use datafusion::arrow::array::{AsArray, RecordBatch};
+use datafusion::arrow::compute::concat_batches;
+use datafusion::arrow::datatypes::{DataType, Field, Int64Type, Schema as ArrowSchema};
+use datafusion::common::{JoinType, ScalarValue};
 
+use super::aggregate_cases::rows;
 use super::join_cases::output_of;
-use super::script::{Outcome, Script, run_both};
+use super::script::{Outcome, Script, run_both, run_both_with_join_scratch};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuCrossJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
     JoinSide, Schema,
@@ -232,6 +234,20 @@ fn no_build() -> Script {
     script(None, Vec::new())
 }
 
+fn no_build_then_a_probe() -> Script {
+    script(None, vec![probe_batch(16, 21)])
+}
+
+/// No condition at all: what DataFusion plans a scalar subquery as, and the `NOT IN`
+/// rewrite's count side — every type but Inner, which plans as a cross join.
+fn predicate_free(join_type: JoinType) -> GpuNestedLoopJoin {
+    nested_with(
+        join_type,
+        (Expr::Literal(ScalarValue::Boolean(Some(true))), Vec::new()),
+        None,
+    )
+}
+
 // The `bug_` assertion: a refusal pinned by the stable part of its message.
 
 fn gpu_refuses_with(outcome: &Outcome, message: &str) {
@@ -252,6 +268,25 @@ operator_case! {
     GpuCrossJoin,
     fn a_cross_join_over_two_probe_batches_agrees() {
         run_both(&cross(None), two_probes()).same(Order::Any);
+    }
+}
+
+// `tpch/nested-limits` keeps rows 4 to 23 of a cross join's product with no sort between, so
+// its answer is the order the join emits: on both engines each build row against the whole
+// probe batch in turn, the build row outer. Compared as emitted, and held to that by hand.
+operator_case! {
+    GpuCrossJoin,
+    fn a_cross_join_emits_each_build_row_against_the_whole_probe_batch_in_turn() {
+        let outcome = run_both(&cross(None), two_probes());
+        outcome.same(Order::AsEmitted);
+        let first = &outcome.gpu.as_ref().expect("the device answers")[0];
+        let first = concat_batches(&first[0].schema(), first).expect("one schema");
+        let ids = |name: &str| first.column_by_name(name).expect("an id").as_primitive::<Int64Type>().clone();
+        let (build, probe) = (ids("b_id"), ids("p_id"));
+        assert_eq!(first.num_rows(), 16 * 12);
+        for row in 0..first.num_rows() {
+            assert_eq!((build.value(row), probe.value(row)), ((row / 12) as i64, (row % 12) as i64));
+        }
     }
 }
 
@@ -347,6 +382,13 @@ operator_case! {
 
 operator_case! {
     GpuNestedLoopJoin,
+    fn a_left_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&left(None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
     fn a_left_nested_loop_join_with_a_projection_agrees() {
         run_both(&left(Some(vec![0, 8])), one_probe()).same(Order::Any);
     }
@@ -423,6 +465,92 @@ operator_case! {
     GpuNestedLoopJoin,
     fn a_right_anti_nested_loop_join_over_two_probe_batches_agrees() {
         run_both(&nested(JoinType::RightAnti, None), two_probes()).same(Order::Any);
+    }
+}
+
+// No condition: the three outer types over rows, and over the empty side each pads from.
+// Hand counts: sixteen rows on the side the type keeps.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_left_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Left), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Right), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Full), two_probes()).same(Order::Any);
+    }
+}
+
+fn pads_sixteen(join_type: JoinType, script: Script) {
+    let outcome = run_both(&predicate_free(join_type), script);
+    outcome.same(Order::Any);
+    assert_eq!(rows(outcome.gpu.as_ref().expect("the device answers")), 16);
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_left_nested_loop_over_an_empty_probe_pads_every_build_row() {
+        pads_sixteen(JoinType::Left, empty_probe());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_over_an_empty_build_pads_every_probe_row() {
+        pads_sixteen(JoinType::Right, empty_build());
+    }
+}
+
+// pbench's `outer-on-true-empty`, once its empty side plans (#256): no build batch at all.
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_with_no_build_batch_pads_every_probe_row() {
+        pads_sixteen(JoinType::Right, no_build_then_a_probe());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_over_an_empty_build_pads_every_probe_row() {
+        pads_sixteen(JoinType::Full, empty_build());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_over_an_empty_probe_pads_every_build_row() {
+        pads_sixteen(JoinType::Full, empty_probe());
+    }
+}
+
+// 64 bytes of candidate pairs a call cuts every probe row into a chunk of its own, on the
+// AST's path and on the cross-then-mask path. Full, since it keeps every probe row and folds
+// its matched column across the chunks before the finish pads the build's.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_in_chunks_of_one_probe_row_agrees() {
+        let node = nested(JoinType::Full, None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_with_a_decimal_predicate_in_chunks_of_one_probe_row_agrees() {
+        let node = nested_with(JoinType::Full, decimal_residual(), None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
     }
 }
 

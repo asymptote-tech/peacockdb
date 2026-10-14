@@ -1510,7 +1510,8 @@ operator_case! {
 - Modify: `peacockdb-core/src/tests/gpu_tests/join_cases.rs`, `join_dimension_cases.rs`, `nested_cases.rs`, `nested_schema_cases.rs`, `join_schema_cases.rs`;
   `tests/end_to_end/dimensions.rs:125-221`; `wire/gpu_tests/mod.rs:445,701,709,916,953,974,1020`
 
-- [ ] **Step 1: Check the 56 pins are flipped** (#152 30, #59 10, #173 4, #190 4, #212 3, #207 2,
+- [x] **Step 1: Check the 56 pins are flipped** — all 56 were, by tasks 7 and 8, none missed;
+  the ledger is in the detail file's task 10 record. (#152 30, #59 10, #173 4, #190 4, #212 3, #207 2,
   #208 2, #215 2; `nested_cases.rs:438` counts for #190 and #215) — each in the commit that changed
   its behaviour (task 7 the device's, task 8 the cpu's), to the positive case with its script, e.g.
   `bug_a_left_join_refuses_its_first_probe_batch_on_the_device` →
@@ -1524,8 +1525,13 @@ operator_case! {
   is empty; `BUILD_COPY`, `PROBE_COPY`, `NO_KEYS`, `NO_BUILD`, `INNER_ONLY`, `TWO_OF_SIXTEEN`,
   `THREE_OF_SIXTEEN` and `device_answers_as_if_null_equals_null` are gone. One #59 case gains a
   hand-counted assertion beside `same`. `crossing_projection`'s `Left | Full => unreachable!` arm
-  gets real arms; `nested_with` gives Left a multi-batch probe.
-- [ ] **Step 2: The new cases** (design §5.7, in-memory batches; `synthetic::key_types` from
+  gets real arms; `nested_with` gives Left a multi-batch probe. (The arms were real since task
+  7, but no Left or Full case used them, and no Left nested loop had two probe batches: both
+  added here.)
+- [x] **Step 2: The new cases** — in `join_shape_cases.rs`, `join_key_type_cases.rs` and the
+  existing files, with `PBENCH_SHAPES` naming a case per pbench join query and a guard over
+  pbench's plan golden; plus the spec's risk 4 (`test_support/order_hazard.rs`, a
+  `device_order_` case per line with a device cell) and the cross join's emitted order (design §5.7, in-memory batches; `synthetic::key_types` from
   repartition-keys):
   - NULL keys on both sides for all nine types under `false` and `true` — Left and Full new:
     `a_left_join_pads_a_null_key_build_row_under_the_sql_default` (hand count: the build's NULL-key
@@ -1538,15 +1544,15 @@ operator_case! {
   - `a_predicate_free_left_nested_loop_over_an_empty_probe_pads_every_build_row`, and Right, Full;
   - `a_keyed_left_semi_join_with_a_decimal_residual_agrees` (the non-AST cross residual);
   - for every type, three probe batches with a zero-row one between (Review Focus 2).
-- [ ] **Step 3: `dimensions.rs`** is rewritten: its helper no longer reads `feeds_owing_build`;
+- [x] **Step 3 (done in task 8): `dimensions.rs`** is rewritten: its helper no longer reads `feeds_owing_build`;
   `an_empty_build_lane_answers_like_the_oracle` asserts the lane reached `SetBuild` with no batch
   and answered as the oracle; its two drivers (tpcds q93 Right, tpch anti-join over an empty build)
   stay.
-- [ ] **Step 4: `wire/gpu_tests/mod.rs`:** the join walker (`:445`) walks the session calls;
+- [x] **Step 4 (done in task 7): `wire/gpu_tests/mod.rs`:** the join walker (`:445`) walks the session calls;
   `driven()` (`:974`) lists `FbKind::Join` as driven; `:709` (one `HashJoin{LeftSemi}` call) goes;
   `:916` and `:953` follow `FbKind::Join`; `SEMI_JOIN` (`:674`) stays as the device's regression
   for the non-AST semi residual.
-- [ ] **Step 5: Run green** on the device: the harness, `--lib -- gpu_tests::`, `test_node_timing`.
+- [x] **Step 5: Run green** on the device: the harness, `--lib -- gpu_tests::`, `test_node_timing`.
 - [ ] **Step 6: Commit.** `git commit -m "join cases for every pbench shape at node level"`.
 
 ### Task 11: The four plan-executor gtests onto the session

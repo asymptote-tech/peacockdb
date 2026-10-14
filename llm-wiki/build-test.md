@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 3200 test cases — Rust 2626, C++ 173, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 3308 test cases — Rust 2734, C++ 173, Python 401.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,11 +22,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 1787 cases: `--lib` 752, `test_cpu_corpus` 1006, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 1823 cases: `--lib` 763, `test_cpu_corpus` 1031, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1005 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1030 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -55,6 +55,15 @@ for `gpu-result.txt`. Today 113 lines are `duckdb_exact`, 16 `duckdb_approx`, 15
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
+
+Then the order tier, 25 of the count: one `device_order_<ds>_<q>` case per line with a device
+cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
+or nested-loop join on the device emits its rows in a different order each run. So a limit with
+no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
+the cell flap. Read off DataFusion's plan at one partition; a sorted cut is re-run one row wider
+to read the rows either side of it. A cross join keeps its order, and a keyless aggregate
+answers one row, so neither is a hazard. Run once over every line DataFusion plans, all pass:
+34 of the 151 with no device cell cut a sorted answer over a join, and no cut falls on a tie
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
 |---|---|--:|
@@ -477,6 +486,15 @@ the cpu helper shown failing, which is what keeps the corpus honest: a wrong row
 a digit past the tolerance, and a section another mode wrote; plus every `CpuOracle` variant
 being named by some corpus line
 
+| Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 11 |
+|---|---|--:|
+
+what the order tier refuses, over two four-row tables: a limit over a hash join, over an
+aggregate over one, and over a cross join fed by one; a sorted cut between tied rows that
+differ, at the fetch and at the offset. And what it lets through: a limit over a cross join of
+scans, over no join, over a keyless aggregate; a cut between rows that do not tie or are the
+same row; a tie over no join
+
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
 
@@ -569,7 +587,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 719 cases: `--lib -- gpu_tests::` 612, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 791 cases: `--lib -- gpu_tests::` 684, `test_gpu_corpus` 95, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -626,7 +644,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 383 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 455 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -640,10 +658,18 @@ scan, and the empty relation, alone and planned whole under a join through the d
 engines — each case green or a `bug_` case
 asserting the wrong answer or the refusal with its ticket above it, every empty shape its own
 case. Then the joins along the dimensions the corpus varies: a crossing projection on every
-type the device reaches; composite, `Int64`, `Utf8` and `Date32` keys on the three key paths,
-the composite's null second key answered as SQL's;
+type; composite, `Int64`, `Utf8` and `Date32` keys under three answer shapes, the composite's
+null second key answered as SQL's; every `key_types` column as an Inner and a LeftSemi key,
+the floats without their -0.0 and NaN rows (#243's pin owns those);
 the residual with a projection, under `null_equals_null`, on a string and on a decimal; and
-the nested loop's cross-then-mask path. `IS [NOT] DISTINCT FROM` has its four arms (both NULL,
+the nested loop's cross-then-mask path. Every join shape pbench shows has a node-level case,
+and a guard reads pbench's plan golden and names a join query without one. Among them: NULL
+keys on both sides of a Left and a Full join under both null rules, counted by hand; a semi
+join over repeated keys answering each build row once; a NULL preserved-side condition, kept
+by an anti join and marked `false`; `IS NULL` residuals on one side; a lane with no probe batch
+for every type; a predicate-free outer nested loop over rows and over an empty side; and the
+pairs chunked to one probe row a call on each path that chunks. The cross join's emitted order
+is compared as emitted, since `tpch/nested-limits` keeps rows of it by position. `IS [NOT] DISTINCT FROM` has its four arms (both NULL,
 one NULL either way, equal, unequal) on each evaluator. It is a nested loop's condition on either
 path too, and pbench's `indf-full-join` runs whole at every mode as its null-equal hash join.
 String keys are `Utf8`; the join cases declare no

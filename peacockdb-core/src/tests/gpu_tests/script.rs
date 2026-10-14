@@ -137,6 +137,15 @@ fn shaped_for(node: &dyn GpuNode, script: &Script) {
 }
 
 pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
+    run_both_with_join_scratch(node, script, 0)
+}
+
+/// `run_both` with the device's join pairs held to `bytes` a call (`Device::with_join_scratch`).
+pub(crate) fn run_both_with_join_scratch(
+    node: &dyn GpuNode,
+    script: Script,
+    bytes: u64,
+) -> Outcome {
     shaped_for(node, &script);
     let cpu_ctx = SessionContext::new().task_ctx();
     let cpu = drive::<CpuBackend, _>(
@@ -147,7 +156,7 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
         |batch| Ok(batch.into_record_batch()),
         CpuBatch::into_record_batch,
     );
-    let device = Device::open(node);
+    let device = Device::with_join_scratch(node, bytes);
     // What the node declares its output to be is what the sink would tell the export.
     let declared = node.kind().schema().map(|schema| schema.fields.as_ref());
     let gpu = drive::<GpuBackend, _>(

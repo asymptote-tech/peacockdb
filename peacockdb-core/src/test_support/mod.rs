@@ -29,6 +29,7 @@ mod golden_text;
 mod gpu_session;
 #[cfg(not(feature = "rust-only"))]
 mod node_timing;
+mod order_hazard;
 mod record;
 mod registry;
 mod result_text;
@@ -604,6 +605,13 @@ pub async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &str) {
 /// cell, so a mode-dependent device answer meets DuckDB rather than only the last mode's.
 pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, oracle: &str) {
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
+}
+
+/// A line with a device cell, refused if its answer rests on an order a device join does not
+/// keep: a limit with no sort above a hash or nested-loop join, or a sorted cut between tied
+/// rows that differ. One case per such line, rust-only, so the refusal precedes any device run.
+pub async fn device_order_case(dataset: &str, sf: &str, query: &str) {
+    order_hazard::device_order_case(dataset, sf, query).await
 }
 
 /// A `gpu-result` file's `cudf=` provenance line against the path it was read as: the committed

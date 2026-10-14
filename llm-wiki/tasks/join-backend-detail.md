@@ -1963,3 +1963,184 @@ cap. Task 9b's two cases took it over.
   show.
 - For task 13: exec_model has no `IS [NOT] DISTINCT FROM` and models no pbench query, so nothing
   there moved. For task 14: `indf-full-join`'s ten cells, as above.
+
+#### Round 2, plan task 10 — the 56 pins accounted for, every pbench join shape at node level, and the order guard
+
+Tests and one test-support module. No production code, no golden, no fbs, no C++.
+
+**Step 1: all 56 pins were already flipped, none missed.** Tasks 7 and 8 flipped each in the
+commit that changed its behaviour. Seven went through a second pin on the way: task 7 re-pinned
+them under #220 or as a cpu-only #212 refusal, and task 8 flipped those. Every target name below
+exists once at `3880153c`. `git grep -nE 'fn bug_'` over the five join harness files lists only
+#243's float pin and #246's `LIKE` pin. `git grep -nB3 'fn bug_' -- peacockdb-core/src` cites
+none of the tickets this task closes. `BUILD_COPY`, `PROBE_COPY`, `NO_KEYS`, `NO_BUILD`,
+`INNER_ONLY`, `TWO_OF_SIXTEEN`, `THREE_OF_SIXTEEN` and `device_answers_as_if_null_equals_null`
+are gone from `peacockdb-core`. The ledger, `jc` = `join_cases.rs`, `jd` = `join_dimension_cases.rs`,
+`nc` = `nested_cases.rs`, `ns` = `nested_schema_cases.rs`; T7 = `a9ae581c`, T8 = `29937e22`:
+
+| # | ticket | file | flipped to | in |
+|--:|---|---|---|---|
+| 1–2 | #152 | jc | `a_{left,full}_join_over_one_probe_batch_agrees` | T7 |
+| 3–8 | #152 | jc | `{an_inner,a_left,a_right,a_full,a_right_semi,a_right_anti}_join_over_two_probe_batches_agrees` | T7 |
+| 9–10 | #152 | jc | `inner_{with_a_zero_row_probe_between_two_with_rows,finishing_after_only_zero_row_probes}_agrees` | T7 |
+| 11–15 | #152 | jc | `left_over_a_zero_row_build_agrees`, `left_over_a_zero_row_probe_pads_every_build_row`, `left_over_both_sides_empty_agrees`, `left_with_a_zero_row_probe_between_two_with_rows_agrees`, `left_finishing_after_only_zero_row_probes_agrees` | T7 |
+| 16–17 | #152 | jc | `right_{with_a_zero_row_probe_between_two_with_rows,finishing_after_only_zero_row_probes}_agrees` | T7 |
+| 18–22 | #152 | jc | `full_over_a_zero_row_build_pads_every_probe_row`, `full_over_a_zero_row_probe_pads_every_build_row`, `full_over_both_sides_empty_agrees`, `full_with_a_zero_row_probe_between_two_with_rows_agrees`, `full_finishing_after_only_zero_row_probes_agrees` | T7 |
+| 23–26 | #152 | jc | `right_{semi,anti}_{with_a_zero_row_probe_between_two_with_rows,finishing_after_only_zero_row_probes}_agrees` | T7 |
+| 27–28 | #152 | jd | `a_right_join_with_a_crossing_projection_over_two_probe_batches_agrees`, `an_inner_join_with_a_residual_over_two_probe_batches_agrees` | T7 |
+| 29–30 | #152 | nc | `a_cross_join_over_two_probe_batches_agrees`, `an_inner_nested_loop_join_over_two_probe_batches_agrees` | T7 |
+| 31–35 | #59 | jc | `a_left_anti_join_keeps_its_null_key_build_rows`, `a_right_anti_join_keeps_its_null_key_probe_rows`, `a_left_mark_join_marks_its_null_key_build_rows_false`, and the two over two probe batches | T7 |
+| 36–37 | #59 | jc | `a_left_{anti,mark}_join_with_a_residual_filter_agrees` (T7 re-pinned under #220) | T8 |
+| 38–39 | #59 | jc | `left_{anti,mark}_with_a_zero_row_probe_between_two_with_rows_agrees` | T7 |
+| 40 | #59 | jd | `a_left_anti_join_on_a_composite_key_with_a_null_second_column_keeps_its_rows`, 30 of 32 by hand | T7 |
+| 41–44 | #173 | jc | `left_…_pads_every_build_row`, `full_…_pads_every_build_row`, `left_semi_…_answers_nothing`, `left_mark_…_marks_every_build_row_false` (each `_finishing_with_no_probe_batch_`) | T7 |
+| 45–47 | #212 | jc | `right_…_pads_every_probe_row`, `full_…_pads_every_probe_row`, `right_anti_…_returns_every_probe_row` (each `_with_no_build_batch_`; T7 re-pinned as a cpu refusal) | T8 |
+| 48–50 | #190 | nc | `an_inner_nested_loop_join_with_a_projection_agrees`, `a_left_nested_loop_join_with_a_projection_agrees`, `an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_agrees` | T8 |
+| 51 | #190, #215 | nc | `a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_agrees` (T7 left its cpu half) | T8 |
+| 52 | #215 | nc | `a_left_nested_loop_join_with_a_decimal_predicate_agrees` (T7 re-pinned under #220) | T8 |
+| 53 | #207 | nc | `a_cross_join_with_a_projection_agrees` (T7 left its cpu half) | T8 |
+| 54 | #207 | ns | `a_cross_join_with_a_projection_declares_the_kept_columns_the_device_holds` | T7 |
+| 55–56 | #208 | nc | `a_cross_join_over_{a_zero_row_build,both_sides_empty}_agrees` | T8 |
+
+**Steps 3 and 4 were done too**: `dimensions.rs` by task 8 (no `feeds_owing_build`, every lane
+of an owing join reaches `SetBuild`, the answer checked against the oracle), the wire walk and
+`driven()` by task 7. `SEMI_JOIN` stays.
+
+**What shipped.**
+- `tests/gpu_tests/join_shape_cases.rs` (new, 13 cases and a guard). `PBENCH_SHAPES` names, per
+  pbench query that plans a join, the node-level cases holding its shapes: 47 queries, the two
+  #256-refused ones included for the day they plan. `every_pbench_join_shape_has_a_node_level_case`
+  reads pbench's tp1-single plan golden, collects every section whose tree has a join, and fails
+  on a join query the table lacks, a table key that is no pbench query, or a case name the
+  harness never registered. The new cases: Left and Full with NULL keys on both sides under the
+  SQL default and under `null_equals_null`, by hand (the build's two NULL keys padded once each,
+  the probe's four too for Full; 2 × 4 pairs under `true`, nothing padded);
+  `a_left_semi_join_over_many_to_many_keys_emits_each_build_row_once` (distinct `b_id`, count
+  computed off the inputs); the preserved-side NULL condition, kept by the anti join and marked
+  `false` (never NULL) by the mark, on build row 22, which a precondition shows meets a probe key;
+  `IS NULL` residuals on the probe (RightAnti) and on the build (LeftMark), pbench's `NOT IN`
+  rewrite shapes; `*_finishing_with_no_probe_batch_answers_nothing` for Inner, Right, RightSemi and
+  RightAnti, the four the per-type list lacked.
+- `tests/gpu_tests/join_key_type_cases.rs` (new): every `key_types` column, 19, as an Inner and a
+  LeftSemi key, 38 cases from one macro, plus a guard that the column count is 19. Build 72 rows,
+  probe 96, one seed, so the build is the probe's first 72 and every column has matches, misses
+  and a NULL on each side. The float columns drop the rows holding -0.0 and the NaNs (#243's).
+- `join_dimension_cases.rs` (+7): crossing projections on Left and Full over two probe batches;
+  RightAnti and LeftMark on a composite key; `a_keyed_left_semi_join_with_a_decimal_residual_agrees`;
+  Inner and Full over a decimal residual with 64 bytes of pairs a call. `hash_join_keyed` builds
+  any type through `join_cases::output_over`, which `output_of` now calls. Three stale comments
+  rewritten (the #152 and #59 refusals, the "accumulated-keys finish").
+- `nested_cases.rs` (+12): `a_cross_join_emits_each_build_row_against_the_whole_probe_batch_in_turn`
+  (`Order::AsEmitted` on both, then every row's `(b_id, p_id)` checked as `(i / 12, i % 12)`);
+  a Left nested loop over two probe batches; predicate-free Left, Right and Full over two probe
+  batches, over the empty side each pads from (16 rows, by hand), and Right with no build batch;
+  Full nested loops chunked to one probe row a call on the AST path and the cross-then-mask path.
+- `script.rs`/`device.rs`: `run_both_with_join_scratch` and `Device::with_join_scratch`, the
+  `chunk_bytes` a case writes; `run_both` and `open` pass 0 as before.
+- The spec's risk 4. `test_support/order_hazard.rs` (new) and one `device_order_<ds>_<q>` case per
+  corpus line with a device cell, from `test_cpu_corpus.rs`'s `device_cell_cases!` (renamed from
+  `duckdb_device_cases!`, since it now makes both kinds). Over DataFusion's plan at one partition:
+  a positional selection (`GlobalLimitExec`, `LocalLimitExec`, any other node with a fetch) that
+  reaches a hash, nested-loop, sort-merge or symmetric hash join with no sort and no keyless
+  aggregate between is refused. A sort with a fetch over such a join is re-run with every sort
+  cutting at that row widened by one, and refused if the rows either side of its fetch or of the
+  limit's offset above it tie on every sort key and differ in any column. A cross join is
+  descended through, not counted: both engines emit it build-row-major, which the new harness
+  case pins. The `data_fusion_subset` half was already held:
+  `an_undetermined_lines_rows_are_compared_only_against_committed_files` keeps such a line's
+  device cells off. 11 unit cases in `order_hazard/tests.rs`. `corpus.rs`'s `session_for` and
+  `query_text` became `pub(crate)` for it.
+
+**Divergences.** None. Every new case agrees slot by slot on nebius-gpu, the hand counts hold on
+the device's answer, and all 38 key-type cases agree, unsigned, decimal(38), timestamp and boolean
+keys included.
+
+**What the plan got wrong.**
+- **Step 1 was already done**, and steps 3 and 4 with it. `crossing_projection`'s Left and Full
+  arms were real since task 7, but no case used them; and no Left nested loop had two probe
+  batches. Both added.
+- **Most of step 2 existed already**: three probe batches with a zero-row one between for all nine
+  types, no-build for all nine, no-probe for five, `null_equals_null` for seven types (under the
+  names `an_anti_join_under_null_equals_null_agrees`, `a_mark_join_under_null_equals_null_agrees`
+  rather than the plan's). Only what was missing was added.
+- **`inner-join-hot-keys` does not chunk.** An unfiltered keyed join answers through
+  `inner_join` in one piece; only the pairs path (a non-AST residual) and the nested loops chunk.
+  So its node-level case is the plain many-to-many Inner, and the chunking cases sit on the paths
+  that chunk.
+- **An unordered `LIMIT` over a keyless aggregate is no hazard.** tpcds q16, q32, q38, q92, q94,
+  q95, q96 and q97 put a `LIMIT 100` over one aggregate row; read as "a limit over a join" they
+  were refused, falsely. A keyless aggregate is one of the two nodes that fix the order.
+- **Ties cannot be read off a plan.** The plan text says which sort cuts; whether the cut falls on
+  a tie is the data's. Hence the widened re-run. It costs little: all 176 plannable lines ran in
+  6.6 s.
+- **The device exports a column non-nullable in a batch that holds no NULL**, as task 7 noted,
+  so a case that concatenates a join's calls must relax nullability first.
+
+**Measured over every corpus line, not only the device ones**, by temporarily giving the `none`
+arm the case too: 176 pass, `pbench/in-is-null` does not plan in DataFusion (#250). No line has an
+unordered selection over a join. 34 lines cut a sorted answer with rows past the cut over a join:
+tpch q2, q3, q10, q21, and tpcds q1, q5, q7, q14, q15, q18, q19, q21, q22, q26, q30, q33, q35, q40,
+q46, q52, q55, q56, q60, q62, q65, q68, q69, q75, q76, q78, q79, q80, q81, q93. No cut falls on a
+tie, so task 14's cells will not be refused by this check. The 25 device lines' four sorted cuts
+(tpcds q37, q82, q84, q85) answer fewer rows than the fetch.
+
+**Red-green evidence.** Rust-only, each mutation applied by asserted single match, restored from
+a saved copy and checked with `cmp`.
+- Red first: the 10 unit cases over a stub answering `None`: the 5 hazard cases failed. Then the
+  keyless-aggregate case, added after the first corpus run: red, 1 of 11.
+- M1 `tied` always true: 1 unit case red; over every line, 35 red — the 34 lines above and
+  `in-is-null`, which fails on any build. Over the 25 device lines, 0 red: their cuts are past
+  their rows (read off a temporary `eprintln!`, removed).
+Device, on the remote copy only, restored, `md5sum`-checked against local, touched, rebuilt:
+- D1 (`join_residual.cpp`'s `chunks` drops a chunked range's last row) with D2 (`probe_cross`
+  answers `cudf::reverse` of the product) and D3 (the wire writes `!null_equals_null`): 120 red.
+  D3 alone accounts for 117, every case with a NULL key among them, the 38 key-type cases and
+  seven of the new shape cases included.
+- D1 alone: the four chunked cases red (the first form of the AST chunk case, a Left nested
+  loop, stayed green — the dropped probe row matched nothing, so Left could not see it; it is a
+  Full now and goes red). The cross order case was red too, because the restored
+  `join_session.cpp` was not recompiled: the rsync trap, here by accident isolating D2 — the
+  `AsEmitted` case is the only one D2 reddens, every `Order::Any` cross case staying green.
+- The guard: a `PBENCH_SHAPES` entry dropped → `pbench joins with no node-level case named:
+  ["nl-left"]`; a case name misspelt → `named and not registered`. The first attempt at the drop
+  matched nothing after rustfmt reflowed the table and passed; it is not counted.
+- The new agreement cases (key types, predicate-free loops, no-probe, crossing projections,
+  composites) were written against code that already answered them and were never red: there is
+  no production change in this task for them to precede.
+
+**The device run, recorded.** nebius-gpu, NVIDIA L40S, 0 MiB in use; cuDF 25.02. The final tree
+synced, `./scripts/build-test-shadgpu.sh --build` rc 0 with no warning in its log, each binary run
+directly with `--test-threads=1`. **924 cases, all green**: `peacock_gpu_tests` 2,
+`peacock_plan_tests` 81, `peacock_join_session_tests` 53, `test_gpu_corpus` 95, `test_node_timing`
+1, `peacockdb_core_gpu_lib gpu_tests::` 684 (+72), `peacock_gpu_benchmarks --skip bench_` 8. Not
+run, per the override: the sf40 pair and the `bench_` cases. Disk 28 GB free of 96 before and
+after; nothing deleted.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 761 passed, 2 ignored; `test_cpu_corpus`
+1031; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage`
+11; `test_golden_format` 43; 0 failed. No golden moved, so no cost diff.
+
+**Warnings.** None new. The rust-only build has none; the gpu-feature lib-test build
+(`cargo-cudf.sh test -p peacockdb-core --lib --features gpu --no-run`) has the one pre-existing
+`AsArray`.
+
+**Formatting.** Edition 2024, through stdin so no `mod` child is followed. Every touched file is
+rustfmt-clean; all were at HEAD but `join_dimension_cases.rs`, whose one HEAD hunk was the
+signature of `hash_join_keyed`, which this task rewrote.
+
+**build-test.md counts, counted off `--list`.** cpu block 1787 → 1823: `--lib` 752 → 763 (a new
+row, "Order hazard", 11), `test_cpu_corpus` 1006 → 1031 ("Corpus, cpu" 1005 → 1030: the order
+tier, 25). gpu block 719 → 791: `--lib -- gpu_tests::` 612 → 684, "Operator harness" 383 → 455.
+Rust 2626 → 2734, grand total 3200 → 3308, the N columns summed by script. Prose rewritten:
+"Corpus, cpu" (the order tier) and "Operator harness" (the key types, the pbench shapes and their
+guard, the chunked paths, the cross join's order).
+
+**What plan tasks 11–14 inherit.**
+- 11: nothing here touches the plan-executor gtests.
+- 13: exec_model models no pbench query and no `key_types` join; nothing moved.
+- 14: every line it will enable passes the order tier today, so the check refuses none of the
+  estimate's cells; a line whose answer comes to tie at a cut, or a new query with a `LIMIT` over a
+  join, is refused at its first device cell. Every pbench join row's shapes are proven at node
+  level on the device before its cells turn on, so a pbench cell that fails there is a planning
+  or driver question, not a join-arm one. `PBENCH_SHAPES` must gain a row for any pbench join
+  query added, or the guard goes red.

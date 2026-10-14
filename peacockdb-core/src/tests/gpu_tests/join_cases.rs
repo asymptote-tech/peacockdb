@@ -47,18 +47,19 @@ pub(crate) fn padded(fields: Vec<Field>) -> Vec<Field> {
 /// DataFusion's join schema declares it and so as the planner would. `nested_cases.rs`
 /// declares its nested loops by it too.
 pub(crate) fn output_of(join_type: JoinType) -> Vec<Field> {
+    output_over(join_type, side("b_"), side("p_"))
+}
+
+/// `output_of` over any two sides, for a case whose columns are not the synthetic ones.
+pub(crate) fn output_over(join_type: JoinType, build: Vec<Field>, probe: Vec<Field>) -> Vec<Field> {
     match join_type {
-        JoinType::Inner => [side("b_"), side("p_")].concat(),
-        JoinType::Left => [side("b_"), padded(side("p_"))].concat(),
-        JoinType::Right => [padded(side("b_")), side("p_")].concat(),
-        JoinType::Full => [padded(side("b_")), padded(side("p_"))].concat(),
-        JoinType::LeftSemi | JoinType::LeftAnti => side("b_"),
-        JoinType::RightSemi | JoinType::RightAnti => side("p_"),
-        JoinType::LeftMark => [
-            side("b_"),
-            vec![Field::new("mark", DataType::Boolean, false)],
-        ]
-        .concat(),
+        JoinType::Inner => [build, probe].concat(),
+        JoinType::Left => [build, padded(probe)].concat(),
+        JoinType::Right => [padded(build), probe].concat(),
+        JoinType::Full => [padded(build), padded(probe)].concat(),
+        JoinType::LeftSemi | JoinType::LeftAnti => build,
+        JoinType::RightSemi | JoinType::RightAnti => probe,
+        JoinType::LeftMark => [build, vec![Field::new("mark", DataType::Boolean, false)]].concat(),
     }
 }
 
