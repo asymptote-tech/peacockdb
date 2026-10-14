@@ -4,7 +4,7 @@
 # tree differs: -
 # n: the join's place among its query's, in pre-order; joins: the joins in its subtree, itself included
 # query n kind/type joins true estimate q-error keys
-anti-join              1 Hash/RightAnti    1    1196041    1049982.0     1.14  c_custkey=o_custkey
+anti-join              1 Hash/RightAnti    1    1196041    1199998.0     1.00  c_custkey=o_custkey
 anti-join-reorder      1 Hash/Inner        2       1951       2000.2     1.03  n_nationkey=c_nationkey
 anti-join-reorder      2 Hash/LeftAnti     1      50004      50004.0     1.00  c_custkey=o_custkey
 cross-join             1 Cross/Cross       1        125        125.0     1.00  -
@@ -29,7 +29,7 @@ q2                     7 Hash/Inner        2     800000     800000.0     1.00  n
 q2                     8 Hash/Inner        1     800000     800000.0     1.00  s_suppkey=ps_suppkey
 q3                     1 Hash/Inner        2      30519     314459.6    10.30  o_orderkey=l_orderkey
 q3                     2 Hash/Inner        1     147126     145405.5     1.01  c_custkey=o_custkey
-q4                     1 Hash/LeftSemi     1      52523      57072.0     1.09  o_orderkey=l_orderkey
+q4                     1 Hash/LeftSemi     1      52523      33699.5     1.56  o_orderkey=l_orderkey
 q5                     1 Hash/Inner        5       7243       7283.9     1.01  r_regionkey=n_regionkey
 q5                     2 Hash/Inner        4      36236      36419.6     1.01  n_nationkey=s_nationkey
 q5                     3 Hash/Inner        3      36236      36419.6     1.01  s_suppkey=l_suppkey,s_nationkey=c_nationkey
@@ -72,12 +72,12 @@ q20                    1 Hash/LeftSemi     4        186        400.0     2.15  s
 q20                    2 Hash/Inner        1        412        400.0     1.03  n_nationkey=s_nationkey
 q20                    3 Hash/Inner        2       5833      32000.0     5.49  ps_partkey=l_partkey,ps_suppkey=l_suppkey
 q20                    4 Hash/RightSemi    1       8508     160000.0    18.81  p_partkey=ps_partkey
-q21                    1 Hash/LeftAnti     5       4141       1468.3     2.82  l_orderkey=l_orderkey
+q21                    1 Hash/LeftAnti     5       4141       1618.6     2.56  l_orderkey=l_orderkey
 q21                    2 Hash/LeftSemi     4      73089       1835.4    39.82  l_orderkey=l_orderkey
 q21                    3 Hash/Inner        3      75871       9176.9     8.27  n_nationkey=s_nationkey
 q21                    4 Hash/Inner        2    1828911     229422.4     7.97  o_orderkey=l_orderkey
 q21                    5 Hash/Inner        1    3793296    1200243.0     3.16  s_suppkey=l_suppkey
 rollup-over-join       1 Hash/Inner        1     150000     150000.0     1.00  n_nationkey=c_nationkey
-semi-join              1 Hash/RightSemi    1     303959     450018.0     1.48  c_custkey=o_custkey
+semi-join              1 Hash/RightSemi    1     303959     300002.0     1.01  c_custkey=o_custkey
 semi-join-reorder      1 Hash/Inner        2       4149       3999.8     1.04  n_nationkey=c_nationkey
 semi-join-reorder      2 Hash/LeftSemi     1      99996      99996.0     1.00  c_custkey=o_custkey

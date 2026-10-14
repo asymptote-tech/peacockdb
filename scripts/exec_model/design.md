@@ -239,8 +239,8 @@ The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 
 386 tpcds runs, dearer in 5 — tpcds q5 at every mode by under 0.06 % — and equal in the rest;
 the median ratio is 1.00 for tpch and 0.61 for tpcds. The final ratio is within the published
 report's 1.4 for 18 of 20 tpch rows and 67 of 79 tpcds rows. Over the 620 runs DPhyp is called
-3,221 times, 808 of the calls reorder and 45 stop at the budget, all tpcds q64's; orientation
-flips 590 joins, and 726 replans run, 91 more refused. Bytes do not see the prototype's own
+3,249 times, 746 of the calls reorder and 45 stop at the budget, all tpcds q64's; orientation
+flips 584 joins, and 710 replans run, 107 more refused. Bytes do not see the prototype's own
 time: q64 replans 7 times at every mode and is cheaper at each (0.83–0.92), yet slower in wall
 time, which is Python estimation and DPhyp over 30 calls rather than anything in the plan.
 
@@ -423,7 +423,7 @@ dataset.
 `scripts/exec_model/testdata/goldens/<bench>/tp1-single.cardinality.txt` holds every join's
 estimate against the engine's rows, so a moved estimate is a named line. tpcds q64 is where the
 estimator is worst: 37 joins, median q-error 4.88, 5 within 2×; the rest of tpcds is 599 joins,
-median 1.21, 73.3 % within 2×. Each half of q64 (store_sales for 1999, then 2000, 18 joins each)
+median 1.17, 74.5 % within 2×. Each half of q64 (store_sales for 1999, then 2000, 18 joins each)
 misses by independence and default assumptions, none of them a correlation:
 
 | node | estimate | true | why |
@@ -439,15 +439,17 @@ misses by independence and default assumptions, none of them a correlation:
 
 So three limits: no histograms, so a skewed column's range is read as uniform; a comparison of
 two aggregates, or of two columns, is the default 0.2 whatever the NDVs say; and a semi or anti
-join's residual scales the matched share as if each row had one partner. Fixing the second alone
-exposes the third. Read as one value of the larger NDV, `a != b` gives q64's residual 0.80 and
-tpcds a median of 1.26 against 1.29, but tpch q21's anti join goes from q 2.82 to 4,141: it is a
-self-join, each row matches itself and `l_suppkey != l_suppkey` always rejects that pair, which
-independence cannot see. It also exposes an aggregate's NDV under functional dependence (q46,
+join's residual scales the matched share as if each row had one partner. Read as one value of the
+larger NDV, `a != b` gives q64's residual 0.80 and tpcds a median of 1.23 against 1.24, and tpch
+q21's anti join goes from q 2.56 to 1.10 — two errors cancelling, not the third limit lifted. q21
+is a self-join: the matched share, 0.59, does not know that each row's own order holds a late
+line, the row itself, and `l_suppkey != l_suppkey` always rejects that pair, which independence
+cannot see. The same reading also exposes an aggregate's NDV under functional dependence (q46,
 q68: an aggregate keyed on `ss_ticket_number` with three columns it determines is estimated at
-its input, 123 thousand against 10.7 thousand). Scaling each equi-join by its keys' non-NULL
-shares fixes q93 (10.7 → 1.03) and worsens 86 tpcds joins against 64 better, q64's middle
-joins most, since they are under already.
+its input, 123 thousand against 10.7 thousand). Scaling each equi-join's rows, and each side's
+matched share, by its keys' non-NULL shares fixes q93 (10.7 → 1.03); counting a join whose
+q-error moves by more than 1 %, it worsens 157 tpcds joins and betters 175. q64's middle joins
+worsen most, 16.6 to 26.4, since they are under already.
 
 ## What the prototype does not model
 

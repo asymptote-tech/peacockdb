@@ -53,9 +53,12 @@ fixes #236 and #237):
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
   at every mode (Task 12 below). Tasks 13–18 are not started.
+- #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
+  join that reads a share ran again at every mode into the committed outputs; no other query's
+  output can move (#239 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (45 files, 429 cases), and q64 in the corpus answer,
+- Green otherwise: rust-only, DPhyp, the cheap tier (45 files, 431 cases), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
@@ -1446,7 +1449,7 @@ Against HEAD's committed outputs, the optimized `.cpu.txt` compared with `mj=` s
     date join above the left join, where the plan had it below. With the shares over the domain
     the estimate is 28,513 and the plan's order stays in all three channels; the fix moves the
     cardinality golden and every non-inner estimate, so it waits for its own full run.
-    `bug_a_left_join_is_estimated_below_its_preserved_side` records it.
+    `bug_a_left_join_is_estimated_below_its_preserved_side` records it. Fixed in #239 below.
   - tpcds q33, by 0.6–1.1 % at four modes. Its pre-run trees and inner flips are HEAD's at every
     mode. Its `RightSemi` is now in a cluster and rebuilt, and the project that picked its columns
     folds into the joins. So at the tp4 modes a different badly estimated build trips the first
@@ -1489,3 +1492,113 @@ After the full run: the cheap tier, 45 files, 428 passed; `test_cardinality_corp
   58, 111, 111). Seven more queries hold a cluster: tpch anti-join, left-join, q13, q22, q4 and
   semi-join, and tpcds q41, whose only joins are non-inner. Python 915, total 2920.
 - The README's run time and design.md's "The committed run" are this run's.
+
+## #239
+
+### The fix
+
+`Estimator.equi_join` takes each side's matched share as the other side's key NDV over
+`max(build NDV, probe NDV, domain, 1)`, the divisor of the inner rows; `typed` did not change. A
+value of one side finds a match as often as the other's values fill the domain, so on either side
+matched rows times fan-out are the inner rows. Where the domain is no wider than the larger key
+count it is the old `min(1, other / own)`, so only joins over a wider domain move.
+
+- Left and Right: inner plus the preserved side's unmatched rows. Never below the preserved side,
+  since a side's rows are at least its key NDV.
+- Full: both of the above.
+- Semi keeps the share, anti the rest; the two sum to the side. Right semi and anti use the build's
+  NDV, as the mirror.
+- Mark keeps every row and reads no share. Inner reads none either, and `SetEstimates._join`, the
+  inner-only clusters' path, reads only rows and columns.
+
+Red first, over 1,000 keys with 100 on the preserved side and 143 on the other: the left join came
+out at 14.4 of 100 and the anti join at 0.0 against a true 86. Both are regular tests now, and the
+`bug_` test is gone. A third, the same anti join as RightAnti with the sides swapped, pins the probe
+side's share that Right, RightSemi, RightAnti and Full read; reverting that share alone to
+`min(1, build / probe)` turns it red and nothing else in the cheap tier.
+
+The rows are fixed; the key NDV above an outer or anti join is not: `_matched_keys` still cuts it
+to the other side's, #240.
+
+### Cardinality golden
+
+tpcds 636 joins: median q-error 1.29 → 1.24, 69.5 → 70.6 % within 2×. tpch keeps 77 joins, 1.07,
+70.1 %; four of its lines move. The test compares the golden line by line and holds no
+threshold, so the summary line is all that moves besides the joins.
+
+| line | before | after | true |
+|---|--:|--:|--:|
+| tpcds q75, six left joins | 1,422.7–5,715.6 | 14,283.5–57,190.8 | 13,736–53,812 |
+| tpcds q69, two anti joins | 0.0, 0.0 | 949.2, 3,325.1 | 580, 611 |
+| tpcds q94, anti | 0.0 | 4.2 | 40 |
+| tpcds q16, anti | 0.0 | 71.4 | 850 |
+
+Worse, each for a reason outside the share: q75's root, q 12.33 → 123.44 (its aggregate keys —
+brand, class, category, manufacturer — are correlated, so it is estimated at its input, now 99,987
+against a true 93,640); q60's three right semi joins, 1.30–2.55 → 2.97–3.06 (the share is right,
+0.19 against 0.20, and the probe is 2.9 times under); tpch q4, 1.09 → 1.56 (the 0.2 default for
+`l_receiptdate > l_commitdate`, truly 0.63); q95's semi join, 1.33 → 1.89 (share right, input 71.4
+against 135). q83 also moves, by 2 %: its root 1.14 → 1.17, its semi join 33.24 → 33.89.
+
+### Which queries can move
+
+Only a plan with a hash join of type Left, Right, Full, semi or anti reads a share. Over the five
+`plans.txt` goldens that is 14 tpch queries (anti-join, anti-join-reorder, left-join,
+left-join-fixed, left-join-reorder, q4, q13, q16, q18, q20, q21, q22, semi-join,
+semi-join-reorder) and 25 tpcds (q5, q6, q8, q10, q14, q16, q33, q35, q38, q40, q41, q56, q58,
+q60, q69, q75, q77, q78, q80, q83, q87, q93, q94, q95, q97). tpch q21's anti join has a residual
+and is a wall, and still reads a share. Every other plan's estimates are what HEAD gives, bit for
+bit. Two checks: `join_order.optimize` of all 555 clustered (query, mode) plans under both
+formulas, 25 different, all in the list (tpcds q40, q69, q75, q80, q95 at every mode); and
+`run.py` of tpch q3, q5 and q10 at tp1-single into a scratch `--out`, whose three files are
+HEAD's byte for byte.
+
+### The run
+
+`run.py --query <the list>` at every mode into the committed outputs, locally, Python 3.13.0,
+pandas 3.0.6, pyarrow 25.0.1: tpch 70 runs in 618 s at `--jobs 2`, tpcds 125 in 4,133 s at
+`--jobs 1`, none failed. The 1,545 sections outside the list did not move.
+
+- tpch: no plan or cost moved; only the priced sets in `.optimizer.txt`.
+- tpcds: the optimized plan changed in q10, q40, q69, q75, q80 and q95 at every mode.
+  `test_engine_optimized` over those six at every mode: 30 passed against DuckDB.
+  `test_engine_reassembled` cannot differ: disassembly reads no estimate.
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| q75 | 0.4475 → 0.4186 | 0.3932 → 0.3767 | 0.4431 → 0.4188 | 0.3859 → 0.3720 | 0.3859 → 0.3720 |
+| q80 | 0.3301 → 0.3306 | 0.3372 → 0.3302 | 0.3956 → 0.3894 | 0.3966 → 0.3921 | 0.3966 → 0.3921 |
+| q69 | 0.7296 → 0.7302 | 0.6582 → 0.6588 | 0.6552 → 0.6554 | 0.6552 → 0.6554 | 0.6552 → 0.6554 |
+| q95 | −1,920 bytes | −1,920 | −1,920 | −1,920 | −1,920 |
+
+q10's and q40's plans changed at the same cost.
+
+- q75: DPhyp keeps the plan's order in all 25 calls, and the ratio is below Task 12's and its
+  predecessor's at every mode (0.4384 and 0.4299 at tp1-single and tp4-single before Task 12).
+- q69 is dearer by 0.04–0.09 %. Its plan joins customer-demographics (r2), then the semi join,
+  then the web and catalog anti joins. DPhyp now moves the semi join below r2 and keeps the anti
+  order; HEAD's tree swapped the two anti joins. r2 cannot go last without a replan: both anti
+  edges' TES hold it (`r0+r1+r2-r5+r6`), because CD-A adds the semi join's whole left side, `assoc`
+  of a semi join under an anti join being false. That is CD-A's correct-but-not-complete limit.
+  HEAD reached r2 last only through three replans (q-errors 8.74, 618 and 603, the last two on
+  builds priced at 0 rows), whose memory source `m3` dropped the dependency, and joined r2 over
+  603 rows. Now no build misses by more than 2×, nothing replans, and r2 joins 652 customers.
+- q80 at tp1-single is dearer by 0.14 %, cheaper by 1.1–2.1 % at the other four. Each channel's
+  left join to its returns is no longer priced far below its preserved side, so DPhyp joins it
+  last, above the dimensions, where HEAD joined it right after the dates; the replans then keep
+  different builds.
+- Totals: cheaper and dearer runs, both medians and the 1.4 counts are unchanged. DPhyp is called
+  3,249 times (3,221), 746 reorder (808), 45 stop at the budget; 584 flips (590); 710 replans
+  (726), 107 refused (91).
+
+### Proving
+
+Cheap tier: 45 files, 431 passed. Dataset tier: `test_cardinality_corpus` 3,
+`test_ordered_corpus` 2, `test_run_corpus` 1. `build-test.md`: the prototype row 431, Python 917,
+total 2922. design.md's limits section was measured again over the fixed estimator: tpcds less
+q64 is 599 joins, median 1.17, 74.5 % within 2×; `a != b` as one value of the larger NDV gives
+1.23 against 1.24, and tpch q21 goes 2.56 → 1.10, two errors cancelling. The non-NULL-share
+experiment still takes q93 from 10.7 to 1.03. Its "86 worse, 64 better" did not reproduce at HEAD
+under any counting tried, so design.md now gives the re-run's: rows and both matched shares
+scaled, a join counted where its q-error moves by more than 1 %, 157 worse and 175 better; q64's
+middle joins worst, 16.6 → 26.4.

@@ -1899,39 +1899,10 @@ replan 1: a build of 459 rows against 131.5 estimated (q-error 3.49) for GpuHash
     oriented (r0 r1), build first
     join r0 x r1: 8044.4 rows, 130722 bytes
     C_out 130722 bytes, the plan's order 130722
-replan 2: a build of 97 rows against 918.0 estimated (q-error 9.46) for GpuHashJoin on=[(c_current_cdemo_sk@1, cd_demo_sk@0)]
-  kept m4 (97 rows)
-  join order MJ1: 2 relations
-    r0 MemorySource m4
-    r1 LoadParquet customer_demographics
-    edge r0-r1: r0.c_current_cdemo_sk = r1.cd_demo_sk
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 97.0 rows, 6955 bytes
-    C_out 6955 bytes, the plan's order 6955
-  join order MJ2: 2 relations
-    r0 MemorySource p1
-    r1 LoadParquet web_sales
-    edge r0-r1: r0.d_date_sk = r1.ws_sold_date_sk
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 8075.2 rows, 131223 bytes
-    C_out 131223 bytes, the plan's order 131223
-  join order MJ3: 2 relations
-    r0 MemorySource p2
-    r1 LoadParquet catalog_sales
-    edge r0-r1: r0.d_date_sk = r1.cs_sold_date_sk
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 8044.4 rows, 130722 bytes
-    C_out 130722 bytes, the plan's order 130722
 plan diff
 --- before
 +++ after
-@@ -13,49 +13,22 @@
+@@ -13,49 +13,39 @@
                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32, mark:Boolean]
                            GpuHashJoin: join_type=LeftMark, on=[(c_customer_sk@0, ws_bill_customer_sk@1)], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32, mark:Boolean]
                              GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
@@ -1966,7 +1937,24 @@ plan diff
 +                              GpuEmitPartitions: hash=[c_customer_sk@0], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
 +                                GpuMergePartitions: lanes=1, batches=multiple, schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
 +                                  GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@1, cd_demo_sk@0)], projection=[c_customer_sk@0, cd_gender@3, cd_marital_status@4, cd_education_status@5, cd_purchase_estimate@6, cd_credit_rating@7, cd_dep_count@8, cd_dep_employed_count@9, cd_dep_college_count@10], lanes=4, batches=multiple, schema=[c_customer_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
-+                                    GpuMemorySource: name=m4, lanes=4, batches=single, hashed_on=[c_current_cdemo_sk@1], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_current_cdemo_sk@1], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                      GpuEmitPartitions: hash=[c_current_cdemo_sk@1], lanes=4, batches=multiple, hashed_on=[c_current_cdemo_sk@1], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                          GpuHashJoin: join_type=LeftSemi, on=[(c_customer_sk@0, ss_customer_sk@0)], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                              GpuEmitPartitions: hash=[c_customer_sk@0], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                                GpuMergePartitions: lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                                  GpuHashJoin: join_type=Inner, on=[(ca_address_sk@0, c_current_addr_sk@2)], projection=[c_customer_sk@1, c_current_cdemo_sk@2], lanes=4, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                                    GpuMemorySource: name=m3, lanes=4, batches=single, hashed_on=[ca_address_sk@0], schema=[ca_address_sk:Int64]
++                                                    GpuEmitPartitions: hash=[c_current_addr_sk@2], lanes=4, batches=multiple, hashed_on=[c_current_addr_sk@2], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64, c_current_addr_sk:Int64]
++                                                      GpuLoadParquet: table=customer, projections=[c_customer_sk@0, c_current_cdemo_sk@2, c_current_addr_sk@4], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64, c_current_addr_sk:Int64]
++                                            GpuEmitPartitions: hash=[ss_customer_sk@0], lanes=4, batches=multiple, hashed_on=[ss_customer_sk@0], schema=[ss_customer_sk:Int64]
++                                              GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_customer_sk:Int64]
++                                                GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_customer_sk@2], lanes=4, batches=multiple, schema=[ss_customer_sk:Int64]
++                                                  GpuMemorySource: name=p0, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
++                                                  GpuEmitPartitions: hash=[ss_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ss_sold_date_sk@0], schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
++                                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
++                                                      GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_customer_sk@3], partition_groups=[[[17]],[[18]],[[23]],[]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
 +                                    GpuEmitPartitions: hash=[cd_demo_sk@0], lanes=4, batches=multiple, hashed_on=[cd_demo_sk@0], schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
 +                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
 +                                        GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5, cd_dep_count@6, cd_dep_employed_count@7, cd_dep_college_count@8], partition_groups=[[[0],[1],[2],[3]],[[4],[5],[6],[7]],[[8],[9],[10],[11]],[[12],[13],[14],[15]]], lanes=4, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, cd_dep_count:Int64, cd_dep_employed_count:Int64, cd_dep_college_count:Int32]
@@ -4103,8 +4091,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 0.0 rows, 0 bytes
-  C_out 0 bytes, the plan's order 0
+  join r0 x r1: 71.4 rows, 2882 bytes
+  C_out 2882 bytes, the plan's order 2882
 join order MJ2: 4 relations
   r0 Filter call_center
   r1 Filter customer_address
@@ -4129,8 +4117,8 @@ replan 1: a build of 2446 rows against 950.0 estimated (q-error 2.57) for GpuHas
     priced 1 sets
     DPhyp (r0 r1)
     oriented (r0 r1), build first
-    join r0 x r1: 0.0 rows, 0 bytes
-    C_out 0 bytes, the plan's order 0
+    join r0 x r1: 183.8 rows, 7421 bytes
+    C_out 7421 bytes, the plan's order 7421
   join order MJ2: 4 relations
     r0 MemorySource m0
     r1 MemorySource m1
@@ -4155,8 +4143,8 @@ replan 2: a build of 2358 rows against 447.9 estimated (q-error 5.26) for GpuHas
     priced 1 sets
     DPhyp (r0 r1)
     oriented (r0 r1), build first
-    join r0 x r1: 0.0 rows, 0 bytes
-    C_out 0 bytes, the plan's order 0
+    join r0 x r1: 967.7 rows, 39070 bytes
+    C_out 39070 bytes, the plan's order 39070
 plan diff
 --- before
 +++ after
@@ -8452,15 +8440,15 @@ join order MJ1: 5 relations
   edge r1-r4: r1.i_item_sk = r4.cs_item_sk
   edge r0-r4: r0.d_date_sk = r4.cs_sold_date_sk
   priced 15 sets
-  DPhyp (((r0 (r1 r4)) r3) r2)
-  oriented (r2 (r3 (r0 (r1 r4)))), build first
+  DPhyp (((r0 (r1 r4)) r2) r3)
+  oriented (r3 (r2 (r0 (r1 r4)))), build first
   join r1 x r4: 7729.2 rows, 531382 bytes
   join r0 x r1+r4: 257.2 rows, 16655 bytes
-  join r3 x r0+r1+r4: 25.7 rows, 1661 bytes
-  join r2 x r0+r1+r3+r4: 25.7 rows, 1610 bytes
-  C_out 551307 bytes, the plan's order 160425289
+  join r2 x r0+r1+r4: 257.2 rows, 16140 bytes
+  join r3 x r0+r1+r2+r4: 257.2 rows, 16108 bytes
+  C_out 580285 bytes, the plan's order 160903280
 replan 1: a build of 1104 rows against 96.5 estimated (q-error 11.44) for GpuHashJoin on=[(i_item_sk@0, cs_item_sk@2)]
-  kept m0 (5 rows), m1 (144067 rows), m2 (61 rows), m3 (1104 rows)
+  kept m0 (144067 rows), m1 (5 rows), m2 (61 rows), m3 (1104 rows)
   join order MJ1: 5 relations
     r0 MemorySource m0
     r1 MemorySource m1
@@ -8469,16 +8457,16 @@ replan 1: a build of 1104 rows against 96.5 estimated (q-error 11.44) for GpuHas
     r4 LoadParquet catalog_sales
     edge r3-r4: r3.i_item_sk = r4.cs_item_sk
     edge r2-r4: r2.d_date_sk = r4.cs_sold_date_sk
-    edge r4-r1: r4.cs_order_number = r1.cr_order_number and r4.cs_item_sk = r1.cr_item_sk, left
-    edge r0-r2+r3+r4: r0.w_warehouse_sk = r4.cs_warehouse_sk
-    priced 9 sets
-    DPhyp ((r0 ((r2 r4) r3)) r1)
-    oriented (r1 (r0 (r3 (r2 r4)))), build first
+    edge r1-r4: r1.w_warehouse_sk = r4.cs_warehouse_sk
+    edge r4-r0: r4.cs_order_number = r0.cr_order_number and r4.cs_item_sk = r0.cr_item_sk, left
+    priced 15 sets
+    DPhyp (r0 (r1 ((r2 r4) r3)))
+    oriented (r0 (r1 (r3 (r2 r4)))), build first
     join r2 x r4: 47972.3 rows, 2140764 bytes
     join r3 x r2+r4: 2942.3 rows, 190514 bytes
-    join r0 x r2+r3+r4: 2942.3 rows, 184629 bytes
-    join r1 x r0+r2+r3+r4: 294.1 rows, 18415 bytes
-    C_out 2534322 bytes, the plan's order 6477603
+    join r1 x r2+r3+r4: 2942.3 rows, 184629 bytes
+    join r0 x r1+r2+r3+r4: 2942.3 rows, 184262 bytes
+    C_out 2700169 bytes, the plan's order 6637932
 plan diff
 --- before
 +++ after
@@ -8517,11 +8505,11 @@ plan diff
 -                                                  GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_sold_date_sk:Int64, cs_warehouse_sk:Int64, cs_item_sk:Int64, cs_order_number:Int64, cs_sales_price:Decimal128(7,2)]
 -                                                    GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_warehouse_sk@14, cs_item_sk@15, cs_order_number@17, cs_sales_price@21], partition_groups=[[[0],[1],[2]],[[3],[4],[5]],[[6],[7],[8]],[[9],[10],[11]]], lanes=4, batches=multiple, schema=[cs_sold_date_sk:Int64, cs_warehouse_sk:Int64, cs_item_sk:Int64, cs_order_number:Int64, cs_sales_price:Decimal128(7,2)]
 +                      GpuHashJoin: join_type=Right, on=[(cr_order_number@1, cs_order_number@4), (cr_item_sk@0, cs_item_sk@5)], projection=[d_date@3, cs_sales_price@4, cr_refunded_cash@2, w_state@5, i_item_id@6], lanes=4, batches=multiple, schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), cr_refunded_cash:Decimal128(7,2), w_state:Utf8, i_item_id:Utf8]
-+                        GpuMemorySource: name=m1, lanes=4, batches=single, hashed_on=[cr_order_number@1, cr_item_sk@0], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_refunded_cash:Decimal128(7,2)]
++                        GpuMemorySource: name=m0, lanes=4, batches=single, hashed_on=[cr_order_number@1, cr_item_sk@0], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_refunded_cash:Decimal128(7,2)]
 +                        GpuEmitPartitions: hash=[cs_order_number@4, cs_item_sk@5], lanes=4, batches=multiple, hashed_on=[cs_order_number@4, cs_item_sk@5], schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), w_state:Utf8, i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64]
 +                          GpuMergePartitions: lanes=1, batches=multiple, schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), w_state:Utf8, i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64]
 +                            GpuHashJoin: join_type=Inner, on=[(w_warehouse_sk@0, cs_warehouse_sk@5)], projection=[d_date@2, cs_sales_price@3, w_state@1, i_item_id@4, cs_order_number@5, cs_item_sk@6], lanes=4, batches=multiple, schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), w_state:Utf8, i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64]
-+                              GpuMemorySource: name=m0, lanes=4, batches=single, hashed_on=[w_warehouse_sk@0], schema=[w_warehouse_sk:Int64, w_state:Utf8]
++                              GpuMemorySource: name=m1, lanes=4, batches=single, hashed_on=[w_warehouse_sk@0], schema=[w_warehouse_sk:Int64, w_state:Utf8]
 +                              GpuEmitPartitions: hash=[cs_warehouse_sk@5], lanes=4, batches=multiple, hashed_on=[cs_warehouse_sk@5], schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64, cs_warehouse_sk:Int64]
 +                                GpuMergePartitions: lanes=1, batches=multiple, schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64, cs_warehouse_sk:Int64]
 +                                  GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, cs_item_sk@3)], projection=[d_date@2, cs_sales_price@3, i_item_id@1, cs_order_number@4, cs_item_sk@5, cs_warehouse_sk@6], lanes=4, batches=multiple, hashed_on=[cs_item_sk@4], schema=[d_date:Date32, cs_sales_price:Decimal128(7,2), i_item_id:Utf8, cs_order_number:Int64, cs_item_sk:Int64, cs_warehouse_sk:Int64]
@@ -12405,72 +12393,21 @@ join order MJ1: 9 relations
   edge r7-r8: r7.d_date_sk = r8.cs_sold_date_sk
   edge r0+r1+r2+r3+r4-r7+r8: r1.c_customer_sk = r8.cs_ship_customer_sk, left_anti
   priced 14 sets
-  DPhyp (((((r0 r1) (r3 r4)) r2) (r7 r8)) (r5 r6))
-  oriented (((((r0 r1) (r3 r4)) r2) (r7 r8)) (r5 r6)), build first
+  DPhyp (((((r0 r1) (r3 r4)) r2) (r5 r6)) (r7 r8))
+  oriented (((((r0 r1) (r3 r4)) r2) (r5 r6)) (r7 r8)), build first
   join r0 x r1: 5700.0 rows, 92625 bytes
   join r3 x r4: 8823.0 rows, 71687 bytes
   join r0+r1 x r3+r4: 502.9 rows, 8172 bytes
   join r0+r1+r3+r4 x r2: 502.9 rows, 25810 bytes
-  join r7 x r8: 6100.3 rows, 49565 bytes
-  join r0+r1+r2+r3+r4 x r7+r8: 0.0 rows, 0 bytes
   join r5 x r6: 6123.7 rows, 49755 bytes
-  join r0+r1+r2+r3+r4+r7+r8 x r5+r6: 0.0 rows, 0 bytes
-  C_out 297615 bytes, the plan's order 581972
-replan 1: a build of 652 rows against 5700.0 estimated (q-error 8.74) for GpuHashJoin on=[(c_current_cdemo_sk@1, cd_demo_sk@0)]
-  kept m3 (652 rows)
-  join order MJ1: 6 relations
-    r0 MemorySource m3
-    r1 LoadParquet customer_demographics
-    r2 MemorySource p2
-    r3 LoadParquet catalog_sales
-    r4 MemorySource p1
-    r5 LoadParquet web_sales
-    edge r0-r1: r0.c_current_cdemo_sk = r1.cd_demo_sk
-    edge r2-r3: r2.d_date_sk = r3.cs_sold_date_sk
-    edge r0-r2+r3: r0.c_customer_sk = r3.cs_ship_customer_sk, left_anti
-    edge r4-r5: r4.d_date_sk = r5.ws_sold_date_sk
-    edge r0+r1-r4+r5: r0.c_customer_sk = r5.ws_bill_customer_sk, left_anti
-    priced 7 sets
-    DPhyp (((r0 (r2 r3)) r1) (r4 r5))
-    oriented (((r0 (r2 r3)) r1) (r4 r5)), build first
-    join r2 x r3: 6100.3 rows, 49565 bytes
-    join r0 x r2+r3: 0.0 rows, 0 bytes
-    join r0+r2+r3 x r1: 0.0 rows, 0 bytes
-    join r4 x r5: 6123.7 rows, 49755 bytes
-    join r0+r1+r2+r3 x r4+r5: 0.0 rows, 0 bytes
-    C_out 99321 bytes, the plan's order 132782
-replan 2: a build of 618 rows against 0.0 estimated (q-error 618.00) for GpuHashJoin on=[(c_current_cdemo_sk@1, cd_demo_sk@0)]
-  kept m4 (618 rows)
-  join order MJ1: 4 relations
-    r0 MemorySource m4
-    r1 LoadParquet customer_demographics
-    r2 MemorySource p1
-    r3 LoadParquet web_sales
-    edge r0-r1: r0.c_current_cdemo_sk = r1.cd_demo_sk
-    edge r2-r3: r2.d_date_sk = r3.ws_sold_date_sk
-    edge r0-r2+r3: r0.c_customer_sk = r3.ws_bill_customer_sk, left_anti
-    priced 4 sets
-    DPhyp ((r0 (r2 r3)) r1)
-    oriented ((r0 (r2 r3)) r1), build first
-    join r2 x r3: 6123.7 rows, 49755 bytes
-    join r0 x r2+r3: 0.0 rows, 0 bytes
-    join r0+r2+r3 x r1: 0.0 rows, 0 bytes
-    C_out 49755 bytes, the plan's order 81472
-replan 3: a build of 603 rows against 0.0 estimated (q-error 603.00) for GpuHashJoin on=[(c_current_cdemo_sk@0, cd_demo_sk@0)]
-  kept m5 (603 rows)
-  join order MJ1: 2 relations
-    r0 MemorySource m5
-    r1 LoadParquet customer_demographics
-    edge r0-r1: r0.c_current_cdemo_sk = r1.cd_demo_sk
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 603.0 rows, 26047 bytes
-    C_out 26047 bytes, the plan's order 26047
+  join r0+r1+r2+r3+r4 x r5+r6: 472.1 rows, 24229 bytes
+  join r7 x r8: 6100.3 rows, 49565 bytes
+  join r0+r1+r2+r3+r4+r5+r6 x r7+r8: 443.3 rows, 19149 bytes
+  C_out 340993 bytes, the plan's order 625351
 plan diff
 --- before
 +++ after
-@@ -8,53 +8,8 @@
+@@ -8,53 +8,46 @@
                GpuMergePartitions: lanes=1, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, count(*):Int64]
                  GpuAggregateBatches: group_by=[cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4], aggs=[sum(count(*)@5) as count(*)], lanes=4, batches=single, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, count(*):Int64]
                    GpuAggregate: group_by=[cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, count(*):Int64]
@@ -12506,29 +12443,59 @@ plan diff
 -                                    GpuEmitPartitions: hash=[ss_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ss_sold_date_sk@0], schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
 -                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
 -                                        GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_customer_sk@3], partition_groups=[[[0],[1],[2],[3],[4],[5]],[[6],[7],[8],[9],[10],[11]],[[12],[13],[14],[15],[16],[17]],[[18],[19],[20],[21],[22],[23]]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
--                          GpuEmitPartitions: hash=[ws_bill_customer_sk@0], lanes=4, batches=multiple, hashed_on=[ws_bill_customer_sk@0], schema=[ws_bill_customer_sk:Int64]
--                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_bill_customer_sk:Int64]
--                              GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_bill_customer_sk@2], lanes=4, batches=multiple, schema=[ws_bill_customer_sk:Int64]
++                    GpuHashJoin: join_type=LeftAnti, on=[(c_customer_sk@5, cs_ship_customer_sk@0)], projection=[cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4], lanes=4, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
++                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@5], schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                        GpuHashJoin: join_type=LeftAnti, on=[(c_customer_sk@5, ws_bill_customer_sk@0)], lanes=4, batches=multiple, hashed_on=[c_customer_sk@5], schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@5], schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                            GpuEmitPartitions: hash=[c_customer_sk@5], lanes=4, batches=multiple, hashed_on=[c_customer_sk@5], schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                              GpuMergePartitions: lanes=1, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                                GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@1, cd_demo_sk@0)], projection=[cd_gender@3, cd_marital_status@4, cd_education_status@5, cd_purchase_estimate@6, cd_credit_rating@7, c_customer_sk@0], lanes=4, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8, c_customer_sk:Int64]
++                                  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_current_cdemo_sk@1], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                    GpuEmitPartitions: hash=[c_current_cdemo_sk@1], lanes=4, batches=multiple, hashed_on=[c_current_cdemo_sk@1], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                        GpuHashJoin: join_type=LeftSemi, on=[(c_customer_sk@0, ss_customer_sk@0)], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                            GpuEmitPartitions: hash=[c_customer_sk@0], lanes=4, batches=multiple, hashed_on=[c_customer_sk@0], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                              GpuMergePartitions: lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                                GpuHashJoin: join_type=Inner, on=[(ca_address_sk@0, c_current_addr_sk@2)], projection=[c_customer_sk@1, c_current_cdemo_sk@2], lanes=4, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64]
++                                                  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ca_address_sk@0], schema=[ca_address_sk:Int64]
++                                                    GpuEmitPartitions: hash=[ca_address_sk@0], lanes=4, batches=multiple, hashed_on=[ca_address_sk@0], schema=[ca_address_sk:Int64]
++                                                      GpuFilter: predicate=((ca_state@1 = KY) OR (ca_state@1 = GA)) OR (ca_state@1 = NM), projection=[ca_address_sk@0], lanes=1, batches=multiple, schema=[ca_address_sk:Int64]
++                                                        GpuLoadParquet: table=customer_address, projections=[ca_address_sk@0, ca_state@8], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[ca_address_sk:Int64, ca_state:Utf8]
++                                                  GpuEmitPartitions: hash=[c_current_addr_sk@2], lanes=4, batches=multiple, hashed_on=[c_current_addr_sk@2], schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64, c_current_addr_sk:Int64]
++                                                    GpuLoadParquet: table=customer, projections=[c_customer_sk@0, c_current_cdemo_sk@2, c_current_addr_sk@4], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[c_customer_sk:Int64, c_current_cdemo_sk:Int64, c_current_addr_sk:Int64]
++                                          GpuEmitPartitions: hash=[ss_customer_sk@0], lanes=4, batches=multiple, hashed_on=[ss_customer_sk@0], schema=[ss_customer_sk:Int64]
++                                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_customer_sk:Int64]
++                                              GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_customer_sk@2], lanes=4, batches=multiple, schema=[ss_customer_sk:Int64]
++                                                GpuMemorySource: name=p0, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
++                                                GpuEmitPartitions: hash=[ss_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ss_sold_date_sk@0], schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
++                                                  GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
++                                                    GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_customer_sk@3], partition_groups=[[[14]],[[23]],[],[]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_customer_sk:Int64]
++                                  GpuEmitPartitions: hash=[cd_demo_sk@0], lanes=4, batches=multiple, hashed_on=[cd_demo_sk@0], schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
++                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
++                                      GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5], partition_groups=[[[0],[1],[2],[3]],[[4],[5],[6],[7]],[[8],[9],[10],[11]],[[12],[13],[14],[15]]], lanes=4, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
+                           GpuEmitPartitions: hash=[ws_bill_customer_sk@0], lanes=4, batches=multiple, hashed_on=[ws_bill_customer_sk@0], schema=[ws_bill_customer_sk:Int64]
+                             GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_bill_customer_sk:Int64]
+                               GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_bill_customer_sk@2], lanes=4, batches=multiple, schema=[ws_bill_customer_sk:Int64]
 -                                GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
 -                                  GpuEmitPartitions: hash=[d_date_sk@0], lanes=4, batches=multiple, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
 -                                    GpuFilter: predicate=((d_year@1 = 2001) AND (d_moy@2 >= 4)) AND (d_moy@2 <= 6), projection=[d_date_sk@0], lanes=1, batches=multiple, schema=[d_date_sk:Int64]
 -                                      GpuLoadParquet: table=date_dim, projections=[d_date_sk@0, d_year@6, d_moy@8], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_date_sk:Int64, d_year:Int64, d_moy:Int64]
--                                GpuEmitPartitions: hash=[ws_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ws_sold_date_sk@0], schema=[ws_sold_date_sk:Int64, ws_bill_customer_sk:Int64]
++                                GpuMemorySource: name=p1, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
+                                 GpuEmitPartitions: hash=[ws_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ws_sold_date_sk@0], schema=[ws_sold_date_sk:Int64, ws_bill_customer_sk:Int64]
 -                                  GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_bill_customer_sk@4], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_bill_customer_sk:Int64]
--                      GpuEmitPartitions: hash=[cs_ship_customer_sk@0], lanes=4, batches=multiple, hashed_on=[cs_ship_customer_sk@0], schema=[cs_ship_customer_sk:Int64]
--                        GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ship_customer_sk:Int64]
--                          GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@0)], projection=[cs_ship_customer_sk@2], lanes=4, batches=multiple, schema=[cs_ship_customer_sk:Int64]
++                                  GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_bill_customer_sk@4], partition_groups=[[[3]]], lanes=1, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_bill_customer_sk:Int64]
+                       GpuEmitPartitions: hash=[cs_ship_customer_sk@0], lanes=4, batches=multiple, hashed_on=[cs_ship_customer_sk@0], schema=[cs_ship_customer_sk:Int64]
+                         GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ship_customer_sk:Int64]
+                           GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@0)], projection=[cs_ship_customer_sk@2], lanes=4, batches=multiple, schema=[cs_ship_customer_sk:Int64]
 -                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
 -                              GpuEmitPartitions: hash=[d_date_sk@0], lanes=4, batches=multiple, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
 -                                GpuFilter: predicate=((d_year@1 = 2001) AND (d_moy@2 >= 4)) AND (d_moy@2 <= 6), projection=[d_date_sk@0], lanes=1, batches=multiple, schema=[d_date_sk:Int64]
 -                                  GpuLoadParquet: table=date_dim, projections=[d_date_sk@0, d_year@6, d_moy@8], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_date_sk:Int64, d_year:Int64, d_moy:Int64]
--                            GpuEmitPartitions: hash=[cs_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[cs_sold_date_sk@0], schema=[cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
++                            GpuMemorySource: name=p2, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
+                             GpuEmitPartitions: hash=[cs_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[cs_sold_date_sk@0], schema=[cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
 -                              GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_ship_customer_sk@7], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11]]], lanes=1, batches=multiple, schema=[cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
-+                    GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@0, cd_demo_sk@0)], projection=[cd_gender@2, cd_marital_status@3, cd_education_status@4, cd_purchase_estimate@5, cd_credit_rating@6], lanes=4, batches=multiple, schema=[cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
-+                      GpuMemorySource: name=m5, lanes=4, batches=single, hashed_on=[c_current_cdemo_sk@0], schema=[c_current_cdemo_sk:Int64]
-+                      GpuEmitPartitions: hash=[cd_demo_sk@0], lanes=4, batches=multiple, hashed_on=[cd_demo_sk@0], schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
-+                        GpuMergePartitions: lanes=1, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
-+                          GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5], partition_groups=[[[0],[1],[2],[3]],[[4],[5],[6],[7]],[[8],[9],[10],[11]],[[12],[13],[14],[15]]], lanes=4, batches=multiple, schema=[cd_demo_sk:Int64, cd_gender:Utf8, cd_marital_status:Utf8, cd_education_status:Utf8, cd_purchase_estimate:Int64, cd_credit_rating:Utf8]
++                              GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_ship_customer_sk@7], partition_groups=[[[7]]], lanes=1, batches=multiple, schema=[cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
 == q70
 skipped: refused by datafusion: This feature is not implemented: Physical plan does not support logical expression AggregateFunction(AggregateFunction { func: AggregateUDF { inner: Grouping { name: "grouping", signature: Signature { type_signature: VariadicAny, volatility: Immutable } } }, args: [Column(Column { relation: Some(Bare { table: "store" }), name: "s_state" })], distinct: false, filter: None, order_by: None, null_treatment: None })
 == q71
@@ -13297,8 +13264,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 539.2 rows, 52441 bytes
-  C_out 52441 bytes, the plan's order 52441
+  join r0 x r1: 5398.7 rows, 525019 bytes
+  C_out 525019 bytes, the plan's order 525019
 join order MJ2: 4 relations
   r0 MemorySource p0
   r1 Filter item
@@ -13308,12 +13275,12 @@ join order MJ2: 4 relations
   edge r0-r2: r0.d_date_sk = r2.cs_sold_date_sk
   edge r2-r3: r2.cs_order_number = r3.cr_order_number and r2.cs_item_sk = r3.cr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 33482.6 rows, 2716278 bytes
-  join r1+r2 x r3: 3346.2 rows, 298232 bytes
-  join r0 x r1+r2+r3: 666.3 rows, 59385 bytes
-  C_out 3073895 bytes, the plan's order 3316540
+  join r0 x r1+r2: 6667.2 rows, 540877 bytes
+  join r0+r1+r2 x r3: 6667.2 rows, 594215 bytes
+  C_out 3851370 bytes, the plan's order 3851370
 join order MJ3: 4 relations
   r0 MemorySource p1
   r1 Filter item
@@ -13323,12 +13290,12 @@ join order MJ3: 4 relations
   edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
   edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 78955.3 rows, 6405251 bytes
-  join r1+r2 x r3: 7890.8 rows, 703266 bytes
-  join r0 x r1+r2+r3: 1577.3 rows, 140574 bytes
-  C_out 7249091 bytes, the plan's order 7826157
+  join r0 x r1+r2: 15782.2 rows, 1280331 bytes
+  join r0+r1+r2 x r3: 15782.2 rows, 1406589 bytes
+  C_out 9092171 bytes, the plan's order 9092171
 join order MJ4: 4 relations
   r0 MemorySource p2
   r1 Filter item
@@ -13338,12 +13305,12 @@ join order MJ4: 4 relations
   edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
   edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 22732.0 rows, 1844131 bytes
-  join r1+r2 x r3: 2264.2 rows, 201798 bytes
-  join r0 x r1+r2+r3: 452.6 rows, 40337 bytes
-  C_out 2086265 bytes, the plan's order 2253087
+  join r0 x r1+r2: 4543.8 rows, 368619 bytes
+  join r0+r1+r2 x r3: 4543.8 rows, 404970 bytes
+  C_out 2617720 bytes, the plan's order 2617720
 join order MJ5: 4 relations
   r0 MemorySource p3
   r1 Filter item
@@ -13353,12 +13320,12 @@ join order MJ5: 4 relations
   edge r0-r2: r0.d_date_sk = r2.cs_sold_date_sk
   edge r2-r3: r2.cs_order_number = r3.cr_order_number and r2.cs_item_sk = r3.cr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 49034.6 rows, 3977930 bytes
-  join r1+r2 x r3: 4900.5 rows, 436755 bytes
-  join r0 x r1+r2+r3: 975.8 rows, 86968 bytes
-  C_out 4501653 bytes, the plan's order 4857002
+  join r0 x r1+r2: 9764.0 rows, 792103 bytes
+  join r0+r1+r2 x r3: 9764.0 rows, 870215 bytes
+  C_out 5640248 bytes, the plan's order 5640248
 join order MJ6: 4 relations
   r0 MemorySource p4
   r1 Filter item
@@ -13368,12 +13335,12 @@ join order MJ6: 4 relations
   edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
   edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 66696.7 rows, 5410769 bytes
-  join r1+r2 x r3: 6665.7 rows, 594076 bytes
-  join r0 x r1+r2+r3: 1332.4 rows, 118749 bytes
-  C_out 6123594 bytes, the plan's order 6611064
+  join r0 x r1+r2: 13331.8 rows, 1081546 bytes
+  join r0+r1+r2 x r3: 13331.8 rows, 1188201 bytes
+  C_out 7680516 bytes, the plan's order 7680516
 join order MJ7: 4 relations
   r0 MemorySource p5
   r1 Filter item
@@ -13383,85 +13350,255 @@ join order MJ7: 4 relations
   edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
   edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
   priced 7 sets
-  DPhyp (r0 ((r1 r2) r3))
-  oriented (r0 ((r1 r2) r3)), build first
+  DPhyp ((r0 (r1 r2)) r3)
+  oriented ((r0 (r1 r2)) r3), build first
   join r1 x r2: 24517.3 rows, 1988965 bytes
-  join r1+r2 x r3: 2442.0 rows, 217646 bytes
-  join r0 x r1+r2+r3: 488.1 rows, 43505 bytes
-  C_out 2250117 bytes, the plan's order 2430040
-replan 1: a build of 858 rows against 2696.2 estimated (q-error 3.14) for GpuHashJoin on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)]
-  kept m6 (858 rows)
+  join r0 x r1+r2: 4900.7 rows, 397570 bytes
+  join r0+r1+r2 x r3: 4900.7 rows, 436775 bytes
+  C_out 2823310 bytes, the plan's order 2823310
+replan 1: a build of 27388 rows against 6667.2 estimated (q-error 4.11) for GpuHashJoin on=[(cs_order_number@7, cr_order_number@1), (cs_item_sk@8, cr_item_sk@0)]
+  kept m6 (27388 rows)
   join order MJ1: 2 relations
-    r0 MemorySource m6
+    r0 AggregateBatches m6,catalog_returns,p1,item,store_sales,store_returns,p2,web_sales,web_returns
     r1 AggregateBatches p3,item,catalog_sales,catalog_returns,p4,store_sales,store_returns,p5,web_sales,web_returns
     edge r0-r1: r0.i_brand_id = r1.i_brand_id and r0.i_class_id = r1.i_class_id and r0.i_category_id = r1.i_category_id and r0.i_manufact_id = r1.i_manufact_id
     priced 1 sets
     DPhyp (r0 r1)
     oriented (r1 r0), build first
-    join r1 x r0: 171.6 rows, 16688 bytes
-    C_out 16688 bytes, the plan's order 16688
+    join r1 x r0: 5599.3 rows, 544533 bytes
+    C_out 544533 bytes, the plan's order 544533
     flipped: r1 builds, r0 probes
+  join order MJ2: 2 relations
+    r0 MemorySource m6
+    r1 LoadParquet catalog_returns
+    edge r0-r1: r0.cs_order_number = r1.cr_order_number and r0.cs_item_sk = r1.cr_item_sk, left
+    priced 1 sets
+    DPhyp (r0 r1)
+    oriented (r0 r1), build first
+    join r0 x r1: 27388.0 rows, 2440956 bytes
+    C_out 2440956 bytes, the plan's order 2440956
+  join order MJ3: 4 relations
+    r0 MemorySource p1
+    r1 Filter item
+    r2 LoadParquet store_sales
+    r3 LoadParquet store_returns
+    edge r1-r2: r1.i_item_sk = r2.ss_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
+    edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 78955.3 rows, 6405251 bytes
+    join r0 x r1+r2: 15782.2 rows, 1280331 bytes
+    join r0+r1+r2 x r3: 15782.2 rows, 1406589 bytes
+    C_out 9092171 bytes, the plan's order 9092171
+  join order MJ4: 4 relations
+    r0 MemorySource p2
+    r1 Filter item
+    r2 LoadParquet web_sales
+    r3 LoadParquet web_returns
+    edge r1-r2: r1.i_item_sk = r2.ws_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
+    edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 22732.0 rows, 1844131 bytes
+    join r0 x r1+r2: 4543.8 rows, 368619 bytes
+    join r0+r1+r2 x r3: 4543.8 rows, 404970 bytes
+    C_out 2617720 bytes, the plan's order 2617720
   join order MJ5: 4 relations
     r0 MemorySource p3
     r1 Filter item
     r2 LoadParquet catalog_sales
     r3 LoadParquet catalog_returns
     edge r1-r2: r1.i_item_sk = r2.cs_item_sk
+    edge r0-r2: r0.d_date_sk = r2.cs_sold_date_sk
     edge r2-r3: r2.cs_order_number = r3.cr_order_number and r2.cs_item_sk = r3.cr_item_sk, left
-    edge r0-r1+r2: r0.d_date_sk = r2.cs_sold_date_sk
-    priced 5 sets
-    DPhyp (r0 ((r1 r2) r3))
-    oriented (r0 ((r1 r2) r3)), build first
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
     join r1 x r2: 49034.6 rows, 3977930 bytes
-    join r1+r2 x r3: 4900.5 rows, 436755 bytes
-    join r0 x r1+r2+r3: 975.8 rows, 86968 bytes
-    C_out 4501653 bytes, the plan's order 4501653
+    join r0 x r1+r2: 9764.0 rows, 792103 bytes
+    join r0+r1+r2 x r3: 9764.0 rows, 870215 bytes
+    C_out 5640248 bytes, the plan's order 5640248
   join order MJ6: 4 relations
     r0 MemorySource p4
     r1 Filter item
     r2 LoadParquet store_sales
     r3 LoadParquet store_returns
     edge r1-r2: r1.i_item_sk = r2.ss_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
     edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
-    edge r0-r1+r2: r0.d_date_sk = r2.ss_sold_date_sk
-    priced 5 sets
-    DPhyp (r0 ((r1 r2) r3))
-    oriented (r0 ((r1 r2) r3)), build first
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
     join r1 x r2: 66696.7 rows, 5410769 bytes
-    join r1+r2 x r3: 6665.7 rows, 594076 bytes
-    join r0 x r1+r2+r3: 1332.4 rows, 118749 bytes
-    C_out 6123594 bytes, the plan's order 6123594
+    join r0 x r1+r2: 13331.8 rows, 1081546 bytes
+    join r0+r1+r2 x r3: 13331.8 rows, 1188201 bytes
+    C_out 7680516 bytes, the plan's order 7680516
   join order MJ7: 4 relations
     r0 MemorySource p5
     r1 Filter item
     r2 LoadParquet web_sales
     r3 LoadParquet web_returns
     edge r1-r2: r1.i_item_sk = r2.ws_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
     edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
-    edge r0-r1+r2: r0.d_date_sk = r2.ws_sold_date_sk
-    priced 5 sets
-    DPhyp (r0 ((r1 r2) r3))
-    oriented (r0 ((r1 r2) r3)), build first
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
     join r1 x r2: 24517.3 rows, 1988965 bytes
-    join r1+r2 x r3: 2442.0 rows, 217646 bytes
-    join r0 x r1+r2+r3: 488.1 rows, 43505 bytes
-    C_out 2250117 bytes, the plan's order 2250117
-replan 2: a build of 883 rows against 2796.3 estimated (q-error 3.17) for GpuHashJoin on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)]
-  kept m7 (883 rows)
+    join r0 x r1+r2: 4900.7 rows, 397570 bytes
+    join r0+r1+r2 x r3: 4900.7 rows, 436775 bytes
+    C_out 2823310 bytes, the plan's order 2823310
+replan 2: a build of 28074 rows against 9764.0 estimated (q-error 2.88) for GpuHashJoin on=[(cs_order_number@7, cr_order_number@1), (cs_item_sk@8, cr_item_sk@0)]
+  kept m7 (28074 rows)
   join order MJ1: 2 relations
-    r0 MemorySource m7
-    r1 MemorySource m6
+    r0 AggregateBatches m7,catalog_returns,p4,item,store_sales,store_returns,p5,web_sales,web_returns
+    r1 AggregateBatches m6,catalog_returns,p1,item,store_sales,store_returns,p2,web_sales,web_returns
     edge r0-r1: r0.i_brand_id = r1.i_brand_id and r0.i_class_id = r1.i_class_id and r0.i_category_id = r1.i_category_id and r0.i_manufact_id = r1.i_manufact_id
     priced 1 sets
     DPhyp (r0 r1)
-    oriented (r1 r0), build first
-    join r1 x r0: 171.6 rows, 16688 bytes
-    C_out 16688 bytes, the plan's order 16688
-    flipped: r1 builds, r0 probes
+    oriented (r0 r1), build first
+    join r0 x r1: 9261.3 rows, 900663 bytes
+    C_out 900663 bytes, the plan's order 900663
+  join order MJ5: 2 relations
+    r0 MemorySource m7
+    r1 LoadParquet catalog_returns
+    edge r0-r1: r0.cs_order_number = r1.cr_order_number and r0.cs_item_sk = r1.cr_item_sk, left
+    priced 1 sets
+    DPhyp (r0 r1)
+    oriented (r0 r1), build first
+    join r0 x r1: 28074.0 rows, 2502095 bytes
+    C_out 2502095 bytes, the plan's order 2502095
+  join order MJ6: 4 relations
+    r0 MemorySource p4
+    r1 Filter item
+    r2 LoadParquet store_sales
+    r3 LoadParquet store_returns
+    edge r1-r2: r1.i_item_sk = r2.ss_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
+    edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 66696.7 rows, 5410769 bytes
+    join r0 x r1+r2: 13331.8 rows, 1081546 bytes
+    join r0+r1+r2 x r3: 13331.8 rows, 1188201 bytes
+    C_out 7680516 bytes, the plan's order 7680516
+  join order MJ7: 4 relations
+    r0 MemorySource p5
+    r1 Filter item
+    r2 LoadParquet web_sales
+    r3 LoadParquet web_returns
+    edge r1-r2: r1.i_item_sk = r2.ws_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
+    edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 24517.3 rows, 1988965 bytes
+    join r0 x r1+r2: 4900.7 rows, 397570 bytes
+    join r0+r1+r2 x r3: 4900.7 rows, 436775 bytes
+    C_out 2823310 bytes, the plan's order 2823310
+  join order MJ2: 2 relations
+    r0 MemorySource m6
+    r1 LoadParquet catalog_returns
+    edge r0-r1: r0.cs_order_number = r1.cr_order_number and r0.cs_item_sk = r1.cr_item_sk, left
+    priced 1 sets
+    DPhyp (r0 r1)
+    oriented (r0 r1), build first
+    join r0 x r1: 27388.0 rows, 2440956 bytes
+    C_out 2440956 bytes, the plan's order 2440956
+  join order MJ3: 4 relations
+    r0 MemorySource p1
+    r1 Filter item
+    r2 LoadParquet store_sales
+    r3 LoadParquet store_returns
+    edge r1-r2: r1.i_item_sk = r2.ss_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
+    edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 78955.3 rows, 6405251 bytes
+    join r0 x r1+r2: 15782.2 rows, 1280331 bytes
+    join r0+r1+r2 x r3: 15782.2 rows, 1406589 bytes
+    C_out 9092171 bytes, the plan's order 9092171
+  join order MJ4: 4 relations
+    r0 MemorySource p2
+    r1 Filter item
+    r2 LoadParquet web_sales
+    r3 LoadParquet web_returns
+    edge r1-r2: r1.i_item_sk = r2.ws_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
+    edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 22732.0 rows, 1844131 bytes
+    join r0 x r1+r2: 4543.8 rows, 368619 bytes
+    join r0+r1+r2 x r3: 4543.8 rows, 404970 bytes
+    C_out 2617720 bytes, the plan's order 2617720
+replan 3: a build of 883 rows against 46306.6 estimated (q-error 52.44) for GpuHashJoin on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)]
+  kept m8 (883 rows)
+  join order MJ1: 2 relations
+    r0 MemorySource m8
+    r1 AggregateBatches m6,catalog_returns,p1,item,store_sales,store_returns,p2,web_sales,web_returns
+    edge r0-r1: r0.i_brand_id = r1.i_brand_id and r0.i_class_id = r1.i_class_id and r0.i_category_id = r1.i_category_id and r0.i_manufact_id = r1.i_manufact_id
+    priced 1 sets
+    DPhyp (r0 r1)
+    oriented (r0 r1), build first
+    join r0 x r1: 176.6 rows, 17174 bytes
+    C_out 17174 bytes, the plan's order 17174
+  join order MJ2: 2 relations
+    r0 MemorySource m6
+    r1 LoadParquet catalog_returns
+    edge r0-r1: r0.cs_order_number = r1.cr_order_number and r0.cs_item_sk = r1.cr_item_sk, left
+    priced 1 sets
+    DPhyp (r0 r1)
+    oriented (r0 r1), build first
+    join r0 x r1: 27388.0 rows, 2440956 bytes
+    C_out 2440956 bytes, the plan's order 2440956
+  join order MJ3: 4 relations
+    r0 MemorySource p1
+    r1 Filter item
+    r2 LoadParquet store_sales
+    r3 LoadParquet store_returns
+    edge r1-r2: r1.i_item_sk = r2.ss_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ss_sold_date_sk
+    edge r2-r3: r2.ss_ticket_number = r3.sr_ticket_number and r2.ss_item_sk = r3.sr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 78955.3 rows, 6405251 bytes
+    join r0 x r1+r2: 15782.2 rows, 1280331 bytes
+    join r0+r1+r2 x r3: 15782.2 rows, 1406589 bytes
+    C_out 9092171 bytes, the plan's order 9092171
+  join order MJ4: 4 relations
+    r0 MemorySource p2
+    r1 Filter item
+    r2 LoadParquet web_sales
+    r3 LoadParquet web_returns
+    edge r1-r2: r1.i_item_sk = r2.ws_item_sk
+    edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
+    edge r2-r3: r2.ws_order_number = r3.wr_order_number and r2.ws_item_sk = r3.wr_item_sk, left
+    priced 7 sets
+    DPhyp ((r0 (r1 r2)) r3)
+    oriented ((r0 (r1 r2)) r3), build first
+    join r1 x r2: 22732.0 rows, 1844131 bytes
+    join r0 x r1+r2: 4543.8 rows, 368619 bytes
+    join r0+r1+r2 x r3: 4543.8 rows, 404970 bytes
+    C_out 2617720 bytes, the plan's order 2617720
+replan refused: a build of 53812 rows against 13331.8 estimated (q-error 4.04) for GpuHashJoin on=[(ss_ticket_number@7, sr_ticket_number@1), (ss_item_sk@8, sr_item_sk@0)]
+replan refused: a build of 14416 rows against 4900.7 estimated (q-error 2.94) for GpuHashJoin on=[(ws_order_number@7, wr_order_number@1), (ws_item_sk@8, wr_item_sk@0)]
+replan refused: a build of 52823 rows against 15782.2 estimated (q-error 3.35) for GpuHashJoin on=[(ss_ticket_number@7, sr_ticket_number@1), (ss_item_sk@8, sr_item_sk@0)]
+replan refused: a build of 13736 rows against 4543.8 estimated (q-error 3.02) for GpuHashJoin on=[(ws_order_number@7, wr_order_number@1), (ws_item_sk@8, wr_item_sk@0)]
 plan diff
 --- before
 +++ after
-@@ -2,181 +2,6 @@
+@@ -2,181 +2,63 @@
    GpuMergeSortedPartitions: by=[sales_cnt_diff@8 asc nulls_last, sales_amt_diff@9 asc nulls_last], fetch=100, lanes=1, batches=single, sorted_on=[sales_cnt_diff@8 asc nulls_last, sales_amt_diff@9 asc nulls_last], schema=[prev_year:Int64, year_:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, prev_yr_cnt:Int64, curr_yr_cnt:Int64, sales_cnt_diff:Int64, sales_amt_diff:Decimal128(38,15)]
      GpuSort: by=[sales_cnt_diff@8 asc nulls_last, sales_amt_diff@9 asc nulls_last], fetch=100, lanes=4, batches=multiple, hashed_on=[i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5], sorted_on=[sales_cnt_diff@8 asc nulls_last, sales_amt_diff@9 asc nulls_last], schema=[prev_year:Int64, year_:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, prev_yr_cnt:Int64, curr_yr_cnt:Int64, sales_cnt_diff:Int64, sales_amt_diff:Decimal128(38,15)]
        GpuProject: exprs=[d_year@7 as prev_year, d_year@0 as year_, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@8 as prev_yr_cnt, sales_cnt@5 as curr_yr_cnt, sales_cnt@5 - sales_cnt@8 as sales_cnt_diff, sales_amt@6 - sales_amt@9 as sales_amt_diff], lanes=4, batches=multiple, hashed_on=[i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5], schema=[prev_year:Int64, year_:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, prev_yr_cnt:Int64, curr_yr_cnt:Int64, sales_cnt_diff:Int64, sales_amt_diff:Decimal128(38,15)]
@@ -13643,9 +13780,66 @@ plan diff
 -                                                                    GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_item_sk@3, ws_order_number@17, ws_quantity@18, ws_ext_sales_price@23], partition_groups=[[[0]],[[1],[2]],[[3]],[[4],[5]]], lanes=4, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_order_number:Int64, ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2)]
 -                                              GpuEmitPartitions: hash=[wr_order_number@1, wr_item_sk@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@1, wr_item_sk@0], schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_quantity:Int64, wr_return_amt:Decimal128(7,2)]
 -                                                GpuLoadParquet: table=web_returns, projections=[wr_item_sk@2, wr_order_number@13, wr_return_quantity@14, wr_return_amt@15], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_quantity:Int64, wr_return_amt:Decimal128(7,2)]
-+        GpuHashJoin: join_type=Inner, on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)], filter=(CAST(sum(sales_detail.sales_cnt)@build:5 AS Decimal128(17,2)) / CAST(sum(sales_detail.sales_cnt)@probe:5 AS Decimal128(17,2))) < 0.900000, projection=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6, d_year@7, sum(sales_detail.sales_cnt)@12, sum(sales_detail.sales_amt)@13], lanes=4, batches=multiple, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(38,15), d_year:Int64, sales_cnt:Int64, sales_amt:Decimal128(38,15)]
-+          GpuMemorySource: name=m6, lanes=4, batches=single, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
-+          GpuMemorySource: name=m7, lanes=4, batches=single, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++        GpuHashJoin: join_type=Inner, on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)], filter=(CAST(sum(sales_detail.sales_cnt)@probe:5 AS Decimal128(17,2)) / CAST(sum(sales_detail.sales_cnt)@build:5 AS Decimal128(17,2))) < 0.900000, projection=[d_year@7, i_brand_id@8, i_class_id@9, i_category_id@10, i_manufact_id@11, sum(sales_detail.sales_cnt)@12, sum(sales_detail.sales_amt)@13, d_year@0, sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6], lanes=4, batches=multiple, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(38,15), d_year:Int64, sales_cnt:Int64, sales_amt:Decimal128(38,15)]
++          GpuMemorySource: name=m8, lanes=4, batches=single, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++          GpuEmitPartitions: hash=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], lanes=4, batches=multiple, hashed_on=[i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++            GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++              GpuMergePartitions: lanes=1, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], aggs=[sum(sum(sales_detail.sales_cnt)@5) as sum(sales_detail.sales_cnt), sum(sum(sales_detail.sales_amt)@6) as sum(sales_detail.sales_amt)], final=[sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6], lanes=4, batches=single, hashed_on=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                  GpuEmitPartitions: hash=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], lanes=4, batches=multiple, hashed_on=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                      GpuMergePartitions: lanes=1, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                        GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], aggs=[sum(sales_cnt@5) as sum(sales_detail.sales_cnt), sum(sales_amt@6) as sum(sales_detail.sales_amt)], lanes=4, batches=single, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sum(sales_detail.sales_cnt):Int64, sum(sales_detail.sales_amt):Decimal128(38,15)]
++                          GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], final=[], lanes=4, batches=single, hashed_on=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                            GpuEmitPartitions: hash=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], lanes=4, batches=multiple, hashed_on=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                GpuMergePartitions: lanes=1, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                  GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=12, batches=single, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                    GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=12, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                      GpuUnion: lanes=12, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                        GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, cs_quantity@0 - coalesce(cr_return_quantity@7, 0) as sales_cnt, cs_ext_sales_price@1 - coalesce(CAST(cr_return_amount@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=4, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                          GpuHashJoin: join_type=Left, on=[(cs_order_number@7, cr_order_number@1), (cs_item_sk@8, cr_item_sk@0)], projection=[cs_quantity@0, cs_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, cr_return_quantity@11, cr_return_amount@12], lanes=4, batches=multiple, schema=[cs_quantity:Int64, cs_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, cr_return_quantity:Int64, cr_return_amount:Decimal128(7,2)]
++                                            GpuMemorySource: name=m6, lanes=4, batches=single, hashed_on=[cs_order_number@7, cs_item_sk@8], schema=[cs_quantity:Int64, cs_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, cs_order_number:Int64, cs_item_sk:Int64]
++                                            GpuEmitPartitions: hash=[cr_order_number@1, cr_item_sk@0], lanes=4, batches=multiple, hashed_on=[cr_order_number@1, cr_item_sk@0], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_quantity:Int64, cr_return_amount:Decimal128(7,2)]
++                                              GpuLoadParquet: table=catalog_returns, projections=[cr_item_sk@2, cr_order_number@16, cr_return_quantity@17, cr_return_amount@18], partition_groups=[[[0],[1]]], lanes=1, batches=multiple, schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_quantity:Int64, cr_return_amount:Decimal128(7,2)]
++                                        GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ss_quantity@0 - coalesce(sr_return_quantity@7, 0) as sales_cnt, ss_ext_sales_price@1 - coalesce(CAST(sr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=4, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                          GpuHashJoin: join_type=Left, on=[(ss_ticket_number@7, sr_ticket_number@1), (ss_item_sk@8, sr_item_sk@0)], projection=[ss_quantity@0, ss_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, sr_return_quantity@11, sr_return_amt@12], lanes=4, batches=multiple, schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, sr_return_quantity:Int64, sr_return_amt:Decimal128(7,2)]
++                                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ss_ticket_number@7, ss_item_sk@8], schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ss_ticket_number:Int64, ss_item_sk:Int64]
++                                              GpuEmitPartitions: hash=[ss_ticket_number@7, ss_item_sk@8], lanes=4, batches=multiple, hashed_on=[ss_ticket_number@7, ss_item_sk@8], schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ss_ticket_number:Int64, ss_item_sk:Int64]
++                                                GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ss_ticket_number:Int64, ss_item_sk:Int64]
++                                                  GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@8)], projection=[ss_quantity@2, ss_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, ss_ticket_number@8, ss_item_sk@9], lanes=4, batches=multiple, schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ss_ticket_number:Int64, ss_item_sk:Int64]
++                                                    GpuMemorySource: name=p1, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64, d_year:Int64]
++                                                    GpuEmitPartitions: hash=[ss_sold_date_sk@8], lanes=4, batches=multiple, hashed_on=[ss_sold_date_sk@8], schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ss_ticket_number:Int64, ss_item_sk:Int64, ss_sold_date_sk:Int64]
++                                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ss_ticket_number:Int64, ss_item_sk:Int64, ss_sold_date_sk:Int64]
++                                                        GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@1)], projection=[ss_quantity@8, ss_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ss_ticket_number@7, ss_item_sk@6, ss_sold_date_sk@5], lanes=4, batches=multiple, hashed_on=[ss_item_sk@7], schema=[ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ss_ticket_number:Int64, ss_item_sk:Int64, ss_sold_date_sk:Int64]
++                                                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                            GpuEmitPartitions: hash=[i_item_sk@0], lanes=4, batches=multiple, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                              GpuFilter: predicate=i_category@4 = Books, projection=[i_item_sk@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@5], lanes=1, batches=multiple, schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                                GpuLoadParquet: table=item, projections=[i_item_sk@0, i_brand_id@7, i_class_id@9, i_category_id@11, i_category@12, i_manufact_id@13], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_category:Utf8, i_manufact_id:Int64]
++                                                          GpuEmitPartitions: hash=[ss_item_sk@1], lanes=4, batches=multiple, hashed_on=[ss_item_sk@1], schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_ticket_number:Int64, ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2)]
++                                                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_ticket_number:Int64, ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2)]
++                                                              GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_item_sk@2, ss_ticket_number@9, ss_quantity@10, ss_ext_sales_price@15], partition_groups=[[[17],[18]],[[19]],[[20],[21]],[[22],[23]]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_ticket_number:Int64, ss_quantity:Int64, ss_ext_sales_price:Decimal128(7,2)]
++                                            GpuEmitPartitions: hash=[sr_ticket_number@1, sr_item_sk@0], lanes=4, batches=multiple, hashed_on=[sr_ticket_number@1, sr_item_sk@0], schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_quantity:Int64, sr_return_amt:Decimal128(7,2)]
++                                              GpuLoadParquet: table=store_returns, projections=[sr_item_sk@2, sr_ticket_number@9, sr_return_quantity@10, sr_return_amt@11], partition_groups=[[[0],[1],[2]]], lanes=1, batches=multiple, schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_quantity:Int64, sr_return_amt:Decimal128(7,2)]
++                                        GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ws_quantity@0 - coalesce(wr_return_quantity@7, 0) as sales_cnt, ws_ext_sales_price@1 - coalesce(CAST(wr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=4, batches=multiple, schema=[d_year:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, sales_cnt:Int64, sales_amt:Decimal128(31,15)]
++                                          GpuHashJoin: join_type=Left, on=[(ws_order_number@7, wr_order_number@1), (ws_item_sk@8, wr_item_sk@0)], projection=[ws_quantity@0, ws_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, wr_return_quantity@11, wr_return_amt@12], lanes=4, batches=multiple, schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, wr_return_quantity:Int64, wr_return_amt:Decimal128(7,2)]
++                                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@7, ws_item_sk@8], schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ws_order_number:Int64, ws_item_sk:Int64]
++                                              GpuEmitPartitions: hash=[ws_order_number@7, ws_item_sk@8], lanes=4, batches=multiple, hashed_on=[ws_order_number@7, ws_item_sk@8], schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ws_order_number:Int64, ws_item_sk:Int64]
++                                                GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ws_order_number:Int64, ws_item_sk:Int64]
++                                                  GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@8)], projection=[ws_quantity@2, ws_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, ws_order_number@8, ws_item_sk@9], lanes=4, batches=multiple, schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, d_year:Int64, ws_order_number:Int64, ws_item_sk:Int64]
++                                                    GpuMemorySource: name=p2, lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64, d_year:Int64]
++                                                    GpuEmitPartitions: hash=[ws_sold_date_sk@8], lanes=4, batches=multiple, hashed_on=[ws_sold_date_sk@8], schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ws_order_number:Int64, ws_item_sk:Int64, ws_sold_date_sk:Int64]
++                                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ws_order_number:Int64, ws_item_sk:Int64, ws_sold_date_sk:Int64]
++                                                        GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ws_item_sk@1)], projection=[ws_quantity@8, ws_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ws_order_number@7, ws_item_sk@6, ws_sold_date_sk@5], lanes=4, batches=multiple, hashed_on=[ws_item_sk@7], schema=[ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2), i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64, ws_order_number:Int64, ws_item_sk:Int64, ws_sold_date_sk:Int64]
++                                                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                            GpuEmitPartitions: hash=[i_item_sk@0], lanes=4, batches=multiple, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                              GpuFilter: predicate=i_category@4 = Books, projection=[i_item_sk@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@5], lanes=1, batches=multiple, schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_manufact_id:Int64]
++                                                                GpuLoadParquet: table=item, projections=[i_item_sk@0, i_brand_id@7, i_class_id@9, i_category_id@11, i_category@12, i_manufact_id@13], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[i_item_sk:Int64, i_brand_id:Int64, i_class_id:Int64, i_category_id:Int64, i_category:Utf8, i_manufact_id:Int64]
++                                                          GpuEmitPartitions: hash=[ws_item_sk@1], lanes=4, batches=multiple, hashed_on=[ws_item_sk@1], schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_order_number:Int64, ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2)]
++                                                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_order_number:Int64, ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2)]
++                                                              GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_item_sk@3, ws_order_number@17, ws_quantity@18, ws_ext_sales_price@23], partition_groups=[[[4]],[[5]],[],[]], lanes=4, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_order_number:Int64, ws_quantity:Int64, ws_ext_sales_price:Decimal128(7,2)]
++                                            GpuEmitPartitions: hash=[wr_order_number@1, wr_item_sk@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@1, wr_item_sk@0], schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_quantity:Int64, wr_return_amt:Decimal128(7,2)]
++                                              GpuLoadParquet: table=web_returns, projections=[wr_item_sk@2, wr_order_number@13, wr_return_quantity@14, wr_return_amt@15], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_quantity:Int64, wr_return_amt:Decimal128(7,2)]
 == q76
 join order MJ1: 3 relations
   r0 LoadParquet date_dim
@@ -14341,14 +14535,14 @@ join order MJ1: 6 relations
   edge r1-r5: r1.i_item_sk = r5.ss_item_sk
   edge r0-r5: r0.p_promo_sk = r5.ss_promo_sk
   priced 31 sets
-  DPhyp ((r0 (r1 ((r3 r5) r4))) r2)
-  oriented (r2 (r0 ((r4 (r3 r5)) r1))), build first
+  DPhyp (((r0 (r1 (r3 r5))) r2) r4)
+  oriented (r4 (r2 (r0 ((r3 r5) r1)))), build first
   join r3 x r5: 48899.9 rows, 3166272 bytes
-  join r4 x r3+r5: 4887.1 rows, 434337 bytes
-  join r3+r4+r5 x r1: 2438.5 rows, 196906 bytes
-  join r0 x r1+r3+r4+r5: 2389.7 rows, 173551 bytes
-  join r2 x r0+r1+r3+r4+r5: 2389.7 rows, 202228 bytes
-  C_out 4173293 bytes, the plan's order 280754901
+  join r3+r5 x r1: 24399.3 rows, 1579855 bytes
+  join r0 x r1+r3+r5: 23911.3 rows, 1353978 bytes
+  join r2 x r0+r1+r3+r5: 23911.3 rows, 1640914 bytes
+  join r4 x r0+r1+r2+r3+r5: 23911.3 rows, 2023495 bytes
+  C_out 9764513 bytes, the plan's order 292964482
 join order MJ2: 6 relations
   r0 Filter promotion
   r1 Filter item
@@ -14362,14 +14556,14 @@ join order MJ2: 6 relations
   edge r1-r5: r1.i_item_sk = r5.cs_item_sk
   edge r0-r5: r0.p_promo_sk = r5.cs_promo_sk
   priced 31 sets
-  DPhyp ((r0 (r1 ((r3 r5) r4))) r2)
-  oriented ((r0 ((r4 (r3 r5)) r1)) r2), build first
+  DPhyp (((r0 (r1 (r3 r5))) r2) r4)
+  oriented (r4 ((r0 ((r3 r5) r1)) r2)), build first
   join r3 x r5: 24379.4 rows, 1578564 bytes
-  join r4 x r3+r5: 2436.5 rows, 216540 bytes
-  join r3+r4+r5 x r1: 1215.7 rows, 98168 bytes
-  join r0 x r1+r3+r4+r5: 1191.4 rows, 86524 bytes
-  join r0+r1+r3+r4+r5 x r2: 1191.4 rows, 100821 bytes
-  C_out 2080617 bytes, the plan's order 140506050
+  join r3+r5 x r1: 12164.4 rows, 787646 bytes
+  join r0 x r1+r3+r5: 11921.1 rows, 675034 bytes
+  join r0+r1+r3+r5 x r2: 11921.1 rows, 818088 bytes
+  join r4 x r0+r1+r2+r3+r5: 11921.1 rows, 1008826 bytes
+  C_out 4868157 bytes, the plan's order 146593216
 join order MJ3: 6 relations
   r0 Filter promotion
   r1 Filter item
@@ -14383,139 +14577,19 @@ join order MJ3: 6 relations
   edge r1-r5: r1.i_item_sk = r5.ws_item_sk
   edge r0-r5: r0.p_promo_sk = r5.ws_promo_sk
   priced 31 sets
-  DPhyp ((r0 (r1 ((r3 r5) r4))) r2)
-  oriented (r2 (r0 ((r4 (r3 r5)) r1))), build first
+  DPhyp (((r0 (r1 (r3 r5))) r2) r4)
+  oriented (r4 (r2 (r0 ((r3 r5) r1)))), build first
   join r3 x r5: 12212.8 rows, 790780 bytes
-  join r4 x r3+r5: 1216.5 rows, 108112 bytes
-  join r3+r4+r5 x r1: 607.0 rows, 49013 bytes
-  join r0 x r1+r3+r4+r5: 594.8 rows, 43199 bytes
-  join r2 x r0+r1+r3+r4+r5: 594.8 rows, 50337 bytes
-  C_out 1041441 bytes, the plan's order 70117703
-replan 1: a build of 63241 rows against 4887.1 estimated (q-error 12.94) for GpuHashJoin on=[(ss_item_sk@6, i_item_sk@0)]
-  kept m0 (30 rows), m1 (294 rows), m2 (71654 rows), m3 (294 rows), m4 (144067 rows), m5 (12 rows), m6 (294 rows), m7 (63241 rows)
-  join order MJ1: 4 relations
-    r0 MemorySource m5
-    r1 MemorySource m6
-    r2 MemorySource m7
-    r3 Filter item
-    edge r2-r3: r2.ss_item_sk = r3.i_item_sk
-    edge r1-r2: r1.p_promo_sk = r2.ss_promo_sk
-    edge r0-r2: r0.s_store_sk = r2.ss_store_sk
-    priced 7 sets
-    DPhyp (r0 (r1 (r2 r3)))
-    oriented (r0 (r1 (r3 r2))), build first
-    join r3 x r2: 31555.0 rows, 2548063 bytes
-    join r1 x r2+r3: 30923.9 rows, 2245846 bytes
-    join r0 x r1+r2+r3: 30923.9 rows, 2616932 bytes
-    C_out 7410841 bytes, the plan's order 7410841
-    flipped: r3 builds, r2 probes
-  join order MJ2: 6 relations
-    r0 MemorySource m3
-    r1 MemorySource m4
-    r2 Filter date_dim
-    r3 LoadParquet catalog_sales
-    r4 Filter item
-    r5 LoadParquet catalog_page
-    edge r2-r3: r2.d_date_sk = r3.cs_sold_date_sk
-    edge r3-r1: r3.cs_item_sk = r1.cr_item_sk and r3.cs_order_number = r1.cr_order_number, left
-    edge r2+r3-r4: r3.cs_item_sk = r4.i_item_sk
-    edge r0-r2+r3: r0.p_promo_sk = r3.cs_promo_sk
-    edge r2+r3-r5: r3.cs_catalog_page_sk = r5.cp_catalog_page_sk
-    priced 17 sets
-    DPhyp (((r0 ((r2 r3) r4)) r1) r5)
-    oriented ((r1 (r0 ((r2 r3) r4))) r5), build first
-    join r2 x r3: 24379.4 rows, 1578564 bytes
-    join r2+r3 x r4: 12164.4 rows, 787646 bytes
-    join r0 x r2+r3+r4: 11921.1 rows, 675034 bytes
-    join r1 x r0+r2+r3+r4: 1191.4 rows, 86524 bytes
-    join r0+r1+r2+r3+r4 x r5: 1191.4 rows, 100821 bytes
-    C_out 3228590 bytes, the plan's order 4914902
-  join order MJ3: 6 relations
-    r0 MemorySource m0
-    r1 MemorySource m1
-    r2 MemorySource m2
-    r3 Filter date_dim
-    r4 LoadParquet web_sales
-    r5 Filter item
-    edge r3-r4: r3.d_date_sk = r4.ws_sold_date_sk
-    edge r4-r2: r4.ws_item_sk = r2.wr_item_sk and r4.ws_order_number = r2.wr_order_number, left
-    edge r3+r4-r5: r4.ws_item_sk = r5.i_item_sk
-    edge r1-r3+r4: r1.p_promo_sk = r4.ws_promo_sk
-    edge r0-r3+r4: r0.web_site_sk = r4.ws_web_site_sk
-    priced 17 sets
-    DPhyp (r0 ((r1 ((r3 r4) r5)) r2))
-    oriented ((r2 (r1 ((r3 r4) r5))) r0), build first
-    join r3 x r4: 12212.8 rows, 790780 bytes
-    join r3+r4 x r5: 6093.8 rows, 394570 bytes
-    join r1 x r3+r4+r5: 5971.9 rows, 338157 bytes
-    join r2 x r1+r3+r4+r5: 594.8 rows, 43199 bytes
-    join r1+r2+r3+r4+r5 x r0: 594.8 rows, 50337 bytes
-    C_out 1617044 bytes, the plan's order 2461800
-    flipped: r1+r2+r3+r4+r5 builds, r0 probes
-replan 2: a build of 1055 rows against 8981.3 estimated (q-error 8.51) for GpuHashJoin on=[(i_item_sk@0, ss_item_sk@6)]
-  kept m8 (1055 rows)
-  join order MJ1: 4 relations
-    r0 MemorySource m5
-    r1 MemorySource m6
-    r2 MemorySource m8
-    r3 MemorySource m7
-    edge r2-r3: r2.i_item_sk = r3.ss_item_sk
-    edge r1-r3: r1.p_promo_sk = r3.ss_promo_sk
-    edge r0-r3: r0.s_store_sk = r3.ss_store_sk
-    priced 7 sets
-    DPhyp (r0 (r1 (r2 r3)))
-    oriented (r0 (r1 (r2 r3))), build first
-    join r2 x r3: 3706.6 rows, 299310 bytes
-    join r1 x r2+r3: 3632.5 rows, 263810 bytes
-    join r0 x r1+r2+r3: 3632.5 rows, 307400 bytes
-    C_out 870519 bytes, the plan's order 870519
-  join order MJ2: 6 relations
-    r0 MemorySource m4
-    r1 MemorySource m3
-    r2 Filter date_dim
-    r3 LoadParquet catalog_sales
-    r4 Filter item
-    r5 LoadParquet catalog_page
-    edge r2-r3: r2.d_date_sk = r3.cs_sold_date_sk
-    edge r3-r4: r3.cs_item_sk = r4.i_item_sk
-    edge r1-r3: r1.p_promo_sk = r3.cs_promo_sk
-    edge r3-r0: r3.cs_item_sk = r0.cr_item_sk and r3.cs_order_number = r0.cr_order_number, left
-    edge r1+r2+r3+r4-r5: r3.cs_catalog_page_sk = r5.cp_catalog_page_sk
-    priced 17 sets
-    DPhyp (r0 ((r1 ((r2 r3) r4)) r5))
-    oriented (r0 ((r1 ((r2 r3) r4)) r5)), build first
-    join r2 x r3: 24379.4 rows, 1578564 bytes
-    join r2+r3 x r4: 12164.4 rows, 787646 bytes
-    join r1 x r2+r3+r4: 11921.1 rows, 675034 bytes
-    join r1+r2+r3+r4 x r5: 11921.1 rows, 818088 bytes
-    join r0 x r1+r2+r3+r4+r5: 11921.1 rows, 1008826 bytes
-    C_out 4868157 bytes, the plan's order 4915842
-  join order MJ3: 6 relations
-    r0 MemorySource m2
-    r1 MemorySource m1
-    r2 Filter date_dim
-    r3 LoadParquet web_sales
-    r4 Filter item
-    r5 MemorySource m0
-    edge r2-r3: r2.d_date_sk = r3.ws_sold_date_sk
-    edge r3-r4: r3.ws_item_sk = r4.i_item_sk
-    edge r1-r3: r1.p_promo_sk = r3.ws_promo_sk
-    edge r3-r0: r3.ws_item_sk = r0.wr_item_sk and r3.ws_order_number = r0.wr_order_number, left
-    edge r1+r2+r3+r4-r5: r3.ws_web_site_sk = r5.web_site_sk
-    priced 17 sets
-    DPhyp (r0 ((r1 ((r2 r3) r4)) r5))
-    oriented (r0 (r5 (r1 ((r2 r3) r4)))), build first
-    join r2 x r3: 12212.8 rows, 790780 bytes
-    join r2+r3 x r4: 6093.8 rows, 394570 bytes
-    join r1 x r2+r3+r4: 5971.9 rows, 338157 bytes
-    join r5 x r1+r2+r3+r4: 5971.9 rows, 409820 bytes
-    join r0 x r1+r2+r3+r4+r5: 5971.9 rows, 505370 bytes
-    C_out 2438698 bytes, the plan's order 2462585
+  join r3+r5 x r1: 6093.8 rows, 394570 bytes
+  join r0 x r1+r3+r5: 5971.9 rows, 338157 bytes
+  join r2 x r0+r1+r3+r5: 5971.9 rows, 409820 bytes
+  join r4 x r0+r1+r2+r3+r5: 5971.9 rows, 505370 bytes
+  C_out 2438698 bytes, the plan's order 73168195
 replan refused: a build of 1770 rows against 11921.1 estimated (q-error 6.74) for GpuHashJoin on=[(cs_catalog_page_sk@4, cp_catalog_page_sk@0)]
 plan diff
 --- before
 +++ after
-@@ -16,43 +16,17 @@
+@@ -16,43 +16,41 @@
                                GpuMergePartitions: lanes=1, batches=multiple, schema=[s_store_id:Utf8, sum(store_sales.ss_ext_sales_price):Decimal128(17,2), `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                  GpuAggregateBatches: group_by=[s_store_id@0], aggs=[sum(sum(store_sales.ss_ext_sales_price)@1) as sum(store_sales.ss_ext_sales_price), sum(`sum(coalesce(store_returns.sr_return_amt,Int64(0)))`@2) as `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`, sum(`sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`@3) as `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`], lanes=4, batches=single, schema=[s_store_id:Utf8, sum(store_sales.ss_ext_sales_price):Decimal128(17,2), `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                    GpuAggregate: group_by=[s_store_id@4], aggs=[sum(ss_ext_sales_price@0) as sum(store_sales.ss_ext_sales_price), sum(coalesce(CAST(sr_return_amt@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`, sum(ss_net_profit@1 - coalesce(CAST(sr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`], lanes=4, batches=multiple, schema=[s_store_id:Utf8, sum(store_sales.ss_ext_sales_price):Decimal128(17,2), `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`:Decimal128(33,2)]
@@ -14556,21 +14630,45 @@ plan diff
 -                                                                  GpuEmitPartitions: hash=[ss_item_sk@1, ss_ticket_number@4], lanes=4, batches=multiple, hashed_on=[ss_item_sk@1, ss_ticket_number@4], schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
 -                                                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
 -                                                                      GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_item_sk@2, ss_store_sk@7, ss_promo_sk@8, ss_ticket_number@9, ss_ext_sales_price@15, ss_net_profit@22], partition_groups=[[[0],[1],[2],[3],[4],[5]],[[6],[7],[8],[9],[10],[11]],[[12],[13],[14],[15],[16],[17]],[[18],[19],[20],[21],[22],[23]]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
-+                                    GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@4)], projection=[ss_ext_sales_price@2, ss_net_profit@3, sr_return_amt@4, sr_net_loss@5, s_store_id@1], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), s_store_id:Utf8]
-+                                      GpuMemorySource: name=m5, lanes=4, batches=single, hashed_on=[s_store_sk@0], schema=[s_store_sk:Int64, s_store_id:Utf8]
-+                                      GpuEmitPartitions: hash=[ss_store_sk@4], lanes=4, batches=multiple, hashed_on=[ss_store_sk@4], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64]
-+                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64]
-+                                          GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ss_promo_sk@5)], projection=[ss_ext_sales_price@1, ss_net_profit@2, sr_return_amt@3, sr_net_loss@4, ss_store_sk@5], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64]
-+                                            GpuMemorySource: name=m6, lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
-+                                            GpuEmitPartitions: hash=[ss_promo_sk@5], lanes=4, batches=multiple, hashed_on=[ss_promo_sk@5], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64, ss_promo_sk:Int64]
-+                                              GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64, ss_promo_sk:Int64]
-+                                                GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@6)], projection=[ss_ext_sales_price@1, ss_net_profit@2, sr_return_amt@3, sr_net_loss@4, ss_store_sk@5, ss_promo_sk@6], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64, ss_promo_sk:Int64]
-+                                                  GpuMemorySource: name=m8, lanes=4, batches=single, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64]
-+                                                  GpuMemorySource: name=m7, lanes=4, batches=single, hashed_on=[ss_item_sk@6], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), ss_store_sk:Int64, ss_promo_sk:Int64, ss_item_sk:Int64]
++                                    GpuHashJoin: join_type=Right, on=[(sr_item_sk@0, ss_item_sk@3), (sr_ticket_number@1, ss_ticket_number@4)], projection=[ss_ext_sales_price@4, ss_net_profit@5, sr_return_amt@2, sr_net_loss@3, s_store_id@6], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2), s_store_id:Utf8]
++                                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[sr_item_sk@0, sr_ticket_number@1], schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2)]
++                                        GpuEmitPartitions: hash=[sr_item_sk@0, sr_ticket_number@1], lanes=4, batches=multiple, hashed_on=[sr_item_sk@0, sr_ticket_number@1], schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2)]
++                                          GpuMergePartitions: lanes=1, batches=multiple, schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2)]
++                                            GpuLoadParquet: table=store_returns, projections=[sr_item_sk@2, sr_ticket_number@9, sr_return_amt@11, sr_net_loss@19], partition_groups=[[[0]],[[1]],[[2]],[]], lanes=4, batches=multiple, schema=[sr_item_sk:Int64, sr_ticket_number:Int64, sr_return_amt:Decimal128(7,2), sr_net_loss:Decimal128(7,2)]
++                                      GpuEmitPartitions: hash=[ss_item_sk@3, ss_ticket_number@4], lanes=4, batches=multiple, hashed_on=[ss_item_sk@3, ss_ticket_number@4], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), s_store_id:Utf8, ss_item_sk:Int64, ss_ticket_number:Int64]
++                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), s_store_id:Utf8, ss_item_sk:Int64, ss_ticket_number:Int64]
++                                          GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@4)], projection=[ss_ext_sales_price@2, ss_net_profit@3, s_store_id@1, ss_item_sk@4, ss_ticket_number@5], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), s_store_id:Utf8, ss_item_sk:Int64, ss_ticket_number:Int64]
++                                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_store_sk@0], schema=[s_store_sk:Int64, s_store_id:Utf8]
++                                              GpuEmitPartitions: hash=[s_store_sk@0], lanes=4, batches=multiple, hashed_on=[s_store_sk@0], schema=[s_store_sk:Int64, s_store_id:Utf8]
++                                                GpuLoadParquet: table=store, projections=[s_store_sk@0, s_store_id@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_store_sk:Int64, s_store_id:Utf8]
++                                            GpuEmitPartitions: hash=[ss_store_sk@4], lanes=4, batches=multiple, hashed_on=[ss_store_sk@4], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64]
++                                              GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64]
++                                                GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ss_promo_sk@5)], projection=[ss_ext_sales_price@1, ss_net_profit@2, ss_item_sk@3, ss_ticket_number@4, ss_store_sk@5], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64]
++                                                  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                    GpuEmitPartitions: hash=[p_promo_sk@0], lanes=4, batches=multiple, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                      GpuFilter: predicate=p_channel_tv@1 = N, projection=[p_promo_sk@0], lanes=1, batches=multiple, schema=[p_promo_sk:Int64]
++                                                        GpuLoadParquet: table=promotion, projections=[p_promo_sk@0, p_channel_tv@11], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[p_promo_sk:Int64, p_channel_tv:Utf8]
++                                                  GpuEmitPartitions: hash=[ss_promo_sk@5], lanes=4, batches=multiple, hashed_on=[ss_promo_sk@5], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                      GpuHashJoin: join_type=Inner, on=[(ss_item_sk@2, i_item_sk@0)], projection=[ss_ext_sales_price@0, ss_net_profit@1, ss_item_sk@2, ss_ticket_number@3, ss_store_sk@4, ss_promo_sk@5], lanes=4, batches=multiple, hashed_on=[ss_item_sk@2], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ss_item_sk@2], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                          GpuEmitPartitions: hash=[ss_item_sk@2], lanes=4, batches=multiple, hashed_on=[ss_item_sk@2], schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                              GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_ext_sales_price@6, ss_net_profit@7, ss_item_sk@2, ss_ticket_number@5, ss_store_sk@3, ss_promo_sk@4], lanes=4, batches=multiple, schema=[ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2), ss_item_sk:Int64, ss_ticket_number:Int64, ss_store_sk:Int64, ss_promo_sk:Int64]
++                                                                GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
++                                                                  GpuEmitPartitions: hash=[d_date_sk@0], lanes=4, batches=multiple, hashed_on=[d_date_sk@0], schema=[d_date_sk:Int64]
++                                                                    GpuFilter: predicate=(d_date@1 >= 2000-08-23) AND (d_date@1 <= 2000-09-22), projection=[d_date_sk@0], lanes=1, batches=multiple, schema=[d_date_sk:Int64]
++                                                                      GpuLoadParquet: table=date_dim, projections=[d_date_sk@0, d_date@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_date_sk:Int64, d_date:Date32]
++                                                                GpuEmitPartitions: hash=[ss_sold_date_sk@0], lanes=4, batches=multiple, hashed_on=[ss_sold_date_sk@0], schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
++                                                                  GpuMergePartitions: lanes=1, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
++                                                                    GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_item_sk@2, ss_store_sk@7, ss_promo_sk@8, ss_ticket_number@9, ss_ext_sales_price@15, ss_net_profit@22], partition_groups=[[[0],[1],[2],[3],[4],[5]],[[6],[7],[8],[9],[10],[11]],[[12],[13],[14],[15],[16],[17]],[[18],[19],[20],[21],[22],[23]]], lanes=4, batches=multiple, schema=[ss_sold_date_sk:Int64, ss_item_sk:Int64, ss_store_sk:Int64, ss_promo_sk:Int64, ss_ticket_number:Int64, ss_ext_sales_price:Decimal128(7,2), ss_net_profit:Decimal128(7,2)]
++                                                        GpuEmitPartitions: hash=[i_item_sk@0], lanes=4, batches=multiple, hashed_on=[i_item_sk@0], schema=[i_item_sk:Int64]
++                                                          GpuFilter: predicate=i_current_price@1 > 50.00, projection=[i_item_sk@0], lanes=1, batches=multiple, schema=[i_item_sk:Int64]
++                                                            GpuLoadParquet: table=item, projections=[i_item_sk@0, i_current_price@5], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[i_item_sk:Int64, i_current_price:Decimal128(7,2)]
                      GpuProject: exprs=[`catalog channel` as channel, concat(catalog_page, catalog_page_id@0) as id, sales@1, returns_@2, profit@3], lanes=4, batches=single, schema=[channel:Utf8, id:Utf8, sales:Decimal128(17,2), returns_:Decimal128(32,2), profit:Decimal128(33,2)]
                        GpuProject: exprs=[cp_catalog_page_id@0 as catalog_page_id, sum(catalog_sales.cs_ext_sales_price)@1 as sales, `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`@2 as returns_, `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`@3 as profit], lanes=4, batches=single, hashed_on=[catalog_page_id@0], schema=[catalog_page_id:Utf8, sales:Decimal128(17,2), returns_:Decimal128(32,2), profit:Decimal128(33,2)]
                          GpuAggregateBatches: group_by=[cp_catalog_page_id@0], aggs=[sum(sum(catalog_sales.cs_ext_sales_price)@1) as sum(catalog_sales.cs_ext_sales_price), sum(`sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`@2) as `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`, sum(`sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`@3) as `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`], final=[sum(catalog_sales.cs_ext_sales_price)@1, `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`@2, `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`@3], lanes=4, batches=single, hashed_on=[cp_catalog_page_id@0], schema=[cp_catalog_page_id:Utf8, sum(catalog_sales.cs_ext_sales_price):Decimal128(17,2), `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`:Decimal128(32,2), `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`:Decimal128(33,2)]
-@@ -61,42 +35,35 @@
+@@ -61,42 +59,40 @@
                                GpuMergePartitions: lanes=1, batches=multiple, schema=[cp_catalog_page_id:Utf8, sum(catalog_sales.cs_ext_sales_price):Decimal128(17,2), `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`:Decimal128(32,2), `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                  GpuAggregateBatches: group_by=[cp_catalog_page_id@0], aggs=[sum(sum(catalog_sales.cs_ext_sales_price)@1) as sum(catalog_sales.cs_ext_sales_price), sum(`sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`@2) as `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`, sum(`sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`@3) as `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`], lanes=4, batches=single, schema=[cp_catalog_page_id:Utf8, sum(catalog_sales.cs_ext_sales_price):Decimal128(17,2), `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`:Decimal128(32,2), `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                    GpuAggregate: group_by=[cp_catalog_page_id@4], aggs=[sum(cs_ext_sales_price@0) as sum(catalog_sales.cs_ext_sales_price), sum(coalesce(CAST(cr_return_amount@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`, sum(cs_net_profit@1 - coalesce(CAST(cr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`], lanes=4, batches=multiple, schema=[cp_catalog_page_id:Utf8, sum(catalog_sales.cs_ext_sales_price):Decimal128(17,2), `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`:Decimal128(32,2), `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`:Decimal128(33,2)]
@@ -14609,7 +14707,9 @@ plan diff
 -                                                                      GpuLoadParquet: table=catalog_returns, projections=[cr_item_sk@2, cr_order_number@16, cr_return_amount@18, cr_net_loss@26], partition_groups=[[[0],[1]]], lanes=1, batches=multiple, schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2)]
 -                                                                  GpuEmitPartitions: hash=[cs_item_sk@2, cs_order_number@4], lanes=4, batches=multiple, hashed_on=[cs_item_sk@2, cs_order_number@4], schema=[cs_sold_date_sk:Int64, cs_catalog_page_sk:Int64, cs_item_sk:Int64, cs_promo_sk:Int64, cs_order_number:Int64, cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
 +                                    GpuHashJoin: join_type=Right, on=[(cr_item_sk@0, cs_item_sk@3), (cr_order_number@1, cs_order_number@4)], projection=[cs_ext_sales_price@4, cs_net_profit@5, cr_return_amount@2, cr_net_loss@3, cp_catalog_page_id@6], lanes=4, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2), cp_catalog_page_id:Utf8]
-+                                      GpuMemorySource: name=m4, lanes=4, batches=single, hashed_on=[cr_item_sk@0, cr_order_number@1], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2)]
++                                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[cr_item_sk@0, cr_order_number@1], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2)]
++                                        GpuEmitPartitions: hash=[cr_item_sk@0, cr_order_number@1], lanes=4, batches=multiple, hashed_on=[cr_item_sk@0, cr_order_number@1], schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2)]
++                                          GpuLoadParquet: table=catalog_returns, projections=[cr_item_sk@2, cr_order_number@16, cr_return_amount@18, cr_net_loss@26], partition_groups=[[[0],[1]]], lanes=1, batches=multiple, schema=[cr_item_sk:Int64, cr_order_number:Int64, cr_return_amount:Decimal128(7,2), cr_net_loss:Decimal128(7,2)]
 +                                      GpuEmitPartitions: hash=[cs_item_sk@3, cs_order_number@4], lanes=4, batches=multiple, hashed_on=[cs_item_sk@3, cs_order_number@4], schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cp_catalog_page_id:Utf8, cs_item_sk:Int64, cs_order_number:Int64]
 +                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cp_catalog_page_id:Utf8, cs_item_sk:Int64, cs_order_number:Int64]
 +                                          GpuHashJoin: join_type=Inner, on=[(cs_catalog_page_sk@4, cp_catalog_page_sk@0)], projection=[cs_ext_sales_price@0, cs_net_profit@1, cp_catalog_page_id@6, cs_item_sk@2, cs_order_number@3], lanes=4, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cp_catalog_page_id:Utf8, cs_item_sk:Int64, cs_order_number:Int64]
@@ -14617,7 +14717,10 @@ plan diff
 +                                              GpuEmitPartitions: hash=[cs_catalog_page_sk@4], lanes=4, batches=multiple, hashed_on=[cs_catalog_page_sk@4], schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64]
 +                                                GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64]
 +                                                  GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, cs_promo_sk@5)], projection=[cs_ext_sales_price@1, cs_net_profit@2, cs_item_sk@3, cs_order_number@4, cs_catalog_page_sk@5], lanes=4, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64]
-+                                                    GpuMemorySource: name=m3, lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                      GpuEmitPartitions: hash=[p_promo_sk@0], lanes=4, batches=multiple, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                        GpuFilter: predicate=p_channel_tv@1 = N, projection=[p_promo_sk@0], lanes=1, batches=multiple, schema=[p_promo_sk:Int64]
++                                                          GpuLoadParquet: table=promotion, projections=[p_promo_sk@0, p_channel_tv@11], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[p_promo_sk:Int64, p_channel_tv:Utf8]
 +                                                    GpuEmitPartitions: hash=[cs_promo_sk@5], lanes=4, batches=multiple, hashed_on=[cs_promo_sk@5], schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64, cs_promo_sk:Int64]
 +                                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64, cs_promo_sk:Int64]
 +                                                        GpuHashJoin: join_type=Inner, on=[(cs_item_sk@2, i_item_sk@0)], projection=[cs_ext_sales_price@0, cs_net_profit@1, cs_item_sk@2, cs_order_number@3, cs_catalog_page_sk@4, cs_promo_sk@5], lanes=4, batches=multiple, hashed_on=[cs_item_sk@2], schema=[cs_ext_sales_price:Decimal128(7,2), cs_net_profit:Decimal128(7,2), cs_item_sk:Int64, cs_order_number:Int64, cs_catalog_page_sk:Int64, cs_promo_sk:Int64]
@@ -14640,7 +14743,7 @@ plan diff
                      GpuProject: exprs=[`web channel` as channel, concat(web_site, web_site_id@0) as id, sales@1, returns_@2, profit@3], lanes=4, batches=single, schema=[channel:Utf8, id:Utf8, sales:Decimal128(17,2), returns_:Decimal128(32,2), profit:Decimal128(33,2)]
                        GpuProject: exprs=[web_site_id@0, sum(web_sales.ws_ext_sales_price)@1 as sales, `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`@2 as returns_, `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`@3 as profit], lanes=4, batches=single, hashed_on=[web_site_id@0], schema=[web_site_id:Utf8, sales:Decimal128(17,2), returns_:Decimal128(32,2), profit:Decimal128(33,2)]
                          GpuAggregateBatches: group_by=[web_site_id@0], aggs=[sum(sum(web_sales.ws_ext_sales_price)@1) as sum(web_sales.ws_ext_sales_price), sum(`sum(coalesce(web_returns.wr_return_amt,Int64(0)))`@2) as `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`, sum(`sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`@3) as `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`], final=[sum(web_sales.ws_ext_sales_price)@1, `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`@2, `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`@3], lanes=4, batches=single, hashed_on=[web_site_id@0], schema=[web_site_id:Utf8, sum(web_sales.ws_ext_sales_price):Decimal128(17,2), `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`:Decimal128(33,2)]
-@@ -105,39 +72,30 @@
+@@ -105,39 +101,37 @@
                                GpuMergePartitions: lanes=1, batches=multiple, schema=[web_site_id:Utf8, sum(web_sales.ws_ext_sales_price):Decimal128(17,2), `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                  GpuAggregateBatches: group_by=[web_site_id@0], aggs=[sum(sum(web_sales.ws_ext_sales_price)@1) as sum(web_sales.ws_ext_sales_price), sum(`sum(coalesce(web_returns.wr_return_amt,Int64(0)))`@2) as `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`, sum(`sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`@3) as `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`], lanes=4, batches=single, schema=[web_site_id:Utf8, sum(web_sales.ws_ext_sales_price):Decimal128(17,2), `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`:Decimal128(33,2)]
                                    GpuAggregate: group_by=[web_site_id@4], aggs=[sum(ws_ext_sales_price@0) as sum(web_sales.ws_ext_sales_price), sum(coalesce(CAST(wr_return_amt@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`, sum(ws_net_profit@1 - coalesce(CAST(wr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`], lanes=4, batches=multiple, schema=[web_site_id:Utf8, sum(web_sales.ws_ext_sales_price):Decimal128(17,2), `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`:Decimal128(32,2), `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`:Decimal128(33,2)]
@@ -14681,15 +14784,22 @@ plan diff
 -                                                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_web_site_sk:Int64, ws_promo_sk:Int64, ws_order_number:Int64, ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
 -                                                                      GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_item_sk@3, ws_web_site_sk@13, ws_promo_sk@16, ws_order_number@17, ws_ext_sales_price@23, ws_net_profit@33], partition_groups=[[[0]],[[1],[2]],[[3]],[[4],[5]]], lanes=4, batches=multiple, schema=[ws_sold_date_sk:Int64, ws_item_sk:Int64, ws_web_site_sk:Int64, ws_promo_sk:Int64, ws_order_number:Int64, ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
 +                                    GpuHashJoin: join_type=Right, on=[(wr_item_sk@0, ws_item_sk@3), (wr_order_number@1, ws_order_number@4)], projection=[ws_ext_sales_price@4, ws_net_profit@5, wr_return_amt@2, wr_net_loss@3, web_site_id@6], lanes=4, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), wr_return_amt:Decimal128(7,2), wr_net_loss:Decimal128(7,2), web_site_id:Utf8]
-+                                      GpuMemorySource: name=m2, lanes=4, batches=single, hashed_on=[wr_item_sk@0, wr_order_number@1], schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_amt:Decimal128(7,2), wr_net_loss:Decimal128(7,2)]
++                                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[wr_item_sk@0, wr_order_number@1], schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_amt:Decimal128(7,2), wr_net_loss:Decimal128(7,2)]
++                                        GpuEmitPartitions: hash=[wr_item_sk@0, wr_order_number@1], lanes=4, batches=multiple, hashed_on=[wr_item_sk@0, wr_order_number@1], schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_amt:Decimal128(7,2), wr_net_loss:Decimal128(7,2)]
++                                          GpuLoadParquet: table=web_returns, projections=[wr_item_sk@2, wr_order_number@13, wr_return_amt@15, wr_net_loss@23], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_item_sk:Int64, wr_order_number:Int64, wr_return_amt:Decimal128(7,2), wr_net_loss:Decimal128(7,2)]
 +                                      GpuEmitPartitions: hash=[ws_item_sk@3, ws_order_number@4], lanes=4, batches=multiple, hashed_on=[ws_item_sk@3, ws_order_number@4], schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), web_site_id:Utf8, ws_item_sk:Int64, ws_order_number:Int64]
 +                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), web_site_id:Utf8, ws_item_sk:Int64, ws_order_number:Int64]
 +                                          GpuHashJoin: join_type=Inner, on=[(web_site_sk@0, ws_web_site_sk@4)], projection=[ws_ext_sales_price@2, ws_net_profit@3, web_site_id@1, ws_item_sk@4, ws_order_number@5], lanes=4, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), web_site_id:Utf8, ws_item_sk:Int64, ws_order_number:Int64]
-+                                            GpuMemorySource: name=m0, lanes=4, batches=single, hashed_on=[web_site_sk@0], schema=[web_site_sk:Int64, web_site_id:Utf8]
++                                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[web_site_sk@0], schema=[web_site_sk:Int64, web_site_id:Utf8]
++                                              GpuEmitPartitions: hash=[web_site_sk@0], lanes=4, batches=multiple, hashed_on=[web_site_sk@0], schema=[web_site_sk:Int64, web_site_id:Utf8]
++                                                GpuLoadParquet: table=web_site, projections=[web_site_sk@0, web_site_id@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[web_site_sk:Int64, web_site_id:Utf8]
 +                                            GpuEmitPartitions: hash=[ws_web_site_sk@4], lanes=4, batches=multiple, hashed_on=[ws_web_site_sk@4], schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64]
 +                                              GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64]
 +                                                GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ws_promo_sk@5)], projection=[ws_ext_sales_price@1, ws_net_profit@2, ws_item_sk@3, ws_order_number@4, ws_web_site_sk@5], lanes=4, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64]
-+                                                  GpuMemorySource: name=m1, lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                    GpuEmitPartitions: hash=[p_promo_sk@0], lanes=4, batches=multiple, hashed_on=[p_promo_sk@0], schema=[p_promo_sk:Int64]
++                                                      GpuFilter: predicate=p_channel_tv@1 = N, projection=[p_promo_sk@0], lanes=1, batches=multiple, schema=[p_promo_sk:Int64]
++                                                        GpuLoadParquet: table=promotion, projections=[p_promo_sk@0, p_channel_tv@11], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[p_promo_sk:Int64, p_channel_tv:Utf8]
 +                                                  GpuEmitPartitions: hash=[ws_promo_sk@5], lanes=4, batches=multiple, hashed_on=[ws_promo_sk@5], schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64, ws_promo_sk:Int64]
 +                                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64, ws_promo_sk:Int64]
 +                                                      GpuHashJoin: join_type=Inner, on=[(ws_item_sk@2, i_item_sk@0)], projection=[ws_ext_sales_price@0, ws_net_profit@1, ws_item_sk@2, ws_order_number@3, ws_web_site_sk@4, ws_promo_sk@5], lanes=4, batches=multiple, hashed_on=[ws_item_sk@2], schema=[ws_ext_sales_price:Decimal128(7,2), ws_net_profit:Decimal128(7,2), ws_item_sk:Int64, ws_order_number:Int64, ws_web_site_sk:Int64, ws_promo_sk:Int64]
@@ -14973,9 +15083,9 @@ join order MJ1: 3 relations
   priced 3 sets
   DPhyp (r0 (r1 r2))
   oriented ((r2 r1) r0), build first
-  join r2 x r1: 21.0 rows, 764 bytes
-  join r1+r2 x r0: 21.0 rows, 934 bytes
-  C_out 1698 bytes, the plan's order 2441
+  join r2 x r1: 20.6 rows, 749 bytes
+  join r1+r2 x r0: 20.6 rows, 917 bytes
+  C_out 1666 bytes, the plan's order 2423
 join order MJ2: 5 relations
   r0 Filter date_dim
   r1 LoadParquet date_dim
@@ -16651,8 +16761,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 0.0 rows, 0 bytes
-  C_out 0 bytes, the plan's order 0
+  join r0 x r1: 4.2 rows, 171 bytes
+  C_out 171 bytes, the plan's order 171
 join order MJ2: 4 relations
   r0 Filter web_site
   r1 Filter customer_address
@@ -16677,8 +16787,8 @@ replan 1: a build of 135 rows against 14.3 estimated (q-error 9.45) for GpuHashJ
     priced 1 sets
     DPhyp (r0 r1)
     oriented (r0 r1), build first
-    join r0 x r1: 0.0 rows, 0 bytes
-    C_out 0 bytes, the plan's order 0
+    join r0 x r1: 40.0 rows, 1613 bytes
+    C_out 1613 bytes, the plan's order 1613
 plan diff
 --- before
 +++ after
@@ -16739,21 +16849,29 @@ join order MJ1: 9 relations
   edge r6-r7: r6.wr_order_number = r7.ws_order_number
   edge r0+r1+r2+r3-r6+r7+r8: r3.ws_order_number = r6.wr_order_number, left_semi
   priced 21 sets
-  DPhyp (((r0 ((r1 r3) r2)) (r4 r5)) (r6 (r7 r8)))
-  oriented (((r0 (r2 (r1 r3))) (r4 r5)) (r6 (r7 r8))), build first
+  DPhyp (((r0 ((r1 r3) r2)) (r6 (r7 r8))) (r4 r5))
+  oriented (((r0 (r2 (r1 r3))) (r6 (r7 r8))) (r4 r5)), build first
   join r1 x r3: 13668.3 rows, 773967 bytes
   join r2 x r1+r3: 428.7 rows, 20791 bytes
   join r0 x r1+r2+r3: 71.4 rows, 2885 bytes
-  join r4 x r5: 1725044.5 rows, 14015986 bytes
-  join r0+r1+r2+r3 x r4+r5: 71.4 rows, 2885 bytes
   join r7 x r8: 1725044.5 rows, 14015986 bytes
   join r6 x r7+r8: 2060105.6 rows, 16738358 bytes
-  join r0+r1+r2+r3+r4+r5 x r6+r7+r8: 71.4 rows, 2885 bytes
-  C_out 45573742 bytes, the plan's order 46077329
+  join r0+r1+r2+r3 x r6+r7+r8: 50.3 rows, 2031 bytes
+  join r4 x r5: 1725044.5 rows, 14015986 bytes
+  join r0+r1+r2+r3+r6+r7+r8 x r4+r5: 50.3 rows, 2031 bytes
+  C_out 45572035 bytes, the plan's order 46076475
 plan diff
 --- before
 +++ after
-@@ -13,26 +13,26 @@
+@@ -7,47 +7,47 @@
+             GpuAggregate: group_by=[], aggs=[count(alias1@0) as count(alias1), sum(alias2@1) as sum(alias2), sum(alias3@2) as sum(alias3)], lanes=4, batches=single, schema=[count(alias1):Int64, sum(alias2):Decimal128(27,2), sum(alias3):Decimal128(27,2)]
+               GpuAggregateBatches: group_by=[alias1@0], aggs=[sum(alias2@1) as alias2, sum(alias3@2) as alias3], final=[alias2@1, alias3@2], lanes=4, batches=single, hashed_on=[alias1@0], schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
+                 GpuAggregate: group_by=[ws_order_number@0], aggs=[sum(ws_ext_ship_cost@1) as alias2, sum(ws_net_profit@2) as alias3], lanes=4, batches=multiple, hashed_on=[alias1@0], schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
+-                  GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, wr_order_number@0)], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
++                  GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, ws_order_number@0)], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
+                     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
+-                      GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, ws_order_number@0)], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
++                      GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, wr_order_number@0)], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                            GpuEmitPartitions: hash=[ws_order_number@0], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                              GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
@@ -16795,7 +16913,34 @@ plan diff
 +                                            GpuEmitPartitions: hash=[ws_ship_addr_sk@1], lanes=4, batches=multiple, hashed_on=[ws_ship_addr_sk@1], schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                                                GpuMergePartitions: lanes=1, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                                                  GpuLoadParquet: table=web_sales, projections=[ws_ship_date_sk@2, ws_ship_addr_sk@11, ws_web_site_sk@13, ws_order_number@17, ws_ext_ship_cost@28, ws_net_profit@33], partition_groups=[[[0]],[[1],[2]],[[3]],[[4],[5]]], lanes=4, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
-                         GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64]
+-                        GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64]
+-                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                        GpuHashJoin: join_type=Inner, on=[(wr_order_number@0, ws_order_number@0)], projection=[wr_order_number@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
++                          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
++                            GpuEmitPartitions: hash=[wr_order_number@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
++                              GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_order_number:Int64]
++                          GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64]
++                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                              GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                                GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                             GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                               GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                          GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                            GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                    GpuHashJoin: join_type=Inner, on=[(wr_order_number@0, ws_order_number@0)], projection=[wr_order_number@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
+-                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
+-                        GpuEmitPartitions: hash=[wr_order_number@0], lanes=4, batches=multiple, hashed_on=[wr_order_number@0], schema=[wr_order_number:Int64]
+-                          GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_order_number:Int64]
+-                      GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64]
+-                        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                          GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                            GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                    GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@0], schema=[ws_order_number:Int64]
++                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                         GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+                           GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                      GpuEmitPartitions: hash=[ws_order_number@1], lanes=4, batches=multiple, hashed_on=[ws_order_number@1], schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
++                        GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0],[1],[2],[3],[4],[5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
 == q96
 join order MJ1: 4 relations
   r0 Filter store

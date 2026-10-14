@@ -221,17 +221,12 @@ node that orders a whole stream emits one batch, so "stream sorted" is `BatchSor
 breaks that — a stream ordered across several batches — so it must add `PartitionSorted` back
 and teach the limit-after-sort validation to accept it alongside the derived form.
 
-<a id="t239"></a>
-### #239 — a left or anti join's estimate ignores the key domain, and DPhyp orders on it
-`Estimator.equi_join` (`scripts/exec_model/optimizer/cardinality.py`) divides inner rows by the key
-domain but takes each matched share as `min(1, other NDV / own NDV)`: where the domain exceeds both
-key counts every preserved row counts as matched, so a left join comes out below its own preserved
-side and an anti join at 0. The cardinality golden shows it: tpcds q75's six left joins near a tenth
-of their rows (2,849.5 against 27,388), q69's two anti joins and q94's at 0.0 against 580, 611, 40.
-`SetEstimates` prices non-inner sets the same way, so it picks orders: in q75 at tp1-single the
-catalog returns' left join is priced at 14,372 rows against its preserved side's 143,810, and DPhyp
-joins the dates above it rather than below, 1–3 % dearer. Fix: both shares over the inner rows'
-domain, `other NDV / max(build NDV, probe NDV, domain)`; q75 then estimates 28,513 and keeps the
-plan's order in all three channels. It moves the cardinality golden and every non-inner estimate,
-so a full `run.py` comes with it. `bug_a_left_join_is_estimated_below_its_preserved_side`
-(`test_cardinality.py`) records it.
+<a id="t240"></a>
+### #240 — an outer or anti join's key NDV is cut to the other side's, though its rows are not
+`_matched_keys` (`scripts/exec_model/optimizer/cardinality.py`) cuts both sides' key NDV to the
+smaller side's for every join type, so what reads the key above an outer or anti join undercounts.
+A left join of 1,000 keys against 10 is 1,000 rows with key NDV 10, true 1,000; a left anti join
+is 990 rows, NDV 10. The rows are right since #239; the NDV is not. tpch q13 groups by `c_custkey`
+over `customer ⟕ orders`: the final aggregate is estimated at 99,996 groups, orders' customer
+count, against 150,000. Only an inner or semi join's output holds just the matched values; a
+preserved side keeps its own NDV, and an anti join's is at most its own less the matched ones.

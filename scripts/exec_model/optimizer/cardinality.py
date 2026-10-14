@@ -5,9 +5,9 @@ than its node's rows: a filter leaves a column it pins the values it can still h
 rest (Cardenas), a join leaves its keys the values both sides hold, an aggregate's keys start a
 new relation. An equi-join is |build|·|probe| over the largest of each side's key NDV
 (containment) and the domain the two can share — DuckDB's total domain cut to where the key
-ranges overlap (`Estimator._domain`). A semi join keeps the share of its side's values the other
-holds, an anti join the rest; an outer join adds its unmatched rows, NULL on the other side.
-A `GpuMemorySource` is measured, not estimated: its estimate is given in `known`, by its name.
+ranges overlap (`Estimator._domain`). A side's rows match in the share the other's key NDV is of
+that divisor: a semi join keeps that share, an anti join the rest, an outer join adds the rest,
+NULL on the other side. A `GpuMemorySource` is measured: its estimate is in `known`, by name.
 """
 
 from __future__ import annotations
@@ -191,12 +191,15 @@ class Estimator:
         build_keys, probe_keys = [b for b, _ in pairs], [p for _, p in pairs]
         build_ndv, probe_ndv = self._key_ndv(build, build_keys), self._key_ndv(probe, probe_keys)
         domain = self._domain(build, probe, pairs)
-        # Containment — the side with fewer key values finds each on the other — over a domain
-        # the two share; a match survives the residual filter as often as the filter keeps a row.
-        inner = build.rows * probe.rows / max(build_ndv, probe_ndv, domain, 1.0) * residual
+        # Each side's values spread over the larger key count or the shared domain, whichever is
+        # wider (containment where the domain is no wider). A value matches as often as the other's
+        # values fill that spread, so matched rows times fan-out are the inner rows; a match
+        # survives the residual filter as often as the filter keeps a row.
+        spread = max(build_ndv, probe_ndv, domain, 1.0)
+        inner = build.rows * probe.rows / spread * residual
         matched_build, matched_probe = _matched_keys(build, probe, pairs)
-        return EquiJoin(inner, min(1.0, probe_ndv / max(build_ndv, 1.0)) * residual,
-                        min(1.0, build_ndv / max(probe_ndv, 1.0)) * residual, matched_build, matched_probe)
+        return EquiJoin(inner, probe_ndv / spread * residual, build_ndv / spread * residual,
+                        matched_build, matched_probe)
 
     def _loop_join(self, node, build: Estimate, probe: Estimate) -> Estimate:
         share = 1.0

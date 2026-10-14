@@ -1,5 +1,5 @@
 # tpcds tp1-single: each join's estimate against its rows in tp1-single-mini.cpu.txt
-# 636 joins: median q-error 1.29, 69.5% within 2x
+# 636 joins: median q-error 1.24, 70.6% within 2x
 # not run: q24 q54
 # tree differs: -
 # n: the join's place among its query's, in pre-order; joins: the joins in its subtree, itself included
@@ -70,9 +70,9 @@ q9  12 Cross/Cross       4          1          1.0     1.00  -
 q9  13 Cross/Cross       3          1          1.0     1.00  -
 q9  14 Cross/Cross       2          1          1.0     1.00  -
 q9  15 Cross/Cross       1          1          1.0     1.00  -
-q10  1 Hash/LeftMark     8         92        262.9     2.86  c_customer_sk=cs_ship_customer_sk
-q10  2 Hash/LeftMark     6         92        262.9     2.86  c_customer_sk=ws_bill_customer_sk
-q10  3 Hash/LeftSemi     4         92        262.9     2.86  c_customer_sk=ss_customer_sk
+q10  1 Hash/LeftMark     8         92        238.9     2.60  c_customer_sk=cs_ship_customer_sk
+q10  2 Hash/LeftMark     6         92        238.9     2.60  c_customer_sk=ws_bill_customer_sk
+q10  3 Hash/LeftSemi     4         92        238.9     2.60  c_customer_sk=ss_customer_sk
 q10  4 Hash/Inner        2        897        262.9     3.41  c_current_cdemo_sk=cd_demo_sk
 q10  5 Hash/Inner        1        932        262.9     3.54  ca_address_sk=c_current_addr_sk
 q10  6 Hash/Inner        1     108973     191092.5     1.75  d_date_sk=ss_sold_date_sk
@@ -145,7 +145,7 @@ q14 48 Hash/Inner        1    2880404    2880404.0     1.00  i_item_sk=ss_item_s
 q15  1 Hash/Inner        3       3342      17487.3     5.23  d_date_sk=cs_sold_date_sk
 q15  2 Hash/Inner        2     115820     352803.1     3.05  ca_address_sk=c_current_addr_sk
 q15  3 Hash/Inner        1    1434418    1441548.0     1.00  c_customer_sk=cs_bill_customer_sk
-q16  1 Hash/LeftAnti     5        850          0.0   850.00  cs_order_number=cr_order_number
+q16  1 Hash/LeftAnti     5        850         71.4    11.91  cs_order_number=cr_order_number
 q16  2 Hash/LeftSemi     4       2358        173.9    13.56  cs_order_number=cs_order_number
 q16  3 Hash/Inner        3       2358        869.7     2.71  cc_call_center_sk=cs_call_center_sk
 q16  4 Hash/Inner        2       2362        869.7     2.72  ca_address_sk=cs_ship_addr_sk
@@ -313,15 +313,15 @@ q52  1 Hash/Inner        2       1497        476.6     3.14  i_item_sk=ss_item_s
 q52  2 Hash/Inner        1      88756      47773.1     1.86  d_date_sk=ss_sold_date_sk
 q55  1 Hash/Inner        2       1713        476.6     3.59  i_item_sk=ss_item_sk
 q55  2 Hash/Inner        1      86313      47773.1     1.81  d_date_sk=ss_sold_date_sk
-q56  1 Hash/RightSemi    4        478        576.0     1.20  i_item_id=i_item_id
+q56  1 Hash/RightSemi    4        478        493.7     1.03  i_item_id=i_item_id
 q56  2 Hash/Inner        3       8487       7714.4     1.10  i_item_sk=ss_item_sk
 q56  3 Hash/Inner        2       8487       7714.4     1.10  ca_address_sk=ss_addr_sk
 q56  4 Hash/Inner        1      24385      47773.1     1.96  d_date_sk=ss_sold_date_sk
-q56  5 Hash/RightSemi    4        246        576.0     2.34  i_item_id=i_item_id
+q56  5 Hash/RightSemi    4        246        246.1     1.00  i_item_id=i_item_id
 q56  6 Hash/Inner        3       4750       3846.1     1.24  cs_item_sk=i_item_sk
 q56  7 Hash/Inner        2       4750       3846.1     1.24  ca_address_sk=cs_bill_addr_sk
 q56  8 Hash/Inner        1      12692      23817.6     1.88  d_date_sk=cs_sold_date_sk
-q56  9 Hash/RightSemi    4        121        576.0     4.76  i_item_id=i_item_id
+q56  9 Hash/RightSemi    4        121        123.3     1.02  i_item_id=i_item_id
 q56 10 Hash/Inner        3       2349       1926.7     1.22  ws_item_sk=i_item_sk
 q56 11 Hash/Inner        2       2349       1926.7     1.22  ca_address_sk=ws_bill_addr_sk
 q56 12 Hash/Inner        1       6934      11931.4     1.72  d_date_sk=ws_sold_date_sk
@@ -346,15 +346,15 @@ q59  4 Hash/Inner        1    2750554    2880404.0     1.05  d_date_sk=ss_sold_d
 q59  5 Hash/Inner        3       2190       2190.6     1.00  d_week_seq=d_week_seq
 q59  6 Hash/Inner        2       1572      62616.0    39.83  s_store_sk=ss_store_sk
 q59  7 Hash/Inner        1    2750554    2880404.0     1.05  d_date_sk=ss_sold_date_sk
-q60  1 Hash/RightSemi    4       4347       1706.1     2.55  i_item_id=i_item_id
+q60  1 Hash/RightSemi    4       4347       1462.4     2.97  i_item_id=i_item_id
 q60  2 Hash/Inner        3      22109       7714.4     2.87  i_item_sk=ss_item_sk
 q60  3 Hash/Inner        2      22109       7714.4     2.87  ca_address_sk=ss_addr_sk
 q60  4 Hash/Inner        1      62336      47773.1     1.30  d_date_sk=ss_sold_date_sk
-q60  5 Hash/RightSemi    4       2217       1706.1     1.30  i_item_id=i_item_id
+q60  5 Hash/RightSemi    4       2217        729.1     3.04  i_item_id=i_item_id
 q60  6 Hash/Inner        3      11552       3846.1     3.00  cs_item_sk=i_item_sk
 q60  7 Hash/Inner        2      11552       3846.1     3.00  ca_address_sk=cs_bill_addr_sk
 q60  8 Hash/Inner        1      30857      23817.6     1.30  d_date_sk=cs_sold_date_sk
-q60  9 Hash/RightSemi    4       1117       1706.1     1.53  i_item_id=i_item_id
+q60  9 Hash/RightSemi    4       1117        365.2     3.06  i_item_id=i_item_id
 q60 10 Hash/Inner        3       5932       1926.7     3.08  ws_item_sk=i_item_sk
 q60 11 Hash/Inner        2       5932       1926.7     3.08  ca_address_sk=ws_bill_addr_sk
 q60 12 Hash/Inner        1      15632      11931.4     1.31  d_date_sk=ws_sold_date_sk
@@ -430,9 +430,9 @@ q68  3 Hash/Inner        4      25188      27739.2     1.10  ca_address_sk=ss_ad
 q68  4 Hash/Inner        3      25332      27739.2     1.10  hd_demo_sk=ss_hdemo_sk
 q68  5 Hash/Inner        2     106040     110956.9     1.05  s_store_sk=ss_store_sk
 q68  6 Hash/Inner        1     108610     110956.9     1.02  d_date_sk=ss_sold_date_sk
-q69  1 Hash/LeftAnti     8        580          0.0   580.00  c_customer_sk=cs_ship_customer_sk
-q69  2 Hash/LeftAnti     6        611          0.0   611.00  c_customer_sk=ws_bill_customer_sk
-q69  3 Hash/LeftSemi     4        625       5700.0     9.12  c_customer_sk=ss_customer_sk
+q69  1 Hash/LeftAnti     8        580        949.2     1.64  c_customer_sk=cs_ship_customer_sk
+q69  2 Hash/LeftAnti     6        611       3325.1     5.44  c_customer_sk=ws_bill_customer_sk
+q69  3 Hash/LeftSemi     4        625       5178.9     8.29  c_customer_sk=ss_customer_sk
 q69  4 Hash/Inner        2       9460       5700.0     1.66  c_current_cdemo_sk=cd_demo_sk
 q69  5 Hash/Inner        1       9807       5700.0     1.72  ca_address_sk=c_current_addr_sk
 q69  6 Hash/Inner        1      79272     143319.4     1.81  d_date_sk=ss_sold_date_sk
@@ -458,23 +458,23 @@ q74  8 Hash/Inner        2     147010     143176.7     1.03  d_date_sk=ws_sold_d
 q74  9 Hash/Inner        1     719214     719384.0     1.00  c_customer_sk=ws_bill_customer_sk
 q74 10 Hash/Inner        2     142487     143176.7     1.00  d_date_sk=ws_sold_date_sk
 q74 11 Hash/Inner        1     719214     719384.0     1.00  c_customer_sk=ws_bill_customer_sk
-q75  1 Hash/Inner       19        162       1997.6    12.33  i_brand_id=i_brand_id,i_class_id=i_class_id,i_category_id=i_category_id,i_manufact_id=i_manufact_id
-q75  2 Hash/Left         3      27388       2849.5     9.61  cs_order_number=cr_order_number,cs_item_sk=cr_item_sk
+q75  1 Hash/Inner       19        162      19997.4   123.44  i_brand_id=i_brand_id,i_class_id=i_class_id,i_category_id=i_category_id,i_manufact_id=i_manufact_id
+q75  2 Hash/Left         3      27388      28512.8     1.04  cs_order_number=cr_order_number,cs_item_sk=cr_item_sk
 q75  3 Hash/Inner        2      27388      28512.8     1.04  d_date_sk=cs_sold_date_sk
 q75  4 Hash/Inner        1     140878     143810.4     1.02  i_item_sk=cs_item_sk
-q75  5 Hash/Left         3      52823       5715.6     9.24  ss_ticket_number=sr_ticket_number,ss_item_sk=sr_item_sk
+q75  5 Hash/Left         3      52823      57190.8     1.08  ss_ticket_number=sr_ticket_number,ss_item_sk=sr_item_sk
 q75  6 Hash/Inner        2      52823      57190.8     1.08  d_date_sk=ss_sold_date_sk
 q75  7 Hash/Inner        1     282258     287352.3     1.02  i_item_sk=ss_item_sk
-q75  8 Hash/Left         3      13736       1422.7     9.65  ws_order_number=wr_order_number,ws_item_sk=wr_item_sk
+q75  8 Hash/Left         3      13736      14283.5     1.04  ws_order_number=wr_order_number,ws_item_sk=wr_item_sk
 q75  9 Hash/Inner        2      13736      14283.5     1.04  d_date_sk=ws_sold_date_sk
 q75 10 Hash/Inner        1      70763      71766.5     1.01  i_item_sk=ws_item_sk
-q75 11 Hash/Left         3      28074       2849.5     9.85  cs_order_number=cr_order_number,cs_item_sk=cr_item_sk
+q75 11 Hash/Left         3      28074      28512.8     1.02  cs_order_number=cr_order_number,cs_item_sk=cr_item_sk
 q75 12 Hash/Inner        2      28074      28512.8     1.02  d_date_sk=cs_sold_date_sk
 q75 13 Hash/Inner        1     140878     143810.4     1.02  i_item_sk=cs_item_sk
-q75 14 Hash/Left         3      53812       5715.6     9.41  ss_ticket_number=sr_ticket_number,ss_item_sk=sr_item_sk
+q75 14 Hash/Left         3      53812      57190.8     1.06  ss_ticket_number=sr_ticket_number,ss_item_sk=sr_item_sk
 q75 15 Hash/Inner        2      53812      57190.8     1.06  d_date_sk=ss_sold_date_sk
 q75 16 Hash/Inner        1     282258     287352.3     1.02  i_item_sk=ss_item_sk
-q75 17 Hash/Left         3      14416       1422.7    10.13  ws_order_number=wr_order_number,ws_item_sk=wr_item_sk
+q75 17 Hash/Left         3      14416      14283.5     1.01  ws_order_number=wr_order_number,ws_item_sk=wr_item_sk
 q75 18 Hash/Inner        2      14416      14283.5     1.01  d_date_sk=ws_sold_date_sk
 q75 19 Hash/Inner        1      70763      71766.5     1.01  i_item_sk=ws_item_sk
 q76  1 Hash/Inner        2      64530     129461.0     2.01  d_date_sk=ss_sold_date_sk
@@ -533,7 +533,7 @@ q81  7 Hash/Inner        1      28792      25281.1     1.14  d_date_sk=cr_return
 q82  1 Hash/Inner        3       8058      28862.5     3.58  i_item_sk=ss_item_sk
 q82  2 Hash/Inner        2         34        180.4     5.30  d_date_sk=inv_date_sk
 q82  3 Hash/Inner        1       1097       5381.5     4.91  i_item_sk=inv_item_sk
-q83  1 Hash/Inner       14         24         21.0     1.14  item_id=item_id
+q83  1 Hash/Inner       14         24         20.6     1.17  item_id=item_id
 q83  2 Hash/Inner        9        311         41.4     7.51  item_id=item_id
 q83  3 Hash/RightSemi    4       1296         41.4    31.30  d_date=d_date
 q83  4 Hash/RightSemi    1         21         21.0     1.00  d_week_seq=d_week_seq
@@ -543,7 +543,7 @@ q83  7 Hash/RightSemi    4       2647         82.7    31.99  d_date=d_date
 q83  8 Hash/RightSemi    1         21         21.0     1.00  d_week_seq=d_week_seq
 q83  9 Hash/Inner        2     277623     287867.0     1.04  d_date_sk=sr_returned_date_sk
 q83 10 Hash/Inner        1     287867     287867.0     1.00  i_item_sk=sr_item_sk
-q83 11 Hash/LeftSemi     4        698         21.0    33.24  d_date=d_date
+q83 11 Hash/LeftSemi     4        698         20.6    33.89  d_date=d_date
 q83 12 Hash/Inner        2      68461      71654.0     1.05  wr_returned_date_sk=d_date_sk
 q83 13 Hash/Inner        1      71654      71654.0     1.00  i_item_sk=wr_item_sk
 q83 14 Hash/RightSemi    1         21         21.0     1.00  d_week_seq=d_week_seq
@@ -617,12 +617,12 @@ q92  3 Hash/Inner        1        876        722.2     1.21  i_item_sk=ws_item_s
 q92  4 Hash/Inner        1      20705      35850.5     1.73  d_date_sk=ws_sold_date_sk
 q93  1 Hash/Inner        2       7917      84717.8    10.70  r_reason_sk=sr_reason_sk
 q93  2 Hash/Right        1    2880404    2880404.0     1.00  sr_item_sk=ss_item_sk,sr_ticket_number=ss_ticket_number
-q94  1 Hash/LeftAnti     5         40          0.0    40.00  ws_order_number=wr_order_number
+q94  1 Hash/LeftAnti     5         40          4.2     9.46  ws_order_number=wr_order_number
 q94  2 Hash/LeftSemi     4        135         14.3     9.45  ws_order_number=ws_order_number
 q94  3 Hash/Inner        3        135         71.4     1.89  web_site_sk=ws_web_site_sk
 q94  4 Hash/Inner        2       1054        428.7     2.46  ca_address_sk=ws_ship_addr_sk
 q94  5 Hash/Inner        1      30466      22561.7     1.35  d_date_sk=ws_ship_date_sk
-q95  1 Hash/LeftSemi     8         95         71.4     1.33  ws_order_number=wr_order_number
+q95  1 Hash/LeftSemi     8         95         50.3     1.89  ws_order_number=wr_order_number
 q95  2 Hash/LeftSemi     5        135         71.4     1.89  ws_order_number=ws_order_number
 q95  3 Hash/Inner        3        135         71.4     1.89  web_site_sk=ws_web_site_sk
 q95  4 Hash/Inner        2       1054        428.7     2.46  ca_address_sk=ws_ship_addr_sk

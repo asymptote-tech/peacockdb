@@ -221,8 +221,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 57072.0 rows, 714827 bytes
-  C_out 714827 bytes, the plan's order 714827
+  join r0 x r1: 33699.5 rows, 422087 bytes
+  C_out 422087 bytes, the plan's order 422087
 plan unchanged
 == q5
 join order MJ1: 6 relations
@@ -1419,8 +1419,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 0.0 rows, 0 bytes
-  C_out 0 bytes, the plan's order 0
+  join r0 x r1: 10000.7 rows, 352524 bytes
+  C_out 352524 bytes, the plan's order 352524
 plan unchanged
 == aggregate-groupby
 nothing fired
@@ -1432,8 +1432,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 1049982.0 rows, 136538609 bytes
-  C_out 136538609 bytes, the plan's order 136538609
+  join r0 x r1: 1199998.0 rows, 156046540 bytes
+  C_out 156046540 bytes, the plan's order 156046540
 plan unchanged
 == anti-join-reorder
 join order MJ1: 3 relations
@@ -1446,8 +1446,8 @@ join order MJ1: 3 relations
   DPhyp ((r0 r1) r2)
   oriented ((r0 r1) r2), build first
   join r0 x r1: 6000.0 rows, 181500 bytes
-  join r0+r1 x r2: 0.0 rows, 0 bytes
-  C_out 181500 bytes, the plan's order 1718888
+  join r0+r1 x r2: 2000.1 rows, 60504 bytes
+  C_out 242004 bytes, the plan's order 1779392
 plan diff
 --- before
 +++ after
@@ -1574,8 +1574,8 @@ join order MJ1: 3 relations
   DPhyp ((r0 r1) r2)
   oriented ((r0 r1) r2), build first
   join r0 x r1: 6000.0 rows, 181500 bytes
-  join r0+r1 x r2: 60000.4 rows, 1815012 bytes
-  C_out 1996512 bytes, the plan's order 55096400
+  join r0+r1 x r2: 62000.5 rows, 1875516 bytes
+  C_out 2057016 bytes, the plan's order 55156904
 plan diff
 --- before
 +++ after
@@ -1649,8 +1649,8 @@ join order MJ1: 2 relations
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 450018.0 rows, 58519891 bytes
-  C_out 58519891 bytes, the plan's order 58519891
+  join r0 x r1: 300002.0 rows, 39011960 bytes
+  C_out 39011960 bytes, the plan's order 39011960
 plan unchanged
 == semi-join-reorder
 join order MJ1: 3 relations
@@ -1663,8 +1663,8 @@ join order MJ1: 3 relations
   DPhyp ((r0 r1) r2)
   oriented ((r0 r1) r2), build first
   join r0 x r1: 6000.0 rows, 181500 bytes
-  join r0+r1 x r2: 6000.0 rows, 181500 bytes
-  C_out 363000 bytes, the plan's order 3618862
+  join r0+r1 x r2: 3999.9 rows, 120996 bytes
+  C_out 302496 bytes, the plan's order 3558358
 plan diff
 --- before
 +++ after

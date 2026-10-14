@@ -638,8 +638,24 @@ GpuUnload: output_rows=6, output_bytes=754
                       in_rows=[[92]] batch_rows=[[92]] batch_bytes=[[8019]]
                       GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@1, cd_demo_sk@0)], projection=[c_customer_sk@0, cd_gender@3, cd_marital_status@4, cd_education_status@5, cd_purchase_estimate@6, cd_credit_rating@7, cd_dep_count@8, cd_dep_employed_count@9, cd_dep_college_count@10], lanes=1, batches=multiple, mj=MJ1, output_rows=92, output_bytes=8019
                         in_rows=[[97],[1920800]] batch_rows=[[92]] batch_bytes=[[8019]]
-                        GpuMemorySource: name=m4, lanes=1, batches=single, output_rows=97, output_bytes=1552
-                          in_rows=[] batch_rows=[[97]] batch_bytes=[[1552]]
+                        GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=97, output_bytes=1552
+                          in_rows=[[97]] batch_rows=[[97]] batch_bytes=[[1552]]
+                          GpuHashJoin: join_type=LeftSemi, on=[(c_customer_sk@0, ss_customer_sk@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=97, output_bytes=1552
+                            in_rows=[[932],[108973]] batch_rows=[[97]] batch_bytes=[[1552]]
+                            GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=932, output_bytes=14912
+                              in_rows=[[932]] batch_rows=[[932]] batch_bytes=[[14912]]
+                              GpuHashJoin: join_type=Inner, on=[(ca_address_sk@0, c_current_addr_sk@2)], projection=[c_customer_sk@1, c_current_cdemo_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=932, output_bytes=14912
+                                in_rows=[[459],[100000]] batch_rows=[[932]] batch_bytes=[[14912]]
+                                GpuMemorySource: name=m3, lanes=1, batches=single, output_rows=459, output_bytes=3672
+                                  in_rows=[] batch_rows=[[459]] batch_bytes=[[3672]]
+                                GpuLoadParquet: table=customer, projections=[c_customer_sk@0, c_current_cdemo_sk@2, c_current_addr_sk@4], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=100000, output_bytes=2400000
+                                  in_rows=[] batch_rows=[[100000]] batch_bytes=[[2400000]]
+                            GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_customer_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=108973, output_bytes=871784
+                              in_rows=[[120],[791444]] batch_rows=[[108973]] batch_bytes=[[871784]]
+                              GpuMemorySource: name=p0, lanes=1, batches=single, output_rows=120, output_bytes=960
+                                in_rows=[] batch_rows=[[120]] batch_bytes=[[960]]
+                              GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_customer_sk@3], partition_groups=[[[17,18,23]]], lanes=1, batches=multiple, output_rows=791444, output_bytes=12663104
+                                in_rows=[] batch_rows=[[791444]] batch_bytes=[[12663104]]
                         GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5, cd_dep_count@6, cd_dep_employed_count@7, cd_dep_college_count@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]]], lanes=1, batches=multiple, output_rows=1920800, output_bytes=166286400
                           in_rows=[] batch_rows=[[1920800]] batch_bytes=[[166286400]]
                     GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_sold_date_sk@1, ws_bill_customer_sk@2], lanes=1, batches=multiple, mj=MJ2, output_rows=27788, output_bytes=444608
@@ -1848,11 +1864,11 @@ GpuUnload: output_rows=100, output_bytes=5026
               in_rows=[[1733]] batch_rows=[[1733]] batch_bytes=[[100948]]
               GpuHashJoin: join_type=Right, on=[(cr_order_number@1, cs_order_number@4), (cr_item_sk@0, cs_item_sk@5)], projection=[d_date@3, cs_sales_price@4, cr_refunded_cash@2, w_state@5, i_item_id@6], lanes=1, batches=multiple, mj=MJ1, output_rows=1733, output_bytes=100948
                 in_rows=[[144067],[1733]] batch_rows=[[1733]] batch_bytes=[[100948]]
-                GpuMemorySource: name=m1, lanes=1, batches=single, output_rows=144067, output_bytes=3457608
+                GpuMemorySource: name=m0, lanes=1, batches=single, output_rows=144067, output_bytes=3457608
                   in_rows=[] batch_rows=[[144067]] batch_bytes=[[3457608]]
                 GpuHashJoin: join_type=Inner, on=[(w_warehouse_sk@0, cs_warehouse_sk@5)], projection=[d_date@2, cs_sales_price@3, w_state@1, i_item_id@4, cs_order_number@5, cs_item_sk@6], lanes=1, batches=multiple, mj=MJ1, output_rows=1733, output_bytes=114812
                   in_rows=[[5],[1738]] batch_rows=[[1733]] batch_bytes=[[114812]]
-                  GpuMemorySource: name=m0, lanes=1, batches=single, output_rows=5, output_bytes=90
+                  GpuMemorySource: name=m1, lanes=1, batches=single, output_rows=5, output_bytes=90
                     in_rows=[] batch_rows=[[5]] batch_bytes=[[90]]
                   GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, cs_item_sk@3)], projection=[d_date@2, cs_sales_price@3, i_item_id@1, cs_order_number@4, cs_item_sk@5, cs_warehouse_sk@6], lanes=1, batches=multiple, mj=MJ1, output_rows=1738, output_bytes=111450
                     in_rows=[[1104],[28044]] batch_rows=[[1738]] batch_bytes=[[111450]]
@@ -2780,12 +2796,52 @@ GpuUnload: output_rows=100, output_bytes=8373
           in_rows=[[552]] batch_rows=[[552]] batch_bytes=[[37113]]
           GpuAggregate: group_by=[cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4], aggs=[count(1) as count(*)], lanes=1, batches=multiple, output_rows=552, output_bytes=37113
             in_rows=[[580]] batch_rows=[[552]] batch_bytes=[[37113]]
-            GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@0, cd_demo_sk@0)], projection=[cd_gender@2, cd_marital_status@3, cd_education_status@4, cd_purchase_estimate@5, cd_credit_rating@6], lanes=1, batches=multiple, mj=MJ1, output_rows=580, output_bytes=34368
-              in_rows=[[603],[1920800]] batch_rows=[[580]] batch_bytes=[[34368]]
-              GpuMemorySource: name=m5, lanes=1, batches=single, output_rows=603, output_bytes=4824
-                in_rows=[] batch_rows=[[603]] batch_bytes=[[4824]]
-              GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]]], lanes=1, batches=multiple, output_rows=1920800, output_bytes=127870400
-                in_rows=[] batch_rows=[[1920800]] batch_bytes=[[127870400]]
+            GpuHashJoin: join_type=LeftAnti, on=[(c_customer_sk@5, cs_ship_customer_sk@0)], projection=[cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4], lanes=1, batches=multiple, mj=MJ1, output_rows=580, output_bytes=34368
+              in_rows=[[611],[41368]] batch_rows=[[580]] batch_bytes=[[34368]]
+              GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=611, output_bytes=41087
+                in_rows=[[611]] batch_rows=[[611]] batch_bytes=[[41087]]
+                GpuHashJoin: join_type=LeftAnti, on=[(c_customer_sk@5, ws_bill_customer_sk@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=611, output_bytes=41087
+                  in_rows=[[625],[21445]] batch_rows=[[611]] batch_bytes=[[41087]]
+                  GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=625, output_bytes=42022
+                    in_rows=[[625]] batch_rows=[[625]] batch_bytes=[[42022]]
+                    GpuHashJoin: join_type=Inner, on=[(c_current_cdemo_sk@1, cd_demo_sk@0)], projection=[cd_gender@3, cd_marital_status@4, cd_education_status@5, cd_purchase_estimate@6, cd_credit_rating@7, c_customer_sk@0], lanes=1, batches=multiple, mj=MJ1, output_rows=625, output_bytes=42022
+                      in_rows=[[652],[1920800]] batch_rows=[[625]] batch_bytes=[[42022]]
+                      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=652, output_bytes=10432
+                        in_rows=[[652]] batch_rows=[[652]] batch_bytes=[[10432]]
+                        GpuHashJoin: join_type=LeftSemi, on=[(c_customer_sk@0, ss_customer_sk@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=652, output_bytes=10432
+                          in_rows=[[9807],[79272]] batch_rows=[[652]] batch_bytes=[[10432]]
+                          GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=9807, output_bytes=156912
+                            in_rows=[[9807]] batch_rows=[[9807]] batch_bytes=[[156912]]
+                            GpuHashJoin: join_type=Inner, on=[(ca_address_sk@0, c_current_addr_sk@2)], projection=[c_customer_sk@1, c_current_cdemo_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=9807, output_bytes=156912
+                              in_rows=[[4891],[100000]] batch_rows=[[9807]] batch_bytes=[[156912]]
+                              GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=4891, output_bytes=39128
+                                in_rows=[[4891]] batch_rows=[[4891]] batch_bytes=[[39128]]
+                                GpuFilter: predicate=((ca_state@1 = KY) OR (ca_state@1 = GA)) OR (ca_state@1 = NM), projection=[ca_address_sk@0], lanes=1, batches=multiple, output_rows=4891, output_bytes=39128
+                                  in_rows=[[50000]] batch_rows=[[4891]] batch_bytes=[[39128]]
+                                  GpuLoadParquet: table=customer_address, projections=[ca_address_sk@0, ca_state@8], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=50000, output_bytes=903150
+                                    in_rows=[] batch_rows=[[50000]] batch_bytes=[[903150]]
+                              GpuLoadParquet: table=customer, projections=[c_customer_sk@0, c_current_cdemo_sk@2, c_current_addr_sk@4], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=100000, output_bytes=2400000
+                                in_rows=[] batch_rows=[[100000]] batch_bytes=[[2400000]]
+                          GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_customer_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=79272, output_bytes=634176
+                            in_rows=[[91],[1160084]] batch_rows=[[79272]] batch_bytes=[[634176]]
+                            GpuMemorySource: name=p0, lanes=1, batches=single, output_rows=91, output_bytes=728
+                              in_rows=[] batch_rows=[[91]] batch_bytes=[[728]]
+                            GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_customer_sk@3], partition_groups=[[[14,23]]], lanes=1, batches=multiple, output_rows=1160084, output_bytes=18561344
+                              in_rows=[] batch_rows=[[1160084]] batch_bytes=[[18561344]]
+                      GpuLoadParquet: table=customer_demographics, projections=[cd_demo_sk@0, cd_gender@1, cd_marital_status@2, cd_education_status@3, cd_purchase_estimate@4, cd_credit_rating@5], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]]], lanes=1, batches=multiple, output_rows=1920800, output_bytes=127870400
+                        in_rows=[] batch_rows=[[1920800]] batch_bytes=[[127870400]]
+                  GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_bill_customer_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=21445, output_bytes=171560
+                    in_rows=[[91],[122880]] batch_rows=[[21445]] batch_bytes=[[171560]]
+                    GpuMemorySource: name=p1, lanes=1, batches=single, output_rows=91, output_bytes=728
+                      in_rows=[] batch_rows=[[91]] batch_bytes=[[728]]
+                    GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_bill_customer_sk@4], partition_groups=[[[3]]], lanes=1, batches=multiple, output_rows=122880, output_bytes=1966080
+                      in_rows=[] batch_rows=[[122880]] batch_bytes=[[1966080]]
+              GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@0)], projection=[cs_ship_customer_sk@2], lanes=1, batches=multiple, mj=MJ1, output_rows=41368, output_bytes=330944
+                in_rows=[[91],[122880]] batch_rows=[[41368]] batch_bytes=[[330944]]
+                GpuMemorySource: name=p2, lanes=1, batches=single, output_rows=91, output_bytes=728
+                  in_rows=[] batch_rows=[[91]] batch_bytes=[[728]]
+                GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_ship_customer_sk@7], partition_groups=[[[7]]], lanes=1, batches=multiple, output_rows=122880, output_bytes=1966080
+                  in_rows=[] batch_rows=[[122880]] batch_bytes=[[1966080]]
 == q70
 skipped: refused by datafusion: This feature is not implemented: Physical plan does not support logical expression AggregateFunction(AggregateFunction { func: AggregateUDF { inner: Grouping { name: "grouping", signature: Signature { type_signature: VariadicAny, volatility: Immutable } } }, args: [Column(Column { relation: Some(Bare { table: "store" }), name: "s_state" })], distinct: false, filter: None, order_by: None, null_treatment: None })
 == q71
@@ -2870,88 +2926,74 @@ GpuUnload: output_rows=100, output_bytes=8000
       in_rows=[[162]] batch_rows=[[100]] batch_bytes=[[8000]]
       GpuProject: exprs=[d_year@7 as prev_year, d_year@0 as year_, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@8 as prev_yr_cnt, sales_cnt@5 as curr_yr_cnt, sales_cnt@5 - sales_cnt@8 as sales_cnt_diff, sales_amt@6 - sales_amt@9 as sales_amt_diff], lanes=1, batches=multiple, output_rows=162, output_bytes=12960
         in_rows=[[162]] batch_rows=[[162]] batch_bytes=[[12960]]
-        GpuHashJoin: join_type=Inner, on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)], filter=(CAST(sum(sales_detail.sales_cnt)@build:5 AS Decimal128(17,2)) / CAST(sum(sales_detail.sales_cnt)@probe:5 AS Decimal128(17,2))) < 0.900000, projection=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6, d_year@7, sum(sales_detail.sales_cnt)@12, sum(sales_detail.sales_amt)@13], lanes=1, batches=multiple, mj=MJ1, output_rows=162, output_bytes=12960
-          in_rows=[[858],[883]] batch_rows=[[162]] batch_bytes=[[12960]]
-          GpuMemorySource: name=m6, lanes=1, batches=single, output_rows=858, output_bytes=48048
-            in_rows=[] batch_rows=[[858]] batch_bytes=[[48048]]
-          GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], aggs=[sum(sales_cnt@5) as sum(sales_detail.sales_cnt), sum(sales_amt@6) as sum(sales_detail.sales_amt)], final=[sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6], lanes=1, batches=single, output_rows=883, output_bytes=49448
-            in_rows=[[96002]] batch_rows=[[883]] batch_bytes=[[49448]]
-            GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], final=[], lanes=1, batches=single, output_rows=96002, output_bytes=5376112
-              in_rows=[[96090]] batch_rows=[[96002]] batch_bytes=[[5376112]]
-              GpuMergePartitions: lanes=1, batches=multiple, output_rows=96090, output_bytes=5381040
-                in_rows=[[28064,53613,14413]] batch_rows=[[28064,53613,14413]] batch_bytes=[[1571584,3002328,807128]]
-                GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=3, batches=single, output_rows=96090, output_bytes=5381040
-                  in_rows=[[28064,53642,14413]] batch_rows=[[28064],[53613],[14413]] batch_bytes=[[1571584],[3002328],[807128]]
-                  GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=3, batches=multiple, output_rows=96119, output_bytes=5382664
-                    in_rows=[[28074,53812,14416]] batch_rows=[[2767,25297],[5318,48324],[1440,12973]] batch_bytes=[[154952,1416632],[297808,2706144],[80640,726488]]
-                    GpuUnion: lanes=3, batches=multiple, output_rows=96302, output_bytes=5392912
-                      in_rows=[[28074],[53812],[14416]] batch_rows=[[2774,25300],[5360,48452],[1443,12973]] batch_bytes=[[155344,1416800],[300160,2713312],[80808,726488]]
-                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, cs_quantity@0 - coalesce(cr_return_quantity@7, 0) as sales_cnt, cs_ext_sales_price@1 - coalesce(CAST(cr_return_amount@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=28074, output_bytes=1572144
-                        in_rows=[[28074]] batch_rows=[[2774,25300]] batch_bytes=[[155344,1416800]]
-                        GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@8)], projection=[cs_quantity@2, cs_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, cr_return_quantity@8, cr_return_amount@9], lanes=1, batches=multiple, mj=MJ5, output_rows=28074, output_bytes=2021328
-                          in_rows=[[365],[48144]] batch_rows=[[2774,25300]] batch_bytes=[[199728,1821600]]
-                          GpuMemorySource: name=p3, lanes=1, batches=single, output_rows=365, output_bytes=5840
-                            in_rows=[] batch_rows=[[365]] batch_bytes=[[5840]]
-                          GpuHashJoin: join_type=Left, on=[(cs_order_number@7, cr_order_number@1), (cs_item_sk@8, cr_item_sk@0)], projection=[cs_quantity@0, cs_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, cr_return_quantity@11, cr_return_amount@12, cs_sold_date_sk@6], lanes=1, batches=multiple, mj=MJ5, output_rows=48144, output_bytes=3466368
-                            in_rows=[[48144],[144067]] batch_rows=[[4744,43400]] batch_bytes=[[341568,3124800]]
-                            GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=48144, output_bytes=3466368
-                              in_rows=[[48144]] batch_rows=[[48144]] batch_bytes=[[3466368]]
-                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, cs_item_sk@1)], projection=[cs_quantity@8, cs_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, cs_sold_date_sk@5, cs_order_number@7, cs_item_sk@6], lanes=1, batches=multiple, mj=MJ5, output_rows=48144, output_bytes=3466368
-                                in_rows=[[1733],[491520]] batch_rows=[[48144]] batch_bytes=[[3466368]]
+        GpuHashJoin: join_type=Inner, on=[(i_brand_id@1, i_brand_id@1), (i_class_id@2, i_class_id@2), (i_category_id@3, i_category_id@3), (i_manufact_id@4, i_manufact_id@4)], filter=(CAST(sum(sales_detail.sales_cnt)@probe:5 AS Decimal128(17,2)) / CAST(sum(sales_detail.sales_cnt)@build:5 AS Decimal128(17,2))) < 0.900000, projection=[d_year@7, i_brand_id@8, i_class_id@9, i_category_id@10, i_manufact_id@11, sum(sales_detail.sales_cnt)@12, sum(sales_detail.sales_amt)@13, d_year@0, sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6], lanes=1, batches=multiple, mj=MJ1, output_rows=162, output_bytes=12960
+          in_rows=[[883],[858]] batch_rows=[[162]] batch_bytes=[[12960]]
+          GpuMemorySource: name=m8, lanes=1, batches=single, output_rows=883, output_bytes=49448
+            in_rows=[] batch_rows=[[883]] batch_bytes=[[49448]]
+          GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4], aggs=[sum(sales_cnt@5) as sum(sales_detail.sales_cnt), sum(sales_amt@6) as sum(sales_detail.sales_amt)], final=[sum(sales_detail.sales_cnt)@5, sum(sales_detail.sales_amt)@6], lanes=1, batches=single, output_rows=858, output_bytes=48048
+            in_rows=[[93640]] batch_rows=[[858]] batch_bytes=[[48048]]
+            GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], final=[], lanes=1, batches=single, output_rows=93640, output_bytes=5243840
+              in_rows=[[93732]] batch_rows=[[93640]] batch_bytes=[[5243840]]
+              GpuMergePartitions: lanes=1, batches=multiple, output_rows=93732, output_bytes=5248992
+                in_rows=[[27371,52628,13733]] batch_rows=[[27371,52628,13733]] batch_bytes=[[1532776,2947168,769048]]
+                GpuAggregateBatches: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=3, batches=single, output_rows=93732, output_bytes=5248992
+                  in_rows=[[27371,52656,13733]] batch_rows=[[27371],[52628],[13733]] batch_bytes=[[1532776],[2947168],[769048]]
+                  GpuAggregate: group_by=[d_year@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, sales_cnt@5, sales_amt@6], aggs=[], lanes=3, batches=multiple, output_rows=93760, output_bytes=5250560
+                    in_rows=[[27388,52823,13736]] batch_rows=[[2723,24648],[5201,47455],[1377,12356]] batch_bytes=[[152488,1380288],[291256,2657480],[77112,691936]]
+                    GpuUnion: lanes=3, batches=multiple, output_rows=93947, output_bytes=5261032
+                      in_rows=[[27388],[52823],[13736]] batch_rows=[[2739,24649],[5221,47602],[1378,12358]] batch_bytes=[[153384,1380344],[292376,2665712],[77168,692048]]
+                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, cs_quantity@0 - coalesce(cr_return_quantity@7, 0) as sales_cnt, cs_ext_sales_price@1 - coalesce(CAST(cr_return_amount@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=27388, output_bytes=1533728
+                        in_rows=[[27388]] batch_rows=[[2739,24649]] batch_bytes=[[153384,1380344]]
+                        GpuHashJoin: join_type=Left, on=[(cs_order_number@7, cr_order_number@1), (cs_item_sk@8, cr_item_sk@0)], projection=[cs_quantity@0, cs_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, cr_return_quantity@11, cr_return_amount@12], lanes=1, batches=multiple, mj=MJ2, output_rows=27388, output_bytes=1971936
+                          in_rows=[[27388],[144067]] batch_rows=[[2739,24649]] batch_bytes=[[197208,1774728]]
+                          GpuMemorySource: name=m6, lanes=1, batches=single, output_rows=27388, output_bytes=1971936
+                            in_rows=[] batch_rows=[[27388]] batch_bytes=[[1971936]]
+                          GpuLoadParquet: table=catalog_returns, projections=[cr_item_sk@2, cr_order_number@16, cr_return_quantity@17, cr_return_amount@18], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=144067, output_bytes=4610144
+                            in_rows=[] batch_rows=[[144067]] batch_bytes=[[4610144]]
+                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ss_quantity@0 - coalesce(sr_return_quantity@7, 0) as sales_cnt, ss_ext_sales_price@1 - coalesce(CAST(sr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=52823, output_bytes=2958088
+                        in_rows=[[52823]] batch_rows=[[5221,47602]] batch_bytes=[[292376,2665712]]
+                        GpuHashJoin: join_type=Left, on=[(ss_ticket_number@7, sr_ticket_number@1), (ss_item_sk@8, sr_item_sk@0)], projection=[ss_quantity@0, ss_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, sr_return_quantity@11, sr_return_amt@12], lanes=1, batches=multiple, mj=MJ3, output_rows=52823, output_bytes=3803256
+                          in_rows=[[52823],[287867]] batch_rows=[[5221,47602]] batch_bytes=[[375912,3427344]]
+                          GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=52823, output_bytes=3803256
+                            in_rows=[[52823]] batch_rows=[[52823]] batch_bytes=[[3803256]]
+                            GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@8)], projection=[ss_quantity@2, ss_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, ss_ticket_number@8, ss_item_sk@9], lanes=1, batches=multiple, mj=MJ3, output_rows=52823, output_bytes=3803256
+                              in_rows=[[365],[76566]] batch_rows=[[52823]] batch_bytes=[[3803256]]
+                              GpuMemorySource: name=p1, lanes=1, batches=single, output_rows=365, output_bytes=5840
+                                in_rows=[] batch_rows=[[365]] batch_bytes=[[5840]]
+                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@1)], projection=[ss_quantity@8, ss_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ss_ticket_number@7, ss_item_sk@6, ss_sold_date_sk@5], lanes=1, batches=multiple, mj=MJ3, output_rows=76566, output_bytes=5512752
+                                in_rows=[[1733],[791444]] batch_rows=[[76566]] batch_bytes=[[5512752]]
                                 GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1733, output_bytes=69320
                                   in_rows=[[1733]] batch_rows=[[1733]] batch_bytes=[[69320]]
                                   GpuFilter: predicate=i_category@4 = Books, projection=[i_item_sk@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@5], lanes=1, batches=multiple, output_rows=1733, output_bytes=69320
                                     in_rows=[[18000]] batch_rows=[[1733]] batch_bytes=[[69320]]
                                     GpuLoadParquet: table=item, projections=[i_item_sk@0, i_brand_id@7, i_class_id@9, i_category_id@11, i_category@12, i_manufact_id@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=18000, output_bytes=972099
                                       in_rows=[] batch_rows=[[18000]] batch_bytes=[[972099]]
-                                GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_item_sk@15, cs_order_number@17, cs_quantity@18, cs_ext_sales_price@23], partition_groups=[[[6,7,8,9]]], lanes=1, batches=multiple, output_rows=491520, output_bytes=19660800
-                                  in_rows=[] batch_rows=[[491520]] batch_bytes=[[19660800]]
-                            GpuLoadParquet: table=catalog_returns, projections=[cr_item_sk@2, cr_order_number@16, cr_return_quantity@17, cr_return_amount@18], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=144067, output_bytes=4610144
-                              in_rows=[] batch_rows=[[144067]] batch_bytes=[[4610144]]
-                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ss_quantity@0 - coalesce(sr_return_quantity@7, 0) as sales_cnt, ss_ext_sales_price@1 - coalesce(CAST(sr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=53812, output_bytes=3013472
-                        in_rows=[[53812]] batch_rows=[[5360,48452]] batch_bytes=[[300160,2713312]]
-                        GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@8)], projection=[ss_quantity@2, ss_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, sr_return_quantity@8, sr_return_amt@9], lanes=1, batches=multiple, mj=MJ6, output_rows=53812, output_bytes=3874464
-                          in_rows=[[365],[125122]] batch_rows=[[5360,48452]] batch_bytes=[[385920,3488544]]
-                          GpuMemorySource: name=p4, lanes=1, batches=single, output_rows=365, output_bytes=5840
-                            in_rows=[] batch_rows=[[365]] batch_bytes=[[5840]]
-                          GpuHashJoin: join_type=Left, on=[(ss_ticket_number@7, sr_ticket_number@1), (ss_item_sk@8, sr_item_sk@0)], projection=[ss_quantity@0, ss_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, sr_return_quantity@11, sr_return_amt@12, ss_sold_date_sk@6], lanes=1, batches=multiple, mj=MJ6, output_rows=125122, output_bytes=9008784
-                            in_rows=[[125122],[287867]] batch_rows=[[12434,112688]] batch_bytes=[[895248,8113536]]
-                            GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=125122, output_bytes=9008784
-                              in_rows=[[125122]] batch_rows=[[125122]] batch_bytes=[[9008784]]
-                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@1)], projection=[ss_quantity@8, ss_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ss_sold_date_sk@5, ss_ticket_number@7, ss_item_sk@6], lanes=1, batches=multiple, mj=MJ6, output_rows=125122, output_bytes=9008784
-                                in_rows=[[1733],[1282964]] batch_rows=[[125122]] batch_bytes=[[9008784]]
+                                GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_item_sk@2, ss_ticket_number@9, ss_quantity@10, ss_ext_sales_price@15], partition_groups=[[[17,18,19,20,21,22,23]]], lanes=1, batches=multiple, output_rows=791444, output_bytes=31657760
+                                  in_rows=[] batch_rows=[[791444]] batch_bytes=[[31657760]]
+                          GpuLoadParquet: table=store_returns, projections=[sr_item_sk@2, sr_ticket_number@9, sr_return_quantity@10, sr_return_amt@11], partition_groups=[[[0,1,2]]], lanes=1, batches=multiple, output_rows=287867, output_bytes=9211744
+                            in_rows=[] batch_rows=[[287867]] batch_bytes=[[9211744]]
+                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ws_quantity@0 - coalesce(wr_return_quantity@7, 0) as sales_cnt, ws_ext_sales_price@1 - coalesce(CAST(wr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=13736, output_bytes=769216
+                        in_rows=[[13736]] batch_rows=[[1378,12358]] batch_bytes=[[77168,692048]]
+                        GpuHashJoin: join_type=Left, on=[(ws_order_number@7, wr_order_number@1), (ws_item_sk@8, wr_item_sk@0)], projection=[ws_quantity@0, ws_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, d_year@6, wr_return_quantity@11, wr_return_amt@12], lanes=1, batches=multiple, mj=MJ4, output_rows=13736, output_bytes=988992
+                          in_rows=[[13736],[71654]] batch_rows=[[1378,12358]] batch_bytes=[[99216,889776]]
+                          GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=13736, output_bytes=988992
+                            in_rows=[[13736]] batch_rows=[[13736]] batch_bytes=[[988992]]
+                            GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@8)], projection=[ws_quantity@2, ws_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, ws_order_number@8, ws_item_sk@9], lanes=1, batches=multiple, mj=MJ4, output_rows=13736, output_bytes=988992
+                              in_rows=[[365],[22142]] batch_rows=[[13736]] batch_bytes=[[988992]]
+                              GpuMemorySource: name=p2, lanes=1, batches=single, output_rows=365, output_bytes=5840
+                                in_rows=[] batch_rows=[[365]] batch_bytes=[[5840]]
+                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ws_item_sk@1)], projection=[ws_quantity@8, ws_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ws_order_number@7, ws_item_sk@6, ws_sold_date_sk@5], lanes=1, batches=multiple, mj=MJ4, output_rows=22142, output_bytes=1594224
+                                in_rows=[[1733],[227864]] batch_rows=[[22142]] batch_bytes=[[1594224]]
                                 GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1733, output_bytes=69320
                                   in_rows=[[1733]] batch_rows=[[1733]] batch_bytes=[[69320]]
                                   GpuFilter: predicate=i_category@4 = Books, projection=[i_item_sk@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@5], lanes=1, batches=multiple, output_rows=1733, output_bytes=69320
                                     in_rows=[[18000]] batch_rows=[[1733]] batch_bytes=[[69320]]
                                     GpuLoadParquet: table=item, projections=[i_item_sk@0, i_brand_id@7, i_class_id@9, i_category_id@11, i_category@12, i_manufact_id@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=18000, output_bytes=972099
                                       in_rows=[] batch_rows=[[18000]] batch_bytes=[[972099]]
-                                GpuLoadParquet: table=store_sales, projections=[ss_sold_date_sk@0, ss_item_sk@2, ss_ticket_number@9, ss_quantity@10, ss_ext_sales_price@15], partition_groups=[[[13,14,15,16,17,23]]], lanes=1, batches=multiple, output_rows=1282964, output_bytes=51318560
-                                  in_rows=[] batch_rows=[[1282964]] batch_bytes=[[51318560]]
-                            GpuLoadParquet: table=store_returns, projections=[sr_item_sk@2, sr_ticket_number@9, sr_return_quantity@10, sr_return_amt@11], partition_groups=[[[0,1,2]]], lanes=1, batches=multiple, output_rows=287867, output_bytes=9211744
-                              in_rows=[] batch_rows=[[287867]] batch_bytes=[[9211744]]
-                      GpuProject: exprs=[d_year@6, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, ws_quantity@0 - coalesce(wr_return_quantity@7, 0) as sales_cnt, ws_ext_sales_price@1 - coalesce(CAST(wr_return_amt@8 AS Decimal128(30,15)), 0.000000000000000) as sales_amt], lanes=1, batches=multiple, output_rows=14416, output_bytes=807296
-                        in_rows=[[14416]] batch_rows=[[1443,12973]] batch_bytes=[[80808,726488]]
-                        GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@8)], projection=[ws_quantity@2, ws_ext_sales_price@3, i_brand_id@4, i_class_id@5, i_category_id@6, i_manufact_id@7, d_year@1, wr_return_quantity@8, wr_return_amt@9], lanes=1, batches=multiple, mj=MJ7, output_rows=14416, output_bytes=1037952
-                          in_rows=[[365],[24265]] batch_rows=[[1443,12973]] batch_bytes=[[103896,934056]]
-                          GpuMemorySource: name=p5, lanes=1, batches=single, output_rows=365, output_bytes=5840
-                            in_rows=[] batch_rows=[[365]] batch_bytes=[[5840]]
-                          GpuHashJoin: join_type=Left, on=[(ws_order_number@7, wr_order_number@1), (ws_item_sk@8, wr_item_sk@0)], projection=[ws_quantity@0, ws_ext_sales_price@1, i_brand_id@2, i_class_id@3, i_category_id@4, i_manufact_id@5, wr_return_quantity@11, wr_return_amt@12, ws_sold_date_sk@6], lanes=1, batches=multiple, mj=MJ7, output_rows=24265, output_bytes=1747080
-                            in_rows=[[24265],[71654]] batch_rows=[[2416,21849]] batch_bytes=[[173952,1573128]]
-                            GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=24265, output_bytes=1747080
-                              in_rows=[[24265]] batch_rows=[[24265]] batch_bytes=[[1747080]]
-                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ws_item_sk@1)], projection=[ws_quantity@8, ws_ext_sales_price@9, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@4, ws_sold_date_sk@5, ws_order_number@7, ws_item_sk@6], lanes=1, batches=multiple, mj=MJ7, output_rows=24265, output_bytes=1747080
-                                in_rows=[[1733],[245760]] batch_rows=[[24265]] batch_bytes=[[1747080]]
-                                GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1733, output_bytes=69320
-                                  in_rows=[[1733]] batch_rows=[[1733]] batch_bytes=[[69320]]
-                                  GpuFilter: predicate=i_category@4 = Books, projection=[i_item_sk@0, i_brand_id@1, i_class_id@2, i_category_id@3, i_manufact_id@5], lanes=1, batches=multiple, output_rows=1733, output_bytes=69320
-                                    in_rows=[[18000]] batch_rows=[[1733]] batch_bytes=[[69320]]
-                                    GpuLoadParquet: table=item, projections=[i_item_sk@0, i_brand_id@7, i_class_id@9, i_category_id@11, i_category@12, i_manufact_id@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=18000, output_bytes=972099
-                                      in_rows=[] batch_rows=[[18000]] batch_bytes=[[972099]]
-                                GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_item_sk@3, ws_order_number@17, ws_quantity@18, ws_ext_sales_price@23], partition_groups=[[[3,4]]], lanes=1, batches=multiple, output_rows=245760, output_bytes=9830400
-                                  in_rows=[] batch_rows=[[245760]] batch_bytes=[[9830400]]
-                            GpuLoadParquet: table=web_returns, projections=[wr_item_sk@2, wr_order_number@13, wr_return_quantity@14, wr_return_amt@15], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=71654, output_bytes=2292928
-                              in_rows=[] batch_rows=[[71654]] batch_bytes=[[2292928]]
+                                GpuLoadParquet: table=web_sales, projections=[ws_sold_date_sk@0, ws_item_sk@3, ws_order_number@17, ws_quantity@18, ws_ext_sales_price@23], partition_groups=[[[4,5]]], lanes=1, batches=multiple, output_rows=227864, output_bytes=9114560
+                                  in_rows=[] batch_rows=[[227864]] batch_bytes=[[9114560]]
+                          GpuLoadParquet: table=web_returns, projections=[wr_item_sk@2, wr_order_number@13, wr_return_quantity@14, wr_return_amt@15], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=71654, output_bytes=2292928
+                            in_rows=[] batch_rows=[[71654]] batch_bytes=[[2292928]]
 == q76
 early_exit=none
 GpuUnload: output_rows=100, output_bytes=8429
@@ -3332,23 +3374,23 @@ GpuUnload: output_rows=100, output_bytes=8255
                       in_rows=[[6]] batch_rows=[[6]] batch_bytes=[[289]]
                       GpuAggregate: group_by=[s_store_id@4], aggs=[sum(ss_ext_sales_price@0) as sum(store_sales.ss_ext_sales_price), sum(coalesce(CAST(sr_return_amt@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(store_returns.sr_return_amt,Int64(0)))`, sum(ss_net_profit@1 - coalesce(CAST(sr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(store_sales.ss_net_profit - coalesce(store_returns.sr_net_loss,Int64(0)))`], lanes=1, batches=multiple, output_rows=6, output_bytes=289
                         in_rows=[[3453]] batch_rows=[[6]] batch_bytes=[[289]]
-                        GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@4)], projection=[ss_ext_sales_price@2, ss_net_profit@3, sr_return_amt@4, sr_net_loss@5, s_store_id@1], lanes=1, batches=multiple, mj=MJ1, output_rows=3453, output_bytes=193800
-                          in_rows=[[12],[3488]] batch_rows=[[3453]] batch_bytes=[[193800]]
-                          GpuMemorySource: name=m2, lanes=1, batches=single, output_rows=12, output_bytes=384
-                            in_rows=[] batch_rows=[[12]] batch_bytes=[[384]]
-                          GpuHashJoin: join_type=Right, on=[(sr_item_sk@0, ss_item_sk@3), (sr_ticket_number@1, ss_ticket_number@4)], projection=[ss_ext_sales_price@4, ss_net_profit@5, sr_return_amt@2, sr_net_loss@3, ss_store_sk@6], lanes=1, batches=multiple, mj=MJ1, output_rows=3488, output_bytes=139520
-                            in_rows=[[287867],[3488]] batch_rows=[[3488]] batch_bytes=[[139520]]
-                            GpuMemorySource: name=m9, lanes=1, batches=single, output_rows=287867, output_bytes=9211744
-                              in_rows=[] batch_rows=[[287867]] batch_bytes=[[9211744]]
-                            GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ss_promo_sk@5)], projection=[ss_ext_sales_price@1, ss_net_profit@2, ss_store_sk@3, ss_item_sk@4, ss_ticket_number@5], lanes=1, batches=multiple, mj=MJ1, output_rows=3488, output_bytes=139520
+                        GpuHashJoin: join_type=Right, on=[(sr_item_sk@0, ss_item_sk@3), (sr_ticket_number@1, ss_ticket_number@4)], projection=[ss_ext_sales_price@4, ss_net_profit@5, sr_return_amt@2, sr_net_loss@3, s_store_id@6], lanes=1, batches=multiple, mj=MJ1, output_rows=3453, output_bytes=193801
+                          in_rows=[[287867],[3453]] batch_rows=[[3453]] batch_bytes=[[193801]]
+                          GpuMemorySource: name=m6, lanes=1, batches=single, output_rows=287867, output_bytes=9211744
+                            in_rows=[] batch_rows=[[287867]] batch_bytes=[[9211744]]
+                          GpuHashJoin: join_type=Inner, on=[(s_store_sk@0, ss_store_sk@4)], projection=[ss_ext_sales_price@2, ss_net_profit@3, s_store_id@1, ss_item_sk@4, ss_ticket_number@5], lanes=1, batches=multiple, mj=MJ1, output_rows=3453, output_bytes=193800
+                            in_rows=[[12],[3488]] batch_rows=[[3453]] batch_bytes=[[193800]]
+                            GpuMemorySource: name=m7, lanes=1, batches=single, output_rows=12, output_bytes=384
+                              in_rows=[] batch_rows=[[12]] batch_bytes=[[384]]
+                            GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ss_promo_sk@5)], projection=[ss_ext_sales_price@1, ss_net_profit@2, ss_item_sk@3, ss_ticket_number@4, ss_store_sk@5], lanes=1, batches=multiple, mj=MJ1, output_rows=3488, output_bytes=139520
                               in_rows=[[294],[3631]] batch_rows=[[3488]] batch_bytes=[[139520]]
-                              GpuMemorySource: name=m3, lanes=1, batches=single, output_rows=294, output_bytes=2352
+                              GpuMemorySource: name=m8, lanes=1, batches=single, output_rows=294, output_bytes=2352
                                 in_rows=[] batch_rows=[[294]] batch_bytes=[[2352]]
-                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@3)], projection=[ss_ext_sales_price@1, ss_net_profit@2, ss_store_sk@3, ss_item_sk@4, ss_ticket_number@5, ss_promo_sk@6], lanes=1, batches=multiple, mj=MJ1, output_rows=3631, output_bytes=174288
+                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ss_item_sk@2)], projection=[ss_ext_sales_price@1, ss_net_profit@2, ss_item_sk@3, ss_ticket_number@4, ss_store_sk@5, ss_promo_sk@6], lanes=1, batches=multiple, mj=MJ1, output_rows=3631, output_bytes=174288
                                 in_rows=[[1055],[63241]] batch_rows=[[3631]] batch_bytes=[[174288]]
-                                GpuMemorySource: name=m4, lanes=1, batches=single, output_rows=1055, output_bytes=8440
+                                GpuMemorySource: name=m9, lanes=1, batches=single, output_rows=1055, output_bytes=8440
                                   in_rows=[] batch_rows=[[1055]] batch_bytes=[[8440]]
-                                GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_ext_sales_price@6, ss_net_profit@7, ss_store_sk@3, ss_item_sk@2, ss_ticket_number@5, ss_promo_sk@4], lanes=1, batches=multiple, mj=MJ1, output_rows=63241, output_bytes=3035568
+                                GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ss_sold_date_sk@0)], projection=[ss_ext_sales_price@6, ss_net_profit@7, ss_item_sk@2, ss_ticket_number@5, ss_store_sk@3, ss_promo_sk@4], lanes=1, batches=multiple, mj=MJ1, output_rows=63241, output_bytes=3035568
                                   in_rows=[[31],[2880404]] batch_rows=[[63241]] batch_bytes=[[3035568]]
                                   GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=31, output_bytes=248
                                     in_rows=[[31]] batch_rows=[[31]] batch_bytes=[[248]]
@@ -3366,27 +3408,23 @@ GpuUnload: output_rows=100, output_bytes=8255
                       in_rows=[[402]] batch_rows=[[402]] batch_bytes=[[19347]]
                       GpuAggregate: group_by=[cp_catalog_page_id@4], aggs=[sum(cs_ext_sales_price@0) as sum(catalog_sales.cs_ext_sales_price), sum(coalesce(CAST(cr_return_amount@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(catalog_returns.cr_return_amount,Int64(0)))`, sum(cs_net_profit@1 - coalesce(CAST(cr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(catalog_sales.cs_net_profit - coalesce(catalog_returns.cr_net_loss,Int64(0)))`], lanes=1, batches=multiple, output_rows=402, output_bytes=19347
                         in_rows=[[1768]] batch_rows=[[402]] batch_bytes=[[19347]]
-                        GpuHashJoin: join_type=Inner, on=[(cs_catalog_page_sk@4, cp_catalog_page_sk@0)], projection=[cs_ext_sales_price@0, cs_net_profit@1, cr_return_amount@2, cr_net_loss@3, cp_catalog_page_id@6], lanes=1, batches=multiple, mj=MJ2, output_rows=1768, output_bytes=99229
-                          in_rows=[[1770],[11718]] batch_rows=[[1768]] batch_bytes=[[99229]]
-                          GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1770, output_bytes=70800
-                            in_rows=[[1770]] batch_rows=[[1770]] batch_bytes=[[70800]]
-                            GpuHashJoin: join_type=Right, on=[(cr_item_sk@0, cs_item_sk@3), (cr_order_number@1, cs_order_number@4)], projection=[cs_ext_sales_price@4, cs_net_profit@5, cr_return_amount@2, cr_net_loss@3, cs_catalog_page_sk@6], lanes=1, batches=multiple, mj=MJ2, output_rows=1770, output_bytes=70800
-                              in_rows=[[144067],[1770]] batch_rows=[[1770]] batch_bytes=[[70800]]
-                              GpuMemorySource: name=m8, lanes=1, batches=single, output_rows=144067, output_bytes=4610144
-                                in_rows=[] batch_rows=[[144067]] batch_bytes=[[4610144]]
-                              GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, cs_promo_sk@5)], projection=[cs_ext_sales_price@1, cs_net_profit@2, cs_catalog_page_sk@3, cs_item_sk@4, cs_order_number@5], lanes=1, batches=multiple, mj=MJ2, output_rows=1770, output_bytes=70800
+                        GpuHashJoin: join_type=Right, on=[(cr_item_sk@0, cs_item_sk@3), (cr_order_number@1, cs_order_number@4)], projection=[cs_ext_sales_price@4, cs_net_profit@5, cr_return_amount@2, cr_net_loss@3, cp_catalog_page_id@6], lanes=1, batches=multiple, mj=MJ2, output_rows=1768, output_bytes=99230
+                          in_rows=[[144067],[1768]] batch_rows=[[1768]] batch_bytes=[[99230]]
+                          GpuMemorySource: name=m3, lanes=1, batches=single, output_rows=144067, output_bytes=4610144
+                            in_rows=[] batch_rows=[[144067]] batch_bytes=[[4610144]]
+                          GpuHashJoin: join_type=Inner, on=[(cs_catalog_page_sk@4, cp_catalog_page_sk@0)], projection=[cs_ext_sales_price@0, cs_net_profit@1, cp_catalog_page_id@6, cs_item_sk@2, cs_order_number@3], lanes=1, batches=multiple, mj=MJ2, output_rows=1768, output_bytes=99229
+                            in_rows=[[1770],[11718]] batch_rows=[[1768]] batch_bytes=[[99229]]
+                            GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1770, output_bytes=70800
+                              in_rows=[[1770]] batch_rows=[[1770]] batch_bytes=[[70800]]
+                              GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, cs_promo_sk@5)], projection=[cs_ext_sales_price@1, cs_net_profit@2, cs_item_sk@3, cs_order_number@4, cs_catalog_page_sk@5], lanes=1, batches=multiple, mj=MJ2, output_rows=1770, output_bytes=70800
                                 in_rows=[[294],[1807]] batch_rows=[[1770]] batch_bytes=[[70800]]
-                                GpuMemorySource: name=m7, lanes=1, batches=single, output_rows=294, output_bytes=2352
+                                GpuMemorySource: name=m5, lanes=1, batches=single, output_rows=294, output_bytes=2352
                                   in_rows=[] batch_rows=[[294]] batch_bytes=[[2352]]
-                                GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, cs_item_sk@3)], projection=[cs_ext_sales_price@1, cs_net_profit@2, cs_catalog_page_sk@3, cs_item_sk@4, cs_order_number@5, cs_promo_sk@6], lanes=1, batches=multiple, mj=MJ2, output_rows=1807, output_bytes=86736
+                                GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, cs_item_sk@2)], projection=[cs_ext_sales_price@1, cs_net_profit@2, cs_item_sk@3, cs_order_number@4, cs_catalog_page_sk@5, cs_promo_sk@6], lanes=1, batches=multiple, mj=MJ2, output_rows=1807, output_bytes=86736
                                   in_rows=[[1055],[31634]] batch_rows=[[1807]] batch_bytes=[[86736]]
-                                  GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1055, output_bytes=8440
-                                    in_rows=[[1055]] batch_rows=[[1055]] batch_bytes=[[8440]]
-                                    GpuFilter: predicate=i_current_price@1 > 50.00, projection=[i_item_sk@0], lanes=1, batches=multiple, output_rows=1055, output_bytes=8440
-                                      in_rows=[[18000]] batch_rows=[[1055]] batch_bytes=[[8440]]
-                                      GpuLoadParquet: table=item, projections=[i_item_sk@0, i_current_price@5], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=18000, output_bytes=288000
-                                        in_rows=[] batch_rows=[[18000]] batch_bytes=[[288000]]
-                                  GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@0)], projection=[cs_ext_sales_price@6, cs_net_profit@7, cs_catalog_page_sk@2, cs_item_sk@3, cs_order_number@5, cs_promo_sk@4], lanes=1, batches=multiple, mj=MJ2, output_rows=31634, output_bytes=1518432
+                                  GpuMemorySource: name=m10, lanes=1, batches=single, output_rows=1055, output_bytes=8440
+                                    in_rows=[] batch_rows=[[1055]] batch_bytes=[[8440]]
+                                  GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, cs_sold_date_sk@0)], projection=[cs_ext_sales_price@6, cs_net_profit@7, cs_item_sk@3, cs_order_number@5, cs_catalog_page_sk@2, cs_promo_sk@4], lanes=1, batches=multiple, mj=MJ2, output_rows=31634, output_bytes=1518432
                                     in_rows=[[31],[1441548]] batch_rows=[[31634]] batch_bytes=[[1518432]]
                                     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=31, output_bytes=248
                                       in_rows=[[31]] batch_rows=[[31]] batch_bytes=[[248]]
@@ -3396,8 +3434,8 @@ GpuUnload: output_rows=100, output_bytes=8255
                                           in_rows=[] batch_rows=[[73049]] batch_bytes=[[1168784]]
                                     GpuLoadParquet: table=catalog_sales, projections=[cs_sold_date_sk@0, cs_catalog_page_sk@12, cs_item_sk@15, cs_promo_sk@16, cs_order_number@17, cs_ext_sales_price@23, cs_net_profit@33], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, output_rows=1441548, output_bytes=80726688
                                       in_rows=[] batch_rows=[[1441548]] batch_bytes=[[80726688]]
-                          GpuLoadParquet: table=catalog_page, projections=[cp_catalog_page_sk@0, cp_catalog_page_id@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=11718, output_bytes=374976
-                            in_rows=[] batch_rows=[[11718]] batch_bytes=[[374976]]
+                            GpuMemorySource: name=m4, lanes=1, batches=single, output_rows=11718, output_bytes=374976
+                              in_rows=[] batch_rows=[[11718]] batch_bytes=[[374976]]
                 GpuProject: exprs=[`web channel` as channel, concat(web_site, web_site_id@0) as id, sales@1, returns_@2, profit@3], lanes=1, batches=single, output_rows=15, output_bytes=1127
                   in_rows=[[15]] batch_rows=[[15]] batch_bytes=[[1127]]
                   GpuProject: exprs=[web_site_id@0, sum(web_sales.ws_ext_sales_price)@1 as sales, `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`@2 as returns_, `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`@3 as profit], lanes=1, batches=single, output_rows=15, output_bytes=722
@@ -3406,23 +3444,23 @@ GpuUnload: output_rows=100, output_bytes=8255
                       in_rows=[[15]] batch_rows=[[15]] batch_bytes=[[722]]
                       GpuAggregate: group_by=[web_site_id@4], aggs=[sum(ws_ext_sales_price@0) as sum(web_sales.ws_ext_sales_price), sum(coalesce(CAST(wr_return_amt@2 AS Decimal128(22,2)), 0.00)) as `sum(coalesce(web_returns.wr_return_amt,Int64(0)))`, sum(ws_net_profit@1 - coalesce(CAST(wr_net_loss@3 AS Decimal128(22,2)), 0.00)) as `sum(web_sales.ws_net_profit - coalesce(web_returns.wr_net_loss,Int64(0)))`], lanes=1, batches=multiple, output_rows=15, output_bytes=722
                         in_rows=[[883]] batch_rows=[[15]] batch_bytes=[[722]]
-                        GpuHashJoin: join_type=Inner, on=[(web_site_sk@0, ws_web_site_sk@4)], projection=[ws_ext_sales_price@2, ws_net_profit@3, wr_return_amt@4, wr_net_loss@5, web_site_id@1], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=49559
-                          in_rows=[[30],[883]] batch_rows=[[883]] batch_bytes=[[49559]]
-                          GpuMemorySource: name=m0, lanes=1, batches=single, output_rows=30, output_bytes=960
-                            in_rows=[] batch_rows=[[30]] batch_bytes=[[960]]
-                          GpuHashJoin: join_type=Right, on=[(wr_item_sk@0, ws_item_sk@3), (wr_order_number@1, ws_order_number@4)], projection=[ws_ext_sales_price@4, ws_net_profit@5, wr_return_amt@2, wr_net_loss@3, ws_web_site_sk@6], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=35320
-                            in_rows=[[71654],[883]] batch_rows=[[883]] batch_bytes=[[35320]]
-                            GpuMemorySource: name=m5, lanes=1, batches=single, output_rows=71654, output_bytes=2292928
-                              in_rows=[] batch_rows=[[71654]] batch_bytes=[[2292928]]
-                            GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ws_promo_sk@5)], projection=[ws_ext_sales_price@1, ws_net_profit@2, ws_web_site_sk@3, ws_item_sk@4, ws_order_number@5], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=35320
+                        GpuHashJoin: join_type=Right, on=[(wr_item_sk@0, ws_item_sk@3), (wr_order_number@1, ws_order_number@4)], projection=[ws_ext_sales_price@4, ws_net_profit@5, wr_return_amt@2, wr_net_loss@3, web_site_id@6], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=49559
+                          in_rows=[[71654],[883]] batch_rows=[[883]] batch_bytes=[[49559]]
+                          GpuMemorySource: name=m0, lanes=1, batches=single, output_rows=71654, output_bytes=2292928
+                            in_rows=[] batch_rows=[[71654]] batch_bytes=[[2292928]]
+                          GpuHashJoin: join_type=Inner, on=[(web_site_sk@0, ws_web_site_sk@4)], projection=[ws_ext_sales_price@2, ws_net_profit@3, web_site_id@1, ws_item_sk@4, ws_order_number@5], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=49559
+                            in_rows=[[30],[883]] batch_rows=[[883]] batch_bytes=[[49559]]
+                            GpuMemorySource: name=m1, lanes=1, batches=single, output_rows=30, output_bytes=960
+                              in_rows=[] batch_rows=[[30]] batch_bytes=[[960]]
+                            GpuHashJoin: join_type=Inner, on=[(p_promo_sk@0, ws_promo_sk@5)], projection=[ws_ext_sales_price@1, ws_net_profit@2, ws_item_sk@3, ws_order_number@4, ws_web_site_sk@5], lanes=1, batches=multiple, mj=MJ3, output_rows=883, output_bytes=35320
                               in_rows=[[294],[897]] batch_rows=[[883]] batch_bytes=[[35320]]
-                              GpuMemorySource: name=m1, lanes=1, batches=single, output_rows=294, output_bytes=2352
+                              GpuMemorySource: name=m2, lanes=1, batches=single, output_rows=294, output_bytes=2352
                                 in_rows=[] batch_rows=[[294]] batch_bytes=[[2352]]
-                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ws_item_sk@3)], projection=[ws_ext_sales_price@1, ws_net_profit@2, ws_web_site_sk@3, ws_item_sk@4, ws_order_number@5, ws_promo_sk@6], lanes=1, batches=multiple, mj=MJ3, output_rows=897, output_bytes=43056
+                              GpuHashJoin: join_type=Inner, on=[(i_item_sk@0, ws_item_sk@2)], projection=[ws_ext_sales_price@1, ws_net_profit@2, ws_item_sk@3, ws_order_number@4, ws_web_site_sk@5, ws_promo_sk@6], lanes=1, batches=multiple, mj=MJ3, output_rows=897, output_bytes=43056
                                 in_rows=[[1055],[16224]] batch_rows=[[897]] batch_bytes=[[43056]]
-                                GpuMemorySource: name=m6, lanes=1, batches=single, output_rows=1055, output_bytes=8440
+                                GpuMemorySource: name=m11, lanes=1, batches=single, output_rows=1055, output_bytes=8440
                                   in_rows=[] batch_rows=[[1055]] batch_bytes=[[8440]]
-                                GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_ext_sales_price@6, ws_net_profit@7, ws_web_site_sk@3, ws_item_sk@2, ws_order_number@5, ws_promo_sk@4], lanes=1, batches=multiple, mj=MJ3, output_rows=16224, output_bytes=778752
+                                GpuHashJoin: join_type=Inner, on=[(d_date_sk@0, ws_sold_date_sk@0)], projection=[ws_ext_sales_price@6, ws_net_profit@7, ws_item_sk@2, ws_order_number@5, ws_web_site_sk@3, ws_promo_sk@4], lanes=1, batches=multiple, mj=MJ3, output_rows=16224, output_bytes=778752
                                   in_rows=[[31],[719384]] batch_rows=[[16224]] batch_bytes=[[778752]]
                                   GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=31, output_bytes=248
                                     in_rows=[[31]] batch_rows=[[31]] batch_bytes=[[248]]
@@ -4212,12 +4250,12 @@ GpuUnload: output_rows=1, output_bytes=24
             in_rows=[[68]] batch_rows=[[68]] batch_bytes=[[1632]]
             GpuAggregate: group_by=[ws_order_number@0], aggs=[sum(ws_ext_ship_cost@1) as alias2, sum(ws_net_profit@2) as alias3], lanes=1, batches=multiple, output_rows=68, output_bytes=1632
               in_rows=[[95]] batch_rows=[[68]] batch_bytes=[[1632]]
-              GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, wr_order_number@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=95, output_bytes=2280
-                in_rows=[[135],[8701162]] batch_rows=[[95]] batch_bytes=[[2280]]
-                GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=135, output_bytes=3240
-                  in_rows=[[135]] batch_rows=[[135]] batch_bytes=[[3240]]
-                  GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, ws_order_number@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=135, output_bytes=3240
-                    in_rows=[[135],[6644272]] batch_rows=[[135]] batch_bytes=[[3240]]
+              GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, ws_order_number@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=95, output_bytes=2280
+                in_rows=[[95],[6644272]] batch_rows=[[95]] batch_bytes=[[2280]]
+                GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=95, output_bytes=2280
+                  in_rows=[[95]] batch_rows=[[95]] batch_bytes=[[2280]]
+                  GpuHashJoin: join_type=LeftSemi, on=[(ws_order_number@0, wr_order_number@0)], lanes=1, batches=multiple, mj=MJ1, output_rows=95, output_bytes=2280
+                    in_rows=[[135],[8701162]] batch_rows=[[95]] batch_bytes=[[2280]]
                     GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=135, output_bytes=3240
                       in_rows=[[135]] batch_rows=[[135]] batch_bytes=[[3240]]
                       GpuHashJoin: join_type=Inner, on=[(web_site_sk@0, ws_web_site_sk@3)], projection=[ws_order_number@1, ws_ext_ship_cost@2, ws_net_profit@3], lanes=1, batches=multiple, mj=MJ1, output_rows=135, output_bytes=3240
@@ -4246,28 +4284,28 @@ GpuUnload: output_rows=1, output_bytes=24
                                   in_rows=[] batch_rows=[[50000]] batch_bytes=[[903150]]
                             GpuLoadParquet: table=web_sales, projections=[ws_ship_date_sk@2, ws_ship_addr_sk@11, ws_web_site_sk@13, ws_order_number@17, ws_ext_ship_cost@28, ws_net_profit@33], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=34530432
                               in_rows=[] batch_rows=[[719384]] batch_bytes=[[34530432]]
-                    GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=1, batches=multiple, mj=MJ1, output_rows=6644272, output_bytes=53154176
-                      in_rows=[[719384],[719384]] batch_rows=[[6644272]] batch_bytes=[[53154176]]
-                      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=719384, output_bytes=11510144
-                        in_rows=[[719384]] batch_rows=[[719384]] batch_bytes=[[11510144]]
+                    GpuHashJoin: join_type=Inner, on=[(wr_order_number@0, ws_order_number@0)], projection=[wr_order_number@0], lanes=1, batches=multiple, mj=MJ1, output_rows=8701162, output_bytes=69609296
+                      in_rows=[[71654],[6644272]] batch_rows=[[8701162]] batch_bytes=[[69609296]]
+                      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=71654, output_bytes=573232
+                        in_rows=[[71654]] batch_rows=[[71654]] batch_bytes=[[573232]]
+                        GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=71654, output_bytes=573232
+                          in_rows=[] batch_rows=[[71654]] batch_bytes=[[573232]]
+                      GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=1, batches=multiple, mj=MJ1, output_rows=6644272, output_bytes=53154176
+                        in_rows=[[719384],[719384]] batch_rows=[[6644272]] batch_bytes=[[53154176]]
+                        GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=719384, output_bytes=11510144
+                          in_rows=[[719384]] batch_rows=[[719384]] batch_bytes=[[11510144]]
+                          GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
+                            in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
                         GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
                           in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
-                      GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
-                        in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
-                GpuHashJoin: join_type=Inner, on=[(wr_order_number@0, ws_order_number@0)], projection=[wr_order_number@0], lanes=1, batches=multiple, mj=MJ1, output_rows=8701162, output_bytes=69609296
-                  in_rows=[[71654],[6644272]] batch_rows=[[8701162]] batch_bytes=[[69609296]]
-                  GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=71654, output_bytes=573232
-                    in_rows=[[71654]] batch_rows=[[71654]] batch_bytes=[[573232]]
-                    GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=71654, output_bytes=573232
-                      in_rows=[] batch_rows=[[71654]] batch_bytes=[[573232]]
-                  GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=1, batches=multiple, mj=MJ1, output_rows=6644272, output_bytes=53154176
-                    in_rows=[[719384],[719384]] batch_rows=[[6644272]] batch_bytes=[[53154176]]
-                    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=719384, output_bytes=11510144
-                      in_rows=[[719384]] batch_rows=[[719384]] batch_bytes=[[11510144]]
-                      GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
-                        in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
+                GpuHashJoin: join_type=Inner, on=[(ws_order_number@1, ws_order_number@1)], filter=ws_warehouse_sk@probe:0 != ws_warehouse_sk@build:0, projection=[ws_order_number@1], lanes=1, batches=multiple, mj=MJ1, output_rows=6644272, output_bytes=53154176
+                  in_rows=[[719384],[719384]] batch_rows=[[6644272]] batch_bytes=[[53154176]]
+                  GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=719384, output_bytes=11510144
+                    in_rows=[[719384]] batch_rows=[[719384]] batch_bytes=[[11510144]]
                     GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
                       in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
+                  GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, output_rows=719384, output_bytes=11510144
+                    in_rows=[] batch_rows=[[719384]] batch_bytes=[[11510144]]
 == q96
 early_exit=none
 GpuUnload: skip=0, fetch=100, output_rows=1, output_bytes=8

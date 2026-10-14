@@ -128,20 +128,47 @@ def test_a_filtered_column_holds_only_the_values_the_filter_left():
     assert rows_of(text) == 1
 
 
-# #239 — a join's matched shares compare the two sides' key counts, not the key domain its inner
-# rows divide by. A thousand keys, 100 of them on the preserved side and 143 others on the null
-# side: every preserved row counts as matched, so the left join keeps 14 rows of the 100.
-def bug_a_left_join_is_estimated_below_its_preserved_side():
-    tables = {"pre": pa.table({"pk": list(range(1000)), "pv": [k % 10 for k in range(1000)]}),
-              "nul": pa.table({"nk": [7 * i for i in range(143)]})}
+#: a thousand keys: 100 on the preserved side, and 143 multiples of 7 on the other, 14 of them
+#: among the 100 — a domain wider than either side's key count
+WIDE_DOMAIN = {"pre": pa.table({"pk": list(range(1000)), "pv": [k % 10 for k in range(1000)]}),
+               "nul": pa.table({"nk": [7 * i for i in range(143)]})}
+
+
+def wide_domain_join(join_type):
+    """`join_type` of the 100 keys `pv = 3` keeps against the 143 multiples of 7 — the 100 on the
+    build side, or on the probe side for a Right type — its estimates, the join and the 100's node."""
     preserved = ("GpuCoalesceAllBatches: lanes=1, batches=single, schema=[pk:Int64]\n"
                  "      GpuFilter: predicate=pv@1 = 3, projection=[pk@0], lanes=1, batches=multiple, "
                  f"schema=[pk:Int64]\n        {scan('pre', ['pk', 'pv'])}")
-    plan = parse_plans(f"== q\nGpuUnload\n{join('Left', 'pk@0', 'nk@0', preserved, scan('nul', ['nk']), 'pk:Int64, nk:Int64')}\n",
-                       "test")["q"]
-    estimates = estimate(plan, dataset(tables=tables))
-    left = plan.children[0]
-    assert estimates[id(left)].rows < 0.2 * estimates[id(left.children[0])].rows
+    other = scan("nul", ["nk"])
+    if join_type.startswith("Right"):
+        out = "pk:Int64" if join_type == "RightAnti" else "nk:Int64, pk:Int64"
+        text = join(join_type, "nk@0", "pk@0", other, preserved, out)
+    else:
+        out = "pk:Int64" if join_type == "LeftAnti" else "pk:Int64, nk:Int64"
+        text = join(join_type, "pk@0", "nk@0", preserved, other, out)
+    plan = parse_plans(f"== q\nGpuUnload\n{text}\n", "test")["q"]
+    joined = plan.children[0]
+    return estimate(plan, dataset(tables=WIDE_DOMAIN)), joined, joined.children[join_type.startswith("Right")]
+
+
+def test_a_left_join_keeps_its_preserved_side_where_the_domain_is_wider_than_both_keys():
+    # Taking the match share over the two key counts, not the domain, every preserved row
+    # matches and the join keeps 14 of the 100.
+    estimates, left, preserved = wide_domain_join("Left")
+    assert estimates[id(left)].rows >= estimates[id(preserved)].rows
+    assert abs(estimates[id(left)].rows - 100) < 1
+
+
+def test_an_anti_join_keeps_the_unmatched_share_where_the_domain_is_wider_than_both_keys():
+    estimates, anti, _ = wide_domain_join("LeftAnti")
+    assert abs(estimates[id(anti)].rows - 86) < 2
+
+
+def test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is_wider():
+    # The probe side's share, which Right, RightSemi, RightAnti and Full read.
+    estimates, anti, _ = wide_domain_join("RightAnti")
+    assert abs(estimates[id(anti)].rows - 86) < 2
 
 
 if __name__ == "__main__":
