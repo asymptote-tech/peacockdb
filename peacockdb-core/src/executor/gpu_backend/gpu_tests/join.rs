@@ -6,10 +6,12 @@ use super::*;
 
 use super::super::join::PairScratch;
 use super::super::{GpuEmitter, GpuJoin as GpuJoinExec, GpuProbingJoin};
-use crate::executor::{AbiTarget, Executor};
+use crate::common::logical_size_from_schema;
+use crate::executor::{AbiTarget, Backend, Executor, GpuBackend, GpuContext, NodeExecutors};
 use crate::plan::{BatchLayout, GpuEmitPartitions, GpuHashJoin, JoinFilterColumn, JoinSide};
 use crate::tests::given::Given;
 use crate::wire::FbKind;
+use crate::wire::attach_recipes;
 use datafusion::arrow::datatypes::TimeUnit;
 use datafusion::common::JoinType;
 use peacockdb_ffi::raw::peacock_join_finish;
@@ -55,6 +57,7 @@ fn session_join(session: &Session, join_type: JoinType, output: &ArrowSchema) ->
         session.recipe(2),
         join_type,
         scratch,
+        0,
         output,
     )
     .expect("the recipe is a session's")
@@ -111,6 +114,57 @@ fn a_session_probed_three_times_answers_each() {
     }
     let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
     assert!(finished.is_none(), "an Inner join owes nothing at done");
+}
+
+/// The join's executor as `executors_for` builds it from the node, which is where its
+/// prices are read off the plan.
+fn backend_join(session: &Session, tree: &dyn GpuNode) -> GpuJoinExec {
+    let ctx = GpuContext {
+        executor: session.executor,
+        recipes: attach_recipes(tree, 0).expect("every node's payload is writable"),
+    };
+    match GpuBackend::executors_for(&ctx, tree, 2, 0) {
+        Ok(NodeExecutors::Join(join)) => join,
+        Ok(other) => panic!("a join built a {:?} executor", other.category()),
+        Err(error) => panic!("the join did not build: {error}"),
+    }
+}
+
+/// The four types that answer each probe row in its own call owe nothing at done, and their
+/// recipe publishes no `join_finish`. Their finish ends the session without one, so neither
+/// the journal nor the device's regions hold a call past the probe.
+#[test]
+fn a_join_that_owes_nothing_at_done_makes_no_finish_call() {
+    for join_type in [
+        JoinType::Inner,
+        JoinType::Right,
+        JoinType::RightSemi,
+        JoinType::RightAnti,
+    ] {
+        let out = match join_type {
+            JoinType::Inner | JoinType::Right => joined(false),
+            _ => columns(),
+        };
+        let tree = self_join(join_type, 0, vec![2], vec![vec![0]], &out);
+        let session = Session::open(tree.as_ref());
+        let join = session_join(&session, join_type, &out);
+        let (build, probe) = (session.scan(&[2]), session.scan(&[0]));
+        let _measured = Measuring::on();
+        let (mut probing, _) = join.set_build(Some(build)).expect("built");
+        probing.probe_and_fetch(probe).expect("probed");
+        let (finished, stats) = probing.finish_and_fetch().expect("finished");
+        assert!(finished.is_none(), "{join_type:?} owes nothing at done");
+        assert_eq!(
+            made(&stats),
+            Vec::new(),
+            "{join_type:?}'s finish made a call"
+        );
+        assert_eq!(
+            session.regions().len(),
+            2,
+            "{join_type:?}: the build and the probe, and no finish"
+        );
+    }
 }
 
 /// The session is the device's to free, and `Drop` is what frees it: after the drop the
@@ -244,6 +298,7 @@ fn a_left_join_with_a_timestamp_probe_column_finished_without_a_probe_batch_pads
         session.recipe(2),
         JoinType::Left,
         scratch,
+        0,
         &out,
     )
     .expect("the recipe is a session's")
@@ -304,6 +359,7 @@ fn a_right_join_whose_lane_got_no_build_batch_pads_a_timestamp_build_column() {
         session.recipe(2),
         JoinType::Right,
         scratch,
+        0,
         &out,
     )
     .expect("the recipe is a session's")
@@ -421,6 +477,44 @@ fn a_session_holds_its_build_its_hash_table_and_its_matched_column() {
         left,
         build + 16 * 4 + 4,
         "and a byte a row saying which matched"
+    );
+}
+
+/// A RightSemi session also holds its build's keys taken distinct, the copy its table views:
+/// four `k`s here, a string each, at the 16 bytes a row the session prices one. Built as
+/// `executors_for` builds it, so the width is read off the node.
+#[test]
+fn a_probe_side_semi_session_holds_its_distinct_build_keys() {
+    let out = columns();
+    let tree = self_join(JoinType::RightSemi, 0, vec![1, 2], vec![vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let build = session.scan(&[1, 2]);
+    let build_bytes = build.byte_size();
+    let (probing, _) = backend_join(&session, tree.as_ref())
+        .set_build(Some(build))
+        .expect("built");
+    assert_eq!(
+        probing.resident_bytes(),
+        build_bytes + 16 * 4 + 16 * 4,
+        "four build rows: the hash table and the distinct keys"
+    );
+}
+
+/// A LeftSemi probe takes its batch's keys distinct before matching them, so a call is
+/// charged a key a probe row beside the batch, an output as long and the pairs.
+#[test]
+fn a_build_side_semi_probe_is_charged_its_batchs_distinct_keys() {
+    let out = columns();
+    let tree = self_join(JoinType::LeftSemi, 0, vec![1, 2], vec![vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let (probing, _) = backend_join(&session, tree.as_ref())
+        .set_build(Some(session.scan(&[1, 2])))
+        .expect("built");
+    let output = logical_size_from_schema(&out, 2, 0);
+    assert_eq!(
+        probing.scratch_bytes(2, 100),
+        100 + output + 2 * 8 + 2 * 16,
+        "two probe rows: the batch, the output, the pairs and the distinct keys"
     );
 }
 

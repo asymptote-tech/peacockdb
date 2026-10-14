@@ -133,12 +133,18 @@ impl Backend for GpuBackend {
             }
             // One session executor for the three nodes, as the wire writes one `CudfJoin`.
             NodeRef::Join(_) | NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {
-                let (join_type, keyed, filter_columns) = match as_node_ref(node) {
-                    NodeRef::Join(join) => (join.join_type, true, &join.filter_columns[..]),
+                let (join_type, keyed, filter_columns, distinct_key_width) = match as_node_ref(node)
+                {
+                    NodeRef::Join(join) => (
+                        join.join_type,
+                        true,
+                        &join.filter_columns[..],
+                        join.distinct_key_width(),
+                    ),
                     NodeRef::NestedLoopJoin(join) => {
-                        (join.join_type, false, &join.filter_columns[..])
+                        (join.join_type, false, &join.filter_columns[..], 0)
                     }
-                    _ => (JoinType::Inner, false, &[][..]),
+                    _ => (JoinType::Inner, false, &[][..], 0),
                 };
                 let scratch = PairScratch::new(
                     keyed,
@@ -147,7 +153,14 @@ impl Backend for GpuBackend {
                     &input(1),
                     ctx.recipes.join_scratch_bytes(),
                 );
-                NodeExecutors::Join(GpuJoin::new(site, recipe, join_type, scratch, &out(node))?)
+                NodeExecutors::Join(GpuJoin::new(
+                    site,
+                    recipe,
+                    join_type,
+                    scratch,
+                    distinct_key_width,
+                    &out(node),
+                )?)
             }
             NodeRef::Unload(_) => NodeExecutors::Unload(GpuExport::new(site, &input(0))),
             NodeRef::MergePartitions(_)

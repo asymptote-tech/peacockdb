@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::common::JoinType;
 
 use peacockdb_ffi::raw::{
@@ -22,12 +22,11 @@ use crate::executor::GpuBatch;
 use crate::executor::node_timing_on;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget, BackendError, CallResult, CallStats};
 use crate::plan::PlanError;
-use crate::plan::{JoinFilterColumn, JoinSide, empty_build_owes_nothing, needs_finish};
+use crate::plan::{
+    JoinFilterColumn, JoinSide, empty_build_owes_nothing, needs_finish, session_bytes,
+    width_on_device,
+};
 use crate::wire::{AbiSymbol, CallPattern, FbKind, Recipe, Seq};
-
-/// The cuDF hash table per build row: a `static_multiset` of 8-byte slots at load factor
-/// 0.5, whatever the key width (design §4.3). The planner's resident model uses the same.
-const HASH_TABLE_BYTES_PER_ROW: u64 = 16;
 
 /// Each key-match pair's index maps, before the residual's own columns are gathered for it.
 const INDEX_BYTES_PER_PAIR: u64 = 8;
@@ -89,15 +88,6 @@ impl PairScratch {
     }
 }
 
-/// A column's bytes per row as the session counts them (`filter_row_bytes`): the fixed width
-/// cuDF holds it at, and 16 for a variable-width one.
-fn width_on_device(data_type: &DataType) -> u64 {
-    match data_type {
-        DataType::Boolean => 1,
-        other => other.primitive_width().map_or(16, |width| width as u64),
-    }
-}
-
 impl GpuJoin {
     /// `recipe` is the session line the wire published: `join_build`, `join_probe` and, for
     /// a finishing type, `join_finish`, all on one `CudfJoin` seq.
@@ -106,6 +96,7 @@ impl GpuJoin {
         recipe: &Recipe,
         join_type: JoinType,
         scratch: PairScratch,
+        distinct_key_width: u64,
         output: &ArrowSchema,
     ) -> Result<Self, PlanError> {
         let expected: &[(AbiSymbol, CallPattern)] = if needs_finish(join_type) {
@@ -152,21 +143,19 @@ impl GpuJoin {
             seq,
             join_type,
             scratch,
+            distinct_key_width,
             output: Arc::new(output.clone()),
         })
     }
 
-    /// The session's hash table and `matched` column, for `rows` build rows.
+    /// What the session holds beside its build batch of `rows` rows, as the planner prices it.
     pub(crate) fn built_bytes(&self, rows: u64) -> u64 {
-        let table = match self.scratch.keyed {
-            true => HASH_TABLE_BYTES_PER_ROW * rows,
-            false => 0,
-        };
-        let matched = match needs_finish(self.join_type) {
-            true => rows,
-            false => 0,
-        };
-        table + matched
+        session_bytes(
+            self.join_type,
+            self.scratch.keyed,
+            self.distinct_key_width,
+            rows,
+        )
     }
 
     /// The session begins here, with this lane's build batch or with none — the session
@@ -244,19 +233,28 @@ impl GpuProbingJoin {
         self.build_bytes + self.join.built_bytes(self.build_rows)
     }
 
-    /// A probe call: the batch, an output of as many rows, and its pairs. A finish (no
-    /// batch): the unmatched build rows, priced as every one of them.
+    /// A probe call: the batch, an output of as many rows, its pairs and, for the build-side
+    /// semi family, the batch's keys taken distinct. A finish (no batch): the unmatched build
+    /// rows, priced as every one of them.
     pub(crate) fn call_bytes(&self, n_rows: u64, n_bytes: u64) -> u64 {
         let output = &self.join.output;
+        let finishes = needs_finish(self.join.join_type);
         if n_rows == 0 && n_bytes == 0 {
-            return match needs_finish(self.join.join_type) {
+            return match finishes {
                 true => logical_size_from_schema(output, self.build_rows as usize, 0) as u64,
                 false => 0,
             };
         }
+        // Of the types that finish, only the build-side semi family has a width; RightSemi
+        // and RightAnti hold their build's distinct keys, priced in `built_bytes`.
+        let distinct_keys = match finishes {
+            true => n_rows * self.join.distinct_key_width,
+            false => 0,
+        };
         n_bytes
             + logical_size_from_schema(output, n_rows as usize, 0) as u64
             + self.join.scratch.bytes(self.build_rows, n_rows)
+            + distinct_keys
     }
 
     /// One probe batch, consumed. `None` where the type answers only at finish — LeftSemi,
@@ -282,8 +280,19 @@ impl GpuProbingJoin {
     }
 
     /// After the last probe: one table for the five types that finish, `None` for the rest.
-    /// The session is released when this returns, by `Drop`.
+    /// The rest make no call, as their recipe names none. The session is released when this
+    /// returns, by `Drop`.
     pub(crate) fn finish_and_fetch(self) -> CallResult<Option<GpuBatch>> {
+        if !needs_finish(self.join.join_type) {
+            let calls = AbiCalls::armed(node_timing_on());
+            return Ok((
+                None,
+                CallStats {
+                    scratch_bytes: None,
+                    calls,
+                },
+            ));
+        }
         let mut out = 0u64;
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {

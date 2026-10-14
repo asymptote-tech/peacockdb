@@ -233,6 +233,93 @@ fn a_join_filter_reference_past_its_map_is_caught_at_plan_time() {
     );
 }
 
+/// `k > 1` or `fk > 1`: a conjunct reading the build alone or the probe alone, its column at
+/// the ordinal `both_sides_filter` maps it to.
+fn one_sided(side: JoinSide) -> Expr {
+    let (index, name) = match side {
+        JoinSide::Build => (0, "k"),
+        JoinSide::Probe => (1, "fk"),
+    };
+    Expr::binary(
+        Expr::column(index, name),
+        BinaryOp::Gt,
+        Expr::Literal(datafusion::common::ScalarValue::Int64(Some(1))),
+        DataType::Boolean,
+    )
+}
+
+fn and(left: Expr, right: Expr) -> Expr {
+    Expr::binary(left, BinaryOp::And, right, DataType::Boolean)
+}
+
+/// The semi family takes its keys distinct, a probe batch's or the build's, and the four types
+/// that pair rows never do. A conjunct reading both sides sends a semi join to the mixed or
+/// pairs path instead, which takes nothing distinct (design §3.1, §3.4).
+#[test]
+fn a_semi_join_takes_its_keys_distinct_unless_a_conjunct_reads_both_sides() {
+    use datafusion::common::JoinType::*;
+    for join_type in EVERY_JOIN_TYPE {
+        let plain = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            None,
+            Vec::new(),
+        );
+        let semi = matches!(
+            join_type,
+            LeftSemi | LeftAnti | LeftMark | RightSemi | RightAnti
+        );
+        assert_eq!(
+            plain.distinct_key_width(),
+            if semi { 8 } else { 0 },
+            "{join_type:?}: one Int64 key"
+        );
+        let (filter, filter_columns) = both_sides_filter();
+        let crossing = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            Some(and(one_sided(JoinSide::Build), filter)),
+            filter_columns,
+        );
+        assert_eq!(
+            crossing.distinct_key_width(),
+            0,
+            "{join_type:?} with k < fk"
+        );
+    }
+}
+
+/// A conjunct reading one side filters that side's rows, which leaves the keys to the row-wise
+/// matchers; a constant conjunct is evaluated with the pairs, as the session splits it.
+#[test]
+fn a_one_sided_conjunct_leaves_a_semi_join_its_distinct_keys() {
+    let (_, filter_columns) = both_sides_filter();
+    let constant = Expr::Literal(datafusion::common::ScalarValue::Boolean(Some(true)));
+    for join_type in [
+        datafusion::common::JoinType::RightSemi,
+        datafusion::common::JoinType::LeftAnti,
+    ] {
+        for (filter, width) in [
+            (
+                and(one_sided(JoinSide::Build), one_sided(JoinSide::Probe)),
+                8,
+            ),
+            (and(one_sided(JoinSide::Probe), constant.clone()), 0),
+        ] {
+            let join = joining(
+                Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+                Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+                join_type,
+                Some(filter),
+                filter_columns.clone(),
+            );
+            assert_eq!(join.distinct_key_width(), width, "{join_type:?}");
+        }
+    }
+}
+
 #[test]
 fn a_cross_join_over_several_lanes_names_the_node_that_fixes_it() {
     let join = GpuCrossJoin::new(

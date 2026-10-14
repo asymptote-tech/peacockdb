@@ -497,11 +497,22 @@ comes from a build row, so `owes_nothing()` holds and the driver drops the lane'
 without a call. Right, Full and RightAnti owe their probe rows, padded with the types of the
 plan's `build_schema`. `plan::empty_build_owes_nothing` is the one rule both engines read.
 
-**Pricing.** A session holds the build bytes, about 16 bytes a build row for a keyed join's hash
-table, and for the five finishing types, hash or nested loop, one byte a row for `matched`
-(`planner/memory_estimation.rs`, `gpu_backend/join.rs`'s `built_bytes`).
-A probe call's scratch prices each pair at 8 bytes plus the residual's per-row width, chunked at
-`chunk_bytes` (`gpu_backend/join.rs`). At `tp4-sized` the planner writes
+**Pricing.** One function, `plan::session_bytes`, prices what a session holds, for the planner's
+resident model and the device's accountant alike. It is the build bytes, plus three terms:
+- about 16 bytes a build row for a keyed join's hash table;
+- for RightSemi and RightAnti, the build's key bytes again, for the distinct keys the table is
+  built over;
+- for the five finishing types, hash or nested loop, one byte a row for `matched`.
+
+The distinct keys are charged only where no residual conjunct reads both sides
+(`GpuHashJoin::distinct_key_width`). Where one does, the session holds no distinct keys. It runs
+`mixed_left_semi_join`, which hashes the build per call into about 8 bytes a row, or the pairs
+path over a hash table. Either way the 16 bytes a row already charged covers it.
+
+A probe call's scratch is the batch, an output as long, and each pair at 8 bytes plus the
+residual's per-row width, chunked at `chunk_bytes`. A LeftSemi, LeftAnti or LeftMark probe
+without a crossing conjunct also pays the batch's key bytes, for its distinct keys
+(`gpu_backend/join.rs`). At `tp4-sized` the planner writes
 `chunk_bytes` as a sixteenth of the budget, capped at 1 GiB, so the accountant and the session
 bound one call alike; the unbudgeted modes write 0, which the session reads as 1 GiB.
 
@@ -1025,8 +1036,9 @@ side — and answers a join id from its own map in `NodeSession::Impl`, freed by
 distinct-key table a `distinct_hash_join` views, the cuDF join object and the build-matched
 column; it is not tied to a lane, so any lane may probe it. `peacock_join_probe` consumes one
 batch and answers exactly one table, possibly of zero rows — or handle 0 for LeftSemi, LeftAnti
-and LeftMark, which answer only at `peacock_join_finish`. `finish` is called once, after the
-last probe, and answers handle 0 for the types that have none. Two refusals leave the session
+and LeftMark, which answer only at `peacock_join_finish`. The executor calls `finish` once,
+after the last probe, and only for the five finishing types, as the recipe names it. Called for
+any other type, it answers handle 0. Two refusals leave the session
 standing, an unknown join id and a probe after finish; anything else ends the query, as
 `execute_node` does. Each call opens one region, `(seq, partition 0, call_index)`.
 

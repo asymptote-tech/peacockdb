@@ -268,6 +268,35 @@ async fn a_build_preserving_nested_loop_is_charged_for_its_matched_column() {
     );
 }
 
+/// A RightSemi or RightAnti session copies its build's keys distinct and keeps the copy for
+/// its table to view (design §3.1): the key's bytes again, a build row. A residual reading
+/// both sides takes `mixed_left_semi_join` or the pairs path instead, which copy no keys.
+#[tokio::test]
+async fn a_probe_side_semi_join_is_charged_for_its_distinct_build_keys() {
+    let distinct = modelled(
+        "SELECT s_name FROM supplier WHERE EXISTS \
+         (SELECT 1 FROM nation WHERE n_nationkey = s_nationkey)",
+        4,
+        BUDGET,
+    )
+    .await;
+    let crossing = modelled(
+        "SELECT s_name FROM supplier WHERE EXISTS \
+         (SELECT 1 FROM nation WHERE n_nationkey = s_nationkey AND n_nationkey <> s_suppkey)",
+        4,
+        BUDGET,
+    )
+    .await;
+    // Both plan a RightSemi over nation's 25 rows, keyed on an Int32: 4 bytes a row.
+    assert_eq!(
+        distinct.accumulator_bytes - crossing.accumulator_bytes,
+        25 * 4,
+        "the distinct keys are the build key's width per BUILD row: {} vs {}",
+        distinct.accumulator_bytes,
+        crossing.accumulator_bytes
+    );
+}
+
 #[tokio::test]
 async fn a_loader_is_priced_by_the_batches_its_mapping_makes() {
     // Two batching forms, one budget: what a loader holds is the largest batch the

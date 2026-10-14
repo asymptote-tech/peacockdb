@@ -813,6 +813,13 @@ impl GpuHashJoin {
             schema,
         )
     }
+
+    /// Bytes a row of the keys its session takes distinct, 0 where it takes none: the build's
+    /// for RightSemi and RightAnti, held for the session; a probe batch's for LeftSemi,
+    /// LeftAnti and LeftMark, for that call.
+    pub(crate) fn distinct_key_width(&self) -> u64 {
+        join::distinct_key_width(self)
+    }
 }
 
 /// N lanes into 1, forwarding each batch as it is visited, round-robin. It accumulates
@@ -1303,6 +1310,27 @@ pub(crate) fn finalize_columns(
 /// `join_finish` answers for: Left, Full and the build-side semi family.
 pub(crate) fn needs_finish(join_type: JoinType) -> bool {
     join::needs_finish(join_type)
+}
+
+/// What a join session holds besides its build batch, for `rows` build rows (design §4.3):
+/// a keyed join's hash table, 16 bytes a row; RightSemi and RightAnti's distinct build keys,
+/// at `distinct_key_width` a row; and `matched`, a byte a row, for the five that finish. The
+/// planner's resident model and the device's accountant both read this.
+pub(crate) fn session_bytes(
+    join_type: JoinType,
+    keyed: bool,
+    distinct_key_width: u64,
+    rows: u64,
+) -> u64 {
+    join::session_bytes(join_type, keyed, distinct_key_width, rows)
+}
+
+/// A column's bytes per row as the join session counts them: its fixed width on the device,
+/// and 16 for a variable-width one. The device backend prices a residual by it, so a
+/// rust-only build has no caller.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn width_on_device(data_type: &DataType) -> u64 {
+    join::width_on_device(data_type)
 }
 
 /// The sides whose unmatched rows are never emitted, as `(build, probe)`: there a NULL key

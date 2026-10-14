@@ -83,6 +83,9 @@ pub(crate) struct GpuJoin {
     /// what a lane with no build batch owes.
     join_type: JoinType,
     scratch: join::PairScratch,
+    /// Bytes a row of the keys the session takes distinct, 0 where it takes none
+    /// (`GpuHashJoin::distinct_key_width`).
+    distinct_key_width: u64,
     output: SchemaRef,
 }
 

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 4931 test cases — Rust 4361, C++ 173, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 4937 test cases — Rust 4367, C++ 173, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2758 cases: `--lib` 769, `test_cpu_corpus` 1960, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 2761 cases: `--lib` 772, `test_cpu_corpus` 1960, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -136,11 +136,12 @@ one input per rule, each built to break the rule it is aimed at: a plan that vio
 unreachable from SQL because translation inserts the fix, so a hand-built input is the only
 thing that shows the guard going red
 
-| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 23 |
+| Join declarations | [a_join_whose_sides_carry_different_lane_counts_is_refused](../peacockdb-core/src/plan/tests/joins.rs) | 25 |
 |---|---|--:|
 
 what each of the three join kinds requires of its inputs, and the distribution a join declares
-about its own output — the claim nothing downstream re-checks
+about its own output — the claim nothing downstream re-checks; and which keys a semi join's
+session takes distinct, which a conjunct reading both sides or neither takes away
 
 | Aggregate state columns | [plan::tests::aggregate](../peacockdb-core/src/plan/tests/aggregate.rs) | 5 |
 |---|---|--:|
@@ -545,7 +546,7 @@ real consumer, no node declares no column ([#63](archive/archived-tickets.md#t63
 names a view type the device cannot hold;
 layout canonical forms and equality; whether a hash survives a regrouping
 
-| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 13 |
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 14 |
 |---|---|--:|
 
 the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
@@ -553,7 +554,7 @@ holds comes off the budget first, a batch is charged once per lane in force, a l
 by the batches its mapping makes, amplification is the widest point on the path, a target lands
 on the coarse grid, constants that cannot be less and exceed the budget are a plan-time
 error, a join that answers at the finish — hash or nested loop — is charged its `matched` byte a
-build row, and an empty relation is no source the budget sizes
+build row, a RightSemi its distinct build keys, and an empty relation is no source the budget sizes
 
 | Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 27 |
 |---|---|--:|
@@ -593,7 +594,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1483 cases: `--lib -- gpu_tests::` 706, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1486 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -739,7 +740,7 @@ what [#201](archive/archived-tickets.md#t201) was. Two of the nineteen need no d
 call and `pmod` on a negative hash, and ride here anyway, because the module is the gate and
 splits nowhere
 
-| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 36 |
+| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 39 |
 |---|---|--:|
 
 each one handed its node's recipe — the exec nodes one batch at a time (filter, project,
@@ -747,7 +748,9 @@ per-batch sort, aggregate with and without its finalize, the export with a row r
 accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating
 sort, the state merge, the Welford merge, the mid-plan limit), and the joins what the matrix says a device
 runs on the session: its lifecycle, `Drop` releasing it, `owes_nothing`, the journal and region
-per call, its residency and pair scratch, and the scatter's N handles; plans hand-built over six rows the test writes itself, since the ABI
+per call and no finish call for the four types that owe nothing at done, its residency (a
+RightSemi's distinct build keys among it) and call scratch (a LeftSemi probe's distinct keys), and
+the scatter's N handles; plans hand-built over six rows the test writes itself, since the ABI
 loads a table only by reading one. `backend.rs` is the caller `executors_for` otherwise has
 none of: six of the seven categories built from a live session's recipes, and a node asked for
 at the wrong post-order refused, so the number is an address. The partition accumulator is the

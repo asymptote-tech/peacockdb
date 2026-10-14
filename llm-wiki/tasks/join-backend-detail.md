@@ -3427,3 +3427,108 @@ terms are not priced and why.
 Already wrong at the base, not this branch's doing: The scheduling rule, "A lane that receives
 nothing is never runnable". A join lane whose inputs end empty is run. On this branch the run is
 `set_build(None)`; at the base it was `NoBuild`.
+
+### Round 4 — the completeness findings
+
+Dispatched 2026-10-14 on `a717202c`. Three items: the analyst's important 2 (pricing), falsified
+sentence 3 (the finish call), important 1 (the cost record). Every mutation below was reverted,
+and the file was confirmed back to its pre-mutation copy (`cmp`) before anything else ran.
+
+**1 — pricing as §4.3 says.** The analyst's three terms, checked against `join_session.cpp`:
+- **RightSemi/RightAnti's distinct-key table `Bd`: unpriced, and wider than the analyst said.**
+  The session takes `Bd` whenever its residual has no conjunct reading both sides or neither,
+  not only when it has no residual: a one-sided conjunct filters `B` or `P` and leaves the keys
+  to `distinct_hash_join`. Now priced as resident, at build rows × key width.
+- **A build-side semi probe's distinct keys: not covered in general.** The analyst said the
+  never-emitted output charge covers them. That output is the build's projected columns, and a
+  projection can drop the key, so the output can be narrower than the key. Now priced in
+  `call_bytes`, at probe rows × key width, under the same rule: `probe()` takes
+  `distinct_keys(Pk)` only when `cross` is empty.
+- **The per-call build hash of `mixed_left_semi_join` (RightSemi/RightAnti, AST-whole cross
+  residual): covered.** cuDF 25.02's `mixed_join_semi.cu` builds a `cuco::static_set<size_type>`
+  over the build rows at 50% occupancy, about 8 B a row per call. That session holds no join
+  object, yet it is charged 16 B a row as resident from `set_build` to the drop. Unchanged, and
+  said so in `architecture.md` and §4.3.
+
+What changed:
+- `plan::session_bytes(join_type, keyed, distinct_key_width, rows)` is the resident formula.
+  `memory_estimation.rs` and `GpuJoin::built_bytes` both call it. The two `HASH_TABLE_BYTES_PER_ROW`
+  copies and `matched_bytes` are gone.
+- `GpuHashJoin::distinct_key_width()` (`plan/join.rs`) mirrors `split_residual`'s rule:
+  top-level `AND` conjuncts, sides read through `filter_columns`. It reads the key columns of the
+  side taken distinct, at `width_on_device` (fixed width, 16 for a string). That function moved
+  from `gpu_backend/join.rs` to `plan`.
+- `executors_for` passes the width into `GpuJoin::new`.
+
+Red, then green:
+- rust-only, against a stub returning 0. `a_probe_side_semi_join_is_charged_for_its_distinct_build_keys`
+  (`memory_estimation/tests.rs`, supplier semi-joined to nation, with and without a crossing
+  conjunct) failed at 650 vs 650 and expects +100 (25 rows × Int32).
+  `a_semi_join_takes_its_keys_distinct_unless_a_conjunct_reads_both_sides` and
+  `a_one_sided_conjunct_leaves_a_semi_join_its_distinct_keys` (`plan/tests/joins.rs`) failed at
+  0 vs 8.
+- Device build 1, executor unpriced: `a_probe_side_semi_session_holds_its_distinct_build_keys`
+  failed at 64 vs 128. `a_build_side_semi_probe_is_charged_its_batchs_distinct_keys` failed at
+  146 vs 178. Both build through `executors_for`, so the wiring is under test too. Green on
+  build 2.
+
+Mutations (rust-only):
+- the `Bd` term zeroed in `session_bytes`: the memory test went red;
+- the crossing check disabled: both `joins.rs` tests and the memory test went red;
+- `==` → `&&` in the crossing rule, so a constant conjunct no longer crosses: the one-sided
+  test went red.
+
+Goldens: `UPDATE_CANONICAL=1 … plan_goldens`, 15 plan files. Only memory lines moved
+(`estimated_max_resident_size` and `budget=`, checked by script), and no `target_batch_bytes`,
+so no cpu or cost golden moved. 19 queries:
+- tpch: `anti-join`, `semi-join`, q16, q18, q20;
+- tpcds: q14, q33, q38, q56, q58, q60, q83, q87;
+- pbench: `not-in-correlated`, `not-in-uncorrelated`, `not-not-in`, `not-or-not-in`,
+  `sparse-build-anti`, `sparse-probe-semi`.
+
+**2 — no finish call for a type that does not finish.** `GpuProbingJoin::finish_and_fetch`
+answers `(None, armed empty calls)` without `peacock_join_finish` when `needs_finish` is false.
+The calls are armed so that a measured run reads "made no call" (`made()` expects `Some`).
+Release stays on `Drop`.
+- The driver still takes `LaneCall::Finish` for every undrained lane. That ends the lane and
+  its accounting, and no call is made.
+- The cpu already mirrors this. Its `finish_and_fetch` journals nothing for any type and answers
+  `None` for these four. It drains DataFusion's stream only to check the stream owed nothing,
+  which `has_finish_pass` relies on.
+- `every_session_call_is_journalled_and_timed_on_the_joins_seq` is a Left join, so its five
+  calls are still true. `test_node_timing` asserts regions = journalled over q19's Inner joins,
+  and both counts lose the finish together. It passed.
+- Red on device build 1: `a_join_that_owes_nothing_at_done_makes_no_finish_call` (Inner, Right,
+  RightSemi, RightAnti; journal empty, two regions) failed "Inner's finish made a call" with one
+  journalled `AbiCall`. Green on build 2.
+- `architecture.md`'s Interfaces paragraph says the executor calls `finish` only for the five
+  finishing types.
+
+**3 — the cost record.** `cargo run -q -p cost-report -- --cost-diff --base 3d9a122e` on the
+final tree: **703 compared, 529 changed, 278 improvements, 251 rises, 173 past 10%**, the same
+as round 3. Every rise is in [`reports/join-backend-cost-rises.md`](../reports/join-backend-cost-rises.md),
+sorted by percent. The table is computed from the `.cost.txt` sections as cost-report reads them.
+Its 251 (label, percent) pairs equal the 🔴 rows of the command's own markdown, compared by
+script.
+
+**Counts.** rust-only `--lib` 769 → 772; device `gpu_tests::` 706 → 709. `build-test.md`'s
+header is re-derived by summing every row: **4937 — Rust 4367**, cpu 2761, gpu 1486.
+
+**Warnings.** rust-only: none. `scripts/cargo-cudf.sh check -p peacockdb-core --lib --features
+gpu`: the same 26 dead-code warnings as round 3, in the same five files. The lib-test check adds
+only the pre-existing `AsArray` warning.
+
+**Device run, nebius-gpu: incomplete, the host was lost.** Build 2 is this round's code; after
+it, only comments changed. The tree was synced uncommitted, `./scripts/build-test-shadgpu.sh
+--build` returned rc 0, and each binary was run directly with `--test-threads=1`:
+`peacock_gpu_tests` 2, `peacock_plan_tests` 81, `peacock_join_session_tests` 53,
+`peacockdb_core_gpu_lib gpu_tests::` 709, `test_node_timing` 1, `peacock_gpu_benchmarks --skip
+bench_` 8. All passed, with rc 0. `test_gpu_corpus` was running, all `ok` as far as the tpcds q64
+cells, when the host stopped answering at about 07:50. Its address timed out on port 22 and
+ping until 08:34, while the local network was fine. Still owed on a device:
+- `test_gpu_corpus` whole;
+- the planned device mutations: `executors_for` passing 0 for the width, and the finish
+  skipped for every type.
+
+The red-first of every device test above stands (build 1). nebius-gpu had 27 GB free before
+both builds, and nothing was deleted there.

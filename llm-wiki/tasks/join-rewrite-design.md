@@ -544,7 +544,10 @@ Drop for GpuProbingJoin: peacock_join_release(join)
   `matched`. Scratch per probe = the batch + its output estimate + the transients: the batch's
   `distinct_keys`, `8 + the residual's per-row bytes` per key-match pair (priced by
   `inner_join_size`), and for RightSemi/RightAnti with a cross residual the build's hash that
-  `mixed_*` makes per call. **An earlier version of this line said 8 bytes a pair**, which is the
+  `mixed_*` makes per call. That session holds no join object, and its per-call hash (a
+  `static_set` of 4-byte slots at load 0.5, about 8 B a row) is priced as the 16 B a row it is
+  charged as resident. `plan::session_bytes` is the resident formula both the planner and the
+  device read. **An earlier version of this line said 8 bytes a pair**, which is the
   index maps alone; join-session-cpp measured the executor's real bound and put the formula in
   `gpu_plan.fbs`'s `chunk_bytes` comment, where the second term is the sum over the filter's
   columns of their fixed width, 16 for a variable-width one. A planner converting its scratch

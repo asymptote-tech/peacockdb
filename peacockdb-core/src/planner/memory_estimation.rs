@@ -9,13 +9,11 @@
 //! Every cardinality here is the trivial estimate the planner has today (#19, #73): a
 //! filter passes everything and a join is 1:1. Widths are real, from the declared schemas.
 
-use datafusion::common::JoinType;
-
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
 use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::needs_finish;
+use crate::plan::session_bytes;
 use crate::plan::{NodeRef, as_node_ref};
 
 pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
@@ -85,10 +83,6 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
         sources,
     })
 }
-
-/// What cuco's open-addressing table costs per build row: the 8-byte key beside the
-/// 8-byte payload, at the load factor the session builds it with. Design §4.3.
-const HASH_TABLE_BYTES_PER_ROW: u64 = 16;
 
 /// Rounds down onto a coarse grid. The inputs are the optimizer's estimates, and an
 /// estimate that drifts slightly should not regenerate every golden.
@@ -238,22 +232,24 @@ impl<'a> Tree<'a> {
             NodeRef::AggregateBatches(_) => {
                 Some(self.rows(self.children[seq][0]) * self.width(seq))
             }
-            // Three things, every one a function of the BUILD side: the batch, the hash
-            // table its keys go into, and — for the types answering at the finish — one
-            // byte a row saying which matched. A nested loop has no table; a cross join,
-            // Inner alone, no finish either.
+            // The build batch and what the session holds beside it, every one a function of
+            // the BUILD side and priced as the device's accountant prices it. A nested loop
+            // has no table; a cross join, Inner alone, no finish either.
             NodeRef::Join(join) => {
                 let build = self.children[seq][0];
-                let rows = self.rows(build);
                 Some(
                     self.bytes(build)
-                        + rows * HASH_TABLE_BYTES_PER_ROW
-                        + matched_bytes(join.join_type, rows),
+                        + session_bytes(
+                            join.join_type,
+                            true,
+                            join.distinct_key_width(),
+                            self.rows(build),
+                        ),
                 )
             }
             NodeRef::NestedLoopJoin(join) => {
                 let build = self.children[seq][0];
-                Some(self.bytes(build) + matched_bytes(join.join_type, self.rows(build)))
+                Some(self.bytes(build) + session_bytes(join.join_type, false, 0, self.rows(build)))
             }
             NodeRef::CrossJoin(_) => Some(self.bytes(self.children[seq][0])),
             _ => None,
@@ -315,15 +311,6 @@ impl<'a> Tree<'a> {
             };
         }
         batch
-    }
-}
-
-/// The session's `matched` column: one byte a build row for a type that answers at the finish.
-fn matched_bytes(join_type: JoinType, build_rows: u64) -> u64 {
-    if needs_finish(join_type) {
-        build_rows
-    } else {
-        0
     }
 }
 

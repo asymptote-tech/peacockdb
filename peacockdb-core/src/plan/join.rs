@@ -5,9 +5,11 @@
 use super::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinFilterColumn, JoinSide};
 use std::any::Any;
 
+use super::BinaryOp;
 use super::ColumnRef;
 use super::Expr;
 use super::PlanError;
+use datafusion::arrow::datatypes::DataType;
 use datafusion::common::JoinType;
 
 use super::GpuNode;
@@ -553,4 +555,92 @@ pub(crate) fn new_hash_join(
         build,
         probe,
     }
+}
+
+/// `join_session.cpp` takes a semi join's keys distinct only where no conjunct of its residual
+/// reads both sides or neither; any other goes to `mixed_left_semi_join` or the pairs path,
+/// which take none. The split is mirrored here because the price is of the session it builds.
+pub(crate) fn distinct_key_width(join: &GpuHashJoin) -> u64 {
+    let (side, ordinals): (&dyn GpuNode, Vec<u32>) = match join.join_type {
+        JoinType::RightSemi | JoinType::RightAnti => (
+            join.build.as_ref(),
+            join.keys.iter().map(|(build, _)| *build).collect(),
+        ),
+        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => (
+            join.probe.as_ref(),
+            join.keys.iter().map(|(_, probe)| *probe).collect(),
+        ),
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => return 0,
+    };
+    let mut conjuncts = Vec::new();
+    if let Some(filter) = &join.filter {
+        conjuncts_of(filter, &mut conjuncts);
+    }
+    let crosses = conjuncts.iter().any(|conjunct| {
+        let mut refs = Vec::new();
+        collect_column_refs(conjunct, &mut refs);
+        let reads = |side: JoinSide| {
+            refs.iter()
+                .any(|r| join.filter_columns[r.index as usize].side == side)
+        };
+        reads(JoinSide::Build) == reads(JoinSide::Probe)
+    });
+    if crosses {
+        return 0;
+    }
+    let schema = input_schema(side);
+    ordinals
+        .iter()
+        .map(|ordinal| width_on_device(schema.fields.field(*ordinal as usize).data_type()))
+        .sum()
+}
+
+/// The residual's top-level `AND` operands, as `join_session.cpp`'s `conjuncts_of` splits it.
+fn conjuncts_of<'a>(expr: &'a Expr, into: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::Binary {
+            left,
+            op: BinaryOp::And,
+            right,
+            ..
+        } => {
+            conjuncts_of(left, into);
+            conjuncts_of(right, into);
+        }
+        other => into.push(other),
+    }
+}
+
+/// A column's bytes per row as the session counts them (`filter_row_bytes`): the fixed width
+/// cuDF holds it at, and 16 for a variable-width one.
+pub(crate) fn width_on_device(data_type: &DataType) -> u64 {
+    match data_type {
+        DataType::Boolean => 1,
+        other => other.primitive_width().map_or(16, |width| width as u64),
+    }
+}
+
+/// cuDF's hash table per build row: a `static_multiset` of 8-byte slots at load factor 0.5,
+/// whatever the key width, and `distinct_hash_join`'s priced the same (design §4.3).
+const HASH_TABLE_BYTES_PER_ROW: u64 = 16;
+
+pub(crate) fn session_bytes(
+    join_type: JoinType,
+    keyed: bool,
+    distinct_key_width: u64,
+    rows: u64,
+) -> u64 {
+    let table = match keyed {
+        true => HASH_TABLE_BYTES_PER_ROW * rows,
+        false => 0,
+    };
+    let distinct_keys = match join_type {
+        JoinType::RightSemi | JoinType::RightAnti => distinct_key_width * rows,
+        _ => 0,
+    };
+    let matched = match needs_finish(join_type) {
+        true => rows,
+        false => 0,
+    };
+    table + distinct_keys + matched
 }
