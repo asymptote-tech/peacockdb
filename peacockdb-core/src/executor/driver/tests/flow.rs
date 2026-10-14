@@ -416,8 +416,8 @@ fn a_scatter_feeding_a_probe_side_still_drops_its_empties() {
     assert_accounted(&report);
 }
 
-/// The #152 hazard from the other direction: the batch kept for the build side is set,
-/// and the probe calls are exactly the probe batches.
+/// A build batch is set and never becomes a probe call: the probe calls are exactly the
+/// probe batches.
 #[test]
 fn a_build_batch_does_not_become_a_probe_call() {
     let plan = scattered_build_plan(JoinType::Right);

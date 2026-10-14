@@ -418,24 +418,18 @@ both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` t
 <a id="t214"></a>
 ### #214 — a limit drops a zero-row batch on both backends
 
-A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and on the device alike.
-
-Both `LimitStream`s take their cut from the one `RowInterval::range_of` (`plan/interval.rs`),
-which answers `None` when `start < stop` is false — and it is false for `n_rows == 0` whatever
-the interval — so the batch is released as if it lay outside the interval. Symmetric, so the
-harness's cpu-vs-device comparison is green by construction. Pinned by
-`bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two neighbours
-(`gpu_tests/harness_cases.rs`), which want the zero-row batch under the schema.
-
-Since join-backend a join reads no batch as an empty side, so a join above the limit answers the
-same either way. What still tells nothing from a zero-row batch is #199's keyless aggregate: a
-`limit → global aggregate` over zero survivors loses its identity row where the same aggregate
-without the limit keeps it.
+A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
+Both `LimitStream`s cut with `RowInterval::range_of` (`plan/interval.rs`), which answers `None`
+when `start < stop` is false — always, at `n_rows == 0` — so the batch is released as if outside
+the interval. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two
+neighbours (`gpu_tests/harness_cases.rs`). Joins read no batch as an empty side, so what still
+sees the difference is #199's keyless aggregate: `limit → global aggregate` over zero survivors
+loses its identity row.
 
 **Corpus query:** none.
 
-**Fix proposed:** none beyond #199's. Once the keyless aggregate reads nothing and a zero-row
-batch alike, the difference is invisible and this ticket drops with its three `bug_` pins.
+**Fix proposed:** a zero-row batch inside the interval is forwarded as it is; the three pins go
+green as `same` cases.
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -457,9 +451,8 @@ which answers zero rows — 12 bytes at the device's unload against the cpu's 0 
 rows (`mini.result.txt`). `pbench/not-in-uncorrelated` at the two tp1 modes is the second, and it
 reaches the no-batch half without a sort: its cross join's build is empty, so the lane ends with
 no call, and the root receives nothing on both engines. Its line is `duckdb_divergent(205)`, as
-q17's is, and its tp1 device cells are on. q17's device cell at `tp1-single` stays off on this
-ticket; since the join session its tp4 cells pass on the device, and its tp1 cells meet
-[#225](#t225) first. The 12 bytes are the device's one zero-row batch: three `Utf8`
+q17's is, and its tp1 device cells are on. q17's device cells are all off: its tp1 cells meet
+[#225](#t225) first, and its tp4 cells, which pass, stay off until this fix moves the row's answer. The 12 bytes are the device's one zero-row batch: three `Utf8`
 columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
 `select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
 
