@@ -496,8 +496,9 @@ comes from a build row, so `owes_nothing()` holds and the driver drops the lane'
 without a call. Right, Full and RightAnti owe their probe rows, padded with the types of the
 plan's `build_schema`. `plan::empty_build_owes_nothing` is the one rule both engines read.
 
-**Pricing.** A session holds the build bytes, about 16 bytes a build row for the hash table,
-and for the five finishing types one byte a row for `matched` (`planner/memory_estimation.rs`).
+**Pricing.** A session holds the build bytes, about 16 bytes a build row for a keyed join's hash
+table, and for the five finishing types, hash or nested loop, one byte a row for `matched`
+(`planner/memory_estimation.rs`, `gpu_backend/join.rs`'s `built_bytes`).
 A probe call's scratch prices each pair at 8 bytes plus the residual's per-row width, chunked at
 `chunk_bytes` (`gpu_backend/join.rs`). The planner writes `chunk_bytes` from the mode's budget,
 a sixteenth of it, so the accountant and the session bound one call alike.
@@ -934,7 +935,7 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first. Under `rows_only` it decodes nothing: it reads the row groups' counts from the footer, capped by `limit`, and builds `__rowmarker__` |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_num_rows(limit)`, `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Under `rows_only` it decodes nothing: `opts` takes the limit and the row groups all the same, so cuDF refuses the pair there too (#186); it reads the row groups' counts from the footer, capped by a limit beside none, and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |

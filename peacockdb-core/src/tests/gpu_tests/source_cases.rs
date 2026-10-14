@@ -67,6 +67,45 @@ pub(crate) fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuL
     )
 }
 
+/// A scan of no column over `path`'s row groups, one batch per group, under `limit`: the plan
+/// declares `__rowmarker__` in place of the columns (#63).
+fn rows_only_scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuLoadParquet {
+    let columns = scan(path, schema, None);
+    let groups = ScanMetadata {
+        file: columns.file.clone(),
+        groups: columns.survivors.clone(),
+        can_be_null: Vec::new(),
+    };
+    GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        columns.partition_groups.clone(),
+        &groups,
+        limit,
+        Schema::rowmarker(),
+    )
+}
+
+/// A rows-only scan of 64 rows in four row groups of sixteen, run on both and removed.
+fn rows_only_both(name: &str, limit: Option<usize>) -> Outcome {
+    let batch = synthetic(64, 1);
+    let path = write_parquet(name, &batch, 16);
+    let outcome = run_both(
+        &rows_only_scan(&path, batch.schema(), limit),
+        Script::Source { lane: 0 },
+    );
+    std::fs::remove_file(&path).expect("the file this case wrote");
+    outcome
+}
+
+fn rows_per_batch(batches: &[Vec<RecordBatch>]) -> Vec<usize> {
+    batches
+        .iter()
+        .flatten()
+        .map(|batch| batch.num_rows())
+        .collect()
+}
+
 /// Write, read on both, remove: the file is gone whether or not the comparison holds.
 fn read_both(
     name: &str,
@@ -176,34 +215,29 @@ operator_case! {
 operator_case! {
     GpuLoadParquet,
     fn a_rows_only_scan_agrees_on_both_backends() {
-        let batch = synthetic(64, 1);
-        let path = write_parquet("rows-only", &batch, 16);
-        let columns = scan(&path, batch.schema(), None);
-        let groups = ScanMetadata {
-            file: columns.file.clone(),
-            groups: columns.survivors.clone(),
-            can_be_null: Vec::new(),
-        };
-        let rows_only = GpuLoadParquet::new(
-            "t".to_string(),
-            Vec::new(),
-            columns.partition_groups.clone(),
-            &groups,
-            None,
-            Schema::rowmarker(),
-        );
-        let outcome = run_both(&rows_only, Script::Source { lane: 0 });
-        std::fs::remove_file(&path).expect("the file this case wrote");
+        let outcome = rows_only_both("rows-only", None);
         outcome.same(Order::AsEmitted);
-        let rows: Vec<usize> = outcome
-            .gpu
-            .as_ref()
-            .expect("the device answers")
-            .iter()
-            .flatten()
-            .map(|batch| batch.num_rows())
-            .collect();
-        assert_eq!(rows, vec![16; 4]);
+        let gpu = outcome.gpu.as_ref().expect("the device answers");
+        assert_eq!(rows_per_batch(gpu), vec![16; 4]);
+    }
+}
+
+// #186 — a scan of no column decodes nothing, so its limit meets the call's row groups only
+// where the column read's does: refused together, as cuDF refuses them there.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_rows_only_scan_with_row_groups_and_a_limit_is_refused_on_the_device() {
+        gpu_refuses_with(&rows_only_both("rows-only-limit-gpu", Some(10)), GROUPS_AND_LIMIT);
+    }
+}
+
+// #186 — the cpu never reads the limit: four row groups of sixteen, all answered whole.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_rows_only_scan_with_row_groups_and_a_limit_is_read_whole_on_the_cpu() {
+        let outcome = rows_only_both("rows-only-limit-cpu", Some(10));
+        let cpu = outcome.cpu.as_ref().expect("the cpu answers");
+        assert_eq!(rows_per_batch(cpu), vec![16; 4]);
     }
 }
 

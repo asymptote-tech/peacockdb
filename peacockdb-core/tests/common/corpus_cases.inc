@@ -263,17 +263,15 @@ corpus_query!(tpcds, 1, q85, all_modes, all_modes, duckdb_approx, data_fusion_ex
 corpus_query!(tpcds, 1, q92, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // --- pbench ------------------------------------------------------------------
-// The dataset whose data holds what tpch and tpcds lack: one query per demonstrable ticket of
-// chain J, cells off where a ticket blocks them, each later task turning its own on. It plans
-// with the small-table rule off, so `fact` splits across four lanes at tp4 and the
-// one-row-group tables leave three empty. llm-wiki/tasks/pbench.md, and -detail.md beside it.
+// What tpch and tpcds lack: one query per demonstrable ticket of chain J, planned with the
+// small-table rule off, so `fact` splits across four lanes at tp4 and the one-row-group tables
+// leave three empty. llm-wiki/tasks/pbench.md.
 //
-// BOTH COLUMNS. Every line runs on both engines at every mode it plans at, but these. Three are
-// refused at plan time: `cross-empty-build` and `outer-on-true-empty` over a file with no row
-// group (#256), `in-is-null` (#250). `not-in-uncorrelated` at tp4 is refused too (#267), and
-// `scalar-subquery-cross` at tp4 meets #199 on both engines. On the device alone,
-// `like-column-pattern` meets #246, `rollup-small-keys` #65 and `timestamp-s-key-group` #264.
-// Three queries are absent, on #255.
+// BOTH COLUMNS. Every line runs on both engines at every mode it plans at, but these. Refused
+// at plan time: `cross-empty-build` and `outer-on-true-empty` over a file with no row group
+// (#256), `in-is-null` (#250), `not-in-uncorrelated` at tp4 (#267). `scalar-subquery-cross` at
+// tp4 meets #199 on both engines; on the device alone, `like-column-pattern` meets #246,
+// `rollup-small-keys` #65 and `timestamp-s-key-group` #264. Three are absent, on #255.
 corpus_query!(pbench, 1, anti_null_preserved_condition, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, bool_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, none, none, duckdb_none, data_fusion_exact, golden_exact, schema_validation_enabled);

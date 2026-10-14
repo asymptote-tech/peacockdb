@@ -39,10 +39,6 @@ pub(crate) struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    pub(crate) fn new() -> Self {
-        Self::with_join_scratch(0)
-    }
-
     /// A writer whose joins carry `bytes` as their `chunk_bytes`: one plan, one budget.
     pub(crate) fn with_join_scratch(bytes: u64) -> Self {
         Self {

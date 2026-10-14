@@ -275,3 +275,38 @@ async fn bug_datafusion_45_refuses_six_subquery_shapes() {
 async fn bug_a_scalar_subquery_of_several_rows_is_not_refused() {
     assert!(row_count("select (select y from s) from o").await > 0);
 }
+
+// #267 — the rewrite's count over `sub` is a Single aggregate, and pbench plans `sub` in four
+// lanes: it finalizes on each with no merge below it, and validation refuses the plan.
+#[tokio::test]
+async fn bug_the_rewrites_count_over_a_scan_split_into_lanes_is_refused_at_tp4() {
+    let sql = std::fs::read_to_string(queries_dir_for("pbench").join("not-in-uncorrelated.sql"))
+        .expect("the query text");
+    for mode in crate::test_support::MODES
+        .iter()
+        .filter(|m| m.target_partitions == 4)
+    {
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir_for("pbench", "1"),
+        )
+        .await
+        .expect("register the pbench tables");
+        let physical = ctx
+            .sql(&sql)
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("physical plan");
+        let why = match crate::planner::plan(&physical, mode.knobs_for("pbench")) {
+            Ok(_) => panic!("{} planned: #267 may be fixed", mode.name),
+            Err(why) => why.to_string(),
+        };
+        assert!(
+            why.contains("a finalizing merge over several lanes needs its input hashed"),
+            "{}: {why}",
+            mode.name
+        );
+    }
+}

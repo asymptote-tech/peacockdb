@@ -385,9 +385,9 @@ fn a_join_type_that_owes_nothing_still_drops_its_empty_lanes() {
     }
 }
 
-/// The condition that stops this task *causing* #152: an empty probe batch is an extra
-/// probe call, and the device refuses a second one. A test written only around the build
-/// side never reaches this plan shape.
+/// A scatter on a join's probe side drops its empty outputs too, so a lane whose probe side
+/// received no rows makes no probe call. A test written only around the build side never
+/// reaches this plan shape.
 #[test]
 fn a_scatter_feeding_a_probe_side_still_drops_its_empties() {
     let plan = unload(join_of(

@@ -139,8 +139,7 @@ include!("common/corpus_cases.inc");
 ///
 /// The device tier asserts read-only against the section the cpu authored AT THAT MODE, so a
 /// gpu cell whose cpu twin is off compares against a section holding no rows and passes
-/// having checked nothing. Today it holds because a few device cells were hand-chosen, not
-/// because of a rule, and the moment [#152] clears somebody enables device modes in bulk.
+/// having checked nothing. Device cells are enabled in bulk, so this rule is what holds it.
 ///
 /// Read off the registry rather than the declarations: `CorpusDeclaration` carries the
 /// oracles and not the modes, and a disabled mode submits no registration to compare.

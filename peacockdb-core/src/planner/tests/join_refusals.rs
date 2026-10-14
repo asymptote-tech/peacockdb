@@ -5,10 +5,9 @@
 //! `crate::tests::join_fixture`. Each asserts the ticket number is in the MESSAGE and not only
 //! in a comment beside it: the message is what a user sees when a query does not plan.
 //!
-//! Three refusals are missing here on purpose — a final aggregate with no partial below
-//! it, a repartition by an unstated rule, and an empty IN list. No query produces any of
-//! them, so they are hand-built in `join_capability.rs` and carry no ticket:
-//! they are internal-consistency guards rather than limitations.
+//! Three refusals are missing on purpose — a final aggregate with no partial below it, a
+//! repartition by an unstated rule, an empty IN list. No query produces them, so
+//! `join_capability.rs` hand-builds them, ticketless: consistency guards, not limitations.
 
 use std::sync::Arc;
 

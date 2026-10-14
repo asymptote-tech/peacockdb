@@ -113,6 +113,8 @@ the record. **Plan task 3 is where it came from and its numbers are under that r
 regressions, 173 past the 10% gate, driven by #137's `IS NOT NULL` filters. Re-run
 `cargo run -q -p cost-report -- --cost-diff --base <base sha>` once before the PR against the
 branch point, so the PR quotes one figure for the whole task rather than one per round.
+**Taken in round 3, against `3d9a122e`: 703 compared, 278 improvements, 251 regressions, 173 past
+the 10% gate** — by dataset and worst rows under "Round 3 — review round 1's findings".
 
 ## Round log
 
@@ -3098,3 +3100,191 @@ matched byte; (11) *coordinator* — PR body over 10 lines; (12) signoff: name t
 `pub trait IntoAnyBox`.
 
 Also owed before the PR settles: the whole-task cost diff against `3d9a122e` (spec risk 1).
+
+### Round 3 — review round 1's findings
+
+Dispatched 2026-10-14 on `77a18d46`. Every item routed to the developer, in the order given; the
+*coordinator* items (I5, I6's ticket text, nits 2, 3, 8, 11) were already done, and nit 12 is the
+signoff's. Every mutation below was reverted, and the file was confirmed back to its pre-mutation copy
+(`cmp`) before anything else ran.
+
+**I1 — the order hazard reads the whole tie (`test_support/order_hazard.rs`).** A cut now finds
+its tie group by widening the sort's fetch, doubling it until a row past the tie, or the input's end,
+is in the prefix. It reports a hazard when the tie spans the cut and holds two rows that differ
+(`arrow::row` comparisons, not one `ScalarValue` per cell). The offset is carried down through
+`ProjectionExec` and `CoalesceBatchesExec`, which keep row positions. A sort with no fetch becomes a
+cut when an offset sits above it: `ORDER BY … OFFSET n` had no cut at all before. Four cases; the
+reviewer's arrangement could not be made red as given:
+- DataFusion's top-k is not stable. For `v = (p, q, q, s)` it emits `q, q, p` at fetch 3, so the
+  old two-row check already saw `p` at the cut. `v = (q, p, q, s)` emits `p, q, q`, and the two
+  `(q, 10)` meet at the cut: `a_sorted_cut_inside_a_tie_of_three_rows_is_a_hazard`.
+- `an_offset_through_a_projection_inside_a_tie_is_a_hazard`: `SELECT a.v … ORDER BY b.w OFFSET 2`
+  plans `GlobalLimitExec → ProjectionExec → SortExec` (no fetch).
+- `a_tie_that_runs_past_the_row_after_the_cut_is_read_to_its_end`: four tied rows, and the top
+  three DataFusion keeps are the same, so the differing row lies past the first prefix.
+- `a_sorted_cut_inside_a_tie_of_identical_rows_is_not_a_hazard`, against over-refusal.
+- Red before: the first two failed on `77a18d46`'s code (a hazard of `None`).
+- Mutations: widening never done (`.or(Some(n))`) failed the run-past case; the old two-row check
+  together with no widening failed it and the three-row case; `keeps_positions` set to `false`
+  failed the offset case. One mutation said nothing: the two-row check *with* widening stays green,
+  because the 6-row top-k reorders the tie. So the three-row case pins the old code, not the
+  backward scan alone.
+- Green: 15 order-hazard cases. All 157 `device_order_` corpus cases still pass, so no enabled
+  device cell is newly refused.
+- Not handled, and said so: an offset over a node that changes positions (a `FilterExec` between
+  the limit and the sort) is not read as a cut. No corpus query has that shape.
+
+**I2 — a rows-only scan refuses a limit beside row groups (`cpp/src/operators/scan.cpp`).**
+`execute_scan` now builds `parquet_reader_options` first. It sets `set_num_rows(limit)` and
+`set_row_groups` on them before branching, and the column read adds `set_columns` later. cuDF
+refuses the pair in `parquet_reader_options::set_row_groups` itself, so the rows-only path meets
+cuDF's own refusal, with no copied message. Two pins in `gpu_tests/source_cases.rs`, under #186:
+`bug_a_rows_only_scan_with_row_groups_and_a_limit_is_refused_on_the_device` and
+`…_is_read_whole_on_the_cpu` (the cpu half: four batches of 16, the limit unread). The rows-only
+construction became a helper the existing case shares.
+- Red on device build 1, at the old `scan.cpp`: the device pin failed, because the device answered.
+  Green on build 2: 706 passed in `gpu_tests::`, both pins among them.
+- **Does `SELECT 1 FROM lineitem LIMIT 10` at tp1-rowgroup reach it? Yes.** A remote-only scratch
+  test (`whole_plan::answers_on_both` over a remote-only `zz-rows-limit.sql`) gave, on the old code:
+
+  | mode | cpu (rows, batches) | device |
+  |---|---|---|
+  | tp1-rowgroup | 6,001,215, 49 | 490 rows, 49 batches: ten per row group, a wrong answer |
+  | tp1-single | 6,001,215, 1 | 10, 1 — one call over all 49 groups, right by accident |
+  | tp4 ×3 | 10, 1 | 10, 1 |
+
+  All five modes plan `GpuLoadParquet: projections=[], limit=10, schema=[__rowmarker__:Int8]` with
+  no limit node above it at tp1. The cpu column is #186's cpu half. After the fix (build 3, the
+same remote-only probe), the device refuses at all five modes, at the first call, with cuDF's
+`row_groups can't be set along with skip_rows and num_rows`. That is #186's refusal for `SELECT *
+FROM lineitem LIMIT 10`. tp4, right by the unload's interval before, now refuses too, and so does
+tp1-single. No enabled device cell has this shape: `test_gpu_corpus` passed whole on the fix.
+  `architecture.md`'s `CudfScan` row and #186's text say what the code now does.
+- `peacock_cpu_tests` 15 passed locally (`/tmp/dkb-cppbuild` rebuilt clean). `git clang-format
+  --diff HEAD` over `scan.cpp`: no change.
+
+**I3 — the device-schema cases for Left, Full and the newly runnable nested loops.**
+`join_schema_cases.rs` gains six cases: Left and Full, plain and with a crossing projection over two
+probe batches, and each over `probes_with_misses`, whose finish pads build rows no probe matched.
+`nested_schema_cases.rs` gains fourteen: Right, Full, LeftSemi, LeftAnti, LeftMark, RightSemi and
+RightAnti, each plain and with `crossing_projection`, over two probe batches so a build-side answer
+at finish is read. `nested_cases::nested` became `pub(crate)` for them. Both headers were rewritten:
+the #152 refusal is gone, and so are the recipe words "side swap" and "accumulated-keys finish".
+All twenty were green on their first device run (build 1) and again on build 2. The device holds
+what these nodes declare, so no `bug_` pin. These are coverage, not a fix, so there was no red
+phase. The read-at-the-handle machinery already fails elsewhere: the four schema `bug_` pins
+assert divergences it reports.
+
+**I4 — `build-test.md`.** The device-schema row now names all nine hash-join types, Left and Full
+through the padding finish, and every nested-loop type. It says "Four are `bug_` pins": #65,
+#216, and #225 at the init and at the merge. #207's cross-join pin is gone. The counts come off
+`--list`:
+- rust-only `--lib` 769 (763 + order hazard 4, `not_in` 1, memory estimation 1).
+- device `gpu_tests::` 706 (684 + 22): the schema files 169 (149 + 20), and the rest of
+  `tests::gpu_tests` 457 (455 + 2).
+- The headers were derived by summing every row's N with a script that reproduces `77a18d46`'s
+  4903 / 4333 / 173 / 397 exactly. Today: **4931 — Rust 4361, C++ 173, Python 397**; cpu 2758,
+  gpu 1483.
+- The three cpu rows' texts name what they now cover (#267's pin, the whole-tie read, the nested
+  loop's `matched` byte).
+
+**I6 — #267's pin.** `planner/tests/not_in.rs`
+`bug_the_rewrites_count_over_a_scan_split_into_lanes_is_refused_at_tp4`, `// #267` above it. It plans
+`pbench/not-in-uncorrelated` at each tp4 mode with pbench's knobs and asserts validation's "a
+finalizing merge over several lanes needs its input hashed". Mutation: pointed at the tp1 modes, it
+fails with "tp1-single planned: #267 may be fixed".
+
+**I7 — the 26 `--features gpu` dead-code warnings.** Each revision was built locally from a `git
+archive`, in its own directory with its own target dir (`/tmp/jb-{base,head}`, with
+`third_party/cudf` a symlink to the workspace's checkout). Both target dirs were deleted afterwards,
+and the workspace's own `target-cudf-rapids-cuda-12.2` was never pointed at another tree.
+`CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh build -p peacockdb-core --features gpu`:
+**26 at `3d9a122e`, 26 at `77a18d46`, 26 on this round's tree — the same (file, item) pairs all
+three times**, compared by script; only line numbers moved. The review's 25 was a grep for
+`never used|never constructed`, which misses `field per_call is never read`. None is the branch's.
+The branch changed `driver/index.rs` and `executor/mod.rs` around these items and moved them, nothing
+more. So the signoff reads the bar as "no new warning". The pairs:
+- `executor/mod.rs`: `recorded` (method), `per_call` (field), `call` (method), `join_regions`,
+  `node_measured`, `nodes_as_recorded`, `RmmPool` (enum), `NodeTiming` (enum), `NvtxRange`
+  (struct), `install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_range`,
+  `collect_regions`;
+- `executor/instrument.rs`: `install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`,
+  `nvtx_range`, `nvtx_pop`;
+- `executor/driver/mod.rs`: `nodes_as_recorded`, `join_regions`, `node_measured`;
+- `executor/driver/measurements.rs`: `join_regions`, `unanswered`, `node_measured`;
+- `executor/driver/index.rs`: `nodes_as_recorded`.
+
+The gpu lib-test build has only the pre-existing `AsArray` warning. The rust-only builds have none.
+
+**Nits.**
+1. The four comments are at most ten lines now. `gpu_backend/mod.rs` is 8 lines and
+   `join_refusals.rs` 10, both merged rather than cut. `wire/mod.rs`'s `attach_recipes` doc is 10.
+   `corpus_cases.inc`'s pbench block is 10, keeping `BOTH COLUMNS.`.
+5. `wire/tests.rs`'s agreement could not fail. The recipe's `AtDone` and the cpu's
+   `finish_and_fetch` returning `Some` both read `needs_finish`. Shown: `needs_finish(Inner) = true`
+   left the test green. Now `has_finish_pass` (both rows of `TEST_ONLY_ITEMS`, signature only) takes
+   real batches: `dim` = (1, 0), (2, 0) and one `fact` batch, (1, 10). It reports whether DataFusion
+   yields rows at the finish, which no type that does not finish can do without `finish_and_fetch`
+   failing. Mutations: `needs_finish(Inner) = true` → red ("Inner … disagree about the finish");
+   `needs_finish(Left) = false` → red ("the finish of a Left join answers nothing, and DataFusion
+   emitted 1 rows there").
+6. `driver/tests/flow.rs`: the scatter test now says what it holds, that a lane with no probe rows
+   makes no probe call; the "device refuses a second probe call" premise is gone.
+   `test_cpu_corpus.rs`: the "#152 clears" sentence became "device cells are enabled in bulk".
+7. `plan/join.rs` and `plan/mod.rs`'s `empty_build_owes_nothing` doc now says "a build side that holds
+   no row — no batch, or batches of none". Both engines call it with `rows == 0`. The doc also names
+   the driver's dropping of probe batches.
+9. `Writer::new` deleted. Its eight callers, all in `wire/tests.rs`, call a two-line `writer()`
+   helper there.
+10. `memory_estimation.rs`: a `GpuNestedLoopJoin` is priced at its build bytes plus `matched_bytes`,
+    one byte a build row for a type that finishes, as `gpu_backend/join.rs`'s `built_bytes` charges
+    it. A cross join is Inner alone and stays at its build bytes. The red test,
+    `a_build_preserving_nested_loop_is_charged_for_its_matched_column` (supplier LEFT vs INNER on
+    `<`), failed at 280000 vs 280000 and expects the 10,000. The plan goldens moved and were
+    regenerated (`UPDATE_CANONICAL=1 … plan_goldens`): 15 files, memory lines only
+    (`estimated_max_resident_size` and the `budget=` line, checked by script). Nine queries move at
+    every mode: tpch `nested-loop-left-join`, tpcds `q9`, and pbench `nl-full`, `nl-left`,
+    `nl-left-anti`, `nl-left-decimal`, `nl-left-semi`, `nl-mark` and `scalar-subquery-cross`. No
+    cpu, cost or payload golden moved. `architecture.md`'s Pricing paragraph says a keyed join's
+    table and either kind's `matched`.
+- `coding-style.md:164`, the split derived from `SURFACE` (47 items). The CLI names nine: `run`,
+  `CpuBackend`, `record_batch` (main.rs calls `batch.record_batch()`), `plan`, `PlanKnobs`,
+  `BatchSizing`, `SMALL_TABLE_BYTES`, `build_session_state`, `register_tables_for`. `run<B:
+  Backend>` closes over the other 22 `executor/mod.rs` items and the eight `Cpu*`, 30. `plan`
+  closes over `plan/mod.rs`'s seven, now with `IntoAnyBox`, plus `MemoryModel`: eight. 30 + 8 + 9 =
+  47. The receipt line now also names `private_bounds`, which is what `IntoAnyBox`'s was.
+
+**Spec risk 1 — the whole-task cost figure.** `cargo run -q -p cost-report -- --cost-diff --base
+3d9a122e` on the final tree: **703 compared, 529 changed — 278 improvements, 251 regressions, 173
+past the 10% gate.** It is red, and pre-accepted by the board.
+- By dataset: tpch 106 improvements (25 queries), 11 regressions (3 queries), 0 past 10%. tpcds 156
+  (71), 209 (70), 161 past 10%. pbench 16 (8), 31 (10), 12 past 10% (`exists-null-keys`,
+  `not-not-in`, `not-or-not-in`, `uint-key-join` at the tp4 modes).
+- tpch in full: q2 +0.72% at the three tp4 modes (374.74 → 377.45 MB); q15 +1.59 / +1.43 / +1.62%
+  (56.60 → 57.50 MB); `nested-limits` +0.00% at every mode (976.44 → 976.45 KB, the marker's bytes).
+- Worst five, by query: tpcds q33 +30.74% (605.22 → 791.24 MB), q56 +30.58% (606.42 → 791.85 MB),
+  q61 +30.53% (1.74 → 2.27 GB), q31 +30.37% (1.04 → 1.36 GB), q60 +30.29% (618.50 → 805.86 MB),
+  each at tp4-rowgroup. The spread over the 251: 14 at +0.00%, 39 under +5%, 25 to +10%, 47 to
+  +20%, 112 to +30%, 14 above.
+- Best five: tpcds q22 −17.54% (tp1-single), tpch q21 −16.78% (tp1), tpcds q16 −14.77%, q94
+  −14.60%, tpch q13 −11.75%.
+- Where they come from, per the rounds above, which overlap on some rows and so do not add up
+  to this figure: the regressions are plan task 3's #137 filters at the tp4 modes (173 past 10% there,
+  as here), plan task 4's `__rowmarker__` (33, none past 10%) and plan task 8's +46 bytes on
+  `nested-loop-left-join`. The improvements are plan task 6's 445 and plan task 9's lost
+  coalesces (q21, q16, q94, `nested-loop-left-join`).
+- The per-row table is `cost_diff.html`, which the command writes.
+
+**Device run, nebius-gpu, build 2** (`./scripts/build-test-shadgpu.sh --build` rc 0, the tree synced
+uncommitted, each binary run directly with `--test-threads=1`): **1616 cases, every binary rc 0,
+0 failed** — `peacock_gpu_tests` 2, `peacock_plan_tests` 81, `peacock_join_session_tests` 53,
+`peacockdb_core_gpu_lib gpu_tests::` 706, `test_node_timing` 1, `peacock_gpu_benchmarks --skip
+bench_` 8, `test_gpu_corpus` 765. Not run, per the board: `peacock_cpu_tests` (local, 15 passed),
+the sf40 pair, the `bench_` cases. Build 2 is this round's code. After it, `source_cases.rs` was
+rustfmt-ed whole (clean at HEAD) and `matched_bytes` moved above `mod tests;`. Build 3 carries
+both, plus the probe, and reran the three touched device files: `source_cases` 12,
+`join_schema_cases` 44 and `nested_schema_cases` 20, all passed. The final sync took the probe out
+of the remote tree.
+
+**Hosts.** nebius-gpu had 27 GB free before and after; nothing was deleted there. Locally, the two
+archive trees and their target dirs (the base's was 4.6 GB) were removed after their counts.

@@ -644,8 +644,8 @@ lineitem), and nothing validates it. On the cpu, `CpuSource` never reads `node.l
 reader has no `with_limit`. At tp1 the limit sits in the scan alone; at tp4 the unload's interval
 hides it, though the loader still reads everything. On the device, `scan.cpp` sets
 `set_num_rows(limit)` and then the call's row groups, which cuDF refuses together, even for one
-row group. Pinned by the four `bug_` cases in `gpu_tests/source_cases.rs`: sixty-four rows for ten
-on the cpu, a refused read on the device. #188 filed the device half and is merged here.
+row group and for a scan of no column. Pinned by the six `bug_` cases in `gpu_tests/source_cases.rs`:
+sixty-four rows for ten on the cpu, a refused read on the device. #188 is merged here.
 
 **Corpus queries:** `tpch/scan-limit`, cpu off at the two tp1 modes and device off at all five.
 `tpch/nested-limits`, device off at all five. Simplest: `select n_nationkey from nation limit 3;`

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 4903 test cases — Rust 4333, C++ 173, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 4931 test cases — Rust 4361, C++ 173, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -22,7 +22,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2752 cases: `--lib` 763, `test_cpu_corpus` 1960, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 2758 cases: `--lib` 769, `test_cpu_corpus` 1960, `test_corpus_goldens` 26, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -179,15 +179,16 @@ what the `NOT IN` rewrite and #137's key filters ask before a physical plan exis
 files, since every corpus column is declared nullable; the tpcds case is the only one whose column
 really holds NULLs
 
-| `NOT IN` as SQL means it | [correlated_not_in_answers_as_sql](../peacockdb-core/src/planner/tests/not_in.rs) | 16 |
+| `NOT IN` as SQL means it | [correlated_not_in_answers_as_sql](../peacockdb-core/src/planner/tests/not_in.rs) | 17 |
 |---|---|--:|
 
 the `NOT IN` rewrite, over two in-memory tables whose columns the footer reader cannot reach, so
 every operand counts as possibly-NULL and every form rewrites: the four scratch probe shapes, the
 three negation-normal-form folds, the nested `NOT IN` inside an `EXISTS`, the uncorrelated count
-that must not become `count(*)`, the tpch keys that hold no NULL and so plan untouched, and the two
-refusals this chain leaves — #250's off-spine `IN` and #247's seven DataFusion limits. Every
-expected row is DuckDB 1.5.4's over the same tables
+that must not become `count(*)`, the tpch keys that hold no NULL and so plan untouched, and the
+refusals this chain leaves — #250's off-spine `IN`, #247's seven DataFusion limits, and #267's
+count over pbench's four-lane `sub` at tp4. Every expected row is DuckDB 1.5.4's over the same
+tables
 
 | #137's NULL-key filters | [an_inner_join_drops_null_keys_below_both_shuffles_where_the_data_holds_them](../peacockdb-core/src/planner/tests/null_key_filters.rs) | 7 |
 |---|---|--:|
@@ -489,14 +490,15 @@ the cpu helper shown failing, which is what keeps the corpus honest: a wrong row
 a digit past the tolerance, and a section another mode wrote; plus every `CpuOracle` variant
 being named by some corpus line
 
-| Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 11 |
+| Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 15 |
 |---|---|--:|
 
 what the order tier refuses, over two four-row tables: a limit over a hash join, over an
-aggregate over one, and over a cross join fed by one; a sorted cut between tied rows that
-differ, at the fetch and at the offset. And what it lets through: a limit over a cross join of
-scans, over no join, over a keyless aggregate; a cut between rows that do not tie or are the
-same row; a tie over no join
+aggregate over one, and over a cross join fed by one; a sorted cut inside a tie that holds rows
+that differ, at the fetch and at the offset — the whole tie read, past the row after the cut,
+and an offset read through a projection to a sort with no fetch. And what it lets through: a
+limit over a cross join of scans, over no join, over a keyless aggregate; a cut between rows
+that do not tie, or inside a tie of one row repeated; a tie over no join
 
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|
@@ -543,14 +545,15 @@ real consumer, no node declares no column ([#63](archive/archived-tickets.md#t63
 names a view type the device cannot hold;
 layout canonical forms and equality; whether a hash survives a regrouping
 
-| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 12 |
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 13 |
 |---|---|--:|
 
 the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
 holds comes off the budget first, a batch is charged once per lane in force, a loader is priced
 by the batches its mapping makes, amplification is the widest point on the path, a target lands
 on the coarse grid, constants that cannot be less and exceed the budget are a plan-time
-error, and an empty relation is no source the budget sizes
+error, a join that answers at the finish — hash or nested loop — is charged its `matched` byte a
+build row, and an empty relation is no source the budget sizes
 
 | Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 27 |
 |---|---|--:|
@@ -590,7 +593,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1461 cases: `--lib -- gpu_tests::` 684, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1483 cases: `--lib -- gpu_tests::` 706, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -650,7 +653,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 455 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 457 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -688,7 +691,7 @@ keys, and the merge at four lanes. The group keys are `Utf8` too; the aggregate 
 view type. A guard reads the kind each case declares and names every kind with none, the three
 forwarders excluded
 
-| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_stddev_holds_three_identically_named_columns](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 149 |
+| Operator harness, what the device holds | [a_divide_over_a_decimal_declares_the_scale_6_the_device_holds](../peacockdb-core/src/tests/gpu_tests/exec_schema_cases.rs), [bug_stddev_holds_three_identically_named_columns](../peacockdb-core/src/tests/gpu_tests/aggregate_schema_cases.rs) | 169 |
 |---|---|--:|
 
 the same nodes on the device alone, every output handle read where it sits through
@@ -699,13 +702,14 @@ One `<family>_schema_cases.rs` beside each family: the reader against the upload
 mid-plan limit; a scan of each fixture column type; a filter with and without its projection;
 arithmetic on each numeric type, the divide's declared scale, each cast the corpus emits, the
 union's two branch casts, each scalar function the dispatch admits, CASE, LIKE and the unary
-forms; a sort; the three accumulators; the scatter on each key type; the seven hash-join
-types that run past a first probe batch (Left and Full refuse it, #152), with and without a
-crossing projection, and the three key-path types on each key type; the cross and nested
-loops; and each aggregate's init, the merges, and the sum, avg, stddev and var finalizes,
-grouped on each key type and global. Five are `bug_` pins: the grouping id held `Int32` under a
-`UInt8` declaration (#65), the cross join's dropped projection (#207), the keyless Welford init's one finished column
-(#216), and the Welford state named three times by its alias at the init and the merge (#225)
+forms; a sort; the three accumulators; the scatter on each key type; all nine hash-join types,
+with and without a crossing projection, Left and Full also through a finish that pads build rows
+no probe matched, and Inner, Right and LeftAnti on each key type; the cross join, and the nested
+loop of every type, each with and without a projection; and each aggregate's init, the merges,
+and the sum, avg, stddev and var finalizes, grouped on each key type and global. Four are `bug_`
+pins: the grouping id held `Int32` under a `UInt8` declaration (#65), the keyless Welford init's
+one finished column (#216), and the Welford state named three times by its alias at the init and
+at the merge (#225)
 
 *component*
 

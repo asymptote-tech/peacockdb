@@ -162,9 +162,10 @@ feature, with signatures free of engine types.
   and `register_tables_for`, plus what their signatures close over — a `pub` trait makes its
   associated-type bounds and its methods' types as public as itself, an enum variant's fields
   are always public, and the `impl Backend for CpuBackend` makes the eight `Cpu*` executor types
-  a hard error at anything less — so `run<B: Backend>` closes over 30 of the 46 and `plan` over
-  seven, beside the nine the CLI names. A new row in `SURFACE` needs the receipt: `cargo build
-  -p peacockdb` failing without it, or `private_interfaces` on a row already listed.
+  a hard error at anything less — so `run<B: Backend>` closes over 30 of the 47 and `plan` over
+  eight, `GpuNode`'s supertrait `IntoAnyBox` among them, beside the nine the CLI names. A new
+  row in `SURFACE` needs the receipt: `cargo build -p peacockdb` failing without it, or
+  `private_interfaces` (or `private_bounds`) on a row already listed.
 - **`SURFACE` is the gate; `#![warn(unreachable_pub)]` is the signal.** A `pub` item written
   anywhere in `src/` outside `test_support` and the table fails
   `bare_pub_is_the_surface_and_nothing_else` in the layout test, which CI runs; a `pub` field

@@ -189,7 +189,7 @@ fn nested_with(
     )
 }
 
-fn nested(join_type: JoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
+pub(crate) fn nested(join_type: JoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
     nested_with(join_type, residual(), projection)
 }
 

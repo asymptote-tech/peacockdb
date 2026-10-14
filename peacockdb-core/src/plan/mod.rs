@@ -1311,12 +1311,13 @@ pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
     join::null_key_droppable(join_type)
 }
 
-/// Whether a lane whose build side produced no batch owes no rows at all.
+/// Whether a join whose build side holds no row — no batch, or batches of none — owes no
+/// rows at all.
 ///
 /// True where every output row is built from a build row, so an empty build side is an
-/// empty answer and the lane can end without a call. False for the three types that
-/// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
-/// making it takes a call over a build table that does not exist.
+/// empty answer and the driver drops the lane's probe batches without a call. False for the
+/// three types that preserve unmatched PROBE rows: what they owe is the probe side, padded or
+/// not.
 pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
     join::empty_build_owes_nothing(join_type)
 }

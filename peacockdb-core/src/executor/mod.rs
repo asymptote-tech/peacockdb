@@ -505,7 +505,7 @@ pub(crate) fn physical_expr(
     cpu_backend::physical_expr(expr, input, registry)
 }
 
-/// Whether the CPU executor for this join answers at done.
+/// Whether DataFusion answers rows at this join's finish, over `build` and one `probe` batch.
 ///
 /// `#[cfg(test)]` because its only caller is `wire/tests.rs`, which checks that answer
 /// against the recipe's `AtDone` call. Two hops rather than one: `cpu_backend` declares
@@ -513,8 +513,8 @@ pub(crate) fn physical_expr(
 #[cfg(test)]
 pub(crate) fn has_finish_pass(
     node: &crate::plan::GpuHashJoin,
-    build: &datafusion::arrow::datatypes::Schema,
-    probe: &datafusion::arrow::datatypes::Schema,
+    build: datafusion::arrow::array::RecordBatch,
+    probe: datafusion::arrow::array::RecordBatch,
     ctx: std::sync::Arc<datafusion::execution::TaskContext>,
 ) -> Result<bool, PlanError> {
     cpu_backend::has_finish_pass(node, build, probe, ctx)

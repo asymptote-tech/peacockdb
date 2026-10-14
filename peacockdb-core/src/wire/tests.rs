@@ -20,6 +20,7 @@ use crate::plan::{
     GpuFilter, GpuHashJoin, GpuLimit, GpuNestedLoopJoin, GpuUnload,
 };
 use crate::plan::{JoinFilterColumn, JoinSide};
+use datafusion::arrow::array::{ArrayRef, Int64Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::common::JoinType;
 use datafusion::common::ScalarValue;
@@ -68,6 +69,11 @@ impl GpuNode for Given {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// A writer whose joins carry no budget of their own: the session's default.
+fn writer<'a>() -> Writer<'a> {
+    Writer::with_join_scratch(0)
 }
 
 fn columns_of(columns: &[&str]) -> Schema {
@@ -416,7 +422,7 @@ fn bug_a_join_side_holding_a_list_column_is_not_runnable() {
 /// share its one seq, and seqs run on across the plan rather than restarting per node.
 #[test]
 fn seqs_are_the_post_order_positions_of_what_was_built() {
-    let mut writer = Writer::new();
+    let mut writer = writer();
     let build = columns_of(&["k", "label"]);
     let probe = columns_of(&["fk", "v"]);
     let left = join(JoinType::Left, false, None);
@@ -452,17 +458,15 @@ fn a_join_leaves_its_inputs_for_the_walk_to_gather() {
 }
 
 /// Every cell of both dimensions — nine join types crossed with a residual filter — and
-/// one claim about each: the recipe finishes exactly where the session does, and the cpu
-/// executor finishes there too.
+/// one claim about each: the recipe finishes exactly where the session does, and DataFusion
+/// answers rows at the finish exactly there too.
 #[test]
 fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
-    let build = columns_of(&["k", "label"]);
-    let probe = columns_of(&["fk", "v"]);
     let mut cells = 0;
     for join_type in ALL_TYPES {
         for residual in [false, true] {
             let node = typed_join(join_type, residual);
-            let executor_finishes = cpu_finishes(&node, &build, &probe);
+            let executor_finishes = cpu_finishes(&node);
             let recipe = recipe_for(&node);
             let recipe_finishes = recipe
                 .calls
@@ -492,8 +496,6 @@ fn the_recipe_and_the_executor_take_the_same_path_through_every_cell() {
 /// does and as it does unfiltered (#220).
 #[test]
 fn the_cpu_finishes_a_filtered_build_side_semi_join_as_the_session_does() {
-    let build = columns_of(&["k", "label"]);
-    let probe = columns_of(&["fk", "v"]);
     for join_type in [JoinType::LeftSemi, JoinType::LeftAnti, JoinType::LeftMark] {
         let node = typed_join(join_type, true);
         let recipe = recipe_for(&node);
@@ -505,7 +507,7 @@ fn the_cpu_finishes_a_filtered_build_side_semi_join_as_the_session_does() {
             "{join_type:?}: the session finishes"
         );
         assert!(
-            cpu_finishes(&node, &build, &probe).expect("the cpu builds it"),
+            cpu_finishes(&node).expect("the cpu builds it"),
             "{join_type:?}: the cpu finishes"
         );
     }
@@ -559,15 +561,19 @@ fn shape(recipe: &Recipe) -> Vec<(FbKind, CallPattern)> {
         .collect()
 }
 
-fn cpu_finishes(
-    node: &GpuHashJoin,
-    build: &Schema,
-    probe: &Schema,
-) -> Result<bool, crate::plan::PlanError> {
+/// Whether DataFusion answers rows at `node`'s finish over `dim` = (1, 0), (2, 0) and one
+/// `fact` batch, (1, 10): one build row matched with the residual true, one matched by
+/// nothing, so each type that finishes has a row to answer there and no other type does.
+fn cpu_finishes(node: &GpuHashJoin) -> Result<bool, crate::plan::PlanError> {
+    let int64 = |values: &[i64]| Arc::new(Int64Array::from(values.to_vec())) as ArrayRef;
+    let build = RecordBatch::try_from_iter([("k", int64(&[1, 2])), ("label", int64(&[0, 0]))])
+        .expect("two columns of one length");
+    let probe = RecordBatch::try_from_iter([("fk", int64(&[1])), ("v", int64(&[10]))])
+        .expect("two columns of one length");
     crate::executor::has_finish_pass(
         node,
-        &build.fields,
-        &probe.fields,
+        build,
+        probe,
         datafusion::execution::context::SessionContext::new().task_ctx(),
     )
 }
@@ -583,7 +589,7 @@ fn an_accumulating_sort_sorts_every_batch_and_merges_what_the_lane_kept() {
         }],
         Some(10),
     );
-    let recipe = accumulate_and_sort(&node, &[&columns_of(&["a"])], &mut Writer::new())
+    let recipe = accumulate_and_sort(&node, &[&columns_of(&["a"])], &mut writer())
         .expect("the sort's payloads are writable")
         .expect("an accumulating sort drives the ABI");
     assert_eq!(
@@ -622,7 +628,7 @@ fn a_batch_aggregate_runs_the_same_pair_at_a_compaction_and_at_done() {
         columns_of(&["k", "sum(n)"]),
         columns_of(&["k", "sum(n)"]),
     );
-    let recipe = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut Writer::new())
+    let recipe = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut writer())
         .expect("the aggregate's payloads are writable")
         .expect("a batch aggregate drives the ABI");
     assert_eq!(
@@ -693,7 +699,7 @@ fn summed() -> Vec<NamedExpr> {
 #[test]
 fn a_finalizing_merge_carries_its_finalize_in_a_project_of_its_own() {
     let node = finalizing_merge(summed(), &["k", "sum(n)"]);
-    let recipe = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut Writer::new())
+    let recipe = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut writer())
         .expect("the aggregate's payloads are writable")
         .expect("a batch aggregate drives the ABI");
     assert_eq!(
@@ -716,7 +722,7 @@ fn a_finalizing_merge_carries_its_finalize_in_a_project_of_its_own() {
 #[test]
 fn an_init_that_finalizes_itself_carries_the_finalize_in_a_project_of_its_own() {
     let node = finalizing_init(summed(), &["k", "sum(n)"]);
-    let recipe = aggregate(&node, &[&columns_of(&["k", "n"])], &mut Writer::new())
+    let recipe = aggregate(&node, &[&columns_of(&["k", "n"])], &mut writer())
         .expect("the aggregate's payloads are writable")
         .expect("an aggregate drives the ABI");
     assert_eq!(
@@ -738,7 +744,7 @@ fn an_init_that_finalizes_itself_carries_the_finalize_in_a_project_of_its_own() 
 #[test]
 fn a_finalize_project_emits_the_group_keys_the_finalize_list_leaves_out() {
     let node = finalizing_merge(summed(), &["k", "sum(n)"]);
-    let mut writer = Writer::new();
+    let mut writer = writer();
     let recipe = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut writer)
         .expect("the aggregate's payloads are writable")
         .expect("a batch aggregate drives the ABI");
@@ -763,7 +769,7 @@ fn a_finalize_project_emits_the_group_keys_the_finalize_list_leaves_out() {
 #[test]
 fn a_state_whose_first_columns_are_not_the_keys_is_refused() {
     let node = finalizing_merge(summed(), &["j", "sum(n)"]);
-    let refused = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut Writer::new())
+    let refused = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut writer())
         .expect_err("a state that does not lead with the keys is not projectable");
     let message = format!("{refused}");
     assert!(
@@ -778,7 +784,7 @@ fn a_state_whose_first_columns_are_not_the_keys_is_refused() {
 #[test]
 fn a_finalize_that_does_not_fill_the_declared_output_is_refused() {
     let node = finalizing_merge(Vec::new(), &["k", "sum(n)"]);
-    let refused = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut Writer::new())
+    let refused = aggregate_batches(&node, &[&columns_of(&["k", "n"])], &mut writer())
         .expect_err("a finalize short of the declared output is not writable");
     let message = format!("{refused}");
     assert!(

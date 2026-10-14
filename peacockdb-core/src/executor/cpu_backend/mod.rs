@@ -703,8 +703,9 @@ pub(crate) fn physical_expr(
     expr_physical::physical_expr(expr, input, registry)
 }
 
-/// Whether the CPU executor for this join answers at done: asked of the executor itself,
-/// over an absent build side, where every finishing type answers a batch of no rows.
+/// Whether DataFusion answers rows at this join's finish, over `build` and one `probe` batch,
+/// read through the executor: a type that does not finish fails `finish_and_fetch` if
+/// DataFusion yields rows there, and one that does answers them.
 ///
 /// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
 /// the test compares the answer against the recipe's `AtDone` call. The question crosses
@@ -712,14 +713,21 @@ pub(crate) fn physical_expr(
 #[cfg(test)]
 pub(crate) fn has_finish_pass(
     node: &crate::plan::GpuHashJoin,
-    build: &ArrowSchema,
-    probe: &ArrowSchema,
+    build: RecordBatch,
+    probe: RecordBatch,
     ctx: Arc<TaskContext>,
 ) -> Result<bool, PlanError> {
-    CpuJoin::hash(node, build, probe, ctx).map(|join| {
-        let (probing, _) = join.set_build(None).expect("an absent build side is a join");
-        let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
-        finished.is_some()
+    CpuJoin::hash(node, &build.schema(), &probe.schema(), ctx).map(|join| {
+        let (mut probing, _) = join
+            .set_build(Some(CpuBatch::new(build)))
+            .expect("the build side is set");
+        probing
+            .probe_and_fetch(CpuBatch::new(probe))
+            .expect("the probe runs");
+        let (finished, _) = probing
+            .finish_and_fetch()
+            .expect("the finish answers what DataFusion yields there");
+        finished.is_some_and(|batch| batch.record_batch().num_rows() > 0)
     })
 }
 

@@ -69,6 +69,16 @@ TableResult execute_scan(const fb::CudfScan* scan,
     for (auto rg : *own) rgs.push_back(static_cast<cudf::size_type>(rg));
   }
 
+  // The limit and the row groups go on before either read: cuDF refuses the two together
+  // (#186), and a scan of no column meets that refusal rather than answering past it.
+  auto opts = cudf::io::parquet_reader_options::builder(cudf::io::source_info{paths}).build();
+  if (scan->limit() > 0) {
+    opts.set_num_rows(static_cast<cudf::size_type>(scan->limit()));
+  }
+  if (!rgs.empty()) {
+    opts.set_row_groups({rgs});
+  }
+
   if (scan->rows_only()) return rows_of(paths, rgs, scan->limit());
 
   // Build column name list from file_schema + projection.
@@ -90,18 +100,7 @@ TableResult execute_scan(const fb::CudfScan* scan,
     projected_names = all_names;
   }
 
-  auto opts = cudf::io::parquet_reader_options::builder(
-                  cudf::io::source_info{paths})
-                  .columns(projected_names)
-                  .build();
-
-  if (scan->limit() > 0) {
-    opts.set_num_rows(static_cast<cudf::size_type>(scan->limit()));
-  }
-
-  if (!rgs.empty()) {
-    opts.set_row_groups({rgs});
-  }
+  opts.set_columns(projected_names);
 
   auto result = cudf::io::read_parquet(opts);
 

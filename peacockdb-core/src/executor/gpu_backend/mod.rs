@@ -1,9 +1,6 @@
 //! The GPU backend's executors: a node's recipe is the instruction set, and running it is
-//! all these do.
-//!
-//! Nothing here builds a cuDF call of its own, deliberately: the recipe already says which
-//! seqs to address and in what order, so an executor that also built calls would be a
-//! second path to the same kernels, and the two would drift where the plan golden pins
+//! all these do. None builds a cuDF call of its own: the recipe already names the seqs and
+//! their order, and a second path to the same kernels would drift where the plan golden pins
 //! only the recipe.
 //!
 //! So an executor holds a borrowed session pointer, its recipe's calls, and the schema its

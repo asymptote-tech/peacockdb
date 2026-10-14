@@ -738,10 +738,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuProject: estimated_max_resident_size=80
-    GpuNestedLoopJoin: estimated_max_resident_size=28809
+budget=2147483648, accumulators=168, certain=80
+GpuUnload: estimated_max_resident_size=88
+  GpuProject: estimated_max_resident_size=88
+    GpuNestedLoopJoin: estimated_max_resident_size=28817
       GpuCoalesceAllBatches: estimated_max_resident_size=80
         GpuMergePartitions: estimated_max_resident_size=110
           GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
@@ -794,10 +794,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuProject: estimated_max_resident_size=80
-    GpuNestedLoopJoin: estimated_max_resident_size=28809
+budget=2147483648, accumulators=168, certain=80
+GpuUnload: estimated_max_resident_size=88
+  GpuProject: estimated_max_resident_size=88
+    GpuNestedLoopJoin: estimated_max_resident_size=28817
       GpuCoalesceAllBatches: estimated_max_resident_size=80
         GpuMergePartitions: estimated_max_resident_size=110
           GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
@@ -820,9 +820,9 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuMergePartitions: none
       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuNestedLoopJoin: estimated_max_resident_size=12396
+budget=2147483648, accumulators=168, certain=80
+GpuUnload: estimated_max_resident_size=88
+  GpuNestedLoopJoin: estimated_max_resident_size=12404
     GpuCoalesceAllBatches: estimated_max_resident_size=80
       GpuMergePartitions: estimated_max_resident_size=110
         GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
@@ -847,10 +847,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuProject: estimated_max_resident_size=80
-    GpuNestedLoopJoin: estimated_max_resident_size=28809
+budget=2147483648, accumulators=168, certain=80
+GpuUnload: estimated_max_resident_size=88
+  GpuProject: estimated_max_resident_size=88
+    GpuNestedLoopJoin: estimated_max_resident_size=28817
       GpuCoalesceAllBatches: estimated_max_resident_size=80
         GpuMergePartitions: estimated_max_resident_size=110
           GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
@@ -873,9 +873,9 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuMergePartitions: none
       GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuNestedLoopJoin: estimated_max_resident_size=12396
+budget=2147483648, accumulators=168, certain=80
+GpuUnload: estimated_max_resident_size=88
+  GpuNestedLoopJoin: estimated_max_resident_size=12404
     GpuCoalesceAllBatches: estimated_max_resident_size=80
       GpuMergePartitions: estimated_max_resident_size=110
         GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
@@ -902,10 +902,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
         GpuProject: calling_lanes=4, per batch: execute_node(#3 CudfProject, batch)
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=240, certain=120
-GpuUnload: estimated_max_resident_size=50
-  GpuFilter: estimated_max_resident_size=50
-    GpuNestedLoopJoin: estimated_max_resident_size=34604
+budget=2147483648, accumulators=248, certain=120
+GpuUnload: estimated_max_resident_size=53
+  GpuFilter: estimated_max_resident_size=53
+    GpuNestedLoopJoin: estimated_max_resident_size=34612
       GpuCoalesceAllBatches: estimated_max_resident_size=120
         GpuMergePartitions: estimated_max_resident_size=165
           GpuLoadParquet: estimated_max_resident_size=660, source_bytes=165, target_batch_bytes=165, amplification=4.0
@@ -1550,16 +1550,16 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                 GpuFilter: calling_lanes=4, per batch: execute_node(#39 CudfFilter, batch)
                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#38 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=5236032, certain=0
-GpuUnload: estimated_max_resident_size=430000
-  GpuProject: estimated_max_resident_size=430000
-    GpuNestedLoopJoin: estimated_max_resident_size=878000
+budget=2147483648, accumulators=5296040, certain=0
+GpuUnload: estimated_max_resident_size=440000
+  GpuProject: estimated_max_resident_size=440000
+    GpuNestedLoopJoin: estimated_max_resident_size=898000
       GpuCoalesceAllBatches: estimated_max_resident_size=860000
-        GpuNestedLoopJoin: estimated_max_resident_size=860000
+        GpuNestedLoopJoin: estimated_max_resident_size=880000
           GpuCoalesceAllBatches: estimated_max_resident_size=520000
-            GpuNestedLoopJoin: estimated_max_resident_size=520000
+            GpuNestedLoopJoin: estimated_max_resident_size=540000
               GpuCoalesceAllBatches: estimated_max_resident_size=180000
-                GpuNestedLoopJoin: estimated_max_resident_size=180016
+                GpuNestedLoopJoin: estimated_max_resident_size=180024
                   GpuCoalesceAllBatches: estimated_max_resident_size=16
                     GpuMergePartitions: estimated_max_resident_size=22
                       GpuProject: estimated_max_resident_size=88

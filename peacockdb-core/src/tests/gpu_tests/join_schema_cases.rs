@@ -1,10 +1,9 @@
-//! What a `GpuHashJoin` hands the device up, read at the handle: every join type the device
-//! runs, with and without a crossing projection, and the three key-path types on every key
-//! type the corpus joins on, every output handle held to the node's declared schema. Left
-//! and Full refuse their first probe batch (#152, pinned in `join_cases.rs`) and hold
-//! nothing to read. The builders and scripts are `join_cases.rs`'s and
-//! `join_dimension_cases.rs`'s. Every case is green or a `bug_` test with its ticket above
-//! it; nothing here repairs.
+//! What a `GpuHashJoin` hands the device up, read at the handle: all nine join types, with and
+//! without a crossing projection, Left and Full also through a finish that pads build rows no
+//! probe matched, and Inner, Right and LeftAnti on every key type the corpus joins on — every
+//! output handle held to the node's declared schema. The builders and scripts are
+//! `join_cases.rs`'s and `join_dimension_cases.rs`'s. Every case is green or a `bug_` test with
+//! its ticket above it; nothing here repairs.
 
 use datafusion::common::JoinType;
 
@@ -29,6 +28,50 @@ operator_case! {
     fn an_inner_join_with_a_crossing_projection_declares_the_kept_columns_the_device_holds() {
         let node = hash_join(JoinType::Inner, false, false, Some(crossing_projection(JoinType::Inner)));
         assert_holds_as_declared(&node, one_probe());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_declares_what_the_device_holds() {
+        assert_holds_as_declared(&hash_join(JoinType::Left, false, false, None), two_probes());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_with_a_crossing_projection_declares_the_kept_columns_the_device_holds() {
+        let node = hash_join(JoinType::Left, false, false, Some(crossing_projection(JoinType::Left)));
+        assert_holds_as_declared(&node, two_probes());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_whose_finish_pads_unmatched_build_rows_declares_what_the_device_holds() {
+        assert_holds_as_declared(&hash_join(JoinType::Left, false, false, None), probes_with_misses());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_declares_what_the_device_holds() {
+        assert_holds_as_declared(&hash_join(JoinType::Full, false, false, None), two_probes());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_with_a_crossing_projection_declares_the_kept_columns_the_device_holds() {
+        let node = hash_join(JoinType::Full, false, false, Some(crossing_projection(JoinType::Full)));
+        assert_holds_as_declared(&node, two_probes());
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_whose_finish_pads_unmatched_build_rows_declares_what_the_device_holds() {
+        assert_holds_as_declared(&hash_join(JoinType::Full, false, false, None), probes_with_misses());
     }
 }
 
@@ -122,15 +165,15 @@ operator_case! {
     }
 }
 
-// The three key-path types on each key type: the per-batch join, the side swap, the
-// accumulated-keys finish. A projection over the keyed output keeps one column of each
+// Inner, Right and LeftAnti on each key type: pairs per probe call, a probe row padded, and
+// build rows answered at finish. A projection over the keyed output keeps one column of each
 // side where the type keeps both, and the build's where it does not.
 
 fn keyed_projection(join_type: JoinType) -> Vec<u32> {
     match join_type {
         JoinType::Inner | JoinType::Right => vec![13, 4, 8, 6],
         JoinType::LeftAnti => vec![6, 4, 0],
-        other => unreachable!("{other:?} is not one of the three key-path types"),
+        other => unreachable!("{other:?} is not one of the three keyed types"),
     }
 }
 

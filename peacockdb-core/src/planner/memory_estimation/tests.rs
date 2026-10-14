@@ -243,6 +243,31 @@ async fn a_build_preserving_join_is_charged_for_its_matched_column() {
     );
 }
 
+/// The same byte for a nested loop: the session keeps `matched` for every type that answers
+/// at the finish, hash table or none.
+#[tokio::test]
+async fn a_build_preserving_nested_loop_is_charged_for_its_matched_column() {
+    let left = modelled(
+        "SELECT s.s_name, c.c_name FROM supplier s LEFT JOIN customer c ON s.s_nationkey < c.c_nationkey",
+        4,
+        BUDGET,
+    )
+    .await;
+    let inner = modelled(
+        "SELECT s.s_name, c.c_name FROM supplier s JOIN customer c ON s.s_nationkey < c.c_nationkey",
+        4,
+        BUDGET,
+    )
+    .await;
+    assert_eq!(
+        left.accumulator_bytes - inner.accumulator_bytes,
+        10_000,
+        "the matched column is one byte per BUILD row: {} vs {}",
+        left.accumulator_bytes,
+        inner.accumulator_bytes
+    );
+}
+
 #[tokio::test]
 async fn a_loader_is_priced_by_the_batches_its_mapping_makes() {
     // Two batching forms, one budget: what a loader holds is the largest batch the
