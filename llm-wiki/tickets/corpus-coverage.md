@@ -342,7 +342,7 @@ Single arm passes `Shuffle::None` and does not.
 The small-table rule hides it: a source under 5 MB plans one lane, so a larger one is needed.
 
 **Corpus queries:** `pbench/not-in-uncorrelated` at the three tp4 modes, where the `NOT IN`
-rewrite's `count(*)` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
+rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
 `sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
 which refused first.
 
@@ -422,26 +422,20 @@ A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and on
 
 Both `LimitStream`s take their cut from the one `RowInterval::range_of` (`plan/interval.rs`),
 which answers `None` when `start < stop` is false — and it is false for `n_rows == 0` whatever
-the interval — so the batch is released as if it lay outside the interval. Nothing and a zero-row
-batch are different arrivals downstream, as #205 says: a build side of `filter → limit → coalesce`
-with zero survivors reaches `without_build` and #212's refusal for Right, Full and RightAnti,
-where the same filter without the limit pads and answers. Symmetric, so the harness's cpu-vs-device
-comparison is green by construction. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both`
-and its two neighbours (`gpu_tests/harness_cases.rs`), which want the zero-row batch under the
-schema. Numbered past #213, which the branches above this one have taken.
+the interval — so the batch is released as if it lay outside the interval. Symmetric, so the
+harness's cpu-vs-device comparison is green by construction. Pinned by
+`bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two neighbours
+(`gpu_tests/harness_cases.rs`), which want the zero-row batch under the schema.
 
-**Corpus query:** none; the only full joins, tpcds q51 and q97, have their `LIMIT` at the top.
-Simplest shape: `select n_name, r_name from (select * from region where r_regionkey < 0 limit 1)
-r right join nation on n_regionkey = r_regionkey;` (tpch) — refused where the same query without
-the `limit` answers. Unconfirmed that the filter hands the limit a zero-row batch.
+Since join-backend a join reads no batch as an empty side, so a join above the limit answers the
+same either way. What still tells nothing from a zero-row batch is #199's keyless aggregate: a
+`limit → global aggregate` over zero survivors loses its identity row where the same aggregate
+without the limit keeps it.
 
-**Fix proposed:** in the joins, not the limit — a join reads no batch on either side as an empty
-side. Build: `without_build` pads Right, Full and RightAnti rather than refusing (#212). Probe:
-the finish answers over zero keys (#173, the device's unfiltered LeftSemi/LeftMark), and the
-one-call forms make their call over zero rows — a hash LeftAnti/LeftMark with a residual filter
-(every build row, or every row marked false) and a nested-loop Left (the build rows padded); both
-answer nothing today, on both backends, unticketed. The keyless aggregate's same gap, both
-its sites, is #199's and deferred. Then this ticket drops with its three `bug_` pins.
+**Corpus query:** none.
+
+**Fix proposed:** none beyond #199's. Once the keyless aggregate reads nothing and a zero-row
+batch alike, the difference is invisible and this ticket drops with its three `bug_` pins.
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -463,8 +457,9 @@ which answers zero rows — 12 bytes at the device's unload against the cpu's 0 
 rows (`mini.result.txt`). `pbench/not-in-uncorrelated` at the two tp1 modes is the second, and it
 reaches the no-batch half without a sort: its cross join's build is empty, so the lane ends with
 no call, and the root receives nothing on both engines. Its line is `duckdb_divergent(205)`, as
-q17's is. Its device cells are off on this ticket. Measured since the join
-session: its tp4 cells pass on the device, and its tp1 cells meet [#225](#t225) first. The 12 bytes are the device's one zero-row batch: three `Utf8`
+q17's is, and its tp1 device cells are on. q17's device cell at `tp1-single` stays off on this
+ticket; since the join session its tp4 cells pass on the device, and its tp1 cells meet
+[#225](#t225) first. The 12 bytes are the device's one zero-row batch: three `Utf8`
 columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
 `select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
 

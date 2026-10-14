@@ -878,7 +878,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | Node | seqs emitted | driven as |
 |---|---|---|
 | `GpuLoadParquet` | `CudfScan` | `execute_scan_rowgroups(seq, row_groups…)` once per batch, overriding the node's own list |
-| `GpuEmpty` | a `CudfScan` stub, never called | none: the driver routes it, as it does a merge |
+| `GpuEmpty` | a `CudfScan` stub, never called | none: a source that answers no batch, so no FFI call |
 | `GpuFilter`, `GpuProject`, `GpuAggregate` | the same-kind node | generic map arm, one call per batch |
 | `GpuSort` | `CudfSort` | map arm per batch; per-batch `fetch` for a top-N |
 | `GpuAccumulateBatchesAndSort` | `CudfSort` + `CudfSortPreservingMerge` | per-batch sorts, then one merge call at done |

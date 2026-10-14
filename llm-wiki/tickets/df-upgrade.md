@@ -166,31 +166,14 @@ becomes an `EmptyRelation` that `propagate_empty_relation` then collapses, both 
 physical planning renders as `EmptyExec`. `Expr::InSubquery::nullable` delegating to the inner
 expression (`expr_schema.rs:310`) is why the fold needs the mark join to happen first.
 
-So the optimized logical plan is already an `EmptyRelation` — an earlier note here said the logical
-plan still carried the filter and sent the reader to physical planning, which was read off the
-*initial* plan. Measured on the committed pbench sf1 data at four partitions.
+Why it is ours: DataFusion at `target_partitions = 1` is the corpus' cpu oracle, so a query that
+reached this would be checked against the wrong answer and agree with it. The DuckDB oracle
+([#235](../archive/archived-tickets.md#t235)) caught it. Since join-backend the engine plans
+`EmptyExec` as `GpuEmpty`, so the refusal no longer stands between a user and the 0 rows; the
+`NOT IN` rule does. In a filter, a spine `IN` is rewritten before any mark join exists, an off-spine
+one over data that can hold a NULL is refused on [#250](joins.md#t250), and one over provably
+non-null operands is two-valued, where folding `IS NULL` to false is right. In a projection
+DataFusion 45 refuses the `InSubquery` at physical planning ([#247](#t247)'s second row), so no mark
+join and no fold. Re-check the projection after an upgrade that decorrelates there.
 
-Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the corpus' cpu
-oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
-answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
-[#155](../archive/archived-tickets.md#t155) — so no wrong answer is served. That arm lands in join-backend, and the
-`NOT IN` rule landing with it is what keeps the filter form from answering 0 rows to a user; the
-corpus note below has the measurement for every other shape. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
-and is the only thing that could have.
-
-**Corpus queries:** none. pbench's `in-is-null` was this ticket's witness until join-backend's
-`NOT IN` rule landed. It now meets [#250](joins.md#t250) at all five modes and its row carries
-`250` alone.
-
-The defect is untouched and our exposure to it is closed, in every shape, measured rather than
-argued. Under a filter the rule runs before `decorrelate_predicate_subquery`, so an `IN` meets one
-of three fates: a spine form is rewritten and no mark join is built; an off-spine form whose data
-can hold a NULL is refused on [#250](joins.md#t250); an off-spine form whose operands provably hold
-none is two-valued, and there folding `IS NULL` to false is the right answer. Outside a filter the
-rule never looks, and it does not need to: `SELECT (f_k IN (SELECT s_y FROM sub)) IS NULL FROM fact`
-is refused at physical planning with "does not support logical expression InSubquery", because
-DataFusion 45 decorrelates only inside a filter ([#247](#t247)'s second row). No mark join, so no
-fold.
-
-So the shape to re-check is a projection, and the thing that would change it is an upgrade that
-decorrelates there.
+**Corpus queries:** none. pbench's `in-is-null` now meets #250 at all five modes.
