@@ -6,7 +6,7 @@ dynamic filters
   partsupp: row groups 7 -> 7 (0-6)
     ps_partkey in [249, 199723]
   build p0 read from memory: 747 rows
-join order 1: 6 relations
+join order MJ1: 6 relations
   r0 Filter region
   r1 LoadParquet nation
   r2 LoadParquet supplier
@@ -28,7 +28,7 @@ join order 1: 6 relations
   join r0+r1 x r2: 2000.0 rows, 345002 bytes
   join r3+r4+r5 x r0+r1+r2: 597.6 rows, 113918 bytes
   C_out 593363 bytes, the plan's order 1615081
-join order 2: 4 relations
+join order MJ2: 4 relations
   r0 Filter region
   r1 LoadParquet nation
   r2 LoadParquet supplier
@@ -168,7 +168,7 @@ plan diff
 +                GpuEmitPartitions: hash=[s_nationkey@3], lanes=4, batches=multiple, hashed_on=[s_nationkey@3], schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8, s_nationkey:Int32, s_phone:Utf8, s_acctbal:Decimal128(15,2), s_comment:Utf8]
 +                  GpuLoadParquet: table=supplier, projections=[s_suppkey@0, s_name@1, s_address@2, s_nationkey@3, s_phone@4, s_acctbal@5, s_comment@6], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8, s_nationkey:Int32, s_phone:Utf8, s_acctbal:Decimal128(15,2), s_comment:Utf8]
 == q3
-join order 1: 3 relations
+join order MJ1: 3 relations
   r0 Filter customer
   r1 Filter orders
   r2 Filter lineitem
@@ -201,9 +201,18 @@ plan diff
                                  GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64]
                                    GpuFilter: predicate=c_mktsegment@1 = BUILDING, projection=[c_custkey@0], lanes=1, batches=multiple, schema=[c_custkey:Int64]
 == q4
-nothing fired
+join order MJ1: 2 relations
+  r0 Filter orders
+  r1 Filter lineitem
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey, left_semi
+  priced 1 sets
+  DPhyp (r0 r1)
+  oriented (r0 r1), build first
+  join r0 x r1: 57072.0 rows, 714827 bytes
+  C_out 714827 bytes, the plan's order 714827
+plan unchanged
 == q5
-join order 1: 6 relations
+join order MJ1: 6 relations
   r0 Filter region
   r1 LoadParquet nation
   r2 LoadParquet supplier
@@ -306,7 +315,7 @@ plan diff
 == q6
 nothing fired
 == q7
-join order 1: 6 relations
+join order MJ1: 6 relations
   r0 Filter nation
   r1 Filter nation
   r2 LoadParquet customer
@@ -407,7 +416,7 @@ plan diff
 +                                  GpuFilter: predicate=(l_shipdate@4 >= 1995-01-01) AND (l_shipdate@4 <= 1996-12-31), lanes=4, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64, l_extendedprice:Decimal128(15,2), l_discount:Decimal128(15,2), l_shipdate:Date32]
 +                                    GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2, l_extendedprice@5, l_discount@6, l_shipdate@10], partition_groups=[[[20,21,22,23]],[[24,25,26,27]],[[28,29,30,31]],[[32,33,34,35]]], lanes=4, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64, l_extendedprice:Decimal128(15,2), l_discount:Decimal128(15,2), l_shipdate:Date32]
 == q8
-join order 1: 8 relations
+join order MJ1: 8 relations
   r0 Filter region
   r1 LoadParquet nation
   r2 LoadParquet nation
@@ -541,7 +550,7 @@ plan diff
 +                              GpuEmitPartitions: hash=[s_suppkey@0], lanes=4, batches=multiple, hashed_on=[s_suppkey@0], schema=[s_suppkey:Int64, s_nationkey:Int32]
 +                                GpuLoadParquet: table=supplier, projections=[s_suppkey@0, s_nationkey@3], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_suppkey:Int64, s_nationkey:Int32]
 == q9
-join order 1: 6 relations
+join order MJ1: 6 relations
   r0 LoadParquet nation
   r1 LoadParquet orders
   r2 LoadParquet partsupp
@@ -564,7 +573,7 @@ join order 1: 6 relations
   C_out 357961733 bytes, the plan's order 454838086
 replan 1: a build of 10664 rows against 40000.0 estimated (q-error 3.75) for GpuHashJoin on=[(p_partkey@0, l_partkey@1)]
   kept m0 (10000 rows), m1 (10664 rows)
-  join order 1: 5 relations
+  join order MJ1: 5 relations
     r0 MemorySource m0
     r1 MemorySource m1
     r2 LoadParquet lineitem
@@ -651,7 +660,7 @@ plan diff
 +                                GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_supplycost:Decimal128(15,2)]
 +                                  GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1, ps_supplycost@3], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_supplycost:Decimal128(15,2)]
 == q10
-join order 1: 4 relations
+join order MJ1: 4 relations
   r0 LoadParquet nation
   r1 LoadParquet customer
   r2 Filter orders
@@ -668,7 +677,7 @@ join order 1: 4 relations
   C_out 18123816 bytes, the plan's order 27072151
 replan 1: a build of 114705 rows against 39158.9 estimated (q-error 2.93) for GpuHashJoin on=[(o_custkey@2, c_custkey@0)]
   kept m0 (25 rows), m1 (114705 rows)
-  join order 1: 3 relations
+  join order MJ1: 3 relations
     r0 MemorySource m0
     r1 MemorySource m1
     r2 LoadParquet customer
@@ -719,7 +728,7 @@ plan diff
 +                                GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_address:Utf8, c_nationkey:Int32, c_phone:Utf8, c_acctbal:Decimal128(15,2), c_comment:Utf8]
 +                                  GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_address@2, c_nationkey@3, c_phone@4, c_acctbal@5, c_comment@7], partition_groups=[[[0]],[[1]],[],[]], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_address:Utf8, c_nationkey:Int32, c_phone:Utf8, c_acctbal:Decimal128(15,2), c_comment:Utf8]
 == q11
-join order 1: 3 relations
+join order MJ1: 3 relations
   r0 Filter nation
   r1 LoadParquet supplier
   r2 LoadParquet partsupp
@@ -731,7 +740,7 @@ join order 1: 3 relations
   join r0 x r1: 400.0 rows, 3250 bytes
   join r0+r1 x r2: 32000.0 rows, 776000 bytes
   C_out 779250 bytes, the plan's order 23476000
-join order 2: 3 relations
+join order MJ2: 3 relations
   r0 Filter nation
   r1 LoadParquet supplier
   r2 LoadParquet partsupp
@@ -816,7 +825,7 @@ plan diff
 +                            GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64, ps_supplycost:Decimal128(15,2)]
 +                              GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1, ps_availqty@2, ps_supplycost@3], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64, ps_supplycost:Decimal128(15,2)]
 == q12
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 Filter lineitem
   r1 LoadParquet orders
   edge r0-r1: r0.l_orderkey = r1.o_orderkey
@@ -827,7 +836,7 @@ join order 1: 2 relations
   C_out 204103 bytes, the plan's order 204103
 replan 1: a build of 30988 rows against 9749.4 estimated (q-error 3.18) for GpuHashJoin on=[(l_orderkey@0, o_orderkey@0)]
   kept m0 (30988 rows)
-  join order 1: 2 relations
+  join order MJ1: 2 relations
     r0 MemorySource m0
     r1 LoadParquet orders
     edge r0-r1: r0.l_orderkey = r1.o_orderkey
@@ -853,9 +862,18 @@ plan diff
                            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_orderpriority:Utf8]
                              GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_orderpriority@5], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_orderpriority:Utf8]
 == q13
-nothing fired
+join order MJ1: 2 relations
+  r0 LoadParquet customer
+  r1 Filter orders
+  edge r0-r1: r0.c_custkey = r1.o_custkey, left
+  priced 1 sets
+  DPhyp (r0 r1)
+  oriented (r0 r1), build first
+  join r0 x r1: 1250004.0 rows, 20312565 bytes
+  C_out 20312565 bytes, the plan's order 20312565
+plan unchanged
 == q14
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 LoadParquet part
   r1 Filter lineitem
   edge r0-r1: r0.p_partkey = r1.l_partkey
@@ -887,7 +905,7 @@ plan diff
 +                GpuEmitPartitions: hash=[p_partkey@0], lanes=4, batches=multiple, hashed_on=[p_partkey@0], schema=[p_partkey:Int64, p_type:Utf8]
 +                  GpuLoadParquet: table=part, projections=[p_partkey@0, p_type@4], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[p_partkey:Int64, p_type:Utf8]
 == q15
-join order 1: 3 relations
+join order MJ1: 3 relations
   r0 LoadParquet supplier
   r1 AggregateBatches lineitem
   r2 Aggregate lineitem
@@ -952,30 +970,36 @@ dynamic filters
   partsupp: row groups 7 -> 7 (0-6)
     ps_partkey in [4, 199998]
   build p0 read from memory: 29581 rows
-join order 1: 2 relations
-  r0 MemorySource p0
-  r1 LoadParquet partsupp
-  edge r0-r1: r0.p_partkey = r1.ps_partkey
-  priced 1 sets
-  DPhyp (r0 r1)
-  oriented (r0 r1), build first
-  join r0 x r1: 118324.0 rows, 5809708 bytes
-  C_out 5809708 bytes, the plan's order 5809708
+join order MJ1: 3 relations
+  r0 Filter supplier
+  r1 MemorySource p0
+  r2 LoadParquet partsupp
+  edge r1-r2: r1.p_partkey = r2.ps_partkey
+  edge r2-r0: r2.ps_suppkey = r0.s_suppkey, left_anti
+  priced 3 sets
+  DPhyp (r0 (r1 r2))
+  oriented (r0 (r1 r2)), build first
+  join r1 x r2: 118324.0 rows, 5809708 bytes
+  join r0 x r1+r2: 94659.2 rows, 4647767 bytes
+  C_out 10457475 bytes, the plan's order 10457475
 replan 1: a build of 4 rows against 2000.0 estimated (q-error 500.00) for GpuHashJoin on=[(s_suppkey@0, ps_suppkey@0)]
   kept m1 (4 rows)
-  join order 1: 2 relations
-    r0 MemorySource p0
-    r1 LoadParquet partsupp
-    edge r0-r1: r0.p_partkey = r1.ps_partkey
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 118324.0 rows, 5809708 bytes
-    C_out 5809708 bytes, the plan's order 5809708
+  join order MJ1: 3 relations
+    r0 MemorySource m1
+    r1 MemorySource p0
+    r2 LoadParquet partsupp
+    edge r1-r2: r1.p_partkey = r2.ps_partkey
+    edge r2-r0: r2.ps_suppkey = r0.s_suppkey, left_anti
+    priced 3 sets
+    DPhyp (r0 (r1 r2))
+    oriented (r0 (r1 r2)), build first
+    join r1 x r2: 118324.0 rows, 5809708 bytes
+    join r0 x r1+r2: 118276.7 rows, 5807385 bytes
+    C_out 11617093 bytes, the plan's order 11617093
 plan diff
 --- before
 +++ after
-@@ -14,18 +14,12 @@
+@@ -14,18 +14,11 @@
                            GpuAggregateBatches: group_by=[p_brand@0, p_type@1, p_size@2, alias1@3], aggs=[], lanes=4, batches=single, hashed_on=[alias1@3], schema=[p_brand:Utf8, p_type:Utf8, p_size:Int32, alias1:Int64]
                              GpuAggregate: group_by=[p_brand@1, p_type@2, p_size@3, ps_suppkey@0], aggs=[], lanes=4, batches=multiple, hashed_on=[alias1@3], schema=[p_brand:Utf8, p_type:Utf8, p_size:Int32, alias1:Int64]
                                GpuHashJoin: join_type=RightAnti, on=[(s_suppkey@0, ps_suppkey@0)], lanes=4, batches=multiple, hashed_on=[ps_suppkey@0], schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
@@ -986,18 +1010,22 @@ plan diff
 +                                GpuMemorySource: name=m1, lanes=4, batches=single, hashed_on=[s_suppkey@0], schema=[s_suppkey:Int64]
                                  GpuEmitPartitions: hash=[ps_suppkey@0], lanes=4, batches=multiple, hashed_on=[ps_suppkey@0], schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
                                    GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
-                                     GpuProject: exprs=[ps_suppkey@3, p_brand@0, p_type@1, p_size@2], lanes=4, batches=multiple, schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
-                                       GpuHashJoin: join_type=Inner, on=[(p_partkey@0, ps_partkey@0)], projection=[p_brand@1, p_type@2, p_size@3, ps_suppkey@5], lanes=4, batches=multiple, schema=[p_brand:Utf8, p_type:Utf8, p_size:Int32, ps_suppkey:Int64]
+-                                    GpuProject: exprs=[ps_suppkey@3, p_brand@0, p_type@1, p_size@2], lanes=4, batches=multiple, schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
+-                                      GpuHashJoin: join_type=Inner, on=[(p_partkey@0, ps_partkey@0)], projection=[p_brand@1, p_type@2, p_size@3, ps_suppkey@5], lanes=4, batches=multiple, schema=[p_brand:Utf8, p_type:Utf8, p_size:Int32, ps_suppkey:Int64]
 -                                        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[p_partkey@0], schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
 -                                          GpuEmitPartitions: hash=[p_partkey@0], lanes=4, batches=multiple, hashed_on=[p_partkey@0], schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
 -                                            GpuFilter: predicate=((p_brand@1 != Brand#45) AND p_type@2 NOT LIKE `MEDIUM POLISHED%`) AND ((((((((p_size@3 = 49) OR (p_size@3 = 14)) OR (p_size@3 = 23)) OR (p_size@3 = 45)) OR (p_size@3 = 19)) OR (p_size@3 = 3)) OR (p_size@3 = 36)) OR (p_size@3 = 9)), lanes=1, batches=multiple, schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
 -                                              GpuLoadParquet: table=part, projections=[p_partkey@0, p_brand@3, p_type@4, p_size@5], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
-+                                        GpuMemorySource: name=p0, lanes=4, batches=single, hashed_on=[p_partkey@0], schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
-                                         GpuEmitPartitions: hash=[ps_partkey@0], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64]
-                                           GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
-                                             GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
+-                                        GpuEmitPartitions: hash=[ps_partkey@0], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64]
+-                                          GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
+-                                            GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
++                                    GpuHashJoin: join_type=Inner, on=[(p_partkey@0, ps_partkey@0)], projection=[ps_suppkey@5, p_brand@1, p_type@2, p_size@3], lanes=4, batches=multiple, schema=[ps_suppkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
++                                      GpuMemorySource: name=p0, lanes=4, batches=single, hashed_on=[p_partkey@0], schema=[p_partkey:Int64, p_brand:Utf8, p_type:Utf8, p_size:Int32]
++                                      GpuEmitPartitions: hash=[ps_partkey@0], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64]
++                                        GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
++                                          GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64]
 == q17
-join order 1: 3 relations
+join order MJ1: 3 relations
   r0 Filter part
   r1 LoadParquet lineitem
   r2 Project lineitem
@@ -1054,39 +1082,46 @@ plan diff
 +                GpuMergePartitions: lanes=1, batches=multiple, schema=[l_partkey:Int64, l_quantity:Decimal128(15,2), l_extendedprice:Decimal128(15,2)]
 +                  GpuLoadParquet: table=lineitem, projections=[l_partkey@1, l_quantity@4, l_extendedprice@5], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]],[[12,13,14,15,16,17,18,19,20,21,22,23]],[[24,25,26,27,28,29,30,31,32,33,34,35]],[[36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=4, batches=multiple, schema=[l_partkey:Int64, l_quantity:Decimal128(15,2), l_extendedprice:Decimal128(15,2)]
 == q18
-join order 1: 3 relations
-  r0 LoadParquet customer
-  r1 LoadParquet orders
-  r2 LoadParquet lineitem
-  edge r0-r1: r0.c_custkey = r1.o_custkey
-  edge r1-r2: r1.o_orderkey = r2.l_orderkey
-  priced 3 sets
-  DPhyp ((r0 r1) r2)
-  oriented ((r0 r1) r2), build first
-  join r0 x r1: 1500000.0 rows, 87937500 bytes
-  join r0+r1 x r2: 6001215.0 rows, 448590821 bytes
-  C_out 536528321 bytes, the plan's order 536528321
-replan 1: a build of 57 rows against 300000.0 estimated (q-error 5263.16) for GpuHashJoin on=[(l_orderkey@0, o_orderkey@2)]
+join order MJ1: 4 relations
+  r0 Filter lineitem
+  r1 LoadParquet customer
+  r2 LoadParquet orders
+  r3 LoadParquet lineitem
+  edge r1-r2: r1.c_custkey = r2.o_custkey
+  edge r2-r3: r2.o_orderkey = r3.l_orderkey
+  edge r2-r0: r2.o_orderkey = r0.l_orderkey, left_semi
+  priced 7 sets
+  DPhyp (((r0 r2) r1) r3)
+  oriented (((r0 r2) r1) r3), build first
+  join r0 x r2: 300000.0 rows, 10950000 bytes
+  join r0+r2 x r1: 300000.0 rows, 17587500 bytes
+  join r0+r1+r2 x r3: 1200243.0 rows, 89718164 bytes
+  C_out 118255664 bytes, the plan's order 626246486
+replan 1: a build of 57 rows against 300000.0 estimated (q-error 5263.16) for GpuHashJoin on=[(l_orderkey@0, o_orderkey@0)]
   kept m0 (57 rows)
-  join order 1: 3 relations
-    r0 LoadParquet customer
+  join order MJ1: 4 relations
+    r0 MemorySource m0
     r1 LoadParquet orders
-    r2 LoadParquet lineitem
-    edge r0-r1: r0.c_custkey = r1.o_custkey
-    edge r1-r2: r1.o_orderkey = r2.l_orderkey
-    priced 3 sets
-    DPhyp ((r0 r1) r2)
-    oriented ((r0 r1) r2), build first
-    join r0 x r1: 1500000.0 rows, 87937500 bytes
-    join r0+r1 x r2: 6001215.0 rows, 448590821 bytes
-    C_out 536528321 bytes, the plan's order 536528321
+    r2 LoadParquet customer
+    r3 LoadParquet lineitem
+    edge r1-r0: r1.o_orderkey = r0.l_orderkey, left_semi
+    edge r1-r2: r1.o_custkey = r2.c_custkey
+    edge r1-r3: r1.o_orderkey = r3.l_orderkey
+    priced 7 sets
+    DPhyp (((r0 r1) r2) r3)
+    oriented (((r0 r1) r2) r3), build first
+    join r0 x r1: 57.0 rows, 2080 bytes
+    join r0+r1 x r2: 57.0 rows, 3342 bytes
+    join r0+r1+r2 x r3: 228.0 rows, 17046 bytes
+    C_out 22469 bytes, the plan's order 22469
 plan diff
 --- before
 +++ after
-@@ -8,14 +8,7 @@
+@@ -7,26 +7,21 @@
+             GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, c_custkey:Int64, o_orderkey:Int64, o_orderdate:Date32, o_totalprice:Decimal128(15,2), sum(lineitem.l_quantity):Decimal128(25,2)]
                GpuAggregateBatches: group_by=[c_name@0, c_custkey@1, o_orderkey@2, o_orderdate@3, o_totalprice@4], aggs=[sum(sum(lineitem.l_quantity)@5) as sum(lineitem.l_quantity)], lanes=4, batches=single, hashed_on=[o_orderkey@2], schema=[c_name:Utf8, c_custkey:Int64, o_orderkey:Int64, o_orderdate:Date32, o_totalprice:Decimal128(15,2), sum(lineitem.l_quantity):Decimal128(25,2)]
                  GpuAggregate: group_by=[c_name@1, c_custkey@0, o_orderkey@2, o_orderdate@4, o_totalprice@3], aggs=[sum(l_quantity@5) as sum(lineitem.l_quantity)], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_name:Utf8, c_custkey:Int64, o_orderkey:Int64, o_orderdate:Date32, o_totalprice:Decimal128(15,2), sum(lineitem.l_quantity):Decimal128(25,2)]
-                   GpuHashJoin: join_type=RightSemi, on=[(l_orderkey@0, o_orderkey@2)], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, l_quantity:Decimal128(15,2)]
+-                  GpuHashJoin: join_type=RightSemi, on=[(l_orderkey@0, o_orderkey@2)], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, l_quantity:Decimal128(15,2)]
 -                    GpuFilter: predicate=sum(lineitem.l_quantity)@1 > 300.00, projection=[l_orderkey@0], lanes=4, batches=single, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64]
 -                      GpuAggregateBatches: group_by=[l_orderkey@0], aggs=[sum(sum(lineitem.l_quantity)@1) as sum(lineitem.l_quantity)], final=[sum(lineitem.l_quantity)@1], lanes=4, batches=single, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, sum(lineitem.l_quantity):Decimal128(25,2)]
 -                        GpuEmitPartitions: hash=[l_orderkey@0], lanes=4, batches=multiple, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, sum(lineitem.l_quantity):Decimal128(25,2)]
@@ -1095,12 +1130,40 @@ plan diff
 -                              GpuAggregateBatches: group_by=[l_orderkey@0], aggs=[sum(sum(lineitem.l_quantity)@1) as sum(lineitem.l_quantity)], lanes=4, batches=single, schema=[l_orderkey:Int64, sum(lineitem.l_quantity):Decimal128(25,2)]
 -                                GpuAggregate: group_by=[l_orderkey@0], aggs=[sum(l_quantity@1) as sum(lineitem.l_quantity)], lanes=4, batches=multiple, schema=[l_orderkey:Int64, sum(lineitem.l_quantity):Decimal128(25,2)]
 -                                  GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_quantity@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]],[[12,13,14,15,16,17,18,19,20,21,22,23]],[[24,25,26,27,28,29,30,31,32,33,34,35]],[[36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=4, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
-+                    GpuMemorySource: name=m0, lanes=4, batches=single, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64]
-                     GpuHashJoin: join_type=Inner, on=[(o_orderkey@2, l_orderkey@0)], projection=[c_custkey@0, c_name@1, o_orderkey@2, o_totalprice@3, o_orderdate@4, l_quantity@6], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, l_quantity:Decimal128(15,2)]
-                       GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
-                         GpuEmitPartitions: hash=[o_orderkey@2], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                    GpuHashJoin: join_type=Inner, on=[(o_orderkey@2, l_orderkey@0)], projection=[c_custkey@0, c_name@1, o_orderkey@2, o_totalprice@3, o_orderdate@4, l_quantity@6], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, l_quantity:Decimal128(15,2)]
+-                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                        GpuEmitPartitions: hash=[o_orderkey@2], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                          GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                            GpuHashJoin: join_type=Inner, on=[(c_custkey@0, o_custkey@1)], projection=[c_custkey@0, c_name@1, o_orderkey@2, o_totalprice@4, o_orderdate@5], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                              GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
+-                                GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
+-                                  GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+-                              GpuEmitPartitions: hash=[o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_custkey@1], schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                                GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                                  GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1, o_totalprice@3, o_orderdate@4], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
+-                      GpuEmitPartitions: hash=[l_orderkey@0], lanes=4, batches=multiple, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
+-                        GpuMergePartitions: lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
+-                          GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_quantity@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]],[[12,13,14,15,16,17,18,19,20,21,22,23]],[[24,25,26,27,28,29,30,31,32,33,34,35]],[[36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=4, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
++                  GpuHashJoin: join_type=Inner, on=[(o_orderkey@2, l_orderkey@0)], projection=[c_custkey@0, c_name@1, o_orderkey@2, o_totalprice@3, o_orderdate@4, l_quantity@6], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, l_quantity:Decimal128(15,2)]
++                    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                      GpuEmitPartitions: hash=[o_orderkey@2], lanes=4, batches=multiple, hashed_on=[o_orderkey@2], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                          GpuHashJoin: join_type=Inner, on=[(o_custkey@3, c_custkey@0)], projection=[c_custkey@4, c_name@5, o_orderkey@0, o_totalprice@1, o_orderdate@2], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[o_custkey@3], schema=[o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, o_custkey:Int64]
++                              GpuEmitPartitions: hash=[o_custkey@3], lanes=4, batches=multiple, hashed_on=[o_custkey@3], schema=[o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, o_custkey:Int64]
++                                GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, o_custkey:Int64]
++                                  GpuHashJoin: join_type=RightSemi, on=[(l_orderkey@0, o_orderkey@0)], projection=[o_orderkey@0, o_totalprice@2, o_orderdate@3, o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_orderkey@0], schema=[o_orderkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32, o_custkey:Int64]
++                                    GpuMemorySource: name=m0, lanes=4, batches=single, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64]
++                                    GpuEmitPartitions: hash=[o_orderkey@0], lanes=4, batches=multiple, hashed_on=[o_orderkey@0], schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                                      GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                                        GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1, o_totalprice@3, o_orderdate@4], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64, o_totalprice:Decimal128(15,2), o_orderdate:Date32]
++                            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++                              GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
++                    GpuEmitPartitions: hash=[l_orderkey@0], lanes=4, batches=multiple, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
++                      GpuMergePartitions: lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
++                        GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_quantity@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]],[[12,13,14,15,16,17,18,19,20,21,22,23]],[[24,25,26,27,28,29,30,31,32,33,34,35]],[[36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=4, batches=multiple, schema=[l_orderkey:Int64, l_quantity:Decimal128(15,2)]
 == q19
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 Filter part
   r1 Filter lineitem
   edge r0-r1: r0.p_partkey = r1.l_partkey
@@ -1116,42 +1179,69 @@ dynamic filters
   partsupp: row groups 7 -> 7 (0-6)
     ps_partkey in [5, 199879]
   build p0 read from memory: 2127 rows
-join order 1: 2 relations
+join order MJ1: 5 relations
   r0 Filter nation
   r1 LoadParquet supplier
+  r2 MemorySource p0
+  r3 LoadParquet partsupp
+  r4 Project lineitem
   edge r0-r1: r0.n_nationkey = r1.s_nationkey
-  priced 1 sets
-  DPhyp (r0 r1)
-  oriented (r0 r1), build first
+  edge r3-r2: r3.ps_partkey = r2.p_partkey, left_semi
+  edge r3-r4: r3.ps_partkey = r4.l_partkey and r3.ps_suppkey = r4.l_suppkey
+  edge r1-r2+r3+r4: r1.s_suppkey = r3.ps_suppkey, left_semi
+  priced 6 sets
+  DPhyp ((r0 r1) ((r2 r3) r4))
+  oriented ((r0 r1) ((r2 r3) r4)), build first
   join r0 x r1: 400.0 rows, 23741 bytes
-  C_out 23741 bytes, the plan's order 23741
-join order 2: 2 relations
-  r0 HashJoin p0,partsupp
-  r1 Project lineitem
-  edge r0-r1: r0.ps_partkey = r1.l_partkey and r0.ps_suppkey = r1.l_suppkey
-  priced 1 sets
-  DPhyp (r0 r1)
-  oriented (r0 r1), build first
-  join r0 x r1: 1701.6 rows, 13826 bytes
-  C_out 13826 bytes, the plan's order 13826
+  join r2 x r3: 8508.0 rows, 207382 bytes
+  join r2+r3 x r4: 1701.6 rows, 13826 bytes
+  join r0+r1 x r2+r3+r4: 68.1 rows, 3487 bytes
+  C_out 248436 bytes, the plan's order 248436
 plan diff
 --- before
 +++ after
-@@ -19,11 +19,7 @@
-                 GpuEmitPartitions: hash=[ps_partkey@0, ps_suppkey@1], lanes=4, batches=multiple, hashed_on=[ps_partkey@0, ps_suppkey@1], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
-                   GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
-                     GpuHashJoin: join_type=RightSemi, on=[(p_partkey@0, ps_partkey@0)], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
+@@ -1,11 +1,11 @@
+ GpuUnload
+   GpuMergeSortedPartitions: by=[s_name@0 asc nulls_last], lanes=1, batches=single, sorted_on=[s_name@0 asc nulls_last], schema=[s_name:Utf8, s_address:Utf8]
+     GpuSort: by=[s_name@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[s_name@0 asc nulls_last], schema=[s_name:Utf8, s_address:Utf8]
+-      GpuHashJoin: join_type=LeftSemi, on=[(s_suppkey@0, ps_suppkey@0)], projection=[s_name@1, s_address@2], lanes=4, batches=multiple, schema=[s_name:Utf8, s_address:Utf8]
+-        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_suppkey@0], schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8]
+-          GpuEmitPartitions: hash=[s_suppkey@0], lanes=4, batches=multiple, hashed_on=[s_suppkey@0], schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8]
+-            GpuMergePartitions: lanes=1, batches=multiple, schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8]
+-              GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, s_nationkey@3)], projection=[s_suppkey@1, s_name@2, s_address@3], lanes=4, batches=multiple, schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8]
++      GpuHashJoin: join_type=LeftSemi, on=[(s_suppkey@2, ps_suppkey@0)], projection=[s_name@0, s_address@1], lanes=4, batches=multiple, schema=[s_name:Utf8, s_address:Utf8]
++        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_suppkey@2], schema=[s_name:Utf8, s_address:Utf8, s_suppkey:Int64]
++          GpuEmitPartitions: hash=[s_suppkey@2], lanes=4, batches=multiple, hashed_on=[s_suppkey@2], schema=[s_name:Utf8, s_address:Utf8, s_suppkey:Int64]
++            GpuMergePartitions: lanes=1, batches=multiple, schema=[s_name:Utf8, s_address:Utf8, s_suppkey:Int64]
++              GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, s_nationkey@3)], projection=[s_name@2, s_address@3, s_suppkey@1], lanes=4, batches=multiple, schema=[s_name:Utf8, s_address:Utf8, s_suppkey:Int64]
+                 GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+                   GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+                     GpuFilter: predicate=n_name@1 = CANADA, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+@@ -14,16 +14,12 @@
+                   GpuLoadParquet: table=supplier, projections=[s_suppkey@0, s_name@1, s_address@2, s_nationkey@3], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_suppkey:Int64, s_name:Utf8, s_address:Utf8, s_nationkey:Int32]
+         GpuEmitPartitions: hash=[ps_suppkey@0], lanes=4, batches=multiple, hashed_on=[ps_suppkey@0], schema=[ps_suppkey:Int64]
+           GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_suppkey:Int64]
+-            GpuHashJoin: join_type=Inner, on=[(ps_partkey@0, l_partkey@1), (ps_suppkey@1, l_suppkey@2)], filter=CAST(ps_availqty@build:2 AS Float64) > `Float64(0.5) * sum(lineitem.l_quantity)`@probe:0, projection=[ps_suppkey@1], lanes=4, batches=multiple, schema=[ps_suppkey:Int64]
+-              GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ps_partkey@0, ps_suppkey@1], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
+-                GpuEmitPartitions: hash=[ps_partkey@0, ps_suppkey@1], lanes=4, batches=multiple, hashed_on=[ps_partkey@0, ps_suppkey@1], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
+-                  GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
+-                    GpuHashJoin: join_type=RightSemi, on=[(p_partkey@0, ps_partkey@0)], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
 -                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[p_partkey@0], schema=[p_partkey:Int64]
 -                        GpuEmitPartitions: hash=[p_partkey@0], lanes=4, batches=multiple, hashed_on=[p_partkey@0], schema=[p_partkey:Int64]
 -                          GpuMergePartitions: lanes=1, batches=multiple, schema=[p_partkey:Int64]
 -                            GpuFilter: predicate=p_name@1 LIKE forest%, projection=[p_partkey@0], lanes=4, batches=multiple, schema=[p_partkey:Int64]
 -                              GpuLoadParquet: table=part, projections=[p_partkey@0, p_name@1], partition_groups=[[[0]],[[1]],[],[]], lanes=4, batches=multiple, schema=[p_partkey:Int64, p_name:Utf8]
++            GpuHashJoin: join_type=Inner, on=[(ps_partkey@1, l_partkey@1), (ps_suppkey@0, l_suppkey@2)], filter=CAST(ps_availqty@build:2 AS Float64) > `Float64(0.5) * sum(lineitem.l_quantity)`@probe:0, projection=[ps_suppkey@0], lanes=4, batches=multiple, schema=[ps_suppkey:Int64]
++              GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[ps_partkey@1, ps_suppkey@0], schema=[ps_suppkey:Int64, ps_partkey:Int64, ps_availqty:Int64]
++                GpuEmitPartitions: hash=[ps_partkey@1, ps_suppkey@0], lanes=4, batches=multiple, hashed_on=[ps_partkey@1, ps_suppkey@0], schema=[ps_suppkey:Int64, ps_partkey:Int64, ps_availqty:Int64]
++                  GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_suppkey:Int64, ps_partkey:Int64, ps_availqty:Int64]
++                    GpuHashJoin: join_type=RightSemi, on=[(p_partkey@0, ps_partkey@0)], projection=[ps_suppkey@1, ps_partkey@0, ps_availqty@2], lanes=4, batches=multiple, hashed_on=[ps_partkey@1], schema=[ps_suppkey:Int64, ps_partkey:Int64, ps_availqty:Int64]
 +                      GpuMemorySource: name=p0, lanes=4, batches=single, hashed_on=[p_partkey@0], schema=[p_partkey:Int64]
                        GpuEmitPartitions: hash=[ps_partkey@0], lanes=4, batches=multiple, hashed_on=[ps_partkey@0], schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
                          GpuMergePartitions: lanes=1, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
                            GpuLoadParquet: table=partsupp, projections=[ps_partkey@0, ps_suppkey@1, ps_availqty@2], partition_groups=[[[0,1]],[[2,3]],[[4]],[[5,6]]], lanes=4, batches=multiple, schema=[ps_partkey:Int64, ps_suppkey:Int64, ps_availqty:Int64]
 == q21
-join order 1: 4 relations
+join order MJ1: 4 relations
   r0 Filter nation
   r1 Filter orders
   r2 LoadParquet supplier
@@ -1168,7 +1258,7 @@ join order 1: 4 relations
   C_out 2206636 bytes, the plan's order 61112945
 replan 1: a build of 156739 rows against 48009.7 estimated (q-error 3.26) for GpuHashJoin on=[(l_orderkey@1, o_orderkey@0)]
   kept m0 (156739 rows)
-  join order 1: 2 relations
+  join order MJ1: 2 relations
     r0 MemorySource m0
     r1 Filter orders
     edge r0-r1: r0.l_orderkey = r1.o_orderkey
@@ -1180,7 +1270,7 @@ replan 1: a build of 156739 rows against 48009.7 estimated (q-error 3.26) for Gp
     flipped: r1 builds, r0 probes
 replan 2: a build of 729413 rows against 286720.0 estimated (q-error 2.54) for GpuHashJoin on=[(o_orderkey@0, l_orderkey@1)]
   kept m1 (729413 rows)
-  join order 1: 2 relations
+  join order MJ1: 2 relations
     r0 MemorySource m1
     r1 MemorySource m0
     edge r0-r1: r0.o_orderkey = r1.l_orderkey
@@ -1235,28 +1325,80 @@ plan diff
                          GpuEmitPartitions: hash=[l_orderkey@0], lanes=4, batches=multiple, hashed_on=[l_orderkey@0], schema=[l_orderkey:Int64, l_suppkey:Int64]
                            GpuMergePartitions: lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
 == q22
-nothing fired
-== aggregate-groupby
-nothing fired
-== anti-join
-nothing fired
-== anti-join-reorder
 join order MJ1: 2 relations
-  r0 Filter nation
-  r1 HashJoin customer,orders
-  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  r0 Filter customer
+  r1 LoadParquet orders
+  edge r0-r1: r0.c_custkey = r1.o_custkey, left_anti
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 2000.2 rows, 60505 bytes
-  C_out 60505 bytes, the plan's order 60505
+  join r0 x r1: 0.0 rows, 0 bytes
+  C_out 0 bytes, the plan's order 0
 plan unchanged
+== aggregate-groupby
+nothing fired
+== anti-join
+join order MJ1: 2 relations
+  r0 Filter customer
+  r1 LoadParquet orders
+  edge r1-r0: r1.o_custkey = r0.c_custkey, left_anti
+  priced 1 sets
+  DPhyp (r0 r1)
+  oriented (r0 r1), build first
+  join r0 x r1: 1049982.0 rows, 136538609 bytes
+  C_out 136538609 bytes, the plan's order 136538609
+plan unchanged
+== anti-join-reorder
+join order MJ1: 3 relations
+  r0 Filter nation
+  r1 LoadParquet customer
+  r2 LoadParquet orders
+  edge r1-r2: r1.c_custkey = r2.o_custkey, left_anti
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  priced 3 sets
+  DPhyp ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows, 181500 bytes
+  join r0+r1 x r2: 0.0 rows, 0 bytes
+  C_out 181500 bytes, the plan's order 1718888
+plan diff
+--- before
++++ after
+@@ -1,15 +1,15 @@
+ GpuUnload
+-  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+-          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+-    GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-        GpuHashJoin: join_type=LeftAnti, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
++  GpuHashJoin: join_type=LeftAnti, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++      GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
++          GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
++            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++              GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++                GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
++                  GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
++            GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+               GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-          GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
+-            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
+-              GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
++    GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
++      GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
++        GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
 == cross-join
 nothing fired
 == filter-project
 nothing fired
 == hash-join
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 LoadParquet orders
   r1 LoadParquet lineitem
   edge r0-r1: r0.o_orderkey = r1.l_orderkey
@@ -1267,7 +1409,7 @@ join order 1: 2 relations
   C_out 193539184 bytes, the plan's order 193539184
 plan unchanged
 == join-int
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 LoadParquet customer
   r1 LoadParquet orders
   edge r0-r1: r0.c_custkey = r1.o_custkey
@@ -1278,28 +1420,43 @@ join order 1: 2 relations
   C_out 6187500 bytes, the plan's order 6187500
 plan unchanged
 == left-join
-nothing fired
-== left-join-fixed
 join order MJ1: 2 relations
-  r0 Filter lineitem
-  r1 HashJoin customer,orders
-  edge r0-r1: r0.l_orderkey = r1.o_orderkey
+  r0 LoadParquet orders
+  r1 LoadParquet lineitem
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey, left
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 50.3 rows, 1929 bytes
-  C_out 1929 bytes, the plan's order 1929
+  join r0 x r1: 6001215.0 rows, 193539184 bytes
+  C_out 193539184 bytes, the plan's order 193539184
+plan unchanged
+== left-join-fixed
+join order MJ1: 3 relations
+  r0 Filter lineitem
+  r1 LoadParquet customer
+  r2 LoadParquet orders
+  edge r1-r2: r1.c_custkey = r2.o_custkey, left
+  edge r0-r1+r2: r0.l_orderkey = r2.o_orderkey
+  priced 2 sets
+  DPhyp (r0 (r1 r2))
+  oriented (r0 (r1 r2)), build first
+  join r1 x r2: 1550004.0 rows, 46887621 bytes
+  join r0 x r1+r2: 50.3 rows, 1929 bytes
+  C_out 46889550 bytes, the plan's order 46889550
 replan 1: a build of 2528 rows against 48.6 estimated (q-error 51.97) for GpuHashJoin on=[(l_orderkey@0, o_orderkey@1)]
   kept m0 (2528 rows)
-  join order MJ1: 2 relations
+  join order MJ1: 3 relations
     r0 MemorySource m0
-    r1 HashJoin customer,orders
-    edge r0-r1: r0.l_orderkey = r1.o_orderkey
-    priced 1 sets
-    DPhyp (r0 r1)
-    oriented (r0 r1), build first
-    join r0 x r1: 2612.3 rows, 100246 bytes
-    C_out 100246 bytes, the plan's order 100246
+    r1 LoadParquet customer
+    r2 LoadParquet orders
+    edge r1-r2: r1.c_custkey = r2.o_custkey, left
+    edge r0-r1+r2: r0.l_orderkey = r2.o_orderkey
+    priced 2 sets
+    DPhyp (r0 (r1 r2))
+    oriented (r0 (r1 r2)), build first
+    join r1 x r2: 1550004.0 rows, 46887621 bytes
+    join r0 x r1+r2: 2612.3 rows, 100246 bytes
+    C_out 46987867 bytes, the plan's order 46987867
 plan diff
 --- before
 +++ after
@@ -1316,18 +1473,52 @@ plan diff
          GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
            GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, o_orderkey@2], lanes=4, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
 == left-join-reorder
-join order MJ1: 2 relations
+join order MJ1: 3 relations
   r0 Filter nation
-  r1 HashJoin customer,orders
+  r1 LoadParquet customer
+  r2 LoadParquet orders
+  edge r1-r2: r1.c_custkey = r2.o_custkey, left
   edge r0-r1: r0.n_nationkey = r1.c_nationkey
-  priced 1 sets
-  DPhyp (r0 r1)
-  oriented (r0 r1), build first
-  join r0 x r1: 62000.2 rows, 1875505 bytes
-  C_out 1875505 bytes, the plan's order 1875505
-plan unchanged
+  priced 3 sets
+  DPhyp ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows, 181500 bytes
+  join r0+r1 x r2: 60000.4 rows, 1815012 bytes
+  C_out 1996512 bytes, the plan's order 55096400
+plan diff
+--- before
++++ after
+@@ -1,15 +1,15 @@
+ GpuUnload
+-  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@1)], projection=[c_name@1, o_orderkey@3], lanes=4, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
+-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+-          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+-    GpuEmitPartitions: hash=[c_nationkey@1], lanes=4, batches=multiple, hashed_on=[c_nationkey@1], schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+-      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+-        GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, c_nationkey@2, o_orderkey@3], lanes=4, batches=multiple, schema=[c_name:Utf8, c_nationkey:Int32, o_orderkey:Int64]
+-          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
++  GpuHashJoin: join_type=Left, on=[(c_custkey@1, o_custkey@1)], projection=[c_name@0, o_orderkey@2], lanes=4, batches=multiple, schema=[c_name:Utf8, o_orderkey:Int64]
++    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@1], schema=[c_name:Utf8, c_custkey:Int64]
++      GpuEmitPartitions: hash=[c_custkey@1], lanes=4, batches=multiple, hashed_on=[c_custkey@1], schema=[c_name:Utf8, c_custkey:Int64]
++        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_name:Utf8, c_custkey:Int64]
++          GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_name@2, c_custkey@1], lanes=4, batches=multiple, schema=[c_name:Utf8, c_custkey:Int64]
++            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++              GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++                GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
++                  GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
++            GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+               GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-          GpuEmitPartitions: hash=[o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_custkey@1], schema=[o_orderkey:Int64, o_custkey:Int64]
+-            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
+-              GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
++    GpuEmitPartitions: hash=[o_custkey@1], lanes=4, batches=multiple, hashed_on=[o_custkey@1], schema=[o_orderkey:Int64, o_custkey:Int64]
++      GpuMergePartitions: lanes=1, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
++        GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_orderkey:Int64, o_custkey:Int64]
 == mixed-join
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 LoadParquet orders
   r1 LoadParquet lineitem
   edge r0-r1: r0.o_orderkey = r1.l_orderkey
@@ -1344,7 +1535,7 @@ nothing fired
 == nested-loop-left-join
 nothing fired
 == rollup-over-join
-join order 1: 2 relations
+join order MJ1: 2 relations
   r0 LoadParquet nation
   r1 LoadParquet customer
   edge r0-r1: r0.n_nationkey = r1.c_nationkey
@@ -1357,18 +1548,61 @@ plan unchanged
 == scan-limit
 nothing fired
 == semi-join
-nothing fired
-== semi-join-reorder
 join order MJ1: 2 relations
-  r0 Filter nation
-  r1 HashJoin customer,orders
-  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  r0 Filter customer
+  r1 LoadParquet orders
+  edge r1-r0: r1.o_custkey = r0.c_custkey, left_semi
   priced 1 sets
   DPhyp (r0 r1)
   oriented (r0 r1), build first
-  join r0 x r1: 3999.8 rows, 120995 bytes
-  C_out 120995 bytes, the plan's order 120995
+  join r0 x r1: 450018.0 rows, 58519891 bytes
+  C_out 58519891 bytes, the plan's order 58519891
 plan unchanged
+== semi-join-reorder
+join order MJ1: 3 relations
+  r0 Filter nation
+  r1 LoadParquet customer
+  r2 LoadParquet orders
+  edge r1-r2: r1.c_custkey = r2.o_custkey, left_semi
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  priced 3 sets
+  DPhyp ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows, 181500 bytes
+  join r0+r1 x r2: 6000.0 rows, 181500 bytes
+  C_out 363000 bytes, the plan's order 3618862
+plan diff
+--- before
++++ after
+@@ -1,15 +1,15 @@
+ GpuUnload
+-  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
+-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-      GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
+-        GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
+-          GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
+-    GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-      GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-        GpuHashJoin: join_type=LeftSemi, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-            GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
++  GpuHashJoin: join_type=LeftSemi, on=[(c_custkey@0, o_custkey@0)], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++      GpuEmitPartitions: hash=[c_custkey@0], lanes=4, batches=multiple, hashed_on=[c_custkey@0], schema=[c_custkey:Int64, c_name:Utf8]
++        GpuMergePartitions: lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
++          GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=4, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8]
++            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++              GpuEmitPartitions: hash=[n_nationkey@0], lanes=4, batches=multiple, hashed_on=[n_nationkey@0], schema=[n_nationkey:Int32]
++                GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, schema=[n_nationkey:Int32]
++                  GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_name:Utf8]
++            GpuEmitPartitions: hash=[c_nationkey@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@2], schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+               GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[c_custkey:Int64, c_name:Utf8, c_nationkey:Int32]
+-          GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
+-            GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
+-              GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
++    GpuEmitPartitions: hash=[o_custkey@0], lanes=4, batches=multiple, hashed_on=[o_custkey@0], schema=[o_custkey:Int64]
++      GpuMergePartitions: lanes=1, batches=multiple, schema=[o_custkey:Int64]
++        GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2]],[[3,4,5]],[[6,7,8]],[[9,10,11,12]]], lanes=4, batches=multiple, schema=[o_custkey:Int64]
 == shuffle-additive
 nothing fired
 == shuffle-additive-avg

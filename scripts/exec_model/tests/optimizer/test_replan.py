@@ -50,11 +50,11 @@ UNION = f"""GpuUnload
         {year_five(4)}
         {scan('sales', ['sk'])}
 """
-# The customers' orders, run whole as the semi join's build, then the year's dates, which stop the
-# run: the replan reads that build from memory and the first cluster with it.
+# The customers with orders, run whole as the semi join's build, then the year's dates, which stop
+# the run: the replan reads that build from memory and the cluster inside it with it.
 SEMI = f"""GpuUnload
   GpuHashJoin: join_type=RightSemi, on=[(ck@0, dk@0)], {L}, schema=[dk:Int64, sk:Int64]
-    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[ck:Int64]
+    GpuAggregateBatches: group_by=[ck@0], aggs=[], lanes=1, batches=single, schema=[ck:Int64]
       GpuHashJoin: join_type=Inner, on=[(ck@0, ok@0)], projection=[ck@0], {L}, schema=[ck:Int64]
         GpuCoalesceAllBatches: lanes=1, batches=single, schema=[ck:Int64]
           {scan('cust', ['ck'])}
@@ -102,9 +102,9 @@ def test_a_replanned_cluster_keeps_its_id_when_one_before_it_is_read_from_memory
     run = adaptive_run(SEMI)
     joins = [[(n.fields["join_type"], n.mj) for n in _nodes(plan) if n.kind == "GpuHashJoin"]
              for plan in run.plans]
-    assert joins == [[("RightSemi", None), ("Inner", "MJ1"), ("Inner", "MJ2")],
-                     [("RightSemi", None), ("Inner", "MJ2")]]
-    assert [order.mj for order in run.replans[0].orders] == ["MJ2"]
+    assert joins[0] == [("RightSemi", "MJ1"), ("Inner", "MJ2"), ("Inner", "MJ1")]
+    assert {mj for _, mj in joins[1]} == {"MJ1"} and len(joins[1]) == 2
+    assert [order.mj for order in run.replans[0].orders] == ["MJ1"]
 
 
 def _nodes(node):

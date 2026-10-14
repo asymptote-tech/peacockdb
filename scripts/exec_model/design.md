@@ -92,11 +92,14 @@ step has its shape.
   1.5): on an unordered column every row group's range spans the keys and nothing prunes.
   Survivors are re-mapped by the planner's own policy, so the pruned plan is one the planner
   would have made.
-- **Clusters** (`multijoin.py`) are maximal trees of inner hash joins only: inner joins alone
-  commute and associate freely, and only hash joins carry the key edges DPhyp takes. A filter
-  roots a relation even between inner joins, because an `IS NULL` there is what turns a left join
-  into an anti join. Columns are `(relation, ordinal)` identities rather than positions, since a
-  reordered tree renumbers every position.
+- **Clusters** (`multijoin.py`) are maximal trees of hash joins: inner ones, and left, right,
+  full, semi and anti ones without a residual, which conflict detection places (below). Only
+  hash joins carry the key edges DPhyp takes. A mark join stays a wall, its mark column being no
+  relation's, and so does a non-inner join with a residual: whether its predicate rejects NULLs
+  is not read, and its semi and anti mirrors are refused (#159). A filter roots a relation even
+  between joins, because an `IS NULL` there is what turns a left join into an anti join. Columns
+  are `(relation, ordinal)` identities rather than positions, since a reordered tree renumbers
+  every position.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
   (`multijoin.named`, the first thing `join_order.ordered` does), and every join it holds carries
   the id. It lives on the join node (`EngineNode.mj`), not in the plan text and not in a table
@@ -107,9 +110,14 @@ step has its shape.
 - **Disassembly** (`disassembly.py`) derives each new join's wiring as the translator would
   rather than carrying the old plan's exchanges, which were placed for keys the new join may not
   use. A join over the same relations as one the plan had keeps that join's lanes — DataFusion's
-  choice to collect a small build. `test_disassembly_corpus` holds every cluster of every golden,
-  rebuilt in its own order, to the layout the engine printed, and `test_engine_reassembled` to the
-  answers.
+  choice to collect a small build. A new root joining on other keys is shuffled back onto the
+  plan root's hash where something reads that hash before the next exchange: a hash join, a final
+  aggregate, or an enclosing cluster whose join may take the relation as hashed on its keys, since
+  the relation declares that hash. Per-lane nodes — sorts, partial aggregates, projects, a union —
+  read none, and get no shuffle. `test_disassembly_corpus` holds every cluster of every golden,
+  rebuilt in its own order, to the layout the engine printed, `test_ordered_corpus` every golden
+  ordered to a plan that builds, no final aggregate's groups split across lanes, and
+  `test_engine_reassembled` to the answers.
 
 ### DPhyp on C_out
 
@@ -120,11 +128,25 @@ asks the cost of each connected set it reaches, once; `join_order.SetEstimates` 
 `cardinality`'s formulas over one canonical order, so a set has one estimate however DPhyp
 reached it.
 
+- **Non-inner joins: TES.** Where a cluster holds a non-inner join, each join is one hyperedge:
+  its whole predicate, on its total eligibility set (`optimizer/conflicts.py`). The TES is CD-A's
+  (Moerkotte, Fender, Eich, SIGMOD 2013, §5): the relations the predicate reads, plus, for each
+  join below that the two may not swap past by the paper's `assoc`, `l-asscom` and `r-asscom`
+  tables, that join's side which would be left behind. CD-A keeps no conflict rules: it is
+  correct and not complete, and as hyperedges it needs no crate change. CD-B and CD-C keep the
+  conflicts as rules tested per (left, right) pair and admit more orders; the crate prices sets,
+  not pairs, so they would need a pair callback. One edge per join means a set S holds at most
+  |S| − 1 edges, so each pair DPhyp joins has exactly one edge across it, its sides unsplit: a
+  non-inner join never takes another join's predicate as a residual (#153). An inner join is one
+  edge too in such a cluster, its conjuncts together; a cluster of inner joins only keeps an
+  edge per relation pair. `test_conflicts` runs every order the TES admits, over every
+  three-relation plan of the eight join types with NULLs in every table and NULL held equal or
+  not, and a sample of four-relation plans, against the plan's answer.
 - **Why DPhyp.** It is exact and enumerates each connected csg–cmp pair once, so its work is the
   number of connected pairs, never cross products. On the prototype's key edges, which are all
   between two relations, it enumerates exactly what DPccp would; it also takes hyperedges, which
   is what predicates over three or more relations need. A greedy order is not optimal, and the
-  clusters here are small enough not to need one: of the 500 runs in the committed corpus that
+  clusters here are small enough not to need one: of the 555 runs in the committed corpus that
   called DPhyp, 5 hit the budget — tpcds q64's 18-relation clusters, at every mode.
 - **The budget.** `MAX_PAIRS` is 10,000 connected pairs, DuckDB's. Past it the cluster keeps the
   plan's order and is only oriented again; the greedy fallback DuckDB has is not built.
@@ -144,8 +166,15 @@ inner join both orientations emit the same rows, so C_out is a function of the s
 price sets alone. Which side builds is not: it depends on how many batches the probe arrives in
 — a function of the subtree's shape and lanes — because while #152 is open the build is copied
 once per probe batch, and a probe not hashed onto the join's lanes is shuffled first, cut once
-per lane. Folding that into DPhyp would give one set several costs. So each join builds its
-cheaper side: build bytes × (1 + copies × probe batches).
+per lane. Folding that into DPhyp would give one set several costs. So each inner join builds
+its cheaper side: build bytes × (1 + copies × probe batches).
+
+A non-inner join keeps the plan's type and build side: it builds the side holding the relations
+its TES has on the side the plan's join built. A `Left` join whose preserved side built still
+does, as one set or as a larger one after a reorder. The copy model charges a semi or anti join
+for copies it never makes, and the reorders gain from order, not flips. Disassembly reads the
+type off the tree it is given — `Left` where the preserved side builds, `Right` where it probes,
+the semi and anti pairs alike — and `orient`'s tree gives back the plan's.
 
 ### The adaptive run and replan
 
@@ -206,13 +235,14 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   Where the engine has no figure at any mode run (tpch q11 and q22, tpcds q24 and q54) there is
   no final ratio.
 
-The committed run: 600 (query, mode) runs, none failed. Optimized is cheaper in 55 tpch runs and
-379 tpcds runs, dearer in 6 — tpch q18 at `tp1-rowgroup` by 1 % (a flip and a replan after a
-build of 57 rows against 300,000 estimated), tpcds q5 at every mode by under 0.06 % — and equal
-in the rest. The final ratio is within the published report's 1.4 for 17 of 20 tpch rows and 64
-of 79 tpcds rows. Bytes do not see the prototype's own time: q64 replans 7 times at every mode
-and is cheaper at each (0.83–0.92), yet slower in wall time, which is Python estimation and
-DPhyp over 30 calls rather than anything in the plan.
+The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and
+386 tpcds runs, dearer in 5 — tpcds q5 at every mode by under 0.06 % — and equal in the rest;
+the median ratio is 1.00 for tpch and 0.61 for tpcds. The final ratio is within the published
+report's 1.4 for 18 of 20 tpch rows and 67 of 79 tpcds rows. Over the 620 runs DPhyp is called
+3,221 times, 808 of the calls reorder and 45 stop at the budget, all tpcds q64's; orientation
+flips 590 joins, and 726 replans run, 91 more refused. Bytes do not see the prototype's own
+time: q64 replans 7 times at every mode and is cheaper at each (0.83–0.92), yet slower in wall
+time, which is Python estimation and DPhyp over 30 calls rather than anything in the plan.
 
 ## The runtime
 

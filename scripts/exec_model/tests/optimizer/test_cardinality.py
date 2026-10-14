@@ -40,13 +40,16 @@ TABLES = {
 COMPOSITE = {"lines": [["li", "lo"]], "returns": [["ri", "ro"]]}
 
 
-def dataset(row_group_size: int | None = None) -> Statistics:
+def dataset(row_group_size: int | dict | None = None, tables=None) -> Statistics:
+    """`tables`, `TABLES` by default, written as a dataset with its statistics sidecar; a dict of
+    `row_group_size` gives it per table."""
     root = pathlib.Path(tempfile.mkdtemp())
     directory = root / "toy.sf1"
     directory.mkdir()
     sidecar = {}
-    for name, table in TABLES.items():
-        pq.write_table(table, directory / f"{name}.parquet", row_group_size=row_group_size)
+    for name, table in (tables or TABLES).items():
+        size = row_group_size.get(name) if isinstance(row_group_size, dict) else row_group_size
+        pq.write_table(table, directory / f"{name}.parquet", row_group_size=size)
         frame = table.to_pandas()
         sidecar[name] = {"fingerprint": fingerprint(pq.read_metadata(directory / f"{name}.parquet")),
                          "columns": {c: {"ndv": int(frame[c].nunique()), "method": "exact"} for c in frame},
@@ -123,6 +126,22 @@ def test_a_filtered_column_holds_only_the_values_the_filter_left():
             f"    GpuFilter: predicate=y@0 = 5, lanes=1, batches=multiple, schema=[y:Int64]\n"
             f"      {scan('dates', ['y'])}")
     assert rows_of(text) == 1
+
+
+# #239 — a join's matched shares compare the two sides' key counts, not the key domain its inner
+# rows divide by. A thousand keys, 100 of them on the preserved side and 143 others on the null
+# side: every preserved row counts as matched, so the left join keeps 14 rows of the 100.
+def bug_a_left_join_is_estimated_below_its_preserved_side():
+    tables = {"pre": pa.table({"pk": list(range(1000)), "pv": [k % 10 for k in range(1000)]}),
+              "nul": pa.table({"nk": [7 * i for i in range(143)]})}
+    preserved = ("GpuCoalesceAllBatches: lanes=1, batches=single, schema=[pk:Int64]\n"
+                 "      GpuFilter: predicate=pv@1 = 3, projection=[pk@0], lanes=1, batches=multiple, "
+                 f"schema=[pk:Int64]\n        {scan('pre', ['pk', 'pv'])}")
+    plan = parse_plans(f"== q\nGpuUnload\n{join('Left', 'pk@0', 'nk@0', preserved, scan('nul', ['nk']), 'pk:Int64, nk:Int64')}\n",
+                       "test")["q"]
+    estimates = estimate(plan, dataset(tables=tables))
+    left = plan.children[0]
+    assert estimates[id(left)].rows < 0.2 * estimates[id(left.children[0])].rows
 
 
 if __name__ == "__main__":

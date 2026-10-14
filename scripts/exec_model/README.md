@@ -49,7 +49,8 @@ on a newer system does not load on shad-gpu.
 ## The tests
 
 Every test file runs on its own with `python3 <file>`, no pytest: `tests/harness.py` runs a
-module's `test_*` functions and provides `raises`. A test file's five-line header puts the repo
+module's `test_*` functions, and its `bug_*` ones, which assert a known-wrong behaviour beside its
+ticket, and provides `raises`. A test file's five-line header puts the repo
 root on `sys.path`, so the relative imports resolve either way. Arguments select tests: a test's
 full name selects it alone, any other word every test whose name contains it, and `-word`
 drops those. `PCK_SHARD=k/n` (k from 0) takes every n-th test from the k-th. A selection that
@@ -57,8 +58,8 @@ matches nothing fails.
 
 | tier | files | needs | where it runs |
 |---|---|---|---|
-| cheap | every `tests/**/test_*.py` but the nine below | pandas, pyarrow, `PEACOCK_DPHYP_LIB`; committed files only | `pipeline.yml`, cost-report job |
-| dataset | `optimizer/test_stats_sidecar.py`, `optimizer/test_cardinality_corpus.py`, `test_run_corpus.py` | + the sf1 tables and DuckDB | `pipeline.yml`, dataset-matrix (cuDF 25.02 leg) |
+| cheap | every `tests/**/test_*.py` but the ten below | pandas, pyarrow, `PEACOCK_DPHYP_LIB`; committed files only | `pipeline.yml`, cost-report job |
+| dataset | `optimizer/test_stats_sidecar.py`, `optimizer/test_cardinality_corpus.py`, `optimizer/test_ordered_corpus.py`, `test_run_corpus.py` | + the sf1 tables and DuckDB; `PEACOCK_DPHYP_LIB` for the last two | `pipeline.yml`, dataset-matrix (cuDF 25.02 leg) |
 | corpus | `plans/test_engine_answers.py`, `optimizer/test_engine_dynamic_filters.py`, `optimizer/test_engine_reassembled.py`, `optimizer/test_engine_optimized.py` | + the sf1 tables, DuckDB, `PEACOCK_DPHYP_LIB` | `exec-model-corpus.yml`, manual dispatch; whole files on shad-gpu |
 | manual | `optimizer/test_stats_embeddings.py`; `optimizer/test_call_cost_measured.py` | the embeddings cache and DuckDB; the fetched sf40 record | by hand; the record check also in `exec-model-corpus.yml`'s call-cost job |
 
@@ -67,7 +68,7 @@ matches nothing fails.
 ```
 python3 scripts/exec_model/tests/engine/test_determinism.py
 shopt -s globstar 2>/dev/null  # bash; zsh globs ** without it
-heavy='test_engine_answers|test_engine_dynamic_filters|test_engine_reassembled|test_engine_optimized|test_stats_sidecar|test_cardinality_corpus|test_run_corpus|test_stats_embeddings|test_call_cost_measured'
+heavy='test_engine_answers|test_engine_dynamic_filters|test_engine_reassembled|test_engine_optimized|test_stats_sidecar|test_cardinality_corpus|test_ordered_corpus|test_run_corpus|test_stats_embeddings|test_call_cost_measured'
 for f in scripts/exec_model/tests/**/test_*.py; do
   [[ $(basename "$f" .py) =~ ^($heavy)$ ]] || python3 "$f" || break
 done
@@ -81,23 +82,25 @@ python3 scripts/exec_model/tests/engine/test_plan.py test_height_is_distance_to_
 python3 -m pytest scripts/exec_model/tests/engine/test_plan.py::test_height_is_distance_to_root -q
 ```
 
-**Dataset.** Seconds to a minute each. `test_stats_sidecar` recounts the committed sidecars
+**Dataset.** Seconds to a minute or two each. `test_stats_sidecar` recounts the committed sidecars
 (`testdata/stats/`) with `gen_stats.py` and compares byte for byte; `test_cardinality_corpus`
 compares every join's estimate with the golden `testdata/goldens/<bench>/tp1-single.cardinality.txt`
-here, and `UPDATE_CANONICAL=1` rewrites it; `test_run_corpus` runs `run.py` over three queries
-into a temp directory.
+here, and `UPDATE_CANONICAL=1` rewrites it; `test_ordered_corpus` orders every golden plan at
+every mode without running it, the plan built and no final aggregate's groups split across lanes;
+`test_run_corpus` runs `run.py` over three queries into a temp directory.
 
 ```
 python3 scripts/exec_model/tests/optimizer/test_stats_sidecar.py
 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
 UPDATE_CANONICAL=1 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+python3 scripts/exec_model/tests/optimizer/test_ordered_corpus.py
 python3 scripts/exec_model/tests/test_run_corpus.py
 ```
 
 **Corpus.** Each file runs the planned queries it applies to, from one mode's plan golden,
 `PCK_MODE` (`tp4-single` by default), over whole sf1 tables against DuckDB: every one as planned
 (124), those with a dynamic-filter candidate pruned (58), and those with a join cluster
-disassembled and rebuilt (104) and reordered by DPhyp (104). A whole file is about a
+disassembled and rebuilt (111) and reordered by DPhyp (111). A whole file is about a
 process-minute per query at `tp4-single`, so run whole files on shad-gpu, in shards, and single
 queries locally:
 
@@ -168,9 +171,8 @@ no query accounts for; with it, only its own sections change — the rule `UPDAT
 that is not the planned one among them, gets a `failed:` section, and the run exits 1. Nothing
 compares the files with a previous copy.
 
-The committed files are one whole run under Python 3.13, pandas 3.0.6 and pyarrow 25.0.1, with the
-sf1 tables beside the tree; tpch's `left-join-reorder`, `semi-join-reorder`, `anti-join-reorder`
-and `left-join-fixed` sections came from a later `--query` run. A batch's bytes are pandas'
+The committed files are one whole run per bench under Python 3.13, pandas 3.0.6 and pyarrow
+25.0.1, with the sf1 tables beside the tree. A batch's bytes are pandas'
 `memory_usage(deep=True)`, so another pandas moves every cost line: regenerate in that
 environment, and send exploratory runs elsewhere with `--out`. Python 3.13.0 and 3.13.15 give the
 same bytes.
@@ -179,9 +181,11 @@ same bytes.
 python3 scripts/exec_model/run.py --jobs 16
 ```
 
-A whole run is 620 (query, mode) runs now. The last one was 600, in 15:59 wall at `--jobs 16` on
-shad-gpu's 22 cores, at most 7.7 GB per worker. The tail is one task, tpch q9 at `tp4-rowgroup`,
-whose planned run takes about 14 minutes alone; the optimized one takes 14 seconds.
+A whole run is 620 (query, mode) runs. The committed one ran on a 12-core, 15 GiB host, a bench
+at a time: tpch's 215 in 48 min at `--jobs 2`, tpcds's 405 in 3 h 36 min at `--jobs 1`, at most
+8.0 GB resident. At `--jobs 16` on shad-gpu's 22 cores, 600 runs took 15:59. The tail is one
+task, tpch q9 at `tp4-rowgroup`, whose planned run takes about 17 minutes alone; the optimized
+one takes 27 seconds.
 A worker peaks at about 8 GB (tpcds `tp1-single`); size `--jobs` to free memory over that.
 
 ## What is here
@@ -239,12 +243,13 @@ driver tests' mock executors.
 | `optimizer/estimator.py` | filter selectivity from NDV, min/max and nulls — equality as 1/NDV, a range as the share of evenly spaced values, bounds on one column merged, DuckDB's 20% where statistics cannot speak |
 | `optimizer/cardinality.py` | every node's row estimate over an engine plan — column lineage and NDV carried up, a join over containment and the key domain its sides share, semi / anti / outer by the share of rows that match; a memory source is `known`, `measured` from its frames — true rows, NDV clamped into what the lanes' counts bound |
 | `optimizer/cost.py` | C_out in bytes — each join's estimated rows times the width of what it passes on, a string by its mean length from the sidecar |
-| `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, and its C_out bytes — the orientation pass: each join's cheaper build, the build copied per probe batch while #152 is open, a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
+| `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, a non-inner join's by its type, and its C_out bytes — the orientation pass: each inner join's cheaper build, a non-inner join's the plan's, the build copied per probe batch while #152 is open, a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
 | `optimizer/replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
 | `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what lanes and batch size would be chosen by where C_out sees no difference; no rule reads it yet. The record is fetched into `RECORD` (above) |
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
-| `optimizer/multijoin.py` | a cluster of inner joins as DPhyp takes it in — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included, and `named` gives each its id, `MJ<n>`, on every join it holds |
-| `optimizer/disassembly.py` | a join order back into an engine plan — keys, residual and projection from the MultiJoin's identities, wiring as the translator derives it; `baseline` is the order the plan already has |
+| `optimizer/multijoin.py` | a cluster of joins as DPhyp takes it in — inner ones, and non-inner ones without a residual, each then one edge on its TES — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included, and `named` gives each its id, `MJ<n>`, on every join it holds |
+| `optimizer/conflicts.py` | conflict detection for non-inner joins: each join's TES by CD-A, from the `assoc`, `l-asscom` and `r-asscom` tables, and the edges a join of two sets applies |
+| `optimizer/disassembly.py` | a join order back into an engine plan — type, keys, residual and projection from the MultiJoin's identities, a non-inner join mirrored where its kept side probes, the root on the plan root's hash, wiring as the translator derives it; `baseline` is the order the plan already has |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — dynamic filters, then DPhyp and orientation with the probes' builds known, then the adaptive run — and its report; each mode's lanes and batching, by name |
 | `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates and pruned scans, each DPhyp call (the cluster's id, relations, edges, the sets priced through the cost callback, its budget, the tree, the chosen joins and the plan order's C_out, the flips), each replan and refusal, the plan text before and after; `Fired`, how often each rule acted |
 | `optimizer/report_text.py` | that report as a `.optimizer.txt` section |

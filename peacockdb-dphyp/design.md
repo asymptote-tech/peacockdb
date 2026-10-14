@@ -159,7 +159,9 @@ tree.
 `optimizer/join_order.ordered` makes one call per join cluster:
 
 - the relations are the cluster's, the edges its key edges only — each between two relations,
-  since a hash join needs a key; residuals are placed on joins afterwards;
+  since a hash join needs a key; residuals are placed on joins afterwards. A cluster holding a
+  non-inner join gives each join one edge, a hyperedge on its total eligibility set by CD-A
+  (`optimizer/conflicts.py`);
 - the cost of a set is its C_out term in bytes (`SetEstimates.cost`), and every set asked is
   recorded for the optimizer's report;
 - the budget is `MAX_PAIRS`, 10,000, DuckDB's; on `budget` the cluster keeps the plan's order,

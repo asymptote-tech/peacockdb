@@ -207,29 +207,8 @@ class Estimator:
                             min(1.0, probe.rows * share), min(1.0, build.rows * share))
 
     def _joined(self, node, build, probe, inner, build_matched, probe_matched) -> Estimate:
-        """The join's rows by its type, from its inner rows and the share of each side's rows
-        that find a match."""
         join_type = engine_ir.join_type(node) if "join_type" in node.fields else JoinType.INNER
-        if join_type in _KEEPS_BUILD:
-            kept, matched, how = build, build_matched, _KEEPS_BUILD[join_type]
-        elif join_type in _KEEPS_PROBE:
-            kept, matched, how = probe, probe_matched, _KEEPS_PROBE[join_type]
-        if join_type in _KEEPS_BUILD or join_type in _KEEPS_PROBE:
-            rows = {"semi": kept.rows * matched, "anti": kept.rows * (1 - matched), "mark": kept.rows}[how]
-        else:
-            rows = inner
-            if join_type in (JoinType.LEFT, JoinType.FULL):
-                rows += build.rows * (1 - build_matched)
-            if join_type in (JoinType.RIGHT, JoinType.FULL):
-                rows += probe.rows * (1 - probe_matched)
-        # An outer join's unmatched rows carry NULL in the other side's columns.
-        if join_type in (JoinType.LEFT, JoinType.FULL):
-            probe = _padded(probe, build.rows * (1 - build_matched), rows)
-        if join_type in (JoinType.RIGHT, JoinType.FULL):
-            build = _padded(build, probe.rows * (1 - probe_matched), rows)
-        own = own_output(join_type, len(build.columns), len(probe.columns))
-        joined = build.columns + probe.columns
-        columns = [Column(None, 2.0) if at is None else joined[at] for at in own]
+        rows, columns = typed(join_type, build, probe, inner, build_matched, probe_matched)
         if "projection" in node.fields:
             columns = [columns[ref.index] for ref in parse_columns(node.fields["projection"])]
         return shaped(rows, columns)
@@ -309,6 +288,32 @@ class Estimator:
         frames = [c.frame for c in engine_ir.columns(node.children[0].schema + node.children[1].schema)]
         rows = max(build.rows, probe.rows)
         return selectivity(engine_ir.lower_field(node, "filter"), _lookup(frames, build.columns + probe.columns, rows), rows)
+
+
+def typed(join_type: JoinType, build: Estimate, probe: Estimate, inner: float, build_matched: float,
+          probe_matched: float) -> tuple[float, list[Column]]:
+    """A join's rows by its type, from its inner rows and the share of each side's rows that find
+    a match, and the columns of its own output, before any projection."""
+    if join_type in _KEEPS_BUILD:
+        kept, matched, how = build, build_matched, _KEEPS_BUILD[join_type]
+    elif join_type in _KEEPS_PROBE:
+        kept, matched, how = probe, probe_matched, _KEEPS_PROBE[join_type]
+    if join_type in _KEEPS_BUILD or join_type in _KEEPS_PROBE:
+        rows = {"semi": kept.rows * matched, "anti": kept.rows * (1 - matched), "mark": kept.rows}[how]
+    else:
+        rows = inner
+        if join_type in (JoinType.LEFT, JoinType.FULL):
+            rows += build.rows * (1 - build_matched)
+        if join_type in (JoinType.RIGHT, JoinType.FULL):
+            rows += probe.rows * (1 - probe_matched)
+    # An outer join's unmatched rows carry NULL in the other side's columns.
+    if join_type in (JoinType.LEFT, JoinType.FULL):
+        probe = _padded(probe, build.rows * (1 - build_matched), rows)
+    if join_type in (JoinType.RIGHT, JoinType.FULL):
+        build = _padded(build, probe.rows * (1 - probe_matched), rows)
+    own = own_output(join_type, len(build.columns), len(probe.columns))
+    joined = build.columns + probe.columns
+    return rows, [Column(None, 2.0) if at is None else joined[at] for at in own]
 
 
 def _lookup(frames, columns, rows):

@@ -220,3 +220,18 @@ node that orders a whole stream emits one batch, so "stream sorted" is `BatchSor
 `SingleBatch` and is derived rather than declared. Ranged emission produces the one shape that
 breaks that — a stream ordered across several batches — so it must add `PartitionSorted` back
 and teach the limit-after-sort validation to accept it alongside the derived form.
+
+<a id="t239"></a>
+### #239 — a left or anti join's estimate ignores the key domain, and DPhyp orders on it
+`Estimator.equi_join` (`scripts/exec_model/optimizer/cardinality.py`) divides inner rows by the key
+domain but takes each matched share as `min(1, other NDV / own NDV)`: where the domain exceeds both
+key counts every preserved row counts as matched, so a left join comes out below its own preserved
+side and an anti join at 0. The cardinality golden shows it: tpcds q75's six left joins near a tenth
+of their rows (2,849.5 against 27,388), q69's two anti joins and q94's at 0.0 against 580, 611, 40.
+`SetEstimates` prices non-inner sets the same way, so it picks orders: in q75 at tp1-single the
+catalog returns' left join is priced at 14,372 rows against its preserved side's 143,810, and DPhyp
+joins the dates above it rather than below, 1–3 % dearer. Fix: both shares over the inner rows'
+domain, `other NDV / max(build NDV, probe NDV, domain)`; q75 then estimates 28,513 and keeps the
+plan's order in all three channels. It moves the cardinality golden and every non-inner estimate,
+so a full `run.py` comes with it. `bug_a_left_join_is_estimated_below_its_preserved_side`
+(`test_cardinality.py`) records it.

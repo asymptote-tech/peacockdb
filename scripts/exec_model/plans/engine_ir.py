@@ -240,6 +240,11 @@ _JOIN_TYPES = {
 }
 
 
+def join_type_name(join_type: JoinType) -> str:
+    """A join type as the plan text writes it."""
+    return next(text for text, found in _JOIN_TYPES.items() if found is join_type)
+
+
 def join_type(node) -> JoinType:
     """A join node's type; a cross join has none and emits both sides, as an inner one does."""
     text = node.fields.get("join_type", "Inner")

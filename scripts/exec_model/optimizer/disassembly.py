@@ -1,21 +1,11 @@
-"""A join order back into an engine plan: the tree DPhyp returns, over a MultiJoin's relations,
-as `GpuHashJoin` nodes with their wiring derived again.
-
-A tree is a relation's index or a `(build, probe)` pair of trees; which side builds is already
-decided by the time it gets here (section 2). Per join, bottom up:
-
-- **keys and residual** — every edge between the two sides' relations; a residual goes on the
-  first join where every relation it reads is below;
-- **projection** — what the joins above and the cluster's output need, in their order, and
-  nothing else; the pure projects the plan had between joins fold into it;
-- **wiring** — the translator's (`translator/nodes.rs::hash_join`, `shuffled`, `merged`): at more
-  than one lane each side not already hashed on its own keys is shuffled on them, so the join
-  is a partitioned one; at one lane a side on several is merged; the build side is then made one
-  batch per lane. A join over the same relations as one the plan had keeps that one's lanes —
-  DataFusion's choice to collect a small build into one lane; a new join takes the mode's.
-
-The cluster's root keeps the original root's schema, names included: the node above it reads
-it by ordinal and checks the name.
+"""A join order back into an engine plan: DPhyp's tree, oriented, over a MultiJoin's relations, as
+`GpuHashJoin` nodes. Per join, bottom up: its type, keys and residuals from the edges between its
+sides — a non-inner type mirrored where its kept side probes — a residual on the first join that
+has all it reads; a projection of what the joins above and the cluster's output need; and the
+translator's wiring, a side not hashed on its keys shuffled at more than one lane, the build made
+one batch per lane, a join over the plan's relations on the plan's lanes. The root keeps the
+plan root's schema, names included, and its hash where a node above reads it. `design.md`,
+"Disassembly".
 """
 
 from __future__ import annotations
@@ -23,8 +13,12 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, replace
 
+from ..operators.join_types import JoinType
+from ..operators.joins import own_output
 from ..plans.engine_expr import Binary, ColumnRef, expr_text, parse_columns, quoted
+from ..plans.engine_ir import join_type_name
 from ..plans.engine_plan import EngineNode
+from .conflicts import MIRRORED
 from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, is_reorderable, replaced, sided_columns
 
 JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
@@ -52,8 +46,16 @@ def reassembled(plan: EngineNode, lanes: int, order=baseline) -> EngineNode:
 
 
 def disassemble(cluster: MultiJoin, tree: JoinTree, lanes: int) -> EngineNode:
-    """The plan for `tree`, its root outputting `cluster.output` under the original root's schema."""
-    part = _Disassembly(cluster, lanes, planned_lanes(cluster)).part(tree, list(cluster.output))
+    """The plan for `tree`, its root outputting `cluster.output` under the original root's schema.
+    Where a hash join or a final aggregate above reads the root's hash before any exchange, a new
+    root joining on other keys is shuffled back onto it; per-lane nodes alone read none."""
+    disassembly = _Disassembly(cluster, lanes, planned_lanes(cluster))
+    part = disassembly.part(tree, list(cluster.output))
+    root = cluster.root
+    if cluster.hash_read_above and int(root.fields["lanes"]) > 1 and "hashed_on" in root.fields:
+        hashed = tuple(c.index for c in parse_columns(root.fields["hashed_on"]))
+        if (part.lanes, part.hashed) != (int(root.fields["lanes"]), hashed):
+            part = disassembly._wired(part, list(hashed), int(root.fields["lanes"]))
     node = part.node
     return replace(node, fields=dict(node.fields, schema=_schema_text(cluster.root.schema)),
                    schema=cluster.root.schema)
@@ -79,7 +81,7 @@ class _Disassembly:
             return self._relation(tree)
         build_tree, probe_tree = tree
         build_mask, probe_mask = _mask(build_tree), _mask(probe_tree)
-        keys, residuals = self._predicates(build_mask, probe_mask)
+        join_type, keys, residuals, null_equals_null = self._predicates(build_mask, probe_mask)
         if not keys:
             raise ValueError(f"no key joins relations {build_mask:#b} and {probe_mask:#b}: a hash join needs one")
         read = [c for pair in keys for c in pair] + [c.column for r in residuals for c in sided_columns(r)]
@@ -91,7 +93,8 @@ class _Disassembly:
         build, probe = self._wired(build, build_keys, lanes), self._wired(probe, probe_keys, lanes)
         if not build.single:
             build = self._wrap("GpuCoalesceAllBatches", build, single=True)
-        return self._join(build, probe, keys, build_keys, probe_keys, residuals, need)
+        return self._join(_Applied(join_type, build_keys, probe_keys, residuals, null_equals_null),
+                          build, probe, keys, need)
 
     def _relation(self, index: int) -> _Part:
         root = self.cluster.relations[index].root
@@ -100,19 +103,28 @@ class _Disassembly:
                      int(root.fields["lanes"]), root.fields["batches"] == "single", hashed)
 
     def _predicates(self, build_mask: int, probe_mask: int):
-        """The key pairs (build column, probe column) and residuals this join applies."""
+        """The join's type, the key pairs (build column, probe column) and residuals it applies,
+        and whether its keys hold NULL equal to NULL."""
         both, keys, residuals = build_mask | probe_mask, [], []
+        join_type, null_equal = JoinType.INNER, set()
         for edge in self.cluster.edges:
             span = edge.left | edge.right
             if span & ~both or not span & build_mask or not span & probe_mask:
                 continue
             if edge.residual is not None:
                 residuals.append(edge.residual)
-            elif edge.left & build_mask:
+            if edge.left & build_mask:
                 keys += list(edge.keys)
             else:
                 keys += [(right, left) for left, right in edge.keys]
-        return keys, residuals
+            if edge.kind is not JoinType.INNER:
+                join_type = edge.kind if edge.left & build_mask else MIRRORED[edge.kind]
+            if edge.keys:
+                null_equal.add(edge.null_equals_null)
+        if len(null_equal) > 1:
+            raise ValueError(f"keys joining {build_mask:#b} and {probe_mask:#b} disagree on whether NULL "
+                             "equals NULL: one join holds one rule")
+        return join_type, keys, residuals, null_equal == {True}
 
     def _wired(self, side: _Part, keys: list[int], lanes: int) -> _Part:
         """The side as `co_partitioned` wants it: on the join's lanes, and at more than one
@@ -136,23 +148,26 @@ class _Disassembly:
         node = EngineNode(kind, fields, side.node.schema, [side.node])
         return replace(wrapped, node=node)
 
-    def _join(self, build, probe, keys, build_keys, probe_keys, residuals, need) -> _Part:
-        own = build.columns + probe.columns
+    def _join(self, applied: _Applied, build: _Part, probe: _Part, keys, need) -> _Part:
+        joined = build.columns + probe.columns
+        own = [joined[at] for at in own_output(applied.join_type, len(build.columns), len(probe.columns))]
         picked = [own.index(c) for c in need]
         schema = tuple(self._column_schema(c) for c in need)
-        fields = {"join_type": "Inner",
+        fields = {"join_type": join_type_name(applied.join_type),
                   "on": "[" + ", ".join(f"({_ref(build, b)}, {_ref(probe, p)})"
-                                        for b, p in zip(build_keys, probe_keys)) + "]"}
-        if residuals:
-            fields["filter"] = expr_text(_conjunction([self._resided(r, build, probe) for r in residuals]))
+                                        for b, p in zip(applied.build_keys, applied.probe_keys)) + "]"}
+        if applied.null_equals_null:
+            fields["null_equals_null"] = "true"
+        if applied.residuals:
+            fields["filter"] = expr_text(_conjunction([self._resided(r, build, probe) for r in applied.residuals]))
         if picked != list(range(len(own))):
             names = [self._column_schema(c)[0] for c in own]
             fields["projection"] = "[" + ", ".join(f"{quoted(names[i])}@{i}" for i in picked) + "]"
         hashed = None
         if build.lanes > 1:
-            at = {joined: out for out, joined in enumerate(picked)}
-            for keys_here, offset in ((build_keys, 0), (probe_keys, len(build.columns))):
-                positions = [at.get(k + offset) for k in keys_here]
+            at = {c: out for out, c in enumerate(need)}
+            for side in _HASHED_BY.get(applied.join_type, ()):
+                positions = [at.get(pair[side]) for pair in keys]
                 if None not in positions:
                     hashed = tuple(positions)
                     break
@@ -175,6 +190,23 @@ class _Disassembly:
         if isinstance(residual, tuple):
             return tuple(self._resided(r, build, probe) for r in residual)
         return residual
+
+
+@dataclass(frozen=True)
+class _Applied:
+    """What a join applies: its type, its keys as ordinals of its two sides, its residuals."""
+
+    join_type: JoinType
+    build_keys: list[int]
+    probe_keys: list[int]
+    residuals: list
+    null_equals_null: bool
+
+
+#: The sides, 0 build and 1 probe, whose keys a join's output is hashed on — tried in order. A
+#: side an outer join pads holds NULL where it found no match, so it is not hashed on its keys.
+_HASHED_BY = {JoinType.INNER: (0, 1), JoinType.LEFT: (0,), JoinType.LEFT_SEMI: (0,), JoinType.LEFT_ANTI: (0,),
+              JoinType.RIGHT: (1,), JoinType.RIGHT_SEMI: (1,), JoinType.RIGHT_ANTI: (1,)}
 
 
 def planned_lanes(cluster: MultiJoin) -> dict[int, int]:

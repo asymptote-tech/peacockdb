@@ -10,7 +10,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/plans/<f
 
 from ..corpus import execute
 from ..harness import main
-from .test_engine_nodes import SCAN, T, T_ONE, U_PROBE, built, tables
+from .test_engine_nodes import SCAN, T, T_ONE, U, U_PROBE, built, tables
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
 from ...plans.engine_run import render_run
@@ -54,12 +54,13 @@ def test_a_join_in_a_cluster_names_it_and_no_other_join_does():
       GpuNestedLoopJoin: join_type=Inner, filter=k@build:0 > k@probe:0, projection=[k@0], lanes=1, batches=multiple, schema=[k:Int64]
         {built(T_ONE, T, 4)}
         {U_PROBE}
-    GpuHashJoin: join_type=LeftSemi, on=[(k@0, k@0)], lanes=1, batches=multiple, schema=[k:Int64]
+    GpuHashJoin: join_type=LeftSemi, on=[(k@0, k@0)], filter=k@build:0 < k@probe:0, lanes=1, batches=multiple, schema=[k:Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[k:Int64]
         GpuHashJoin: join_type=Inner, on=[(k@0, k@0)], projection=[k@0], lanes=1, batches=multiple, schema=[k:Int64]
           {built(T_ONE, T, 5)}
           {U_PROBE}
-      {U_PROBE}""")
+      GpuCoalesceAllBatches: lanes=1, batches=single, {U}
+        {U_PROBE}""")
     joins = [(line.split(",")[0].strip(), "mj=" in line) for line in lines if "Join:" in line]
     assert joins == [("GpuCrossJoin: lanes=1", False), ("GpuNestedLoopJoin: join_type=Inner", False),
                      ("GpuHashJoin: join_type=LeftSemi", False), ("GpuHashJoin: join_type=Inner", True)]

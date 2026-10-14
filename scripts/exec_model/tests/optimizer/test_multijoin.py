@@ -68,12 +68,13 @@ def test_a_residual_is_an_edge_over_the_relations_it_reads():
     assert isinstance(residual.residual, Binary) and residual.residual.op == ">"
 
 
-def test_a_filter_a_non_inner_join_and_a_computing_project_each_root_a_relation():
+def test_a_filter_a_join_with_a_residual_it_cannot_place_and_a_computing_project_each_root_a_relation():
     filtered = CHAIN.replace(
         "  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64, b:Int64]",
         "  GpuFilter: predicate=a@0 IS NULL, lanes=1, batches=multiple, schema=[a:Int64, b:Int64]")
     assert [r.root.kind for r in assemble(plan(filtered)).relations] == ["GpuFilter", "GpuLoadParquet"]
-    semi = CHAIN.replace("join_type=Inner, on=[(a@0, b@0)]", "join_type=LeftSemi, on=[(a@0, b@0)]")
+    semi = CHAIN.replace("join_type=Inner, on=[(a@0, b@0)]",
+                         "join_type=LeftSemi, on=[(a@0, b@0)], filter=a@build:0 < b@probe:0")
     semi_relations = assemble(plan(semi)).relations
     assert [r.root.kind for r in semi_relations] == ["GpuHashJoin", "GpuLoadParquet"]
     assert semi_relations[0].root.fields["join_type"] == "LeftSemi"
@@ -112,12 +113,26 @@ def test_each_cluster_is_named_in_plan_order_outermost_first_on_every_join_it_ho
     assert named(tree) is tree
 
 
-def test_a_cross_join_a_nested_loop_join_and_a_semi_join_carry_no_id():
+def test_a_cluster_inside_a_relation_reads_its_hash_where_the_enclosing_join_may_key_on_it():
+    # t1 joined to a computing project over t2 ⋈ t3, the project hashed on its first column.
+    def nested(hashed: str):
+        return plan(f"""GpuHashJoin: join_type=Inner, on=[(a@0, b@0)], {L}, schema=[a:Int64, b:Int64, c:Int64]
+{scan("t1", "a", indent=2)}
+  GpuProject: exprs=[b@0, c@1 + 1 as c], lanes=1, batches=multiple, hashed_on=[{hashed}], schema=[b:Int64, c:Int64]
+    GpuHashJoin: join_type=Inner, on=[(b@0, c@0)], {L}, schema=[b:Int64, c:Int64]
+{scan("t2", "b", indent=6)}
+{scan("t3", "c", indent=6)}""")
+
+    assert [c.hash_read_above for c in clusters(nested("b@0"))] == [False, True]
+    assert [c.hash_read_above for c in clusters(nested("c@1"))] == [False, False]
+
+
+def test_a_cross_join_a_nested_loop_join_and_a_filtered_semi_join_carry_no_id():
     text = f"""GpuCrossJoin: {L}, schema=[a:Int64, c:Int64]
   GpuNestedLoopJoin: join_type=Inner, filter=a@build:0 < b@probe:0, projection=[a@0], {L}, schema=[a:Int64]
 {scan("t1", "a", indent=4)}
 {scan("t2", "b", indent=4)}
-  GpuHashJoin: join_type=LeftSemi, on=[(c@0, d@0)], {L}, schema=[c:Int64]
+  GpuHashJoin: join_type=LeftSemi, on=[(c@0, d@0)], filter=c@build:0 < d@probe:0, {L}, schema=[c:Int64]
 {scan("t3", "c", indent=4)}
     GpuHashJoin: join_type=Inner, on=[(d@0, e@0)], projection=[d@0], {L}, schema=[d:Int64]
 {scan("t4", "d", indent=6)}

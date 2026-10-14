@@ -1,16 +1,12 @@
 """MultiJoin: a cluster of reorderable joins, as DPhyp takes it in.
 
-A cluster is a maximal tree of inner hash joins, reached through the wiring the translator
-derives from orientation — `GpuCoalesceAllBatches`, `GpuEmitPartitions`, `GpuMergePartitions` —
-and through projects that only pick and rename columns. Anything else roots a relation and
-is left alone: a scan, an aggregate, a join of another type, a project that computes, and a
-filter, whose `IS NULL` between joins is what makes a left join an anti join. A relation
-may hold clusters of its own; `clusters` finds those too.
-
-Columns are identities — which relation, which of its outputs — never positions: a reordered
-tree renumbers every position. An edge joins the relations its predicate reads: the key
-pairs between one pair of relations make one edge, so a composite key stays whole, and a
-residual predicate is an edge of its own over every relation it reads.
+A cluster is a maximal tree of the hash joins `is_reorderable` admits, through the wiring the
+translator derives from orientation and projects that only pick columns. Anything else roots a
+relation: a scan, an aggregate, a join it does not admit, a computing project, a filter — an
+`IS NULL` between joins is what makes a left join an anti join. Columns are identities, never
+positions. A cluster of inner joins has an edge per relation pair its keys join and one per
+residual; a cluster holding a non-inner join has one edge per join, its whole predicate, on its
+TES (`conflicts.py`). `design.md`, "Clusters" and "Non-inner joins: TES".
 """
 
 from __future__ import annotations
@@ -19,6 +15,7 @@ import dataclasses
 from dataclasses import dataclass
 
 from ..plans import engine_ir
+from .conflicts import MIRRORED, Operator, eligibility, logical
 from ..plans.engine_expr import ColumnRef, parse_columns, parse_expr, parse_join_keys, parse_named_exprs
 from ..plans.engine_plan import EngineNode
 from ..operators.join_types import JoinType
@@ -48,13 +45,18 @@ class Relation:
 class Edge:
     """A predicate between the relations in `left` and those in `right` (bit masks). `keys`
     pair a left column with a right one; `residual` is the engine's expression with every
-    column a `SidedColumn`, and an edge has keys or a residual, not both."""
+    column a `SidedColumn`. `kind` is the join's logical type, the side a non-inner join keeps
+    or preserves on the left. In a cluster of inner joins an edge has keys or a residual, not
+    both; with a non-inner join an edge is one join's, and its sides are the join's TES."""
 
     left: int
     right: int
     keys: tuple[tuple[RelColumn, RelColumn], ...] = ()
     null_equals_null: bool = False
     residual: object | None = None
+    kind: JoinType = JoinType.INNER
+    #: whether the plan's join built its `left` side, the side a non-inner join keeps
+    builds_left: bool = True
 
 
 @dataclass(frozen=True)
@@ -69,24 +71,65 @@ class MultiJoin:
     output: tuple[RelColumn, ...]
     joins: tuple[EngineNode, ...]
     mj: str | None
+    #: whether a node above `root`, before the next exchange, needs its rows on `root`'s hash: a
+    #: hash join, a final aggregate, or an enclosing cluster's join that may take its hash as keyed
+    hash_read_above: bool = False
+
+    @property
+    def holds_non_inner(self) -> bool:
+        """Whether a join of the cluster is not inner: then each edge is one join, on its TES."""
+        return any(edge.kind is not JoinType.INNER for edge in self.edges)
 
 
 def is_reorderable(node: EngineNode) -> bool:
-    return node.kind == "GpuHashJoin" and engine_ir.join_type(node) is JoinType.INNER
+    """An inner hash join, or a non-inner one without a residual. A mark join stays out: its mark
+    column is no relation's. So does a residual on a non-inner join, whose rejection of NULLs is
+    not read and whose semi and anti mirrors the engine refuses (#159)."""
+    if node.kind != "GpuHashJoin":
+        return False
+    join_type = engine_ir.join_type(node)
+    return join_type is JoinType.INNER or join_type in MIRRORED and "filter" not in node.fields
 
 
 def clusters(plan: EngineNode) -> list[MultiJoin]:
     """Every cluster of `plan`, outermost first, those inside a cluster's relations included."""
-    found, stack = [], [plan]
+    found, stack = [], [(plan, False)]
     while stack:
-        node = stack.pop()
+        node, hash_read = stack.pop()
         if is_reorderable(node):
-            cluster = assemble(node)
+            cluster = assemble(node, hash_read)
             found.append(cluster)
-            stack.extend(reversed([relation.root for relation in cluster.relations]))
+            stack.extend(reversed([(relation.root, _hash_joined_on(cluster, index))
+                                   for index, relation in enumerate(cluster.relations)]))
         else:
-            stack.extend(reversed(node.children))
+            stack.extend(reversed([(child, _reads_hash(node, hash_read)) for child in node.children]))
     return found
+
+
+def _hash_joined_on(cluster: MultiJoin, index: int) -> bool:
+    """Whether a rebuilt join of `cluster` may take relation `index` as hashed on its keys without a
+    shuffle: the hash it declares is on columns among its keys. Keys covering the hash need not be
+    the keys a join takes, so this can shuffle more than needed; over the corpus it adds no shuffle
+    beyond those q10, q35, q56 and q60 get from a join or final aggregate above."""
+    root = cluster.relations[index].root
+    if "hashed_on" not in root.fields:
+        return False
+    keys = {c.ordinal for edge in cluster.edges for pair in edge.keys for c in pair if c.relation == index}
+    return {c.index for c in parse_columns(root.fields["hashed_on"])} <= keys
+
+
+_EXCHANGES = frozenset({"GpuEmitPartitions", "GpuMergePartitions", "GpuMergeSortedPartitions", "GpuUnload"})
+
+
+def _reads_hash(node: EngineNode, above: bool) -> bool:
+    """Whether `node`'s children's hash is read by `node` or, through it, a node above: a hash
+    join co-locates its sides, a final aggregate its groups; an exchange reads no hash, and any
+    other node passes on what is above it."""
+    if node.kind in _EXCHANGES:
+        return False
+    if node.kind == "GpuHashJoin" or node.kind.startswith("GpuAggregate") and "final" in node.fields:
+        return True
+    return above
 
 
 def named(plan: EngineNode) -> EngineNode:
@@ -110,9 +153,9 @@ def _labelled(node: EngineNode, ids: dict[int, str]) -> EngineNode:
                                mj=ids.get(id(node), node.mj))
 
 
-def assemble(root: EngineNode) -> MultiJoin:
+def assemble(root: EngineNode, hash_read_above: bool = False) -> MultiJoin:
     """The cluster whose topmost join is `root`."""
-    return _Assembly(root).multijoin()
+    return dataclasses.replace(_Assembly(root).multijoin(), hash_read_above=hash_read_above)
 
 
 class _Assembly:
@@ -122,24 +165,35 @@ class _Assembly:
         self.index: dict[int, int] = {}
         self.edges: list[Edge] = []
         self.joins: list[EngineNode] = []
+        #: each join, bottom up, as conflict detection reads it, and its edges' keys and residual
+        self.operators: list[tuple[Operator, Edge]] = []
         self._collect(root)
 
     def multijoin(self) -> MultiJoin:
         output = tuple(self.lift(self.root, i) for i in range(len(self.root.schema)))
-        return MultiJoin(self.root, tuple(self.relations), tuple(self.edges), output, tuple(self.joins),
-                         self.root.mj)
+        edges = tuple(self.edges)
+        # One edge per join: a set S holds at most |S| − 1 of them, so each pair DPhyp joins has
+        # exactly one edge across it, its sides unsplit.
+        if any(operator.kind is not JoinType.INNER for operator, _ in self.operators):
+            tes = eligibility([operator for operator, _ in self.operators])
+            edges = tuple(dataclasses.replace(whole, left=left, right=right)
+                          for (_, whole), (left, right) in zip(self.operators, tes))
+        return MultiJoin(self.root, tuple(self.relations), edges, output, tuple(self.joins), self.root.mj)
 
-    def _collect(self, node: EngineNode) -> None:
+    def _collect(self, node: EngineNode) -> int:
+        """The relations under `node`, as a mask, `node`'s joins and relations collected."""
         if node.kind in _WIRING or _picks_columns(node):
-            self._collect(node.children[0])
-        elif is_reorderable(node):
+            return self._collect(node.children[0])
+        if is_reorderable(node):
             self.joins.append(node)
-            for child in node.children:
-                self._collect(child)
-            self.edges += self._edges(node)
-        else:
-            self.index[id(node)] = len(self.relations)
-            self.relations.append(Relation(node))
+            build, probe = [self._collect(child) for child in node.children]
+            edges = self._edges(node)
+            self.edges += edges
+            self.operators.append(_operator(node, build, probe, edges))
+            return build | probe
+        self.index[id(node)] = len(self.relations)
+        self.relations.append(Relation(node))
+        return 1 << self.index[id(node)]
 
     def lift(self, node: EngineNode, ordinal: int) -> RelColumn:
         """Output `ordinal` of `node`, a node of this cluster, as the relation column it is."""
@@ -153,7 +207,7 @@ class _Assembly:
                 build, probe = node.children
                 if "projection" in node.fields:
                     ordinal = parse_columns(node.fields["projection"])[ordinal].index
-                joined = own_output(JoinType.INNER, len(build.schema), len(probe.schema))[ordinal]
+                joined = own_output(engine_ir.join_type(node), len(build.schema), len(probe.schema))[ordinal]
                 node, ordinal = (build, joined) if joined < len(build.schema) else (probe, joined - len(build.schema))
         return RelColumn(self.index[id(node)], ordinal)
 
@@ -186,6 +240,26 @@ class _Assembly:
         if isinstance(expr, tuple):
             return tuple(self._lifted(e, build, probe) for e in expr)
         return expr
+
+
+def _operator(join: EngineNode, build: int, probe: int, edges: list[Edge]) -> tuple[Operator, Edge]:
+    """`join` as conflict detection reads it, and as one edge over its plan sides `build` and
+    `probe`, logical left first: all its keys and its residual."""
+    kind, swapped = logical(engine_ir.join_type(join))
+    reads = [0, 0]
+    keys, residual = [], None
+    for edge in edges:
+        reads[0] |= edge.left
+        reads[1] |= edge.right
+        keys += edge.keys
+        residual = edge.residual if edge.residual is not None else residual
+    null_equals_null = join.fields.get("null_equals_null") == "true"
+    strong = residual is None and not null_equals_null
+    if swapped:
+        build, probe, reads = probe, build, reads[::-1]
+        keys = [(right, left) for left, right in keys]
+    whole = Edge(build, probe, tuple(keys), null_equals_null, residual, kind, not swapped)
+    return Operator(kind, build, probe, reads[0], reads[1], strong), whole
 
 
 @dataclass(frozen=True)

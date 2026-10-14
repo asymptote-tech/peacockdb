@@ -1,15 +1,11 @@
-"""Join order for a plan's clusters of joins: what DPhyp is asked of a set of relations, which
-side of each join in the tree it returns builds, and `optimize`, which does both for every
-cluster of a plan.
+"""Join order for a plan's clusters: what DPhyp is asked of a set of relations, which side of
+each join in its tree builds, and `optimize`, which does both for every cluster of a plan.
 
-DPhyp asks the cost of arbitrary connected sets of a cluster's relations, and `cardinality`
-estimates trees. `SetEstimates` estimates a set with the same formulas, over one canonical
-order: a set is its highest relation whose removal leaves it connected, joined to the rest —
-so every set has one estimate, whatever order DPhyp reaches it in. A residual edge keeps
-DuckDB's default share of the rows: its expression is in relation columns, which the filter
-estimator does not read. A set's cost is C_out's term for it: its rows times
-the width of what the joins above need of it — the cluster's output and the keys of every
-edge that leaves it.
+`SetEstimates` answers DPhyp with `cardinality`'s formulas over one canonical split of each set,
+so a set has one estimate however DPhyp reached it; a non-inner join is estimated by its type, as
+`cardinality.typed` does a plan's. A residual edge keeps DuckDB's default share of the rows. A
+set's cost is its C_out term: its rows times the width of what the joins above and the cluster's
+output need of it. `design.md`, "DPhyp on C_out" and "Orientation after DPhyp".
 """
 
 from __future__ import annotations
@@ -17,13 +13,15 @@ from __future__ import annotations
 import json
 
 from . import dphyp
-from .cardinality import Estimate, Estimator, estimator, shaped
+from .cardinality import Estimate, Estimator, estimator, shaped, typed
+from .conflicts import joining
 from .cost import row_width
 from .estimator import DEFAULT
 from .disassembly import baseline, planned_lanes, reassembled
 from ..plans.engine_expr import parse_columns
 from ..plans.engine_plan import EngineNode
 from .multijoin import MultiJoin, RelColumn, named, sided_columns
+from ..operators.join_types import JoinType
 from .report import ChosenJoin, JoinOrder, PricedSet
 from .stats import Statistics
 
@@ -38,6 +36,7 @@ class SetEstimates:
     def __init__(self, cluster: MultiJoin, estimator: Estimator):
         self.cluster, self.estimator = cluster, estimator
         self._sets: dict[int, tuple[Estimate, dict[RelColumn, int]]] = {}
+        self._splits: dict[int, tuple[int, int] | None] = {}
 
     def rows(self, mask: int) -> float:
         return self._estimate(mask)[0].rows
@@ -62,8 +61,65 @@ class SetEstimates:
 
     def _estimate(self, mask: int) -> tuple[Estimate, dict[RelColumn, int]]:
         if mask not in self._sets:
-            self._sets[mask] = self._leaf(mask) if mask & (mask - 1) == 0 else self._join(mask)
+            if mask & (mask - 1) == 0:
+                self._sets[mask] = self._leaf(mask)
+            elif not self.cluster.holds_non_inner:
+                self._sets[mask] = self._join(mask)
+            else:
+                split = self.split(mask)
+                if split is None:
+                    raise ValueError(f"no join of the cluster's makes the set {mask:#b} DPhyp asked for")
+                self._sets[mask] = self._applied(*split)
         return self._sets[mask]
+
+    def split(self, mask: int) -> tuple[int, int] | None:
+        """The two sets `mask` is estimated as the join of, in a cluster holding a non-inner join:
+        its highest relation whose removal leaves a set the edges join, joined to that set by an
+        edge, or failing one the first two such sets; None where none is."""
+        if mask not in self._splits:
+            self._splits[mask] = self._split(mask)
+        return self._splits[mask]
+
+    def _split(self, mask: int) -> tuple[int, int] | None:
+        edges = self.cluster.edges
+        for r in reversed(range(mask.bit_length())):
+            rest = mask & ~(1 << r)
+            if mask >> r & 1 and self._made(rest) and joining(edges, rest, 1 << r) is not None:
+                return rest, 1 << r
+        part = (mask - 1) & mask
+        while part:
+            rest = mask & ~part
+            if part & mask & -mask and self._made(part) and self._made(rest) \
+                    and joining(edges, part, rest) is not None:
+                return part, rest
+            part = (part - 1) & mask
+        return None
+
+    def _made(self, mask: int) -> bool:
+        return mask & (mask - 1) == 0 or self.split(mask) is not None
+
+    def _applied(self, rest: int, part: int):
+        """`rest` joined to `part` by the edge between them, as its type has it: the side a
+        non-inner join keeps or preserves is its left."""
+        edges = joining(self.cluster.edges, rest, part)
+        kind = next((e.kind for e in edges if e.kind is not JoinType.INNER), JoinType.INNER)
+        if any(e.kind is not JoinType.INNER and e.left & part for e in edges):
+            rest, part = part, rest
+        (left, left_at), (right, right_at) = self._estimate(rest), self._estimate(part)
+        pairs, residual = [], 1.0
+        for edge in edges:
+            if edge.residual is not None:
+                residual *= DEFAULT
+            for a, b in edge.keys:
+                inner, outer = (a, b) if 1 << a.relation & rest else (b, a)
+                pairs.append((left_at[inner], right_at[outer]))
+        joined = self.estimator.equi_join(left, right, pairs, residual)
+        rows, columns = typed(kind, joined.build, joined.probe, joined.rows, joined.build_matched,
+                              joined.probe_matched)
+        at = dict(left_at)
+        if kind not in (JoinType.LEFT_SEMI, JoinType.LEFT_ANTI):
+            at |= {c: k + len(left.columns) for c, k in right_at.items()}
+        return shaped(rows, columns), at
 
     def _leaf(self, mask: int):
         index = mask.bit_length() - 1
@@ -107,8 +163,9 @@ class SetEstimates:
 
 def orient(tree, sets: SetEstimates, copies: int = 1, lanes: int = 1,
            planned: dict[int, int] | None = None):
-    """`tree` — a relation's index or a pair of trees, sides unordered — with each join's cheaper
-    side first, as its build. Bottom up, since a join's probe batches are what the
+    """`tree` — a relation's index or a pair of trees, sides unordered — with each inner join's
+    cheaper side first, as its build, and each non-inner join building the side its plan join
+    built, so it keeps the plan's type. Bottom up, since a join's probe batches are what the
     join below it emits. For an inner join the two configurations differ only in what the build
     costs: held whole, and copied once per probe batch while the build handle cannot outlive a
     streamed probe (#152, `copies` = 1). A join runs on the lanes the plan had for its relations
@@ -128,8 +185,24 @@ def _orient(tree, sets, copies, lanes, planned):
     mask = a[1] | b[1]
     width = planned.get(mask, lanes)
     fed = {a[1]: _fed(a, b[1], width, sets), b[1]: _fed(b, a[1], width, sets)}
-    build, probe = min((a, b), (b, a), key=lambda side: side[0][2] * (1 + copies * fed[side[1][1]]))
+    builder = _plan_builder(sets.cluster, a[1], b[1])
+    if builder is None:
+        build, probe = min((a, b), (b, a), key=lambda side: side[0][2] * (1 + copies * fed[side[1][1]]))
+    else:
+        build, probe = (a, b) if builder & a[1] else (b, a)
     return (build[0], probe[0]), mask, sets.cost(mask), fed[probe[1]], sets.rows(mask)
+
+
+def _plan_builder(cluster: MultiJoin, left: int, right: int) -> int | None:
+    """Where the join of `left` and `right` is a non-inner one, the relations its plan join built
+    on — its TES side that the plan had build — else None. Its type is the plan's then: the copy
+    model would charge semi and anti joins for copies they never make, and gains come from order."""
+    if not cluster.holds_non_inner:
+        return None
+    [edge] = joining(cluster.edges, left, right)
+    if edge.kind is JoinType.INNER:
+        return None
+    return edge.left if edge.builds_left else edge.right
 
 
 def _fed(side, other: int, lanes: int, sets: SetEstimates) -> float:
@@ -176,7 +249,7 @@ def batches(node) -> int:
 
 def optimize(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
              max_pairs: int = MAX_PAIRS, known: dict[str, Estimate] | None = None) -> EngineNode:
-    """`plan` with every cluster of inner joins reordered by DPhyp on C_out and each join
+    """`plan` with every join cluster reordered by DPhyp on C_out and each join
     oriented. DPhyp sees the key edges only: a hash join needs a key, and two sets that only a
     residual connects would be a nested loop — the residual goes on the first join that has its
     relations anyway. A cluster past `max_pairs` keeps the plan's order, oriented again: the
@@ -241,7 +314,8 @@ def _keys_text(cluster: MultiJoin, edge) -> str:
     def name(c: RelColumn) -> str:
         return f"r{c.relation}.{cluster.relations[c.relation].names[c.ordinal]}"
 
-    return " and ".join(f"{name(a)} = {name(b)}" for a, b in edge.keys)
+    keys = " and ".join(f"{name(a)} = {name(b)}" for a, b in edge.keys)
+    return keys if edge.kind is JoinType.INNER else f"{keys}, {edge.kind.name.lower()}"
 
 
 def _flipped(oriented, planned) -> tuple[tuple[int, int], ...]:

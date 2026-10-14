@@ -122,5 +122,36 @@ def test_at_four_lanes_each_side_is_shuffled_on_its_keys_and_the_build_coalesced
     assert rebuilt.fields["lanes"] == "4"
 
 
+def test_a_join_holding_null_equal_to_null_is_rebuilt_holding_it():
+    text = CHAIN.replace("on=[(a@0, b@0)],", "on=[(a@0, b@0)], null_equals_null=true,")
+    cluster = assemble(plan(text))
+    rebuilt = disassemble(cluster, baseline(cluster), lanes=1)
+    lower = rebuilt.children[0].children[0]
+    assert lower.fields.get("null_equals_null") == "true" and "null_equals_null" not in rebuilt.fields
+
+
+def test_edges_that_disagree_on_null_equality_are_not_joined_as_one():
+    # t3 joins t1 and t2 both; t1 and t2 hold NULL equal. Joining t1 to t3 first leaves both
+    # flags to the second join.
+    text = CHAIN.replace("on=[(a@0, b@0)],", "on=[(a@0, b@0)], null_equals_null=true,") \
+        .replace("on=[(b@1, c@0)],", "on=[(b@1, c@0), (a@0, c@0)],")
+    cluster = assemble(plan(text))
+    with raises(ValueError, match="NULL"):
+        disassemble(cluster, ((0, 2), 1), lanes=1)
+
+
+def test_a_full_join_s_output_is_hashed_on_neither_side():
+    # Either side's key is NULL where the join padded it, so neither hashes the output.
+    full = f"""GpuHashJoin: join_type=Full, on=[(a@0, b@0)], lanes=4, batches=multiple, schema=[a:Int64, b:Int64]
+  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[a@0], schema=[a:Int64]
+    GpuEmitPartitions: hash=[a@0], lanes=4, batches=multiple, hashed_on=[a@0], schema=[a:Int64]
+{scan("t1", "a", indent=6)}
+  GpuEmitPartitions: hash=[b@0], lanes=4, batches=multiple, hashed_on=[b@0], schema=[b:Int64]
+{scan("t2", "b", indent=4)}"""
+    cluster = assemble(plan(full))
+    rebuilt = disassemble(cluster, baseline(cluster), lanes=4)
+    assert rebuilt.fields["join_type"] == "Full" and "hashed_on" not in rebuilt.fields
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

@@ -33,7 +33,7 @@ def raises(exception, match=None):
 
 #: `async` matters: an async test lands in the namespace and is callable, so it would be
 #: called, return a coroutine, and be reported ok having asserted nothing.
-_DEF = re.compile(r"^(?:async )?def (test_\w+)", re.M)
+_DEF = re.compile(r"^(?:async )?def ((?:test|bug)_\w+)", re.M)
 
 
 def _source_problems(namespace, collected) -> list[str]:
@@ -102,14 +102,15 @@ def _selected(tests, path):
 
 
 def main(namespace) -> int:
-    """Run every `test_*` callable in `namespace`, in definition order.
+    """Run every `test_*` and `bug_*` callable in `namespace`, in definition order: a `bug_` test
+    asserts a known-wrong behaviour, its ticket beside it (`coding-style.md`, "Building around a bug").
 
     Pass `globals()`. Returns a process exit code. See `_selected` for running a subset.
     """
     tests = [
         (name, obj)
         for name, obj in namespace.items()
-        if name.startswith("test_") and callable(obj)
+        if name.startswith(("test_", "bug_")) and callable(obj)
     ]
     path = namespace["__file__"]
     for problem in _source_problems(namespace, {name for name, _ in tests}):

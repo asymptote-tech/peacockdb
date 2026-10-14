@@ -1,4 +1,4 @@
-"""The engine's plans with every cluster of inner joins reordered by DPhyp and oriented
+"""The engine's plans with every join cluster reordered by DPhyp and oriented
 (`join_order.optimize`), run by the prototype: each still answers as DuckDB does.
 
 The order changes what every join emits, so only the answer is compared. Needs the sf1 datasets,

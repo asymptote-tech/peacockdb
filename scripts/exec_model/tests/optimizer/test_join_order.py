@@ -10,6 +10,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     __package__ = "scripts.exec_model.tests.optimizer"
 
 from ..harness import main
+from .test_reorder_non_inner import ANTI, LEFT, SEMI, TABLES as NON_INNER_TABLES
 from .test_cardinality import dataset, scan
 from ...optimizer.cardinality import Column, estimator
 from ...optimizer.cost import row_width
@@ -57,6 +58,26 @@ def test_a_set_costs_its_rows_times_the_width_of_what_it_passes_on():
     _, _, sets = setup()
     two_int64 = row_width([("dk", "Int64"), ("sk", "Int64")], (Column(None, 1.0), Column(None, 1.0)))
     assert abs(sets.cost(0b011) - sets.rows(0b011) * two_int64) < 1e-6
+
+
+def non_inner(text):
+    plan = parse_plans(f"== q\n{text}", "test")["q"]
+    est = estimator(plan, dataset(tables=NON_INNER_TABLES))
+    [cluster] = clusters(plan)
+    return cluster, est, SetEstimates(cluster, est)
+
+
+def test_a_set_made_by_a_left_semi_or_anti_join_is_estimated_as_cardinality_estimates_that_join():
+    for text in (LEFT, SEMI, ANTI):
+        cluster, est, sets = non_inner(text)
+        # nation r0, customers r1, orders r2: the plan's own lower join is customers with orders.
+        assert abs(sets.rows(0b110) - est.estimates[id(cluster.root.children[1])].rows) < 1e-6
+    _, _, left = non_inner(LEFT)
+    _, _, semi = non_inner(SEMI)
+    _, _, anti = non_inner(ANTI)
+    # A left join keeps every row of the one nation's customers, a semi or an anti join some.
+    assert left.rows(0b111) >= left.rows(0b011)
+    assert semi.rows(0b111) + anti.rows(0b111) <= semi.rows(0b011) * (1 + 1e-9)
 
 
 def pair(orders_batches: int):
