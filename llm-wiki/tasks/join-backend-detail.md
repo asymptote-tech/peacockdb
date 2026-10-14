@@ -3544,3 +3544,9 @@ approved`.
 at about 07:50 during `test_gpu_corpus` (tpcds q64 reached, all green), and the round's two device
 mutations were not run. The full override binary list must pass on the final tree, recorded here.
 (2) CI green on the PR head except `gpu-tests` (exempt) and cost-report (pre-accepted).
+
+**CI on `28b0d074` (run 38536148260).** Both cuDF legs and the 25.02 GPU build green; `gpu-tests`
+red (exempt). The cost-report job is red for a reason the board did not accept:
+`cost-report`'s `the_index_reads_the_anchors_of_every_wiki_file` names #152 as an open `joins.md`
+ticket, and plan task 16 archived it. Its own doc says the fix is to swap in an open number. Red
+since task 16's push, unnoticed through two review rounds because the job was expected red.
