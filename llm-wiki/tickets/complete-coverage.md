@@ -27,7 +27,7 @@ tables, no new dataset, plus the engine work it needs.
 - `ORDER BY … LIMIT n OFFSET m`: every corpus limit has `skip=0`, so both lowerings' offset
   half is synthetic-only; shape it away from [#166](#t166)'s two droppers.
 - `min`/`max` over a string or date column: zero uses, and the merge is a string reduce.
-- a join on a nullable key: [#59](#t59), [#80](#t80) and [#137](#t137) rest on there being none.
+- a join on a nullable key: [#59](../archive/archived-tickets.md#t59), [#80](../archive/archived-tickets.md#t80) and [#137](../archive/archived-tickets.md#t137) rest on there being none.
 - a shuffle keyed on a decimal: delivered by `repartition-keys`, which closed
   [#95](../archive/archived-tickets.md#t95) — two pbench decimal rows run at all five device modes
   and the gate carries both precisions and a decimal-then-string composite.

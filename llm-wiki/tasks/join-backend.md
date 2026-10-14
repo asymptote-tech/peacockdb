@@ -34,21 +34,21 @@ detail file, and one that cannot be resolved here is a ticket naming both engine
    device's join order; reword it to what does hold (the same rows, the same batch structure).
    Float sums reordered across a join (q39) already compare with a tolerance.
 
-**This task closes** [#155](../tickets/joins.md#t155) (umbrella: join execution through a wider C
-and FlatBuffers API), [#152](../tickets/joins.md#t152) (the build handle does not survive a
-streamed probe), [#173](../tickets/joins.md#t173) (a finish whose probe produced no keys refuses
-what it could answer from the build side), [#212](../tickets/joins.md#t212) (a build side that
-emits no batch at all still refuses Right, Full and RightAnti), [#159](../tickets/joins.md#t159)
-(RightSemi/RightAnti with a residual filter has no cuDF path), [#59](../tickets/joins.md#t59)
-(nullable-key semantics for semi/anti/mark joins), [#80](../tickets/joins.md#t80) (anti-join
-`NOT IN` three-valued logic), [#137](../tickets/joins.md#t137) (the planner does not drop null
-join keys before the shuffle), [#220](../tickets/joins.md#t220) (the cpu's joins answer several
-batches per call), [#190](../tickets/joins.md#t190) (the cpu drops a nested-loop join's
-projection), [#207](../tickets/joins.md#t207) (both backends drop a cross join's projection),
-[#208](../tickets/joins.md#t208) (the cpu's cross join answers nothing over a zero-row build), and
-the tickets join-session-cpp built the C++ half of: [#136](../tickets/joins.md#t136),
-[#153](../tickets/joins.md#t153), [#160](../tickets/joins.md#t160), [#215](../tickets/joins.md#t215),
-[#63](../tickets/joins.md#t63), and #154's `join.cpp` sites (so #154 closes whole). Eighth of the
+**This task closes** [#155](../archive/archived-tickets.md#t155) (umbrella: join execution through a wider C
+and FlatBuffers API), [#152](../archive/archived-tickets.md#t152) (the build handle does not survive a
+streamed probe), [#173](../archive/archived-tickets.md#t173) (a finish whose probe produced no keys refuses
+what it could answer from the build side), [#212](../archive/archived-tickets.md#t212) (a build side that
+emits no batch at all still refuses Right, Full and RightAnti), [#159](../archive/archived-tickets.md#t159)
+(RightSemi/RightAnti with a residual filter has no cuDF path), [#59](../archive/archived-tickets.md#t59)
+(nullable-key semantics for semi/anti/mark joins), [#80](../archive/archived-tickets.md#t80) (anti-join
+`NOT IN` three-valued logic), [#137](../archive/archived-tickets.md#t137) (the planner does not drop null
+join keys before the shuffle), [#220](../archive/archived-tickets.md#t220) (the cpu's joins answer several
+batches per call), [#190](../archive/archived-tickets.md#t190) (the cpu drops a nested-loop join's
+projection), [#207](../archive/archived-tickets.md#t207) (both backends drop a cross join's projection),
+[#208](../archive/archived-tickets.md#t208) (the cpu's cross join answers nothing over a zero-row build), and
+the tickets join-session-cpp built the C++ half of: [#136](../archive/archived-tickets.md#t136),
+[#153](../archive/archived-tickets.md#t153), [#160](../archive/archived-tickets.md#t160), [#215](../archive/archived-tickets.md#t215),
+[#63](../archive/archived-tickets.md#t63), and #154's `join.cpp` sites (so #154 closes whole). Eighth of the
 join-rewrite chain.
 
 The design is [`join-rewrite-design.md`](join-rewrite-design.md): §1.3 (validation), §3.5 (the

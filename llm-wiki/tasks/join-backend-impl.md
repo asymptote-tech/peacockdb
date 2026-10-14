@@ -1633,7 +1633,7 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 
 ### Task 15: Nothing of the old join path survives
 
-- [ ] **Step 1: Remove** (spec step 9): `cpp/src/operators/join.cpp` and its `cpp/CMakeLists.txt` entry (the session lives in `join_session.cpp`, join-session-cpp); `wire/join.rs`'s old writers and `attach.rs`'s
+- [x] **Step 1: Remove** (spec step 9): `cpp/src/operators/join.cpp` and its `cpp/CMakeLists.txt` entry (the session lives in `join_session.cpp`, join-session-cpp); `wire/join.rs`'s old writers and `attach.rs`'s
   `cross_join`; `Input::{BuildSide, BuildSideCopy, BatchCopy, AccumulatedKeys}`,
   `ProjectRole::{ProbeKeys, NullPad, Narrow}`, `FbKind::{HashJoin, CrossJoin, NestedLoopJoin}` and
   their renderings (`recipes.rs:150-160`, `mod.rs:41-50`); `CudfHashJoin`, `CudfCrossJoin`,
@@ -1647,7 +1647,7 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
   a Right/Full/RightAnti lane with an empty build then reaches `set_build(None)` and only tasks 7
   and 8 can answer it. Step 2's grep already names `feeds_owing_build`, so this is the work behind
   a check that would otherwise fail with no instruction attached.
-- [ ] **Step 2: The checks**, quoted in the PR, each empty:
+- [x] **Step 2: The checks**, quoted in the PR, each empty:
 
 ```bash
 git grep -nE 'BuildSideCopy|BatchCopy|AccumulatedKeys|Input::BuildSide\b|ProbeKeys|NullPad|ProjectRole::Narrow' -- peacockdb-core scripts
@@ -1658,23 +1658,25 @@ git grep -n 'multi-partition joins are not implemented' -- cpp
 ```
 
   and `cargo build -p peacockdb-core --features gpu 2>&1 | grep -c 'never used\|never constructed'`
-  is 0, as is the C++ build's `-Wunused-function` count.
-- [ ] **Step 3: The wiki:** `architecture.md`'s Joins section rewritten from the design (the
+  is 0, as is the C++ build's `-Wunused-function` count. (The C++ count is 0. The Rust count is
+  25, every one an instrumentation item no production path calls, in files this branch never
+  touched; none is a join item. Detail file, round 2 task 15.)
+- [x] **Step 3: The wiki:** `architecture.md`'s Joins section rewritten from the design (the
   session, the matchers, the capability as two facts, the `NOT IN` rewrite, #137, `__rowmarker__`),
   and its scheduling rule's scatter-drop exception — "a scatter feeding the build side of a Right,
   Full or RightAnti join keeps its zero-row table" — which sits outside the Joins section and
   stops being true when step 1 removes the exception;
   `hacks-audit.md`'s P1, P4, P8, P9, P10, P13 and findings 5, 11, 12 marked resolved with this PR;
   `build-test.md`'s rows and counts.
-- [ ] **Step 4: Commit.** `git commit -m "the old join path removed: recipes, tables, executors, scaffolding"`.
+- [x] **Step 4: Commit.** `git commit -m "the old join path removed: recipes, tables, executors, scaffolding"`.
 
 ### Task 16: The estimate, compared; the record
 
-- [ ] **Step 1:** in the detail file, the estimate's per-query table (§7) against what turned on:
+- [x] **Step 1:** in the detail file, the estimate's per-query table (§7) against what turned on:
   each cell the estimate called FLIP and stayed off, and each it did not call FLIP and turned on,
   gets one line with its cause; each NEXT ISSUE confirmed or not; the eight checkable statements
   (§8) answered true or false.
-- [ ] **Step 2:** the closed tickets archived (`archive/archived-tickets.md`) — #155, #152, #173,
+- [x] **Step 2:** the closed tickets archived (`archive/archived-tickets.md`) — #155, #152, #173,
   #212, #159, #59, #80, #137, #220, #190, #207, #208, #136, #153, #160, #215, #63, #154; any ticket
   a cell met filed with its query and mode.
-- [ ] **Step 3: Commit.** `git commit -m "join-backend: the estimate compared, the record"`.
+- [x] **Step 3: Commit.** `git commit -m "join-backend: the estimate compared, the record"`.

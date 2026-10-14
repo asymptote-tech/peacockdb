@@ -27,6 +27,170 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t155"></a>
+### #155 — umbrella: join execution through a wider C and FlatBuffers API
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+Every join ran on the frozen surface, and this ticket weighed what that cost. Joins now run as a
+session: four `peacock_join_*` symbols and one `CudfJoin` table replace the three old tables, the
+recipe choreography and `join.cpp`. Four of its five costs are gone — the build copy, the probe
+copy, the per-batch rebuild, and the resident probe keys with their finish join. The fifth, a
+symbol per runtime-varying parameter, stands in `architecture.md` ("What the frozen surface costs").
+
+<a id="t152"></a>
+### #152 — GpuHashJoin: the build handle does not survive a streamed probe
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+`execute_node` consumed the build handle on the first probe call, so a build side probed by B
+batches was needed B times and existed once, and Left and Full had no device path. The session
+owns the build table across calls, so nothing is copied and every probe streams on both engines.
+Every registry row that carried it ran on the device in plan task 14; none carries it now.
+
+<a id="t153"></a>
+### #153 — equi-join residual filter is applied after the outer gather
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+Left, Right and Full masked the residual after padding, so the ON condition acted as a WHERE.
+The session decides the residual per key-matched pair before it pads (`join_residual.cpp`), and
+the cpu hands it to DataFusion's join. pbench's `left-`, `right-` and `full-join-residual` answer
+as DuckDB on both engines at all five modes.
+
+<a id="t80"></a>
+### #80 — Anti-join NOT IN three-valued logic + independent DuckDB result oracle
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+No `null_equality` setting gives `NOT IN` its meaning. The planner's rule (`planner/not_in.rs`)
+rewrites a `NOT IN` on a filter's AND/OR spine whose operands can be NULL into anti joins that are
+exact there; off the spine a nullable `IN` is refused on [#250](../tickets/joins.md#t250). pbench's
+seven rows answer as DuckDB on both engines, but `not-in-uncorrelated` at tp4, refused on
+[#267](../tickets/corpus-coverage.md#t267). The oracle half was [#235](#t235).
+
+<a id="t59"></a>
+### #59 — Nullable-key semantics for semi/anti/mark joins
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+The device hardcoded `EQUAL` for anti and mark joins, so it disagreed with the cpu under the SQL
+default. Every join type honours `null_equals_null` on both engines now, and `NOT IN` is the
+planner's rewrite ([#80](#t80)). The nine `bug_…null_key…` pins flipped to the right answer.
+
+<a id="t215"></a>
+### #215 — a left nested-loop join over a predicate the AST cannot take is refused on the device
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+The cross-then-mask path was written for Inner alone. The session splits the condition, runs the
+AST-able conjuncts as a conditional join and masks the rest over chunked index pairs, for every
+type. pbench's `nl-left-decimal` answers as DuckDB on both engines at all five modes.
+
+<a id="t208"></a>
+### #208 — the cpu's cross join answers nothing over a zero-row build side
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+`CrossJoinExec` ended its stream without a batch over an empty build, where the device answered
+a zero-row table. The cpu's join now answers one batch per call, a zero-row one where no chunk
+came, as the device does. The node pins flipped. `pbench/cross-empty-build` still meets
+[#256](../tickets/joins.md#t256) at plan time.
+
+<a id="t207"></a>
+### #207 — both backends drop a cross join's projection
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+`CudfCrossJoin` had no projection field and `CrossJoinExec` takes none. `CudfJoin` carries the
+projection for all three plan nodes and the session applies it; the cpu wraps the cross join in
+a projection. pbench's `cross-projection` answers on both engines at all five modes.
+
+<a id="t190"></a>
+### #190 — the CPU backend drops a nested-loop join's projection
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+The cpu passed `None` for `NestedLoopJoinExec`'s projection. It passes the node's now. tpch q11
+and q22, tpcds q24 and q54, and pbench's `nl-inner`, `nl-left`, `nl-projection` and
+`nl-left-decimal` answer on both engines. q11's and q22's device cells off at tp4 are
+[#199](../tickets/corpus-coverage.md#t199)'s; `like-column-pattern`'s device cells are
+[#246](../tickets/joins.md#t246)'s.
+
+<a id="t63"></a>
+### #63 — a zero-column placeholder survives the cross join and shifts every ordinal above it
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+The device's hidden `__rowcount__` reached the cross join's output and shifted every ordinal above
+it. The plan declares the marker now: a project of `Int8 0 AS __rowmarker__` where DataFusion has
+no column, `CudfScan.rows_only` for a scan of none, and a keyless join drops it through its
+projection. Validation refuses a zero-column schema and the device an empty project. tpcds q9
+answers on the device at all five modes; `scalar-subquery-cross` at tp1, its tp4 cells on
+[#199](../tickets/corpus-coverage.md#t199).
+
+<a id="t212"></a>
+### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+`without_build` refused a lane with no build batch where the answer owed was every probe row.
+Both engines answer `set_build(None)` as an empty build: Right and Full pad every probe row,
+RightAnti returns it. `without_build`, `feeds_owing_build` and the driver's scatter-drop exception
+are gone. tpcds q77 runs past it, its device cells off on [#65](../tickets/corpus-coverage.md#t65);
+pbench's `sparse-build-*` rows answer.
+
+<a id="t173"></a>
+### #173 — a finish whose probe produced no keys refuses what it could answer from the build side
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.** The collapse half
+was done 2026-08-25, below.
+
+`finish_without_keys` refused Left, Full, LeftSemi and LeftMark, and answered LeftAnti unprojected.
+It is gone: a lane that owes rows is finished through the session whether or not a probe batch
+came, and the finish answers from the build side and its matched column. The one-call finishing
+joins the ticket left open no longer exist, since every type streams.
+
+<a id="t136"></a>
+### #136 — GpuHashJoin: build-side match tracking when the probe side streams
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+"Which build rows matched" never crossed the ABI, so the recipe kept probe keys and ran a second
+join at the finish. The session keeps a build-matched column across probe calls, set by the pairs
+that passed, and the finish reads it. `test_join_session.cpp` pins it over three probe batches
+with a zero-row batch between.
+
+<a id="t137"></a>
+### #137 — the planner does not drop null join keys before the shuffle
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+Every NULL key hashed to one lane and matched nothing there. The translator puts
+`GpuFilter(<key> IS NOT NULL)` under a shuffled side whose unmatched rows are never emitted,
+wherever the data can hold a NULL: 74 tpcds plans and tpch q2 and q15 at the tp4 modes, the
+cost rise the board accepted. The two halves the ticket set aside, scattering a preserved side's NULL rows and
+an adaptive filter, are not filed: no query needs them.
+
+<a id="t159"></a>
+### #159 — RightSemi/RightAnti with a residual filter has no cuDF path
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+No swapped `mixed_*` call exists, so the planner refused the shape. The session calls
+`mixed_left_semi_join` with the probe as cuDF's left side, or takes the pairs path; the cpu is
+DataFusion's own join. pbench's `probe-exists-residual` and `probe-not-exists-residual` answer as
+DuckDB on both engines at all five modes.
+
+<a id="t160"></a>
+### #160 — nested-loop join supports Inner and Left only
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
+
+A mask over a cross product cannot emit the rows an outer or semi form owes. The session answers
+all nine types: conditional joins over the AST-able conjuncts with a matched column, chunked index
+pairs for the rest. pbench's seven `nl-*` rows answer as DuckDB on both engines at all five modes.
+
+<a id="t220"></a>
+### #220 — the cpu's joins answer several batches per call where the device answers one
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md); awaiting merge.**
+
+The cpu handed up DataFusion's chunks one batch apiece, so every node above a join disagreed with
+the device's golden. The cpu's join is one stream per lane whose call concatenates what it reads
+into one batch, and `ProbingJoin` returns `Option`, so the rule is in the type on both engines.
+Every row that carried it ran on the device in plan task 14.
+
+<a id="t154"></a>
+### #154 — join.cpp's exit paths deep-copy their output into a fresh table
+**Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.** The other eleven sites went with [`exit-copies`](../tasks/exit-copies.md).
+
+`join.cpp` is deleted. The session moves its gathered columns into its output, and
+`JoinSession.AProbeHandsItsGatheredColumnsOverWithoutACopy` bounds the peak and the net both ways.
+
 <a id="t145"></a>
 ### #145 — Refcounted handles: stop copying every partition out of a scatter
 **Done 2026-10-09 by [`refcounted-scatter`](../tasks/refcounted-scatter.md), PR #173; awaiting merge.**
@@ -110,7 +274,7 @@ bit-casts each unit to `INT64` under a live gate.
 `timestamp-ns-key-group`, all five device cells on each — which is what proves the key itself
 hashes. `timestamp-s-key-group` is off on [#264](../tickets/corpus-coverage.md#t264): it reaches
 the aggregate through `arrow_cast`, and the device refuses a group key that is not a bare column.
-`ts-key-join` is off on [#152](../tickets/joins.md#t152) and [#220](../tickets/joins.md#t220).
+`ts-key-join` is off on [#152](#t152) and [#220](#t220).
 tpch and tpcds have nothing here; they use `Date32`.
 
 <a id="t95"></a>
@@ -129,8 +293,8 @@ key to `Decimal128(38, s)` before calling comet, and the kernel hashes the same 
 longer matches Spark's at precision ≤ 18, deliberately.
 
 **Corpus queries:** `pbench/decimal15-key-group` and `decimal38-key-group`, all five device cells
-on; `decimal15-key-join` is off on [#152](../tickets/joins.md#t152) and
-[#220](../tickets/joins.md#t220), not on this. Eight tpch and tpcds rows carried `95` and no
+on; `decimal15-key-join` is off on [#152](#t152) and
+[#220](#t220), not on this. Eight tpch and tpcds rows carried `95` and no
 longer do — `tpcds/q24`, `q37`, `q75`, `q82` and `tpch/q2`, `q10`, `q15`, `q18`. On six of them
 `95` could never have been the blocker: `q24`'s cpu side is off on #190 so no device cell is
 declarable, and the other five have `gpu_tp1_single` off too, where one lane hashes nothing. On
@@ -156,7 +320,7 @@ whole in one lane — hash keys a *subset* of the group columns, the merge still
 That turned on 18 cells over `tpch/rollup-over-join`, tpcds q5, q18, q22, q80 and
 `pbench/rollup-small-keys`. The other 6, `pbench`'s `uint-key-group` and `uint-key-join`, reached
 the same refusal by a plain unsigned user key and wanted the unsigned arm itself, which the same
-task added. tpcds q77 never met this ticket: [#212](../tickets/joins.md#t212) is all that holds
+task added. tpcds q77 never met this ticket: [#212](#t212) is all that holds
 it.
 
 <a id="t259"></a>
@@ -618,8 +782,7 @@ off and no outcome but a pool that the harness will record.
 
 ### #173 (done half) — a collapse of nothing answers with a table that has no columns
 
-The finish half of this ticket stays open as [#173](../tickets/joins.md#t173); the anchor is
-there.
+The finish half is done too, as [#173](#t173) above, which holds the anchor.
 
 `GpuCoalesceAllBatches` over a lane that received no batch returns a handle whose table carries
 zero columns, so the export decodes a batch whose first column is out of bounds.
@@ -864,7 +1027,7 @@ q77 q79 q80 q90, `tpch` hash-join q10 q18. `aggregate-state-types`'s, 2026-09-17
 `q48` and `q93` are also the first cells in this rollout where a device COMPLETED a plan and the
 golden caught the disagreement — every other device failure so far has been a refusal.
 
-**Stale 2026-09-28.** A duplicate of [#220](../tickets/joins.md#t220). `in_rows` is the driver's
+**Stale 2026-09-28.** A duplicate of [#220](#t220). `in_rows` is the driver's
 sum over the batches a node takes, the same on both engines. The cpu's join split its output into
 more batches, so the aggregate over it made more partials; the merge's `in_rows` was the first line
 the golden comparison printed. Its evidence and registry rows moved to #220.

@@ -331,7 +331,7 @@ F12. **Modelling the wire found a defect in the shipping engine, not in the mode
    recipe backend, since retired, reproduced the old hash-join operator branch for branch,
    so where it disagreed with the SQL oracle the disagreement belonged to the C++: an outer
    join's residual filter was applied after the outer gather and dropped the rows the outer
-   join exists to keep ([#153](../../llm-wiki/tickets/joins.md#t153)). Reproducing a code path faithfully is
+   join exists to keep ([#153](../../llm-wiki/archive/archived-tickets.md#t153)). Reproducing a code path faithfully is
    worth more than implementing it correctly — a correct model would have hidden this. The
    join session decides the residual per pair, and the case that pinned the defect now
    counts the padded rows: `test_a_left_join_pads_the_build_rows_its_residual_rejects`.

@@ -34,8 +34,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
-- [Performance](#performance)
-  - [#154 — join.cpp's exit paths deep-copy their output into a fresh table](#t154)
 - [Testing](#testing)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
@@ -710,34 +708,6 @@ the joins they test. Simplest: `select count(*) from nation where n_nationkey < 
 **Fix proposed:** a scan with no survivors plans one lane that holds no batch, so its executors
 make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
 every node answer right. In keyless-identity.
-
-## Performance
-
-Tickets pulled ahead from the performance path to fix earlier
-
-<a id="t154"></a>
-### #154 — join.cpp's exit paths deep-copy their output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and ten sites in
-`join.cpp` still do it, mostly to a table the same function just produced. An engine running
-a node once per query would pay that once; this one pays it once per node per *batch*.
-
-`execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
-each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). Three kinds: whole table freshly produced (202, 337, 342, 512, 515), which
-`release()` moves instead; ordinal subset (211, 270, 376, 525), which `TableResult::select`
-shares; and a column of an **input** table kept in the output (259), which shares the input's
-owner. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
-ordinal moved twice leaves a hole — a wrong answer, not a throw. [`join-session-cpp`](../tasks/join-session-cpp.md)
-built the session beside this file, carrying none of these copies, and one allocation bound in
-`test_join_session.cpp` holds it to that. `join-backend` deletes `join.cpp` with the three old
-nodes and closes this; land before [#155](joins.md#t155).
-
-The other eleven sites are gone or justified, by [`exit-copies`](../tasks/exit-copies.md): six
-lost their copy — `expr.cpp`'s `ColumnRef` arm (now `evaluate_column`, a view of the input's own
-column), `filter.cpp`'s fused projection, `project.cpp`'s and `window.cpp`'s input columns, and
-`aggregate.cpp`'s two groupby key tables — and five keep it, the four Welford struct members
-because `cudf::make_structs_column` owns its children, and the merged-state child because up to
-three builds read one struct, a child each.
 
 ## Testing
 

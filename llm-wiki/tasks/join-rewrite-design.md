@@ -5,7 +5,7 @@ Draft under discussion with the human; uncommitted until the chain's specs are f
 its lasting parts move into `architecture.md` (Joins) and this file goes to the archive.
 
 Tickets: [`joins.md`](../tickets/joins.md) in full, umbrella
-[#155](../tickets/joins.md#t155). Every non-join node keeps the recipe architecture; joins leave it.
+[#155](../archive/archived-tickets.md#t155). Every non-join node keeps the recipe architecture; joins leave it.
 
 ## 1. ABI and FlatBuffers — approved
 

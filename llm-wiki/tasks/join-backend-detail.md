@@ -2858,3 +2858,195 @@ step 1 that landed in plan task 8. "Off" lists only cells on a row this task wor
 
 Against the estimate's tpch-and-tpcds prediction: gpu 431 FLIP categorically (about 306 weighted),
 472 measured. cpu 23 predicted for tpch and tpcds, 23 measured.
+
+#### Round 2, plan task 15 — nothing of the old join path survives
+
+**What shipped.**
+- **C++.** `cpp/src/operators/join.cpp` deleted (540 lines: `execute_hash_join`,
+  `execute_cross_join`, `execute_nested_loop_join`) with its `cpp/CMakeLists.txt` line, its three
+  `operators.h` declarations, its three `dispatch.cpp` arms and names, and the three
+  `node_children` arms in `node_session.cpp`. The map arm's mismatched-partition refusal stays, as a
+  guard for any multi-child node, and loses its "multi-partition joins are not implemented yet"
+  clause.
+- **fbs.** `CudfHashJoin`, `CudfCrossJoin` and `CudfNestedLoopJoin` removed, tables and union
+  members. The union is renumbered, so every payload digest moved: all 22 `sha256=` lines of
+  `recipe-payloads.txt`, rewritten under `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1`, and
+  nothing else in that file or any other golden. Red first: the plain run failed
+  `the_payload_golden_carries_what_each_call_hands_the_executor` on the digests alone.
+- **Rust.** `wire/fb_text.rs` and `wire/read.rs` lose their arms for the three tables, and `read.rs`
+  its `pair` helper, which only they called. Comments: `plan_goldens.rs` (the coverage case's
+  `CudfHashJoin{LeftAnti}` example, "ten mode goldens", "both project roles"),
+  `memory_estimation.rs` (a history clause), `wire/writer.rs` (`CudfScan` called the only leaf
+  beside `left`/`right` tables), `tests/end_to_end.rs` (q77 "refused by name" on #212, which
+  closed), `test_join_session.cpp` (`join.cpp` named as the copy's site).
+- **Already gone before this task, each checked:** `wire/join.rs`'s recipe writers, `attach.rs`'s
+  `cross_join`, the join `Input`s and `ProjectRole`s and `FbKind`s, `NestedLoopJoinType`,
+  `empty_build_answers_nothing`, `feeds_owing_build` and the scatter-drop exception (the emitter's
+  drop is unconditional, `partitioned.rs`), `dimensions.rs`'s use of them, the cpu's `Calls`,
+  `GpuJoin`'s call lists, `planner/nulls.rs`, the probe-side coalesce, and exec_model's recipe join.
+- **One C++ warning that was not the join's.** `expr.cpp` forward-declared a
+  `build_column_binary(const fb::Expr*, …)` that nothing defines (the definition takes a
+  `BinaryExprNode`), the one `-Wunused-function` in the tree. The declaration is deleted.
+
+**Step 2's checks, quoted for the PR.** Each exits 1 with no output, on the final tree:
+
+```
+$ git grep -nE 'BuildSideCopy|BatchCopy|AccumulatedKeys|Input::BuildSide\b|ProbeKeys|NullPad|ProjectRole::Narrow' -- peacockdb-core scripts
+$ git grep -nE 'FbKind::(HashJoin|CrossJoin|NestedLoopJoin)|CudfHashJoin|CudfCrossJoin|CudfNestedLoopJoin' -- peacockdb-core cpp flatbuffers scripts
+$ git grep -nE 'execute_(hash|cross|nested_loop)_join|without_build|feeds_owing_build|empty_build_owes_its_probe' -- peacockdb-core cpp scripts
+$ git grep -nE 'copy_of|build_copy|finish_without_keys|answers_in_one_call|per_call_join_type|finish_join_type|refuse_null_unsafe_joins|copy_handle|recipe_join' -- peacockdb-core scripts
+$ git grep -n 'multi-partition joins are not implemented' -- cpp
+```
+
+Before this task the second named the fbs tables, `dispatch.cpp`, `node_session.cpp`, `join.cpp`,
+`operators.h`, `fb_text.rs`, `read.rs` and a `plan_goldens.rs` comment; the third `join.cpp`,
+`dispatch.cpp` and `operators.h`; the fifth `node_session.cpp:665`.
+
+**The dead-code counts.**
+- **C++: 0.** No `-Wall` in `cpp/CMakeLists.txt`, so the count is taken by recompiling every
+  translation unit `ninja -t commands` lists for `peacock_gpu`, `peacock_plan_tests`,
+  `peacock_join_session_tests`, `peacock_cpu_tests` and `peacock_gpu_tests` (22 of them) with
+  `-fsyntax-only -Wunused-function`: 1 once `join.cpp` was gone (not measured with it), 0 after
+  the `expr.cpp` fix. The `.cu` kernel is not
+  in the count.
+- **Rust: 25, none of them the join's.**
+  `CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh build -p peacockdb-core --features gpu 2>&1 | grep -c 'never used\|never constructed'`
+  gives 25. Every one is instrumentation that only test and benchmark binaries call — timing,
+  NVTX, the RMM pool, measurements — in `executor/{mod,instrument}.rs` and
+  `executor/driver/{mod,measurements,index}.rs`, files this branch has not changed since
+  `3d9a122e`. The plan's "is 0" was never true of the crate; the join half of it is.
+  `coding-style.md` calls such a warning the honest signal, so nothing was done to it.
+- **A trap, paid for once.** To count at HEAD I built a `git archive` of it with the workspace's
+  `target-cudf-rapids-cuda-12.2`. The two build scripts bake `CARGO_MANIFEST_DIR` in, so the shared
+  dir then pointed at the deleted copy and the next workspace build failed in cmake. `cargo clean -p
+  peacockdb-ffi -p peacockdb-core` in that dir (locally, 10.4 GiB) restored it. Count at HEAD not
+  taken; never share a target dir with another tree.
+
+**The wiki.**
+- `architecture.md`'s Joins section rewritten from the design and the code: the session on both
+  engines, the type table, the matchers, NULL keys, the empty build and `owes_nothing`, pricing,
+  where the sides run, #137's filter, and the planner's three rewrites (`NOT IN`,
+  `__rowmarker__`, `GpuEmpty`). Every sentence the rounds listed as falsified is fixed: the node
+  table (`GpuHashJoin`'s row, a `GpuEmpty` row), the hash-skew exception, the measured memory rule
+  on a build-preserving join's residency and the scatter-lane clause, the determinism paragraph
+  (spec risk 6: the same rows in the same batches, not the same order, and the order guard), the
+  zero-row breaks, the wire kind count (3 of 13 unwritten), both seq tables, the `CudfScan` and
+  `CudfProject` rows, "What the frozen surface costs", the column-index table and counts (19 and
+  32), the cuDF options rows, and the flat-buffer field table. "Join types and NULL key equality"
+  is gone into the Joins section. The page is 8 lines shorter.
+- `reports/hacks-audit.md`: P1 resolved (its #199 half still open), and the Joins section is one
+  resolved line each for 5, 11, 12, P4, P8, P9, P10, P13.
+- `build-test.md`: the Join session row loses two history clauses. No count moved: the binaries
+  ran the counts the page has.
+- Not done here: `join-rewrite-design.md` to the archive (spec step 9). The helper archives specs at
+  merge, and code comments still cite its sections.
+
+**Red-green.** A removal has no red of its own. The payload digests went red before their rewrite,
+and the five greps were non-empty before and empty after.
+
+**Local, rust-only, fresh on the final tree:** `--lib` 761 passed, 2 ignored; `test_cpu_corpus`
+1960; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage`
+11; `test_golden_format` 43; 0 failed, no warning. `/tmp/dkb-cppbuild` built `peacock_gpu` and the
+four test binaries with no warning; `peacock_cpu_tests` 15 passed. Nothing under `scripts/` but a
+README moved, so exec_model's pytest was not re-run.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base 889ca031`: 853 compared, 0
+changed, 0 regressions.
+
+**The device run, recorded.** nebius-gpu, NVIDIA L40S, 0 MiB in use; cuDF 25.02. The final tree
+synced with the board's rsync line (`join.cpp`'s deletion carried by `--delete-after`), then
+`./scripts/build-test-shadgpu.sh --build` rc 0 with no warning in its log; the 14 changed code
+and golden files have the same md5 on both sides. Every binary the override lists, run directly,
+`--test-threads=1` on the Rust ones. **1,594 cases, all green:**
+
+| binary | passed |
+|---|--:|
+| `peacock_gpu_tests` | 2 |
+| `peacock_plan_tests` | 81 |
+| `peacock_join_session_tests` | 53 |
+| `test_gpu_corpus` | 765, 692 s |
+| `test_node_timing` | 1 |
+| `peacockdb_core_gpu_lib gpu_tests::` | 684 |
+| `peacock_gpu_benchmarks --skip bench_` | 8 |
+
+Not run, per the override: the sf40 pair and the `bench_` cases. Disk 27–28 GB free of 96 before
+and after; nothing deleted there. Logs: `~/t15-build3.log`, `~/t15-dev/`.
+
+**A slip, reverted.** One `git rm --cached` on `join.cpp` touched the index; `git restore --staged`
+put it back at once, and the index matches HEAD.
+
+#### Round 2, plan task 16 — the estimate compared, and the record
+
+Markdown only. Scored against the registry at the end of plan task 14 (`889ca031`) and against
+the estimate's base `fc3b0b55`, by script (`csv` over `cost-registry.csv` at both revisions).
+The estimate counts tpch and tpcds only; pbench is outside it.
+
+**§7, each miss with its cause.** Every other cell §7 called FLIP turned on, and no other cell
+turned on.
+- **tpch q11 at 4s, 4r, 4z and q22 at 4s — FLIP (M-L), stayed off on #199.** §3's scan of the
+  tp4 cpu goldens ran while their cpu cells were off on #190, so the sections it would have read
+  did not exist. Plan task 8 wrote them, and the keyless merge over an empty lane is in them.
+- **tpch q7, q8, q9, all five modes — STAY on #191, turned on.** #191 closed on master
+  (`5a1eac45`) after the estimate was taken.
+- **tpch's 25 STALE cells** (q4, cross-join, nested-loop-left-join, semi-join, anti-join at
+  1r/4s/4r/4z; q15 at 1r; nested-loop-join at 1r/4s/4r/4z) **— turned on.** The spec told this task
+  to run them; §6 had said FLIP (M) if run.
+- **tpcds q66, all five modes — STAY on #55, turned on.** #55 was stale, as §4 and its own text
+  suspected; the cells met DuckDB under the line's #251 oracle. #55 stays open for its walk test.
+
+**NEXT ISSUE, each confirmed.**
+- tpch rollup-over-join ×5 on #65: confirmed, at the schema hook (`__grouping_id: UInt8 vs INT32`).
+- tpcds q78 ×5 on #60: confirmed, five `ratio` cells one ulp off, as #60's emulation said.
+- tpcds q32 at 4s/4r/4z on #199: confirmed, the merge reading `[[1]]` against `[[4]]`.
+- The next issues behind STAY rows: q2 → #60 confirmed, #56 never showed; q5 → #210 confirmed,
+  ahead of #65; q17 → #225 confirmed at the tp1 modes, its tp4 cells pass; q39 → #225 confirmed,
+  ahead of #57; q7/q8/q9 → #191 alone, confirmed by their turning on once it closed.
+- "Not ruled out": the Float64→Decimal128 residual thresholds (q1, q30, q81, q32, q92, q58) did
+  not show: q32's three tp4 cells failed on #199 alone, and every other cell of those queries passed.
+
+**§8, the eight statements.**
+1. **True.** cpu: 551 on at `fc3b0b55`, 589 now, exactly the 38 FLIP cells turned on (q11, q22,
+   q24, q54 ×5; rollup-over-join, q5, q18, q22, q80, q77 at the three tp4 modes), none off. The 11
+   off are tpcds q88/q90/q96 at tp4 and tpch scan-limit at 1s/1r.
+2. **True.** The 13 NEXT cells are off with `65`, `60` and `199` on their rows.
+3. **False.** Of the 89 STAY cells, 20 turned on: q7/q8/q9 (#191 closed) and q66 (#55 stale). The
+   STALE clause holds as conditioned: all 41 turned on because tasks ran them — 16 in stale-cells,
+   25 here.
+4. **False.** The device column is 514 on of 600 (tpch 171, tpcds 343), above the 290–400 range.
+   Of the 431 FLIP cells, 427 turned on, not about 306. Its shortfall clause is true in letter:
+   the four FLIP cells off are on q11 and q22, which it names — but for #199, which it does not.
+5. **True.** No cell on at `fc3b0b55`, on either engine, is off now. R1 to R8 did not turn a cell off.
+6. **False in its first clause, true in the other three.** tpch q2 and q15 gained #137 filters at
+   the three tp4 modes (one and two filter lines): they join on an aggregate's output, which
+   `can_be_null` counts as possibly NULL. Plan task 3 recorded it. q16's and anti-join's plan trees
+   are unchanged at all five modes. tpcds q9's 15 `GpuCrossJoin` lines are 15 `GpuNestedLoopJoin`
+   over `true` at every mode. nested-limits' region scan declares `schema=[__rowmarker__:Int8]`.
+7. **True.** `git diff fc3b0b55` over tpch's and tpcds's `mini.result.txt` removes no value line:
+   only `mode=` stamps change and `skipped:` stubs become answers. No cell duckdb-oracle enabled is
+   off (statement 5's check covers it).
+8. **Not decidable yet.** verify-26.02 has not run.
+
+**Against the totals.** gpu: 431 FLIP predicted categorically for tpch and tpcds, about 306
+weighted; 472 turned on by this task (427 FLIP, 20 STAY, 25 STALE). cpu: 23 predicted for this
+task in tpch and tpcds, 23 measured; 48 with pbench's five `190` rows, as §2's note says, and
+measured 48.
+
+**The record.** The eighteen tickets moved to `archive/archived-tickets.md`, Done 2026-10-14, each
+saying what fixed it, in the order the spec closes them: #155, #152, #153, #80, #59, #215, #208,
+#207, #190, #63, #212, #173, #136, #137, #159, #160, #220 from `tickets/joins.md`, and #154 from
+`tickets/corpus-coverage.md`. `joins.md` keeps five tickets (#243, #245, #246, #250, #256) under a
+new header; its rewrite-era preamble said the work was still to come. `corpus-coverage.md` loses
+its Performance section, #154 its only ticket. `tickets.md`: 124 → 106 open, joins 22 → 5,
+corpus-coverage 33 → 32, each row's count, list and anchors checked equal by script. The old
+"#173 (done half)" entry now points at the new #173. No ticket filed: every cell that met an issue
+met an open ticket, and #267 was filed in plan task 9. Next free is still **268**.
+
+**Links moved to the archive**, every one to the eighteen across `llm-wiki/` and the code:
+`archive/archived-tickets.md` (5, now in-page), `tasks/join-backend.md` (15), `join-session-cpp.md`
+(5), `tasks.md` (2, the board line), `exit-copies.md`, `join-rewrite-design.md`,
+`reports/join-rewrite-cell-estimate.md`, `tickets/complete-coverage.md` (three in-page anchors to
+#59, #80 and #137 that never resolved there), `df-upgrade.md`, `optimizer.md`, and
+`scripts/exec_model/README.md`. The frozen specs got link targets only. `architecture.md` and
+`build-test.md` name #136, #137 and #154 without a link, so task 15's commit stands on its own.
+`git grep -nE 'joins\.md#t(155|152|153|80|59|215|208|207|190|63|212|173|136|137|159|160|220)\b|corpus-coverage\.md#t154\b|\]\(#t(…)\)'`
+over `llm-wiki scripts peacockdb-core cpp` is empty outside the archive.

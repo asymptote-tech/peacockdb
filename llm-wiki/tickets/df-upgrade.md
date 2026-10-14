@@ -173,7 +173,7 @@ plan still carried the filter and sent the reader to physical planning, which wa
 Why it is ours and not only theirs: DataFusion at `target_partitions = 1` is the corpus' cpu
 oracle (`corpus.rs::assert_answer`), so a query this reaches would be checked against the wrong
 answer and agree with it. Today the engine refuses the plan — `unsupported: plan node EmptyExec`,
-[#155](joins.md#t155) — so no wrong answer is served. That arm lands in join-backend, and the
+[#155](../archive/archived-tickets.md#t155) — so no wrong answer is served. That arm lands in join-backend, and the
 `NOT IN` rule landing with it is what keeps the filter form from answering 0 rows to a user; the
 corpus note below has the measurement for every other shape. The DuckDB oracle ([#235](../archive/archived-tickets.md#t235)) is what caught it,
 and is the only thing that could have.
