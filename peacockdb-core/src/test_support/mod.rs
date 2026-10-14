@@ -313,6 +313,8 @@ pub struct CorpusDeclaration {
     pub query: &'static str,
     pub cpu_oracle: &'static str,
     pub gpu_oracle: &'static str,
+    /// The line's last argument, as written: `schema_validation_enabled|disabled`.
+    pub schema_validation: &'static str,
 }
 
 inventory::collect!(CorpusDeclaration);
@@ -329,6 +331,11 @@ pub struct CsvRow {
     pub plan_status: String,
     pub features: Vec<String>,
     pub tickets: Vec<String>,
+    /// The `corpus_query!` line's two oracles and its schema validation (`enabled|disabled`),
+    /// copied here so the widget can show them; all three `na` for a query with no line.
+    pub cpu_oracle: String,
+    pub gpu_oracle: String,
+    pub schema_validation: String,
 }
 
 /// The spelling everything but the CSV uses. The CSV's query column is a Rust identifier —

@@ -21,10 +21,10 @@ use peacockdb_core::test_support::{
 /// disagree with the other about which query exists.
 macro_rules! corpus_query {
     ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
+        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle, $validation);
     };
     ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle);
+        declare_corpus_query!($dataset, $sf, $query, $cpu_oracle, $gpu_oracle, $validation);
         $(
             paste::paste! {
                 #[tokio::test]
@@ -54,9 +54,10 @@ macro_rules! corpus_query {
 }
 
 /// The line itself, submitted by both arms — a query with no enabled mode still declared
-/// two oracles, and the pairing between them is a property of the line rather than of a run.
+/// two oracles and a schema validation, and the pairing between the oracles is a property of
+/// the line rather than of a run.
 macro_rules! declare_corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         inventory::submit! {
             CorpusDeclaration {
                 dataset: stringify!($dataset),
@@ -64,6 +65,7 @@ macro_rules! declare_corpus_query {
                 query: stringify!($query),
                 cpu_oracle: stringify!($cpu_oracle),
                 gpu_oracle: stringify!($gpu_oracle),
+                schema_validation: stringify!($validation),
             }
         }
     };
@@ -157,6 +159,59 @@ fn each_declarations_two_oracles_suit_each_other() {
             ));
         }
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The registry's last three columns are a copy of each `corpus_query!` line's oracles and
+/// schema validation, held to the lines in both directions: every line's row says what the
+/// line says, and every row that names an oracle has a line. The widget reads the copy, so a
+/// line edited without its row would show a reader an oracle no test uses.
+#[test]
+fn the_registry_carries_each_lines_oracles_and_schema_validation() {
+    let rows = load_csv();
+    let mut wrong: Vec<String> = Vec::new();
+    let mut declared = std::collections::BTreeSet::new();
+    for line in inventory::iter::<CorpusDeclaration> {
+        let key = (line.dataset, line.sf, line.query);
+        declared.insert(key);
+        let validation = line
+            .schema_validation
+            .trim_start_matches("schema_validation_");
+        match rows
+            .iter()
+            .find(|r| (r.dataset.as_str(), r.sf.as_str(), r.query.as_str()) == key)
+        {
+            None => wrong.push(format!(
+                "{}/{}: a line and no registry row",
+                line.dataset, line.query
+            )),
+            Some(row) => {
+                let got = (
+                    row.cpu_oracle.as_str(),
+                    row.gpu_oracle.as_str(),
+                    row.schema_validation.as_str(),
+                );
+                let want = (line.cpu_oracle, line.gpu_oracle, validation);
+                if got != want {
+                    wrong.push(format!(
+                        "{}/{}: the line says {want:?}, the row {got:?}",
+                        line.dataset, line.query
+                    ));
+                }
+            }
+        }
+    }
+    for row in &rows {
+        let named = row.cpu_oracle != "na";
+        if named && !declared.contains(&(row.dataset.as_str(), row.sf.as_str(), row.query.as_str()))
+        {
+            wrong.push(format!(
+                "{}/{}: the row names {} / {} and no corpus_query! line declares it",
+                row.dataset, row.query, row.cpu_oracle, row.gpu_oracle
+            ));
+        }
+    }
+    assert!(!declared.is_empty(), "no corpus_query! line was collected");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 

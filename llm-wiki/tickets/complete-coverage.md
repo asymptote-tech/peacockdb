@@ -5,16 +5,16 @@ Tickets for MVP SQL functionality milestone
 
 ## Contents
 
-- [#239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device](#t239)
-- [#195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all](#t195)
-- [#161 — aggregate shapes the planner refuses: FILTER, and functions with no decomposition](#t161)
-- [#144 — multiple DISTINCT arguments need a gid-multiplying expand](#t144)
-- [#261 — a `stddev` or `var` beside a DISTINCT is refused at planning](#t261)
-- [#249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`](#t249)
-- [#283 — a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
+- [#239 (date_part as Int16) `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device](#t239)
+- [#195 (corpus shape gaps) the corpus is numeric-aggregate heavy, and six shapes have no query at all](#t195)
+- [#161 (FILTER and agg refusals) aggregate shapes the planner refuses: FILTER, and functions with no decomposition](#t161)
+- [#144 (multiple DISTINCT args) multiple DISTINCT arguments need a gid-multiplying expand](#t144)
+- [#261 (stddev beside DISTINCT) a `stddev` or `var` beside a DISTINCT is refused at planning](#t261)
+- [#249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`](#t249)
+- [#283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
 
 <a id="t239"></a>
-### #239 — `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
+### #239 (date_part as Int16) `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
 DataFusion 45 types `date_part`/`extract` as `Int32`; cuDF's `extract_datetime_component`
 answers `INT16` for every field. Since [#191](../archive/archived-tickets.md#t191) the device arm in
 `build_column_scalar_fn` (`expr.cpp`) casts the component to the wire's `return_type`, one
@@ -28,7 +28,7 @@ where DataFusion and Postgres give a wider integer), every field's cuDF type, an
 corpus goldens move. No wrong answer today; this is a choice about where the type is fixed.
 
 <a id="t195"></a>
-### #195 — the corpus is numeric-aggregate heavy, and six shapes have no query at all
+### #195 (corpus shape gaps) the corpus is numeric-aggregate heavy, and six shapes have no query at all
 Measured off `tp1-single.plans.txt` over the 61 enabled queries and the four largest held
 back: node counts run 33 to 267 while distinct node kinds run 6 to 12, median 9. More corpus
 tests scale, not surface, so each shape below wants a hand-written query over the existing
@@ -45,7 +45,7 @@ tables, no new dataset, plus the engine work it needs.
 - a wide `SELECT DISTINCT`: dedup whose state is the whole row, the compaction worst case.
 
 <a id="t161"></a>
-### #161 — aggregate shapes the planner refuses: FILTER, and functions with no decomposition
+### #161 (FILTER and agg refusals) aggregate shapes the planner refuses: FILTER, and functions with no decomposition
 Two refusals in the aggregate arm. A `FILTER (WHERE …)` clause has no lowering, and an
 aggregate function outside the decomposition registry is refused by name.
 
@@ -58,7 +58,7 @@ they are refusals rather than work.
 
 
 <a id="t144"></a>
-### #144 — multiple DISTINCT arguments need a gid-multiplying expand
+### #144 (multiple DISTINCT args) multiple DISTINCT arguments need a gid-multiplying expand
 **Priority: low** — no query in either benchmark has this shape.
 
 `count(DISTINCT a), count(DISTINCT b)` over different expressions is the one distinct shape the
@@ -75,7 +75,7 @@ ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until
 planner refuses the shape at plan time.
 
 <a id="t261"></a>
-### #261 — a `stddev` or `var` beside a DISTINCT is refused at planning
+### #261 (stddev beside DISTINCT) a `stddev` or `var` beside a DISTINCT is refused at planning
 **Priority: low** — no query in either benchmark has this shape.
 
 `stddev(y), count(DISTINCT x)` does not plan, on either backend. Every other companion of a
@@ -112,7 +112,7 @@ device's missing keyless Welford arm. The `bug_` test flips to a plan test and a
 case.
 
 <a id="t249"></a>
-### #249 — the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
+### #249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type, and writes such a field as `Null`
 The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-35`) stops at `Decimal128`, and
 `serialize_schema` maps any Arrow type it cannot name to `Null` without saying so
 (`wire/serialize.rs:136`). Most device nodes take a column's type from the data, so such a
@@ -133,7 +133,7 @@ struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON
 each declared not runnable on this ticket.
 
 <a id="t283"></a>
-### #283 — a ROLLUP or CUBE over no rows answers no grand-total row
+### #283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row
 **Priority: low** — no query in either benchmark has an empty input under a rollup.
 
 `select a, count(*), sum(a) from (select 1 as a where false) t group by rollup(a)` answers one

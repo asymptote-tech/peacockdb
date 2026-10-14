@@ -1,13 +1,13 @@
 ## Contents
 
-- [#182 — two accounting properties are out of reach, and no budgeted run survives](#t182)
-- [#179 — nothing shows a rebatcher moving an enforced budget boundary](#t179)
-- [#177 — the finish join's intermediate is priced by the node's row, not by what it emits](#t177)
-- [#167 — nothing proves a failed query gives its device memory back](#t167)
-- [#229 — a mid-plan limit's sliced device batch is priced without its string bytes](#t229)
+- [#182 (accounting unreachable) two accounting properties are out of reach, and no budgeted run survives](#t182)
+- [#179 (rebatcher budget proof) nothing shows a rebatcher moving an enforced budget boundary](#t179)
+- [#177 (finish join pricing) the finish join's intermediate is priced by the node's row, not by what it emits](#t177)
+- [#167 (failed query memory) nothing proves a failed query gives its device memory back](#t167)
+- [#229 (limit slice string bytes) a mid-plan limit's sliced device batch is priced without its string bytes](#t229)
 
 <a id="t182"></a>
-### #182 — two accounting properties are out of reach, and no budgeted run survives
+### #182 (accounting unreachable) two accounting properties are out of reach, and no budgeted run survives
 
 Pricing a batch from the plan's schema disabled two cases in `test_cpu_end_to_end.rs`,
 both `#[ignore]`d rather than deleted so they stay in `--list`. Neither property stopped being
@@ -45,7 +45,7 @@ T17a's drain half is untouched: a drained lane changes rows per lane, so q16's 1
 77.9 MB stands.
 
 <a id="t179"></a>
-### #179 — nothing shows a rebatcher moving an enforced budget boundary
+### #179 (rebatcher budget proof) nothing shows a rebatcher moving an enforced budget boundary
 
 Whether batch sizes can reach the accountant's binding pre-call check at all is open: two
 candidates failed structurally rather than by accident, so this is about the model, not a gap.
@@ -63,7 +63,7 @@ the observed peak, so a query whose trip is below it reports an untested floor �
 catches that rather than passing. Answering this needs a downward search, a different claim.
 
 <a id="t177"></a>
-### #177 — the finish join's intermediate is priced by the node's row, not by what it emits
+### #177 (finish join pricing) the finish join's intermediate is priced by the node's row, not by what it emits
 `schema_of` in `gpu_backend/join.rs` prices the finish join's output by the node's output schema.
 The finish emits the whole build side — plus the appended boolean for a mark join — so wherever the
 node carries a projection the resident model sees a narrower row than the device holds.
@@ -78,7 +78,7 @@ Needs a device to check, which is why it is a ticket rather than T17's: a pricin
 run is a second guess on top of the first.
 
 <a id="t167"></a>
-### #167 — nothing proves a failed query gives its device memory back
+### #167 (failed query memory) nothing proves a failed query gives its device memory back
 
 A failed `execute_node` resets the session, which frees every resident table by destruction, and
 the handles that outlive it release into a null-guarded no-op. Neither half is tested.
@@ -94,7 +94,7 @@ executor is reusable, plus one Rust FFI case on shad-gpu. Retry with a smaller b
 [#142](optimizer.md#t142) and is not this.
 
 <a id="t229"></a>
-### #229 — a mid-plan limit's sliced device batch is priced without its string bytes
+### #229 (limit slice string bytes) a mid-plan limit's sliced device batch is priced without its string bytes
 
 A `GpuLimit` that slices a straddling batch on the device prices the slice at its fixed-width
 size alone. Its string payload counts as zero, so the accountant's resident total runs low.

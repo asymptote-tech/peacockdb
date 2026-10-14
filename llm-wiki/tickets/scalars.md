@@ -5,20 +5,20 @@ Tickets related to scalars and functions. These tickets are tied to a milestone 
 
 ## Contents
 
-- [#224 — the device cannot cast an integer to a date](#t224)
-- [#211 — a typed null argument to substr or round is read as 0 on the device](#t211)
-- [#203 — the device cannot cast a number to text](#t203)
-- [#223 — `substr` with a column for its start or length is refused on the device](#t223)
-- [#218 — the device cannot cast text to a date](#t218)
-- [#222 — `round(x, places)` with a column for `places` is refused on the device](#t222)
-- [#221 — `round` over a `Float32` column answers `Float64` on the device](#t221)
-- [#219 — `ILIKE` is case-sensitive on the device](#t219)
-- [#200 — a Date64 comes back as a type the wire cannot name](#t200)
-- [#162 — expression forms the planner refuses](#t162)
-- [#230 — GROUPING() over a subset or reordering of the rollup keys is refused on the device](#t230)
+- [#224 (int to date cast) the device cannot cast an integer to a date](#t224)
+- [#211 (typed null in substr) a typed null argument to substr or round is read as 0 on the device](#t211)
+- [#203 (number to text cast) the device cannot cast a number to text](#t203)
+- [#223 (substr column args) `substr` with a column for its start or length is refused on the device](#t223)
+- [#218 (text to date cast) the device cannot cast text to a date](#t218)
+- [#222 (round column places) `round(x, places)` with a column for `places` is refused on the device](#t222)
+- [#221 (round Float32 type) `round` over a `Float32` column answers `Float64` on the device](#t221)
+- [#219 (ILIKE case-sensitive) `ILIKE` is case-sensitive on the device](#t219)
+- [#200 (Date64 on the wire) a Date64 comes back as a type the wire cannot name](#t200)
+- [#162 (refused expressions) expression forms the planner refuses](#t162)
+- [#230 (GROUPING() key subset) GROUPING() over a subset or reordering of the rollup keys is refused on the device](#t230)
 
 <a id="t224"></a>
-### #224 — the device cannot cast an integer to a date
+### #224 (int to date cast) the device cannot cast an integer to a date
 
 `CAST(i AS DATE)` over an integer column answers on the cpu and is refused on the device:
 `Timestamps cannot be converted to numeric without converting it to a duration`.
@@ -31,7 +31,7 @@ corpus query casts an integer to a date; `date-part-return-type`'s gtests met it
 date from `n_nationkey` and made the date from literals instead. No pin yet.
 
 <a id="t211"></a>
-### #211 — a typed null argument to substr or round is read as 0 on the device
+### #211 (typed null in substr) a typed null argument to substr or round is read as 0 on the device
 
 `build_column_scalar_fn` (`expr.cpp`) reads a literal argument's `int_val()` for `substr`'s
 start and `round`'s places without asking `is_null`, so `substr(s, NULL)` runs as `substr(s, 0)`
@@ -43,7 +43,7 @@ no `bug_` pin yet; the C++ side is unguarded whatever the planner does. `date_pa
 argument refuses an empty string, so it is a refusal there, not a wrong answer.
 
 <a id="t203"></a>
-### #203 — the device cannot cast a number to text
+### #203 (number to text cast) the device cannot cast a number to text
 
 `CAST(key AS VARCHAR)` in a select list answers on the cpu and is refused on the device:
 "cast to STRING from a non-string type not supported in column path".
@@ -58,7 +58,7 @@ Pinned by `bug_a_cast_to_text_is_refused_on_the_device` and
 `bug_a_date_cast_to_text_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t223"></a>
-### #223 — `substr` with a column for its start or length is refused on the device
+### #223 (substr column args) `substr` with a column for its start or length is refused on the device
 
 `substr(s, start, len)` with a column `start` or `len` answers on the cpu and is refused on the
 device: `substr: position/length must be literals`.
@@ -69,7 +69,7 @@ overload. No corpus query reaches it. Seen by `date-part-return-type`'s neighbou
 yet.
 
 <a id="t218"></a>
-### #218 — the device cannot cast text to a date
+### #218 (text to date cast) the device cannot cast text to a date
 
 `CAST(d AS DATE)` over a `Utf8` column answers on the cpu and is refused on the device:
 `cudf::cast` throws "Column type must be numeric or chrono or decimal32/64/128".
@@ -81,7 +81,7 @@ type. The mirror of #203, where the target is the string. No corpus query casts 
 Pinned by `bug_a_text_cast_to_date_is_refused_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t222"></a>
-### #222 — `round(x, places)` with a column for `places` is refused on the device
+### #222 (round column places) `round(x, places)` with a column for `places` is refused on the device
 
 `round(x, n)` with a column `n` answers on the cpu and the device refuses it: `round: decimal
 places must be a literal`.
@@ -94,7 +94,7 @@ agree. No corpus query rounds by a column. Seen by `date-part-return-type`'s nei
 no pin yet.
 
 <a id="t221"></a>
-### #221 — `round` over a `Float32` column answers `Float64` on the device
+### #221 (round Float32 type) `round` over a `Float32` column answers `Float64` on the device
 
 `round(x)` with `x: Float32` is `Float32` on the cpu — DataFusion's signature takes `Float32`
 exactly and declares it — and `FLOAT64` on the device, so the sink refuses the column.
@@ -108,7 +108,7 @@ round decimals. Pinned on `ENS-date-part-return-type` (PR #161) by
 `bug_a_round_over_float32_answers_float64_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t219"></a>
-### #219 — `ILIKE` is case-sensitive on the device
+### #219 (ILIKE case-sensitive) `ILIKE` is case-sensitive on the device
 
 `s ILIKE 'B%'` answers true for `beta` on the cpu and false on the device: the pattern is
 matched as `LIKE 'B%'`.
@@ -121,7 +121,7 @@ count under `WHERE … ILIKE`, and a wrong column in a select list; no corpus qu
 `ILIKE`. Pinned by `bug_ilike_is_case_sensitive_on_the_device` (`gpu_tests/exec_cases.rs`).
 
 <a id="t200"></a>
-### #200 — a Date64 comes back as a type the wire cannot name
+### #200 (Date64 on the wire) a Date64 comes back as a type the wire cannot name
 
 `fb_to_type_id` maps `Date64` to `TIMESTAMP_MILLISECONDS`, and `to_arrow_schema` maps that back to
 `Timestamp(ms, None)`. So a column declared `Date64` is exported as a timestamp.
@@ -144,7 +144,7 @@ tpch q7, q8 and q9's `date_part` answers an integer, not a date. Simplest:
 planner accepts `arrow_cast` is unchecked.
 
 <a id="t162"></a>
-### #162 — expression forms the planner refuses
+### #162 (refused expressions) expression forms the planner refuses
 `TRY_CAST`, the regex match operator, an unrecognized binary operator, and an unrecognized
 expression kind are each refused by name at translation.
 
@@ -155,7 +155,7 @@ belongs to this family but does not parse, so it is reachable only from a constr
 covered as a unit test rather than by a query.
 
 <a id="t230"></a>
-### #230 — GROUPING() over a subset or reordering of the rollup keys is refused on the device
+### #230 (GROUPING() key subset) GROUPING() over a subset or reordering of the rollup keys is refused on the device
 
 `grouping(k1)` over a `rollup (k1, k2)` plans on both engines and is refused on the device's
 first call: `unsupported BinaryOp` or `unsupported scalar type`.

@@ -106,6 +106,26 @@ pub(crate) const FEATURE_CODES: [&str; 15] = [
     "limit_offset",
 ];
 
+/// The last three columns: what a query's `corpus_query!` line declares besides its modes.
+/// The test binary that expands the lines holds them to the CSV, both directions
+/// (`the_registry_carries_each_lines_oracles_and_schema_validation`).
+pub(crate) const DECLARATION_COLUMNS: [&str; 3] = ["cpu_oracle", "gpu_oracle", "schema_validation"];
+
+/// The oracle keywords a `corpus_query!` line accepts, as `cpu_oracle_mode` and
+/// `gpu_result_mode` decode them.
+pub(crate) const CPU_ORACLES: [&str; 3] = [
+    "data_fusion_exact",
+    "data_fusion_approximate",
+    "data_fusion_subset",
+];
+pub(crate) const GPU_ORACLES: [&str; 5] = [
+    "golden_exact",
+    "golden_approx",
+    "golden_approx_std",
+    "live_cpu",
+    "skip",
+];
+
 pub(crate) fn registry_csv_path() -> std::path::PathBuf {
     super::testdata_root().join("cost-registry.csv")
 }
@@ -142,6 +162,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         .into_iter()
         .chain(COLUMNS)
         .chain(["plan_status", "features", "tickets"])
+        .chain(DECLARATION_COLUMNS)
         .collect();
     assert_eq!(
         header, expect,
@@ -238,6 +259,21 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             path.display(),
             i + 2
         );
+        // What the query's `corpus_query!` line says, copied for the widget. A query with
+        // no line — it does not plan — has `na` in all three, and only such a query does.
+        let declared: Vec<&str> = f[6 + COLUMNS.len()..].to_vec();
+        let (cpu_oracle, gpu_oracle, schema_validation) = (declared[0], declared[1], declared[2]);
+        let all_na = declared.iter().all(|v| *v == "na");
+        assert!(
+            all_na
+                || (CPU_ORACLES.contains(&cpu_oracle)
+                    && GPU_ORACLES.contains(&gpu_oracle)
+                    && matches!(schema_validation, "enabled" | "disabled")),
+            "{}:{}: cpu_oracle/gpu_oracle/schema_validation must be all `na` or one of \
+             {CPU_ORACLES:?} / {GPU_ORACLES:?} / enabled|disabled, got {declared:?}",
+            path.display(),
+            i + 2
+        );
         rows.push(CsvRow {
             dataset: f[0].to_string(),
             sf: f[1].to_string(),
@@ -246,6 +282,9 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             plan_status: plan_status.to_string(),
             features,
             tickets,
+            cpu_oracle: cpu_oracle.to_string(),
+            gpu_oracle: gpu_oracle.to_string(),
+            schema_validation: schema_validation.to_string(),
         });
     }
     assert!(!rows.is_empty(), "registry CSV has no rows");
