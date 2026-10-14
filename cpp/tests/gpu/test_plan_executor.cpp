@@ -2363,6 +2363,44 @@ TEST(Literals, ABareTypedNullIsStillNull) {
   EXPECT_EQ(view.null_count(), view.size());
 }
 
+// IS [NOT] DISTINCT FROM against a typed NULL answers a value on every row, never a NULL. An
+// Int64 cast of the key keeps both operands alike, so the AST takes the first; a string
+// operand is what it refuses, so the column path takes the second.
+
+/// Every row of a BOOL8 column with no NULL, as `expected`.
+static void expect_every_row(const cudf::column_view& view, bool expected) {
+  ASSERT_EQ(view.type().id(), cudf::type_id::BOOL8);
+  ASSERT_EQ(view.null_count(), 0);
+  std::vector<uint8_t> host(view.size());
+  cudaMemcpy(host.data(), view.data<bool>(), view.size(), cudaMemcpyDeviceToHost);
+  for (cudf::size_type row = 0; row < view.size(); ++row) {
+    EXPECT_EQ(host[row] != 0, expected) << "row " << row;
+  }
+}
+
+TEST(Literals, IsNotDistinctFromATypedNullIsFalseThroughTheAst) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto key = make_cast_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"), fb::DataType_Int64);
+  auto indf = make_binary_expr(fbb, key, fb::BinaryOp_IsNotDistinctFrom,
+                               make_null_literal(fbb, fb::DataType_Int64));
+  auto buf = nation_project(fbb, indf, "indf");
+  WholePlan plan(buf);
+  auto view = plan.result().view().column(0);
+  ASSERT_EQ(view.size(), 25);
+  expect_every_row(view, false);
+}
+
+TEST(Literals, IsDistinctFromATypedNullIsTrueThroughTheColumnPath) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto idf = make_binary_expr(fbb, make_col_ref(fbb, 1, "n_name"), fb::BinaryOp_IsDistinctFrom,
+                              make_null_literal(fbb, fb::DataType_Utf8));
+  auto buf = nation_project(fbb, idf, "idf");
+  WholePlan plan(buf);
+  auto view = plan.result().view().column(0);
+  ASSERT_EQ(view.size(), 25);
+  expect_every_row(view, true);
+}
+
 TEST(TableResult, SlicesAndSelectionsShareTheirColumnsOwners) {
   std::vector<std::unique_ptr<cudf::column>> cols;
   cols.push_back(int64_column({1, 2, 3, 4}));

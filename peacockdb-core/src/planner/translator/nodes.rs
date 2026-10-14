@@ -9,8 +9,11 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
-use datafusion::common::{JoinType, ScalarValue};
+use datafusion::common::{JoinSide as DfJoinSide, JoinType, ScalarValue};
 use datafusion::datasource::physical_plan::ParquetExec;
+use datafusion::logical_expr::Operator;
+use datafusion::physical_expr::expressions::{BinaryExpr, Column};
+use datafusion::physical_expr::{PhysicalExpr, split_conjunction};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::Partitioning;
 use datafusion::physical_plan::aggregates::AggregateExec;
@@ -35,6 +38,7 @@ use super::common::*;
 use super::expr::translate_expr;
 use super::scan_mapping::{parquet_table_name, partition, survivor_metadata};
 use crate::plan::BatchLayout;
+use crate::plan::JoinFilterColumn;
 use crate::plan::PlanError;
 use crate::plan::ROWMARKER;
 use crate::plan::Schema;
@@ -275,11 +279,55 @@ pub(crate) fn hash_join(
             column_ordinal_of(right, &join.right().schema(), "join key")?,
         ));
     }
+    let residual = match join.filter() {
+        Some(filter) => Some((
+            translate_expr(filter.expression(), filter.schema())?,
+            filter_column_map(filter)?,
+        )),
+        None => None,
+    };
+    keyed_join(
+        t,
+        join,
+        *join.join_type(),
+        KeyedOn {
+            keys,
+            residual,
+            null_equals_null: join.null_equals_null(),
+            projection: projected(join.projection.as_ref()),
+        },
+    )
+}
 
+/// What a hash join is keyed on, whichever DataFusion node it was read from.
+struct KeyedOn {
+    keys: Vec<(u32, u32)>,
+    residual: Option<(Expr, Vec<JoinFilterColumn>)>,
+    null_equals_null: bool,
+    projection: Option<Vec<u32>>,
+}
+
+/// A hash join over `join`'s two sides, built first: the co-partitioning, #137's filters and
+/// the build's one batch per lane.
+fn keyed_join(
+    t: &Translator,
+    join: &dyn ExecutionPlan,
+    join_type: JoinType,
+    on: KeyedOn,
+) -> Result<Box<dyn GpuNode>, PlanError> {
+    let KeyedOn {
+        keys,
+        residual,
+        null_equals_null,
+        projection,
+    } = on;
+    let [left, right] = join.children()[..] else {
+        unreachable!("a join has two sides")
+    };
     // DataFusion collects its left input, so the build side is already left; what the
     // planner adds is the one batch per lane the join reads it as.
-    let mut build = node(t, join.left())?;
-    let mut probe = node(t, join.right())?;
+    let mut build = node(t, left)?;
+    let mut probe = node(t, right)?;
     if !co_partitioned(build.as_ref(), probe.as_ref(), &keys) {
         // DataFusion broadcasts a small build side rather than hashing both, so the
         // sides are not co-located and the engine has no broadcast to do it with
@@ -289,8 +337,8 @@ pub(crate) fn hash_join(
     }
     // #137, before the build is coalesced: the key ordinals index each side's own output,
     // which is the shuffle's input schema.
-    if !join.null_equals_null() {
-        let (drop_build, drop_probe) = null_key_droppable(*join.join_type());
+    if !null_equals_null {
+        let (drop_build, drop_probe) = null_key_droppable(join_type);
         if drop_build {
             let ordinals: Vec<u32> = keys.iter().map(|(build, _)| *build).collect();
             build = drop_null_keys_below_shuffle(build, &ordinals);
@@ -303,27 +351,67 @@ pub(crate) fn hash_join(
     if batches(build.as_ref()) != BatchLayout::SingleBatch {
         build = Box::new(GpuCoalesceAllBatches::new(build));
     }
-
-    let (filter, filter_columns) = match join.filter() {
-        Some(filter) => (
-            Some(translate_expr(filter.expression(), filter.schema())?),
-            filter_column_map(filter)?,
-        ),
+    let (filter, filter_columns) = match residual {
+        Some((filter, columns)) => (Some(filter), columns),
         None => (None, Vec::new()),
     };
     Ok(Box::new(GpuHashJoin::new(
         build,
         probe,
-        *join.join_type(),
+        join_type,
         keys,
         filter,
         filter_columns,
-        join.null_equals_null(),
-        join.projection
-            .as_ref()
-            .map(|columns| columns.iter().map(|c| *c as u32).collect()),
+        null_equals_null,
+        projection,
         Schema::new(join.schema()),
     )))
+}
+
+/// A nested loop's `IS NOT DISTINCT FROM` conjuncts over one column of each side, as hash
+/// keys under `null_equals_null`; `None` where there is none. Only those become keys, since
+/// the flag is one for every key: any other conjunct stays the residual and keeps its own
+/// NULL semantics. DataFusion 45 extracts only `=` as a key, so a keyless join holds no `=`
+/// pair a key could have come from.
+fn null_equal_keys(join: &NestedLoopJoinExec) -> Result<Option<KeyedOn>, PlanError> {
+    let Some(filter) = join.filter() else {
+        return Ok(None);
+    };
+    let side_of = |expr: &Arc<dyn PhysicalExpr>| {
+        let column = expr.as_any().downcast_ref::<Column>()?;
+        let index = &filter.column_indices()[column.index()];
+        Some((index.side, index.index as u32))
+    };
+    let (mut keys, mut rest) = (Vec::new(), Vec::new());
+    for conjunct in split_conjunction(filter.expression()) {
+        let pair = conjunct
+            .as_any()
+            .downcast_ref::<BinaryExpr>()
+            .filter(|binary| *binary.op() == Operator::IsNotDistinctFrom)
+            .and_then(|binary| Some((side_of(binary.left())?, side_of(binary.right())?)));
+        match pair {
+            Some(((DfJoinSide::Left, build), (DfJoinSide::Right, probe)))
+            | Some(((DfJoinSide::Right, probe), (DfJoinSide::Left, build))) => {
+                keys.push((build, probe))
+            }
+            _ => rest.push(translate_expr(conjunct, filter.schema())?),
+        }
+    }
+    if keys.is_empty() {
+        return Ok(None);
+    }
+    let residual = rest
+        .into_iter()
+        .reduce(|left, right| Expr::binary(left, BinaryOp::And, right, DataType::Boolean));
+    Ok(Some(KeyedOn {
+        keys,
+        residual: match residual {
+            Some(residual) => Some((residual, filter_column_map(filter)?)),
+            None => None,
+        },
+        null_equals_null: true,
+        projection: projected(join.projection()),
+    }))
 }
 
 /// #137: a NULL key matches nothing on a side whose unmatched rows are never emitted, so
@@ -541,6 +629,9 @@ pub(crate) fn nested_loop_join(
     join: &NestedLoopJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
     let join_type = *join.join_type();
+    if let Some(on) = null_equal_keys(join)? {
+        return keyed_join(t, join, join_type, on);
+    }
     // DataFusion uses a nested-loop join with no predicate where the product itself is
     // what the query asked for — tpcds q9 pairs one-row aggregates that way. Only an
     // Inner is a cross join by another name: every other type owes its preserved side

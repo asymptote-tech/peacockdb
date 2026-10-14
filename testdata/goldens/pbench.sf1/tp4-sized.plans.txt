@@ -487,7 +487,7 @@ Error during planning: an IN or NOT IN that can meet a NULL, read outside a WHER
 == indf-full-join
 GpuUnload
   GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, schema=[d_id:Int64, t_id:Int32]
-    GpuNestedLoopJoin: join_type=Full, filter=d_k@probe:1 IS NOT DISTINCT FROM t_k@build:1, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
+    GpuHashJoin: join_type=Full, on=[(t_k@1, d_k@1)], null_equals_null=true, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_k:Int32]
         GpuMergePartitions: lanes=1, batches=multiple, schema=[t_id:Int32, t_k:Int32]
           GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_k:Int32]
@@ -496,17 +496,17 @@ GpuUnload
 --- recipes ---
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
-    GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe; at done: join_finish
+    GpuHashJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe; at done: join_finish
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
       GpuMergePartitions: none
         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
 --- memory ---
-budget=2147483648, accumulators=160, certain=80
-GpuUnload: estimated_max_resident_size=80
-  GpuProject: estimated_max_resident_size=80
-    GpuNestedLoopJoin: estimated_max_resident_size=24211
+budget=2147483648, accumulators=296, certain=80
+GpuUnload: estimated_max_resident_size=216
+  GpuProject: estimated_max_resident_size=216
+    GpuHashJoin: estimated_max_resident_size=24347
       GpuCoalesceAllBatches: estimated_max_resident_size=80
         GpuMergePartitions: estimated_max_resident_size=110
           GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0

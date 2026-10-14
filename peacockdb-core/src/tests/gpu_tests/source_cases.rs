@@ -226,40 +226,17 @@ operator_case! {
 /// puts the empty relation's stub on the device's wire under a join.
 #[tokio::test]
 async fn a_left_join_over_an_empty_relation_pads_every_row_on_both_engines() {
-    use crate::executor::{CpuBackend, GpuBackend, run};
-    use crate::test_support::{MODES, batches_to_sorted_str, data_dir_for, queries_dir_for};
-    let sql = std::fs::read_to_string(queries_dir_for("pbench").join("empty-side-left-join.sql"))
-        .expect("the query text");
+    use crate::test_support::{MODES, batches_to_sorted_str};
     for mode in &MODES {
         let what = format!("empty-side-left-join at {}", mode.name);
-        let ctx = crate::register_tables_for(
-            crate::build_session_state(mode.target_partitions),
-            &data_dir_for("pbench", "1"),
-        )
-        .await
-        .expect("register pbench");
-        let plan = ctx
-            .sql(&sql)
-            .await
-            .expect("the query plans")
-            .create_physical_plan()
-            .await
-            .expect("a physical plan");
-        let (tree, _) = crate::planner::plan(&plan, mode.knobs_for("pbench"))
-            .unwrap_or_else(|why| panic!("{what}: {why}"));
-        let rows = |batches: Vec<crate::executor::CpuBatch>| {
-            let batches: Vec<RecordBatch> =
-                batches.iter().map(|b| b.record_batch().clone()).collect();
+        let (cpu, gpu) =
+            super::whole_plan::answers_on_both("pbench", "empty-side-left-join", mode).await;
+        let rows = |batches: &[RecordBatch]| {
             let padded: usize = batches.iter().map(|b| b.column(1).null_count()).sum();
-            (batches_to_sorted_str(&batches), padded)
+            (batches_to_sorted_str(batches), padded)
         };
-        let cpu = run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
-            .unwrap_or_else(|why| panic!("{what} on the cpu: {why}"));
-        let device = super::device::Device::open(tree.as_ref());
-        let gpu = run::<GpuBackend>(tree.as_ref(), device.ctx(), None)
-            .unwrap_or_else(|why| panic!("{what} on the device: {why}"));
-        let (cpu, padded) = rows(cpu.batches);
+        let (cpu, padded) = rows(&cpu);
         assert_eq!(padded, 8, "{what}: every tiny row, padded, on the cpu");
-        assert_eq!(rows(gpu.batches), (cpu, 8), "{what}");
+        assert_eq!(rows(&gpu), (cpu, 8), "{what}");
     }
 }

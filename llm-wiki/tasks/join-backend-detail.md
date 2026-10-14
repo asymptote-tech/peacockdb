@@ -1798,3 +1798,168 @@ reads pbench, so a 9c payload member can come from pbench without widening the l
 each, `Device::open` over the whole tree), which 9c's promoted hash join can copy if the harness
 alone does not show it. For task 13: exec_model has no `GpuEmpty` and models no pbench query, so
 nothing there moved.
+
+#### Round 2, plan task 9c — `IS [NOT] DISTINCT FROM` as a join condition (review row 9)
+
+The device's two evaluators, the translator, and tests. No fbs change: `IsDistinctFrom` and
+`IsNotDistinctFrom` were already on the wire, and the cpu already evaluated both.
+
+**What shipped.**
+- `cpp/src/expr.cpp`: `build_expr`'s binary arm answers `IS NOT DISTINCT FROM` with the AST's
+  `NULL_EQUAL` and `IS DISTINCT FROM` with `NOT` over it, ahead of `fb_to_ast_op`. The column
+  path maps them to `NULL_EQUALS` and `NULL_NOT_EQUALS`, and `is_predicate_op` names both, so
+  that path declares a `BOOL8` result. A nested loop, or a keyed join's residual, takes either
+  path. A non-AST conjunct is not hoisted (`is_comparison` does not name them); it goes to the
+  pair-gather residual, which is correct.
+- Translator: `hash_join`'s body is now `keyed_join(t, join, join_type, KeyedOn)`. `KeyedOn`
+  holds the keys, the residual and its column map, the flag and the projection, and both join
+  arms build their join through it. `nested_loop_join` first asks `null_equal_keys(join)`. That
+  splits the filter's top-level `AND`s. Each `Column IS NOT DISTINCT FROM Column` over one
+  column of each side, in either order, becomes a key. The rest is translated and re-joined with
+  `AND` as the residual, under the filter's whole column map. If there is a key, the node is a
+  `GpuHashJoin` with `null_equals_null = true`. Otherwise the arm is unchanged.
+- `GpuHashJoin.null_equals_null`'s doc names the second source of `true`.
+- Tests. `planner/tests/distinct_from_keys.rs` has 4 cases, each answering as DataFusion with a
+  hand count: Full 16, Inner 16 with the probe's column written first, LeftSemi 7, LeftAnti 3;
+  a residual beside the key, 3 + 8 + 8; `=` beside it, 7; `IS DISTINCT FROM` and `a.k + 1`, which
+  keep the loop, 84 and 12. The device has `tests/gpu_tests/distinct_cases.rs` with 3 cases: the
+  four arms through the AST and through the column path, each held to the truth table, and
+  pbench's query planned whole at five modes on both engines. `nested_cases.rs` has 4 more: Full
+  on `IS NOT DISTINCT FROM`, Left on `IS DISTINCT FROM`, and both over decimals on the
+  cross-then-mask path. `test_plan_executor.cpp` has 2: each operator against a typed NULL, one
+  per evaluator. `PBENCH_JOINS`' `indf-full-join` row reads the hash join.
+- `tests/gpu_tests/whole_plan.rs`: `answers_on_both(dataset, query, mode)`, the whole-plan run
+  task 9b wrote inline in `source_cases.rs`. Its case now calls it too.
+- `cost-registry.csv`: `indf_full_join`'s feature tag `outer_join nested_loop_join` →
+  `outer_join`; `--numstat` 1/1.
+
+**Divergences.** None found. The four arms agree with the truth table on both engines and on
+both evaluators. pbench's query answers 2,009 rows on both engines at every mode, the same rows.
+Through the CLI at tp1 and tp4 the cpu's sorted rows equal DuckDB's committed section byte for
+byte. **Not measured:** a float operand. The AST's `NULL_EQUAL` compares by value, so NaN is
+unequal and -0.0 equals 0.0. DataFusion's comparison is by bits. That is #243's class. No
+corpus or pbench query has a float `IS [NOT] DISTINCT FROM`.
+
+**What the plan got wrong.**
+- **The column path needed a third line.** `binop_output_type` declares a non-predicate's
+  result in the left operand's type, so a decimal `NULL_EQUALS` asked cuDF for a decimal result
+  and cuDF refused: "Unsupported operator for these types" (D1 below). `is_predicate_op` names
+  both operators now.
+- **A filter cannot show the arm that matters.** A filter drops a NULL and a `false` alike, so
+  the plan's `GpuFilter` cases pass on an engine that answers NULL for the one-NULL arm. The
+  cases are projects held to the truth table. The plan's `synthetic` pairing (`i32` cast against
+  `i64`) rarely makes the equal arm. A five-row batch makes each arm once.
+- **The `=`-beside case is a guard and was never red.** DataFusion keys on the `=`, so the
+  shape is a `HashJoinExec` and never reaches `nested_loop_join`. The test pins that the flag
+  stays `false` there.
+- **sqlparser binds `IS NOT DISTINCT FROM` looser than `AND`.** `a.k IS NOT DISTINCT FROM b.k
+  AND a.v < b.v` parses as `a.k IS NOT DISTINCT FROM (b.k AND a.v < b.v)`, and DataFusion
+  refuses to coerce it. The test parenthesizes. A trap for the next test writer.
+- **The design's "the hash join shuffles into lanes where the nested loop ran in one" is
+  false.** DataFusion puts no repartition under a nested loop, so `co_partitioned` says no and
+  both sides merge into one lane, as before. Every tp4 plan of the query shows `lanes=1`.
+  Shuffling would mean the planner makes up a partitioning DataFusion never chose. That is
+  outside this task, and no ticket is filed: the answer is right, only the lane count differs.
+- **`hash_join_from_parts` with nine arguments** became `keyed_join` over a `KeyedOn`. The
+  residual keeps the filter's whole column map. A column no conjunct reads is harmless:
+  validation checks only the columns referenced, and both engines carry the extra column.
+- **The test files.** `translator/tests.rs` is past the 1,000-line cap (1,014 at HEAD), and
+  `exec_cases.rs` is near it, so the cases got files of their own.
+- **The memory estimate moves +136 bytes.** The promoted join prices its hash table: 8 build
+  rows × 16, plus 8 bytes for which rows matched. That is the same +136 at every mode.
+
+**Goldens moved, by kind, checked by script.** No `.cpu.txt`, `.cost.txt`, `.result.txt`,
+`duckdb-result.txt`, `gpu-result.txt`, `recipe-payloads.txt` or `corpus_cases.inc`. The query's
+cells are off, and it is not a payload member.
+
+| kind | files | what moved |
+|---|---|---|
+| `*.plans.txt` pbench | 5 | `indf-full-join` only, 6 of its 21 (tp1) or 27 (tp4) lines, 30/30 by numstat: the node line (`GpuNestedLoopJoin` with `filter=… IS NOT DISTINCT FROM …` → `GpuHashJoin` with `on=[(t_k@1, d_k@1)], null_equals_null=true`, the projection unchanged), its recipe line (the name alone), and four memory lines, each +136 |
+| `cost-registry.csv` | 1 | the feature tag above |
+
+The arithmetic. Every other section of the five files is equal to HEAD's. The recipe line is
+equal to HEAD's once `GpuNestedLoopJoin` is replaced with `GpuHashJoin`. The memory figures read
+`accumulators` 160 → 296, `GpuUnload` and `GpuProject` 80 → 216, and the join 24,211 → 24,347,
+at every mode.
+
+**Cells that become enable-able: all ten of `indf-full-join`'s, left to task 14.** Task 9 made
+the five cpu cells enable-able; they still answer DuckDB's 2,009 rows, now through the hash
+join. The five gpu cells answer the cpu's rows at every mode on nebius-gpu (the whole-plan
+case). The registry row still carries `155 160` on its tickets column.
+
+**Cost gate**, `cargo run -q -p cost-report -- --cost-diff --base b153a3eb`: 726 compared, **0
+changed, 0 regressions**.
+
+**Red-green evidence.** Planner, red first: two of the four `distinct_from_keys` cases, both on
+"nested loop where a hash join was expected". The other two are the guards above. Device, a red
+build of the tests over HEAD's code: all 9 new cases red. The 7 Rust cases were "unsupported
+BinaryOp: 19/20", in the column path's wording where it applies; the whole-plan case failed on
+the nested loop's probe. The 2 gtests threw the same. Then mutations. Each local one was
+applied by an asserted single match, run against the whole `--lib` tier, restored from a saved
+copy, and checked with `cmp`.
+- M1 the promotion off: 7 failed — two `distinct_from_keys` cases and the five pbench plan
+  goldens.
+- M2 the flag `false`: the same 7.
+- M3 a pair with the probe's column first not taken: 6 failed — the "alone" case (its Inner
+  query was rewritten probe-first so that it sees this) and the five plan goldens.
+- M4 the residual dropped: 1 failed, the residual case.
+- M5 `IS DISTINCT FROM` promoted too: 1 failed, the stays-a-loop case.
+- Device, one build, on the remote copy only: D1 `is_predicate_op` without the two operators,
+  and D2 the AST answering `NULL_EQUAL` for `IS DISTINCT FROM` too. 5 Rust cases failed and 607
+  passed. D1 accounts for the column-path case and both decimal nested loops ("Unsupported
+  operator for these types"). D2 accounts for the AST case and the Left `IS DISTINCT FROM`
+  nested loop (rows differ). The column-path gtest failed too, 80 passed. The local `expr.cpp`
+  was touched and re-synced. The diff against the pre-mutation copy was empty, and the final
+  build recompiled `expr.cpp`.
+
+**The device run, recorded.** nebius-gpu (`computeinstance-e00tnrse7ayntnzcyt`), NVIDIA L40S, 0
+MiB in use; cuDF 25.02. The final tree was synced, `./scripts/build-test-shadgpu.sh --build` gave
+rc 0 with no warning in its log, and each binary was run directly with `--test-threads=1`.
+**852 cases, all green**: `peacock_gpu_tests` 2, `peacock_plan_tests` 81 (+2),
+`peacock_join_session_tests` 53, `test_gpu_corpus` 95, `test_node_timing` 1,
+`peacockdb_core_gpu_lib gpu_tests::` 612 (+7), `peacock_gpu_benchmarks --skip bench_` 8. Not run,
+per the override: the sf40 pair and the `bench_` cases. Disk was 28 GB free of 96 before and
+after; nothing was deleted.
+
+**Local, fresh on the final tree.** rust-only: `--lib` 750 passed, 2 ignored; `test_cpu_corpus`
+1006; `test_corpus_goldens` 26; `test_cost_model` 3; `test_module_layout` 18; `test_ci_coverage`
+11; `test_golden_format` 43; 0 failed. `peacock_cpu_tests` 15 passed, from `/tmp/dkb-cppbuild`
+rebuilt over the new `expr.cpp`; `binop_output_type` is one of its subjects.
+
+**Warnings.** None new. The rust-only builds have none. The local gpu-feature lib-test build
+has the one pre-existing `AsArray`. The nebius build log has no warning.
+
+**Formatting.** Under edition 2024, every touched Rust file is rustfmt-clean, as each was at
+HEAD. `git clang-format` was applied to the changed C++ lines. It split the two new column-path
+`case`s onto two lines each, where their neighbours are on one line.
+
+**build-test.md counts, counted off `--list`.** cpu block 1783 → 1787: `--lib` 748 → 752, and a
+new row, "`IS NOT DISTINCT FROM` as a join key", with 4. gpu block 712 → 719: `--lib --
+gpu_tests::` 605 → 612 (`--list` 612), "Operator harness" 376 → 383. Plan-executor (C++) 79 → 81
+(`--gtest_list_tests` 81). Rust 2615 → 2626, C++ 171 → 173, grand total 3187 → 3200, the N
+columns summed by script. Prose rewritten: "Operator harness" (the four arms, the nested loop on
+either path, pbench's query planned whole) and "Plan-executor" (each operator against a typed
+NULL).
+
+**architecture.md sentences this round falsified** (the coordinator's, or task 15's rewrite):
+- "Join types and NULL key equality": "`null_equals_null` travels in the flat buffers per join,
+  mirroring DataFusion", and "`true` means NULL = NULL, which is what a set operation lowered to
+  a join needs". The planner now also sets it, for keys made of `IS NOT DISTINCT FROM`.
+- The wire table's `CudfHashJoin.null_equals_null` row: "which the planner set from
+  `HashJoinExec::null_equals_null()`". It is also set from a nested loop's `IS NOT DISTINCT FROM`
+  conjuncts. The row's `CudfHashJoin` has been stale since task 7, too.
+
+**Ticket text made stale.** None. No ticket mentions `IS [NOT] DISTINCT FROM`.
+
+**Drift found, not mine.** `planner/translator/tests.rs` is 1,014 lines, past `coding-style.md`'s
+cap. Task 9b's two cases took it over.
+
+**What plan task 10 inherits.**
+- The device harness has the nested loop on `IS NOT DISTINCT FROM` (Full, AST), on `IS DISTINCT
+  FROM` (Left, AST), and both over decimals (the cross-then-mask path). Step 2 need not add them.
+- The promoted Full hash join under `null_equals_null = true` is proved only whole-plan, through
+  pbench's query. Step 2's "Left and Full new … under `true`" node-level cases are still owed.
+- `whole_plan::answers_on_both` is the shared whole-plan runner, for any case the harness cannot
+  show.
+- For task 13: exec_model has no `IS [NOT] DISTINCT FROM` and models no pbench query, so nothing
+  there moved. For task 14: `indf-full-join`'s ten cells, as above.

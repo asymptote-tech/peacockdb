@@ -1428,8 +1428,15 @@ impl GpuNode for GpuEmpty {
   column path's binary operators); `planner/translator/nodes.rs:465-514` (`nested_loop_join`)
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`, `tests/gpu_tests/nested_cases.rs`,
   `tests/gpu_tests/exec_cases.rs`, `planner/translator/tests.rs`
+- **Also moved, measured:** `expr.cpp`'s `is_predicate_op` (the column path declared the
+  result in the left operand's type, and cuDF refused it), `plan/mod.rs`'s `null_equals_null`
+  doc, the registry's `indf_full_join` feature tag; the cases went to a new
+  `tests/gpu_tests/distinct_cases.rs` (a project, which shows a NULL a filter hides) and a new
+  `planner/tests/distinct_from_keys.rs` (`translator/tests.rs` is past the 1,000-line cap,
+  `exec_cases.rs` near it); the whole-plan run in `source_cases.rs` became `tests/gpu_tests/whole_plan.rs`,
+  shared — the detail file's task 9c record.
 
-- [ ] **Step 1: The failing tests.** Device: a `GpuFilter` over `i32 IS NOT DISTINCT FROM i64`
+- [x] **Step 1: The failing tests.** Device: a `GpuFilter` over `i32 IS NOT DISTINCT FROM i64`
   and `IS DISTINCT FROM` on `synthetic` (NULLs on both sides at their strides) agrees with the cpu,
   on the AST path and with a non-AST operand forcing the column path:
 
@@ -1455,9 +1462,9 @@ operator_case! {
   `GpuHashJoin{Full, null_equals_null=true}`; with `ON d.d_k = t.t_k AND d.d_w IS NOT DISTINCT FROM
   t.t_v` the `=` stays the key, `null_equals_null=false`, and the IS NOT DISTINCT FROM conjunct is
   the residual.
-- [ ] **Step 2: Run red** — the device throws `unsupported BinaryOp: <n>`; the planner plans a
+- [x] **Step 2: Run red** — the device throws `unsupported BinaryOp: <n>`; the planner plans a
   nested loop.
-- [ ] **Step 3: The device.** In `build_expr`'s binary arm, before `fb_to_ast_op`:
+- [x] **Step 3: The device.** In `build_expr`'s binary arm, before `fb_to_ast_op`:
 
 ```cpp
     if (op == fb::BinaryOp_IsNotDistinctFrom || op == fb::BinaryOp_IsDistinctFrom) {
@@ -1474,7 +1481,7 @@ operator_case! {
     case fb::BinaryOp_IsDistinctFrom:    return cudf::binary_operator::NULL_NOT_EQUALS;
 ```
   (`ctx.keep` is `ExprContext::keep`, `expr.h:24-31`, which owns AST nodes for the expression's life.)
-- [ ] **Step 4: The promotion.** In `nested_loop_join`, before the nested-loop arm:
+- [x] **Step 4: The promotion.** In `nested_loop_join`, before the nested-loop arm:
 
 ```rust
     // DataFusion 45 extracts only `=` as a key; a keyless join on IS NOT DISTINCT FROM is a hash
@@ -1493,7 +1500,7 @@ operator_case! {
   returns the rest re-joined with `AND` against the filter's schema; `hash_join_from_parts` is
   `hash_join`'s body (`nodes.rs:246-301`) taking keys, filter and the flag instead of reading a
   `HashJoinExec`, so the two arms share the co-partitioning, coalescing and #137 logic.
-- [ ] **Step 5: Run green** (rust-only; the harness on the device); pbench's `indf-full-join` plan
+- [x] **Step 5: Run green** (rust-only; the harness on the device); pbench's `indf-full-join` plan
   golden shows `GpuHashJoin{Full}` with `null_equals_null=true`, regenerated in this commit.
 - [ ] **Step 6: Commit.** `git commit -m "IS NOT DISTINCT FROM: NULL_EQUAL on the device, a null-equal hash key in the plan"`.
 

@@ -779,8 +779,9 @@ pub(crate) struct GpuHashJoin {
     pub(crate) keys: Vec<(u32, u32)>,
     pub(crate) filter: Option<Expr>,
     pub(crate) filter_columns: Vec<JoinFilterColumn>,
-    /// From DataFusion, per join: `false` — the SQL default — means a NULL key matches
-    /// nothing, `true` is what a set operation lowered to a join needs.
+    /// Per join: `false` — the SQL default — means a NULL key matches nothing. `true` is what
+    /// a set operation lowered to a join needs, and what keys made of `IS NOT DISTINCT FROM`
+    /// conjuncts mean.
     pub(crate) null_equals_null: bool,
     pub(crate) projection: Option<Vec<u32>>,
     build: Box<dyn GpuNode>,

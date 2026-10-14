@@ -767,7 +767,10 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     ("nl-mark", "GpuNestedLoopJoin: join_type=LeftMark"),
     ("nl-right-semi", "GpuNestedLoopJoin: join_type=RightSemi"),
     ("nl-right-anti", "GpuNestedLoopJoin: join_type=RightAnti"),
-    ("indf-full-join", "GpuNestedLoopJoin: join_type=Full"),
+    (
+        "indf-full-join",
+        "GpuHashJoin: join_type=Full, on=[(t_k@1, d_k@1)], null_equals_null=true",
+    ),
     ("not-exists-null-keys", "GpuHashJoin: join_type=LeftAnti"),
     (
         "anti-null-preserved-condition",

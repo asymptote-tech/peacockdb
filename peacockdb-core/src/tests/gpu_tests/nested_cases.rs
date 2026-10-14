@@ -134,6 +134,40 @@ fn like_column_residual() -> (Expr, Vec<JoinFilterColumn>) {
     )
 }
 
+/// `b_key <op> p_key`, where `key` is NULL on every eleventh row of either side, so all four
+/// arms of `IS [NOT] DISTINCT FROM` occur. `cast` puts both operands under a decimal, which
+/// sends the device down the cross-then-mask path instead of the AST.
+fn distinct_residual(op: BinaryOp, cast: bool) -> (Expr, Vec<JoinFilterColumn>) {
+    let operand = |i: u32, name: &str| {
+        let column = Expr::column(i, name);
+        if !cast {
+            return column;
+        }
+        Expr::Cast {
+            expr: Box::new(column),
+            target: DataType::Decimal128(20, 0),
+        }
+    };
+    (
+        Expr::binary(
+            operand(0, "b_key"),
+            op,
+            operand(1, "p_key"),
+            DataType::Boolean,
+        ),
+        vec![
+            JoinFilterColumn {
+                side: JoinSide::Build,
+                index: 1,
+            },
+            JoinFilterColumn {
+                side: JoinSide::Probe,
+                index: 1,
+            },
+        ],
+    )
+}
+
 /// A nested loop of any type, its probe streamed.
 fn nested_with(
     join_type: JoinType,
@@ -424,6 +458,42 @@ operator_case! {
     GpuNestedLoopJoin,
     fn a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_agrees() {
         let node = nested_with(JoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
+        run_both(&node, one_probe()).same(Order::Any);
+    }
+}
+
+// IS [NOT] DISTINCT FROM as the whole condition (review row 9), on either path. The planner
+// makes a pair of bare columns a hash key; an expression operand or IS DISTINCT FROM stays a
+// loop like these.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_on_is_not_distinct_from_agrees() {
+        let node = nested_with(JoinType::Full, distinct_residual(BinaryOp::IsNotDistinctFrom, false), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_nested_loop_join_on_is_distinct_from_agrees() {
+        let node = nested_with(JoinType::Left, distinct_residual(BinaryOp::IsDistinctFrom, false), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn an_inner_nested_loop_join_on_is_not_distinct_from_over_decimals_agrees() {
+        let node = nested_with(JoinType::Inner, distinct_residual(BinaryOp::IsNotDistinctFrom, true), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn an_inner_nested_loop_join_on_is_distinct_from_over_decimals_agrees() {
+        let node = nested_with(JoinType::Inner, distinct_residual(BinaryOp::IsDistinctFrom, true), None);
         run_both(&node, one_probe()).same(Order::Any);
     }
 }

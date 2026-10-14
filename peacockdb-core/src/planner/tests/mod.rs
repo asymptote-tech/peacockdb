@@ -5,6 +5,7 @@
 //! cases that drive the planner through `plan`, `can_be_null` and the knobs, rather
 //! than a subcomponent directly.
 
+mod distinct_from_keys;
 mod join_capability;
 mod join_projection_names;
 mod join_refusals;
