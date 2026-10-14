@@ -70,8 +70,6 @@ void debug_sync(const char* tag) {
 static bool is_predicate_op(fb::BinaryOp op);
 static cudf::type_id infer_expr_type(const fb::Expr* expr,
                                      cudf::table_view const& table);
-static std::unique_ptr<cudf::column> build_column_binary(
-    const fb::Expr* expr, cudf::table_view const& table);
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv);
 
 

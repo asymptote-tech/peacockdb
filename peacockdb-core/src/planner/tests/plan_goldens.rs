@@ -158,7 +158,7 @@ const PAYLOAD_MODE: &str = "tp4_rowgroup";
 /// The queries, and the rule for adding one.
 ///
 /// Chosen by cover rather than by taste: every fb node kind the mapping emits (join types
-/// spelled out, both project roles, the repartition, the two symbols that address no seq,
+/// spelled out, the finalize project, the repartition, the two symbols that address no seq,
 /// the rows that emit nothing), every call shape longer than one call, and every
 /// expression kind a payload can carry — LIKE, CASE, casts, scalar functions, decimal
 /// scales, grouping sets, null substitutions, Welford state, an avg's finalize, fetch and
@@ -558,14 +558,13 @@ fn call_shapes(text: &str) -> std::collections::BTreeSet<String> {
     shapes
 }
 
-/// Every fb kind and every call shape the ten mode goldens hold appears in the payload
+/// Every fb kind and every call shape the fifteen mode goldens hold appears in the payload
 /// golden too.
 ///
 /// This is the checked half of [`PAYLOAD_QUERIES`]'s claim. A mapping arm added later
 /// without a payload query for it goes red here rather than waiting for a careful reader —
-/// and the shapes matter as much as the kinds, since the build-side semi family's finish
-/// and a Left outer's derived finish both address a `CudfHashJoin{LeftAnti}` while doing
-/// different things with different arguments.
+/// and the shapes matter as much as the kinds, since one `CudfJoin` is called in two
+/// shapes: built and probed, and for the five finishing types finished too.
 #[test]
 fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
     let payloads =

@@ -109,49 +109,6 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                 field("mergeable_agg_state", "true".to_string());
             }
         }
-        fb::PlanNodeKind::CudfHashJoin => {
-            let join = node.node_as_cudf_hash_join().expect("a hash join");
-            field("join_type", format!("{:?}", join.join_type()));
-            if let Some(keys) = join.keys() {
-                let pairs: Vec<String> = keys
-                    .iter()
-                    .map(|key| {
-                        format!(
-                            "({}, {})",
-                            key.left().map(|e| expr_text(&e)).unwrap_or_default(),
-                            key.right().map(|e| expr_text(&e)).unwrap_or_default()
-                        )
-                    })
-                    .collect();
-                field("keys", pairs.join(", "));
-            }
-            if let Some(filter) = join.filter() {
-                field("filter", expr_text(&filter));
-            }
-            if let Some(columns) = join.filter_columns() {
-                let mapped: Vec<String> = columns
-                    .iter()
-                    .map(|column| format!("{:?}@{}", column.side(), column.index()))
-                    .collect();
-                field("filter_columns", format!("[{}]", mapped.join(", ")));
-            }
-            if let Some(projection) = join.projection() {
-                field("projection", ordinals(projection.iter()));
-            }
-            if join.null_equals_null() {
-                field("null_equals_null", "true".to_string());
-            }
-        }
-        fb::PlanNodeKind::CudfNestedLoopJoin => {
-            let join = node.node_as_cudf_nested_loop_join().expect("a nlj");
-            field("join_type", format!("{:?}", join.join_type()));
-            if let Some(filter) = join.filter() {
-                field("filter", expr_text(&filter));
-            }
-            if let Some(projection) = join.projection() {
-                field("projection", ordinals(projection.iter()));
-            }
-        }
         // Every field the session reads, the two schemas included: they are what an absent
         // side and every pad are typed from, so a wrong pad type shows here and nowhere else.
         fb::PlanNodeKind::CudfJoin => {

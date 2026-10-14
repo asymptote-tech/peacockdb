@@ -293,13 +293,6 @@ std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
       return {node->node_as_CudfProject()->input()};
     case fb::PlanNodeKind_CudfAggregate:
       return {node->node_as_CudfAggregate()->input()};
-    case fb::PlanNodeKind_CudfHashJoin:
-      return {node->node_as_CudfHashJoin()->left(), node->node_as_CudfHashJoin()->right()};
-    case fb::PlanNodeKind_CudfCrossJoin:
-      return {node->node_as_CudfCrossJoin()->left(), node->node_as_CudfCrossJoin()->right()};
-    case fb::PlanNodeKind_CudfNestedLoopJoin:
-      return {node->node_as_CudfNestedLoopJoin()->left(),
-              node->node_as_CudfNestedLoopJoin()->right()};
     case fb::PlanNodeKind_CudfSort:
       return {node->node_as_CudfSort()->input()};
     case fb::PlanNodeKind_CudfCoalesceBatches:
@@ -656,13 +649,11 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
   if (n_out > out_cap)
     throw std::runtime_error("NodeSession::execute_node: out_handles buffer too small");
   // The per-partition MAP arm reads child[c][p] for every c, so every child must
-  // carry the same partition count. Partitioned joins (mismatched counts) are not
-  // implemented — fail LOUDLY rather than read out of bounds.
+  // carry the same partition count; a mismatch is refused rather than read out of bounds.
   for (size_t c = 1; c < n_children; ++c) {
     if (child[c].size() != n_out)
       throw std::runtime_error(
-          "NodeSession::execute_node: children have mismatched partition counts "
-          "(multi-partition joins are not implemented yet)");
+          "NodeSession::execute_node: children have mismatched partition counts");
   }
 
   for (size_t p = 0; p < n_out; ++p) {

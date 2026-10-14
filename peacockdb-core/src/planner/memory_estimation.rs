@@ -238,8 +238,7 @@ impl<'a> Tree<'a> {
             }
             // Three things, every one a function of the BUILD side: the batch, the hash
             // table its keys go into, and — for the types answering unmatched build rows
-            // at the finish — one byte a row saying which matched. The frozen surface
-            // accumulated the probe's keys instead (#136, design §4.3).
+            // at the finish — one byte a row saying which matched.
             NodeRef::Join(join) => {
                 let build = self.children[seq][0];
                 let rows = self.rows(build);

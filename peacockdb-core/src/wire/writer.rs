@@ -106,8 +106,9 @@ impl<'a> Writer<'a> {
         self.scan_of_nothing().0
     }
 
-    /// `CudfScan` is the only leaf the schema has — every other table carries `input`,
-    /// `left`/`right` or `inputs` — so it is what both the stub and the leaf are made of.
+    /// `CudfScan` is the schema's one leaf that names nothing else — `CudfJoin` is read by a
+    /// session, and every other table carries `input` or `inputs` — so it is what both the
+    /// stub and the leaf are made of.
     fn scan_of_nothing(&mut self) -> (Seq, WIPOffset<fb::PlanNode<'a>>) {
         let scan = fb::CudfScan::create(&mut self.builder, &fb::CudfScanArgs::default());
         self.push(Payload {
