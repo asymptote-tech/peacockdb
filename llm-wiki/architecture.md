@@ -433,7 +433,8 @@ batch, finished once. On the device that is the four `peacock_join_*` symbols ov
 leaf ([Interfaces](#interfaces)). On the cpu it is one DataFusion join stream per lane, fed
 through a channel and alive from `set_build` to `finish_and_fetch` (`cpu_backend/join.rs`). The
 session keeps the build table, the join object and the build-matched column between calls, so
-nothing is copied and nothing is rebuilt per batch. Every call answers at most one batch: the
+nothing is copied per batch. One case rebuilds: a RightSemi or RightAnti whose residual the AST
+takes whole holds no join object, and each probe's `mixed_left_semi_join` hashes the build again. Every call answers at most one batch: the
 `ProbingJoin` trait returns `Option`, which is the driver's one-batch rule in the type.
 
 The build side is DataFusion's left input and one batch per lane (the planner inserts a
@@ -500,8 +501,9 @@ plan's `build_schema`. `plan::empty_build_owes_nothing` is the one rule both eng
 table, and for the five finishing types, hash or nested loop, one byte a row for `matched`
 (`planner/memory_estimation.rs`, `gpu_backend/join.rs`'s `built_bytes`).
 A probe call's scratch prices each pair at 8 bytes plus the residual's per-row width, chunked at
-`chunk_bytes` (`gpu_backend/join.rs`). The planner writes `chunk_bytes` from the mode's budget,
-a sixteenth of it, so the accountant and the session bound one call alike.
+`chunk_bytes` (`gpu_backend/join.rs`). At `tp4-sized` the planner writes
+`chunk_bytes` as a sixteenth of the budget, capped at 1 GiB, so the accountant and the session
+bound one call alike; the unbudgeted modes write 0, which the session reads as 1 GiB.
 
 ### Where the sides run
 
@@ -569,11 +571,12 @@ column.
 
 ### Cross join vs nested-loop join
 
-Both are a join with no equality to hash, and which one DataFusion plans — and so which node
-the translator meets — is decided by whether there is a predicate at all.
+Both are a join with no equality to hash. Which one DataFusion plans is decided by whether there
+is a predicate at all; which node the translator makes is decided by that and the join type.
 
-- **No join predicate ⇒ `CrossJoinExec`.** `SELECT * FROM region, nation` — a full cartesian
-  product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
+- **No join predicate ⇒ `CrossJoinExec`** for an Inner join, which becomes `GpuCrossJoin`;
+  any other type keeps a `GpuNestedLoopJoin` over `true` (tpcds q9's predicate-free Left joins).
+  `SELECT * FROM region, nation` — a full cartesian product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
   condition, e.g. tpcds q61 putting `sum(ss_ext_sales_price) as promotions` beside `total` so
   it can divide them; pbench's `cross-projection` is the plain cartesian of two base tables.
 - **A predicate that is not an equijoin ⇒ `NestedLoopJoinExec`**, carrying that predicate as
@@ -697,8 +700,9 @@ Livelock has the same answer: the one thing that can block a batch is a join wai
 other side, and orienting the tree so the build side is the left child removes the wait, because
 at equal heights the leftmost node wins and the build subtree drains first.
 
-Hash skew needs one decision and no mechanism. A lane that receives nothing is never runnable,
-and empty scatter outputs are dropped at the emitter, so nothing empty traverses a chain. A join
+Hash skew needs one decision and no mechanism. Empty scatter outputs are dropped at the
+emitter, so nothing empty traverses a chain, and a lane that receives nothing runs only to learn
+its inputs are finished. A join
 whose build lane got nothing still answers it, through `set_build(None)` ([Joins](#joins)).
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
@@ -939,7 +943,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
-| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
+| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
@@ -1033,8 +1037,8 @@ Three conventions the signatures do not carry:
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
 - **Instrumentation is process-global and off by default; the benchmark harness and the
-  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, one
-  `gpu_tests` case in the GPU backend, and the gtest fixtures on both C++ tiers. Without
+  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, two
+  `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
   the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
   ([#148](tickets/performance.md#t148)); the gtest binaries install it from their own `main()`, and this
   symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output

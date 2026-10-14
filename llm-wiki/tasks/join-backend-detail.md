@@ -3297,3 +3297,133 @@ limit is designed (#186), and one refusal rule is what #186's fix will change. R
 (tickets over length) left partly open: #205, #199, #225, #56, #60 stay long; not reopened, since a
 nit does not reopen a task. The four new nits fixed by the coordinator in `a356266e`.
 Board → `completing`.
+
+## Completeness — analyst, 2026-10-14
+
+On `63d0e10b` against `3d9a122e`. I read the spec first: its Scope, then work items 1–10, risks
+1–6, the Restriction, the Registry and the Verification bar. Then design §1.3, §3.5, §4 and §5.7,
+the whole of `architecture.md` against the code, `build-test.md`, and this file's rounds (not its
+review sections). I read PR #179's body and its CI runs with `gh`. No project code was built or run.
+
+**0 blocking, 2 important.**
+
+**1. important: the cost acceptance names 5 of 251 regressions, and the PR body has neither the
+list nor the removal greps.** Spec risk 1 says "list every rise in the detail file". Chain J's
+board header accepts join-backend's regressions on one condition: "Name each regression in the
+task's detail file and its PR, with the queries and the byte delta, so the acceptance has a
+record." Round 3's whole-task figure gives counts by dataset, tpch's three queries in full, the
+worst five, the best five and a spread. Then it says "The per-row table is `cost_diff.html`, which
+the command writes", and nobody committed that file. About 240 tpcds and pbench rows are named
+nowhere. Plan task 3's figure has the same gap. PR #179's body names no regression. It also does
+not quote the five removal greps that spec item 9 says "the PR quotes". They are in plan task 15,
+under "quoted for the PR". Fix, with no code change: append the per-row table (query, mode,
+base → head bytes, %) under the whole-task figure. Then put that table, or a link to it, and the
+five greps in the PR body.
+
+**2. important: work item 3's "pricing as §4.3 says" landed in part, and the rest is not recorded
+as dropped.** This branch edited §4.3 and left it pricing three things the code does not price:
+- the distinct-key table a RightSemi/RightAnti session holds ("plus that table");
+- a build-side semi probe's `distinct_keys`;
+- "for RightSemi/RightAnti with a cross residual the build's hash that `mixed_*` makes per call".
+
+`GpuJoin::built_bytes` and `GpuProbingJoin::call_bytes` (`gpu_backend/join.rs`) price none of the
+three. Plan task 7's pricing record states the formula that landed and does not name the
+omission. The exposure today is small:
+- A session that calls `mixed_left_semi_join` holds no hash table. It is still charged 16 B a
+  build row as resident, and that covers the per-call rehash.
+- A build-side semi probe is charged an output it never emits, and that covers its distinct keys.
+- What stays unpriced is a residual-free RightSemi/RightAnti session's `Bd`, at most the build's
+  key bytes.
+- Device corpus runs pass no budget, so nothing tripped.
+
+Fix: price the three terms. Or say here, and in `architecture.md`'s Pricing paragraph, which §4.3
+terms are not priced and why.
+
+**Checked, nothing missing:**
+- Work items 1–10 are each present in code and tests. The cleanup greps are empty on the final
+  tree; I re-ran them over the code, `scripts` and `flatbuffers`. Item 9's "`join-rewrite-design.md`
+  archived" waits for the helper's merge commit, as plan task 15 records.
+- Risks 2–6:
+  - Goldens were regenerated in the commit that moved them (`94778b76`, `4ef0e714`, `d7042a8c`,
+    `a9ae581c`).
+  - `gpu-result.txt` was regenerated for all three datasets.
+  - `order_hazard.rs` exists, with one `device_order_*` case for each line that has a device cell.
+    The cross join's emitted order is pinned with `Order::AsEmitted`.
+  - Both backends read `plan::empty_build_owes_nothing`.
+  - The determinism sentence is reworded.
+- The tests §5.7 names exist:
+  - all nine types under both null rules (Left and Full are in `join_shape_cases.rs`);
+  - lanes with no build batch and with no probe batch, for every type;
+  - every `key_types` column as an Inner key and a LeftSemi key;
+  - the #153, #159, #160, #215 and #63 cases;
+  - the `IS NOT DISTINCT FROM` arms on both evaluators;
+  - the `__rowmarker__` and `GpuEmpty` planner and validation tests;
+  - the two timestamp wire cases;
+  - the gtests on the session;
+  - the driver's `set_build(None)` tests.
+
+  The exec_model cuDF-call guard was dropped rather than moved to the new file. Plan task 13
+  records why.
+- Registry, as plan task 16 records:
+  - 23 tpch/tpcds cpu cells, and 427 of 431 FLIP device cells.
+  - rollup-over-join (#65), q78 (#60) and q32 at tp4 (#199) are off, with their tickets on their
+    rows.
+  - The 25 stale-#183 cells are on.
+  - `empty-side-left-join` and `indf-full-join` are on at every mode on both engines.
+- These files are outside the Scope table, and this file accounts for each:
+  `testdata/cost_model.conf` (`GpuEmpty`), `test_support/*` (join scratch, order hazard),
+  `tests/test_cpu_corpus.rs`, `.github/workflows/exec-model-corpus.yml`, `coding-style.md` (the
+  SURFACE count), `planner/parquet_nulls.rs`, `scan_mapping/parquet_meta.rs` and
+  `test_module_layout/visibility.rs`.
+- Verification bar: the device ran on nebius-gpu under the board's override, which also deferred
+  sf40 and the benchmarks. CI on `63d0e10b` is the first run to build `a356266e`'s `flow.rs` edit.
+  Both pipelines and the GPU build are green. cost-report is red (pre-accepted) and `gpu-tests` is
+  red (exempt).
+
+**`architecture.md`: six sentences this branch falsified.**
+1. Joins, opening paragraph: "The session keeps the build table, the join object and the
+   build-matched column between calls, so nothing is copied and nothing is rebuilt per batch."
+   - Take a RightSemi or RightAnti whose cross residual the AST takes whole. Its session builds
+     no join object (`join_session.cpp:149-153`, `cross_is_ast`).
+   - Each of its probes runs `mixed_left_semi_join(Pk, Bk, …)`, which hashes its right table
+     every call (`third_party/cudf/cpp/src/join/mixed_join_semi.cu:114-115`). That right table
+     is the build.
+   - Keyless sessions hold no join object either.
+2. The wire format → From flat buffer to cuDF call, the `CudfJoin` row: "the tables arrive through
+   `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join`
+   across every batch." The cause is the same: keyless sessions, and the semi sessions in item 1,
+   hold neither object.
+3. The wire format → From node to seqs, the join row: "`join_build(seq, build)` once per lane,
+   `join_probe` per probe batch, and `join_finish` at done for the five finishing types".
+   - Every join lane that was not drained takes `LaneCall::Finish` (`single_partition.rs:215`).
+   - `GpuProbingJoin::finish_and_fetch` calls `peacock_join_finish` whatever the type. So an
+     Inner, Right, RightSemi or RightAnti lane makes a finish call. The call answers handle 0 and
+     is timed on the seq.
+   - The plan goldens' recipe line leaves that call out for those four types: 62 tpch join lines
+     at tp4-single end at `join_probe`. `GpuJoin::new` refuses a recipe that names it. So the
+     executor makes a call its recipe does not publish.
+
+   The sentence and the recipe line, or the executor, should change.
+4. Joins → What each type answers, **Pricing**: "The planner writes `chunk_bytes` from the mode's
+   budget, a sixteenth of it, so the accountant and the session bound one call alike."
+   `join_scratch_bytes` in `wire/mod.rs` writes `min(budget / 16, 1 GiB)` at `tp4-sized` only. The
+   other four modes write 0, which the session reads as 1 GiB.
+5. Interfaces, "Instrumentation is process-global and off by default…": "…`peacock_gpu_benchmarks`,
+   `test_node_timing`, one `gpu_tests` case in the GPU backend, and the gtest fixtures on both C++
+   tiers." There are two cases now:
+   `a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle`
+   (`gpu_tests/accumulate.rs`), and this branch's
+   `every_session_call_is_journalled_and_timed_on_the_joins_seq` (`gpu_tests/join.rs`).
+6. Joins → Cross join vs nested-loop join: "Both are a join with no equality to hash, and which one
+   DataFusion plans — and so which node the translator meets — is decided by whether there is a
+   predicate at all." and "**No join predicate ⇒ `CrossJoinExec`.**"
+   - The join type decides too. A predicate-free non-Inner `NestedLoopJoinExec` now plans as
+     `GpuNestedLoopJoin` over `true`: tpcds q9's 15 Left joins, at every mode. Only an Inner one
+     plans as `GpuCrossJoin`.
+   - This branch rewrote the Joins opening to say so, and this section now contradicts it.
+   - DataFusion's half was already loose at the base: q9 reached the translator as a
+     predicate-free nested loop.
+
+Already wrong at the base, not this branch's doing: The scheduling rule, "A lane that receives
+nothing is never runnable". A join lane whose inputs end empty is run. On this branch the run is
+`set_build(None)`; at the base it was `NoBuild`.
