@@ -19,14 +19,14 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
   // AST fast path when the predicate has no LIKE / CASE / ScalarFunction nodes;
   // otherwise produce the bool mask via the column-producing evaluator.
   std::unique_ptr<cudf::column> mask;
-  if (cudf_ast_can_evaluate(filter->predicate(), input.table->view())) {
+  if (cudf_ast_can_evaluate(filter->predicate(), input.view())) {
     ExprContext ctx;
     auto& predicate = build_expr(filter->predicate(), ctx);
-    mask = cudf::compute_column(input.table->view(), predicate);
+    mask = cudf::compute_column(input.view(), predicate);
   } else {
-    mask = build_column(filter->predicate(), input.table->view());
+    mask = build_column(filter->predicate(), input.view());
   }
-  auto filtered = cudf::apply_boolean_mask(input.table->view(), mask->view());
+  auto filtered = cudf::apply_boolean_mask(input.view(), mask->view());
 
   // Optional projection, set when the planner fused a downstream ProjectionExec
   // into the filter. Skipping it leaves every input column in place and shifts all
@@ -41,11 +41,11 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
       proj_cols.push_back(std::make_unique<cudf::column>(fv.column(idx)));
       proj_names.push_back(input.column_names[idx]);
     }
-    return {std::make_unique<cudf::table>(std::move(proj_cols)),
-            std::move(proj_names)};
+    return TableResult::owning(std::make_unique<cudf::table>(std::move(proj_cols)),
+                               std::move(proj_names));
   }
 
-  return {std::move(filtered), std::move(input.column_names)};
+  return TableResult::owning(std::move(filtered), std::move(input.column_names));
 }
 
 

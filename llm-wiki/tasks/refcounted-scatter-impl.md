@@ -27,6 +27,25 @@ device; no Rust, wire or golden change.
   `--push-binaries --patch`, `--run`); `peacock_plan_tests` runs whole each cycle.
 - Never share a cargo target dir across worktrees; never build in the primary checkout.
 
+## What the run changed in this plan
+
+Three deviations, each measured rather than reasoned:
+
+- **Task 4's peak bound is measured, not a formula.** `partition_alone` runs the same
+  `spark_hash_partition` call in a scope of its own, and the assertion is that the arm's peak is
+  that peak and nothing on top. The plan's `rows * 12 + offsets` under-counts cuDF's own gather
+  temporaries by a factor of three on a string column, so a hand formula would have refused a
+  correct arm.
+- **The peak case scatters a fixed-width table, not the string one.** cuDF's gather inside
+  `cudf::partition` peaks at 2.59x the input over a string column — above `parted` + the copies —
+  so on that shape removing the copies cannot lower the peak, and no bound discriminates. The
+  fixed-width shape (`c_custkey`, `c_nationkey`, `c_acctbal`) does: 6,973,648 to 4,962,592 bytes.
+  `Scatter.AStringColumnsGatherCostsMoreThanTheCopiesDid` records the string shape's figures.
+  The string column stays in the stats and sharing cases, which is what the spec's §5 asks for.
+- **`scatter_plan` took a projection instead of growing a third near-copy.** One helper over
+  (table, fields, projection) with two named wrappers, and `customer_scan_plan` now reads its
+  field list from the same place.
+
 ## Review focus
 
 1. **A zero-column table reaching `owning()`.** The rule refuses it; today only tpch
@@ -85,7 +104,7 @@ struct TableResult {
 };
 ```
 
-- [ ] **Step 1: The unit case, red (it does not compile).** After `host_int64_column` (`:1174`):
+- [x] **Step 1: The unit case, red (it does not compile).** After `host_int64_column` (`:1174`):
 
 ```cpp
 static std::unique_ptr<cudf::column> int64_column(std::vector<int64_t> const& values) {
@@ -135,9 +154,9 @@ TEST(TableResult, NamesMustMatchColumns) {
 }
 ```
 
-- [ ] **Step 2: The struct** — replace `plan_executor.h:15-19` with the block under *Interfaces*,
+- [x] **Step 2: The struct** — replace `plan_executor.h:15-19` with the block under *Interfaces*,
   adding `#include <cudf/column/column_view.hpp>` and `<cudf/table/table_view.hpp>`.
-- [ ] **Step 3: `cpp/src/table_result.cpp`**, and add `src/table_result.cpp` to the library's
+- [x] **Step 3: `cpp/src/table_result.cpp`**, and add `src/table_result.cpp` to the library's
   source list in `cpp/CMakeLists.txt` after `src/node_session.cpp`:
 
 ```cpp
@@ -210,7 +229,7 @@ TableResult TableResult::with(std::unique_ptr<cudf::column> column, std::string 
 }  // namespace peacock
 ```
 
-- [ ] **Step 4: Migrate every site, no behaviour change.** Three rewrites cover them all:
+- [x] **Step 4: Migrate every site, no behaviour change.** Three rewrites cover them all:
   - `X.table->view()` → `X.view()`; `X.table->num_rows()` → `X.num_rows()`;
     `X.table->num_columns()` → `X.num_columns()` (dispatch.cpp:93; filter.cpp:22-29;
     sort.cpp:19; aggregate.cpp:136; union.cpp:28; limit.cpp:17; project.cpp:25,33;
@@ -234,11 +253,11 @@ TableResult TableResult::with(std::unique_ptr<cudf::column> column, std::string 
     `TableResult part = TableResult::owning(std::make_unique<cudf::table>(slice), column_names);`.
   - Tests: `sed -i 's/\.table->view()/.view()/g; s/\.table->num_rows()/.num_rows()/g; s/\.table->num_columns()/.num_columns()/g' cpp/tests/gpu/test_plan_executor.cpp`,
     then fix by hand what the compiler names.
-- [ ] **Step 5: Device cycle.** The three new cases green; `peacock_plan_tests` and the gpu tier
+- [x] **Step 5: Device cycle.** The three new cases green; `peacock_plan_tests` and the gpu tier
   otherwise unchanged. A producer refused by `owning()` for a name mismatch is fixed here when
   the fix is the names it should have passed; otherwise the case is recorded in the detail file
   and the check kept.
-- [ ] **Step 6: Commit.** `git commit -m "TableResult: one owner per column, views over them (#145)"`.
+- [x] **Step 6: Commit.** `git commit -m "TableResult: one owner per column, views over them (#145)"`.
 
 ### Task 2: A slice's string bytes are its own
 
@@ -250,7 +269,7 @@ TableResult TableResult::with(std::unique_ptr<cudf::column> column, std::string 
 - Consumes: `TableResult::slice` (Task 1).
 - Produces: `varlen_content_bytes(table_view)` correct over sliced views — Task 4's stats rely on it.
 
-- [ ] **Step 1: The case, red.**
+- [x] **Step 1: The case, red.**
 
 ```cpp
 TEST(VarlenBytes, ASliceCountsOnlyItsOwnRows) {
@@ -274,8 +293,8 @@ TEST(VarlenBytes, ASliceCountsOnlyItsOwnRows) {
 }
 ```
 
-- [ ] **Step 2: Device cycle:** red, `first == all`.
-- [ ] **Step 3: The fix.** In `node_session.cpp`, above `varlen_content_bytes`, add
+- [x] **Step 2: Device cycle:** red, `first == all`.
+- [x] **Step 3: The fix.** In `node_session.cpp`, above `varlen_content_bytes`, add
   `#include <cudf/copying.hpp>` (for `get_element`) and `<cudf/scalar/scalar.hpp>`, and:
 
 ```cpp
@@ -299,8 +318,8 @@ static uint64_t string_content_bytes(cudf::column_view const& col) {
   and in `varlen_content_bytes` replace the `chars_size(...)` term with
   `string_content_bytes(col)`. `plan_executor.h`'s comment on `set_node_timing` ("reads
   `chars_size` back") becomes "reads two offsets back".
-- [ ] **Step 4: Device cycle:** green; `ScanRowGroups.TheStatsCarryTheVarlenBytes` still green.
-- [ ] **Step 5: Commit.** `git commit -m "varlen bytes from a slice's own offsets, not its parent's"`.
+- [x] **Step 4: Device cycle:** green; `ScanRowGroups.TheStatsCarryTheVarlenBytes` still green.
+- [x] **Step 5: Commit.** `git commit -m "varlen bytes from a slice's own offsets, not its parent's"`.
 
 ### Task 3: The repartition arm takes exactly one handle (#197)
 
@@ -308,7 +327,7 @@ static uint64_t string_content_bytes(cudf::column_view const& col) {
 - Modify: `cpp/src/node_session.cpp:500-538` (the comment naming #197, the gather)
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`
 
-- [ ] **Step 1: The case, red** (today the arm concatenates two and answers). A two-column
+- [x] **Step 1: The case, red** (today the arm concatenates two and answers). A two-column
   scatter plan helper first, used here and in Task 4:
 
 ```cpp
@@ -386,8 +405,8 @@ TEST(Scatter, EmptyLanesAreZeroRowSlices) {
 }
 ```
 
-- [ ] **Step 2: Device cycle:** the first red (no throw), the second green (and it must stay so).
-- [ ] **Step 3: The fix.** Replace the gather (`:517-538`) with:
+- [x] **Step 2: Device cycle:** the first red (no throw), the second green (and it must stay so).
+- [x] **Step 3: The fix.** Replace the gather (`:517-538`) with:
 
 ```cpp
     if (child[0].size() != 1)
@@ -405,8 +424,8 @@ TEST(Scatter, EmptyLanesAreZeroRowSlices) {
   and delete the comment block at `:500-509` that says the concat has no caller, replacing it
   with one line: "One handle per call: the emitter's contract (#197)." `combined` becomes
   `input.view()` in the `spark_hash_partition` call; the per-partition copies stay until Task 4.
-- [ ] **Step 4: Device cycle:** both green; `NodeRegions.*` unchanged.
-- [ ] **Step 5: Commit.** `git commit -m "the repartition arm takes exactly one handle (#197)"`.
+- [x] **Step 4: Device cycle:** both green; `NodeRegions.*` unchanged.
+- [x] **Step 5: Commit.** `git commit -m "the repartition arm takes exactly one handle (#197)"`.
 
 ### Task 4: Partitions share the partitioned table (#145)
 
@@ -419,7 +438,7 @@ TEST(Scatter, EmptyLanesAreZeroRowSlices) {
   one-handle arm (Task 3); `peacock::stats_mr()` (`cpp/include/peacock/rmm_pool.hpp:86`, the
   statistics adaptor `main()` installs above the pool).
 
-- [ ] **Step 1: Three cases.** The allocation probe first, reused by exit-copies:
+- [x] **Step 1: Three cases.** The allocation probe first, reused by exit-copies:
 
 ```cpp
 /// What `fn` allocated: the bytes it asked for in total, its high-water mark above where it
@@ -519,10 +538,10 @@ TEST(Slice, OwnsItsRowsSoTheBatchCanGo) {
 }
 ```
 
-- [ ] **Step 2: Device cycle:** the first red (`use_count` 1), the second red (peak about 2× the
+- [x] **Step 2: Device cycle:** the first red (`use_count` 1), the second red (peak about 2× the
   input, above the bound by about one input), the third green (and it must stay so). Copy the
   `[scatter] input … peak …` line into the detail file: it is the "before".
-- [ ] **Step 3: The fix.** After `spark_hash_partition` returns:
+- [x] **Step 3: The fix.** After `spark_hash_partition` returns:
 
 ```cpp
     auto [parted, offsets] = peacock::partitioning::spark_hash_partition(
@@ -547,33 +566,33 @@ TEST(Slice, OwnsItsRowsSoTheBatchCanGo) {
 
   Rewrite the comment above the arm: the partitions share one table; a lane that does not drain
   keeps all of it alive; the p1..N−1 regions time only the slice.
-- [ ] **Step 4: Device cycle:** the three green; `NodeRegions.EveryCallOpensOneRegionPerOutputPartition`
+- [x] **Step 4: Device cycle:** the three green; `NodeRegions.EveryCallOpensOneRegionPerOutputPartition`
   green (still N regions); the full gpu tier green. Copy the new `[scatter]` line beside the old
   one in the detail file and check the drop: `peak_before − peak_after ≥ 0.8 × input` (the copies,
   less allocator rounding). A smaller drop means a copy survived; find it before committing.
-- [ ] **Step 5: Commit.** `git commit -m "a scatter's partitions share one table, the input freed at once (#145)"`.
+- [x] **Step 5: Commit.** `git commit -m "a scatter's partitions share one table, the input freed at once (#145)"`.
 
 ### Task 5: The tiers, the benchmark, the wiki
 
-- [ ] **Step 1: Device cycle, the whole gpu tier and the corpus at the tp4 modes.** Every answer
+- [x] **Step 1: Device cycle, the whole gpu tier and the corpus at the tp4 modes.** Every answer
   unchanged (the corpus device cells on today stay green). The benchmark timings of the tp4
   device cells on today (tpch q1, shuffle-additive-avg and the other enabled tp4 cells) before
   Task 1 and after Task 4, into the detail file: the p1..N−1 regions drop toward zero.
-- [ ] **Step 2: The accounting ticket** in `llm-wiki/tickets/memory.md` (the next number from
+- [x] **Step 2: The accounting ticket** in `llm-wiki/tickets/memory.md` (the next number from
   `tickets.md`, counter and counts updated): "the driver's memory model under-reports a shared
   scatter's partitions" — the driver prices each lane's batch alone
   (`executor/driver/accounting.rs`), so a released lane's bytes leave the model while the device
   holds them behind a sibling; the fix is device-reported residency
   (`GpuBackend::resident_bytes()`); no corpus query; a pin would compare the model with the
   statistics adaptor's `value` after releasing three of four partitions.
-- [ ] **Step 3: The wiki.** `architecture.md`: the handle is a per-column-owner `TableResult`; a
+- [x] **Step 3: The wiki.** `architecture.md`: the handle is a per-column-owner `TableResult`; a
   scatter's partitions share; slices and the merge's fetch still copy, and why. `build-test.md`:
   `peacock_plan_tests` count (+9) and the row text. #145 and #197 closed per `tickets.md`'s rule,
   with the commit.
-- [ ] **Step 4: Commit.** `git commit -m "#145, #197 closed: the scatter shares; the accounting ticket filed"`.
+- [x] **Step 4: Commit.** `git commit -m "#145, #197 closed: the scatter shares; the accounting ticket filed"`.
 
 ### Task 6: The record
 
-- [ ] Detail file: the gtest output of each red and green step, the peak numbers of
+- [x] Detail file: the gtest output of each red and green step, the peak numbers of
   `HoldsTheInputOnlyUntilTheTableIsPartitioned` before and after, the benchmark table, any
   producer `owning()` refused in Task 1. `git commit -m "refcounted-scatter: the record"`.

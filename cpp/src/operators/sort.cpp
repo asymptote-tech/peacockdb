@@ -16,7 +16,7 @@ namespace peacock {
 
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
   auto input = take_input(in);
-  auto tv = input.table->view();
+  auto tv = input.view();
 
   if (!sort->exprs() || sort->exprs()->size() == 0)
     return std::move(input);
@@ -56,10 +56,12 @@ TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
                       result->view().num_rows());
     std::vector<cudf::size_type> slice_indices{0, n};
     auto sliced = cudf::slice(result->view(), slice_indices);
+    // An owning copy of the top N, not a view: a view would pin the whole sorted table,
+    // which is the memory this fetch exists to give back.
     result = std::make_unique<cudf::table>(sliced[0]);
   }
 
-  return {std::move(result), std::move(input.column_names)};
+  return TableResult::owning(std::move(result), std::move(input.column_names));
 }
 
 
