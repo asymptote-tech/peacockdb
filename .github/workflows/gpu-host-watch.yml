@@ -1,0 +1,9 @@
+# Stub so the real workflow can be dispatched from PR #180's branch before the merge
+# (GitHub dispatches only a workflow file master already has). PR #180 replaces it.
+name: GPU host watch
+on: workflow_dispatch
+jobs:
+  stub:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "stub; dispatch with --ref gpu-host"
