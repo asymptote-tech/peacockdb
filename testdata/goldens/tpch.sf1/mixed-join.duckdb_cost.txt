@@ -1,0 +1,20 @@
+UNGROUPED_AGGREGATE: aggregates=[count_star(), sum(#0), sum(#1)], output_bytes=40, output_rows=1, materialized=71425136
+  PROJECTION: projections=[l_quantity, o_totalprice], output_bytes=71425136, output_rows=4464071, materialized=0
+    HASH_JOIN: join_type=INNER, conditions=[l_orderkey = o_orderkey, CAST(l_shipdate AS TIMESTAMP) >= CAST(o_orderdate AS TIMESTAMP), CAST(l_shipdate AS TIMESTAMP) <= (o_orderdate + '90 days'::INTERVAL)], output_bytes=71425136, output_rows=4464071, materialized=71425136
+      TABLE_SCAN: table=lineitem, projections=[l_orderkey, l_shipdate, l_quantity], output_bytes=120024300, output_rows=6001215, materialized=120024300, bytes_read=168784172, rows_read=6001215
+      TABLE_SCAN: table=orders, projections=[o_orderkey, o_orderdate, o_totalprice], output_bytes=30000000, output_rows=1500000, materialized=30000000, bytes_read=42187500, rows_read=1500000
+duckdb_cost=503846244
+materialization_total=292874572
+storage_read_total=210971672
+
+--- row-group pruning (storage reduction) ---
+lineitem  dyn_filter=[l_orderkey>=1 AND l_orderkey<=6000000]  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=33793192/33793192 (100.0%)
+orders  row_groups=13/13  rows=1500000/1500000 (100.0%)  bytes_fetched=16098316/16098316 (100.0%)
+pruning_bytes_fetched=49891508/49891508 (100.0%)
+
+--- cost breakdown ---
+TABLE_SCAN(lineitem)                  120024300  41.0%
+UNGROUPED_AGGREGATE                    71425136  24.4%
+HASH_JOIN                              71425136  24.4%
+TABLE_SCAN(orders)                     30000000  10.2%
+total=292874572

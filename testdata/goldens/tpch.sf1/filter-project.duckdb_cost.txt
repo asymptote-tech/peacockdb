@@ -1,0 +1,13 @@
+PROJECTION: projections=[l_orderkey, l_quantity], output_bytes=38434992, output_rows=2402187, materialized=0
+  TABLE_SCAN: table=lineitem, projections=[l_quantity, l_orderkey], filters="l_quantity>30.00", output_bytes=38434992, output_rows=2402187, materialized=38434992, bytes_read=144779312, rows_read=6001215
+duckdb_cost=183214304
+materialization_total=38434992
+storage_read_total=144779312
+
+--- row-group pruning (storage reduction) ---
+lineitem  filter=[l_quantity>30.00]  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=33772577/33772577 (100.0%)
+pruning_bytes_fetched=33772577/33772577 (100.0%)
+
+--- cost breakdown ---
+TABLE_SCAN(lineitem)                   38434992 100.0%
+total=38434992

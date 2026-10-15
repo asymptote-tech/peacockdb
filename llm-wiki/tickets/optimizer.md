@@ -230,3 +230,18 @@ is 990 rows, NDV 10. The rows are right since #239; the NDV is not. tpch q13 gro
 over `customer ⟕ orders`: the final aggregate is estimated at 99,996 groups, orders' customer
 count, against 150,000. Only an inner or semi join's output holds just the matched values; a
 preserved side keeps its own NDV, and an anti join's is at most its own less the matched ones.
+
+<a id="t241"></a>
+### #241 — the DuckDB oracle charges a full scan under a limit DuckDB stops early
+`duckdb_cost.py`'s `scan_cost` reads a scan's rows as every surviving row group's (`rows_fetched`),
+so a scan a `STREAMING_LIMIT` stops is charged as read in full. tpch `scan-limit` profiles 2,048
+rows scanned of lineitem's 6,001,215, and its golden charges all 49 row groups, 1.04 GB of
+`storage_read_total`: the engine's 1.05 GB reads as a ratio of 1.01, where DuckDB read one row
+group. tpch `nested-limits` is the same through pass 1: DuckDB's default plan reads `part` by
+`rowid>=5 AND rowid<=44` (pass 2's bounds, a late-materialization semi join), pass 1 turns that
+off, and the golden charges the full 200,000-row scan, 4.83 MB of its 4.85 MB.
+
+Fix: under a `STREAMING_LIMIT`, charge the lesser of the pruned row groups and those covering
+`operator_rows_scanned`; a `rowid` range from pass 2 bounds the scan the same way. tpcds q28, q32,
+q38 and q97 hold scans under a limit too, each scanning its whole table: check their goldens
+hold, and the two tpch ratios become comparable.

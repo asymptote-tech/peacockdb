@@ -60,6 +60,8 @@ fixes #236 and #237):
   through unions and non-inner joins; probe plans run adaptively. The full `run.py` regenerated
   every committed prototype output, and the answer suites passed over every (query, mode) that
   differs from HEAD; tpcds q84 is the one ratio above HEAD, +0.2–0.5 % (Task 13 below).
+- Task 14: every named tpch query has a DuckDB cost, and `cost-report` prices the named rows on
+  both sides (Task 14 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (46 files, 452 cases), and q64 in the corpus answer,
@@ -1984,3 +1986,90 @@ moved at four places:
 - Totals are design.md's "The committed run": 740 probes before the order narrowing 735 scans, 66
   after narrowing 45; DPhyp 3,315 calls (3,249 at HEAD), 69 at the budget, all q64's, which now
   replans 9 times at every mode (7 at HEAD).
+
+## Task 14
+
+### Generation
+
+`gen_duckdb_cost.sh --gen` profiles every `<bench>-queries/*.sql`, and `--extract-only` every
+committed profile, so the 21 named tpch queries have a `.duckdb_cost.txt`, a pass-1 profile and
+pass-2 bounds. Its raw profiles go to a `mktemp -d` rather than fixed `/tmp` names, so concurrent
+runs do not share scratch files; the import cache below is still shared. Either mode exits 1 on an
+empty query or profile set, and `--gen` on any failed query. Run as written with DuckDB 1.5.4 and
+pyarrow 19.0.1: tpch 43, tpcds 99, none failed, 1 min 54 s, peak RSS 0.6 GB. All 363 committed
+outputs were rewritten and came out byte for byte; `--extract-only` reproduces the 21 new goldens.
+
+The import caches a database in `<data>/.duckdb_cache/`. With the sf1 directory a symlink that
+lands in the link's target; a `TESTDATA_DIR` whose sf1 directories hold one link per parquet file
+keeps it local. DuckDB's memory limit can be set in a `.duckdbrc` under `HOME`; this run set 2 GB.
+
+### The engine's report
+
+`cost-report` looked a micro-query's `.cost.txt` section up under the registry's underscore name,
+`scan_limit`, and the section is `== scan-limit`, so every named row's PeacockDB Σout was "—".
+`build_dataset` now passes the hyphenated stem, as the DuckDB lookup did.
+`a_micro_query_is_priced_from_its_hyphenated_section` was red on all 21 and
+`every_registry_query_has_a_duckdb_cost` on the same 21 before generation. The PR comment is
+56,706 of 65,536 bytes.
+
+Three places still say the named queries have no DuckDB figure: `cost_report.py`'s legend,
+`scripts/exec_model/README.md`'s `cost_report.html` entry, and the committed `cost_report.html`.
+They change with the next render of the prototype's report, left to the merge with Task 13; a
+render of 0205232c's outputs into a scratch directory shows all 21 rows with DuckDB and a ratio.
+
+### Room for the optimizer
+
+Report = the engine's figure at the last mode its cpu run is enabled at, over DuckDB's, as
+`cost-report` shows it (tp4-sized for all but rollup-over-join, tp1-rowgroup). tp1 = the same at
+tp1-single. Projected = `cost_report.py`'s final ratio over the prototype's committed outputs.
+Forwarders cost 0, so tp4's excess is the scatter alone. n/c = not comparable: the oracle charges
+DuckDB a full scan its default run avoids (#241).
+
+| query | report | tp1 | projected | room |
+|---|--:|--:|--:|---|
+| left-join-reorder | 1.70 | 0.89 | 0.31 | taken: nation's one row joins customer first, then the left join; 0.35 of the plan at tp1 |
+| semi-join-reorder | 1.29 | 0.72 | 0.48 | taken, the same move; 0.67 |
+| anti-join-reorder | 1.24 | 0.70 | 0.50 | taken, the same move; 0.72 |
+| left-join-fixed | 1.65 | 0.86 | 0.86 | not taken, see below |
+| anti-join | 1.45 | 1.05 | 1.05 | exchange, not order |
+| semi-join | 1.28 | 0.75 | 0.75 | exchange, not order |
+| mixed-join | 1.22 | 0.79 | 0.79 | none: two large sides |
+| hash-join | 1.02 | 0.71 | 0.71 | none: two large sides |
+| left-join | 1.02 | 0.71 | 0.71 | none: two large sides |
+| join-int | 0.76 | 0.47 | 0.47 | none |
+| rollup-over-join | 0.43 | 0.43 | 0.43 | none |
+| filter-project | 1.43 | 1.43 | 1.43 | none: no join |
+| scan-limit | n/c | — | n/c | none for order: the limit; DuckDB's figure is a full read, #241 |
+| aggregate-groupby | 0.39 | 0.39 | 0.39 | none: no join |
+| shuffle-additive | 0.39 | 0.39 | 0.39 | none: no join |
+| shuffle-additive-avg | 0.31 | 0.31 | 0.31 | none: no join |
+| shuffle-stddev | 0.26 | 0.26 | 0.26 | none: no join |
+| nested-limits | n/c | n/c | n/c | no order: a 5-row cross join; DuckDB's figure is a full scan, #241 |
+| cross-join | 3.64 | 3.64 | 3.64 | none: kilobytes |
+| nested-loop-join | 4.10 | 4.10 | 4.10 | none: kilobytes |
+| nested-loop-left-join | 4.73 | 4.73 | 4.73 | none: kilobytes |
+
+- The three reorder queries: DuckDB keeps the written order in all three, joining the 150 k
+  customers to orders before nation's filter, so the prototype ends below DuckDB.
+- left-join-fixed is the one query with room the optimizer does not take. The inner join to
+  lineitem on `o_orderkey` rejects every row the left join null-extends, so the left join is an
+  inner one; as written, TES keeps customer ⟕ orders together, and its 1.55 M rows are 47 MB of
+  the 83 MB at tp1-single. Simplifying the outer join would let orders meet lineitem's 2,528 rows
+  first. DuckDB does not do it either.
+- anti-join and semi-join: at tp4 the 1.5 M-row orders side is scattered, 195 MB, to meet a
+  30 k-key build; broadcasting the build would drop it. That is the exchange, not DPhyp's order.
+  At tp1 anti-join's 155 MB is `SELECT *` of 1.2 M orders, joined and unloaded, as DuckDB pays it.
+- hash-join, left-join and mixed-join scatter both sides at tp4, 182–213 MB, and both are large;
+  at tp1 they sit at 0.71–0.79.
+- filter-project pays its 58 MB output twice, filter and unload, at 24 bytes a row (`l_quantity`
+  is Decimal128); DuckDB's scan emits 16 bytes a row once.
+- scan-limit: the engine reads all of lineitem, 1.05 GB, for ten rows, and tp4-rowgroup stops
+  after 21.5 MB. DuckDB stops after one 2,048-row vector, but the oracle charges every surviving
+  row group, 1.04 GB, so the 1.01 is the oracle's, not DuckDB's (#241). A limit the scan honours
+  is the room there.
+- nested-limits: DuckDB's default run reads `part` by a `rowid` range (pass 2's bounds); pass 1
+  turns that off and the golden charges the full 200,000-row scan, so its 0.34 flatters the
+  engine (#241). Its one join is a 5-row cross join, with no order to choose.
+- The aggregates are their scan alone; DuckDB counts its aggregate's input as materialized.
+  cross-join and the nested-loop joins are region × nation, 5–49 KB, where fixed overhead sets the
+  ratio.

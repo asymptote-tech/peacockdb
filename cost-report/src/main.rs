@@ -535,7 +535,7 @@ fn build_dataset(
                 features: r.features.clone(),
                 tickets: r.tickets.clone(),
                 duckdb: read_total(&canon.join(format!("{stem}.duckdb_cost.txt")), "duckdb_cost="),
-                peacockdb: peacockdb_cost(canon, &r.states, &r.query),
+                peacockdb: peacockdb_cost(canon, &r.states, &stem),
             }
         })
         .collect();
@@ -581,14 +581,14 @@ fn section_lines(canon: &Path) -> SectionLines {
 fn peacockdb_cost(
     canon: &Path,
     states: &BTreeMap<String, String>,
-    query: &str,
+    stem: &str,
 ) -> Option<(String, u64)> {
     let mode = MODES.iter().rev().find(|mode| {
         let column = format!("cpu_{}", mode.replace('-', "_"));
         states.get(&column).map(String::as_str) == Some("enabled")
     })?;
     let text = std::fs::read_to_string(canon.join(format!("{mode}-{TIER}.cost.txt"))).ok()?;
-    let total = entry_total(&text, query)?;
+    let total = entry_total(&text, stem)?;
     Some((mode.to_string(), total))
 }
 
@@ -2121,17 +2121,12 @@ mod tests {
     /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
     #[test]
     fn the_pr_comment_fits_under_the_body_cap() {
-        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
-        let registry = Registry::load(&testdata.join("cost-registry.csv"));
         let links = Links {
             repo: "asymptote-tech/peacockdb".into(),
             sha: Some("0".repeat(40)),
             tickets: TicketIndex::default(),
         };
-        let datasets = [
-            build_dataset("TPC-H", "testdata/goldens/tpch.sf1", "testdata/tpch-queries", &testdata.join("goldens/tpch.sf1"), &registry, "tpch"),
-            build_dataset("TPC-DS", "testdata/goldens/tpcds.sf1", "testdata/tpcds-queries", &testdata.join("goldens/tpcds.sf1"), &registry, "tpcds"),
-        ];
+        let datasets = committed_datasets();
         let body = render_markdown(&datasets, "https://p/", false, &links, None);
         // The margin, not just the verdict: the body grows by a row per query enabled, so
         // the number a later reader needs is how many more fit — a guard that only says
@@ -2150,6 +2145,76 @@ mod tests {
              this with a 422 that reads as a permissions error",
             body.len()
         );
+    }
+
+    /// Both datasets as the report builds them, from the committed registry and goldens.
+    fn committed_datasets() -> [Dataset; 2] {
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        [
+            build_dataset(
+                "TPC-H",
+                "testdata/goldens/tpch.sf1",
+                "testdata/tpch-queries",
+                &testdata.join("goldens/tpch.sf1"),
+                &registry,
+                "tpch",
+            ),
+            build_dataset(
+                "TPC-DS",
+                "testdata/goldens/tpcds.sf1",
+                "testdata/tpcds-queries",
+                &testdata.join("goldens/tpcds.sf1"),
+                &registry,
+                "tpcds",
+            ),
+        ]
+    }
+
+    /// The registry spells a micro-query `scan_limit` and its `.cost.txt` section is
+    /// `== scan-limit`, so a lookup under the registry's spelling prices no micro-query. Only a
+    /// row with a cpu run enabled at some mode has a section to price.
+    #[test]
+    fn a_micro_query_is_priced_from_its_hyphenated_section() {
+        let [tpch, _] = committed_datasets();
+        let micro: Vec<&Row> = tpch
+            .rows
+            .iter()
+            .filter(|r| r.n.is_none())
+            .filter(|r| {
+                MODES
+                    .iter()
+                    .any(|mode| r.state(&ModeGroup::Cpu.column(mode)) == "enabled")
+            })
+            .collect();
+        assert!(
+            !micro.is_empty(),
+            "the registry holds no tpch micro-query a cpu run enables"
+        );
+        let unpriced: Vec<&str> = micro
+            .iter()
+            .filter(|r| r.peacockdb.is_none())
+            .map(|r| r.query.as_str())
+            .collect();
+        assert!(
+            unpriced.is_empty(),
+            "micro-queries with no PeacockDB cost: {unpriced:?}"
+        );
+    }
+
+    /// `gen_duckdb_cost.sh` profiles every query file, so every registry row has DuckDB's cost.
+    #[test]
+    fn every_registry_query_has_a_duckdb_cost() {
+        let missing: Vec<String> = committed_datasets()
+            .iter()
+            .flat_map(|d| {
+                d.rows
+                    .iter()
+                    .filter(|r| r.duckdb.is_none())
+                    .map(|r| format!("{}/{}", d.label, r.query))
+            })
+            .collect();
+        assert!(missing.is_empty(), "no `.duckdb_cost.txt` for: {missing:?}");
     }
 
     #[test]

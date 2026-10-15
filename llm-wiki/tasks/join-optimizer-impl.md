@@ -265,7 +265,7 @@ tests, goldens.
 - [ ] Generation and extraction iterate every corpus query, the named ones included, with the
   pinned DuckDB and pyarrow. The engine's cost report and `cost_report.html` show their final
   ratio.
-- [ ] Which named queries leave room for the optimizer, and why, in the detail file.
+- [x] Which named queries leave room for the optimizer, and why, in the detail file.
 - [ ] Proving: `gen_duckdb_cost.sh --gen` run as written; the cost-report crate and
   `cost_report.py` render.
 
