@@ -6,6 +6,7 @@ Tests, CI, hosts, testdata etc
 ## Contents
 
 - [#263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline](#t263)
+- [#258 — the PR comment has about seven corpus rows of headroom left](#t258)
 - [#252 — six corpus cases read the checkout, which a remote CPU run never ships](#t252)
 - [#178 — the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 — the CI coverage guard checks one direction only](#t176)
@@ -42,6 +43,27 @@ run `--lib` by hand after a tickets-only commit.
 
 Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, which is the branch
 that made the wiki an input.
+
+<a id="t258"></a>
+### #258 — the PR comment has about seven corpus rows of headroom left
+`the_pr_comment_fits_under_the_body_cap` holds the cost widget's comment under GitHub's
+65,536-byte body limit. pbench's 60 rows took it to 79,352, and three cuts in the pbench task
+brought it back to **63,339** — the fully-enabled tick made one character wider, a 7-character sha
+in the comment's query links (the archived page keeps the full one), and no `<sub>` on the three
+mode cells. None of the three lost information.
+
+That leaves **2,197 bytes, about six corpus rows**, and chain J already owes three of them: the
+queries [#255](complete-coverage.md#t255) blocks. `int8-key-group` spent the fourth when pbench's
+device cycle landed it. So the next task after those to add a corpus query goes
+red here, and the lever left is a choice about what a PR comment is for rather than another byte
+cut.
+
+**The two options, measured in the pbench task:** take the Features column out of the comment
+(about 9 KB, and the page still carries it), or collapse pbench in the comment to its summary line
+with the rows on the page only. The first is the better trade on the argument that a feature matrix
+does not change with the PR while a per-row pass or fail does — but it changes what every reviewer
+sees in every comment from then on, which is why it is filed for a human rather than taken inside
+the task that measured it.
 
 <a id="t252"></a>
 ### #252 — six corpus cases read the checkout, which a remote CPU run never ships

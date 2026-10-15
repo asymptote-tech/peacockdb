@@ -1,0 +1,851 @@
+== anti-null-preserved-condition
+refused: unsupported: LeftAnti join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== bool-key-group
+GpuUnload
+  GpuProject: exprs=[f_kb@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_kb:Boolean, n:Int64]
+    GpuAggregateBatches: group_by=[f_kb@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_kb:Boolean, count(*):Int64]
+      GpuAggregate: group_by=[f_kb@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_kb:Boolean, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_kb@3], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_kb:Boolean]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=220000, certain=0
+GpuUnload: estimated_max_resident_size=220000
+  GpuProject: estimated_max_resident_size=220000
+    GpuAggregateBatches: estimated_max_resident_size=220000
+      GpuAggregate: estimated_max_resident_size=29133
+        GpuLoadParquet: estimated_max_resident_size=5297, source_bytes=5297, target_batch_bytes=5297, amplification=5.5
+== cross-empty-build
+refused: invalid plan: no surviving row groups: what an empty scan means is the caller's decision, not an empty map — the wire format reads that as one unmapped partition
+== cross-projection
+GpuUnload
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
+      GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[]
+    GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfCrossJoin, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=16, certain=8
+GpuUnload: estimated_max_resident_size=8
+  GpuCrossJoin: estimated_max_resident_size=160297
+    GpuCoalesceAllBatches: estimated_max_resident_size=8
+      GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=160289, source_bytes=160289, target_batch_bytes=160289, amplification=1.0
+== decimal15-key-group
+GpuUnload
+  GpuProject: exprs=[f_kdec15@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_kdec15:Decimal128(15,2), n:Int64]
+    GpuAggregateBatches: group_by=[f_kdec15@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_kdec15:Decimal128(15,2), count(*):Int64]
+      GpuAggregate: group_by=[f_kdec15@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_kdec15:Decimal128(15,2), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_kdec15@6], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_kdec15:Decimal128(15,2)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=520000, certain=0
+GpuUnload: estimated_max_resident_size=520000
+  GpuProject: estimated_max_resident_size=520000
+    GpuAggregateBatches: estimated_max_resident_size=520000
+      GpuAggregate: estimated_max_resident_size=246287
+        GpuLoadParquet: estimated_max_resident_size=161034, source_bytes=161034, target_batch_bytes=161034, amplification=1.5
+== decimal15-key-join
+GpuUnload
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
+    GpuHashJoin: join_type=Inner, on=[(d_kdec15@1, f_kdec15@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_kdec15:Decimal128(15,2)]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_kdec15@6], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_kdec15:Decimal128(15,2)]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_kdec15@6], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_kdec15:Decimal128(15,2)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=104000, certain=52000
+GpuUnload: estimated_max_resident_size=52000
+  GpuProject: estimated_max_resident_size=52000
+    GpuHashJoin: estimated_max_resident_size=373323
+      GpuCoalesceAllBatches: estimated_max_resident_size=52000
+        GpuLoadParquet: estimated_max_resident_size=32057, source_bytes=32057, target_batch_bytes=32057, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=321323, source_bytes=321323, target_batch_bytes=321323, amplification=1.0
+== decimal38-key-group
+GpuUnload
+  GpuProject: exprs=[f_kdec38@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_kdec38:Decimal128(38,4), n:Int64]
+    GpuAggregateBatches: group_by=[f_kdec38@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_kdec38:Decimal128(38,4), count(*):Int64]
+      GpuAggregate: group_by=[f_kdec38@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_kdec38:Decimal128(38,4), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_kdec38@7], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_kdec38:Decimal128(38,4)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=520000, certain=0
+GpuUnload: estimated_max_resident_size=520000
+  GpuProject: estimated_max_resident_size=520000
+    GpuAggregateBatches: estimated_max_resident_size=520000
+      GpuAggregate: estimated_max_resident_size=488827
+        GpuLoadParquet: estimated_max_resident_size=319618, source_bytes=319618, target_batch_bytes=319618, amplification=1.5
+== empty-side-left-join
+refused: unsupported: plan node EmptyExec
+== exists-null-keys
+GpuUnload
+  GpuHashJoin: join_type=LeftSemi, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfProject{probe keys}, batch); at done: execute_node(#4 CudfCoalescePartitions, accumulated keys), execute_node(#5 CudfHashJoin{LeftSemi}, build, prior output), execute_node(#6 CudfProject{narrow}, prior output)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=156000, certain=28000
+GpuUnload: estimated_max_resident_size=128000
+  GpuHashJoin: estimated_max_resident_size=206812
+    GpuCoalesceAllBatches: estimated_max_resident_size=28000
+      GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=78812, source_bytes=78812, target_batch_bytes=78812, amplification=1.0
+== exists-or-mark
+refused: unsupported: LeftMark join on a key that can be NULL on both sides (build @1, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== finish-without-probe
+GpuUnload
+  GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, schema=[d_id:Int64, d_w:Int32, mark:Boolean]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, d_w:Int32]
+      GpuProject: exprs=[1 as Int64(1), t_k@0], lanes=1, batches=multiple, schema=[Int64(1):Int64, t_k:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuFilter: calling_lanes=1, per batch: execute_node(#8 CudfFilter, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfProject{probe keys}, batch); at done: execute_node(#5 CudfCoalescePartitions, accumulated keys), execute_node(#6 CudfHashJoin{LeftMark}, build, prior output), execute_node(#7 CudfProject{narrow}, prior output)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuProject: calling_lanes=1, per batch: execute_node(#3 CudfProject, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=76040, certain=38000
+GpuUnload: estimated_max_resident_size=21397
+  GpuFilter: estimated_max_resident_size=21397
+    GpuHashJoin: estimated_max_resident_size=38194
+      GpuCoalesceAllBatches: estimated_max_resident_size=38000
+        GpuLoadParquet: estimated_max_resident_size=36159, source_bytes=36159, target_batch_bytes=36159, amplification=1.0
+      GpuProject: estimated_max_resident_size=154
+        GpuLoadParquet: estimated_max_resident_size=55, source_bytes=55, target_batch_bytes=55, amplification=2.8
+== float32-key-group
+GpuUnload
+  GpuProject: exprs=[f_kf32@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_kf32:Float32, n:Int64]
+    GpuAggregateBatches: group_by=[f_kf32@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_kf32:Float32, count(*):Int64]
+      GpuAggregate: group_by=[f_kf32@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_kf32:Float32, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_kf32@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_kf32:Float32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuProject: estimated_max_resident_size=280000
+    GpuAggregateBatches: estimated_max_resident_size=280000
+      GpuAggregate: estimated_max_resident_size=229482
+        GpuLoadParquet: estimated_max_resident_size=81958, source_bytes=81958, target_batch_bytes=81958, amplification=2.8
+== float64-key-group
+GpuUnload
+  GpuProject: exprs=[f_kf64@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_kf64:Float64, n:Int64]
+    GpuAggregateBatches: group_by=[f_kf64@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_kf64:Float64, count(*):Int64]
+      GpuAggregate: group_by=[f_kf64@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_kf64:Float64, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_kf64@5], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_kf64:Float64]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuAggregate: estimated_max_resident_size=322470
+        GpuLoadParquet: estimated_max_resident_size=161235, source_bytes=161235, target_batch_bytes=161235, amplification=2.0
+== float64-key-join
+GpuUnload
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
+    GpuHashJoin: join_type=Inner, on=[(d_kf64@1, f_kf64@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_kf64:Float64]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_kf64@5], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_kf64:Float64]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_kf64@5], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_kf64:Float64]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=72000, certain=36000
+GpuUnload: estimated_max_resident_size=36000
+  GpuProject: estimated_max_resident_size=36000
+    GpuHashJoin: estimated_max_resident_size=357524
+      GpuCoalesceAllBatches: estimated_max_resident_size=36000
+        GpuLoadParquet: estimated_max_resident_size=32057, source_bytes=32057, target_batch_bytes=32057, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=321524, source_bytes=321524, target_batch_bytes=321524, amplification=1.0
+== full-join-null-keys
+GpuUnload
+  GpuHashJoin: join_type=Full, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfProject{probe keys}, batch copy), execute_node(#4 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#5 CudfCoalescePartitions, accumulated keys), execute_node(#7 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#8 CudfProject{build columns + 1 null}, prior output)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=156000, certain=28000
+GpuUnload: estimated_max_resident_size=128000
+  GpuHashJoin: estimated_max_resident_size=367101
+    GpuCoalesceAllBatches: estimated_max_resident_size=28000
+      GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== full-join-residual
+refused: unsupported: Full join with a residual filter: the executor applies it after the outer gather, so a padded row's NULLs drop it (#153)
+== in-is-null
+refused: unsupported: plan node EmptyExec
+== indf-full-join
+refused: unsupported: nested-loop join type Full — the executor rejects anything but Inner and Left (#160)
+== inner-join-hot-keys
+GpuUnload
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
+    GpuHashJoin: join_type=Inner, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=56000, certain=28000
+GpuUnload: estimated_max_resident_size=28000
+  GpuProject: estimated_max_resident_size=28000
+    GpuHashJoin: estimated_max_resident_size=267101
+      GpuCoalesceAllBatches: estimated_max_resident_size=28000
+        GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== int8-key-group
+GpuUnload
+  GpuProject: exprs=[f_k8@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_k8:Int8, n:Int64]
+    GpuAggregateBatches: group_by=[f_k8@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_k8:Int8, count(*):Int64]
+      GpuAggregate: group_by=[f_k8@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_k8:Int8, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_k8@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_k8:Int8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=220000, certain=0
+GpuUnload: estimated_max_resident_size=220000
+  GpuProject: estimated_max_resident_size=220000
+    GpuAggregateBatches: estimated_max_resident_size=220000
+      GpuAggregate: estimated_max_resident_size=441534
+        GpuLoadParquet: estimated_max_resident_size=80279, source_bytes=80279, target_batch_bytes=80279, amplification=5.5
+== left-join-null-keys
+GpuUnload
+  GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32, f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfProject{probe keys}, batch copy), execute_node(#4 CudfHashJoin{Inner}, build copy, batch); at done: execute_node(#5 CudfCoalescePartitions, accumulated keys), execute_node(#7 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#8 CudfProject{build columns + 1 null}, prior output)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=156000, certain=28000
+GpuUnload: estimated_max_resident_size=128000
+  GpuHashJoin: estimated_max_resident_size=367101
+    GpuCoalesceAllBatches: estimated_max_resident_size=28000
+      GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== left-join-residual
+refused: unsupported: Left join with a residual filter: the executor applies it after the outer gather, so a padded row's NULLs drop it (#153)
+== like-column-pattern
+GpuUnload
+  GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, schema=[d_id:Int64, t_id:Int32]
+    GpuNestedLoopJoin: join_type=Inner, filter=d_name@probe:1 LIKE t_pat@build:1, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_pat:Utf8]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_pat@3], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_pat:Utf8]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_name@17], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_name:Utf8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=224, certain=112
+GpuUnload: estimated_max_resident_size=112
+  GpuProject: estimated_max_resident_size=112
+    GpuNestedLoopJoin: estimated_max_resident_size=24168
+      GpuCoalesceAllBatches: estimated_max_resident_size=112
+        GpuLoadParquet: estimated_max_resident_size=144, source_bytes=144, target_batch_bytes=144, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=24056, source_bytes=24056, target_batch_bytes=24056, amplification=1.0
+== mark-cross-residual
+refused: unsupported: LeftMark join on a key that can be NULL on both sides (build @1, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== nl-full
+refused: unsupported: nested-loop join type Full — the executor rejects anything but Inner and Left (#160)
+== nl-inner
+GpuUnload
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, t_id:Int32]
+    GpuNestedLoopJoin: join_type=Inner, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_v:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=160, certain=80
+GpuUnload: estimated_max_resident_size=80
+  GpuProject: estimated_max_resident_size=80
+    GpuNestedLoopJoin: estimated_max_resident_size=280649
+      GpuCoalesceAllBatches: estimated_max_resident_size=80
+        GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=280569, source_bytes=280569, target_batch_bytes=280569, amplification=1.0
+== nl-left
+GpuUnload
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, t_id:Int32]
+    GpuNestedLoopJoin: join_type=Left, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_v:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[f_id:Int64, f_qty:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfNestedLoopJoin, build, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280160, certain=280080
+GpuUnload: estimated_max_resident_size=80
+  GpuProject: estimated_max_resident_size=80
+    GpuNestedLoopJoin: estimated_max_resident_size=280080
+      GpuCoalesceAllBatches: estimated_max_resident_size=80
+        GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+      GpuCoalesceAllBatches: estimated_max_resident_size=280000
+        GpuLoadParquet: estimated_max_resident_size=280569, source_bytes=280569, target_batch_bytes=280569, amplification=1.0
+== nl-left-anti
+refused: unsupported: nested-loop join type LeftAnti — the executor rejects anything but Inner and Left (#160)
+== nl-left-decimal
+GpuUnload
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, t_id:Int32]
+    GpuNestedLoopJoin: join_type=Left, filter=CAST(t_v@build:1 AS Decimal128(20,0)) > CAST(f_qty@probe:1 AS Decimal128(20,0)), projection=[t_id@0, f_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_v:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[f_id:Int64, f_qty:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfNestedLoopJoin, build, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280160, certain=280080
+GpuUnload: estimated_max_resident_size=80
+  GpuProject: estimated_max_resident_size=80
+    GpuNestedLoopJoin: estimated_max_resident_size=280080
+      GpuCoalesceAllBatches: estimated_max_resident_size=80
+        GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+      GpuCoalesceAllBatches: estimated_max_resident_size=280000
+        GpuLoadParquet: estimated_max_resident_size=280569, source_bytes=280569, target_batch_bytes=280569, amplification=1.0
+== nl-left-semi
+refused: unsupported: nested-loop join type LeftSemi — the executor rejects anything but Inner and Left (#160)
+== nl-mark
+refused: unsupported: nested-loop join type LeftMark — the executor rejects anything but Inner and Left (#160)
+== nl-projection
+GpuUnload
+  GpuNestedLoopJoin: join_type=Inner, filter=f_qty@probe:1 < t_v@build:0, projection=[f_id@1], lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_v:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_v@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_v:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuNestedLoopJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfNestedLoopJoin, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=80, certain=40
+GpuUnload: estimated_max_resident_size=40
+  GpuNestedLoopJoin: estimated_max_resident_size=280609
+    GpuCoalesceAllBatches: estimated_max_resident_size=40
+      GpuLoadParquet: estimated_max_resident_size=55, source_bytes=55, target_batch_bytes=55, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=280569, source_bytes=280569, target_batch_bytes=280569, amplification=1.0
+== nl-right
+refused: unsupported: nested-loop join type Right — the executor rejects anything but Inner and Left (#160)
+== nl-right-anti
+refused: unsupported: nested-loop join type RightAnti — the executor rejects anything but Inner and Left (#160)
+== nl-right-semi
+refused: unsupported: nested-loop join type RightSemi — the executor rejects anything but Inner and Left (#160)
+== not-exists-null-keys
+refused: unsupported: LeftAnti join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== not-in-correlated
+refused: unsupported: RightAnti join on a key that can be NULL on both sides (build @0, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== not-in-uncorrelated
+refused: unsupported: RightAnti join on a key that can be NULL on both sides (build @0, probe @1) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== not-in-under-or
+refused: unsupported: LeftMark join on a key that can be NULL on both sides (build @1, probe @0) with null_equals_null=false: the executor matches NULL to NULL there whatever the flag says, which is set semantics rather than SQL's (#59, #80)
+== not-not-in
+GpuUnload
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_y:Int32]
+      GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_y:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{RightSemi}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=2000, certain=1000
+GpuUnload: estimated_max_resident_size=1000
+  GpuHashJoin: estimated_max_resident_size=240101
+    GpuCoalesceAllBatches: estimated_max_resident_size=1000
+      GpuLoadParquet: estimated_max_resident_size=827, source_bytes=827, target_batch_bytes=827, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== not-or-not-in
+GpuUnload
+  GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_y:Int32]
+      GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_y:Int32]
+    GpuFilter: predicate=f_qty@2 != 0, projection=[f_id@0, f_k@1], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#4 CudfHashJoin{RightSemi}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuFilter: calling_lanes=1, per batch: execute_node(#3 CudfFilter, batch)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=2000, certain=1000
+GpuUnload: estimated_max_resident_size=1000
+  GpuHashJoin: estimated_max_resident_size=265807
+    GpuCoalesceAllBatches: estimated_max_resident_size=1000
+      GpuLoadParquet: estimated_max_resident_size=827, source_bytes=827, target_batch_bytes=827, amplification=1.0
+    GpuFilter: estimated_max_resident_size=264807
+      GpuLoadParquet: estimated_max_resident_size=359381, source_bytes=359381, target_batch_bytes=359381, amplification=1.0
+== outer-on-true-empty
+refused: unsupported: nested-loop join type Right — the executor rejects anything but Inner and Left (#160)
+== probe-exists-residual
+refused: unsupported: RightSemi join with a residual filter: no swapped mixed_* variant exists — keeping the emitted side as the build turns it into a Left form (#159)
+== probe-not-exists-residual
+refused: unsupported: RightAnti join with a residual filter: no swapped mixed_* variant exists — keeping the emitted side as the build turns it into a Left form (#159)
+== right-join-null-keys
+GpuUnload
+  GpuHashJoin: join_type=Right, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2, f_k@3], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64, f_k:Int32]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_k:Int32]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Right}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=56000, certain=28000
+GpuUnload: estimated_max_resident_size=28000
+  GpuHashJoin: estimated_max_resident_size=267101
+    GpuCoalesceAllBatches: estimated_max_resident_size=28000
+      GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== right-join-residual
+refused: unsupported: Right join with a residual filter: the executor applies it after the outer gather, so a padded row's NULLs drop it (#153)
+== rollup-small-keys
+GpuUnload
+  GpuProject: exprs=[f_k8@0, f_kb@1, sum(fact.f_qty)@3 as q], lanes=1, batches=single, schema=[f_k8:Int8, f_kb:Boolean, q:Int64]
+    GpuAggregateBatches: group_by=[f_k8@0, f_kb@1, __grouping_id@2], aggs=[sum(sum(fact.f_qty)@3) as sum(fact.f_qty)], final=[sum(fact.f_qty)@3], lanes=1, batches=single, schema=[f_k8:Int8, f_kb:Boolean, __grouping_id:UInt8, sum(fact.f_qty):Int64]
+      GpuAggregate: group_by=[f_k8@0, f_kb@1], grouping_sets=[[], [f_k8@0], [f_k8@0, f_kb@1]], aggs=[sum(CAST(f_qty@2 AS Int64)) as sum(fact.f_qty)], lanes=1, batches=multiple, schema=[f_k8:Int8, f_kb:Boolean, __grouping_id:UInt8, sum(fact.f_qty):Int64]
+        GpuLoadParquet: table=fact, projections=[f_k8@2, f_kb@3, f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_k8:Int8, f_kb:Boolean, f_qty:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=300000, certain=0
+GpuUnload: estimated_max_resident_size=260000
+  GpuProject: estimated_max_resident_size=260000
+    GpuAggregateBatches: estimated_max_resident_size=300000
+      GpuAggregate: estimated_max_resident_size=343093
+        GpuLoadParquet: estimated_max_resident_size=205856, source_bytes=205856, target_batch_bytes=205856, amplification=1.7
+== scalar-subquery-cross
+GpuUnload
+  GpuProject: exprs=[CASE WHEN count(*)@0 > 100 THEN avg(fact.f_amount)@1 ELSE avg(fact.f_amount)@2 END as b1, count(*)@3 as b2], lanes=1, batches=multiple, schema=[b1:Decimal128(19,6), b2:Int64]
+    GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6), count(*):Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6)]
+        GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6), avg(fact.f_amount):Decimal128(19,6)]
+          GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
+            GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64, avg(fact.f_amount):Decimal128(19,6)]
+              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[count(*):Int64]
+                GpuCrossJoin: lanes=1, batches=multiple, schema=[count(*):Int64]
+                  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[]
+                    GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                      GpuFilter: predicate=t_id@0 = 1, lanes=1, batches=multiple, schema=[t_id:Int32]
+                        GpuLoadParquet: table=tiny, projections=[t_id@0], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32]
+                  GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
+                    GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
+                      GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                        GpuFilter: predicate=(f_qty@0 >= 1) AND (f_qty@0 <= 20), lanes=1, batches=multiple, schema=[f_qty:Int32]
+                          GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_qty:Int32]
+              GpuAggregateBatches: group_by=[], aggs=[sum(avg(fact.f_amount)$sum@0) as avg(fact.f_amount)$sum, sum(avg(fact.f_amount)$count@1) as avg(fact.f_amount)$count], final=[CAST(avg(fact.f_amount)$sum@0 / CAST(avg(fact.f_amount)$count@1 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(fact.f_amount)], lanes=1, batches=single, schema=[avg(fact.f_amount):Decimal128(19,6)]
+                GpuAggregate: group_by=[], aggs=[sum(f_amount@0) as avg(fact.f_amount)$sum, count(f_amount@0) as avg(fact.f_amount)$count], lanes=1, batches=multiple, schema=[avg(fact.f_amount)$sum:Decimal128(25,2), avg(fact.f_amount)$count:Int64]
+                  GpuFilter: predicate=(f_qty@0 >= 1) AND (f_qty@0 <= 20), projection=[f_amount@1], lanes=1, batches=multiple, schema=[f_amount:Decimal128(15,2)]
+                    GpuLoadParquet: table=fact, projections=[f_qty@16, f_amount@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_qty:Int32, f_amount:Decimal128(15,2)]
+          GpuAggregateBatches: group_by=[], aggs=[sum(avg(fact.f_amount)$sum@0) as avg(fact.f_amount)$sum, sum(avg(fact.f_amount)$count@1) as avg(fact.f_amount)$count], final=[CAST(avg(fact.f_amount)$sum@0 / CAST(avg(fact.f_amount)$count@1 AS Decimal128(19,0)) AS Decimal128(19,6)) as avg(fact.f_amount)], lanes=1, batches=single, schema=[avg(fact.f_amount):Decimal128(19,6)]
+            GpuAggregate: group_by=[], aggs=[sum(f_amount@0) as avg(fact.f_amount)$sum, count(f_amount@0) as avg(fact.f_amount)$count], lanes=1, batches=multiple, schema=[avg(fact.f_amount)$sum:Decimal128(25,2), avg(fact.f_amount)$count:Int64]
+              GpuFilter: predicate=(f_qty@0 >= 21) AND (f_qty@0 <= 40), projection=[f_amount@1], lanes=1, batches=multiple, schema=[f_amount:Decimal128(15,2)]
+                GpuLoadParquet: table=fact, projections=[f_qty@16, f_amount@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_qty:Int32, f_amount:Decimal128(15,2)]
+      GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
+        GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
+          GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+            GpuFilter: predicate=d_w@0 >= 0, lanes=1, batches=multiple, schema=[d_w:Int32]
+              GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_w:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#37 CudfProject, batch)
+    GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#36 CudfCrossJoin, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#28 CudfCoalescePartitions, lane batches)
+        GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#27 CudfCrossJoin, build copy, batch)
+          GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#20 CudfCoalescePartitions, lane batches)
+            GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#19 CudfCrossJoin, build copy, batch)
+              GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#12 CudfCoalescePartitions, lane batches)
+                GpuCrossJoin: calling_lanes=1, per probe batch: execute_node(#11 CudfCrossJoin, build copy, batch)
+                  GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+                    GpuProject: calling_lanes=1, per batch: execute_node(#2 CudfProject, batch)
+                      GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+                        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+                  GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output); at done: execute_node(#10 CudfProject{finalize}, prior output)
+                    GpuAggregate: calling_lanes=1, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+                      GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+                        GpuFilter: calling_lanes=1, per batch: execute_node(#5 CudfFilter, batch)
+                          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+              GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#16 CudfCoalescePartitions, lane batches), execute_node(#17 CudfAggregate{Merge}, prior output); at done: execute_node(#18 CudfProject{finalize}, prior output)
+                GpuAggregate: calling_lanes=1, per batch: execute_node(#15 CudfAggregate{Partial}, batch)
+                  GpuFilter: calling_lanes=1, per batch: execute_node(#14 CudfFilter, batch)
+                    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#13 CudfScan, row groups)
+          GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#24 CudfCoalescePartitions, lane batches), execute_node(#25 CudfAggregate{Merge}, prior output); at done: execute_node(#26 CudfProject{finalize}, prior output)
+            GpuAggregate: calling_lanes=1, per batch: execute_node(#23 CudfAggregate{Partial}, batch)
+              GpuFilter: calling_lanes=1, per batch: execute_node(#22 CudfFilter, batch)
+                GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#21 CudfScan, row groups)
+      GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#33 CudfCoalescePartitions, lane batches), execute_node(#34 CudfAggregate{Merge}, prior output); at done: execute_node(#35 CudfProject{finalize}, prior output)
+        GpuAggregate: calling_lanes=1, per batch: execute_node(#32 CudfAggregate{Partial}, batch)
+          GpuProject: calling_lanes=1, per batch: execute_node(#31 CudfProject, batch)
+            GpuFilter: calling_lanes=1, per batch: execute_node(#30 CudfFilter, batch)
+              GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#29 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=3998016, certain=0
+GpuUnload: estimated_max_resident_size=430000
+  GpuProject: estimated_max_resident_size=430000
+    GpuCrossJoin: estimated_max_resident_size=878000
+      GpuCoalesceAllBatches: estimated_max_resident_size=860000
+        GpuCrossJoin: estimated_max_resident_size=860000
+          GpuCoalesceAllBatches: estimated_max_resident_size=520000
+            GpuCrossJoin: estimated_max_resident_size=520000
+              GpuCoalesceAllBatches: estimated_max_resident_size=180000
+                GpuCrossJoin: estimated_max_resident_size=180008
+                  GpuCoalesceAllBatches: estimated_max_resident_size=8
+                    GpuProject: estimated_max_resident_size=11
+                      GpuFilter: estimated_max_resident_size=55
+                        GpuLoadParquet: estimated_max_resident_size=55, source_bytes=55, target_batch_bytes=55, amplification=1.0
+                  GpuAggregateBatches: estimated_max_resident_size=180000
+                    GpuAggregate: estimated_max_resident_size=216504
+                      GpuProject: estimated_max_resident_size=24056
+                        GpuFilter: estimated_max_resident_size=120280
+                          GpuLoadParquet: estimated_max_resident_size=120280, source_bytes=120280, target_batch_bytes=120280, amplification=1.8
+              GpuAggregateBatches: estimated_max_resident_size=340000
+                GpuAggregate: estimated_max_resident_size=237023
+                  GpuFilter: estimated_max_resident_size=154977
+                    GpuLoadParquet: estimated_max_resident_size=200559, source_bytes=200559, target_batch_bytes=200559, amplification=1.2
+          GpuAggregateBatches: estimated_max_resident_size=340000
+            GpuAggregate: estimated_max_resident_size=237023
+              GpuFilter: estimated_max_resident_size=154977
+                GpuLoadParquet: estimated_max_resident_size=200559, source_bytes=200559, target_batch_bytes=200559, amplification=1.2
+      GpuAggregateBatches: estimated_max_resident_size=18000
+        GpuAggregate: estimated_max_resident_size=21645
+          GpuProject: estimated_max_resident_size=2405
+            GpuFilter: estimated_max_resident_size=12028
+              GpuLoadParquet: estimated_max_resident_size=12028, source_bytes=12028, target_batch_bytes=12028, amplification=1.8
+== sparse-build-anti
+GpuUnload
+  GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=1, batches=multiple, schema=[f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_k:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{RightAnti}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=80, certain=40
+GpuUnload: estimated_max_resident_size=40
+  GpuHashJoin: estimated_max_resident_size=239141
+    GpuCoalesceAllBatches: estimated_max_resident_size=40
+      GpuLoadParquet: estimated_max_resident_size=55, source_bytes=55, target_batch_bytes=55, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== sparse-build-full
+GpuUnload
+  GpuHashJoin: join_type=Full, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_k:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfProject{probe keys}, batch copy), execute_node(#4 CudfHashJoin{Right}, build copy, batch); at done: execute_node(#5 CudfCoalescePartitions, accumulated keys), execute_node(#7 CudfHashJoin{LeftAnti}, build, prior output), execute_node(#8 CudfProject{build columns + 1 null}, prior output)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=100160, certain=80
+GpuUnload: estimated_max_resident_size=100080
+  GpuHashJoin: estimated_max_resident_size=339181
+    GpuCoalesceAllBatches: estimated_max_resident_size=80
+      GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== sparse-build-right
+GpuUnload
+  GpuHashJoin: join_type=Right, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, f_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_k:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_k:Int32]
+    GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Right}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=160, certain=80
+GpuUnload: estimated_max_resident_size=80
+  GpuHashJoin: estimated_max_resident_size=239181
+    GpuCoalesceAllBatches: estimated_max_resident_size=80
+      GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=239101, source_bytes=239101, target_batch_bytes=239101, amplification=1.0
+== sparse-probe-left
+GpuUnload
+  GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, schema=[d_id:Int64, t_id:Int32]
+    GpuHashJoin: join_type=Right, on=[(t_k@1, d_k@1)], projection=[t_id@0, d_id@2], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32, t_k:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_id:Int32, t_k:Int32]
+      GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Right}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=160, certain=80
+GpuUnload: estimated_max_resident_size=80
+  GpuProject: estimated_max_resident_size=80
+    GpuHashJoin: estimated_max_resident_size=24211
+      GpuCoalesceAllBatches: estimated_max_resident_size=80
+        GpuLoadParquet: estimated_max_resident_size=110, source_bytes=110, target_batch_bytes=110, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+== sparse-probe-semi
+GpuUnload
+  GpuHashJoin: join_type=RightSemi, on=[(t_k@0, d_k@1)], projection=[d_id@0], lanes=1, batches=multiple, schema=[d_id:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_k:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[t_k:Int32]
+    GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{RightSemi}, build copy, batch)
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=80, certain=40
+GpuUnload: estimated_max_resident_size=40
+  GpuHashJoin: estimated_max_resident_size=24171
+    GpuCoalesceAllBatches: estimated_max_resident_size=40
+      GpuLoadParquet: estimated_max_resident_size=55, source_bytes=55, target_batch_bytes=55, amplification=1.0
+    GpuLoadParquet: estimated_max_resident_size=24131, source_bytes=24131, target_batch_bytes=24131, amplification=1.0
+== timestamp-ms-key-group
+GpuUnload
+  GpuProject: exprs=[f_ts_ms@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_ts_ms:Timestamp(Millisecond, None), n:Int64]
+    GpuAggregateBatches: group_by=[f_ts_ms@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_ts_ms:Timestamp(Millisecond, None), count(*):Int64]
+      GpuAggregate: group_by=[f_ts_ms@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_ts_ms:Timestamp(Millisecond, None), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_ts_ms@9], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ts_ms:Timestamp(Millisecond, None)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuAggregate: estimated_max_resident_size=320560
+        GpuLoadParquet: estimated_max_resident_size=160280, source_bytes=160280, target_batch_bytes=160280, amplification=2.0
+== timestamp-ns-key-group
+GpuUnload
+  GpuProject: exprs=[f_ts_ns@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_ts_ns:Timestamp(Nanosecond, None), n:Int64]
+    GpuAggregateBatches: group_by=[f_ts_ns@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_ts_ns:Timestamp(Nanosecond, None), count(*):Int64]
+      GpuAggregate: group_by=[f_ts_ns@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_ts_ns:Timestamp(Nanosecond, None), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_ts_ns@11], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ts_ns:Timestamp(Nanosecond, None)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuAggregate: estimated_max_resident_size=320560
+        GpuLoadParquet: estimated_max_resident_size=160280, source_bytes=160280, target_batch_bytes=160280, amplification=2.0
+== timestamp-s-key-group
+GpuUnload
+  GpuProject: exprs=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`@0 as ts, count(*)@1 as n], lanes=1, batches=single, schema=[ts:Timestamp(Second, None), n:Int64]
+    GpuAggregateBatches: group_by=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`:Timestamp(Second, None), count(*):Int64]
+      GpuAggregate: group_by=[CAST(f_ts_s@0 AS Timestamp(Second, None))], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[`arrow_cast(fact.f_ts_s,Utf8("Timestamp(Second, None)"))`:Timestamp(Second, None), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_ts_s@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ts_s:Timestamp(Microsecond, None)]
+--- recipes ---
+not runnable: unsupported: unsupported Arrow data type: Timestamp(Second, None) (#240) at #1
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuAggregate: estimated_max_resident_size=320560
+        GpuLoadParquet: estimated_max_resident_size=160280, source_bytes=160280, target_batch_bytes=160280, amplification=2.0
+== timestamp-us-key-group
+GpuUnload
+  GpuProject: exprs=[f_ts_us@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_ts_us:Timestamp(Microsecond, None), n:Int64]
+    GpuAggregateBatches: group_by=[f_ts_us@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_ts_us:Timestamp(Microsecond, None), count(*):Int64]
+      GpuAggregate: group_by=[f_ts_us@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_ts_us:Timestamp(Microsecond, None), count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ts_us:Timestamp(Microsecond, None)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuAggregate: estimated_max_resident_size=320560
+        GpuLoadParquet: estimated_max_resident_size=160280, source_bytes=160280, target_batch_bytes=160280, amplification=2.0
+== ts-key-join
+GpuUnload
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
+    GpuHashJoin: join_type=Inner, on=[(d_ts_us@1, f_ts_us@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_ts_us:Timestamp(Microsecond, None)]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ts_us@10], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ts_us:Timestamp(Microsecond, None)]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_us@10], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_ts_us:Timestamp(Microsecond, None)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=72000, certain=36000
+GpuUnload: estimated_max_resident_size=36000
+  GpuProject: estimated_max_resident_size=36000
+    GpuHashJoin: estimated_max_resident_size=356569
+      GpuCoalesceAllBatches: estimated_max_resident_size=36000
+        GpuLoadParquet: estimated_max_resident_size=32057, source_bytes=32057, target_batch_bytes=32057, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=320569, source_bytes=320569, target_batch_bytes=320569, amplification=1.0
+== uint-key-group
+GpuUnload
+  GpuProject: exprs=[f_ku32@0, count(*)@1 as n], lanes=1, batches=single, schema=[f_ku32:UInt32, n:Int64]
+    GpuAggregateBatches: group_by=[f_ku32@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[f_ku32:UInt32, count(*):Int64]
+      GpuAggregate: group_by=[f_ku32@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[f_ku32:UInt32, count(*):Int64]
+        GpuLoadParquet: table=fact, projections=[f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_ku32:UInt32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuProject: estimated_max_resident_size=280000
+    GpuAggregateBatches: estimated_max_resident_size=280000
+      GpuAggregate: estimated_max_resident_size=230633
+        GpuLoadParquet: estimated_max_resident_size=82369, source_bytes=82369, target_batch_bytes=82369, amplification=2.8
+== uint-key-join
+GpuUnload
+  GpuProject: exprs=[f_id@1, d_id@0], lanes=1, batches=multiple, schema=[f_id:Int64, d_id:Int64]
+    GpuHashJoin: join_type=Inner, on=[(d_ku32@1, f_ku32@1)], projection=[d_id@0, f_id@2], lanes=1, batches=multiple, schema=[d_id:Int64, f_id:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[d_id:Int64, d_ku32:UInt32]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@14], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_id:Int64, d_ku32:UInt32]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, schema=[f_id:Int64, f_ku32:UInt32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#4 CudfProject, batch)
+    GpuHashJoin: calling_lanes=1, per probe batch: execute_node(#3 CudfHashJoin{Inner}, build copy, batch)
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=56000, certain=28000
+GpuUnload: estimated_max_resident_size=28000
+  GpuProject: estimated_max_resident_size=28000
+    GpuHashJoin: estimated_max_resident_size=270658
+      GpuCoalesceAllBatches: estimated_max_resident_size=28000
+        GpuLoadParquet: estimated_max_resident_size=24056, source_bytes=24056, target_batch_bytes=24056, amplification=1.0
+      GpuLoadParquet: estimated_max_resident_size=242658, source_bytes=242658, target_batch_bytes=242658, amplification=1.0

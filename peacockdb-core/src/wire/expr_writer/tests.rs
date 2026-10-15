@@ -9,6 +9,7 @@
 //! device and as nothing at all in a plan.
 
 use super::*;
+use datafusion::arrow::datatypes::TimeUnit;
 use datafusion::common::ScalarValue;
 
 /// Round-trip one expression: written as the buffer's root, then read back.
@@ -233,6 +234,42 @@ fn a_cast_carries_its_target_and_a_decimal_targets_scale() {
     let cast = read(&bytes).node_as_cast_expr_node().unwrap();
     assert_eq!(cast.target_type(), fb::DataType::Float64);
     assert_eq!((cast.decimal_precision(), cast.decimal_scale()), (0, 0));
+}
+
+/// A type the wire has no word for names the ticket that will give it one.
+///
+/// The plan goldens' meta tests require every `not runnable` line to cite a ticket in
+/// parentheses, and this refusal is the one that reaches them: pbench's
+/// `timestamp-s-key-group` casts to `Timestamp(Second, None)`, which the fbs type table has
+/// no member for until repartition-keys adds the timestamps. A refusal naming nothing is a
+/// line a reader cannot act on, and the meta test would reject the golden that carried it.
+#[test]
+fn a_type_the_wire_cannot_name_is_refused_with_its_ticket() {
+    let refused = |target: DataType| {
+        let mut b = FlatBufferBuilder::new();
+        write_expr(
+            &mut b,
+            &Expr::Cast {
+                expr: Box::new(column(0, "n")),
+                target,
+            },
+        )
+        .expect_err("the wire has no word for this type")
+        .to_string()
+    };
+    let timestamp = refused(DataType::Timestamp(TimeUnit::Second, None));
+    assert!(
+        timestamp.contains("(#240)"),
+        "a timestamp target waits on repartition-keys' fbs timestamps: {timestamp}"
+    );
+    let other = refused(DataType::Time64(TimeUnit::Microsecond));
+    assert!(
+        other.contains("(#249)"),
+        "every other unnamed type is #249's: {other}"
+    );
+    // The type itself stays in the message: the ticket says who will fix it, not what broke.
+    assert!(timestamp.contains("Timestamp"), "{timestamp}");
+    assert!(other.contains("Time64"), "{other}");
 }
 
 #[test]

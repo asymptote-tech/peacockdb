@@ -9,9 +9,9 @@ use std::collections::BTreeSet;
 
 use peacockdb_core::test_support::{
     CorpusDeclaration, DuckdbOracle, MODES, Mode, RegistryEntry, assert_registry_matches_csv,
-    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_gpu_case, gpu_result_coverage,
-    gpu_result_cudf_matches_path, gpu_result_golden, load_csv, result_golden, section_holds_rows,
-    section_of, stem,
+    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
+    gpu_result_coverage, gpu_result_cudf_matches_path, gpu_result_golden, load_csv,
+    ordered_sections, result_golden, section_holds_rows, section_of, stem,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -457,6 +457,39 @@ fn every_enabled_device_cell_has_its_gpu_result_section_and_no_other() {
         if let Err(said) = gpu_result_coverage(&path, &enabled, text.as_deref()) {
             panic!("{dataset}: {said}");
         }
+    }
+}
+
+/// `duckdb-result.txt`'s sections against the registry's rows, in both directions.
+///
+/// The `duckdb_<ds>_<q>` cases read one section each, so a section whose query has left the
+/// tree is read by nobody: it survives every run and a regeneration deletes it, which makes
+/// the committed file and `duckdb_result.py`'s output differ with nothing red. The plan
+/// goldens are held to the registry the same way, by
+/// `the_registry_matches_the_goldens_in_both_directions`.
+#[test]
+fn every_duckdb_result_section_has_a_registry_row_and_every_row_a_section() {
+    for (dataset, sf) in registry_datasets() {
+        let path = duckdb_golden(&dataset, &sf);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let sections: BTreeSet<String> = ordered_sections(&text)
+            .into_iter()
+            .map(|(query, _)| query)
+            .collect();
+        let rows: BTreeSet<String> = load_csv()
+            .iter()
+            .filter(|row| row.dataset == dataset && row.sf == sf)
+            .map(|row| stem(&row.query))
+            .collect();
+        let orphans: Vec<&String> = sections.difference(&rows).collect();
+        let missing: Vec<&String> = rows.difference(&sections).collect();
+        assert!(
+            orphans.is_empty() && missing.is_empty(),
+            "{dataset}: duckdb-result.txt has sections with no registry row {orphans:?} and \
+             rows with no section {missing:?} — regenerate with `python3 \
+             testdata/duckdb_result.py --dataset {dataset}`"
+        );
     }
 }
 

@@ -14,6 +14,7 @@ Run: python3 testdata/test_duckdb_result.py
 import datetime
 import decimal
 import os
+import pathlib
 import sys
 import unittest
 
@@ -143,6 +144,57 @@ class Fingerprint(unittest.TestCase):
         self.assertEqual(dr.approx_number(float("inf")), "inf")
         self.assertEqual(dr.approx_number(float("-inf")), "-inf")
         self.assertEqual(dr.approx_number(float("nan")), "nan")
+
+
+class QueryFiles(unittest.TestCase):
+    """The one thing an empty answer file cannot be told apart from: a dataset whose query
+    directory is missing or holds nothing. `generate` used to write the golden from whatever
+    the glob returned, so `--dataset pbench` over an empty `pbench-queries/` wrote an EMPTY
+    `duckdb-result.txt` — a golden every later comparison reads as "DuckDB answers nothing",
+    which is a worse error than argparse refusing the name."""
+
+    def test_the_three_datasets_resolve_their_queries(self):
+        """The two benchmarks are a fixed set; pbench grows as the join-rewrite chain lands its
+        queries, so it gets a floor rather than a count nobody would remember to update."""
+        for dataset, count in [("tpch", 39), ("tpcds", 99)]:
+            self.assertEqual(len(dr.query_files(dataset, None)), count, dataset)
+        pbench = [q.stem for q in dr.query_files("pbench", None)]
+        self.assertGreater(len(pbench), 50)
+        self.assertIn("bool-key-group", pbench)
+
+    def test_the_queries_that_panic_the_planner_are_not_in_the_tree(self):
+        """#255: the planner panics on a Struct or Interval column, and a query file here is read
+        by every plan-golden renderer — so one of these three in the directory aborts all five of
+        pbench's plan goldens rather than landing with a ticket on its row. They arrive with the
+        fix; this is what says so to whoever wonders where they went."""
+        pbench = {q.stem for q in dr.query_files("pbench", None)}
+        for held in ["struct-key-join", "struct-through-join", "interval-through-join"]:
+            self.assertNotIn(held, pbench, f"{held} panics the planner (#255)")
+
+    def test_a_dataset_with_no_query_directory_is_refused(self):
+        with self.assertRaises(SystemExit) as caught:
+            dr.query_files("nosuchbench", None)
+        self.assertIn("nosuchbench-queries", str(caught.exception))
+
+    def test_a_query_directory_holding_no_sql_is_refused(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            (pathlib.Path(scratch) / "hollow-queries").mkdir()
+            with self.assertRaises(SystemExit) as caught:
+                dr.query_files("hollow", None, root=pathlib.Path(scratch))
+            self.assertIn("no .sql", str(caught.exception))
+
+    def test_an_only_filter_that_names_nothing_is_refused(self):
+        """`generate` rewrites the whole golden from the queries it ran, so an `--only` that
+        matches no query would replace the file with one holding no sections."""
+        with self.assertRaises(SystemExit) as caught:
+            dr.query_files("tpch", {"q4242"})
+        self.assertIn("q4242", str(caught.exception))
+
+    def test_the_queries_come_back_in_the_goldens_order(self):
+        names = [q.stem for q in dr.query_files("tpch", None)]
+        self.assertEqual(names[:3], ["q1", "q2", "q3"])
+        self.assertEqual(names[-1], "shuffle-stddev")
 
 
 if __name__ == "__main__":

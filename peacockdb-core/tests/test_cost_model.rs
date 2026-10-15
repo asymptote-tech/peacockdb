@@ -48,10 +48,10 @@ fn cost_goldens_match_and_total_is_byte_identical() {
     let filter = std::env::var("COST_FILTER").ok();
     let model = CostModel::load();
 
-    let dirs = [
-        peacockdb_core::test_support::golden_dir_for("tpch", "1"),
-        peacockdb_core::test_support::golden_dir_for("tpcds", "1"),
-    ];
+    let dirs: Vec<PathBuf> = peacockdb_core::test_support::CORPUS_DATASETS
+        .iter()
+        .map(|(dataset, sf)| peacockdb_core::test_support::golden_dir_for(dataset, sf))
+        .collect();
     let mut cpu_files: Vec<PathBuf> = dirs
         .iter()
         .flat_map(|d| {

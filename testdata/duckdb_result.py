@@ -17,7 +17,7 @@ than of answers: NULLs last ascending and first descending, and integer `/` trun
 Deterministic: threads=1, and rows are sorted after rendering.
 
 Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
-    python3 testdata/duckdb_result.py [--dataset tpch|tpcds] [--only q1,q2]
+    python3 testdata/duckdb_result.py [--dataset tpch|tpcds|pbench] [--only q1,q2]
 """
 
 import argparse
@@ -185,6 +185,49 @@ def query_order(path):
     return (1, 0, stem)
 
 
+# DataFusion's `arrow_cast` to a second-unit timestamp is DuckDB's TIMESTAMP_S cast. Parquet
+# has no second unit, so pbench's `timestamp-s-key-group` is the one query that reaches
+# `Timestamp(Second)` at all, and it reaches it through a function DuckDB does not have.
+# One entry, matched as the exact spelling that query writes: a general SQL translation layer
+# here would be a second dialect to keep correct, and an oracle nobody can trust.
+DUCKDB_SPELLING = {
+    "arrow_cast(f_ts_s, 'Timestamp(Second, None)')": "f_ts_s::TIMESTAMP_S",
+}
+
+
+def duckdb_text(sql):
+    for ours, theirs in DUCKDB_SPELLING.items():
+        sql = sql.replace(ours, theirs)
+    return sql
+
+
+def query_files(dataset, only, root=ROOT):
+    """The dataset's query files in golden order, or exit naming what is missing.
+
+    `generate` rewrites the whole golden from the queries it ran, so an empty list is the one
+    outcome that must not reach it: a `duckdb-result.txt` with no sections is read by every
+    `duckdb_<ds>_<q>` case as "DuckDB does not answer this query", which passes a line
+    declaring `duckdb_none` and fails every other with a message about the oracle rather than
+    about the missing file. Three ways to get there, each refused by name here: a dataset with
+    no query directory, a directory holding no `.sql`, and an `--only` that matches nothing.
+    """
+    directory = root / f"{dataset}-queries"
+    if not directory.is_dir():
+        sys.exit(f"duckdb_result.py: no query directory at {directory}")
+    found = sorted(directory.glob("*.sql"), key=query_order)
+    if not found:
+        sys.exit(f"duckdb_result.py: {directory} holds no .sql files")
+    if only is None:
+        return found
+    kept = [query for query in found if query.stem in only]
+    if not kept:
+        sys.exit(
+            f"duckdb_result.py: --only {','.join(sorted(only))} names no query of {dataset}; "
+            f"writing the golden from an empty list would delete every section it holds"
+        )
+    return kept
+
+
 def generate(dataset, only):
     # DuckDB imported here rather than at the top, the way duckdb_cost.py defers
     # pyarrow.parquet: test_duckdb_result.py imports this module to check `cell` and
@@ -193,9 +236,7 @@ def generate(dataset, only):
     import duckdb
 
     data = ROOT / f"{dataset}.sf1"
-    queries = sorted((ROOT / f"{dataset}-queries").glob("*.sql"), key=query_order)
-    if only:
-        queries = [q for q in queries if q.stem in only]
+    queries = query_files(dataset, only)
     con = duckdb.connect()
     con.execute("SET threads=1")
     con.execute("SET default_null_order='nulls_last_on_asc_first_on_desc'")
@@ -206,7 +247,7 @@ def generate(dataset, only):
     for query in queries:
         out.append(f"== {query.stem}\n")
         try:
-            cursor = con.execute(query.read_text())
+            cursor = con.execute(duckdb_text(query.read_text()))
             names = [d[0] for d in cursor.description]
             types = [d[1] for d in cursor.description]
             rows = cursor.fetchall()
@@ -221,13 +262,16 @@ def generate(dataset, only):
             out.append(table)
         print(f"{dataset}/{query.stem}: {len(rows)} rows", file=sys.stderr)
     target = ROOT / "goldens" / f"{dataset}.sf1" / "duckdb-result.txt"
+    # A dataset's first golden arrives before its directory does, and this writer is the one
+    # that may run before any Rust tier has written a thing.
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("".join(out))
     print(f"wrote {target}", file=sys.stderr)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dataset", choices=["tpch", "tpcds"], action="append")
+    parser.add_argument("--dataset", choices=["tpch", "tpcds", "pbench"], action="append")
     parser.add_argument("--only", help="comma-separated query stems")
     args = parser.parse_args()
     import duckdb  # deferred for the reason `generate` gives
@@ -235,7 +279,7 @@ def main():
     if duckdb.__version__ != PINNED:
         sys.exit(f"duckdb {duckdb.__version__}; the oracle is pinned at {PINNED}")
     only = set(args.only.split(",")) if args.only else None
-    for dataset in args.dataset or ["tpch", "tpcds"]:
+    for dataset in args.dataset or ["tpch", "tpcds", "pbench"]:
         generate(dataset, only)
 
 
