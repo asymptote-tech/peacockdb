@@ -150,7 +150,8 @@ every site below by its symbol, never by a line number. What moves:
   `scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build`,
   then `ctest --test-dir cpp/build -L cpu`. The cudf Rust shape compiles through
   `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh`.
-- Device builds and runs happen on nebius-gpu, as chain L's header says: **one sync for this
+- Device builds and runs happen on nebius-gpu through `scripts/gpu-host.sh` (never an IP from a
+  plan; `build-test.md`, "GPU host"), as chain L's header says: **one sync for this
   task**, then as many back-to-back builds as its red/green pairs need, the red build first. All
   of it is Task 8, the *Device session* below. Tasks 1–7 build and run everything that runs
   locally and compile every device test (`scripts/build.sh` for the gtests,
@@ -158,8 +159,9 @@ every site below by its symbol, never by a line number. What moves:
   run, red, in Task 8's first build. Record every run (command, binaries, pass and fail counts)
   in `llm-wiki/tasks/keyless-identity-detail.md`. Out of scope, as the header says: the sf40
   binaries, `--run-benchmarks`, Nsight, any H200 timing; record each as deferred there.
-- **Done**, as the header says: CI green except the `gpu-tests` job ("GPU Tests (remote)", on
-  shad-gpu), and Task 8's device runs passed on nebius-gpu and recorded in the detail file.
+- **Done**, as the header says: CI green, the dispatched `gpu-tests` job
+  ("GPU Tests (nebius-gpu)") included, and Task 8's device runs passed on nebius-gpu and
+  recorded in the detail file.
 - Every foreground command carries a `timeout`. Large runs (the corpus regeneration) get a monitor
   reporting progress every 2 minutes and matching `panicked|FAILED|error\[`.
 - Formatting on changed lines only: `git clang-format HEAD -- <files>` for C++;
@@ -180,27 +182,32 @@ backgrounded build chain dies mid-build with no error. If ssh is refused at once
 blocking it, not the host.
 
 ```bash
-GPU=dmitry@89.169.109.150   # nebius-gpu, as chain L's header names it
+G=scripts/gpu-host.sh
 DIR=peacockdb-L              # the header's directory there
+# START (exit 75: no capacity; report it to the coordinator, which owns the retry)
+timeout 2400 $G start
 # SYNC, once per task: the working tree, uncommitted, from the workspace root
-timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
+timeout 3600 scripts/gpu-host-sync.sh --dest "$DIR"
 # BUILD, as often as the red/green pairs need
-timeout 7200 ssh "$GPU" "cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
+timeout 7200 $G ssh "cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
 # RUN what the step names, in place of RUN
-timeout 3600 ssh "$GPU" "cd ~/$DIR && . ~/peacock-env.sh && \
+timeout 3600 $G ssh "cd ~/$DIR && . ~/peacock-env.sh && \
   export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:\$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib \
          PEACOCK_TESTDATA_DIR=\$PWD/testdata && RUN"
+# STOP, soft, after the task's last run. Exit 2: someone's run is on the card; leave it.
+timeout 600 $G stop
 ```
 
 The red build is made from the same sync: the fixes leave the remote tree as a patch piped over
-ssh's stdin (`patch -p1 -R`), and come back the same way (`patch -p1`) for the green build. No
-second rsync. If the green build fails, stop: fix locally, commit, and run the session again from
-SYNC; the detail file records why a second sync was needed.
+`$G ssh`'s stdin (`patch -p1 -R`), and come back the same way (`patch -p1`) for the green build.
+No second sync. If the green build fails, stop: fix locally, commit, and run the session again
+from SYNC; the detail file records why a second sync was needed. If the host is lost mid-step:
+`$G status`, `$G start`, SYNC, rerun the step. Never edit `~/.ssh/config`, and never accept a
+host key by hand.
 
-A fresh `~/$DIR` has no sf1 parquet: copy it from `~/peacockdb-J/testdata`, as the header says, or
-generate it with `testdata/generate_testdata.sh --bench tpch` and `--bench tpcds`. The rsync
-filter excludes it and so never deletes it. pbench's data is committed. Every Rust binary takes
-`--test-threads=1`.
+The sync generates the sf1 parquet in `~/$DIR/testdata` if it is missing, and later syncs leave
+it alone (it is gitignored). Never delete a chain's `testdata/`. pbench's data is committed.
+Every Rust binary takes `--test-threads=1`.
 
 ## Review focus
 
@@ -2633,12 +2640,12 @@ patch -p1 -R --dry-run < /tmp/keyless-identity-fixes.patch
 
   Expected: both hashes found; the dry run reverses every hunk cleanly against the working tree.
 
-- [ ] **Step 3: SYNC**, once.
+- [ ] **Step 3: START and SYNC**, once.
 
 - [ ] **Step 4: The red build.**
 
 ```bash
-timeout 60 ssh "$GPU" "cd ~/$DIR && patch -p1 -R" < /tmp/keyless-identity-fixes.patch
+timeout 60 $G ssh "cd ~/$DIR && patch -p1 -R" < /tmp/keyless-identity-fixes.patch
 ```
 
   Then BUILD, and RUN, one after another:
@@ -2668,7 +2675,7 @@ cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 over_no_input a_g
 - [ ] **Step 5: The green build.**
 
 ```bash
-timeout 60 ssh "$GPU" "cd ~/$DIR && patch -p1" < /tmp/keyless-identity-fixes.patch
+timeout 60 $G ssh "cd ~/$DIR && patch -p1" < /tmp/keyless-identity-fixes.patch
 ```
 
   Then BUILD, and RUN, one after another (list `cpp/install/bin` first, and run every
@@ -2699,7 +2706,7 @@ cpp/install/rust-tests/test_gpu_corpus --test-threads=1
   now. Bring the sections home:
 
 ```bash
-timeout 600 rsync -a "$GPU:$DIR/testdata/goldens/" testdata/goldens/ --include='*/' --include='gpu-result.txt' --exclude='*'
+timeout 600 rsync -a -e "$G rsh" "nebius-gpu:$DIR/testdata/goldens/" testdata/goldens/ --include='*/' --include='gpu-result.txt' --exclude='*'
 git diff --stat testdata/goldens/*/gpu-result.txt
 ```
 

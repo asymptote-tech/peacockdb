@@ -27,8 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Mirror the GPU-tests job in pipeline.yml: same secret (SHAD_GPU_SSH_KEY), same
-      # hardcoded host, same 'gpu' alias.
+      # The ssh setup pipeline.yml's GPU job used while it ran on shad-gpu (it now runs on
+      # nebius-gpu): the same secret (SHAD_GPU_SSH_KEY), hardcoded host and 'gpu' alias.
       - name: Setup SSH to shad-gpu
         env:
           SSH_KEY: ${{ secrets.SHAD_GPU_SSH_KEY }}

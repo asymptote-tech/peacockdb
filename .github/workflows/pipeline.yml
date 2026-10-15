@@ -19,6 +19,10 @@ on:
     paths-ignore:
       - '**.md'
       - 'llm-wiki/**'
+  # The only way a branch reaches gpu-tests: `gh workflow run pipeline.yml --ref <branch>`, by
+  # an actor with write access who is also listed in GPU_ALLOWED_ACTORS. It runs the whole
+  # pipeline, as a push to master does (`changes` answers code=true for any non-PR event).
+  workflow_dispatch:
 
 jobs:
   # paths-ignore above is not enough on its own. For a pull_request event GitHub
@@ -296,7 +300,7 @@ jobs:
           LD_LIBRARY_PATH: /opt/conda/lib
           CUDF_ROOT: /opt/conda
 
-  # Standalone build job for the shad-gpu artifact — runs in parallel with dataset-matrix
+  # Standalone build job for the GPU host's artifact — runs in parallel with dataset-matrix
   # so gpu-tests can start as soon as the build is done, without waiting for the
   # CPU tests + Rust tests to finish.
   cpp-build-2502:
@@ -408,36 +412,58 @@ jobs:
           path: cpp/install/
           retention-days: 1
 
+  # nebius-gpu, an L40S VM this job starts and soft-stops (llm-wiki/build-test.md, "GPU host").
+  # It costs money while it runs, so the job runs on a push to master and on a dispatch, never
+  # on a pull_request: a PR's branch gets it when someone with write access, listed in
+  # GPU_ALLOWED_ACTORS, dispatches the pipeline on that branch. A fork PR gets no secrets and
+  # no GPU job. The secrets live in the nebius-gpu Environment, which only this job and
+  # gpu-host-watch.yml reference.
   gpu-tests:
-    name: GPU Tests (remote)
+    name: GPU Tests (nebius-gpu)
     needs: cpp-build-2502
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    environment: nebius-gpu
+    # This job holds the cloud's keys; its token needs nothing beyond reading the repo.
+    permissions:
+      contents: read
+    # A wedged remote must cost minutes, not GitHub's six-hour default. The budget is the start
+    # (capacity can take half an hour), the transfer, sf1 generation and the suite; if the suite
+    # ever outgrows it, raise it deliberately rather than removing it.
+    timeout-minutes: 150
     # One physical device, so one of these at a time across every ref. Two jobs on the same
     # GPU contend for its memory, and --test-threads=1 keeps one test at a time inside a
     # process but cannot reach across two. Queued rather than cancel-in-progress: a
     # cancelled run can leave both its REMOTE_DIR and the device's state behind.
-    # A wedged remote must cost minutes, not GitHub's six-hour default. The suite itself runs
-    # well inside this; if it ever does not, raise it deliberately rather than removing it.
-    timeout-minutes: 120
     concurrency:
-      group: shad-gpu
+      group: nebius-gpu
       cancel-in-progress: false
-    # Secrets aren't passed to fork PRs, so this job just fails-fast there.
+    defaults:
+      run:
+        shell: bash
     env:
-      GPU_HOST: info@llm-gpu0h200.velkerr.ru
-      REMOTE_DIR: /home/info/peacockdb-ci/run-${{ github.run_id }}-${{ github.run_attempt }}
-      # WARNING TO ANYONE ADDING A STEP THAT USES THIS: exporting it poisons the HOST's
-      # own coreutils. It puts glibc-2.35 ahead of the system libc, and the GPU host runs
-      # glibc 2.31 — so mktemp / tee / grep / cat / rm / readelf all SEGFAULT (exit 139)
-      # in any shell where it is exported. Our patched test binaries NEED it; shell
-      # utilities must not see it. Use bash BUILTINS (>, read, printf, case) inside such a
-      # step, or run the utility with the variable unset. This already cost one red CI run:
-      # mktemp segfaulted -> empty log path -> tee segfaulted -> the test binary died on
-      # SIGPIPE having produced no output, which looks like a test crash and is not.
-      REMOTE_LD_LIBRARY_PATH: /usr/local/cuda-12.5/compat:/home/info/glibc-2.35/lib:/home/info/miniforge3/envs/rapids-cuda-12.2/lib
-
+      # Relative to the VM login's home, so one string serves ssh (as ~/$REMOTE_DIR) and rsync.
+      REMOTE_DIR: peacockdb-ci/run-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
+      # checkout runs no project code, so nothing from the branch runs before the check below.
       - uses: actions/checkout@v4
+
+      - name: Only allowed actors reach the GPU host
+        # Through env, never ${{ }} inside the script: an expression expanded into `run:` is
+        # a script-injection hole. Both actors are checked: a re-run keeps the original
+        # github.actor (and its privileges), and triggering_actor is whoever pressed re-run.
+        # This step keeps the VM from a writer who is not on the list. It cannot stop one who
+        # edits this file on their own branch. Writers are trusted; GPU_ALLOWED_ACTORS and this
+        # check are the gate (llm-wiki/build-test.md, "CI and its secrets").
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          ALLOWED: ${{ vars.GPU_ALLOWED_ACTORS }}
+        run: |
+          scripts/gpu-host/check-actor.sh "$ACTOR" "$ALLOWED"
+          scripts/gpu-host/check-actor.sh "$TRIGGERING_ACTOR" "$ALLOWED"
 
       - name: Download GPU test binaries
         uses: actions/download-artifact@v4
@@ -445,47 +471,53 @@ jobs:
           name: cpp-install-25.02
           path: cpp/install/
 
-      - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.SHAD_GPU_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          # Trust-on-first-use: acceptable for CI since runners are ephemeral.
-          # The keepalives are not decoration. build-test.md records this link as flaky, and
-          # without them a session that stops answering blocks until the job's own limit: the
-          # transfer step hung for hours twice before they were added.
-          cat > ~/.ssh/config <<EOF
-          Host gpu
-              HostName llm-gpu0h200.velkerr.ru
-              User info
-              IdentityFile ~/.ssh/id_ed25519
-              StrictHostKeyChecking accept-new
-              UserKnownHostsFile ~/.ssh/known_hosts_ci
-              ConnectTimeout 15
-              ServerAliveInterval 30
-              ServerAliveCountMax 4
-          EOF
+      - uses: ./.github/actions/nebius-setup
+        with:
+          sa-id: ${{ secrets.NEBIUS_SA_ID }}
+          public-key-id: ${{ secrets.NEBIUS_PUBLIC_KEY_ID }}
+          project-id: ${{ secrets.NEBIUS_PROJECT_ID }}
+          private-key: ${{ secrets.NEBIUS_PRIVATE_KEY }}
+          ssh-key: ${{ secrets.NEBIUS_GPU_SSH_KEY }}
 
-      - name: Rsync artifacts and testdata to remote
+      - name: Start nebius-gpu (up to 30 minutes for capacity)
+        id: start
+        # One attempt can itself wait out STOPPING, RUNNING and ssh (gpu-host.sh's own bounds),
+        # so the step's limit sits well past the 30-minute retry window.
+        timeout-minutes: 75
+        run: |
+          # 75 is "no capacity or quota, retry later"; every other failure is final.
+          deadline=$((SECONDS + 1800))
+          while :; do
+            rc=0; scripts/gpu-host.sh start || rc=$?
+            [ "$rc" -eq 0 ] && exit 0
+            [ "$rc" -eq 75 ] || exit "$rc"
+            [ "$SECONDS" -lt "$deadline" ] || break
+            echo "no capacity yet (rc 75); retrying in 2 minutes"; sleep 120
+          done
+          echo "::error::nebius-gpu did not start within 30 minutes: no capacity"
+          exit 75
+
+      - name: Ship binaries, scripts and testdata
         timeout-minutes: 20
         run: |
+          # download-artifact drops the exec bits; rsync -a carries them to the VM.
+          chmod +x cpp/install/bin/* cpp/install/rust-tests/* 2>/dev/null || true
           # Three tries with a widening pause, and a stalled transfer gives up after five
-          # minutes of silence. scripts/build-test-shadgpu.sh has carried this for the same
-          # reason; CI did not, and a flaky link here was an unbounded hang rather than a retry.
-          rsync_retry() {
+          # minutes of silence: a flaky link must be a retry, not an unbounded hang (the
+          # transfer step on the old host hung for hours twice before this was added).
+          # The bare `nebius-gpu:` host is a placeholder; gpu-host.sh rsh resolves the IP.
+          rs() {
             local attempt
             for attempt in 1 2 3; do
-              rsync -a --timeout=300 "$@" && return 0
+              rsync -a --timeout=300 -e "scripts/gpu-host.sh rsh" "$@" && return 0
               printf 'rsync attempt %d failed; retrying in %ds\n' "$attempt" "$((attempt * 15))" >&2
               sleep "$((attempt * 15))"
             done
             return 1
           }
-          ssh gpu "mkdir -p $REMOTE_DIR/cpp/install $REMOTE_DIR/testdata $REMOTE_DIR/scripts"
-          # Fresh binaries — --delete keeps cpp/install/ clean across runs.
-          rsync_retry --delete cpp/install/ gpu:$REMOTE_DIR/cpp/install/
+          scripts/gpu-host.sh ssh "mkdir -p ~/$REMOTE_DIR/cpp ~/$REMOTE_DIR/testdata ~/$REMOTE_DIR/scripts"
+          rs cpp/install "nebius-gpu:$REMOTE_DIR/cpp/"
+          rs scripts/gpu-host-test.sh "nebius-gpu:$REMOTE_DIR/scripts/"
           # Query SQL + minimal dataset + testdata generator + committed goldens.
           # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads
           # read-only — the sections the cpu tier authored are what a device run is checked
@@ -500,183 +532,55 @@ jobs:
           # that has now bitten four times. A sweep of git-tracked testdata files
           # would end the class; kept as a named entry here only to keep this push
           # small and low-risk. See the follow-up.
-          rsync_retry testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
+          rs testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
             testdata/goldens \
             testdata/tpch-vec-queries \
             testdata/generate_testdata.sh \
             testdata/cost-registry.csv \
-            gpu:$REMOTE_DIR/testdata/
-          # Ship the updated setup-glibc.sh so its patch_rust_dir step is
-          # present on the host (not just the older /home/info/ copy).
-          rsync_retry scripts/setup-glibc.sh gpu:$REMOTE_DIR/scripts/
-          chmod +x cpp/install/bin/* cpp/install/rust-tests/* 2>/dev/null || true
-          ssh gpu "chmod +x \
-            $REMOTE_DIR/cpp/install/bin/* \
-            $REMOTE_DIR/cpp/install/rust-tests/* \
-            $REMOTE_DIR/testdata/generate_testdata.sh \
-            $REMOTE_DIR/scripts/setup-glibc.sh 2>/dev/null || true"
+            "nebius-gpu:$REMOTE_DIR/testdata/"
 
-      - name: Patch binaries for glibc 2.35
-        run: ssh gpu "$REMOTE_DIR/scripts/setup-glibc.sh --repo-dir $REMOTE_DIR --patch"
-
-      - name: Generate SF-1 testdata (skips if present)
+      - name: Generate SF-1 testdata
         run: |
+          # Into this run's own directory, which the last step removes, so every run generates.
+          # A non-interactive ssh does not source ~/peacock-env.sh, which is what puts duckdb on
+          # PATH, and generate_testdata.sh looks duckdb up first: source it, as gpu-host-sync.sh does.
           # PEACOCK_NO_FETCH=1 is set EXPLICITLY because ssh does not inherit the runner's
           # CI/GITHUB_ACTIONS vars — fetch_embeddings.sh's automation guard keys on the
           # environment, and over ssh that environment is the GPU host's, not the runner's.
           # Nothing here invokes fetch today; this keeps the guard honest if that changes.
-          ssh gpu "cd $REMOTE_DIR && PEACOCK_NO_FETCH=1 DUCKDB=/home/info/.local/bin/duckdb testdata/generate_testdata.sh --bench tpch"
-          ssh gpu "cd $REMOTE_DIR && PEACOCK_NO_FETCH=1 DUCKDB=/home/info/.local/bin/duckdb testdata/generate_testdata.sh --bench tpcds"
+          scripts/gpu-host.sh ssh "[ -f ~/peacock-env.sh ] && . ~/peacock-env.sh; cd ~/$REMOTE_DIR \
+            && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpch \
+            && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpcds"
 
-      - name: Run GPU tests
+      - name: Run the L40S list
+        # scripts/gpu-host-test.sh is the one list, shared with the developer. What it keeps
+        # from this job's history:
+        # - Every shipped peacock_*_tests binary, by glob rather than a hand-written list: a
+        #   named list once let peacock_tpchv_tests be built, shipped and never run, green.
+        # - Zero-test guards. A binary whose tests all skip exits 0 and renders GREEN having
+        #   verified nothing, so "[  PASSED  ] 0 tests" (C++) and "running 0 tests" (rust)
+        #   fail it. A guard scoped to one binary cannot notice a different binary missing,
+        #   so an empty glob in either half fails the run too.
+        # - Every binary runs even after an earlier one fails; the run fails at the end.
+        # - --test-threads=1 for the rust binaries: cuDF/RMM share one process-wide pool, and
+        #   concurrent GPU tests OOM the device and poison the CUDA context for every later test.
+        # - A segfault anywhere in the logs fails the run.
+        # Out of it on an L40S: the sf40 pair and every bench_ case.
+        run: scripts/gpu-host.sh ssh "\$HOME/$REMOTE_DIR/scripts/gpu-host-test.sh run --foreground \$HOME/$REMOTE_DIR"
+
+      - name: Clean up and soft-stop
+        # Whenever the start step ran at all: a start that failed or was cancelled half way can
+        # still leave the VM up. Soft, because a process on the card is someone else's (the VM
+        # is shared, with no lock); the idle watcher and the hourly checker take it down later.
+        if: always() && contains(fromJSON('["success", "failure", "cancelled"]'), steps.start.outcome)
         run: |
-          # The block below deliberately runs without 'set -e', so only what it explicitly
-          # OR's into rc can fail it — a command that dies of a signal contributes nothing.
-          # The one place such a death is visible is the text, so the text is kept and read
-          # here, on the runner, where coreutils are not the thing under suspicion.
-          set -o pipefail
-          rc=0
-          ssh gpu bash <<EOF 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log" || rc=$?
-            # Deliberately no 'set -e': run every test binary even when an
-            # earlier one fails (e.g. TPC-H failing must not skip TPC-DS), then
-            # fail the step at the end if anything failed. Each binary's pass/fail
-            # is OR'd into rc.
-            export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
-
-            # The patched glibc-2.35 goes to the test binaries PER COMMAND and is never
-            # exported, which is what setup-glibc.sh's own output tells you to do: exported,
-            # the host's coreutils load it too and segfault — and since this block has no
-            # 'set -e', a crashing `grep -q` just answers no and its guard goes quietly
-            # green. That shipped, for the five rust targets, until it was read in a log.
-            PATCHED_LD=$REMOTE_DIR/cpp/install/lib:$REMOTE_LD_LIBRARY_PATH
-
-            rc=0
-
-            # The large sf40 dataset lives at /home/info/peacock-datasets — deliberately
-            # OUTSIDE \$REMOTE_DIR, which the cleanup step rm -rf's, and it is read in place:
-            # nothing here writes to, regenerates or deletes it.
-            #
-            # SKIP SEMANTICS ARE SPLIT ON PURPOSE. The test binaries skip (exit 0) when the
-            # dataset is absent — right for a dev box that legitimately has no sf40. In CI it
-            # is NOT right: on this host sf40 is a permanent precondition of those tests
-            # existing at all, and a skip that exits 0 renders GREEN having verified nothing.
-            # So CI asserts the precondition itself, and the per-binary zero-tests guard
-            # below is the belt-and-braces behind it.
-            TPCH_SF40=/home/info/peacock-datasets/testdata/tpch.sf40
-            if [ ! -f "\$TPCH_SF40/lineitem.parquet" ]; then
-              echo "::error::tpch.sf40 missing on the GPU host (\$TPCH_SF40/lineitem.parquet)."
-              echo "         It is a permanent precondition of the TPC-H tests, not a transient skip."
-              rc=1
-            fi
-
-            # ---------------------------------------------------------------------
-            # RUN EVERY SHIPPED C++ TEST BINARY — glob, not a hand-written list.
-            #
-            # This step used to name peacock_plan_tests explicitly, which meant a new test
-            # binary could be built, shipped, glibc-patched and verified on the host and
-            # STILL NEVER RUN. That is exactly what happened to peacock_tpchv_tests: the
-            # job went green having never executed it. The patcher had already been made
-            # capability-based so it picks new binaries up automatically — which made the
-            # gap HARDER to see, because the log showed the binary being patched.
-            #
-            # Note why the per-binary zero-tests guard could not catch it either: that guard
-            # inspects one binary's output, and a guard scoped to one binary cannot notice a
-            # DIFFERENT binary being absent. Hence the glob plus the ran_any assertion below.
-            #
-            # The glob is peacock_*_tests, which excludes the vendored flatc that also lives
-            # in bin/. A new test target needs no edit here.
-            #
-            # Superset env: every binary gets every variable it might need. Unused ones are
-            # ignored, and that keeps this loop from re-growing per-binary special cases.
-            export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
-            export PEACOCK_TPCH_SF40_DIR=\$TPCH_SF40
-            export PEACOCK_TPCH_GOLDEN_DIR=$REMOTE_DIR/testdata/goldens/tpch.sf40
-            export PEACOCK_TPCH_VEC_PARAMS=$REMOTE_DIR/testdata/tpch-vec-queries/query_params.jsonl
-
-            ran_any=0
-            for t in $REMOTE_DIR/cpp/install/bin/peacock_*_tests; do
-              [ -x "\$t" ] || continue
-              tname=\${t##*/}
-              echo "==> \$tname"
-              tlog=$REMOTE_DIR/\$tname.log
-              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" > "\$tlog" 2>&1
-              trc=\$?
-              [ "\$trc" -eq 0 ] || rc=1
-              # echo + scan in one builtin pass: one read of the log answers both what to
-              # print and whether anything ran.
-              tzero=0
-              while IFS= read -r line; do
-                printf '%s\n' "\$line"
-                case "\$line" in *"[  PASSED  ] 0 tests"*) tzero=1 ;; esac
-              done < "\$tlog"
-              if [ "\$tzero" -eq 1 ]; then
-                echo "::error::\$tname ran 0 tests (all skipped) — nothing was verified"
-                rc=1
-              fi
-              ran_any=\$((ran_any + 1))
-            done
-            # If the glob matched nothing, every C++ test silently vanished. That must be
-            # red, not green — it is the same failure this whole block exists to prevent.
-            if [ "\$ran_any" -eq 0 ]; then
-              echo "::error::no peacock_*_tests binaries found in $REMOTE_DIR/cpp/install/bin"
-              rc=1
-            fi
-            echo "==> ran \$ran_any C++ test binaries"
-
-            echo "==> rust GPU integration tests"
-            # Same zero-test guard the C++ loop above carries, in libtest's wording: a
-            # rust binary whose cases all vanished exits 0 and says nothing, so the staging
-            # array would go on excusing a target that verifies nothing.
-            rust_ran=0
-            for t in $REMOTE_DIR/cpp/install/rust-tests/*; do
-              [ -x "\$t" ] || continue
-              tname=\${t##*/}
-              echo "--- \$tname"
-              # The measurement binary is staged here for its own assertions. Its bench_
-              # cases are the measurement, tens of minutes on a device, and they write a
-              # benchmark tree — neither belongs in a correctness job.
-              skip=""
-              case "\$tname" in peacock_gpu_benchmarks) skip="--skip bench_" ;; esac
-              # --test-threads=1: cuDF/RMM share one process-wide pool; running
-              # several GPU tests concurrently OOMs the device and poisons the
-              # CUDA context, cascading into bad_alloc/cudaErrorIllegalAddress
-              # for every later test. Sequential is mandatory.
-              tlog=$REMOTE_DIR/\$tname.rust.log
-              # The lib binary holds every rung; the device one is selected by path, and
-              # the zero-test guard below is what notices if that path stops matching.
-              rung=
-              [ "\$tname" = peacockdb_core_gpu_lib ] && rung=gpu_tests::
-              env LD_LIBRARY_PATH="\$PATCHED_LD" "\$t" --nocapture --test-threads=1 \$rung \$skip > "\$tlog" 2>&1 || rc=1
-              rzero=0
-              while IFS= read -r line; do
-                printf '%s\n' "\$line"
-                case "\$line" in "running 0 tests"*) rzero=1 ;; esac
-              done < "\$tlog"
-              if [ "\$rzero" -eq 1 ]; then
-                echo "::error::\$tname ran 0 tests — nothing was verified"
-                rc=1
-              fi
-              rust_ran=\$((rust_ran + 1))
-            done
-            # The C++ loop's ran_any, for the rust half: an empty staging directory would
-            # otherwise run nothing and say nothing.
-            if [ "\$rust_ran" -eq 0 ]; then
-              echo "::error::no rust test binaries in $REMOTE_DIR/cpp/install/rust-tests"
-              rc=1
-            fi
-            echo "==> ran \$rust_ran rust test binaries"
-
-            exit \$rc
-          EOF
-          if grep -qE "Segmentation fault|core dumped" "$RUNNER_TEMP/gpu-tests.log"; then
-            echo "::error::something segfaulted on the GPU host — see the log above"
-            rc=1
-          fi
-          exit $rc
-
-      - name: Cleanup remote run directory
-        if: always()
-        run: ssh -o ConnectTimeout=10 gpu "rm -rf $REMOTE_DIR" || true
+          # A cancelled run leaves its tests running on the VM, and a test process keeps the
+          # idle watcher from stopping it. Kill this run's processes first. The pattern is
+          # bracketed ([p]eacockdb-ci/...) so it does not match the remote shell running pkill.
+          pattern="[${REMOTE_DIR:0:1}]${REMOTE_DIR:1}"
+          scripts/gpu-host.sh ssh "pkill -f '$pattern'" || true
+          scripts/gpu-host.sh ssh "rm -rf ~/${REMOTE_DIR:?}" || true
+          scripts/gpu-host.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
 
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
   # committed goldens (.cpu.txt = PeacockDB cost, .duckdb_cost.txt = DuckDB
@@ -775,6 +679,20 @@ jobs:
             # Run every file before reporting, so one failure does not hide the rest.
             python3 "$f" || status=1
           done
+          exit "$status"
+
+      # gpu-host's scripts, against fake nebius/ssh and synthetic clocks: no VM, no secret.
+      - name: GPU host script tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(scripts/gpu-host/tests/test_*.py)
+          # A vanished glob makes the loop body disappear and the step pass green.
+          [ ${#files[@]} -gt 0 ] || { echo "no gpu-host test files matched"; exit 1; }
+          status=0
+          for f in "${files[@]}"; do echo "== $f"; python3 "$f" || status=1; done
+          shellcheck scripts/gpu-host.sh scripts/gpu-host-sync.sh scripts/gpu-host-test.sh \
+            scripts/gpu-host/check-actor.sh || status=1
           exit "$status"
 
       - name: cost-report unit tests (Rust)
@@ -982,7 +900,8 @@ jobs:
     name: S3 datasets metadata check
     needs: changes
     runs-on: ubuntu-latest
-    # No secrets on fork PRs -> skip rather than fail. Mirrors the GPU job's fork guard.
+    # No secrets on fork PRs -> skip rather than fail. gpu-tests needs no such guard: it never
+    # runs on a pull_request.
     if: >-
       needs.changes.outputs.code == 'true' &&
       (github.event_name == 'push' ||

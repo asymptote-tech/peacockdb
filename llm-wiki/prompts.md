@@ -48,6 +48,11 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   subject near its verb. These three are read under pressure by an agent looking for a single
   fact, and a long sentence hides the fact in the middle of itself.
 - **Every commit keeps code, code comments, and llm-wiki content in agreement.**
+- **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`
+  and any `*.pem` under `~/.nebius/`, on any host, the VM's copy included: no `cat`, `grep`,
+  `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into a
+  transcript on 2026-10-14. Reach the cloud through `scripts/gpu-host.sh`; learn the CLI from
+  `nebius … --help`.
 
 ## Board protocol
 
@@ -173,6 +178,34 @@ state, and a watchdog restarts you.
   it answers, tell the developer to run that task's CPU tests there through
   `scripts/build-test.sh --host verda`; when it does not, say so, and a local run is fine.
   The human starts verda by hand, so this is per dispatch rather than per chain.
+- **The GPU host is nebius-gpu, started and stopped through `scripts/gpu-host.sh`**
+  (`build-test.md`, "GPU host"). Before dispatching a round with a GPU step, `gpu-host.sh start`.
+  On exit 75 (no capacity), retry every 15 minutes for 10 hours. Record the first failure's time
+  in `<task>-detail.md` so a restart keeps the clock, and wait in bounded waits of at most 10
+  minutes. After 10 hours, write `stalled: gpu host unavailable` and exit. Exit 69 (the instance
+  is gone) is a stall at once: rebuilding it is the human's. Exit 1 is a stall at once too, and
+  is never retried. Most often the VM came up but ssh never answered; `start` has already
+  stopped a VM it started. Write `stalled: gpu host up but unreachable`, or the reason in
+  `~/.config/peacock/gpu-host/gpu-host.log`, and exit.
+- **Hard stops are yours.** `gpu-host.sh stop --force` on entering `completeness approved`, on
+  entering `done`, and before every exit: stalled, a tight window, or `stop`. Developers and CI
+  stop softly.
+- **The final device run is CI's.** In `completeness approved`, after the hard stop, note the
+  time in UTC (`date -u +%FT%TZ`) and run `gh workflow run pipeline.yml --ref <branch>`. Then find your run: `gh run list
+  --workflow pipeline.yml --branch <branch> --event workflow_dispatch --json
+  databaseId,headSha,createdAt,status,conclusion`. Take the run whose `headSha` is the branch's
+  `git rev-parse HEAD` and whose `createdAt` is after the time you noted. Never take `--limit 1`
+  alone: it can be someone else's run, or an older one. A new run takes a few seconds to appear,
+  so list again until it does. Record its id and the dispatch time in `<task>-detail.md`, and
+  wait on it in bounded waits. `done` needs its `GPU Tests (nebius-gpu)` green as well as the
+  PR's CI. Then the hard stop, then `done`.
+  - **A `cancelled` run is dispatched again, not diagnosed.** The `nebius-gpu` concurrency
+    group cancels a waiting run when a newer one queues.
+  - **On restart, redo a run you left going.** If `<task>-detail.md` names a dispatched run
+    that had not finished when you exited, your hard stop on exit killed it. Dispatch it again.
+    Its failure is not a developer's, so do not route it to one.
+- **Contention is expected.** Other chains and CI share the VM. A run killed by someone else's
+  stop is rerun, not diagnosed.
 - **Task loop**: branch; dispatch the developer with the spec and the context it needs;
   iterate until it reports tests green with evidence; commit, push, open the PR against its
   parent branch; dispatch the reviewer; have the developer address blocking and important
@@ -255,10 +288,10 @@ state, and a watchdog restarts you.
   is green and nothing else asserts it. A prototype has no PR and so has nothing to wait
   for. The developer never looks at CI, so noticing a failure, reading it and routing it is
   yours alone.
-- **A GPU tier that cannot build its pool is a neighbour, not a bug.** shad-gpu is shared with work
-  outside this repo, so `[rmm] pool of N GiB could not be built` means somebody else was holding the
+- **A GPU tier that cannot build its pool is a neighbour, not a bug.** The GPU host is shared with
+  the other chains and CI, so `[rmm] pool of N GiB could not be built` means somebody else was holding the
   card. Add a dated line to [#178](tickets/testinfra.md#t178) naming the run and the binary, re-run the job
-  once, and do not debug it — a dispatch spent diagnosing a machine we do not own is a dispatch
+  once, and do not debug it — a dispatch spent diagnosing someone else's load is a dispatch
   lost. The opposite failure is ours and reproduces every time: a pool that *was* built and a test
   that then dies with `Maximum pool size exceeded` means that binary's declared budget is too
   small, and it goes to a developer rather than onto the ticket.
@@ -324,6 +357,14 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   why the coordinator has no self-wake either.
 - After small fixes run only the affected subsets; kick heavy suites off in the background
   rather than blocking. Full-suite runs are for milestones and handoffs.
+- **A GPU step is bracketed.** `scripts/gpu-host.sh start` → `scripts/gpu-host-sync.sh` →
+  `scripts/gpu-host.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'`
+  → `scripts/gpu-host.sh ssh '~/<dest>/scripts/gpu-host-test.sh run ~/<dest>'`, polled with
+  `… status`, → `scripts/gpu-host.sh stop`. Only the L40S list runs: no sf40, no benchmarks.
+  If the host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
+  the retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card:
+  leave it. Never edit `~/.ssh/config` for the VM, and never accept a host key by hand:
+  `gpu-host.sh` resolves the IP and replaces a changed key itself.
 - **You never look at CI.** Not a run, not its logs, not its config. Work the tests
   directly, locally or on a remote host. A CI failure reaches you as a failing test the
   coordinator hands you, carrying its signature; that is the only form you ever see it in.
@@ -350,7 +391,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - Anything the next developer on this task would want to know goes in
   `llm-wiki/tasks/<task>-detail.md` — what you tried, what is subtle, what a finding
   actually meant. You may be replaced between review rounds.
-- Definition of done: CPU tests green (locally or on verda), GPU tests green on shad-gpu,
+- Definition of done: CPU tests green (locally or on verda), GPU tests green on nebius-gpu's L40S list,
   clean build with no new warnings, plan goldens regenerated iff plan shape changed, no
   leftover debug prints or scratch files, and a final message naming files touched and the
   proving test commands.

@@ -1,9 +1,90 @@
-# Stub so the real workflow can be dispatched from PR #180's branch before the merge
-# (GitHub dispatches only a workflow file master already has). PR #180 replaces it.
 name: GPU host watch
-on: workflow_dispatch
+
+# The second of nebius-gpu's two idle guards (llm-wiki/build-test.md, "GPU host"). The first is
+# the watcher on the VM; this one runs whether or not the VM, its watcher or its network is
+# alive. Hard stop: anything this finds is something no party is going to clean up.
+# It keeps no state. GitHub runs the schedule from master's copy of this file only.
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      clock_offset:
+        description: Seconds added to the checker's clock; for a test dispatch only
+        type: string
+        default: '0'
+
+concurrency:
+  group: gpu-host-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
-  stub:
+  watch:
     runs-on: ubuntu-latest
+    environment: nebius-gpu
+    # Setup, the 15-minute ssh window, and a hard stop that waits up to 10 minutes for STOPPED.
+    timeout-minutes: 40
     steps:
-      - run: echo "stub; dispatch with --ref gpu-host"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/nebius-setup
+        with:
+          sa-id: ${{ secrets.NEBIUS_SA_ID }}
+          public-key-id: ${{ secrets.NEBIUS_PUBLIC_KEY_ID }}
+          project-id: ${{ secrets.NEBIUS_PROJECT_ID }}
+          private-key: ${{ secrets.NEBIUS_PRIVATE_KEY }}
+          ssh-key: ${{ secrets.NEBIUS_GPU_SSH_KEY }}
+      - name: Check, and hard-stop if nobody is using it
+        shell: bash
+        env:
+          CLOCK_OFFSET: ${{ inputs.clock_offset || '0' }}
+        run: |
+          set -euo pipefail
+          if ! [[ $CLOCK_OFFSET =~ ^(0|[1-9][0-9]{0,5})$ ]]; then
+            echo "::error::clock_offset must be a non-negative integer of at most 6 digits"
+            exit 1
+          fi
+          s=$(scripts/gpu-host.sh status) || { echo "::error::status failed (rc=$?)"; exit 1; }
+          echo "state: $s"
+          case $s in RUNNING*) ;; *) echo "not running; nothing to do"; exit 0;; esac
+
+          # A 15-minute window: a VM still booting answers well inside it. A VM that stops or
+          # is preempted meanwhile fails every try, and the stop below finds it already STOPPED.
+          up=""; line=""; ok=0; deadline=$((SECONDS + 900))
+          while :; do
+            if up=$(scripts/gpu-host.sh ssh 'cut -d. -f1 /proc/uptime') \
+               && line=$(scripts/gpu-host.sh ssh 'tail -1 /var/log/peacock-gpu-idle.log 2>/dev/null; true'); then
+              ok=1; break
+            fi
+            [ "$SECONDS" -lt "$deadline" ] || break
+            sleep 60
+          done
+
+          if [ "$ok" -eq 0 ]; then
+            reason="ssh unanswered for 15 minutes"
+          else
+            # Up under 10 minutes: the watcher's first tick may not have run, and the log's last
+            # line is then the previous session's, which reads as stale. Next hour decides.
+            if [[ $up =~ ^[0-9]+$ ]] && [ "$up" -lt 600 ]; then
+              echo "up ${up}s, under 10 minutes; keeping it until the next check"
+              exit 0
+            fi
+            # A test dispatch shifts the checker's clock forward, so an idle VM reads as stale.
+            if [ "$CLOCK_OFFSET" -ne 0 ]; then
+              echo "::notice::the checker's clock is shifted by ${CLOCK_OFFSET} s for a test dispatch"
+            fi
+            # Any non-zero exit of the checker is a stop, a crash included: it is the guard that
+            # runs when everything else is broken, so it fails toward stopping.
+            if reason=$(printf '%s\n' "$line" | python3 scripts/gpu-host/check.py "$(( $(date +%s) + CLOCK_OFFSET ))"); then
+              echo "in use; keeping it"
+              exit 0
+            fi
+            reason=${reason:-the checker failed}
+          fi
+          # Part of the reason is the VM's own log text: one line, so it cannot start a
+          # workflow command of its own.
+          reason=${reason//[$'\r\n']/ }
+          echo "::warning::hard-stopping nebius-gpu: $reason"
+          scripts/gpu-host.sh stop --force

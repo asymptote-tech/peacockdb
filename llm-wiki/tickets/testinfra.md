@@ -5,15 +5,17 @@ Tests, CI, hosts, testdata etc
 
 ## Contents
 
-- [#178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault](#t178)
+- [#178 — the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 — the CI coverage guard checks one direction only](#t176)
-- [#129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard](#t129)
+- [#129 — The "26.02" CI leg builds against a 25.10a image](#t129)
 
 <a id="t178"></a>
-### #178 — shad-gpu is shared, and a pool that cannot be built is a neighbour's fault
+### #178 — the GPU host is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
-`build-test.md`). Our own runs queue on the `shad-gpu` concurrency group. Work outside this repo
-does not, so a stranger holding part of the card still fails us. **Tentatively closed**: it cannot
+`build-test.md`). The GPU host is nebius-gpu now (`build-test.md`, "GPU host"). Our CI runs
+queue on the `nebius-gpu` concurrency group. The other chains and the developers share the VM
+and do not queue, and neither does work outside this repo. So a neighbour holding part of the
+card still fails us. **Tentatively closed**: it cannot
 be proven closed from here.
 
 The pool line says whose failure it is. `[rmm] pool of N GiB could not be built with M GiB free`
@@ -44,7 +46,7 @@ so it is one assertion that every target pipeline.yml names is in the workspace 
 list already gets this treatment; the step lines do not.
 
 <a id="t129"></a>
-### #129 — The "26.02" CI leg builds against a 25.10a image; the GPU job has no fork guard
+### #129 — The "26.02" CI leg builds against a 25.10a image
 Two unrelated smells in `pipeline.yml`, both found auditing the CI section of
 build-test.md. (a) The dataset-matrix matrix leg labelled `cudf: "26.02"` runs
 `rapidsai/base:25.10a-cuda12-py3.12`, so the compile-only 26.02 coverage the wiki and
@@ -54,4 +56,7 @@ makes. (b) `s3-datasets` explains its fork guard as mirroring "the GPU job's for
 but `gpu-tests` has no job-level `if:` — on a fork PR `secrets.SHAD_GPU_SSH_KEY` is empty,
 so Setup SSH writes an empty key and the job goes red on ssh instead of skipping. Moot
 while the repo has no forks, which is exactly why it will bite later.
+
+(b) is closed. `gpu-tests` now never runs on a pull_request, so a fork PR gets no GPU job, and
+the `s3-datasets` comment says so. Only (a) is open.
 

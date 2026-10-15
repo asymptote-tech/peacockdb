@@ -1,0 +1,7 @@
+[Unit]
+Description=nebius-gpu idle watcher, one tick (scripts/gpu-host/idle_watch.py)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=150
+ExecStart=/usr/bin/python3 /usr/local/lib/peacock-gpu-idle.py

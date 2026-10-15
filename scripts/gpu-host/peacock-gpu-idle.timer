@@ -1,0 +1,11 @@
+[Unit]
+Description=nebius-gpu idle watcher, every minute; survives reboots
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

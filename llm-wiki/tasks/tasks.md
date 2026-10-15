@@ -9,50 +9,16 @@ branch, which is why two chains need no locking.
 > **Host override, from 2026-10-08 until the human lifts it.** It overrides the specs and
 > `build-test.md` wherever they disagree.
 >
-> - **shad-gpu is down.** Build and run the GPU tests on **nebius-gpu**: an NVIDIA L40S with
->   46 GB, Ubuntu 24.04 and glibc 2.39, so it needs no glibc patch.
-> - **Reach it as `nebius-gpu`, the `~/.ssh/config` entry, never by IP.** Its IP has changed
->   (89.169.109.150 is gone) and can change again; the entry is the one place that tracks it.
->   Older detail files quote the old address; do not copy it from them.
-> - **Only what needs the GPU goes there.** The device build (`build-test-shadgpu.sh --build`)
->   and the device runs happen on nebius-gpu. Every CPU build and run stays local, as
->   `build-test.md` describes: rust-only, the CPU tiers, the C++ CPU tests, cost-report.
-> - **cuDF 25.02, as on shad-gpu.** Its env is `~/data/miniforge3/envs/rapids-cuda-12.2`, the
->   path `shadgpu-env.sh` names. cuDF 26.02 there is red for reasons outside this chain:
->   [#260](../tickets/system-hardening.md#t260) and [#94](../tickets/corpus-coverage.md#t94).
-> - **Sync the working tree, uncommitted, before every build. Do not commit to build.** Every
->   commit stays green as before, and no work-in-progress push spends a CI run. From the workspace
->   root:
->   `rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ nebius-gpu:peacockdb-J/`.
->   `--delete-after`, not `--delete`: otherwise the first sync deletes before the `.gitignore` files
->   arrive, and so deletes the ignored data and build dirs it should keep.
->   The filter keeps build dirs, target dirs and generated data on both sides.
-> - **On nebius-gpu**, in `~/peacockdb-J`, after `. ~/peacock-env.sh`:
->   - the sf1 data is already in `testdata/` there (generated 2026-10-08). Regenerate only if it
->     is missing: `testdata/generate_testdata.sh --bench tpch` and `--bench tpcds`;
->   - build: `./scripts/build-test-shadgpu.sh --build`;
->   - run each staged binary directly, never `--run`, which ssh-es to shad-gpu. Set
->     `LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib` and
->     `PEACOCK_TESTDATA_DIR=$PWD/testdata`, and pass `--test-threads=1` to each Rust binary:
->     - `cpp/install/bin/peacock_gpu_tests` and `cpp/install/bin/peacock_plan_tests`. Not
->       `peacock_cpu_tests`, which runs locally, and not the sf40 pair, `peacock_tpch_tests` and
->       `peacock_tpchv_tests`;
->     - `cpp/install/rust-tests/test_gpu_corpus`;
->     - `cpp/install/rust-tests/test_node_timing`;
->     - `cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests::`;
->     - `cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_`.
-> - **If nebius-gpu runs short of disk** (96 GB in all), the developer finds what is using it
->   (`du -xh -d2 ~ | sort -rh | head`) and cleans up what can be rebuilt. That means stale build
->   and target dirs, the conda package cache (`~/miniforge3/bin/conda clean -a`), and the #260
->   debug build in `~/peacockdb` (`cpp/build26`, `target-cudf-rapids`). Never delete the two cuDF
->   envs or `~/peacockdb-J/testdata`. Record what was removed in the detail file.
+> **GPU host:** nebius-gpu through `scripts/gpu-host.sh`, `gpu-host-sync.sh` and `gpu-host-test.sh`
+> (`build-test.md`, "GPU host"). The L40S list only; sf40 and benchmarks are out and deferred.
+> The final device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+>
+> - **This chain's tree on the VM is `~/peacockdb-J`**: sync with `gpu-host-sync.sh --dest
+>   peacockdb-J`. Its sf1 data is already there.
 > - **Large tests and benchmark measurements are out of every task.** That means the sf40
 >   binaries (`peacock_tpch_tests`, `peacock_tpchv_tests`), `--run-benchmarks`, Nsight captures,
 >   and any H200 timing a spec asks for. Record each skipped item in the task's detail file as
 >   deferred; it does not block the task.
-> - **Done** means CI is green except the `gpu-tests` job, "GPU Tests (remote)", which runs on
->   shad-gpu. The GPU tests above must also have passed on nebius-gpu, with the run recorded in
->   the detail file.
 > - **On resuming the chain, reset the board first, in one commit:**
 >   - duckdb-oracle: `completeness approved` → `building`;
 >   - pbench: `completeness approved` → `building`;
@@ -134,22 +100,16 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 > GPU" note and overrides the specs, `build-test.md` and the coordinator's `done` rule wherever
 > they disagree.
 >
-> - **GPU tests run on nebius-gpu**, under chain J's host override above, with every rule
->   there unless it is named here: GPU builds and runs only, CPU work stays
->   local; cuDF 25.02; the `rsync --delete-after` sync, uncommitted; `build-test-shadgpu.sh
->   --build` and the staged binaries run directly, never `--run`; sf40 and benchmarks out.
-> - **Reach it as `nebius-gpu`, the `~/.ssh/config` entry, never by IP.** Its IP has changed
->   (89.169.109.150 is gone) and can change again; the entry is the one place that tracks it.
->   Older detail files quote the old address; do not copy it from them. The sync target is
->   `nebius-gpu:peacockdb-K/`.
-> - **This chain works in `~/peacockdb-K`, never `~/peacockdb-J`.** The sf1 data is already in its
->   `testdata/`, hard-linked from chain J's copy; never edit those files in place.
+> **GPU host:** nebius-gpu through `scripts/gpu-host.sh`, `gpu-host-sync.sh` and `gpu-host-test.sh`
+> (`build-test.md`, "GPU host"). The L40S list only; sf40 and benchmarks are out and deferred.
+> The final device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+>
+> - **This chain works in `~/peacockdb-K`, never `~/peacockdb-J`**: sync with
+>   `gpu-host-sync.sh --dest peacockdb-K`. The sf1 data is already in its `testdata/`,
+>   hard-linked from chain J's copy; never edit those files in place.
 > - **Sharing the card with chain J is allowed.** If a run fails on memory while chain J's is on
 >   the card, `nvidia-smi` shows it; wait for chain J's run to end and rerun, rather than
 >   ticketing it.
-> - **Watch the disk; two chains now build there.** Run `df -h /` before every GPU build. Below
->   20 GB free, follow chain J's cleanup rule first; below 10 GB, do not start a build, and record
->   it in the detail file as an obstacle. Never delete anything under `~/peacockdb-J`.
 > - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
 >   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
 >   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
@@ -157,8 +117,6 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 >   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
 >   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
 >   nebius-gpu cannot exercise.
-> - **`done`** is chain J's rule: CI green except the `gpu-tests` job, and the GPU tests passed
->   on nebius-gpu, recorded in the detail file.
 > - **The cost gate's expected rises are accepted** (the human, 2026-10-08). limits and
 >   empty-sorts are `done` when the cost-report job's only regressions are the sections their
 >   detail files list from the local `--cost-diff` run: nested-limits at tp1-rowgroup and
@@ -199,19 +157,19 @@ answer keeps its columns; q17's result section gains its header.
 > cells (#262) and `tpch/rollup-distinct` this chain runs. Until both have merged, no task here
 > starts.
 >
-> **GPU host: nebius-gpu**, `dmitry@89.169.109.150`, cuDF 25.02, as chain J's header describes:
-> only what needs the GPU runs there, the working tree synced uncommitted into `~/peacockdb-L`
-> (its sf1 data copied from `~/peacockdb-J/testdata`), every CPU build and run local. Chain J will
-> have finished with it.
+> **GPU host:** nebius-gpu through `scripts/gpu-host.sh`, `gpu-host-sync.sh` and `gpu-host-test.sh`
+> (`build-test.md`, "GPU host"). The L40S list only; sf40 and benchmarks are out and deferred.
+> The final device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+> This pointer overrides the device cycle of every spec and every `-impl.md` of this chain. No
+> agent uses an IP from a plan: every host call goes through `gpu-host.sh`.
 >
+> - **This chain's tree on the VM is `~/peacockdb-L`**: sync with `gpu-host-sync.sh --dest
+>   peacockdb-L`. Chain J will have finished with the VM.
 > - **One sync per plan task** (each numbered task of a `-impl.md`) to the host, with as many
 >   back-to-back builds as its red/green pairs need, the red build first. This overrides each spec's "one GPU cycle per round".
 > - **Large tests and benchmark measurements are out of every task**, as in chain J: the sf40
 >   binaries, `--run-benchmarks`, Nsight captures, any H200 timing. Record each skipped item in the
 >   task's detail file as deferred.
-> - **Done** means CI is green except the `gpu-tests` job, "GPU Tests (remote)", which runs on
->   shad-gpu, and the task's device tests have passed on nebius-gpu, the run recorded in the
->   detail file.
 > - **Ticket numbers:** take the next free number from master's `tickets.md` as it stands after
 >   J's merge, which reconciles J's 263–279 with K's 280 on.
 

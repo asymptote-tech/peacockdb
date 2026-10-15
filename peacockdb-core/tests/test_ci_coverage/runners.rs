@@ -1,5 +1,7 @@
 //! The three GPU runners — pipeline.yml's gpu job, `build-test-shadgpu.sh` and `build-test.sh`
-//! — read for the staged targets, the lib and its rung, and the single-tenant flag.
+//! — read for the staged targets, the lib and its rung, and the single-tenant flag. The gpu
+//! job stages its binaries in pipeline.yml and runs them through `scripts/gpu-host-test.sh` on
+//! the GPU host, so its run loop is read out of that script.
 
 use std::collections::BTreeSet;
 
@@ -10,11 +12,14 @@ use crate::{
 
 const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
 
+/// The L40S list pipeline.yml's gpu-tests job runs on the GPU host: its rust loop is the CI one.
+pub(crate) const GPU_HOST_TEST: &str = "scripts/gpu-host-test.sh";
+
 const BUILD_TEST: &str = "scripts/build-test.sh";
 
 pub(crate) const GPU_STAGING_STEP: &str = "Build and stage rust GPU test binaries";
 
-pub(crate) const GPU_RUN_STEP: &str = "Run GPU tests";
+pub(crate) const GPU_RUN_STEP: &str = "Run the L40S list";
 
 /// The body of one step of pipeline.yml's GPU jobs, by its `name:`.
 fn gpu_job_step(name: &str) -> String {
@@ -85,11 +90,11 @@ pub(crate) fn gpu_job_staged_lib() -> Option<(String, String)> {
     })
 }
 
-/// The rung pipeline.yml's run loop hands one staged file, as `(staged name, filter)` —
-/// the `[ "$tname" = <name> ] && rung=<filter>` line. shad-gpu runs prebuilt binaries,
-/// never cargo, so the device rung is this line and not a command line.
+/// The rung the gpu job's run loop (gpu-host-test.sh) hands one staged file, as
+/// `(staged name, filter)` — the `[ "$name" = <name> ] && rung=<filter>` line. The GPU host
+/// runs prebuilt binaries, never cargo, so the device rung is this line and not a command line.
 pub(crate) fn gpu_job_lib_rung() -> Option<(String, String)> {
-    rust_gpu_runner_loop(PIPELINE)
+    rust_gpu_runner_loop(GPU_HOST_TEST)
         .iter()
         .find_map(|l| lib_rung_of(l))
 }
@@ -307,13 +312,15 @@ fn the_three_gpu_target_lists_agree() {
     let runtime_lib = build_test_gpu_lib();
     assert!(
         ci_lib.is_some() && dev_lib.is_some() && runtime_lib.is_some(),
-        "a runner no longer names the lib binary and its rung — pipeline.yml {ci_lib:?}, \
-         build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu {runtime_lib:?}"
+        "a runner no longer names the lib binary and its rung — pipeline.yml + \
+         gpu-host-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
+         {runtime_lib:?}"
     );
     assert!(
         ci_lib == dev_lib && dev_lib == runtime_lib,
-        "the three runners disagree about the lib binary or its rung — pipeline.yml \
-         {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu {runtime_lib:?}"
+        "the three runners disagree about the lib binary or its rung — pipeline.yml + \
+         gpu-host-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
+         {runtime_lib:?}"
     );
     let runners = [
         (SHADGPU, "RUST_LIB_STAGED", "RUST_LIB_RUNG"),
@@ -330,49 +337,65 @@ fn the_three_gpu_target_lists_agree() {
 
 /// The GPU step reports a failure, and has no way to report success over one.
 ///
-/// It runs without `set -e` deliberately — one binary failing must not skip the rest — so the
-/// only thing that can fail it is what it folds into `rc` itself. Three ways that goes wrong:
-/// a binary's status never folded in, the block not exiting `rc`, and a command dying of a
-/// signal, which leaves no status to fold at all. The third shipped: the rust loop's `cat` and
-/// `grep` segfaulted under an exported glibc-2.35 once per target, so five binaries ran with
-/// their output discarded and their zero-tests guard answering from a crash, job green.
+/// The runner runs without `set -e` deliberately — one binary failing must not skip the rest —
+/// so the only thing that can fail it is what it folds into `rc` itself. Ways that goes wrong:
+/// a binary's status never folded in, the run not exiting `rc`, the step not waiting for the
+/// run, and a command dying of a signal, which leaves no status to fold at all. The last
+/// shipped: the rust loop's `cat` and `grep` segfaulted under an exported glibc-2.35 once per
+/// target, so five binaries ran with their output discarded and their zero-tests guard
+/// answering from a crash, job green.
 #[test]
 fn the_gpu_step_cannot_report_success_over_a_failure() {
-    let step = gpu_job_step(GPU_RUN_STEP);
-
+    let step: Vec<String> = gpu_job_step(GPU_RUN_STEP)
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(str::to_string)
+        .collect();
+    let step = step.join("\n");
     assert!(
-        step.contains("exit \\$rc"),
-        "the GPU step does not end by exiting the status it accumulated, so everything it \
+        step.contains("gpu-host-test.sh run --foreground"),
+        "the `{GPU_RUN_STEP}` step does not run {GPU_HOST_TEST} in the foreground. Detached, the \
+         script returns at once and the step is green before a single binary has run"
+    );
+    assert!(
+        !step.contains("|| true") && !step.contains("; true"),
+        "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
+    );
+
+    let text = std::fs::read_to_string(repo_root().join(GPU_HOST_TEST))
+        .unwrap_or_else(|e| panic!("read {GPU_HOST_TEST}: {e}"));
+    assert!(
+        text.contains("return \"$rc\"") && text.contains("run_all \"$tree\"; exit $?"),
+        "{GPU_HOST_TEST} does not end by exiting the status it accumulated, so everything it \
          recorded in rc is discarded and the step is green whatever ran"
     );
-    for line in rust_gpu_runner_invocations(PIPELINE) {
+    for line in rust_gpu_runner_invocations(GPU_HOST_TEST) {
         assert!(
-            line.ends_with("|| rc=1"),
-            "a staged rust GPU binary runs without folding its status into rc, so it cannot \
-             fail the job: {line}"
+            line.ends_with("trc=$?"),
+            "a staged rust GPU binary runs without its status captured, so it cannot fail \
+             the job: {line}"
         );
     }
     assert!(
-        step.contains("[ \"\\$trc\" -eq 0 ] || rc=1"),
+        rust_gpu_runner_loop(GPU_HOST_TEST)
+            .iter()
+            .any(|l| l.contains("[ \"$trc\" -eq 0 ] || rc=1")),
+        "the rust loop no longer folds each binary's status into rc"
+    );
+    assert!(
+        text.matches("[ \"$trc\" -eq 0 ] || rc=1").count() >= 2,
         "the C++ loop no longer folds each binary's status into rc"
     );
     assert!(
-        step.contains("|| rc=$?"),
-        "the ssh pipeline's own status is not captured into rc. Written `rc=\\$?`, the escape \
-         a heredoc-shaped edit reaches for, it assigns the literal two characters and the \
-         status of the whole remote run is lost"
+        text.contains("Segmentation fault") && text.contains("::error::"),
+        "nothing in {GPU_HOST_TEST} notices a command dying of a signal. Without 'set -e' such \
+         a death folds no status into rc, so the run is green having crashed — which is how \
+         the rust loop printed nothing for five targets and said so nowhere"
     );
     assert!(
-        step.contains("Segmentation fault") && step.contains("::error::"),
-        "nothing in the GPU step notices a command dying of a signal. Without 'set -e' such a \
-         death folds no status into rc, so the step is green having crashed — which is how the \
-         rust loop printed nothing for five targets and said so nowhere"
-    );
-    assert!(
-        !step.contains("export LD_LIBRARY_PATH"),
-        "the GPU step exports the patched glibc into its shell. setup-glibc.sh prints the trap \
-         in this same job's log: the host's own coreutils then load it and segfault. Apply it \
-         per command (env LD_LIBRARY_PATH=… \"$t\" …) instead"
+        !text.contains("export LD_LIBRARY_PATH") && !step.contains("export LD_LIBRARY_PATH"),
+        "the GPU runner exports a library path into its shell. The host's own coreutils then \
+         load it and can crash; apply it per command (env LD_LIBRARY_PATH=… \"$t\" …) instead"
     );
 }
 
@@ -432,9 +455,11 @@ fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
 /// the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than
 /// exported, and a reader anchored at the start of the line stops seeing the invocation the
 /// moment anything precedes it — a guard silently reading nothing, not a red one.
+/// build-test-shadgpu.sh writes the loop inside an ssh heredoc (`"\$t"`), gpu-host-test.sh
+/// runs on the host itself (`"$t"`); both spellings are the same command.
 pub(crate) fn is_rust_gpu_runner_invocation(line: &str) -> bool {
-    let line = line.trim_start();
-    !line.starts_with('#') && line.contains("\"\\$t\"") && line.contains("> \"\\$")
+    let line = line.trim_start().replace("\\$", "$");
+    !line.starts_with('#') && line.contains("\"$t\"") && line.contains("> \"$")
 }
 
 /// Single-tenant GPU is one flag on two committed runner lines and nothing else. cuDF and
@@ -444,7 +469,7 @@ pub(crate) fn is_rust_gpu_runner_invocation(line: &str) -> bool {
 /// makes that argument false, and until this test existed nothing said so.
 #[test]
 fn both_gpu_runners_pass_test_threads_one() {
-    for rel in [PIPELINE, SHADGPU] {
+    for rel in [GPU_HOST_TEST, SHADGPU] {
         for line in rust_gpu_runner_invocations(rel) {
             assert!(
                 line.contains("--test-threads=1"),
@@ -462,8 +487,9 @@ fn both_gpu_runners_pass_test_threads_one() {
 /// nothing else, so a runner that lost it turns the gate into a measurement in silence.
 #[test]
 fn the_benchmark_binary_runs_without_its_cases_on_ci() {
-    for rel in [PIPELINE, SHADGPU] {
-        // The shell names the target through `$BENCH_TARGET`, the workflow spells it out.
+    for rel in [GPU_HOST_TEST, SHADGPU] {
+        // build-test-shadgpu.sh names the target through `$BENCH_TARGET`, gpu-host-test.sh
+        // spells it out.
         // Resolved rather than matched two ways, so one needle reads both files.
         let loop_body = rust_gpu_runner_loop(rel)
             .join("\n")

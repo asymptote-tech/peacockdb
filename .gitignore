@@ -58,3 +58,6 @@ cpp/build26/
 /*.txt
 /*.html
 /*.sh
+
+# gpu-host-test.sh run state on the VM
+.gpu-test/
