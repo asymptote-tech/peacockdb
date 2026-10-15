@@ -10,6 +10,9 @@
 //! politeness — a CI log drops a line past a thousand characters, so a half-gigabyte diff
 //! spends the memory and produces something nobody can read.
 
+#[cfg(test)]
+mod tests;
+
 use std::hash::{Hash, Hasher};
 
 use datafusion::arrow::array::RecordBatch;
@@ -20,6 +23,21 @@ use super::ResultDigest;
 
 /// How many rows either side of the first difference a failure prints.
 const EXCERPT: usize = 3;
+
+/// Whether NaN alone settles whether two numeric cells agree: `Some(true)` for two NaNs,
+/// which are the same absent value, `Some(false)` where exactly one side is NaN, and `None`
+/// where the caller's own tolerance rule decides.
+///
+/// Explicit because NaN is unordered, so `NaN > tol` is false and a bare magnitude test
+/// accepts a NaN against a number. In a fingerprint that is worse than it sounds: an
+/// approximate column is out of the hash as well, so the column would be checked by nothing.
+pub(crate) fn nan_settles(a: f64, b: f64) -> Option<bool> {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Some(true),
+        (false, false) => None,
+        _ => Some(false),
+    }
+}
 
 /// One formatter per column, built once for the batch. Arrow's is cheap but not free, and
 /// the alternative is building one per cell — 1.2 million rows times sixteen columns.
@@ -202,16 +220,28 @@ pub(crate) fn assert_results_match(
     rel_tol: Option<f64>,
     query: &str,
 ) {
+    results_match(expected, actual, rel_tol).unwrap_or_else(|said| panic!("{query}: {said}"));
+}
+
+/// The same comparison, `Err(how they differ)` rather than a panic, so a doctored answer can
+/// show it failing without a run behind it. What `assert_answer`'s two whole-answer oracles
+/// reach, and what `CpuOracle`'s negative tests drive.
+pub(crate) fn results_match(
+    expected: &[RecordBatch],
+    actual: &[RecordBatch],
+    rel_tol: Option<f64>,
+) -> Result<(), String> {
     let Some(tol) = rel_tol else {
         // Digests rather than two rendered tables: `assert_eq!` evaluates both arguments
         // before comparing a byte, so the exact arm materialized the whole answer twice to
         // answer yes or no. The excerpt is built only where the answer is no.
-        assert!(
-            results_agree(expected, actual),
-            "result for {query} differs from oracle (exact compare)\n{}",
-            first_difference(expected, actual)
-        );
-        return;
+        if !results_agree(expected, actual) {
+            return Err(format!(
+                "differs from the oracle (exact compare)\n{}",
+                first_difference(expected, actual)
+            ));
+        }
+        return Ok(());
     };
 
     use std::collections::HashMap;
@@ -266,38 +296,45 @@ pub(crate) fn assert_results_match(
     }
 
     let (mut em, am) = (index(expected), index(actual));
-    assert_eq!(
-        em.len(),
-        am.len(),
-        "approx compare: distinct non-float row keys differ for {query} (expected {}, actual {})",
-        em.len(),
-        am.len()
-    );
+    if em.len() != am.len() {
+        return Err(format!(
+            "approx compare: distinct non-float row keys differ (expected {}, actual {})",
+            em.len(),
+            am.len()
+        ));
+    }
     for (key, mut avs) in am {
-        let mut evs = em.remove(&key).unwrap_or_else(|| {
-            panic!("approx compare: actual row key absent from expected for {query}")
-        });
-        assert_eq!(
-            evs.len(),
-            avs.len(),
-            "approx compare: row multiplicity differs for a key in {query}"
-        );
+        let mut evs = em
+            .remove(&key)
+            .ok_or("approx compare: an actual row key is absent from the expected answer")?;
+        if evs.len() != avs.len() {
+            return Err("approx compare: row multiplicity differs for a key".to_string());
+        }
         evs.sort_by(|a, b| tuple_cmp(a, b));
         avs.sort_by(|a, b| tuple_cmp(a, b));
         for (ev, av) in evs.iter().zip(&avs) {
             for (e, a) in ev.iter().zip(av) {
-                if e.is_nan() && a.is_nan() {
-                    continue;
+                match nan_settles(*e, *a) {
+                    Some(true) => continue,
+                    Some(false) => {
+                        return Err(format!(
+                            "approx compare: one side is NaN (expected={e}, actual={a})"
+                        ));
+                    }
+                    None => {}
                 }
                 let d = (e - a).abs();
                 let rel = if *e != 0.0 { d / e.abs() } else { d };
-                assert!(
-                    rel <= tol,
-                    "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} for {query} (expected={e}, actual={a})"
-                );
+                if rel > tol {
+                    return Err(format!(
+                        "approx compare: float cell rel diff {rel:.3e} > tol {tol:.0e} \
+                         (expected={e}, actual={a})"
+                    ));
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Pretty-print batches with the data rows sorted, for order-independent compares. Unlike
@@ -316,4 +353,28 @@ pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
     } else {
         formatted
     }
+}
+
+/// A rendered table's column count, read off its header rather than its data: an answer of
+/// no rows still has one. A header with NO pipe has no cells either — a zero-column answer
+/// renders as `++`, and `split_cells` reads a pipeless line as one cell (tpcds q17).
+pub(crate) fn rendered_width(table: &str) -> usize {
+    match table.lines().nth(1) {
+        Some(header) if header.contains('|') => split_cells(header).len(),
+        _ => 0,
+    }
+}
+
+/// One rendered line's cells, trimmed of the padding Arrow sized them to. Not the borders:
+/// Arrow widens a column to its widest printed cell, so the ascii art encodes the values a
+/// tolerant comparison exists not to compare bit for bit.
+pub(crate) fn split_cells(line: &str) -> Vec<String> {
+    let parts: Vec<&str> = line.split('|').collect();
+    if parts.len() < 2 {
+        return vec![line.trim().to_string()];
+    }
+    parts[1..parts.len() - 1]
+        .iter()
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }

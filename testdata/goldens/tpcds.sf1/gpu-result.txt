@@ -1,0 +1,41 @@
+cudf=25.02
+== q37 mode=tp1-single
++------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
+| i_item_id        | i_item_desc                                                                                                                                                                                | i_current_price |
++------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
+| AAAAAAAAHFMBAAAA | Workers used to send inside long star methods. Profound, natural ministers would forget from the patients. Males say strange, positive phenomena; guests must condemn old alternatives. Ot | 86.11           |
++------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
+== q82 mode=tp1-single
++------------------+------------------------------------------------------------------------------------------------------------+-----------------+
+| i_item_id        | i_item_desc                                                                                                | i_current_price |
++------------------+------------------------------------------------------------------------------------------------------------+-----------------+
+| AAAAAAAAECMCAAAA | Arab, financial pol                                                                                        | 67.28           |
+| AAAAAAAALIHCAAAA | Clinical, labour aspects might sit enough like a problems. Remarkably mysterious experts shall learn to th | 86.90           |
++------------------+------------------------------------------------------------------------------------------------------------+-----------------+
+== q84 mode=tp1-single
++------------------+---------------------+
+| customer_id      | customername        |
++------------------+---------------------+
+| AAAAAAAAAAPDAAAA | Benson, Floyd       |
+| AAAAAAAAAAPDAAAA | Benson, Floyd       |
+| AAAAAAAACBNCBAAA | Ferraro, Timothy    |
+| AAAAAAAADMMCBAAA | Sandoval, Rosemary  |
+| AAAAAAAAEDFBAAAA | Smallwood, Betty    |
+| AAAAAAAAEEGCBAAA | Mattson, Alyson     |
+| AAAAAAAAGLHFBAAA | Fisher, David       |
+| AAAAAAAAIANKAAAA | Nelson, William     |
+| AAAAAAAAIAODBAAA | Murray, Karen       |
+| AAAAAAAAJFJGBAAA | Wing, Deborah       |
+| AAAAAAAALCLABAAA | Whitaker, Lettie    |
+| AAAAAAAAMGLBAAAA | Johnson, Wendy      |
+| AAAAAAAAMKIFBAAA | Evans, Marianna     |
+| AAAAAAAAMPPAAAAA | Cunningham, Katrina |
+| AAAAAAAAOLANAAAA | Bostick, Eric       |
+| AAAAAAAAPKABAAAA | Jones, Terri        |
++------------------+---------------------+
+== q85 mode=tp1-single
++-------------------------------------------------+------+-------------+-------------------------+
+| substr(reason.r_reason_desc,Int64(1),Int64(20)) | avg1 | avg2        | avg(web_returns.wr_fee) |
++-------------------------------------------------+------+-------------+-------------------------+
+| Did not like the col                            | 94.0 | 3078.980000 | 92.970000               |
++-------------------------------------------------+------+-------------+-------------------------+

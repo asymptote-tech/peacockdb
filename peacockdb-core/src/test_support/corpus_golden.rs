@@ -10,7 +10,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
-use super::{Regeneration, SKIPPED, TIER, golden_dir_for, registry};
+use super::{
+    COMMITTED_CUDF_VERSION, CsvRow, MODES, Regeneration, SKIPPED, TIER, golden_dir_for, registry,
+};
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +32,111 @@ pub(crate) fn cost_golden(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 /// is in the others': a second tier would be a second file rather than a silent overwrite.
 pub(crate) fn result_golden(dataset: &str, sf: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join(format!("{}.result.txt", TIER.label()))
+}
+
+/// `duckdb-result.txt` — DuckDB's answer to every query of this dataset, one section each,
+/// written by `testdata/duckdb_result.py`. No `mode=` line: DuckDB has no planning modes.
+pub(crate) fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
+    golden_dir_for(dataset, sf).join("duckdb-result.txt")
+}
+
+/// `gpu-result.txt` — the device's own answers, one section per (query, mode), written only
+/// under `PCK_WRITE_GPU_RESULT` and brought home from whichever host held the card. A record,
+/// never an authority. `version` names a cuDF other than the committed 25.02, whose file is
+/// gitignored beside it.
+pub(crate) fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
+    let name = match version {
+        None => "gpu-result.txt".to_string(),
+        Some(version) => format!("gpu-result-{version}.txt"),
+    };
+    golden_dir_for(dataset, sf).join(name)
+}
+
+/// The cuDF a `gpu-result` file's NAME promises: the suffix where it has one, and
+/// [`COMMITTED_CUDF_VERSION`] where it does not. One rule, read by the writer deciding which
+/// file a cycle may record into and by every reader asking whether a file is what its name says.
+fn cudf_a_path_promises(version: Option<&str>) -> &str {
+    version.unwrap_or(COMMITTED_CUDF_VERSION)
+}
+
+/// The knob that records a `gpu-result` file, as the operator must type it.
+///
+/// `=1` records the COMMITTED file, so a message that always said `=1` told a reader looking at
+/// a missing `gpu-result-26.02.txt` to overwrite cuDF 25.02's answers — the one thing "one
+/// version per file" forbids. The value and the path are one choice, formatted in one place.
+pub(crate) fn recording_knob(version: Option<&str>) -> String {
+    format!("PCK_WRITE_GPU_RESULT={}", version.unwrap_or("1"))
+}
+
+/// The knob that records the file a given cuDF owns — the committed one for
+/// [`COMMITTED_CUDF_VERSION`], a versioned one for anything else.
+fn recording_knob_for_cudf(cudf: &str) -> String {
+    recording_knob((cudf != COMMITTED_CUDF_VERSION).then_some(cudf))
+}
+
+/// The cuDF a `gpu-result` file was recorded under: the `cudf=` provenance line [`merged_cells`]
+/// writes before the first section. `None` for a file carrying none.
+///
+/// Every preamble line rather than the first `cudf=`: two provenance lines name two cuDFs, and
+/// a reader stopping at the first would let the second contradict it unseen.
+pub(crate) fn gpu_result_cudf(text: &str) -> Option<&str> {
+    let stamps: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.starts_with("== "))
+        .filter_map(|line| line.strip_prefix("cudf="))
+        .collect();
+    assert!(
+        stamps.len() <= 1,
+        "a gpu-result file carries one `cudf=` line, naming the cuDF that recorded its \
+         sections; this one has {}",
+        stamps.len()
+    );
+    stamps.first().copied()
+}
+
+/// A `gpu-result` file's provenance line against the path it was read as, which is the whole of
+/// "one version per file" on the read side: `gpu-result.txt` holds cuDF 25.02's answers and
+/// `gpu-result-<v>.txt` holds v's.
+pub(crate) fn gpu_result_cudf_matches_path(
+    text: &str,
+    version: Option<&str>,
+) -> Result<(), String> {
+    let promised = cudf_a_path_promises(version);
+    match gpu_result_cudf(text) {
+        Some(recorded) if recorded == promised => Ok(()),
+        Some(recorded) => Err(format!(
+            "recorded under cuDF {recorded} and read as cuDF {promised}'s. Restore this file \
+             (git checkout) and record {recorded}'s answers with {} instead",
+            recording_knob_for_cudf(recorded)
+        )),
+        None => Err(format!(
+            "no `cudf=` line, so nothing says which cuDF recorded it — re-record it with {}",
+            recording_knob(version)
+        )),
+    }
+}
+
+/// Which file a recording cycle may write, given the cuDF the binary is linked against: the
+/// committed one from [`COMMITTED_CUDF_VERSION`] alone, `gpu-result-<v>.txt` from v.
+///
+/// This is what takes "one version per file" off the operator. A 26.02 cycle that typed
+/// `PCK_WRITE_GPU_RESULT=1` otherwise writes 26.02's answers over the committed 25.02 file, and
+/// the only thing standing between that and a commit is the diff somebody reads.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn recording_cudf_suits_the_path(
+    cudf: &str,
+    version: Option<&str>,
+) -> Result<(), String> {
+    let promised = cudf_a_path_promises(version);
+    match cudf == promised {
+        true => Ok(()),
+        false => Err(format!(
+            "this binary is linked against cuDF {cudf} and {} records cuDF {promised}'s file — \
+             record with {} instead",
+            recording_knob(version),
+            recording_knob_for_cudf(cudf)
+        )),
+    }
 }
 
 pub(crate) fn regeneration() -> Regeneration {
@@ -130,6 +237,137 @@ pub(crate) fn merge_section(
     publish(path, &merged);
     // Explicit rather than left to the drop, so the unlock is ordered after the rename.
     let _ = lock.unlock();
+}
+
+/// Merge one `== <query> mode=<mode>` section into a file keyed by BOTH header fields, and
+/// publish by rename under the same directory lock `merge_section` takes.
+///
+/// `gpu-result.txt`'s shape. One section per device cell, so a cycle that reran one cell
+/// replaces that cell and no other; and the file is written in the registry's row order and
+/// then the mode sequence, because the device cases run in whatever order libtest gives them
+/// and a file ordered by that is a reordering to read on every pull home.
+///
+/// Its only caller outside this module's tests is the device corpus tier, which a rust-only
+/// build does not compile.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn merge_mode_section(
+    path: &Path,
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    body: &str,
+    cudf: &str,
+) {
+    let dir = path.parent().expect("a golden directory");
+    std::fs::create_dir_all(dir).expect("the directory");
+    let lock = std::fs::File::open(dir)
+        .unwrap_or_else(|e| panic!("cannot open {} to lock: {e}", dir.display()));
+    lock.lock()
+        .unwrap_or_else(|e| panic!("cannot lock {}: {e}", dir.display()));
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => panic!("cannot read {}: {e}", path.display()),
+    };
+    publish(
+        path,
+        &merged_cells(&text, dataset, sf, query, mode, body, cudf),
+    );
+    // Explicit rather than left to the drop, so the unlock is ordered after the rename.
+    let _ = lock.unlock();
+}
+
+/// The file as it will be written: the `cudf=` provenance line, then this cell's section
+/// replaced or added, every other ENABLED cell's kept, a cell the registry no longer enables
+/// dropped, and the whole sorted by the registry's row order and then the mode sequence.
+///
+/// Dropped by enablement and never by "what this run wrote": a filtered cycle
+/// (`PCK_TEST_FILTER`) legitimately writes a subset of the enabled cells, so a writer that
+/// pruned whatever it had not just written would destroy a correct file. Pruning at all is
+/// what makes `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`'s "regenerate"
+/// true for a cell turned off, which nothing but a hand edit used to clear.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+fn merged_cells(
+    text: &str,
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    body: &str,
+    cudf: &str,
+) -> String {
+    let header = format!("{query} mode={mode}");
+    let rows: Vec<CsvRow> = registry::load_csv()
+        .into_iter()
+        .filter(|row| row.dataset == dataset && row.sf == sf)
+        .collect();
+    // Nothing is carried out of a file another cuDF recorded: the provenance line covers the
+    // whole file, so keeping those sections would make the one line a lie about them.
+    let carried = match gpu_result_cudf(text) == Some(cudf) {
+        true => text,
+        false => "",
+    };
+    let mut held: Vec<(String, String)> = ordered_sections(carried)
+        .into_iter()
+        .filter(|(name, _)| name == &header || enables_gpu_cell(&rows, name))
+        .collect();
+    match held.iter_mut().find(|(name, _)| *name == header) {
+        Some(section) => section.1 = body.to_string(),
+        None => held.push((header, body.to_string())),
+    }
+    let order: Vec<String> = rows.iter().map(|row| registry::stem(&row.query)).collect();
+    let at = |name: &str| -> (usize, usize) {
+        let (query, mode) = name.split_once(" mode=").unwrap_or((name, ""));
+        (
+            order
+                .iter()
+                .position(|row| row == query)
+                .unwrap_or(order.len()),
+            MODES
+                .iter()
+                .position(|m| m.name == mode)
+                .unwrap_or(MODES.len()),
+        )
+    };
+    held.sort_by_key(|(name, _)| at(name));
+    let mut out = format!("cudf={cudf}\n");
+    for (name, body) in &held {
+        push_section(&mut out, name, body);
+    }
+    out
+}
+
+/// Whether `rows` still enable the device cell a `<query> mode=<mode>` header names. `skip`
+/// counts: the cell has a case, and that case writes its section.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+fn enables_gpu_cell(rows: &[CsvRow], header: &str) -> bool {
+    let Some((query, mode)) = header.split_once(" mode=") else {
+        return false;
+    };
+    let Some(mode) = MODES.iter().find(|m| m.name == mode) else {
+        return false;
+    };
+    let column = format!("gpu_{}", mode.ident());
+    rows.iter().any(|row| {
+        registry::stem(&row.query) == query
+            && row
+                .states
+                .get(&column)
+                .is_some_and(|state| matches!(state.as_str(), "enabled" | "skip"))
+    })
+}
+
+/// Merge one section into a file whose skeleton is the registry's declared queries.
+pub(crate) fn merge_declared(
+    path: &Path,
+    dataset: &str,
+    sf: &str,
+    columns: &[&str],
+    query: &str,
+    body: &str,
+) {
+    merge(path, dataset, sf, columns, query, body, regeneration());
 }
 
 fn merge(

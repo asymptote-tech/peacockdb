@@ -22,9 +22,9 @@ mod benchmark;
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden, load_csv, merge_section,
-    merged_text, mode_named, ordered_sections, over_cap, parse_node_line, parse_run_section,
-    result_golden, stem,
+    MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden, fingerprint_of,
+    load_csv, merge_section, merged_text, mode_named, ordered_sections, parse_node_line,
+    parse_run_section, result_golden, section_holds_rows, stem,
 };
 
 // --- the write path ------------------------------------------------------------
@@ -159,28 +159,29 @@ fn a_cleared_bit_turns_a_real_section_into_a_marker() {
     );
 }
 
-/// The over-cap result keeps its section, says why, and names who decided — in that order.
+/// The over-cap result keeps its section, holds its fingerprint, and names who wrote it —
+/// in that order.
 ///
-/// Built by calling `over_cap` rather than by formatting a twin: nine sites read a leading
-/// SKIPPED as "this section holds no rows", `corpus_gpu` among them, so a mode line ahead of
-/// it would let a `golden_exact` device case compare against nothing. A hand-built body pins
-/// the test's own string and leaves that ordering asserted nowhere.
+/// Several sites read a section's FIRST line as "does this hold rows", `corpus_gpu` among
+/// them, so a mode line ahead of the fingerprint would let a `golden_exact` device case
+/// compare against nothing. The body is built from the writer's own ingredients rather than
+/// hand-formatted, which is what leaves that ordering asserted here and not in a twin.
 #[test]
-fn an_over_cap_result_is_a_marker_and_not_a_deletion() {
+fn an_over_cap_result_is_a_fingerprint_and_not_a_deletion() {
     let declared = skeleton(&[("q1", true)]);
     let mode = mode_named("tp4_sized");
-    let body = over_cap(Some(300_000), mode);
+    let body = format!("{}mode={}\n", fingerprint_of(&[]), mode.name);
     let after = merged_text("", &declared, "q1", &body, Regeneration::Whole);
     assert_eq!(after, format!("== q1\n{body}"));
     let (_, held) = ordered_sections(&after).remove(0);
     assert!(
-        held.starts_with(SKIPPED),
-        "a reader cannot tell why it is absent, and every SKIPPED reader now sees rows: {held}"
+        !section_holds_rows(&held),
+        "a reader takes this for a run and compares against nothing: {held}"
     );
     assert_eq!(
-        held.lines().nth(1),
+        held.lines().next_back(),
         Some(format!("mode={}", mode.name).as_str()),
-        "the marker must name its author on the SECOND line: {held}"
+        "the fingerprint must name its author on the LAST line: {held}"
     );
 }
 
@@ -367,7 +368,9 @@ fn the_root_emitted_the_rows_the_result_golden_holds() {
         let results =
             std::fs::read_to_string(result_golden(dataset, sf)).expect("the result golden");
         for (query, result) in ordered_sections(&results) {
-            if result.starts_with(SKIPPED) {
+            // A marker and the fingerprint over the cap both stand in for the rows rather
+            // than holding them, so neither has a row count to compare.
+            if !section_holds_rows(&result) {
                 continue;
             }
             let mode = result
@@ -573,8 +576,8 @@ fn every_enabled_cell_has_a_section_with_content_and_every_disabled_one_a_marker
 /// nothing else looks at.
 ///
 /// Read off `ordered_sections` rather than `sections_with_content`, and discriminating on a `mode=`
-/// line being PRESENT rather than on SKIPPED being absent: an over-cap section carries both, and it
-/// is the section this guard most needs to see.
+/// line being PRESENT rather than on the rows being there: an over-cap section names its author
+/// under a fingerprint, and it is the section this guard most needs to see.
 #[test]
 fn every_result_section_names_the_mode_that_would_author_it_now() {
     let rows = load_csv();
@@ -645,32 +648,26 @@ fn each_result_section_was_written_by_the_mode_entitled_to_write_it() {
                 let column = format!("cpu_{}", mode.ident());
                 row.states.get(&column).map(String::as_str) == Some("enabled")
             });
-            match (entitled, body.starts_with(SKIPPED)) {
-                (None, true) => {}
-                (None, false) => panic!("{dataset}/{query}: no mode is enabled and its section holds a run"),
-                (Some(mode), true) => {
-                    // Over the cap is the one reason an enabled query carries a marker, and
-                    // it says so in words rather than by being absent.
-                    assert!(
-                        body.contains("cap"),
-                        "{dataset}/{query}: enabled at {} and its section is a marker that does \
-                         not say why:\n{body}",
-                        mode.name
-                    );
-                }
-                (Some(mode), false) => {
-                    let author = body
-                        .lines()
-                        .next()
-                        .and_then(|line| line.strip_prefix("mode="))
-                        .unwrap_or_else(|| panic!("{dataset}/{query}: no `mode=` line"));
-                    assert_eq!(
-                        author, mode.name,
-                        "{dataset}/{query}: written at {author}, and {} is the last mode it \
-                         declares",
-                        mode.name
-                    );
-                }
+            // An enabled query's section names its author whether it holds the rows or
+            // the fingerprint an over-cap answer leaves, so the author line is what the two
+            // cases are told apart by — not the `skipped:` prefix, which only a query no
+            // mode enables carries.
+            match (entitled, body.lines().find_map(|line| line.strip_prefix("mode="))) {
+                (None, None) => {}
+                (None, Some(author)) => panic!(
+                    "{dataset}/{query}: no mode is enabled and its section was written at \
+                     {author}"
+                ),
+                (Some(mode), None) => panic!(
+                    "{dataset}/{query}: enabled at {} and its section names no author:\n{body}",
+                    mode.name
+                ),
+                (Some(mode), Some(author)) => assert_eq!(
+                    author, mode.name,
+                    "{dataset}/{query}: written at {author}, and {} is the last mode it \
+                     declares",
+                    mode.name
+                ),
             }
         }
     }

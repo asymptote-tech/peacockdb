@@ -21,3 +21,8 @@
 !/calibration/calls.tsv
 !/calibration/plots/
 !/calibration/plots/**
+
+# The device's recorded answers from a cuDF other than shad-gpu's 25.02. `gpu-result.txt`
+# IS committed — one version per file, so the comparison with DuckDB reads one engine's
+# answers — and a verify run writes `gpu-result-<version>.txt` beside it instead.
+/goldens/*/gpu-result-*.txt
