@@ -84,7 +84,7 @@ pub(crate) fn scan<'a>(
 ) -> Result<Payload, PlanError> {
     let path = b.create_string(&node.file);
     let paths = b.create_vector(&[path]);
-    let schema = serialize_schema(b, &output.fields);
+    let schema = serialize_schema(b, &output.fields)?;
     let scan = fb::CudfScan::create(
         b,
         &fb::CudfScanArgs {

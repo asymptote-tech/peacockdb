@@ -1192,7 +1192,7 @@ mode=tp4-sized
 | 4           | MIDDLE EAST |  foxes boost furiously along the carefully dogged tithes. slyly regular orbits according to the special epit        | 9           | INDONESIA      | 2           | d deposits sleep quickly according to the dogged, regular dolphins. special excuses haggle furiously special reque |
 +-------------+-------------+---------------------------------------------------------------------------------------------------------------------+-------------+----------------+-------------+--------------------------------------------------------------------------------------------------------------------+
 == rollup-over-join
-mode=tp1-rowgroup
+mode=tp4-sized
 +-------------+--------------+----------+
 | c_nationkey | c_mktsegment | count(*) |
 +-------------+--------------+----------+

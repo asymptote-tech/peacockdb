@@ -239,10 +239,9 @@ fn a_cast_carries_its_target_and_a_decimal_targets_scale() {
 /// A type the wire has no word for names the ticket that will give it one.
 ///
 /// The plan goldens' meta tests require every `not runnable` line to cite a ticket in
-/// parentheses, and this refusal is the one that reaches them: pbench's
-/// `timestamp-s-key-group` casts to `Timestamp(Second, None)`, which the fbs type table has
-/// no member for until repartition-keys adds the timestamps. A refusal naming nothing is a
-/// line a reader cannot act on, and the meta test would reject the golden that carried it.
+/// parentheses, so a refusal naming nothing is a line a reader cannot act on and the meta
+/// test would reject the golden that carried it. Every unnamed type is #249's now that the
+/// fbs table holds all four timestamp units.
 #[test]
 fn a_type_the_wire_cannot_name_is_refused_with_its_ticket() {
     let refused = |target: DataType| {
@@ -257,19 +256,32 @@ fn a_type_the_wire_cannot_name_is_refused_with_its_ticket() {
         .expect_err("the wire has no word for this type")
         .to_string()
     };
-    let timestamp = refused(DataType::Timestamp(TimeUnit::Second, None));
-    assert!(
-        timestamp.contains("(#240)"),
-        "a timestamp target waits on repartition-keys' fbs timestamps: {timestamp}"
-    );
     let other = refused(DataType::Time64(TimeUnit::Microsecond));
     assert!(
         other.contains("(#249)"),
-        "every other unnamed type is #249's: {other}"
+        "every unnamed type is #249's: {other}"
     );
     // The type itself stays in the message: the ticket says who will fix it, not what broke.
-    assert!(timestamp.contains("Timestamp"), "{timestamp}");
     assert!(other.contains("Time64"), "{other}");
+}
+
+/// Every timestamp unit is a cast target the wire can carry, which is what takes pbench's
+/// `timestamp-s-key-group` off `NOT_RUNNABLE`.
+#[test]
+fn a_cast_to_any_timestamp_unit_is_written_with_its_unit() {
+    for (unit, fb_ty) in [
+        (TimeUnit::Second, fb::DataType::TimestampSecond),
+        (TimeUnit::Millisecond, fb::DataType::TimestampMillisecond),
+        (TimeUnit::Microsecond, fb::DataType::TimestampMicrosecond),
+        (TimeUnit::Nanosecond, fb::DataType::TimestampNanosecond),
+    ] {
+        let bytes = written(&Expr::Cast {
+            expr: Box::new(column(0, "n")),
+            target: DataType::Timestamp(unit, None),
+        });
+        let cast = read(&bytes).node_as_cast_expr_node().unwrap();
+        assert_eq!(cast.target_type(), fb_ty);
+    }
 }
 
 #[test]

@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use datafusion::arrow::array::Float64Array;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::JoinType;
@@ -17,6 +18,8 @@ use crate::plan::{
 use crate::tests::compare::{Order, assert_same, same};
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
+
+use super::aggregate_cases::{float_key_batch, rows};
 
 pub(crate) fn build_batch(rows: usize) -> RecordBatch {
     prefixed(&synthetic(rows, 11), "b_")
@@ -87,6 +90,23 @@ pub(crate) fn hash_join_with(
     residual: (Option<Expr>, Vec<JoinFilterColumn>),
     projection: Option<Vec<u32>>,
 ) -> GpuHashJoin {
+    hash_join_on(
+        join_type,
+        null_equals_null,
+        residual,
+        projection,
+        vec![(1, 1)],
+    )
+}
+
+/// `hash_join_with` on a stated key pair, for a case that is about the key's type.
+pub(crate) fn hash_join_on(
+    join_type: JoinType,
+    null_equals_null: bool,
+    residual: (Option<Expr>, Vec<JoinFilterColumn>),
+    projection: Option<Vec<u32>>,
+    keys: Vec<(u32, u32)>,
+) -> GpuHashJoin {
     let (filter, filter_columns) = residual;
     let fields = output_of(join_type);
     let fields = match &projection {
@@ -103,7 +123,7 @@ pub(crate) fn hash_join_with(
         leaf("b_", BatchLayout::SingleBatch),
         leaf("p_", BatchLayout::MultipleBatches),
         join_type,
-        vec![(1, 1)],
+        keys,
         filter,
         filter_columns,
         null_equals_null,
@@ -926,5 +946,35 @@ operator_case! {
         let outcome = run_both(&join(JoinType::LeftMark), no_probe());
         gpu_refuses_with(&outcome, NO_KEYS);
         gpu_refuses_with(&outcome, "every build row with a false mark");
+    }
+}
+
+// #243 — the cpu's float *equality*, unchanged by this task: Inner over `b_f64 = p_f64`, the
+// cpu pairs equal bits (0↔0, -0↔-0, NaN↔NaN, 1↔1: four rows) and the device pairs equal
+// values with NaNs equal (0 and -0 both ways, each NaN with the probe's NaN, 1: seven). One
+// probe batch and one lane, so the lane rule is not what is being measured.
+operator_case! {
+    GpuHashJoin,
+    fn bug_a_float_join_key_misses_negative_zero_and_nan_pairs_on_the_cpu() {
+        let node = hash_join_on(JoinType::Inner, false, (None, Vec::new()), None, vec![(4, 4)]);
+        let build = prefixed(&float_key_batch(), "b_");
+        let probe = {
+            let batch = synthetic(5, 2);
+            let mut columns = batch.columns().to_vec();
+            columns[4] = Arc::new(Float64Array::from(vec![
+                Some(0.0),
+                Some(-0.0),
+                Some(f64::NAN),
+                None,
+                Some(1.0),
+            ]));
+            prefixed(
+                &RecordBatch::try_new(batch.schema(), columns).expect("the same shape"),
+                "p_",
+            )
+        };
+        let outcome = run_both(&node, script(Some(build), vec![probe]));
+        assert_eq!(rows(outcome.cpu.as_ref().expect("the cpu answers")), 4);
+        assert_eq!(rows(outcome.gpu.as_ref().expect("the device answers")), 7);
     }
 }

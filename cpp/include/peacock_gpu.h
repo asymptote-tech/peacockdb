@@ -279,7 +279,9 @@ void peacock_executor_end_plan(peacock_executor_t* executor);
 // Spark-murmur3 partition ids for `key_cols` of the Arrow table described by the
 // C-Data Interface (`schema`/`array` are `ArrowSchema*`/`ArrowArray*`; a struct
 // array = the table), so the live conformance test can assert the REAL GPU path
-// == the REAL comet CPU helper over the SAME bytes. Writes up to `out_cap` ids
+// == the REAL production CPU lane rule over the SAME bytes — the rule rather than a second
+// copy of it, which was #201, and the rule rather than comet's raw output, which departs from
+// it on three key types (peacock/partitioning.hpp). Writes up to `out_cap` ids
 // into `out_pids` and sets `*out_n`.
 /// @return 0 on success; non-zero on failure. There is no executor to hold the message, so
 /// peacock_last_error(NULL) returns ""; the reason is printed to stderr.

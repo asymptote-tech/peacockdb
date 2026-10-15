@@ -453,13 +453,7 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
 /// here with a ticket, and an entry that stops being true goes red until it is removed —
 /// which is the direction that matters when #168 closes, since a stale entry is how a
 /// declared set rots into a list nobody trusts.
-const NOT_RUNNABLE: &[(&str, &str, &str)] = &[
-    ("tpch", "mixed-join", "168"),
-    // pbench's one cast to a second-unit timestamp. Parquet has no second unit, so this is the
-    // only query in the corpus that reaches `Timestamp(Second)` at all, and the fbs type table
-    // has no member for it until repartition-keys adds the timestamps.
-    ("pbench", "timestamp-s-key-group", "240"),
-];
+const NOT_RUNNABLE: &[(&str, &str, &str)] = &[("tpch", "mixed-join", "168")];
 
 #[test]
 fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_true() {

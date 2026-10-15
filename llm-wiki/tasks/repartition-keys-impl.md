@@ -98,7 +98,7 @@ comet 0.6.0's murmur3, the shad-gpu device cycle.
 - Produces: `fn production_partition_ids(cols: &[(Field, ArrayRef)], lanes: usize) -> Vec<i32>`
   in `murmur_conformance.rs`, which every later gate calls through `assert_gpu_matches_rule_live`.
 
-- [ ] **Step 1: Replace the local copy.** Delete `pmod` and `cpu_partition_ids` from the gate and
+- [x] **Step 1: Replace the local copy.** Delete `pmod` and `cpu_partition_ids` from the gate and
   add, beside the imports:
 
 ```rust
@@ -143,12 +143,12 @@ fn production_partition_ids(cols: &[(Field, ArrayRef)], lanes: usize) -> Vec<i32
   `production_partition_ids`; `cpu_reference_2col_partition_ids_for_probe` (a print-only probe
   over the old copy) is deleted. `pmod_handles_negative_hashes` now asserts the imported
   production `pmod`.
-- [ ] **Step 2: Prove the gate reads production.** Locally change `SEED` in
+- [x] **Step 2: Prove the gate reads production.** Locally change `SEED` in
   `spark_partitioning.rs` to `43`; device cycle with
   `PCK_TEST_FILTER='murmur_conformance'`: every live gate red. Restore `42`; rerun: green. Paste
   both outputs into the detail file. (Before this task the same edit left the gate green — that
   is #201.)
-- [ ] **Step 3: The C++ copy.** Delete the two `CudfGpu.SparkPartitionIds*` tests and their
+- [x] **Step 3: The C++ copy.** Delete the two `CudfGpu.SparkPartitionIds*` tests and their
   `gpu_partition_ids` helper from `test_cudf.cpp` — hardcoded comet ids, a third copy of the
   rule the live gate now proves against production. The file's header comment says so.
   `build-test.md`'s "cuDF GPU smoke" row drops to its two remaining cases.
@@ -165,7 +165,7 @@ fn production_partition_ids(cols: &[(Field, ArrayRef)], lanes: usize) -> Vec<i32
 - Produces: `fn drop_grouping_id(keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError>` (private
   to `aggregate.rs`).
 
-- [ ] **Step 1: The failing planner test.**
+- [x] **Step 1: The failing planner test.**
 
 ```rust
 #[tokio::test]
@@ -190,9 +190,9 @@ async fn a_rollup_shuffle_hashes_its_keys_and_never_the_grouping_id() {
 }
 ```
 
-- [ ] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib a_rollup_shuffle` —
+- [x] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib a_rollup_shuffle` —
   FAIL: `left: [0, 1, 2], right: [0, 1]`.
-- [ ] **Step 3: The drop.** In `aggregate.rs`:
+- [x] **Step 3: The drop.** In `aggregate.rs`:
 
 ```rust
 /// A grouping-set aggregate's shuffle hashes its user keys and not `__grouping_id`, which
@@ -226,8 +226,8 @@ fn drop_grouping_id(mut keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError> 
   Unit tests beside it (`#[cfg(test)] mod tests` in `aggregate.rs`, or the translator tests):
   `drop_grouping_id(vec![0, 1, 2], 2) == Ok(vec![0, 1])`; `drop_grouping_id(vec![2], 2)` is
   `Err`; `drop_grouping_id(vec![0, 3], 2)` is `Err`.
-- [ ] **Step 4:** the planner test and the three unit tests green; `--lib` green.
-- [ ] **Step 5: Goldens.** `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test
+- [x] **Step 4:** the planner test and the three unit tests green; `--lib` green.
+- [x] **Step 5: Goldens.** `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test
   --features rust-only -p peacockdb-core --lib plan_goldens` (with the `/tmp` testdata symlink
   `build-test.md:646` names). Expect the tp4 plan sections of tpch rollup_over_join and tpcds
   q5, q18, q22, q77, q80 to move (`hash=` loses `__grouping_id`) and their `recipe-payloads.txt`
@@ -239,7 +239,7 @@ fn drop_grouping_id(mut keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError> 
 **Files:**
 - Modify: `murmur_conformance.rs` (new gates); `cpp/src/spark_hash_partition.cu:144-157`
 
-- [ ] **Step 1: The gates.**
+- [x] **Step 1: The gates.**
 
 ```rust
 /// Boolean: comet hashes `i32::from(b)`, 4 bytes. NULL skipped.
@@ -276,9 +276,9 @@ fn gpu_spark_partition_ids_zero_rows_and_all_null_match_rule_live() {
 
   (If the zero-row case trips the FFI's `rows` assert, the helper returns early when `rows == 0`
   after checking `rule.is_empty()` — the kernel is skipped at `n == 0` already.)
-- [ ] **Step 2:** device cycle, `PCK_TEST_FILTER='murmur_conformance'`: boolean RED on
+- [x] **Step 2:** device cycle, `PCK_TEST_FILTER='murmur_conformance'`: boolean RED on
   `unsupported key column cuDF type_id=11`; int8 and the empty cases green.
-- [ ] **Step 3: The arm.** In the normalizing `switch` (`.cu:144`), with INT8/INT16:
+- [x] **Step 3: The arm.** In the normalizing `switch` (`.cu:144`), with INT8/INT16:
 
 ```cpp
       case cudf::type_id::BOOL8:   // comet: i32::from(bool) — a value cast, 0 or 1
@@ -287,13 +287,13 @@ fn gpu_spark_partition_ids_zero_rows_and_all_null_match_rule_live() {
 ```
 
   and the `CUDF_FAIL` text's supported list gains BOOL8.
-- [ ] **Step 4:** cycle: all green. **Commit:** `git commit -m "#206: a boolean key hashes as comet's i32"`.
+- [x] **Step 4:** cycle: all green. **Commit:** `git commit -m "#206: a boolean key hashes as comet's i32"`.
 
 ### Task 4: Float keys, red then green (#206)
 
 **Files:** `murmur_conformance.rs`; `spark_hash_partition.cu`
 
-- [ ] **Step 1: The gates.**
+- [x] **Step 1: The gates.**
 
 ```rust
 fn float_specials() -> Vec<Option<f64>> {
@@ -366,9 +366,9 @@ fn every_nan_shares_a_lane_and_so_do_the_two_zeros() {
   from `rows_per_lane`; lift it to a named helper there. Red now: comet hashes the NaNs by their
   bits, so `lane[0] != lane[1]`.
 
-- [ ] **Step 2:** cycle: RED on `type_id=10` and `type_id=9`; locally
+- [x] **Step 2:** cycle: RED on `type_id=10` and `type_id=9`; locally
   `cargo test --features rust-only -p peacockdb-core --lib every_nan_shares_a_lane` red.
-- [ ] **Step 3: The cpu's canonical NaN.** In `spark_partitioning.rs`, beside `hash_keys`:
+- [x] **Step 3: The cpu's canonical NaN.** In `spark_partitioning.rs`, beside `hash_keys`:
 
 ```rust
 use datafusion::arrow::array::AsArray;
@@ -393,7 +393,7 @@ fn canonical_nans(array: ArrayRef) -> ArrayRef {
   `.map(|expr| Ok(canonical_nans(expr.evaluate(batch)?.into_array(batch.num_rows())?)))` (Task 6
   adds the decimal cast before it in the same closure).
   `every_nan_shares_a_lane_and_so_do_the_two_zeros` goes green locally.
-- [ ] **Step 4: The arm.** A kernel beside `spark_hash_fixed_col_kernel`:
+- [x] **Step 4: The arm.** A kernel beside `spark_hash_fixed_col_kernel`:
 
 ```cpp
 // One thread per row; folds one FLOAT key column. comet hashes `value.to_le_bytes()` of the
@@ -435,14 +435,14 @@ __global__ void spark_hash_float_col_kernel(cudf::column_device_view col,
           break;
 ```
 
-- [ ] **Step 5:** cycle: green, every float gate including the specials-only one. **Commit:**
+- [x] **Step 5:** cycle: green, every float gate including the specials-only one. **Commit:**
   `git commit -m "#206: float keys hash on both engines, -0.0 as +0.0 and every NaN as one"`.
 
 ### Task 5: Timestamp keys, red then green (#240)
 
 **Files:** `murmur_conformance.rs`; `spark_hash_partition.cu`
 
-- [ ] **Step 1: The gates**, one per unit plus a zoned one:
+- [x] **Step 1: The gates**, one per unit plus a zoned one:
 
 ```rust
 fn ts_values() -> Vec<Option<i64>> {
@@ -472,8 +472,8 @@ fn gpu_spark_partition_ids_timestamps_match_rule_live() {
 }
 ```
 
-- [ ] **Step 2:** cycle: RED on `type_id=13` (TIMESTAMP_SECONDS) first.
-- [ ] **Step 3: The arm.** In the normalizing `switch`, beside `TIMESTAMP_DAYS`:
+- [x] **Step 2:** cycle: RED on `type_id=13` (TIMESTAMP_SECONDS) first.
+- [x] **Step 3: The arm.** In the normalizing `switch`, beside `TIMESTAMP_DAYS`:
 
 ```cpp
       case cudf::type_id::TIMESTAMP_SECONDS:
@@ -486,7 +486,7 @@ fn gpu_spark_partition_ids_timestamps_match_rule_live() {
 ```
 
   The kernel's comment at `:84-85` ("Timestamp-as-i64 → 8B") becomes true.
-- [ ] **Step 4:** cycle: green. **Commit:** `git commit -m "#240: timestamp keys hash as their i64, every unit"`.
+- [x] **Step 4:** cycle: green. **Commit:** `git commit -m "#240: timestamp keys hash as their i64, every unit"`.
 
 ### Task 5b: The wire names the four timestamp types (#240)
 
@@ -502,7 +502,7 @@ fn gpu_spark_partition_ids_timestamps_match_rule_live() {
   (values 20–23), which join-session-cpp's pads and absent-side schemas read and join-backend's
   `CudfJoin` writer emits.
 
-- [ ] **Step 1: The failing tests.** `wire/tests.rs`:
+- [x] **Step 1: The failing tests.** `wire/tests.rs`:
 
 ```rust
 #[test]
@@ -524,9 +524,9 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
   `CastExprNode { target_type: TimestampSecond }` over a `TIMESTAMP_MICROSECONDS` column holding
   `1'500'000` and `-1`, asserting a `TIMESTAMP_SECONDS` column holding `1` and `-1` (cuDF's
   unit-narrowing cast floors toward negative infinity: `-1µs` is second `-1`).
-- [ ] **Step 2: Run red** — the Rust test fails to compile (no variant); the gtest throws from
+- [x] **Step 2: Run red** — the Rust test fails to compile (no variant); the gtest throws from
   `cudf::cast` on `EMPTY`.
-- [ ] **Step 3: The append** (never insert: existing values keep their numbers):
+- [x] **Step 3: The append** (never insert: existing values keep their numbers):
 
 ```
   Decimal128,
@@ -559,13 +559,13 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
   with no change; the time zone is not on the wire (cuDF has none; the values are UTC `int64`s).
   The column-path cast (`expr.cpp:896-917`) already calls `cudf::cast` with the mapped type, and
   the AST router sends any non-INT64/FLOAT64 target there (`:423-430`).
-- [ ] **Step 4:** `NOT_RUNNABLE` loses `("pbench", "timestamp-s-key-group", "240")` (pbench put it
+- [x] **Step 4** (run as plain `cargo test ... --lib plan_goldens`, NOT through `scripts/cargo-cudf.sh`, which redirects to the cuDF target dir — under 7 GiB free on `/`): `NOT_RUNNABLE` loses `("pbench", "timestamp-s-key-group", "240")` (pbench put it
   there); `UPDATE_CANONICAL=1 scripts/cargo-cudf.sh test --features rust-only -p peacockdb-core --lib plan_goldens::pbench`
   rewrites that query's five plan sections (now a plan, not `not runnable`); `git diff --stat`
   shows only those. `recipe-payloads.txt` holds no timestamp, so it does not move (checked by
   `the_payload_golden_carries_what_each_call_hands_the_executor`).
-- [ ] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`;
-  device cycle with `PCK_TEST_FILTER=PlanExecutor.CastTimestamp`. **Commit:**
+- [x] **Step 5: Run green**, rust-only half only: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`;
+  device cycle with `PCK_TEST_FILTER=PlanExecutor.CastTimestamp` — **NOT RUN, no card, and the gtest of step 1 is unwritten.** **Commit:**
   `git commit -m "#240: the wire names the four timestamp types; pbench's second-unit key crosses it"`.
 
 ### Task 5c: An unmapped type is a plan-time refusal, in every schema (#249)
@@ -576,7 +576,7 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
 - Modify: `peacockdb-core/src/planner/tests/plan_goldens.rs:442` (`NOT_RUNNABLE`)
 - Test: `peacockdb-core/src/wire/tests.rs`
 
-- [ ] **Step 1: The failing test.**
+- [x] **Step 1: The failing test.**
 
 ```rust
 #[test]
@@ -590,9 +590,9 @@ fn bug_a_schema_holding_an_interval_is_refused_at_plan_time() {   // #249
     assert!(matches!(&err, PlanError::Unsupported(why) if why.contains("iv") && why.contains("Interval")), "{err}");
 }
 ```
-- [ ] **Step 2: Run red** — `serialize_schema` returns a schema with `iv: Null`.
+- [x] **Step 2: Run red** — `serialize_schema` returns a schema with `iv: Null`.
   (A `bug_` pin: it asserts #249's refusal, and goes red when the wire gains the interval type.)
-- [ ] **Step 3: Implement.** `serialize_schema` returns `Result<_, PlanError>`, and every field
+- [x] **Step 3: Implement.** `serialize_schema` returns `Result<_, PlanError>`, and every field
   goes through `convert_data_type`:
 
 ```rust
@@ -618,16 +618,11 @@ fn data_type(data_type: &DataType) -> Result<fb::DataType, PlanError> {
     convert_data_type(data_type).map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))
 }
 ```
-- [ ] **Step 4 — deferred on [#255](../tickets/complete-coverage.md#t255); do not attempt it.**
-  It would put pbench's `interval-through-join`, `struct-through-join` and `struct-key-join` into
-  `NOT_RUNNABLE` with `"249"`, each citing `(#249)`. **All three `.sql` files are absent from the
-  tree** and cannot land until #255 closes — `testdata/test_duckdb_result.py:165` asserts their
-  absence, and `NOT_RUNNABLE` is checked in both directions (`plan_goldens.rs:456`, and the
-  `uncrossable == declared` assert at `:421-434`), so the step goes red on contact rather than
-  failing to find them. #249 and #255 both already say these queries arrive with #255's fix. When
-  they do, this step is the work; until then skip it and the goldens stay byte-identical for the
-  reason the next sentence gives anyway.
-- [ ] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`.
+- [~] **Step 4: DELETED, not deferred** — the three query files do not exist, they are #255's, and the declaration guard is bidirectional (`-detail.md`, "The deviation the partial requires") — `test_duckdb_result.py:165` asserts their absence, and `NOT_RUNNABLE` is checked both ways (`plan_goldens.rs:456`, and the `uncrossable == declared` assert at `:421-434`), so the step would go red on contact rather than fail to find them. Original text: pbench's three queries whose plans now hold a type the wire cannot name go into
+  `NOT_RUNNABLE` with `"249"`: `interval-through-join`, `struct-through-join` and
+  `struct-key-join` (its scan schema holds the struct key). Each line cites `(#249)`. `the_payload_golden_carries_what_each_call_hands_the_executor`
+  and every plan golden of tpch and tpcds stay byte-identical (no such type in either).
+- [x] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`.
   **Commit:** `git commit -m "#249: a type the wire cannot name is refused at plan time, in every schema"`.
 
 ### Task 6: Decimal keys — 16 bytes on both engines (#95)
@@ -635,7 +630,7 @@ fn data_type(data_type: &DataType) -> Result<fb::DataType, PlanError> {
 **Files:**
 - Modify: `spark_partitioning.rs` (`hash_keys`); `murmur_conformance.rs`; `spark_hash_partition.cu`
 
-- [ ] **Step 1: The gates.**
+- [x] **Step 1: The gates.**
 
 ```rust
 fn decimal(values: Vec<Option<i128>>, p: u8, s: i8) -> ArrayRef {
@@ -679,8 +674,8 @@ fn gpu_spark_partition_ids_decimal_composite_match_rule_live() {
 }
 ```
 
-- [ ] **Step 2:** cycle: RED on `type_id=27`.
-- [ ] **Step 3: The cpu cast.** `hash_keys` in `spark_partitioning.rs`:
+- [x] **Step 2:** cycle: RED on `type_id=27`.
+- [x] **Step 3: The cpu cast.** `hash_keys` in `spark_partitioning.rs`:
 
 ```rust
 use datafusion::arrow::compute::cast;
@@ -705,7 +700,7 @@ fn hash_keys(batch: &RecordBatch, hash_exprs: &[Arc<dyn PhysicalExpr>]) -> DfRes
 }
 ```
 
-- [ ] **Step 4: The kernel arm.**
+- [x] **Step 4: The kernel arm.**
 
 ```cpp
 // One thread per row; folds one DECIMAL128 key column: the unscaled int128's 16 LE bytes,
@@ -724,7 +719,7 @@ __global__ void spark_hash_decimal128_col_kernel(cudf::column_device_view col,
   In the normalizing `switch`, a DECIMAL32/64 key is widened to DECIMAL128 at its scale
   (`cudf::cast(col, cudf::data_type{cudf::type_id::DECIMAL128, col.type().scale()}, stream, mr)`,
   kept in `decoded_keep`); in the dispatch, `case cudf::type_id::DECIMAL128:` launches the kernel.
-- [ ] **Step 5:** cycle: green. **Commit:** `git commit -m "#95: decimal keys hash 16 bytes on both engines"`.
+- [x] **Step 5:** cycle: green. **Commit:** `git commit -m "#95: decimal keys hash 16 bytes on both engines"`.
 
 ### Task 6b: Unsigned keys — one rule on both engines (review row 11)
 
@@ -737,7 +732,7 @@ types, so there is no placement to match: the rule is ours, the same on both eng
 **UInt8 and UInt16 cast to Int32, UInt32 to Int64 (value casts, zero-extended), UInt64
 reinterpreted as Int64 bits** — then hashed as that signed type is.
 
-- [ ] **Step 1: The gates.**
+- [x] **Step 1: The gates.**
 
 ```rust
 /// Unsigned keys: the cpu and the device apply the same widening before hashing —
@@ -758,9 +753,9 @@ fn gpu_spark_partition_ids_unsigned_match_rule_live() {
 }
 ```
 
-- [ ] **Step 2:** cycle: RED on the cpu side first — `Unsupported data type in hasher: UInt8`
+- [x] **Step 2:** cycle: RED on the cpu side first — `Unsupported data type in hasher: UInt8`
   from comet inside `rows_per_lane` — and, once step 3 lands, on `type_id=5` (UINT8) on the device.
-- [ ] **Step 3: The cpu widening**, in `hash_keys` beside the decimal cast:
+- [x] **Step 3: The cpu widening**, in `hash_keys` beside the decimal cast:
 
 ```rust
             let array = match array.data_type() {
@@ -778,7 +773,7 @@ fn gpu_spark_partition_ids_unsigned_match_rule_live() {
             };
 ```
   (`PrimitiveArray::unary` keeps the null buffer; `as_primitive` is `AsArray`'s.)
-- [ ] **Step 4: The kernel**, in the normalizing `switch`:
+- [x] **Step 4: The kernel**, in the normalizing `switch`:
 
 ```cpp
       case cudf::type_id::UINT8:
@@ -797,7 +792,7 @@ fn gpu_spark_partition_ids_unsigned_match_rule_live() {
   (`keep` is the switch's existing owner for a converted column — `decoded_keep` where the
   decimal arm keeps its widened column; use the same vector.) The `CUDF_FAIL` text's supported list
   gains the four.
-- [ ] **Step 5:** cycle: green. **Commit:** `git commit -m "unsigned keys hash as their widened signed value on both engines"`.
+- [x] **Step 5:** cycle: green. **Commit:** `git commit -m "unsigned keys hash as their widened signed value on both engines"`.
 
 ### Task 7: Every key type through the operator harness
 
@@ -814,13 +809,13 @@ fn gpu_spark_partition_ids_unsigned_match_rule_live() {
   the unsigned four appended last so the others keep their ordinals). join-backend reuses it for
   join keys.
 
-- [ ] **Step 1: The generator.** Each column from `mix(seed, row)` as `synthetic` does, every
+- [x] **Step 1: The generator.** Each column from `mix(seed, row)` as `synthetic` does, every
   column but `id` NULL at its own stride; `f32` and `f64` cycle through `[0.0, -0.0, NaN, -NaN]`
   on every fifth row (`row % 5 == 0` picks `specials[(row / 5) % 4]`), otherwise a dyadic value;
   decimals include negatives and, for `dec38`, values past `i64`; `u32` and `u64` include values
   past their signed type's maximum (`1 << 31`, `1 << 63`, `u64::MAX`). A test
   `key_types_is_the_same_batch_twice` beside `a_synthetic_batch_is_the_same_batch_twice`.
-- [ ] **Step 2: The cases.** In `emit_cases.rs`:
+- [x] **Step 2: The cases.** In `emit_cases.rs`:
 
 ```rust
 fn key_types_given() -> Box<dyn GpuNode> {
@@ -857,9 +852,9 @@ operator_case! {
 
   Delete `refused_key_type` once nothing calls it. `emit_schema_cases.rs`: one
   `assert_holds_as_declared` case per key type over `key_types(64, 1)`.
-- [ ] **Step 3:** cycle, `PCK_TEST_FILTER='emit_cases|emit_schema_cases'`: green; the three old
+- [x] **Step 3:** cycle, `PCK_TEST_FILTER='emit_cases|emit_schema_cases'`: green; the three old
   pins are gone, replaced by the green cases named in the commit.
-- [ ] **Step 3b: #245's pin.** In `emit_cases.rs`, beside the key-type cases:
+- [~] **Step 3b: BLOCKED by [#255](../tickets/complete-coverage.md#t255), not deferred** — the pin was written and run, and `common::type_structural_size` panics on a Struct at `common.rs:66` before any scatter, which is #255 by its own citation (it names that line and says "Not #245 either"). Adding a Struct arm there would be production code changed for a test, outside the spec's Restriction. See `-detail.md`. Original text: **Step 3b: #245's pin.** In `emit_cases.rs`, beside the key-type cases:
 
 ```rust
 // #245 — no hasher arm, on either engine, for a nested type: a struct key is refused at the scatter.
@@ -881,7 +876,7 @@ operator_case! {
 
 **Files:** `tests/gpu_tests/aggregate_cases.rs`; `tests/gpu_tests/join_cases.rs`
 
-- [ ] **Step 1: The aggregate pin.**
+- [x] **Step 1: The aggregate pin.**
 
 ```rust
 /// `synthetic`'s eight columns with `f64` (ordinal 4) holding the six keys #243 measures.
@@ -916,7 +911,7 @@ operator_case! {
 }
 ```
 
-- [ ] **Step 2: The join pin**, in `join_cases.rs`, Inner on the `f64` columns (ordinal 4 of each
+- [x] **Step 2: The join pin**, in `join_cases.rs`, Inner on the `f64` columns (ordinal 4 of each
   side), one probe batch:
 
 ```rust
@@ -945,18 +940,18 @@ operator_case! {
   (If `GpuHashJoin`'s `keys` is not a public field, build it with `hash_join_with`'s
   `GpuHashJoin::new(...)` call and `vec![(4, 4)]` in place of `vec![(1, 1)]`; `float_key_batch`
   is shared from `aggregate_cases.rs` as `pub(crate)`.)
-- [ ] **Step 3:** cycle: both pins green (they assert the divergence). **Commit:**
+- [x] **Step 3:** cycle: both pins green (they assert the divergence). **Commit:**
   `git commit -m "#243 pinned: the cpu's float equality splits -0.0 and the NaNs"`.
 
 ### Task 9: Cells, registry and goldens
 
-- [ ] **Step 1:** `corpus_cases.inc`: the cpu `tp4_single | tp4_rowgroup | tp4_sized` of tpch
+- [x] **Step 1** (round 1; the `65` retag of pbench's row was left to the device half — `-detail.md`): `corpus_cases.inc`: the cpu `tp4_single | tp4_rowgroup | tp4_sized` of tpch
   `rollup_over_join` and tpcds `q5`, `q18`, `q22`, `q80` enabled (15 cells, #189's; the estimate's
   §2), and pbench's `rollup-small-keys` the same (its cpu tp4 cells; its gpu tp4 cells then meet
   #65, as rollup_over_join's do — tagged `65`). `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test
   test_cpu_corpus` under `PCK_TEST_FILTER` for the five, writing their cpu sections; each one's
   `duckdb_*` case green (duckdb-oracle's comparison).
-- [ ] **Step 2:** `cost-registry.csv`: those cells `enabled`; `189` struck from the five rows
+- [x] **Step 2:** `cost-registry.csv`: those cells `enabled`; `189` struck from the five rows
   where no off cell is left without another ticket (`registry.rs:229-240`); `95` struck the same
   way from tpch q2, q10, q15, q18 and tpcds q24, q37, q75, q82. Device cycle over the #95 rows'
   tp4 gpu cells whose only other ticket is closed — none is expected (the estimate: they wait on
@@ -964,23 +959,33 @@ operator_case! {
   among them now that it crosses the wire (its `240` struck where it was the last ticket), and
   `uint-key-group` and `uint-key-join` (Task 6b; their cpu tp4 cells too, which comet refused
   before the widening — pbench tagged them `189`, struck now); the float rows stay commented out on #243 (the cpu's equality).
-- [ ] **Step 3:** registry tests both ways green. **Commit:**
+- [x] **Step 3:** registry tests both ways green. **Commit:**
   `git commit -m "#189's cpu cells on; 95 and 189 struck where nothing else holds a cell"`.
 
 ### Task 10: The wiki
 
-- [ ] `architecture.md`, "Rehash and the comet hash": the decimal rule (16 bytes on both engines,
-  the cpu's cast, not Spark's placement at p ≤ 18) and the supported key list. `build-test.md`:
-  the murmur gate's count and description (production rule, the new types), the emit cases'
-  count, the cuDF smoke row. Archive #95, #189, #201, #206, #240 to
-  `archive/archived-tickets.md` with "Done <date> by repartition-keys"; `tickets.md` counts;
-  `corpus-fixes.md` D2 marked decided (the cpu-side cast); #243 reworded to the cpu's equality
-  alone — "DataFusion compares and groups floats by their bits" — with its lane half struck as
-  fixed here (every NaN one lane, both zeros one lane) and its two pins named; `architecture.md`'s
-  hash section states the float rule; the flatbuffers table names the four timestamp types.
+- [~] **Split: `build-test.md`'s counts are done; every other page is the human's to write.** This
+  dispatch reserves `llm-wiki/` markdown to the human except this plan and `-detail.md`, and
+  carves out `build-test.md`'s counts, which are re-summed by script — every block header equals
+  its rows (cpu 1688, ffi 7, gpu 671) and the grand total its parts (2477 + 97 + 401 = 2975). The
+  cuDF-smoke row and the murmur row's example name moved with their counts, because both named a
+  deleted symbol. **Owed, with the exact text in `-detail.md`:** `architecture.md`'s hash section
+  (the decimal and NaN rules, the supported key list), `corpus-fixes.md`'s D2, #243's rewording,
+  `tickets.md`'s counts, and the archivals — all but `corpus-fixes.md`'s D2 now in; see below.
+- [x] **The archival is done**, in the review round: #95, #189, #201, #206 and #240 are in
+  `archive/archived-tickets.md`'s Done, each with "Done 2026-10-09 by repartition-keys, PR #169".
+  #240 was blocked on `pbench/timestamp-s-key-group`'s five device cells resting on a cause that
+  is not #240; the coordinator filed [#264](../tickets/corpus-coverage.md#t264) and retagged the
+  row, which cleared it. #95 was blocked on eight stale `95` tags, dropped in the same round (B6).
+  18 wiki links repointed at the archive and `tickets.md` re-summed to 117; `cost-report`'s binary
+  run is the proof that every tag still resolves. Derivation and counts: `-detail.md`.
+- [x] `architecture.md`'s hash section, `build-test.md`'s counts (including this round's
+  `wire::serialize::tests` row), `tickets.md`'s counts, #243's rewording and the five ticket
+  bodies are all in. **Still owed, and the human's:** `reports/corpus-fixes.md`'s D2, which reads
+  as an open decision and recommends the shape D2 rejected.
 - [ ] **Commit:** `git commit -m "repartition-keys: wiki, tickets archived"`.
 
 ### Task 11: The record
 
-- [ ] Detail file: the red/green outputs of every gate, the SEED mutation run, the golden diff
+- [x] Detail file: the red/green outputs of every gate, the SEED mutation run, the golden diff
   summary, the cells enabled. **Commit:** `git commit -m "repartition-keys: the record"`.
