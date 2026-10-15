@@ -299,8 +299,8 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
 
 The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and
 391 tpcds runs, dearer in none, and equal in the rest; the median ratio is 1.00 for tpch and
-0.52 for tpcds. The final ratio is within the published report's 1.4 for 18 of 20 tpch rows and
-70 of 79 tpcds rows. Over the 620 runs dynamic filters run 740 probes on the plan as written,
+0.52 for tpcds. The final ratio is within the published report's 1.4 for 35 of 41 tpch rows (18
+of the 20 numbered queries, 17 of the 21 named) and 70 of 79 tpcds rows. Over the 620 runs dynamic filters run 740 probes on the plan as written,
 narrowing 735 scans, and 165 on the order DPhyp made, narrowing 55. DPhyp is called 3,133 times,
 766 of the calls reorder and 10 stop at the budget, all tpcds q64's; orientation flips 556
 joins, and 692 replans run, probes' included, 114 more refused. Bytes do not see the prototype's

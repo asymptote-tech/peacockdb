@@ -195,10 +195,10 @@ the build was paid for once, where it was made.
 <p class="legend"><em>Engine .cost.txt</em> is the engine's own CPU run's figure
 (<code>&lt;mode&gt;-mini.cost.txt</code>, Arrow bytes) at the mode named. <em>DuckDB</em> is the
 <code>duckdb_cost=</code> of <code>&lt;q&gt;.duckdb_cost.txt</code>, bytes materialized at pipeline
-breakers; the named tpch queries have none. <em>Final ratio (projected)</em> = min over modes of
-the engine's figure × that mode's ratio / DuckDB's: the engine's bytes as the optimizer is projected
-to change them, not a measured engine cost — directional only, as on the published report. The row
-is green at or below {green}, red above. <em>Rules fired</em>: each rule with the modes where it
+breakers. <em>Final ratio (projected)</em> = min over modes of the engine's figure × that mode's
+ratio / DuckDB's: the engine's bytes as the optimizer is projected to change them, not a measured
+engine cost — directional only, as on the published report. The row is green at or below {green},
+red above. <em>Rules fired</em>: each rule with the modes where it
 changed the plan out of the modes run — dynamic filters that narrowed a scan, DPhyp trees cheaper
 than the plan's order, flips, replans; hover for every count per mode, calls and probes included.</p>
 """

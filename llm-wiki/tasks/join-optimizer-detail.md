@@ -52,7 +52,7 @@ fixes #236 and #237):
 - Task 12: four named tpch queries with a non-inner join are registered. Non-inner joins enter
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
-  at every mode (Task 12 below). Tasks 14–18 are not started.
+  at every mode (Task 12 below). Tasks 15–18 are not started.
 - #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
   join that reads a share ran again at every mode into the committed outputs; no other query's
   output can move (#239 below).

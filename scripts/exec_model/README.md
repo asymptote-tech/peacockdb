@@ -163,9 +163,8 @@ Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode
   function, the optimized cost's probe-plan and stopped-run parts, and how often each rule fired;
 - `cost_report.html` — one page from every `.costs.txt` there, so a filtered run still renders
   the whole corpus. A row per query: per mode non-optimized | optimized | ratio; the engine's own
-  `-mini.cost.txt` figure at the mode the final ratio takes; DuckDB's `duckdb_cost=` (the named
-  tpch queries have none); the final ratio, projected; the rules that changed the plan, every
-  count in the hover. `cost_report.py` renders it again from the files alone; without `--out` it
+  `-mini.cost.txt` figure at the mode the final ratio takes; DuckDB's `duckdb_cost=`; the final
+  ratio, projected; the rules that changed the plan, every count in the hover. `cost_report.py` renders it again from the files alone; without `--out` it
   re-renders the committed page here.
 
 One `== <query>` section each, in the engine's registry order (its `-mini.cpu.txt`); a query the
