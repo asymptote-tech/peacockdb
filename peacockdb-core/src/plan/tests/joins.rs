@@ -48,7 +48,7 @@ fn a_join_filter_column_mapped_to_the_wrong_side_is_caught_at_plan_time() {
     let join = GpuNestedLoopJoin::new(
         build,
         probe,
-        NestedLoopJoinType::Inner,
+        datafusion::common::JoinType::Inner,
         filter,
         mapping,
         None,
@@ -155,20 +155,27 @@ fn an_equi_join_whose_build_side_is_many_batches_names_the_node_that_fixes_it() 
     );
 }
 
-#[test]
-fn a_join_that_cannot_stream_its_probe_over_many_batches_names_the_node_that_fixes_it() {
-    // A filtered semi join is one legacy call over the whole probe side, so the planner
-    // owes it a single batch there — the capability matrix is what says so.
-    let join = joining(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
-        datafusion::common::JoinType::LeftSemi,
-        Some(Expr::binary(
+const EVERY_JOIN_TYPE: [datafusion::common::JoinType; 9] = [
+    datafusion::common::JoinType::Inner,
+    datafusion::common::JoinType::Left,
+    datafusion::common::JoinType::Right,
+    datafusion::common::JoinType::Full,
+    datafusion::common::JoinType::LeftSemi,
+    datafusion::common::JoinType::RightSemi,
+    datafusion::common::JoinType::LeftAnti,
+    datafusion::common::JoinType::RightAnti,
+    datafusion::common::JoinType::LeftMark,
+];
+
+/// `k < fk`, reading one column of each side.
+fn both_sides_filter() -> (Expr, Vec<JoinFilterColumn>) {
+    (
+        Expr::binary(
             Expr::column(0, "k"),
             BinaryOp::Lt,
             Expr::column(1, "fk"),
             DataType::Boolean,
-        )),
+        ),
         vec![
             JoinFilterColumn {
                 side: JoinSide::Build,
@@ -179,37 +186,28 @@ fn a_join_that_cannot_stream_its_probe_over_many_batches_names_the_node_that_fix
                 index: 0,
             },
         ],
-    );
-    invalid(
-        join.validate_schemas_and_partitions(),
-        "cannot stream its probe",
-    );
+    )
 }
 
 #[test]
-fn a_join_shape_the_capability_matrix_refuses_is_refused_at_validation() {
-    let join = joining(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::SingleBatch), &["fk"]),
-        datafusion::common::JoinType::Left,
-        Some(Expr::binary(
-            Expr::column(0, "k"),
-            BinaryOp::Lt,
-            Expr::column(1, "fk"),
-            DataType::Boolean,
-        )),
-        vec![
-            JoinFilterColumn {
-                side: JoinSide::Build,
-                index: 0,
-            },
-            JoinFilterColumn {
-                side: JoinSide::Probe,
-                index: 0,
-            },
-        ],
-    );
-    unsupported(join.validate_schemas_and_partitions(), "#153");
+fn a_filtered_equi_join_of_every_type_streams_its_probe() {
+    // The session matches a build row across probe calls, residual or not, so no type
+    // needs its probe side whole (#153, #159).
+    for join_type in EVERY_JOIN_TYPE {
+        let (filter, filter_columns) = both_sides_filter();
+        let join = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            Some(filter),
+            filter_columns,
+        );
+        assert_eq!(
+            join.validate_schemas_and_partitions(),
+            Ok(()),
+            "{join_type:?}"
+        );
+    }
 }
 
 #[test]
@@ -235,6 +233,93 @@ fn a_join_filter_reference_past_its_map_is_caught_at_plan_time() {
     );
 }
 
+/// `k > 1` or `fk > 1`: a conjunct reading the build alone or the probe alone, its column at
+/// the ordinal `both_sides_filter` maps it to.
+fn one_sided(side: JoinSide) -> Expr {
+    let (index, name) = match side {
+        JoinSide::Build => (0, "k"),
+        JoinSide::Probe => (1, "fk"),
+    };
+    Expr::binary(
+        Expr::column(index, name),
+        BinaryOp::Gt,
+        Expr::Literal(datafusion::common::ScalarValue::Int64(Some(1))),
+        DataType::Boolean,
+    )
+}
+
+fn and(left: Expr, right: Expr) -> Expr {
+    Expr::binary(left, BinaryOp::And, right, DataType::Boolean)
+}
+
+/// The semi family takes its keys distinct, a probe batch's or the build's, and the four types
+/// that pair rows never do. A conjunct reading both sides sends a semi join to the mixed or
+/// pairs path instead, which takes nothing distinct (design §3.1, §3.4).
+#[test]
+fn a_semi_join_takes_its_keys_distinct_unless_a_conjunct_reads_both_sides() {
+    use datafusion::common::JoinType::*;
+    for join_type in EVERY_JOIN_TYPE {
+        let plain = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            None,
+            Vec::new(),
+        );
+        let semi = matches!(
+            join_type,
+            LeftSemi | LeftAnti | LeftMark | RightSemi | RightAnti
+        );
+        assert_eq!(
+            plain.distinct_key_width(),
+            if semi { 8 } else { 0 },
+            "{join_type:?}: one Int64 key"
+        );
+        let (filter, filter_columns) = both_sides_filter();
+        let crossing = joining(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            Some(and(one_sided(JoinSide::Build), filter)),
+            filter_columns,
+        );
+        assert_eq!(
+            crossing.distinct_key_width(),
+            0,
+            "{join_type:?} with k < fk"
+        );
+    }
+}
+
+/// A conjunct reading one side filters that side's rows, which leaves the keys to the row-wise
+/// matchers; a constant conjunct is evaluated with the pairs, as the session splits it.
+#[test]
+fn a_one_sided_conjunct_leaves_a_semi_join_its_distinct_keys() {
+    let (_, filter_columns) = both_sides_filter();
+    let constant = Expr::Literal(datafusion::common::ScalarValue::Boolean(Some(true)));
+    for join_type in [
+        datafusion::common::JoinType::RightSemi,
+        datafusion::common::JoinType::LeftAnti,
+    ] {
+        for (filter, width) in [
+            (
+                and(one_sided(JoinSide::Build), one_sided(JoinSide::Probe)),
+                8,
+            ),
+            (and(one_sided(JoinSide::Probe), constant.clone()), 0),
+        ] {
+            let join = joining(
+                Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+                Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+                join_type,
+                Some(filter),
+                filter_columns.clone(),
+            );
+            assert_eq!(join.distinct_key_width(), width, "{join_type:?}");
+        }
+    }
+}
+
 #[test]
 fn a_cross_join_over_several_lanes_names_the_node_that_fixes_it() {
     let join = GpuCrossJoin::new(
@@ -250,36 +335,26 @@ fn a_cross_join_over_several_lanes_names_the_node_that_fixes_it() {
 }
 
 #[test]
-fn a_left_nested_loop_join_streaming_its_probe_names_the_node_that_fixes_it() {
-    // Its finish pass accumulates keys and a predicate join has none, so the probe side
-    // has to be whole before the join runs.
-    let join = GpuNestedLoopJoin::new(
-        Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
-        Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
-        NestedLoopJoinType::Left,
-        Expr::binary(
-            Expr::column(0, "k"),
-            BinaryOp::Lt,
-            Expr::column(1, "fk"),
-            DataType::Boolean,
-        ),
-        vec![
-            JoinFilterColumn {
-                side: JoinSide::Build,
-                index: 0,
-            },
-            JoinFilterColumn {
-                side: JoinSide::Probe,
-                index: 0,
-            },
-        ],
-        None,
-        columns(&["k", "fk"]),
-    );
-    invalid(
-        join.validate_schemas_and_partitions(),
-        "GpuCoalesceAllBatches",
-    );
+fn a_nested_loop_join_of_every_type_streams_its_probe() {
+    // The session finishes a nested loop as it does an equi-join, so the Left form no longer
+    // needs its probe whole and the other seven are no longer refused (#160).
+    for join_type in EVERY_JOIN_TYPE {
+        let (filter, filter_columns) = both_sides_filter();
+        let join = GpuNestedLoopJoin::new(
+            Given::input(one_lane(BatchLayout::SingleBatch), &["k"]),
+            Given::input(one_lane(BatchLayout::MultipleBatches), &["fk"]),
+            join_type,
+            filter,
+            filter_columns,
+            None,
+            columns(&["k", "fk"]),
+        );
+        assert_eq!(
+            join.validate_schemas_and_partitions(),
+            Ok(()),
+            "{join_type:?}"
+        );
+    }
 }
 
 #[test]
@@ -510,5 +585,31 @@ fn a_semi_joins_projection_is_bounded_by_the_side_it_emits() {
     invalid(
         join.validate_schemas_and_partitions(),
         "projected column @2 is past the 2 a LeftSemi join emits",
+    );
+}
+
+#[test]
+fn every_join_type_says_which_side_may_drop_a_null_key() {
+    // The preserved side owes its unmatched rows, padded or marked, so a NULL key there is
+    // a row the answer needs; on the other side it can match nothing (#137). Nine types,
+    // spelled out rather than derived, because the asymmetry is the whole rule.
+    use crate::plan::null_key_droppable;
+    use datafusion::common::JoinType::*;
+    assert_eq!(
+        [
+            Inner, LeftSemi, RightSemi, Left, LeftAnti, LeftMark, Right, RightAnti, Full
+        ]
+        .map(null_key_droppable),
+        [
+            (true, true),
+            (true, true),
+            (true, true),
+            (false, true),
+            (false, true),
+            (false, true),
+            (true, false),
+            (true, false),
+            (false, false)
+        ]
     );
 }

@@ -13,7 +13,6 @@ use crate::plan::PlanAgg;
 use crate::plan::PlanError;
 use crate::plan::{BinaryOp, Expr};
 use crate::plan::{GpuNode, RowInterval};
-use crate::plan::{NestedLoopJoinType, capability};
 use crate::plan::{NodeRef, as_node_ref};
 
 /// Plain DataFusion planning at tp1 over the committed minimal dataset — the engine
@@ -68,6 +67,7 @@ async fn refused(sql: &str) -> PlanError {
 fn name_of(node: &dyn GpuNode) -> &'static str {
     match as_node_ref(node) {
         NodeRef::LoadParquet(_) => "LoadParquet",
+        NodeRef::Empty(_) => "Empty",
         NodeRef::Filter(_) => "Filter",
         NodeRef::Project(_) => "Project",
         NodeRef::Sort(_) => "Sort",
@@ -416,7 +416,7 @@ async fn a_non_equi_predicate_becomes_a_nested_loop_join() {
     let NodeRef::NestedLoopJoin(join) = as_node_ref(descend(tree.as_ref(), 2)) else {
         panic!("expected a nested-loop join");
     };
-    assert_eq!(join.join_type, NestedLoopJoinType::Inner);
+    assert_eq!(join.join_type, datafusion::common::JoinType::Inner);
     assert!(matches!(join.filter, Expr::Binary { .. }));
     validate_all(tree.as_ref());
 }
@@ -517,7 +517,6 @@ async fn an_equi_join_is_co_partitioned_by_a_scatter_on_each_side() {
     // Lane p of one side holds exactly the rows that can match lane p of the other.
     assert_eq!(join.keys.len(), 1);
     assert!(!join.null_equals_null);
-    assert!(join.capability().unwrap().probe_streams);
     validate_all(tree.as_ref());
 }
 
@@ -539,17 +538,35 @@ async fn a_broadcast_shaped_join_runs_in_one_lane_until_140() {
 }
 
 #[tokio::test]
-async fn an_outer_join_with_a_residual_filter_is_refused() {
-    // Not a limitation of the engine: the shipping executor applies the filter after
-    // the outer gather, so a padded row's NULLs drop it (#153).
-    let err = capability(datafusion::common::JoinType::Left, true).unwrap_err();
+async fn an_outer_join_with_a_residual_filter_streams_its_probe() {
+    // The residual reads both sides, so it stays on the join (#153); the probe streams
+    // under it as under every join.
+    let tree = translated_at_tp4(
+        "SELECT c.c_name, s.s_name FROM customer c LEFT JOIN supplier s \
+         ON c.c_nationkey = s.s_nationkey AND s.s_acctbal > c.c_acctbal",
+        0,
+    )
+    .await;
+    let join = find(tree.as_ref(), &|node| {
+        matches!(as_node_ref(node), NodeRef::Join(_))
+    })
+    .unwrap_or_else(|| panic!("no join in {}", shape(tree.as_ref())));
+    let NodeRef::Join(node) = as_node_ref(join) else {
+        unreachable!()
+    };
     assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#153")),
-        "{err}"
+        node.filter.is_some(),
+        "the residual was pushed below the join"
     );
-    // The build-side semi family keeps its finish pass and gives up streaming instead.
-    let filtered_semi = capability(datafusion::common::JoinType::LeftSemi, true).unwrap();
-    assert!(!filtered_semi.probe_streams && filtered_semi.needs_finish);
+    assert!(
+        !matches!(
+            as_node_ref(join.children()[1]),
+            NodeRef::CoalesceAllBatches(_)
+        ),
+        "{}",
+        shape(tree.as_ref())
+    );
+    validate_all(tree.as_ref());
 }
 
 #[tokio::test]
@@ -714,4 +731,284 @@ async fn a_window_function_is_refused_at_plan_time() {
         matches!(&err, PlanError::Unsupported(what) if what.contains("#143")),
         "{err}"
     );
+}
+
+/// A nested loop with no predicate over two scans, at whatever join type. Hand-built: no
+/// sql over this dataset reaches the shape for anything but Inner, and the point of the
+/// rule is what the other eight do.
+async fn predicate_free_nested_loop(
+    join_type: datafusion::common::JoinType,
+) -> Arc<dyn ExecutionPlan> {
+    use datafusion::physical_plan::joins::NestedLoopJoinExec;
+    let build = plan_at("SELECT r_regionkey FROM region", 4).await;
+    let probe = plan_at("SELECT c_nationkey FROM customer", 4).await;
+    Arc::new(
+        NestedLoopJoinExec::try_new(build, probe, None, &join_type, None)
+            .expect("a predicate-free nested loop"),
+    )
+}
+
+#[tokio::test]
+async fn a_predicate_free_left_nested_loop_is_not_a_cross_join() {
+    // Only Inner is a cross join by another name. A Left owes its unmatched build rows
+    // padded, which a cross join never emits — so the predicate becomes `true` and the node
+    // stays a nested loop. tpcds q9 pairs one-row aggregates this way, fifteen times.
+    use datafusion::common::JoinType;
+    use datafusion::common::ScalarValue;
+    let tree = translate_at_tp4(&predicate_free_nested_loop(JoinType::Left).await, 0);
+    let NodeRef::NestedLoopJoin(join) = as_node_ref(descend(tree.as_ref(), 1)) else {
+        panic!("expected a nested-loop join: {}", shape(tree.as_ref()));
+    };
+    assert_eq!(join.join_type, JoinType::Left);
+    assert_eq!(join.filter, Expr::Literal(ScalarValue::Boolean(Some(true))));
+    assert!(join.filter_columns.is_empty(), "{:?}", join.filter_columns);
+    validate_all(tree.as_ref());
+}
+
+#[tokio::test]
+async fn a_predicate_free_inner_nested_loop_merges_its_probe() {
+    // A cross join reads its probe as one stream, so the lanes are merged here rather than
+    // left for a node above to discover (design §4.1); today's arm does not merge.
+    use datafusion::common::JoinType;
+    let tree = translate_at_tp4(&predicate_free_nested_loop(JoinType::Inner).await, 0);
+    assert_eq!(
+        shape(tree.as_ref()),
+        "Unload(CrossJoin(CoalesceAllBatches(MergePartitions(LoadParquet)), MergePartitions(LoadParquet)))",
+        "{}",
+        shape(tree.as_ref())
+    );
+    validate_all(tree.as_ref());
+}
+
+/// pbench's `outer-on-true-empty`, `tiny LEFT JOIN empty ON true`, as DataFusion swaps it: a
+/// predicate-free Right nested loop whose build side has no row. The empty side is `tiny`
+/// filtered by what no footer statistic prunes, since a scan whose row groups all prune is
+/// refused (#282). DuckDB answers every `tiny` row, padded: eight.
+#[tokio::test]
+async fn a_predicate_free_outer_nested_loop_pads_its_preserved_side() {
+    use datafusion::arrow::array::{Array, AsArray};
+    use datafusion::arrow::datatypes::Int32Type;
+    use datafusion::common::JoinType;
+    use datafusion::physical_plan::joins::NestedLoopJoinExec;
+    let data = crate::test_support::data_dir_for("pbench", "1");
+    let ctx = crate::register_tables_for(crate::build_session_state(4), &data)
+        .await
+        .expect("register pbench");
+    let side = async |sql: &str| {
+        ctx.sql(sql)
+            .await
+            .expect("plan the side")
+            .create_physical_plan()
+            .await
+            .expect("physical plan")
+    };
+    let build = side("SELECT t_id AS e_id FROM tiny WHERE t_id + 1 < 0").await;
+    let probe = side("SELECT t_id FROM tiny").await;
+    let plan: Arc<dyn ExecutionPlan> = Arc::new(
+        NestedLoopJoinExec::try_new(build, probe, None, &JoinType::Right, None)
+            .expect("a predicate-free nested loop"),
+    );
+    let (tree, _) = crate::planner::plan(
+        &plan,
+        crate::tests::join_fixture::knobs(crate::planner::BatchSizing::OneBatchPerRowGroup),
+    )
+    .expect("a predicate-free Right nested loop plans (#160)");
+    let report =
+        crate::executor::run::<crate::executor::CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .expect("it runs");
+    let (mut padded, mut kept) = (0, Vec::new());
+    for batch in &report.batches {
+        let batch = batch.record_batch();
+        padded += batch.column(0).null_count();
+        kept.extend(batch.column(1).as_primitive::<Int32Type>().iter().flatten());
+    }
+    kept.sort();
+    assert_eq!(kept, (0..8).collect::<Vec<i32>>(), "every tiny row, once");
+    assert_eq!(padded, 8, "each of them padded");
+}
+
+// #63 — a table of no columns reads as no rows on a device, so where DataFusion plans rows and
+// no column the plan declares `__rowmarker__` instead, and a join above drops it again.
+
+/// Every node, parents before children.
+fn every(root: &dyn GpuNode) -> Vec<&dyn GpuNode> {
+    let mut nodes = vec![root];
+    for child in root.children() {
+        nodes.extend(every(child));
+    }
+    nodes
+}
+
+fn declares_no_column(node: &dyn GpuNode) -> bool {
+    node.kind()
+        .schema()
+        .is_some_and(|schema| schema.fields.fields().is_empty())
+}
+
+fn declares_the_rowmarker(node: &dyn GpuNode) -> bool {
+    node.kind().schema() == Some(&crate::plan::Schema::rowmarker())
+}
+
+fn field_names(node: &dyn GpuNode) -> Vec<String> {
+    let schema = node.kind().schema().expect("not a sink");
+    schema
+        .fields
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_projection_of_no_column_declares_the_rowmarker() {
+    // `count(*)` over a join reads rows and no column, so DataFusion projects the join down
+    // to nothing — tpcds q88's shape, eight times over.
+    use datafusion::common::ScalarValue;
+    let tree = translated_at_tp4(
+        "SELECT count(*) FROM customer, nation WHERE c_nationkey = n_nationkey",
+        0,
+    )
+    .await;
+    let nodes = every(tree.as_ref());
+    assert!(
+        !nodes.iter().any(|node| declares_no_column(*node)),
+        "{}",
+        shape(tree.as_ref())
+    );
+    let marker = nodes
+        .iter()
+        .find_map(|node| match as_node_ref(*node) {
+            NodeRef::Project(project) if declares_the_rowmarker(*node) => Some(project),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no project declares the marker: {}", shape(tree.as_ref())));
+    assert_eq!(marker.exprs.len(), 1);
+    assert_eq!(marker.exprs[0].name, crate::plan::ROWMARKER);
+    assert_eq!(
+        marker.exprs[0].expr,
+        Expr::Literal(ScalarValue::Int8(Some(0)))
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_scan_of_no_column_declares_the_rowmarker_and_the_cross_join_drops_it() {
+    // tpch nested-limits' and pbench cross-projection's shape: region contributes rows and
+    // nothing else, and a project cannot go below a scan.
+    let tree = translated("SELECT p_partkey FROM part, region").await;
+    let nodes = every(tree.as_ref());
+    let scan = nodes
+        .iter()
+        .find_map(|node| match as_node_ref(*node) {
+            NodeRef::LoadParquet(load) if load.table == "region" => Some(*node),
+            _ => None,
+        })
+        .expect("a scan of region");
+    assert!(
+        declares_the_rowmarker(scan),
+        "the scan declares {:?}",
+        field_names(scan)
+    );
+    let cross = nodes
+        .iter()
+        .find(|node| matches!(as_node_ref(**node), NodeRef::CrossJoin(_)))
+        .expect("a cross join");
+    let NodeRef::CrossJoin(join) = as_node_ref(*cross) else {
+        unreachable!("found as a cross join")
+    };
+    // `[__rowmarker__, p_partkey]` crossed, and only the key kept.
+    assert_eq!(join.projection, Some(vec![1]));
+    assert_eq!(field_names(*cross), vec!["p_partkey"]);
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_left_nested_loop_over_a_side_of_no_column_drops_the_rowmarker() {
+    // tpcds q9's: a scalar subquery over `FROM reason WHERE r_reason_sk = 1` reads no column
+    // of the outer side, so the predicate-free Left join's build is rows alone.
+    let tree = translated(
+        "SELECT (SELECT count(*) FROM nation WHERE n_regionkey = 1) AS a \
+         FROM region WHERE r_regionkey = 1",
+    )
+    .await;
+    let nodes = every(tree.as_ref());
+    assert!(
+        !nodes.iter().any(|node| declares_no_column(*node)),
+        "{}",
+        shape(tree.as_ref())
+    );
+    let join = nodes
+        .iter()
+        .find(|node| matches!(as_node_ref(**node), NodeRef::NestedLoopJoin(_)))
+        .unwrap_or_else(|| panic!("a nested loop: {}", shape(tree.as_ref())));
+    assert!(
+        declares_the_rowmarker(join.children()[0]),
+        "the build declares {:?}",
+        field_names(join.children()[0])
+    );
+    let NodeRef::NestedLoopJoin(nested) = as_node_ref(*join) else {
+        unreachable!("found as a nested loop")
+    };
+    // `[__rowmarker__, a]`, the marker dropped.
+    assert_eq!(nested.projection, Some(vec![1]));
+    assert!(
+        !field_names(*join).contains(&crate::plan::ROWMARKER.to_string()),
+        "the join keeps the marker: {:?}",
+        field_names(*join)
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn a_cross_join_of_two_sides_of_no_column_keeps_one_rowmarker() {
+    // No sql over this dataset keeps the shape — DataFusion answers such a count from
+    // statistics — so the two sides are projected to nothing by hand.
+    use datafusion::physical_plan::joins::CrossJoinExec;
+    use datafusion::physical_plan::projection::ProjectionExec;
+    let nothing = |plan: Arc<dyn ExecutionPlan>| -> Arc<dyn ExecutionPlan> {
+        Arc::new(ProjectionExec::try_new(vec![], plan).expect("a projection of no column"))
+    };
+    let build = nothing(plan("SELECT r_regionkey FROM region").await);
+    let probe = nothing(plan("SELECT n_nationkey FROM nation").await);
+    let cross: Arc<dyn ExecutionPlan> = Arc::new(CrossJoinExec::new(build, probe));
+    let tree = Translator::new(1, Batching::Off)
+        .translate(&cross)
+        .expect("translate the plan");
+    let NodeRef::CrossJoin(join) = as_node_ref(descend(tree.as_ref(), 1)) else {
+        panic!("expected a cross join: {}", shape(tree.as_ref()));
+    };
+    assert_eq!(join.projection, Some(vec![0]));
+    assert!(declares_the_rowmarker(descend(tree.as_ref(), 1)));
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+// A relation DataFusion proved empty (review row 8). `PropagateEmptyRelation` keeps an outer
+// join over one and folds every other operator above it away, so those are the two shapes.
+
+#[tokio::test]
+async fn an_empty_relation_plans_as_a_one_lane_leaf_under_the_join_that_kept_it() {
+    // pbench's `empty-side-left-join` over this dataset: DataFusion swaps the Left join into
+    // a Right one whose build side is the `EmptyExec`.
+    let tree = translated_at_tp4(
+        "SELECT n.n_name, r.r_name FROM nation n \
+         LEFT JOIN (SELECT * FROM region WHERE false) r ON n.n_regionkey = r.r_regionkey",
+        0,
+    )
+    .await;
+    let text = crate::plan_text::render_plan(tree.as_ref());
+    assert!(
+        text.contains("GpuEmpty: lanes=1, batches=single, schema=[r_regionkey:Int32, r_name:Utf8]"),
+        "{text}"
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
+}
+
+#[tokio::test]
+async fn an_empty_relation_alone_is_the_whole_plan_under_its_unload() {
+    let tree = translated("SELECT n_name FROM nation WHERE false").await;
+    assert_eq!(
+        crate::plan_text::render_plan(tree.as_ref()),
+        "GpuUnload\n  GpuEmpty: lanes=1, batches=single, schema=[n_name:Utf8]\n"
+    );
+    crate::plan::validate(tree.as_ref()).expect("the tree validates");
 }

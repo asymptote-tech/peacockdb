@@ -28,6 +28,9 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
             if scan.limit() > 0 {
                 field("limit", scan.limit().to_string());
             }
+            if scan.rows_only() {
+                field("rows_only", "true".to_string());
+            }
         }
         fb::PlanNodeKind::CudfFilter => {
             let filter = node.node_as_cudf_filter().expect("a filter");
@@ -106,10 +109,12 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                 field("mergeable_agg_state", "true".to_string());
             }
         }
-        fb::PlanNodeKind::CudfHashJoin => {
-            let join = node.node_as_cudf_hash_join().expect("a hash join");
+        // Every field the session reads, the two schemas included: they are what an absent
+        // side and every pad are typed from, so a wrong pad type shows here and nowhere else.
+        fb::PlanNodeKind::CudfJoin => {
+            let join = node.node_as_cudf_join().expect("a join");
             field("join_type", format!("{:?}", join.join_type()));
-            if let Some(keys) = join.keys() {
+            if let Some(keys) = join.keys().filter(|keys| !keys.is_empty()) {
                 let pairs: Vec<String> = keys
                     .iter()
                     .map(|key| {
@@ -132,21 +137,20 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                     .collect();
                 field("filter_columns", format!("[{}]", mapped.join(", ")));
             }
-            if let Some(projection) = join.projection() {
-                field("projection", ordinals(projection.iter()));
-            }
             if join.null_equals_null() {
                 field("null_equals_null", "true".to_string());
             }
-        }
-        fb::PlanNodeKind::CudfNestedLoopJoin => {
-            let join = node.node_as_cudf_nested_loop_join().expect("a nlj");
-            field("join_type", format!("{:?}", join.join_type()));
-            if let Some(filter) = join.filter() {
-                field("filter", expr_text(&filter));
+            if let Some(schema) = join.build_schema() {
+                field("build_schema", schema_text(&schema));
+            }
+            if let Some(schema) = join.probe_schema() {
+                field("probe_schema", schema_text(&schema));
             }
             if let Some(projection) = join.projection() {
                 field("projection", ordinals(projection.iter()));
+            }
+            if join.chunk_bytes() > 0 {
+                field("chunk_bytes", join.chunk_bytes().to_string());
             }
         }
         fb::PlanNodeKind::CudfSort => {

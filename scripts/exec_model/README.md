@@ -66,11 +66,8 @@ as a script, so the relative imports resolve either way.
 | `operators/exec_ops.py` | filter, project, sort, partial aggregate, limit, unload |
 | `operators/accumulators.py` | coalesce-all, aggregate-batches, accumulate-and-sort, merge-sorted |
 | `operators/partition_ops.py` | the hash scatter |
-| `operators/join_types.py` | `JoinType` in the fbs vocabulary, and the capability matrix as a function both join backends read |
-| `operators/joins.py` | the pandas join backend — nine hash-join types, cross, nested loop |
-| `operators/cudf_calls.py` | the cuDF calls `cpp/src/operators/join.cpp` makes, modelled: joins that return gather maps, `gather` with its out-of-bounds policy, `scatter`, `apply_boolean_mask` |
-| `operators/recipe.py` | the FlatBuffers node structs, the handle registry with consume-on-use, and the C++ that reads them |
-| `operators/recipe_join.py` | the second join backend: answers every call by emitting fb nodes and making `execute_node` calls |
+| `operators/join_types.py` | `JoinType` in the fbs vocabulary, and the two facts the executors read: every probe streams, five types finish |
+| `operators/joins.py` | the pandas join backend — the hash join and the nested loop at all nine types, and the cross join, each answering a call as the device's join session does |
 | `operators/nodes.py` | `GpuNode` implementations wiring the operators into plans |
 | `operators/validation.py` | the checks a node's `_validator` is composed from with `all_of` — layout expectations and the aggregate state chain. The method is abstract on `GpuNode` (`node.py`) and implemented once, on `PandasNode` (`operators/nodes.py`), which just runs that validator |
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
@@ -122,41 +119,21 @@ categories, and delegates each lane-scoped call to `single_partition_driver`. Th
 is one node's lane rather than a chain of them: min-height selection walks a batch up a
 chain node by node on its own.
 
-## The two join backends
+## The joins
 
-Every join test runs twice, on backends that share no join code.
+`operators/joins.py` joins with pandas, the way DataFusion joins with DataFusion, and
+answers each call the way the device's join session does (`cpp/src/operators/join_session.cpp`,
+join-rewrite-design.md §3): the build side set once, one answer per probe batch, and a finish
+for the five types that emit build rows by what matched across every batch — Left, Full,
+LeftSemi, LeftAnti, LeftMark. Every type streams its probe side, a residual included, and
+nothing is refused: a residual is part of each pair's match, and `null_equals_null` is one
+rule for every type.
 
-`operators/joins.py` joins with pandas, the way DataFusion joins with DataFusion.
-`operators/recipe_join.py` answers each call the way the GPU will: it emits a **recipe
-plan** — `Cudf*` nodes in the legacy vocabulary, addressed by seq — and makes
-`execute_node(seq, handles)` calls against `operators/recipe.py`, whose registry consumes
-handles exactly as `NodeSession` does and whose node implementations mirror
-`cpp/src/operators/join.cpp` branch for branch over the primitives in
-`operators/cudf_calls.py`. `RecipeJoinBackendSelector` picks it for joins and leaves every
-other category on pandas.
-
-`tests/test_join_capability.py` is where both are driven: one case per join mode against a
-SQL oracle, on both backends, at every batching config and layout preset, plus the emitted
-seq sequence, the copy counts, the null-key asymmetry, and two guards that read
-`cpp/src/operators/join.cpp` and fail when it names a join type or calls a cuDF function
-the model has never heard of. The model mirrors that file by hand and no import links them,
-so those two are the only thing standing between a C++ change and silent drift.
-
-The question it exists to answer is the mode's load-bearing one: can the **frozen** fbs and
-C++ execute every join type with a probe side arriving in batches? Three answers came back,
-and the spec's join tables carry all of them.
-
-- **Yes, for every type**, with the lowering in that table: probe-local types are one node
-  per batch, build-preserving types add the #136 finish sequence, and where the matrix
-  refuses to stream, the single-batch fallback is precisely the legacy call.
-- **At a cost the frozen surface makes unavoidable**: a handle is consumed by the call that
-  reads it and nothing duplicates one, so a streamed probe copies the build side once per
-  batch — [#152](../../llm-wiki/tickets/joins.md#t152), and Left/Full copy the probe batch as
-  well. The session counts every copy, so the figure is asserted rather than estimated.
-- **Except one shape, which turned out to be a defect rather than a limit.** An outer join
-  with a residual filter is wrong in the shipping C++ — the filter is applied after the
-  outer gather, dropping the rows it was meant to preserve
-  ([#153](../../llm-wiki/tickets/joins.md#t153)). Latent, since no corpus query has that shape.
+`tests/test_join_capability.py` drives it: one case per join mode against an oracle written
+from the SQL, at every batching config and layout preset, the hash join and the nested loop
+at all nine types, the residual on every family, the null-key rules with counts by hand,
+and a guard that reads `join_session.cpp` and fails when it names a join type the
+prototype's enum does not.
 
 ## The corpus
 
@@ -187,11 +164,6 @@ rows through a pandas operator chain is minutes, not seconds. The queries are in
 so `PCK_SHARD=k/n` splits a file across n processes and `PCK_LAYOUT` picks one of the three
 layouts each query runs at. `test_tpch.py`'s short plan-shape tests are a separate file and
 still run on every push in dataset-matrix.
-
-**`PCK_BACKEND=recipe`** re-runs the whole corpus with every join going through the
-FlatBuffers emulation instead of pandas — the same `Cudf*` node sequence the C++ reads off
-the wire, interpreted by a python model of the cuDF calls. That is the claim the join
-capability work made, checked against real queries rather than against a synthetic matrix.
 
 **Plans are separate from tests.** A plan is a function of the schemas, so the builders in
 `plans_tpch*.py` and `plans_tpcds*.py` take a table provider and never read a row; `plans.py`
@@ -348,20 +320,21 @@ F10. **The executor total must be cached, not summed.** The spec says "Σ cached
    the aliasing along with the cost.
 
 F11. **A residual filter does not by itself force a single-batch probe.** The draft matrix
-   refused a streamed probe to any filtered join. What actually forbids it is the *finish
-   pass*: it sees accumulated keys, and a keys-only table cannot evaluate a predicate over
-   both sides. A filtered Inner — or any probe-local type — streams, because each output
-   row is decided by (the whole build, this batch) and the filter is part of that decision.
-   The matrix in the spec was narrowed to say so.
-   `test_a_residual_filter_rides_the_join_on_both_backends`.
+   refused a streamed probe to any filtered join. What forbade it was a finish that
+   saw only accumulated keys, which cannot evaluate a predicate over both sides. A finish
+   that reads one `matched` flag per build row, set by the pairs that passed, removes even
+   that: every type streams under a residual, because each pair is decided by (the whole
+   build, this batch) and the filter is part of that decision.
+   `test_a_residual_filter_rides_the_join`, `test_a_filtered_semi_join_streams_its_probe_side`.
 
 F12. **Modelling the wire found a defect in the shipping engine, not in the model.** The
-   recipe backend reproduces `execute_hash_join` branch for branch, so where it disagreed
-   with the SQL oracle the disagreement belonged to the C++: an outer join's residual
-   filter is applied after the outer gather and drops the rows the outer join exists to
-   keep ([#153](../../llm-wiki/tickets/joins.md#t153)). Reproducing a code path faithfully is
-   worth more than implementing it correctly — a correct model would have hidden this.
-   `test_an_outer_join_with_a_residual_filter_is_refused_not_answered_wrongly`.
+   recipe backend, since retired, reproduced the old hash-join operator branch for branch,
+   so where it disagreed with the SQL oracle the disagreement belonged to the C++: an outer
+   join's residual filter was applied after the outer gather and dropped the rows the outer
+   join exists to keep ([#153](../../llm-wiki/archive/archived-tickets.md#t153)). Reproducing a code path faithfully is
+   worth more than implementing it correctly — a correct model would have hidden this. The
+   join session decides the residual per pair, and the case that pinned the defect now
+   counts the padded rows: `test_a_left_join_pads_the_build_rows_its_residual_rejects`.
 
 ## The prototype is a model, not a specification
 

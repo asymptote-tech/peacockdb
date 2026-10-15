@@ -9,9 +9,9 @@ use std::collections::BTreeSet;
 
 use peacockdb_core::test_support::{
     CorpusDeclaration, DuckdbOracle, MODES, Mode, RegistryEntry, assert_registry_matches_csv,
-    authoritative_mode, corpus_lines, cpu_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
-    gpu_result_coverage, gpu_result_cudf_matches_path, gpu_result_golden, load_csv,
-    ordered_sections, result_golden, section_holds_rows, section_of, stem,
+    authoritative_mode, corpus_lines, cpu_case, device_order_case, duckdb_case, duckdb_golden,
+    duckdb_gpu_case, gpu_result_coverage, gpu_result_cudf_matches_path, gpu_result_golden,
+    load_csv, ordered_sections, result_golden, section_holds_rows, section_of, stem,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -34,11 +34,11 @@ macro_rules! corpus_query {
     };
     ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
-        duckdb_device_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
+        device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
     };
     ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
-        duckdb_device_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
+        device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
         $(
             paste::paste! {
                 #[tokio::test]
@@ -99,10 +99,22 @@ macro_rules! declare_corpus_query {
 
 /// One device case per ENABLED gpu mode, and none at all for `none`: `gpu-result.txt` is
 /// keyed by (query, mode), so every device cell meets DuckDB rather than only the last
-/// mode — a mode-dependent device answer shows nowhere else.
-macro_rules! duckdb_device_cases {
+/// mode — a mode-dependent device answer shows nowhere else. And one `device_order_` case per
+/// line with a device cell, refusing a line whose answer a device join's order can move.
+macro_rules! device_cell_cases {
     ($dataset:ident, $sf:expr, $query:ident, none, $duck:expr) => {};
     ($dataset:ident, $sf:expr, $query:ident, $($gpu:ident)|+, $duck:expr) => {
+        paste::paste! {
+            #[tokio::test]
+            async fn [<device_order_ $dataset _ $query>]() {
+                device_order_case(
+                    stringify!($dataset),
+                    stringify!($sf),
+                    &stringify!($query).replace('_', "-"),
+                )
+                .await;
+            }
+        }
         $(
             paste::paste! {
                 #[tokio::test]
@@ -127,8 +139,7 @@ include!("common/corpus_cases.inc");
 ///
 /// The device tier asserts read-only against the section the cpu authored AT THAT MODE, so a
 /// gpu cell whose cpu twin is off compares against a section holding no rows and passes
-/// having checked nothing. Today it holds because a few device cells were hand-chosen, not
-/// because of a rule, and the moment [#152] clears somebody enables device modes in bulk.
+/// having checked nothing. Device cells are enabled in bulk, so this rule is what holds it.
 ///
 /// Read off the registry rather than the declarations: `CorpusDeclaration` carries the
 /// oracles and not the modes, and a disabled mode submits no registration to compare.
@@ -247,7 +258,7 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
             declared.duckdb_oracle
         );
         // Off the registry, as the loop above reads it: a `CorpusDeclaration` carries the
-        // oracles and not the modes, and the `gpu_` columns are what `duckdb_device_cases!`
+        // oracles and not the modes, and the `gpu_` columns are what `device_cell_cases!`
         // expands from — held to that macro by the gpu binary's own registry check.
         let row = rows
             .iter()

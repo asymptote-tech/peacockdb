@@ -29,9 +29,9 @@ fn children_first<'a>(node: &'a dyn GpuNode, into: &mut Vec<&'a dyn GpuNode>) {
 
 /// Six categories in one tree: a source, an exec, a batch accumulator, an emitter, a join
 /// and an unload. The emitter and the join are the arms that do the work — the join's
-/// reads `per_call_join_type` and derives a key schema off the probe — so a tree without
-/// them would leave `executors_for` half-called, which is the shape this file exists to
-/// end.
+/// checks its recipe is a session's and prices its pairs off both sides — so a tree
+/// without them would leave `executors_for` half-called, which is the shape this file
+/// exists to end.
 fn tree() -> Box<dyn GpuNode> {
     let filtered = GpuFilter::new(
         source_per_row_group(),
@@ -56,8 +56,7 @@ fn tree() -> Box<dyn GpuNode> {
         }],
         None,
     );
-    // A LeftSemi: its probe call is the key project alone, so the join arm takes the
-    // branch that derives a key schema rather than the one that does not.
+    // A LeftSemi, so the session the arm builds is one that finishes.
     let joined = GpuHashJoin::new(
         Box::new(build),
         Box::new(GpuEmitPartitions::new(source(), vec![0], 2)),
@@ -78,7 +77,7 @@ fn each_node_builds_the_executor_its_category_names() {
     let session = Session::open(tree.as_ref());
     let ctx = GpuContext {
         executor: session.executor,
-        recipes: attach_recipes(tree.as_ref()).expect("every node's payload is writable"),
+        recipes: attach_recipes(tree.as_ref(), 0).expect("every node's payload is writable"),
     };
     let mut nodes = Vec::new();
     children_first(tree.as_ref(), &mut nodes);
@@ -118,7 +117,7 @@ fn a_node_built_at_another_nodes_post_order_is_refused() {
     let session = Session::open(tree.as_ref());
     let ctx = GpuContext {
         executor: session.executor,
-        recipes: attach_recipes(tree.as_ref()).expect("every node's payload is writable"),
+        recipes: attach_recipes(tree.as_ref(), 0).expect("every node's payload is writable"),
     };
     let mut nodes = Vec::new();
     children_first(tree.as_ref(), &mut nodes);

@@ -1,10 +1,10 @@
-//! `GpuLoadParquet`: the one source node.
+//! The two source nodes: `GpuLoadParquet`, and `GpuEmpty`, which reads nothing.
 
 use super::GpuNode;
 use super::PlanError;
 use super::Schema;
 use super::{BatchLayout, KeyDistribution, NodeKind, PartitionLayout, SortOrder};
-use super::{GpuLoadParquet, ScanMetadata};
+use super::{GpuEmpty, GpuLoadParquet, ScanMetadata};
 use std::any::Any;
 
 impl GpuNode for GpuLoadParquet {
@@ -46,6 +46,13 @@ impl GpuNode for GpuLoadParquet {
                 }
             }
         }
+        if self.rows_only() && self.kind.schema() != Some(&Schema::rowmarker()) {
+            return Err(PlanError::Invalid(format!(
+                "{}: it reads no column, so it declares __rowmarker__ and nothing else — the \
+                 rows it answers (#63)",
+                self.table
+            )));
+        }
         Ok(())
     }
 
@@ -70,6 +77,11 @@ pub(crate) fn new_load_parquet(
         sort_order: SortOrder::NotSpecified,
         batch_layout: BatchLayout::MultipleBatches,
     };
+    // The marker a scan of no column answers is a literal, never NULL.
+    let can_be_null = match projection.is_empty() {
+        true => vec![false],
+        false => scan.can_be_null.clone(),
+    };
     GpuLoadParquet {
         kind: NodeKind::Source { layout, schema },
         table,
@@ -77,7 +89,7 @@ pub(crate) fn new_load_parquet(
         projection,
         partition_groups,
         survivors: scan.groups.clone(),
-        can_be_null: scan.can_be_null.clone(),
+        can_be_null,
         limit,
     }
 }
@@ -98,4 +110,36 @@ pub(crate) fn largest_batch_bytes(node: &GpuLoadParquet) -> u64 {
         .map(|batch| batch.iter().map(bytes_of).sum::<u64>())
         .max()
         .unwrap_or(0)
+}
+
+impl GpuNode for GpuEmpty {
+    fn kind(&self) -> &NodeKind {
+        &self.kind
+    }
+
+    fn children(&self) -> Vec<&dyn GpuNode> {
+        Vec::new()
+    }
+
+    fn validate_schemas_and_partitions(&self) -> Result<(), PlanError> {
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// One lane, declared one batch: it emits none, so a node above that needs its input whole
+/// already has it.
+pub(crate) fn new_empty(schema: Schema) -> GpuEmpty {
+    let layout = PartitionLayout {
+        n: 1,
+        key_distribution: KeyDistribution::NotSpecified,
+        sort_order: SortOrder::NotSpecified,
+        batch_layout: BatchLayout::SingleBatch,
+    };
+    GpuEmpty {
+        kind: NodeKind::Source { layout, schema },
+    }
 }

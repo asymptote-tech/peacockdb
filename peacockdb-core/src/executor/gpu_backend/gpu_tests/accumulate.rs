@@ -6,7 +6,7 @@
 use super::*;
 
 use super::super::{GpuAccumulator, GpuPartitionAccumulator};
-use crate::executor::{AbiCall, AbiTarget, CallStats, LaneEvent, NodeTiming, set_node_timing};
+use crate::executor::{AbiCall, AbiTarget, LaneEvent};
 use crate::plan::AggFunc;
 use crate::plan::AggStateColumns;
 use crate::plan::RowInterval;
@@ -224,24 +224,6 @@ fn a_limit_drops_forwards_and_slices_by_where_the_batch_falls() {
     );
 }
 
-/// Timing on for the body of one case, and off again however it ends. The switch is
-/// process-global and every case in this binary shares the process, so a case that panics
-/// with it on would measure every case after it.
-struct Measuring;
-
-impl Measuring {
-    fn on() -> Self {
-        set_node_timing(NodeTiming::Events);
-        Self
-    }
-}
-
-impl Drop for Measuring {
-    fn drop(&mut self) {
-        set_node_timing(NodeTiming::Off);
-    }
-}
-
 /// A slice and an export carry no seq of their own, so both sides charge them to the node
 /// whose output they handled — and `call_index` counts all four entry points together.
 ///
@@ -302,14 +284,6 @@ fn a_slice_and_an_export_are_charged_to_the_node_that_produced_the_handle() {
         ],
         "the three calls this side made name the node the device charged them to"
     );
-}
-
-fn made(stats: &CallStats) -> Vec<AbiCall> {
-    stats
-        .calls
-        .recorded()
-        .expect("a measured run journals what it called")
-        .to_vec()
 }
 
 /// A lane that received nothing emits nothing, here and on the CPU alike.

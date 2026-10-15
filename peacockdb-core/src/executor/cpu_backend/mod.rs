@@ -69,26 +69,35 @@ struct Stage {
 /// `Backend` impl names it and `src/tests/injection.rs` builds one, so it is this
 /// subcomponent's API and `source` is its implementation.
 pub struct CpuSource {
+    /// `None` for a `GpuEmpty`, a relation DataFusion proved empty: no file, and no batch.
+    read: Option<LaneRead>,
+}
+
+/// The parquet one lane of a `GpuLoadParquet` reads.
+struct LaneRead {
     file: String,
     /// The footer, parsed once: a lane reads the same file once per batch, and re-parsing
     /// it per call is the whole of what a scan does besides decoding.
     metadata: ArrowReaderMetadata,
     projection: ProjectionMask,
+    /// A read of no column, answered as the `__rowmarker__` the plan declares (#63).
+    rows_only: bool,
     /// The row groups per batch this lane still owes, front first.
     batches: VecDeque<Vec<usize>>,
     schema: SchemaRef,
 }
 
-/// A join before its build side arrives.
+/// A join before its build side arrives: the DataFusion join it will run.
 pub struct CpuJoin {
-    calls: join::Calls,
+    plan: join::Plan,
 }
 
-/// A join with its build side set, taking probe batches.
+/// A join with its build side set: one DataFusion stream for the lane's life, fed a probe
+/// batch a call.
 pub struct CpuProbingJoin {
-    build: RecordBatch,
-    calls: join::Calls,
-    accumulated: Vec<RecordBatch>,
+    stream: join::Stream,
+    build_bytes: usize,
+    owes_nothing: bool,
 }
 
 /// A `BatchAccumulator` node's executor. What it holds between calls is one of four
@@ -694,7 +703,9 @@ pub(crate) fn physical_expr(
     expr_physical::physical_expr(expr, input, registry)
 }
 
-/// Whether the CPU executor for this join keeps probe keys and answers at done.
+/// Whether DataFusion answers rows at this join's finish, over `build` and one `probe` batch,
+/// read through the executor: a type that does not finish fails `finish_and_fetch` if
+/// DataFusion yields rows there, and one that does answers them.
 ///
 /// `#[cfg(test)]`, and called by `executor/mod.rs`, which carries it to `wire/tests.rs` —
 /// the test compares the answer against the recipe's `AtDone` call. The question crosses
@@ -702,11 +713,22 @@ pub(crate) fn physical_expr(
 #[cfg(test)]
 pub(crate) fn has_finish_pass(
     node: &crate::plan::GpuHashJoin,
-    build: &ArrowSchema,
-    probe: &ArrowSchema,
+    build: RecordBatch,
+    probe: RecordBatch,
     ctx: Arc<TaskContext>,
 ) -> Result<bool, PlanError> {
-    CpuJoin::hash(node, build, probe, ctx).map(|executor| executor.has_finish_pass())
+    CpuJoin::hash(node, &build.schema(), &probe.schema(), ctx).map(|join| {
+        let (mut probing, _) = join
+            .set_build(Some(CpuBatch::new(build)))
+            .expect("the build side is set");
+        probing
+            .probe_and_fetch(CpuBatch::new(probe))
+            .expect("the probe runs");
+        let (finished, _) = probing
+            .finish_and_fetch()
+            .expect("the finish answers what DataFusion yields there");
+        finished.is_some_and(|batch| batch.record_batch().num_rows() > 0)
+    })
 }
 
 #[cfg(test)]

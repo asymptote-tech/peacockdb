@@ -29,6 +29,7 @@ mod golden_text;
 mod gpu_session;
 #[cfg(not(feature = "rust-only"))]
 mod node_timing;
+mod order_hazard;
 mod record;
 mod registry;
 mod result_text;
@@ -606,6 +607,13 @@ pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, o
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
 }
 
+/// A line with a device cell, refused if its answer rests on an order a device join does not
+/// keep: a limit with no sort above a hash or nested-loop join, or a sorted cut between tied
+/// rows that differ. One case per such line, rust-only, so the refusal precedes any device run.
+pub async fn device_order_case(dataset: &str, sf: &str, query: &str) {
+    order_hazard::device_order_case(dataset, sf, query).await
+}
+
 /// A `gpu-result` file's `cudf=` provenance line against the path it was read as: the committed
 /// file holds cuDF 25.02's answers and `gpu-result-<v>.txt` holds v's.
 pub fn gpu_result_cudf_matches_path(text: &str, version: Option<&str>) -> Result<(), String> {
@@ -1122,6 +1130,8 @@ pub struct DevicePlan {
     /// The session the plan was made in, kept for as long as the plan is.
     _ctx: SessionContext,
     tree: Box<dyn GpuNode>,
+    /// The mode's `join_scratch_bytes`, which every join's session chunks by.
+    join_scratch: u64,
     what: String,
 }
 

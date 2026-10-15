@@ -1,6 +1,6 @@
 //! `GpuHashJoin` through the harness: a build batch first and once, the probe streamed,
-//! nine types over the same two prefixed synthetic sides joined on `key`. The scripts
-//! follow the capability matrix, and the filtered forms exist only where it admits one.
+//! nine types over the same two prefixed synthetic sides joined on `key`, each with and
+//! without a residual filter.
 //! The sides, scripts and `hash_join` are `pub(crate)` for `join_dimension_cases.rs`.
 //! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
@@ -11,11 +11,11 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::JoinType;
 
-use super::script::{Outcome, Script, run_both};
+use super::script::{Script, run_both};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
-use crate::tests::compare::{Order, assert_same, same};
+use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -44,20 +44,22 @@ pub(crate) fn padded(fields: Vec<Field>) -> Vec<Field> {
 
 /// What each type emits before any projection: both sides, the build side, the probe
 /// side, or the build side and a mark. A side an outer join pads is nullable, as
-/// DataFusion's join schema declares it and so as the planner would.
-fn output_of(join_type: JoinType) -> Vec<Field> {
+/// DataFusion's join schema declares it and so as the planner would. `nested_cases.rs`
+/// declares its nested loops by it too.
+pub(crate) fn output_of(join_type: JoinType) -> Vec<Field> {
+    output_over(join_type, side("b_"), side("p_"))
+}
+
+/// `output_of` over any two sides, for a case whose columns are not the synthetic ones.
+pub(crate) fn output_over(join_type: JoinType, build: Vec<Field>, probe: Vec<Field>) -> Vec<Field> {
     match join_type {
-        JoinType::Inner => [side("b_"), side("p_")].concat(),
-        JoinType::Left => [side("b_"), padded(side("p_"))].concat(),
-        JoinType::Right => [padded(side("b_")), side("p_")].concat(),
-        JoinType::Full => [padded(side("b_")), padded(side("p_"))].concat(),
-        JoinType::LeftSemi | JoinType::LeftAnti => side("b_"),
-        JoinType::RightSemi | JoinType::RightAnti => side("p_"),
-        JoinType::LeftMark => [
-            side("b_"),
-            vec![Field::new("mark", DataType::Boolean, false)],
-        ]
-        .concat(),
+        JoinType::Inner => [build, probe].concat(),
+        JoinType::Left => [build, padded(probe)].concat(),
+        JoinType::Right => [padded(build), probe].concat(),
+        JoinType::Full => [padded(build), padded(probe)].concat(),
+        JoinType::LeftSemi | JoinType::LeftAnti => build,
+        JoinType::RightSemi | JoinType::RightAnti => probe,
+        JoinType::LeftMark => [build, vec![Field::new("mark", DataType::Boolean, false)]].concat(),
     }
 }
 
@@ -183,6 +185,11 @@ fn no_build() -> Script {
     script(None, Vec::new())
 }
 
+/// No build batch, and a probe batch the three probe-preserving types owe rows for (#212).
+fn no_build_then_a_probe() -> Script {
+    script(None, vec![probe_batch(16, 21)])
+}
+
 fn empty_between() -> Script {
     script(
         Some(build_batch(32)),
@@ -197,62 +204,10 @@ fn only_empty_probes() -> Script {
     )
 }
 
-/// The build set and the finish called with no probe call between: the finish whose
-/// probe produced no keys at all, #173's one refusing site.
+/// The build set and the finish called with no probe call between (#173).
 fn no_probe() -> Script {
     script(Some(build_batch(32)), Vec::new())
 }
-
-// The `bug_` assertions: a refusal pinned by the stable part of its message, and a
-// null-key divergence pinned as "the device under `false` answers as the cpu under `true`".
-
-pub(crate) fn gpu_refuses_with(outcome: &Outcome, message: &str) {
-    let why = outcome.gpu_refuses();
-    assert!(why.contains(message), "{why}");
-}
-
-fn both_refuse_with(outcome: &Outcome, message: &str) {
-    for (side, answer) in [("cpu", &outcome.cpu), ("gpu", &outcome.gpu)] {
-        let why = &answer.as_ref().expect_err(side).message;
-        assert!(why.contains(message), "{side}: {why}");
-    }
-}
-
-/// #59 — anti and mark hardcode `EQUAL` on the device and take the flag on the cpu, so the
-/// device's answer under the SQL default is the cpu's answer with the flag set.
-///
-/// Two assertions, because the first is relative. The oracle comparison names the direction
-/// of the divergence; the second says there is one. #59 can close either way — the device
-/// honouring the flag, or the cpu hardcoding `EQUAL` too — and both end with the backends
-/// agreeing under the default, which is what turns this red and retires the pin.
-fn device_answers_as_if_null_equals_null(
-    join_type: JoinType,
-    filtered: bool,
-    script: fn() -> Script,
-) {
-    let device = run_both(&hash_join(join_type, false, filtered, None), script());
-    let oracle = run_both(&hash_join(join_type, true, filtered, None), script());
-    assert_same(
-        oracle.cpu.as_ref().expect("the cpu answers"),
-        device.gpu.as_ref().expect("the device answers"),
-        Order::Any,
-    );
-    assert!(
-        same(
-            device.cpu.as_ref().expect("the cpu answers"),
-            device.gpu.as_ref().expect("the device answers"),
-            Order::Any,
-        )
-        .is_err(),
-        "the backends agree under the SQL default: #59 is closed, and this pin with it"
-    );
-}
-
-pub(crate) const BUILD_COPY: &str =
-    "probe batch 2 has no build side left, since the call for batch 1 erased it (#152)";
-const PROBE_COPY: &str = "this join's recipe copies its probe batch — the key project keeps the keys and the join below it reads the same batch — and the ABI has no copy";
-const NO_KEYS: &str = "this lane's probe was empty, so its finish has no keys to join against";
-const NO_BUILD: &str = "this lane's build side is empty, and what this join owes is its probe side — which takes a call over a build table that does not exist (#212)";
 
 // One probe batch, every type.
 
@@ -263,12 +218,10 @@ operator_case! {
     }
 }
 
-// #152 — a left join's key project and per-call join both read the probe batch, and the
-// ABI has no copy: the first batch is refused.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_join_refuses_its_first_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), one_probe()), PROBE_COPY);
+    fn a_left_join_over_one_probe_batch_agrees() {
+        run_both(&join(JoinType::Left), one_probe()).same(Order::Any);
     }
 }
 
@@ -279,12 +232,10 @@ operator_case! {
     }
 }
 
-// #152 — a full join's key project and per-call join both read the probe batch, and the
-// ABI has no copy: the first batch is refused.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_full_join_refuses_its_first_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), one_probe()), PROBE_COPY);
+    fn a_full_join_over_one_probe_batch_agrees() {
+        run_both(&join(JoinType::Full), one_probe()).same(Order::Any);
     }
 }
 
@@ -302,62 +253,54 @@ operator_case! {
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_drops_null_key_build_rows_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftAnti, false, one_probe);
+    fn a_left_anti_join_keeps_its_null_key_build_rows() {
+        run_both(&hash_join(JoinType::LeftAnti, false, false, None), one_probe()).same(Order::Any);
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_anti_join_drops_null_key_probe_rows_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::RightAnti, false, one_probe);
+    fn a_right_anti_join_keeps_its_null_key_probe_rows() {
+        run_both(&hash_join(JoinType::RightAnti, false, false, None), one_probe()).same(Order::Any);
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_mark_join_marks_null_key_build_rows_true_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftMark, false, one_probe);
+    fn a_left_mark_join_marks_its_null_key_build_rows_false() {
+        run_both(&hash_join(JoinType::LeftMark, false, false, None), one_probe()).same(Order::Any);
     }
 }
 
-// A streamed probe: two batches, every type. Left and Full refuse their first batch
-// already, so the shape is named and the refusal is the same one.
+// A streamed probe: two batches, every type.
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_an_inner_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Inner), two_probes()), BUILD_COPY);
+    fn an_inner_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::Inner), two_probes()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_join_over_two_probe_batches_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), two_probes()), PROBE_COPY);
+    fn a_left_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::Left), two_probes()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Right), two_probes()), BUILD_COPY);
+    fn a_right_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::Right), two_probes()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_full_join_over_two_probe_batches_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), two_probes()), PROBE_COPY);
+    fn a_full_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::Full), two_probes()).same(Order::Any);
     }
 }
 
@@ -368,41 +311,36 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_semi_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightSemi), two_probes()), BUILD_COPY);
+    fn a_right_semi_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::RightSemi), two_probes()).same(Order::Any);
     }
 }
 
-// #59 — across a streamed probe too.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_over_two_probe_batches_drops_null_key_build_rows_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftAnti, false, two_probes);
+    fn a_left_anti_join_over_two_probe_batches_keeps_its_null_key_build_rows() {
+        run_both(&hash_join(JoinType::LeftAnti, false, false, None), two_probes()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_anti_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightAnti), two_probes()), BUILD_COPY);
+    fn a_right_anti_join_over_two_probe_batches_agrees() {
+        run_both(&join(JoinType::RightAnti), two_probes()).same(Order::Any);
     }
 }
 
-// #59 — across a streamed probe too.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_mark_join_over_two_probe_batches_marks_null_key_build_rows_true_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftMark, false, two_probes);
+    fn a_left_mark_join_over_two_probe_batches_marks_its_null_key_build_rows_false() {
+        run_both(&hash_join(JoinType::LeftMark, false, false, None), two_probes()).same(Order::Any);
     }
 }
 
 // `key` is null on every eleventh row of both sides. `true` matches them to each other on
-// both engines; the SQL default is where anti and mark part company (#59, above). Left and
-// Full have no case here: the device refuses their first probe batch before the flag matters.
+// both engines, and the SQL default matches them to nothing, anti and mark included.
 
 operator_case! {
     GpuHashJoin,
@@ -446,7 +384,6 @@ operator_case! {
     }
 }
 
-// The other half of #59's RightAnti pin: under `true` the two engines agree outright.
 operator_case! {
     GpuHashJoin,
     fn a_right_anti_join_under_null_equals_null_agrees() {
@@ -454,9 +391,10 @@ operator_case! {
     }
 }
 
-// A residual filter where the matrix admits one: Inner, and the build-side semi family
-// over a single-batch probe. Left/Right/Full with one are refused at plan time (#153),
-// RightSemi/RightAnti too (#159), so those have no row.
+// A residual filter, every type. The build-side semi family answers at finish as it does
+// unfiltered; the outer forms pad what the residual leaves unmatched (#153), and the
+// right-handed semi forms keep or drop each probe row by it (#159). The probe streams under
+// every one, so the five lifted forms and the semi family run over two probe batches.
 
 operator_case! {
     GpuHashJoin,
@@ -472,19 +410,73 @@ operator_case! {
     }
 }
 
-// #59 — the `mixed_*` variants hardcode EQUAL too.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_with_a_residual_filter_drops_null_key_build_rows_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftAnti, true, one_probe);
+    fn a_left_anti_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::LeftAnti, false, true, None), one_probe()).same(Order::Any);
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_mark_join_with_a_residual_filter_marks_null_key_build_rows_true_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftMark, true, one_probe);
+    fn a_left_mark_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::LeftMark, false, true, None), one_probe()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Left, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Right, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::Full, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_semi_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::RightSemi, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_anti_join_with_a_residual_filter_agrees() {
+        run_both(&hash_join(JoinType::RightAnti, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_semi_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftSemi, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_anti_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftAnti, false, true, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_mark_join_with_a_residual_filter_over_two_probe_batches_agrees() {
+        run_both(&hash_join(JoinType::LeftMark, false, true, None), two_probes()).same(Order::Any);
     }
 }
 
@@ -495,8 +487,9 @@ operator_case! {
     }
 }
 
-// Empty inputs, one case per type and shape. A zero-row build batch is a build table, and
-// the device pads over it like the cpu; only a build lane with no batch at all is #212.
+// Empty inputs, one case per type and shape. A zero-row build batch owes what no build
+// batch owes: the six types built from build rows drain, and the three that keep probe
+// rows pad over it on both engines.
 
 operator_case! {
     GpuHashJoin,
@@ -526,43 +519,38 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_inner_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Inner), empty_between()), BUILD_COPY);
+    fn inner_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::Inner), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_inner_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Inner), only_empty_probes()), BUILD_COPY);
+    fn inner_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::Inner), only_empty_probes()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_over_a_zero_row_build_refuses_the_probe_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), empty_build()), PROBE_COPY);
+    fn left_over_a_zero_row_build_agrees() {
+        run_both(&join(JoinType::Left), empty_build()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_over_a_zero_row_probe_refuses_it_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), empty_probe()), PROBE_COPY);
+    fn left_over_a_zero_row_probe_pads_every_build_row() {
+        run_both(&join(JoinType::Left), empty_probe()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_over_both_sides_empty_refuses_the_probe_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), both_empty()), PROBE_COPY);
+    fn left_over_both_sides_empty_agrees() {
+        run_both(&join(JoinType::Left), both_empty()).same(Order::Any);
     }
 }
 
@@ -573,29 +561,24 @@ operator_case! {
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), empty_between()), PROBE_COPY);
+    fn left_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::Left), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Left), only_empty_probes()), PROBE_COPY);
+    fn left_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::Left), only_empty_probes()).same(Order::Any);
     }
 }
 
-// #173 — the finish over no keys owes every build row padded with a typed NULL per probe column.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_finishing_with_no_probe_batch_is_refused_on_the_device() {
-        let outcome = run_both(&join(JoinType::Left), no_probe());
-        gpu_refuses_with(&outcome, NO_KEYS);
-        gpu_refuses_with(&outcome, "every build row padded with a typed NULL per probe column");
+    fn left_finishing_with_no_probe_batch_pads_every_build_row() {
+        run_both(&join(JoinType::Left), no_probe()).same(Order::Any);
     }
 }
 
@@ -620,87 +603,83 @@ operator_case! {
     }
 }
 
-// #212 — with no build batch at all the join owes its probe rows, over a table that does
-// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_with_no_build_batch_is_refused_on_both() {
-        both_refuse_with(&run_both(&join(JoinType::Right), no_build()), NO_BUILD);
+    fn right_with_no_build_batch_pads_every_probe_row() {
+        let outcome = run_both(&join(JoinType::Right), no_build_then_a_probe());
+        outcome.same(Order::Any);
+        let device = outcome.gpu.as_ref().expect("the session answers an absent build");
+        assert_eq!(rows(device), 16, "every probe row, padded");
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Right), empty_between()), BUILD_COPY);
+    fn right_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::Right), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Right), only_empty_probes()), BUILD_COPY);
+    fn right_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::Right), only_empty_probes()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_over_a_zero_row_build_refuses_the_probe_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), empty_build()), PROBE_COPY);
+    fn full_over_a_zero_row_build_pads_every_probe_row() {
+        run_both(&join(JoinType::Full), empty_build()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_over_a_zero_row_probe_refuses_it_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), empty_probe()), PROBE_COPY);
+    fn full_over_a_zero_row_probe_pads_every_build_row() {
+        run_both(&join(JoinType::Full), empty_probe()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_over_both_sides_empty_refuses_the_probe_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), both_empty()), PROBE_COPY);
+    fn full_over_both_sides_empty_agrees() {
+        run_both(&join(JoinType::Full), both_empty()).same(Order::Any);
     }
 }
 
-// #212 — with no build batch at all the join owes its probe rows, over a table that does
-// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_with_no_build_batch_is_refused_on_both() {
-        both_refuse_with(&run_both(&join(JoinType::Full), no_build()), NO_BUILD);
+    fn full_with_no_build_batch_pads_every_probe_row() {
+        let outcome = run_both(&join(JoinType::Full), no_build_then_a_probe());
+        outcome.same(Order::Any);
+        let device = outcome.gpu.as_ref().expect("the session answers an absent build");
+        assert_eq!(rows(device), 16, "every probe row, padded");
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_with_a_zero_row_probe_between_two_with_rows_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), empty_between()), PROBE_COPY);
+    fn full_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::Full), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the key project and the join both read the probe batch, and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_finishing_after_only_zero_row_probes_refuses_the_first_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::Full), only_empty_probes()), PROBE_COPY);
+    fn full_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::Full), only_empty_probes()).same(Order::Any);
     }
 }
 
-// #173 — the finish over no keys owes every build row padded with a typed NULL per probe column.
 operator_case! {
     GpuHashJoin,
-    fn bug_full_finishing_with_no_probe_batch_is_refused_on_the_device() {
-        let outcome = run_both(&join(JoinType::Full), no_probe());
-        gpu_refuses_with(&outcome, NO_KEYS);
-        gpu_refuses_with(&outcome, "every build row padded with a typed NULL per probe column");
+    fn full_finishing_with_no_probe_batch_pads_every_build_row() {
+        run_both(&join(JoinType::Full), no_probe()).same(Order::Any);
     }
 }
 
@@ -746,13 +725,10 @@ operator_case! {
     }
 }
 
-// #173 — the finish over no keys owes no rows, which is a table of no rows.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_semi_finishing_with_no_probe_batch_is_refused_on_the_device() {
-        let outcome = run_both(&join(JoinType::LeftSemi), no_probe());
-        gpu_refuses_with(&outcome, NO_KEYS);
-        gpu_refuses_with(&outcome, "no rows, which is a table of no rows");
+    fn left_semi_finishing_with_no_probe_batch_answers_nothing() {
+        run_both(&join(JoinType::LeftSemi), no_probe()).same(Order::Any);
     }
 }
 
@@ -784,19 +760,17 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_semi_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightSemi), empty_between()), BUILD_COPY);
+    fn right_semi_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::RightSemi), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_semi_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightSemi), only_empty_probes()), BUILD_COPY);
+    fn right_semi_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::RightSemi), only_empty_probes()).same(Order::Any);
     }
 }
 
@@ -828,11 +802,10 @@ operator_case! {
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_anti_with_a_zero_row_probe_between_two_with_rows_drops_null_key_build_rows_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftAnti, false, empty_between);
+    fn left_anti_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&hash_join(JoinType::LeftAnti, false, false, None), empty_between()).same(Order::Any);
     }
 }
 
@@ -871,28 +844,29 @@ operator_case! {
     }
 }
 
-// #212 — with no build batch at all the join owes its probe rows, over a table that does
-// not exist. A scatter no longer leaves a lane here (#175); a limit that skips everything does.
+// #212 — a build side that produced no batch: both engines run the join over an empty
+// build table.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_anti_with_no_build_batch_is_refused_on_both() {
-        both_refuse_with(&run_both(&join(JoinType::RightAnti), no_build()), NO_BUILD);
+    fn right_anti_with_no_build_batch_returns_every_probe_row() {
+        let outcome = run_both(&join(JoinType::RightAnti), no_build_then_a_probe());
+        outcome.same(Order::Any);
+        let device = outcome.gpu.as_ref().expect("the session answers an absent build");
+        assert_eq!(rows(device), 16, "every probe row");
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_anti_with_a_zero_row_probe_between_two_with_rows_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightAnti), empty_between()), BUILD_COPY);
+    fn right_anti_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&join(JoinType::RightAnti), empty_between()).same(Order::Any);
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it.
 operator_case! {
     GpuHashJoin,
-    fn bug_right_anti_finishing_after_only_zero_row_probes_refuses_the_second_on_the_device() {
-        gpu_refuses_with(&run_both(&join(JoinType::RightAnti), only_empty_probes()), BUILD_COPY);
+    fn right_anti_finishing_after_only_zero_row_probes_agrees() {
+        run_both(&join(JoinType::RightAnti), only_empty_probes()).same(Order::Any);
     }
 }
 
@@ -924,11 +898,10 @@ operator_case! {
     }
 }
 
-// #59 — the device hardcodes EQUAL for the null keys of an anti or mark join.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_mark_with_a_zero_row_probe_between_two_with_rows_marks_null_key_build_rows_true_on_the_device() {
-        device_answers_as_if_null_equals_null(JoinType::LeftMark, false, empty_between);
+    fn left_mark_with_a_zero_row_probe_between_two_with_rows_agrees() {
+        run_both(&hash_join(JoinType::LeftMark, false, false, None), empty_between()).same(Order::Any);
     }
 }
 
@@ -939,13 +912,10 @@ operator_case! {
     }
 }
 
-// #173 — the finish over no keys owes every build row with a false mark.
 operator_case! {
     GpuHashJoin,
-    fn bug_left_mark_finishing_with_no_probe_batch_is_refused_on_the_device() {
-        let outcome = run_both(&join(JoinType::LeftMark), no_probe());
-        gpu_refuses_with(&outcome, NO_KEYS);
-        gpu_refuses_with(&outcome, "every build row with a false mark");
+    fn left_mark_finishing_with_no_probe_batch_marks_every_build_row_false() {
+        run_both(&join(JoinType::LeftMark), no_probe()).same(Order::Any);
     }
 }
 

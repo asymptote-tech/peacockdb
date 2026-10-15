@@ -256,7 +256,7 @@ fn a_join_sets_its_build_side_before_it_probes() {
 #[test]
 fn a_join_emits_its_unmatched_rows_at_finish() {
     let script = Script::default().with_join(JoinRule {
-        empty_build_owes_its_probe: false,
+        owes_nothing_when_empty: true,
         finish_rows: 3,
         build_residency: 0,
     });
@@ -293,11 +293,11 @@ fn a_join_emits_its_unmatched_rows_at_finish() {
     assert!(outcome.finished);
 }
 
-/// A build side that ended with no batch is a call of its own rather than an error: the
-/// scatter gave this lane no build rows, which a small table over many lanes produces
-/// routinely, and what the lane owes is the join type's answer.
+/// A build side that ended with no batch takes the same call as one that produced one:
+/// the scatter gave this lane no build rows, which a small table over many lanes produces
+/// routinely, and `set_build(None)` is how the join is told.
 #[test]
-fn a_build_side_that_never_produced_chooses_the_call_that_asks_what_it_owes() {
+fn a_build_side_that_never_produced_still_chooses_set_build() {
     let script = Script::default();
     let node = join_node();
     let category = site(&script, node.as_ref()).category;
@@ -309,7 +309,7 @@ fn a_build_side_that_never_produced_chooses_the_call_that_asks_what_it_owes() {
         LaneDriver::<Mock>::default()
             .select(category, &ended)
             .expect("an empty build side is answerable"),
-        LaneCall::NoBuild
+        LaneCall::SetBuild
     );
 }
 
@@ -365,7 +365,7 @@ fn a_decision_only_ever_consumes_a_slot_that_has_a_batch() {
                 let decision = lane.select(category, &avail);
                 match decision {
                     Ok(call) => {
-                        if let Some(slot) = call.consumes() {
+                        if let Some(slot) = call.consumes().filter(|_| call.needs_its_batch()) {
                             assert!(
                                 avail.has[slot],
                                 "{category:?} chose {call:?}, which consumes slot {slot}, \

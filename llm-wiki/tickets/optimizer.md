@@ -212,7 +212,7 @@ do.
 
 The fix is small on the CPU and unavailable on a device: the node is a source of constant rows,
 and a table of literals made from no input is what the frozen surface has no call for — the same
-wall as [#173](joins.md#t173) and [#175](../archive/archived-tickets.md#t175). T17 was to have discharged it and did not: writing the
+wall as [#173](../archive/archived-tickets.md#t173) and [#175](../archive/archived-tickets.md#t175). T17 was to have discharged it and did not: writing the
 CPU half alone makes the oracle answer a query the device refuses, and the oracle is what the
 device is checked against. Waits on the make-a-table-of-literals call all three want.
 

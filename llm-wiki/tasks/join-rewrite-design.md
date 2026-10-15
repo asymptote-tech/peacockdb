@@ -5,7 +5,7 @@ Draft under discussion with the human; uncommitted until the chain's specs are f
 its lasting parts move into `architecture.md` (Joins) and this file goes to the archive.
 
 Tickets: [`joins.md`](../tickets/joins.md) in full, umbrella
-[#155](../tickets/joins.md#t155). Every non-join node keeps the recipe architecture; joins leave it.
+[#155](../archive/archived-tickets.md#t155). Every non-join node keeps the recipe architecture; joins leave it.
 
 ## 1. ABI and FlatBuffers — approved
 
@@ -542,8 +542,17 @@ Drop for GpuProbingJoin: peacock_join_release(join)
   `static_multiset` of 8-byte slots at load factor 0.5, whatever the key width; the same for
   `distinct_hash_join` over the distinct keys, plus that table) + one byte per build row for
   `matched`. Scratch per probe = the batch + its output estimate + the transients: the batch's
-  `distinct_keys`, 8 B per key-match pair (priced by `inner_join_size`), and for RightSemi/
-  RightAnti with a cross residual the build's hash that `mixed_*` makes per call.
+  `distinct_keys`, `8 + the residual's per-row bytes` per key-match pair (priced by
+  `inner_join_size`), and for RightSemi/RightAnti with a cross residual the build's hash that
+  `mixed_*` makes per call. That session holds no join object, and its per-call hash (a
+  `static_set` of 4-byte slots at load 0.5, about 8 B a row) is priced as the 16 B a row it is
+  charged as resident. `plan::session_bytes` is the resident formula both the planner and the
+  device read. **An earlier version of this line said 8 bytes a pair**, which is the
+  index maps alone; join-session-cpp measured the executor's real bound and put the formula in
+  `gpu_plan.fbs`'s `chunk_bytes` comment, where the second term is the sum over the filter's
+  columns of their fixed width, 16 for a variable-width one. A planner converting its scratch
+  budget by the old figure under-prices by the residual's width, so the accountant and the session
+  would disagree about the same call.
 - `peacockdb-ffi`: the four symbols.
 
 ### 4.4 CPU executor (`executor/cpu_backend/join.rs`)

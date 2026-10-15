@@ -24,6 +24,7 @@ use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
 use crate::plan::{AggCall, PlanAgg};
 
+use crate::executor::{AbiCall, CallStats, NodeTiming, set_node_timing};
 use crate::executor::{Region, RowRange, collect_regions};
 
 use crate::plan::{BinaryOp, Expr, NamedExpr};
@@ -159,7 +160,7 @@ impl Session {
     /// The tree's recipes attached and its buffer handed to the device, which is the whole
     /// of what an executor needs before it can address a seq.
     fn open(tree: &dyn GpuNode) -> Self {
-        let recipes = attach_recipes(tree).expect("every node's payload is writable");
+        let recipes = attach_recipes(tree, 0).expect("every node's payload is writable");
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
             unsafe { peacock_executor_create(GPU_BUDGET as u64, &mut executor) },
@@ -351,6 +352,33 @@ fn summing(output: &str) -> AggregateBody {
         }],
         finalize: None,
     }
+}
+
+/// Timing on for the body of one case, and off again however it ends. The switch is
+/// process-global and every case in this binary shares the process, so a case that panics
+/// with it on would measure every case after it.
+struct Measuring;
+
+impl Measuring {
+    fn on() -> Self {
+        set_node_timing(NodeTiming::Events);
+        Self
+    }
+}
+
+impl Drop for Measuring {
+    fn drop(&mut self) {
+        set_node_timing(NodeTiming::Off);
+    }
+}
+
+/// What a measured call journalled.
+fn made(stats: &CallStats) -> Vec<AbiCall> {
+    stats
+        .calls
+        .recorded()
+        .expect("a measured run journals what it called")
+        .to_vec()
 }
 
 mod abi;

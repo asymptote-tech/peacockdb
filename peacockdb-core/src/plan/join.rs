@@ -1,16 +1,15 @@
-//! The joins. All three take their build side as one batch per lane and stream the probe
-//! where the capability matrix allows it; the equi-join is co-partitioned, while cross and
-//! nested-loop need both inputs in one lane, having no key to co-locate on (#140).
+//! The joins. All three take their build side as one batch per lane and stream the probe;
+//! the equi-join is co-partitioned, while cross and nested-loop need both inputs in one
+//! lane, having no key to co-locate on (#140).
 
-use super::{
-    GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinCapability, JoinFilterColumn, JoinSide,
-    NestedLoopJoinType,
-};
+use super::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin, JoinFilterColumn, JoinSide};
 use std::any::Any;
 
+use super::BinaryOp;
 use super::ColumnRef;
 use super::Expr;
 use super::PlanError;
+use datafusion::arrow::datatypes::DataType;
 use datafusion::common::JoinType;
 
 use super::GpuNode;
@@ -67,25 +66,11 @@ impl GpuNode for GpuNestedLoopJoin {
         )?;
         check_projection(
             "GpuNestedLoopJoin",
-            match self.join_type {
-                NestedLoopJoinType::Inner => JoinType::Inner,
-                NestedLoopJoinType::Left => JoinType::Left,
-            },
+            self.join_type,
             self.projection.as_ref(),
             &input_schema(self.build.as_ref()),
             &input_schema(self.probe.as_ref()),
-        )?;
-        if self.join_type == NestedLoopJoinType::Left
-            && input_layout(self.probe.as_ref()).batch_layout != BatchLayout::SingleBatch
-        {
-            return Err(PlanError::Invalid(
-                "GpuNestedLoopJoin{Left}: its probe side must be one batch — the finish pass \
-                 accumulates keys and a predicate join has none, so the planner puts a \
-                 GpuCoalesceAllBatches below it"
-                    .to_string(),
-            ));
-        }
-        Ok(())
+        )
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -201,13 +186,6 @@ enum Emits {
     /// The build side and one more column, the mark.
     BuildSideAndMark,
     ProbeSide,
-}
-
-/// Whether the join's output carries a column from each side. False for the two semi
-/// families and for a mark join, whose row is one side's — read by an executor deciding
-/// whether the columns it owes have to be invented or only selected.
-pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
-    matches!(emits(join_type), Emits::BothSides)
 }
 
 fn emits(join_type: JoinType) -> Emits {
@@ -399,58 +377,42 @@ fn collect_column_refs<'a>(expr: &'a Expr, into: &mut Vec<&'a ColumnRef>) {
     }
 }
 
-/// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// the engine: an outer join's residual filter is applied after the outer gather and drops
-/// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
-/// semi family.
-pub(crate) fn capability(
-    join_type: JoinType,
-    has_filter: bool,
-) -> Result<JoinCapability, PlanError> {
-    let streaming = |needs_finish| {
-        Ok(JoinCapability {
-            probe_streams: true,
-            needs_finish,
-        })
-    };
+/// Whether a join owes rows only its last probe batch can settle: the build rows nothing
+/// matched (Left, Full) or the build side's own answer (the semi family). These five are
+/// what a session's `join_finish` answers for, whatever the node's keys or residual. Every
+/// other type answers each probe row in its own call: the build side is complete before the
+/// first probe call, so a probe row unmatched in this batch is unmatched everywhere.
+pub(crate) fn needs_finish(join_type: JoinType) -> bool {
     match join_type {
-        JoinType::Inner => streaming(false),
-        JoinType::Left | JoinType::Right | JoinType::Full if has_filter => {
-            Err(PlanError::Unsupported(format!(
-                "{join_type:?} join with a residual filter: the executor applies it after the \
-                 outer gather, so a padded row's NULLs drop it (#153)"
-            )))
-        }
-        // The build side is complete before the first probe call, so a probe row unmatched
-        // in this batch is unmatched everywhere; only build-side rows need the finish.
-        JoinType::Right => streaming(false),
-        JoinType::Left | JoinType::Full => streaming(true),
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
-            // The per-call join disappears: a probe call is only the key project, and the
-            // build side is not touched until the finish consumes it. The filtered forms
-            // are one legacy call over a probe side the planner made single-batch.
-            Ok(JoinCapability {
-                probe_streams: !has_filter,
-                needs_finish: true,
-            })
-        }
-        JoinType::RightSemi | JoinType::RightAnti if has_filter => {
-            Err(PlanError::Unsupported(format!(
-                "{join_type:?} join with a residual filter: no swapped mixed_* variant exists — \
-                 keeping the emitted side as the build turns it into a Left form (#159)"
-            )))
-        }
-        JoinType::RightSemi | JoinType::RightAnti => streaming(false),
+        JoinType::Left
+        | JoinType::Full
+        | JoinType::LeftSemi
+        | JoinType::LeftAnti
+        | JoinType::LeftMark => true,
+        JoinType::Inner | JoinType::Right | JoinType::RightSemi | JoinType::RightAnti => false,
     }
 }
 
-/// Whether a lane whose build side produced no batch owes no rows at all.
+/// The sides whose unmatched rows are never emitted, as `(build, probe)`. There a NULL key
+/// can match nothing under SQL equality, so it is dropped before the shuffle rather than
+/// skewing the one lane every NULL hashes to (#137).
+pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
+    match join_type {
+        JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi => (true, true),
+        JoinType::Left | JoinType::LeftAnti | JoinType::LeftMark => (false, true),
+        JoinType::Right | JoinType::RightAnti => (true, false),
+        JoinType::Full => (false, false),
+    }
+}
+
+/// Whether a join whose build side holds no row — no batch, or batches of none — owes no
+/// rows at all.
 ///
 /// True where every output row is built from a build row, so an empty build side is an
-/// empty answer and the lane can end without a call. False for the three types that
-/// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
-/// making it takes a call over a build table that does not exist.
-pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
+/// empty answer and the driver drops the lane's probe batches without a call. False for the
+/// three types that preserve unmatched PROBE rows: what they owe is the probe side, padded or
+/// not.
+pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
     match join_type {
         JoinType::Inner
         | JoinType::Left
@@ -462,33 +424,6 @@ pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
     }
 }
 
-/// What the per-probe-batch join emits, which is not what the node is: a Left emits this
-/// batch's matches and waits for the finish, and a Full also emits the probe rows this
-/// batch had no match for — batch-local, because the build side was complete before the
-/// first call.
-///
-/// `None` is the build-side semi family, whose probe call is only the key project.
-pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
-    match join_type {
-        JoinType::Left => Some(JoinType::Inner),
-        JoinType::Full => Some(JoinType::Right),
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => None,
-        other => unreachable!("{other:?} needs no finish pass"),
-    }
-}
-
-/// The join the finish pass runs against the accumulated keys. Left and Full ask which
-/// build rows nothing ever matched; the semi family asks its own question, and asks it
-/// with the node's own NULL semantics, so the pass substitutes for a legacy single call
-/// rather than improving on it (#59, #80).
-pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
-    match join_type {
-        JoinType::Left | JoinType::Full => JoinType::LeftAnti,
-        semi @ (JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark) => semi,
-        other => unreachable!("{other:?} needs no finish pass"),
-    }
-}
-
 /// How many columns a join emits before any projection of its own — the count half of
 /// [`emits`], which is the same fact its carry-over rule reads.
 pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -> usize {
@@ -497,6 +432,16 @@ pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -
         Emits::BuildSide => build,
         Emits::BuildSideAndMark => build + 1,
         Emits::ProbeSide => probe,
+    }
+}
+
+/// The sides whose columns a join type emits, as `(build, probe)` — the side half of
+/// [`emits`]; a mark comes after both.
+pub(crate) fn emitted_sides(join_type: JoinType) -> (bool, bool) {
+    match emits(join_type) {
+        Emits::BothSides => (true, true),
+        Emits::BuildSide | Emits::BuildSideAndMark => (true, false),
+        Emits::ProbeSide => (false, true),
     }
 }
 
@@ -542,14 +487,6 @@ impl GpuNode for GpuHashJoin {
                  GpuCoalesceAllBatches below it"
                     .to_string(),
             ));
-        }
-        let capability = self.capability()?;
-        if !capability.probe_streams && probe.batch_layout != BatchLayout::SingleBatch {
-            return Err(PlanError::Invalid(format!(
-                "GpuHashJoin{{{:?}}} with a residual filter cannot stream its probe — the planner \
-                 inserts GpuCoalesceAllBatches below it",
-                self.join_type
-            )));
         }
         if let Some(filter) = &self.filter {
             check_filter_columns(
@@ -618,4 +555,92 @@ pub(crate) fn new_hash_join(
         build,
         probe,
     }
+}
+
+/// `join_session.cpp` takes a semi join's keys distinct only where no conjunct of its residual
+/// reads both sides or neither; any other goes to `mixed_left_semi_join` or the pairs path,
+/// which take none. The split is mirrored here because the price is of the session it builds.
+pub(crate) fn distinct_key_width(join: &GpuHashJoin) -> u64 {
+    let (side, ordinals): (&dyn GpuNode, Vec<u32>) = match join.join_type {
+        JoinType::RightSemi | JoinType::RightAnti => (
+            join.build.as_ref(),
+            join.keys.iter().map(|(build, _)| *build).collect(),
+        ),
+        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => (
+            join.probe.as_ref(),
+            join.keys.iter().map(|(_, probe)| *probe).collect(),
+        ),
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => return 0,
+    };
+    let mut conjuncts = Vec::new();
+    if let Some(filter) = &join.filter {
+        conjuncts_of(filter, &mut conjuncts);
+    }
+    let crosses = conjuncts.iter().any(|conjunct| {
+        let mut refs = Vec::new();
+        collect_column_refs(conjunct, &mut refs);
+        let reads = |side: JoinSide| {
+            refs.iter()
+                .any(|r| join.filter_columns[r.index as usize].side == side)
+        };
+        reads(JoinSide::Build) == reads(JoinSide::Probe)
+    });
+    if crosses {
+        return 0;
+    }
+    let schema = input_schema(side);
+    ordinals
+        .iter()
+        .map(|ordinal| width_on_device(schema.fields.field(*ordinal as usize).data_type()))
+        .sum()
+}
+
+/// The residual's top-level `AND` operands, as `join_session.cpp`'s `conjuncts_of` splits it.
+fn conjuncts_of<'a>(expr: &'a Expr, into: &mut Vec<&'a Expr>) {
+    match expr {
+        Expr::Binary {
+            left,
+            op: BinaryOp::And,
+            right,
+            ..
+        } => {
+            conjuncts_of(left, into);
+            conjuncts_of(right, into);
+        }
+        other => into.push(other),
+    }
+}
+
+/// A column's bytes per row as the session counts them (`filter_row_bytes`): the fixed width
+/// cuDF holds it at, and 16 for a variable-width one.
+pub(crate) fn width_on_device(data_type: &DataType) -> u64 {
+    match data_type {
+        DataType::Boolean => 1,
+        other => other.primitive_width().map_or(16, |width| width as u64),
+    }
+}
+
+/// cuDF's hash table per build row: a `static_multiset` of 8-byte slots at load factor 0.5,
+/// whatever the key width, and `distinct_hash_join`'s priced the same (design §4.3).
+const HASH_TABLE_BYTES_PER_ROW: u64 = 16;
+
+pub(crate) fn session_bytes(
+    join_type: JoinType,
+    keyed: bool,
+    distinct_key_width: u64,
+    rows: u64,
+) -> u64 {
+    let table = match keyed {
+        true => HASH_TABLE_BYTES_PER_ROW * rows,
+        false => 0,
+    };
+    let distinct_keys = match join_type {
+        JoinType::RightSemi | JoinType::RightAnti => distinct_key_width * rows,
+        _ => 0,
+    };
+    let matched = match needs_finish(join_type) {
+        true => rows,
+        false => 0,
+    };
+    table + distinct_keys + matched
 }

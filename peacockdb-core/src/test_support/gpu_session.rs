@@ -19,8 +19,10 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub(crate) fn open(tree: &dyn GpuNode, what: &str) -> Self {
-        let recipes = attach_recipes(tree).unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
+    /// `join_scratch` is the mode's `join_scratch_bytes`, which every join's session chunks by.
+    pub(crate) fn open(tree: &dyn GpuNode, join_scratch: u64, what: &str) -> Self {
+        let recipes = attach_recipes(tree, join_scratch)
+            .unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
             unsafe { peacock_executor_create(BUDGET, &mut executor) },

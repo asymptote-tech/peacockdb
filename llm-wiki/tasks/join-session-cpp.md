@@ -3,11 +3,11 @@
 Kind: production
 
 **This task closes no ticket on its own.** It builds the C++ half of
-[#136](../tickets/joins.md#t136) (build-side match tracking when the probe side streams),
-[#153](../tickets/joins.md#t153) (equi-join residual filter is applied after the outer gather),
-[#160](../tickets/joins.md#t160) (nested-loop join supports Inner and Left only),
-[#215](../tickets/joins.md#t215) (a left nested-loop join over a predicate the AST cannot take is
-refused on the device) and [#63](../tickets/joins.md#t63) (a zero-column placeholder survives the
+[#136](../archive/archived-tickets.md#t136) (build-side match tracking when the probe side streams),
+[#153](../archive/archived-tickets.md#t153) (equi-join residual filter is applied after the outer gather),
+[#160](../archive/archived-tickets.md#t160) (nested-loop join supports Inner and Left only),
+[#215](../archive/archived-tickets.md#t215) (a left nested-loop join over a predicate the AST cannot take is
+refused on the device) and [#63](../archive/archived-tickets.md#t63) (a zero-column placeholder survives the
 cross join and shifts every ordinal above it), and removes #154's ten `join.cpp` sites. Each of
 those is reachable only through the planner and the Rust executors, so each closes in
 join-backend, where a query or a harness case first shows it fixed. Seventh of the join-rewrite

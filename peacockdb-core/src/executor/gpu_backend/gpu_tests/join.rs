@@ -1,46 +1,45 @@
-//! The joins and the scatter on a device, and the one call the frozen surface cannot make.
-//!
-//! The finish pass is the reason this file exists: probe keys per batch, the concat at
-//! done, the anti join and the pad project. T21 left it as the one shape the engine invented
-//! with no device behind it, and two of its defects were found by reading rather than by
-//! running — so a run is what settles it.
+//! The join session on a device: built once, probed per batch, finished once, released on
+//! drop — and what it holds and spends between those calls, as the accountant reads it.
+//! The scatter rides here too, as the other executor that answers more than a batch in.
 
 use super::*;
 
-use super::super::{GpuEmitter, GpuJoin as GpuJoinExec};
-use crate::plan::{GpuEmitPartitions, GpuFilter, GpuHashJoin};
+use super::super::join::PairScratch;
+use super::super::{GpuEmitter, GpuJoin as GpuJoinExec, GpuProbingJoin};
+use crate::common::logical_size_from_schema;
+use crate::executor::{AbiTarget, Backend, Executor, GpuBackend, GpuContext, NodeExecutors};
+use crate::plan::{BatchLayout, GpuEmitPartitions, GpuHashJoin, JoinFilterColumn, JoinSide};
+use crate::tests::given::Given;
+use crate::wire::FbKind;
+use crate::wire::attach_recipes;
+use datafusion::arrow::datatypes::TimeUnit;
 use datafusion::common::JoinType;
+use peacockdb_ffi::raw::peacock_join_finish;
 
-/// The joined row: both sides' columns, which for this fixture is `k, v` twice.
-fn joined_columns() -> ArrowSchema {
-    schema_of(&[
-        ("k", DataType::Utf8),
-        ("v", DataType::Int64),
-        ("k2", DataType::Utf8),
-        ("v2", DataType::Int64),
+/// Both sides' columns, the probe's nullable where a Left pads it.
+fn joined(probe_padded: bool) -> ArrowSchema {
+    ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("v", DataType::Int64, true),
+        Field::new("k2", DataType::Utf8, probe_padded),
+        Field::new("v2", DataType::Int64, probe_padded),
     ])
 }
 
-/// `build` is row group 2 — `(a, 6)` and `(b, 5)` — and the probe is row group 0 filtered
-/// to `v > 1`, which is `(a, 2)` alone. So `a` matches and `b` is the row only the finish
-/// pass can find.
-fn left_join_tree(join_type: JoinType, output: &ArrowSchema) -> Box<dyn GpuNode> {
-    let probe = GpuFilter::new(
-        mapped(vec![vec![vec![0]]]),
-        Expr::binary(
-            Expr::column(1, "v"),
-            BinaryOp::Gt,
-            Expr::Literal(ScalarValue::Int64(Some(1))),
-            DataType::Boolean,
-        ),
-        None,
-        Schema::new(Arc::new(columns())),
-    );
+/// A hash join of the table to itself, on `k` (`key = 0`) or on `v` (`key = 1`): `build` and
+/// `probe` are the row-group lists of each side's one lane.
+fn self_join(
+    join_type: JoinType,
+    key: u32,
+    build: Vec<u32>,
+    probe: Vec<Vec<u32>>,
+    output: &ArrowSchema,
+) -> Box<dyn GpuNode> {
     Box::new(GpuHashJoin::new(
-        mapped(vec![vec![vec![2]]]),
-        Box::new(probe),
+        mapped(vec![vec![build]]),
+        mapped(vec![probe]),
         join_type,
-        vec![(0, 0)],
+        vec![(key, key)],
         None,
         Vec::new(),
         false,
@@ -49,212 +48,242 @@ fn left_join_tree(join_type: JoinType, output: &ArrowSchema) -> Box<dyn GpuNode>
     ))
 }
 
-/// A Left join cannot run on a device at all, and not only past its first probe batch: its
-/// key project and its per-call join both read the same batch, and the ABI has no copy of
-/// one any more than of a build side. So the pad project — the shape whose columns were
-/// wrong until this morning — still has no device behind it, and says so here rather than
-/// in a comment nothing checks.
-#[test]
-fn a_left_joins_probe_batch_cannot_be_read_twice_and_says_which_ticket() {
-    let out = joined_columns();
-    let tree = left_join_tree(JoinType::Left, &out);
-    let session = Session::open(tree.as_ref());
-    let keys = schema_of(&[("k", DataType::Utf8)]);
-    let join = GpuJoinExec::new(
-        session.site(),
-        session.recipe(3),
-        Some(JoinType::Left),
-        Some(&keys),
-        &out,
-    )
-    .expect("the join builds");
-    let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
-        .expect("the build side is set");
-    let probe = session
-        .exec(2, &columns())
-        .exec(session.scan(&[0]))
-        .expect("the filter runs")
-        .0;
-    let refused = probing
-        .probe_and_fetch(probe)
-        .expect_err("the batch cannot be read by both calls");
-    let message = format!("{refused}");
-    assert!(
-        message.contains("#152") && message.contains("probe batch"),
-        "the refusal has to name the ticket and which handle: {message}"
-    );
-}
-
-/// The build-side semi family is the one shape that streams a multi-batch probe today: its
-/// probe call is the key project alone, so the build side is untouched until the finish
-/// consumes it and no copy is ever needed. All three members, because they answer three
-/// different questions out of the same pass — anti gathers what did not match, semi what
-/// did, and mark scatters a boolean into a column of its own.
-#[test]
-fn every_member_of_the_semi_family_streams_and_answers_at_done() {
-    let build_rows = || {
-        vec![
-            vec![string("a"), ScalarValue::Int64(Some(6))],
-            vec![string("b"), ScalarValue::Int64(Some(5))],
-        ]
-    };
-    let marked = |mark: bool| {
-        vec![
-            vec![
-                string("a"),
-                ScalarValue::Int64(Some(6)),
-                ScalarValue::Boolean(Some(mark)),
-            ],
-            vec![
-                string("b"),
-                ScalarValue::Int64(Some(5)),
-                ScalarValue::Boolean(Some(mark)),
-            ],
-        ]
-    };
-    // On `v` nothing matches — the probe holds 1, 2, 3 and 4 and the build holds 5 and 6 —
-    // and on `k` everything does, which is what tells the three members apart.
-    let cases: [(
-        JoinType,
-        (u32, u32),
-        Vec<(&str, DataType)>,
-        Vec<Vec<ScalarValue>>,
-    ); 3] = [
-        (JoinType::LeftAnti, (1, 1), vec![], build_rows()),
-        (JoinType::LeftSemi, (0, 0), vec![], build_rows()),
-        (
-            JoinType::LeftMark,
-            (0, 0),
-            vec![("mark", DataType::Boolean)],
-            marked(true),
-        ),
-    ];
-    for (join_type, keys, extra, expected) in cases {
-        let out = schema_of(
-            &[
-                &[("k", DataType::Utf8), ("v", DataType::Int64)][..],
-                &extra[..],
-            ]
-            .concat(),
-        );
-        let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
-            mapped(vec![vec![vec![2]]]),
-            mapped(vec![vec![vec![0], vec![1]]]),
-            join_type,
-            vec![keys],
-            None,
-            Vec::new(),
-            false,
-            None,
-            Schema::new(Arc::new(out.clone())),
-        ));
-        let session = Session::open(tree.as_ref());
-        let key_column = match keys.1 {
-            0 => ("k", DataType::Utf8),
-            _ => ("v", DataType::Int64),
-        };
-        let key_schema = schema_of(&[key_column]);
-        let join = GpuJoinExec::new(
-            session.site(),
-            session.recipe(2),
-            Some(join_type),
-            Some(&key_schema),
-            &out,
-        )
-        .expect("the join builds");
-        let (mut probing, _) = join
-            .set_build(session.scan(&[2]))
-            .expect("the build side is set");
-        for group in [0u32, 1] {
-            let (produced, _) = probing
-                .probe_and_fetch(session.scan(&[group]))
-                .expect("the probe runs");
-            assert!(
-                produced.is_empty(),
-                "{join_type:?}: a probe call keeps keys and emits nothing"
-            );
-        }
-        let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
-        let [answer] = <[GpuBatch; 1]>::try_from(finished).expect("one batch at done");
-        let (back, _) = session
-            .export(&out)
-            .unload(answer, RowRange::WHOLE)
-            .expect("the rows cross the boundary");
-        assert_eq!(by_key(&back), expected, "{join_type:?}");
-    }
-}
-
-/// The narrowing project, on a device. A semi join's finish emits the build side, so a
-/// node keeping one of its two columns owes a call that cuts it down — and until the
-/// recipe published one, the device emitted both columns while the CPU emitted one.
-///
-/// `v` alone, so the column that survives is not the key: keeping the key would pass with
-/// a project that emitted the wrong column as readily as the right one.
-#[test]
-fn a_projecting_semi_joins_finish_emits_the_column_the_node_declares() {
-    let out = schema_of(&[("v", DataType::Int64)]);
-    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
-        mapped(vec![vec![vec![2]]]),
-        mapped(vec![vec![vec![0], vec![1]]]),
-        JoinType::LeftSemi,
-        vec![(0, 0)],
-        None,
-        Vec::new(),
-        false,
-        Some(vec![1]),
-        Schema::new(Arc::new(out.clone())),
-    ));
-    let session = Session::open(tree.as_ref());
-    let keys = schema_of(&[("k", DataType::Utf8)]);
-    let join = GpuJoinExec::new(
+/// The join's executor, at post-order 2 — after its two leaves — as `executors_for` builds
+/// it: keyed, no residual, the session's own chunk.
+fn session_join(session: &Session, join_type: JoinType, output: &ArrowSchema) -> GpuJoinExec {
+    let scratch = PairScratch::new(true, &[], &columns(), &columns(), 0);
+    GpuJoinExec::new(
         session.site(),
         session.recipe(2),
-        Some(JoinType::LeftSemi),
-        Some(&keys),
-        &out,
+        join_type,
+        scratch,
+        0,
+        output,
     )
-    .expect("the join builds");
-    let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
-        .expect("the build side is set");
-    for group in [0u32, 1] {
-        let (produced, _) = probing
+    .expect("the recipe is a session's")
+}
+
+fn rows_of(session: &Session, batch: GpuBatch, out: &ArrowSchema) -> Vec<Vec<ScalarValue>> {
+    let (back, _) = session
+        .export(out)
+        .unload(batch, RowRange::WHOLE)
+        .expect("the rows cross the boundary");
+    by_key(&back)
+}
+
+/// The defect the session ends (#152): the old recipe's second probe batch found its build
+/// side erased by the first. Three batches, the third a re-read of the first, each answered
+/// with its own matches — `a` and `b` meet the build's `a` and `b` once per batch.
+#[test]
+fn a_session_probed_three_times_answers_each() {
+    let out = joined(false);
+    let tree = self_join(
+        JoinType::Inner,
+        0,
+        vec![2],
+        vec![vec![0], vec![1], vec![0]],
+        &out,
+    );
+    let session = Session::open(tree.as_ref());
+    let (mut probing, _) = session_join(&session, JoinType::Inner, &out)
+        .set_build(Some(session.scan(&[2])))
+        .expect("the session is built");
+    for (group, probed) in [(0u32, [2, 1]), (1, [4, 3]), (0, [2, 1])] {
+        let (answer, _) = probing
             .probe_and_fetch(session.scan(&[group]))
-            .expect("the probe runs");
-        assert!(
-            produced.is_empty(),
-            "a probe call keeps keys and emits nothing"
+            .expect("every probe batch is answered");
+        let answer = answer.expect("an Inner probe answers a table");
+        assert_eq!(
+            rows_of(&session, answer, &out),
+            vec![
+                vec![
+                    string("a"),
+                    ScalarValue::Int64(Some(6)),
+                    string("a"),
+                    ScalarValue::Int64(Some(probed[0]))
+                ],
+                vec![
+                    string("b"),
+                    ScalarValue::Int64(Some(5)),
+                    string("b"),
+                    ScalarValue::Int64(Some(probed[1]))
+                ],
+            ],
+            "row group {group}"
         );
     }
     let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
-    let [answer] = <[GpuBatch; 1]>::try_from(finished).expect("one batch at done");
-    let (back, _) = session
-        .export(&out)
-        .unload(answer, RowRange::WHOLE)
-        .expect("the rows cross the boundary");
-    let mut rows = rows(&back);
-    rows.sort_by_key(|row| format!("{:?}", row));
+    assert!(finished.is_none(), "an Inner join owes nothing at done");
+}
+
+/// The join's executor as `executors_for` builds it from the node, which is where its
+/// prices are read off the plan.
+fn backend_join(session: &Session, tree: &dyn GpuNode) -> GpuJoinExec {
+    let ctx = GpuContext {
+        executor: session.executor,
+        recipes: attach_recipes(tree, 0).expect("every node's payload is writable"),
+    };
+    match GpuBackend::executors_for(&ctx, tree, 2, 0) {
+        Ok(NodeExecutors::Join(join)) => join,
+        Ok(other) => panic!("a join built a {:?} executor", other.category()),
+        Err(error) => panic!("the join did not build: {error}"),
+    }
+}
+
+/// The four types that answer each probe row in its own call owe nothing at done, and their
+/// recipe publishes no `join_finish`. Their finish ends the session without one, so neither
+/// the journal nor the device's regions hold a call past the probe.
+#[test]
+fn a_join_that_owes_nothing_at_done_makes_no_finish_call() {
+    for join_type in [
+        JoinType::Inner,
+        JoinType::Right,
+        JoinType::RightSemi,
+        JoinType::RightAnti,
+    ] {
+        let out = match join_type {
+            JoinType::Inner | JoinType::Right => joined(false),
+            _ => columns(),
+        };
+        let tree = self_join(join_type, 0, vec![2], vec![vec![0]], &out);
+        let session = Session::open(tree.as_ref());
+        let join = session_join(&session, join_type, &out);
+        let (build, probe) = (session.scan(&[2]), session.scan(&[0]));
+        let _measured = Measuring::on();
+        let (mut probing, _) = join.set_build(Some(build)).expect("built");
+        probing.probe_and_fetch(probe).expect("probed");
+        let (finished, stats) = probing.finish_and_fetch().expect("finished");
+        assert!(finished.is_none(), "{join_type:?} owes nothing at done");
+        assert_eq!(
+            made(&stats),
+            Vec::new(),
+            "{join_type:?}'s finish made a call"
+        );
+        assert_eq!(
+            session.regions().len(),
+            2,
+            "{join_type:?}: the build and the probe, and no finish"
+        );
+    }
+}
+
+/// The session is the device's to free, and `Drop` is what frees it: after the drop the
+/// device no longer knows the id, which it says rather than answering.
+#[test]
+fn dropping_a_probing_join_releases_its_session() {
+    let out = joined(true);
+    let tree = self_join(JoinType::Left, 0, vec![2], vec![vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let (probing, _) = session_join(&session, JoinType::Left, &out)
+        .set_build(Some(session.scan(&[2])))
+        .expect("the session is built");
+    let id = probing.session;
+    drop(probing);
+    let mut handle = 0u64;
+    let mut stats = PeacockNodeStats::default();
+    let rc = unsafe { peacock_join_finish(session.executor, id, &mut handle, &mut stats) };
+    assert_ne!(rc, 0, "the session outlived the executor that held it");
+    let said = error_of(session.executor);
+    assert!(said.contains(&format!("unknown join {id}")), "{said}");
+}
+
+/// A lane with no build batch owes nothing for the six types every row of which is built
+/// from a build row, and its probe rows for the three that preserve them — read off the
+/// type at `set_build`, the one `join_build(0)` still makes. A batch of no rows is the
+/// harness's `*_over_a_zero_row_build_*` cases, which both engines drain.
+#[test]
+fn an_empty_build_under_inner_owes_nothing() {
+    let out = joined(false);
+    let owes = |join_type: JoinType| -> bool {
+        let tree = self_join(join_type, 0, vec![2], vec![vec![0]], &out);
+        let session = Session::open(tree.as_ref());
+        let (probing, _) = session_join(&session, join_type, &out)
+            .set_build(None)
+            .expect("a session is built over no batch");
+        !probing.owes_nothing()
+    };
+    assert!(!owes(JoinType::Inner));
+    for join_type in [
+        JoinType::Left,
+        JoinType::LeftSemi,
+        JoinType::LeftAnti,
+        JoinType::LeftMark,
+        JoinType::RightSemi,
+    ] {
+        assert!(!owes(join_type), "{join_type:?}");
+    }
+    for join_type in [JoinType::Right, JoinType::Full, JoinType::RightAnti] {
+        assert!(owes(join_type), "{join_type:?}");
+    }
+}
+
+/// A Left join's finish, once, after a probe that matched and one that did not: the build
+/// rows nothing matched, padded. On `v`, the build `{4, 3, 6, 5}` meets `{6, 5}` and then
+/// `{2, 1}`, so 4 and 3 are what the finish owes.
+#[test]
+fn a_build_preserving_finish_answers_once() {
+    let out = joined(true);
+    let tree = self_join(JoinType::Left, 1, vec![1, 2], vec![vec![2], vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let (mut probing, _) = session_join(&session, JoinType::Left, &out)
+        .set_build(Some(session.scan(&[1, 2])))
+        .expect("the session is built");
+    let (first, _) = probing.probe_and_fetch(session.scan(&[2])).expect("probed");
+    assert_eq!(rows_of(&session, first.expect("a table"), &out).len(), 2);
+    let (second, _) = probing.probe_and_fetch(session.scan(&[0])).expect("probed");
     assert_eq!(
-        rows,
+        rows_of(&session, second.expect("a table, of no rows"), &out).len(),
+        0,
+        "nothing in {{2, 1}} meets the build"
+    );
+    let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
+    assert_eq!(
+        rows_of(
+            &session,
+            finished.expect("Left owes its unmatched build rows"),
+            &out
+        ),
         vec![
-            vec![ScalarValue::Int64(Some(5))],
-            vec![ScalarValue::Int64(Some(6))],
-        ],
-        "one column out, and it is v"
+            vec![
+                string("a"),
+                ScalarValue::Int64(Some(4)),
+                ScalarValue::Utf8(None),
+                ScalarValue::Int64(None)
+            ],
+            vec![
+                string("b"),
+                ScalarValue::Int64(Some(3)),
+                ScalarValue::Utf8(None),
+                ScalarValue::Int64(None)
+            ],
+        ]
     );
 }
 
-/// The call the frozen surface cannot make. `execute_node` erases what it reads, so the
-/// join call for the first probe batch takes the build side with it; a second batch has
-/// nothing to be given, and saying so is better than a handle that is not there.
+/// `k` and a microsecond timestamp: a side the fixture file does not hold, as a leaf that
+/// is never read — what the session takes from it is `CudfJoin`'s schema alone.
+fn stamped() -> Schema {
+    Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("ts", DataType::Timestamp(TimeUnit::Microsecond, None), true),
+    ])))
+}
+
+/// The pad column of a side that sent no batch takes its type from the schema the wire
+/// wrote for that side, which is the whole reason `CudfJoin` carries both: a Left join that
+/// finishes before any probe batch pads `ts` as the probe declares it.
 #[test]
-fn a_second_probe_batch_of_a_copying_join_is_refused_by_name() {
-    let out = joined_columns();
+fn a_left_join_with_a_timestamp_probe_column_finished_without_a_probe_batch_pads_it() {
+    let out = ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("v", DataType::Int64, true),
+        Field::new("k2", DataType::Utf8, true),
+        Field::new("ts", DataType::Timestamp(TimeUnit::Microsecond, None), true),
+    ]);
     let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
         mapped(vec![vec![vec![2]]]),
-        mapped(vec![vec![vec![0], vec![1]]]),
-        JoinType::Inner,
+        Given::of(stamped(), BatchLayout::MultipleBatches),
+        JoinType::Left,
         vec![(0, 0)],
         None,
         Vec::new(),
@@ -263,50 +292,263 @@ fn a_second_probe_batch_of_a_copying_join_is_refused_by_name() {
         Schema::new(Arc::new(out.clone())),
     ));
     let session = Session::open(tree.as_ref());
-    let join = GpuJoinExec::new(
+    let scratch = PairScratch::new(true, &[], &columns(), stamped().fields.as_ref(), 0);
+    let (probing, _) = GpuJoinExec::new(
         session.site(),
         session.recipe(2),
-        Some(JoinType::Inner),
-        None,
+        JoinType::Left,
+        scratch,
+        0,
         &out,
     )
-    .expect("the join builds");
-    let (mut probing, _) = join
-        .set_build(session.scan(&[2]))
-        .expect("the build side is set");
-    let (matched, _) = probing
-        .probe_and_fetch(session.scan(&[0]))
-        .expect("the first probe batch has the build side");
-    let [joined] = <[GpuBatch; 1]>::try_from(matched).expect("one batch out per probe batch");
+    .expect("the recipe is a session's")
+    .set_build(Some(session.scan(&[2])))
+    .expect("the session is built");
+    let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
     let (back, _) = session
         .export(&out)
-        .unload(joined, RowRange::WHOLE)
+        .unload(
+            finished.expect("Left owes every build row"),
+            RowRange::WHOLE,
+        )
         .expect("the rows cross the boundary");
+    let back = back.record_batch();
+    assert_eq!(back.num_rows(), 2);
     assert_eq!(
-        by_key(&back),
-        vec![
-            vec![
-                string("a"),
-                ScalarValue::Int64(Some(6)),
-                string("a"),
-                ScalarValue::Int64(Some(2))
-            ],
-            vec![
-                string("b"),
-                ScalarValue::Int64(Some(5)),
-                string("b"),
-                ScalarValue::Int64(Some(1))
-            ],
-        ],
-        "the first batch's matches, which is what makes this cell proved and not merely reached"
+        back.column(3).data_type(),
+        &DataType::Timestamp(TimeUnit::Microsecond, None)
     );
-    let refused = probing
-        .probe_and_fetch(session.scan(&[1]))
-        .expect_err("the second has none");
-    let message = format!("{refused}");
-    assert!(
-        message.contains("#152") && message.contains("batch 2"),
-        "the refusal has to name the ticket and which batch: {message}"
+    assert_eq!(
+        back.column(3).null_count(),
+        2,
+        "every build row is unmatched"
+    );
+}
+
+/// The other side's absence (#212's device half): a Right join whose lane got no build
+/// batch owes every probe row, padded with the build columns `CudfJoin` declares — the
+/// timestamp among them, typed though no batch ever carried it.
+#[test]
+fn a_right_join_whose_lane_got_no_build_batch_pads_a_timestamp_build_column() {
+    let out = ArrowSchema::new(vec![
+        Field::new("k", DataType::Utf8, true),
+        Field::new("ts", DataType::Timestamp(TimeUnit::Microsecond, None), true),
+        Field::new("k2", DataType::Utf8, true),
+        Field::new("v", DataType::Int64, true),
+    ]);
+    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
+        Given::of(stamped(), BatchLayout::SingleBatch),
+        mapped(vec![vec![vec![0]]]),
+        JoinType::Right,
+        vec![(0, 0)],
+        None,
+        Vec::new(),
+        false,
+        None,
+        Schema::new(Arc::new(out.clone())),
+    ));
+    let session = Session::open(tree.as_ref());
+    // The given leaf is a stub on the wire, so the scan is post-order 1 and the join 2.
+    let scan = session.recipes.get(1).expect("the scan's recipe").calls[0]
+        .target
+        .expect("a scan addresses its node")
+        .0;
+    let scratch = PairScratch::new(true, &[], stamped().fields.as_ref(), &columns(), 0);
+    let (mut probing, _) = GpuJoinExec::new(
+        session.site(),
+        session.recipe(2),
+        JoinType::Right,
+        scratch,
+        0,
+        &out,
+    )
+    .expect("the recipe is a session's")
+    .set_build(None)
+    .expect("a session is built over no batch");
+    assert!(!probing.owes_nothing(), "a Right join owes its probe rows");
+    let (answer, _) = probing
+        .probe_and_fetch(scan_at(&session, scan, &[0]))
+        .expect("the probe is answered");
+    let (back, _) = session
+        .export(&out)
+        .unload(answer.expect("one table per probe batch"), RowRange::WHOLE)
+        .expect("the rows cross the boundary");
+    let back = back.record_batch();
+    assert_eq!(back.num_rows(), 2, "both probe rows, padded");
+    assert_eq!(
+        back.column(1).data_type(),
+        &DataType::Timestamp(TimeUnit::Microsecond, None)
+    );
+    assert_eq!(back.column(1).null_count(), 2);
+}
+
+/// A scan at a seq the caller names, for a tree whose post-order 0 is not the scan.
+fn scan_at(session: &Session, seq: Seq, groups: &[u32]) -> GpuBatch {
+    let mut handle = 0u64;
+    let mut stats = PeacockNodeStats::default();
+    let rc = unsafe {
+        peacock_executor_execute_scan_rowgroups(
+            session.executor,
+            seq as u64,
+            groups.as_ptr(),
+            groups.len() as u64,
+            &mut handle,
+            &mut stats,
+        )
+    };
+    assert_eq!(rc, 0, "the scan failed: {}", error_of(session.executor));
+    GpuBatch::new(session.executor, handle, seq, stats.rows as usize, 0)
+}
+
+/// Every session call is one call on the `CudfJoin`'s seq, journalled here and answered by
+/// one device region, counted together: build, three probes and the finish are calls 0 to
+/// 4 of that seq, which is the key the driver's measurement joins the two records on.
+#[test]
+fn every_session_call_is_journalled_and_timed_on_the_joins_seq() {
+    let out = joined(true);
+    let tree = self_join(
+        JoinType::Left,
+        0,
+        vec![2],
+        vec![vec![0], vec![1], vec![0]],
+        &out,
+    );
+    let session = Session::open(tree.as_ref());
+    let join = session_join(&session, JoinType::Left, &out);
+    let seq = join.seq;
+    // The scans are made before timing is on, so the device's regions are the join's alone.
+    let build = session.scan(&[2]);
+    let probes: Vec<GpuBatch> = [0u32, 1, 0]
+        .iter()
+        .map(|group| session.scan(&[*group]))
+        .collect();
+    let _measured = Measuring::on();
+    let mut journalled = Vec::new();
+    let (mut probing, stats) = join.set_build(Some(build)).expect("built");
+    journalled.extend(made(&stats));
+    for probe in probes {
+        let (_, stats) = probing.probe_and_fetch(probe).expect("probed");
+        journalled.extend(made(&stats));
+    }
+    let (_, stats) = probing.finish_and_fetch().expect("finished");
+    journalled.extend(made(&stats));
+    assert_eq!(
+        journalled
+            .iter()
+            .map(|call| (call.seq, call.target))
+            .collect::<Vec<_>>(),
+        vec![(seq, AbiTarget::Node(FbKind::Join)); 5]
+    );
+    assert_eq!(
+        journalled[0].in_rows, 2,
+        "the build call was handed the build batch"
+    );
+    assert_eq!(
+        session
+            .regions()
+            .iter()
+            .map(|region| (region.seq, region.call_index))
+            .collect::<Vec<_>>(),
+        (0..5).map(|index| (seq, index)).collect::<Vec<_>>(),
+        "one region per call, the build first"
+    );
+}
+
+/// What the accountant reads off a session: the build batch, sixteen bytes a row of hash
+/// table, and for a type that finishes one byte a row of `matched` — all of it from
+/// `set_build` until the drop, and none of it before.
+#[test]
+fn a_session_holds_its_build_its_hash_table_and_its_matched_column() {
+    let held = |join_type: JoinType| -> (usize, usize) {
+        let out = joined(join_type == JoinType::Left);
+        let tree = self_join(join_type, 0, vec![1, 2], vec![vec![0]], &out);
+        let session = Session::open(tree.as_ref());
+        let join = session_join(&session, join_type, &out);
+        assert_eq!(join.resident_bytes(), 0, "nothing before the build");
+        let build = session.scan(&[1, 2]);
+        let build_bytes = build.byte_size();
+        let (probing, _): (GpuProbingJoin, _) = join.set_build(Some(build)).expect("built");
+        (probing.resident_bytes(), build_bytes)
+    };
+    let (inner, build) = held(JoinType::Inner);
+    assert_eq!(inner, build + 16 * 4, "four build rows, no matched column");
+    let (left, build) = held(JoinType::Left);
+    assert_eq!(
+        left,
+        build + 16 * 4 + 4,
+        "and a byte a row saying which matched"
+    );
+}
+
+/// A RightSemi session also holds its build's keys taken distinct, the copy its table views:
+/// four `k`s here, a string each, at the 16 bytes a row the session prices one. Built as
+/// `executors_for` builds it, so the width is read off the node.
+#[test]
+fn a_probe_side_semi_session_holds_its_distinct_build_keys() {
+    let out = columns();
+    let tree = self_join(JoinType::RightSemi, 0, vec![1, 2], vec![vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let build = session.scan(&[1, 2]);
+    let build_bytes = build.byte_size();
+    let (probing, _) = backend_join(&session, tree.as_ref())
+        .set_build(Some(build))
+        .expect("built");
+    assert_eq!(
+        probing.resident_bytes(),
+        build_bytes + 16 * 4 + 16 * 4,
+        "four build rows: the hash table and the distinct keys"
+    );
+}
+
+/// A LeftSemi probe takes its batch's keys distinct before matching them, so a call is
+/// charged a key a probe row beside the batch, an output as long and the pairs.
+#[test]
+fn a_build_side_semi_probe_is_charged_its_batchs_distinct_keys() {
+    let out = columns();
+    let tree = self_join(JoinType::LeftSemi, 0, vec![1, 2], vec![vec![0]], &out);
+    let session = Session::open(tree.as_ref());
+    let (probing, _) = backend_join(&session, tree.as_ref())
+        .set_build(Some(session.scan(&[1, 2])))
+        .expect("built");
+    let output = logical_size_from_schema(&out, 2, 0);
+    assert_eq!(
+        probing.scratch_bytes(2, 100),
+        100 + output + 2 * 8 + 2 * 16,
+        "two probe rows: the batch, the output, the pairs and the distinct keys"
+    );
+}
+
+/// The pair scratch is `gpu_plan.fbs`'s formula: 8 bytes a pair for the index maps plus
+/// the residual's own bytes, 16 for a string, and never more than one chunk.
+#[test]
+fn a_join_calls_pair_scratch_is_the_sessions_chunked_formula() {
+    let filter = [
+        JoinFilterColumn {
+            side: JoinSide::Build,
+            index: 0,
+        },
+        JoinFilterColumn {
+            side: JoinSide::Probe,
+            index: 1,
+        },
+    ];
+    let keyed = PairScratch::new(true, &filter, &columns(), &columns(), 0);
+    assert_eq!(
+        keyed.bytes(4, 10),
+        10 * (8 + 16 + 8),
+        "one match per probe row"
+    );
+    let keyless = PairScratch::new(false, &filter, &columns(), &columns(), 1000);
+    assert_eq!(
+        keyless.bytes(4, 10),
+        1000,
+        "40 pairs at 32 bytes, held to the chunk"
+    );
+    let cross = PairScratch::new(false, &[], &columns(), &columns(), 0);
+    assert_eq!(
+        cross.bytes(4, 10),
+        40 * 8,
+        "no residual: the index maps alone"
     );
 }
 
@@ -328,51 +570,5 @@ fn a_scatter_answers_with_one_handle_per_lane() {
         scattered,
         values().len(),
         "every row landed in exactly one lane"
-    );
-}
-
-/// The device's half of the same claim: a lane whose probe was empty owes every build row
-/// from an anti join, and this backend answers it without a call — the concat of no keys
-/// is a refusal, and what the finish would have computed is the build side itself.
-#[test]
-fn a_finish_over_no_probe_keys_hands_the_build_side_up() {
-    let out = columns();
-    let tree: Box<dyn GpuNode> = Box::new(GpuHashJoin::new(
-        mapped(vec![vec![vec![2]]]),
-        mapped(vec![vec![vec![0]]]),
-        JoinType::LeftAnti,
-        vec![(0, 0)],
-        None,
-        Vec::new(),
-        false,
-        None,
-        Schema::new(Arc::new(out.clone())),
-    ));
-    let session = Session::open(tree.as_ref());
-    let keys = schema_of(&[("k", DataType::Utf8)]);
-    let join = GpuJoinExec::new(
-        session.site(),
-        session.recipe(2),
-        Some(JoinType::LeftAnti),
-        Some(&keys),
-        &out,
-    )
-    .expect("the join builds");
-    let (probing, _) = join
-        .set_build(session.scan(&[2]))
-        .expect("the build side is set");
-    let (finished, _) = probing.finish_and_fetch().expect("the finish runs");
-    let [answer] = <[GpuBatch; 1]>::try_from(finished).expect("one batch at done");
-    let (back, _) = session
-        .export(&out)
-        .unload(answer, RowRange::WHOLE)
-        .expect("the rows cross the boundary");
-    assert_eq!(
-        by_key(&back),
-        vec![
-            vec![string("a"), ScalarValue::Int64(Some(6))],
-            vec![string("b"), ScalarValue::Int64(Some(5))],
-        ],
-        "no probe batch arrived, so both build rows are unmatched"
     );
 }

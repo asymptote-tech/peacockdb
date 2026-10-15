@@ -3,6 +3,7 @@
 //! Seqs ascend with the order the nodes are built, which is the order the C++ indexes them —
 //! `writer.rs` has the three rules that keep those the same sequence.
 
+use super::join::JoinNode;
 use super::writer::Writer;
 use super::{AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan};
 use super::{aggregate_writer, join, node_writer};
@@ -12,8 +13,8 @@ use crate::plan::PlanError;
 use crate::plan::Schema;
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
-    GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergeSortedPartitions,
-    GpuProject, GpuSort, GpuUnload, NodeRef, try_as_node_ref,
+    GpuEmitPartitions, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergeSortedPartitions, GpuProject,
+    GpuSort, GpuUnload, NodeRef, try_as_node_ref,
 };
 
 /// Build the recipe plan for a finished tree. It runs after planning because a recipe is
@@ -23,8 +24,11 @@ use crate::plan::{
 /// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
 /// handed, and the alternative is a buffer whose every later seq has to be checked against
 /// a list to be trusted.
-pub(crate) fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
-    let mut writer = Writer::new();
+pub(crate) fn attach_recipes(
+    root: &dyn GpuNode,
+    join_scratch_bytes: u64,
+) -> Result<RecipePlan, PlanError> {
+    let mut writer = Writer::with_join_scratch(join_scratch_bytes);
     let mut recipes = Vec::new();
     walk(root, &mut writer, &mut recipes)?;
     let (bytes, wire_nodes) = writer.finish()?;
@@ -32,6 +36,7 @@ pub(crate) fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError
         recipes,
         bytes,
         wire_nodes,
+        join_scratch_bytes,
     })
 }
 
@@ -92,11 +97,17 @@ fn emit(
         NodeRef::AggregateBatches(merge) => aggregate_batches(merge, inputs, writer),
         NodeRef::MergeSortedPartitions(merge) => merge_sorted_partitions(merge, inputs, writer),
         NodeRef::EmitPartitions(emitter) => emit_partitions(emitter, node, inputs, writer),
-        NodeRef::Join(join_node) => join::hash_join(join_node, inputs, writer),
-        NodeRef::CrossJoin(cross) => cross_join(cross, inputs, writer),
-        NodeRef::NestedLoopJoin(nested) => join::nested_loop_join(nested, inputs, writer),
+        NodeRef::Join(hash) => join::join(JoinNode::Hash(hash), inputs, writer),
+        NodeRef::CrossJoin(cross) => join::join(JoinNode::Cross(cross), inputs, writer),
+        NodeRef::NestedLoopJoin(nested) => join::join(JoinNode::NestedLoop(nested), inputs, writer),
         NodeRef::Limit(limit_node) => limit(limit_node, inputs, writer),
         NodeRef::Unload(unload_node) => unload(unload_node, inputs, writer),
+        // A leaf that reads nothing calls nothing, and holds its slot with a stub so a
+        // plan of it alone still has a root.
+        NodeRef::Empty(_) => {
+            writer.leaf();
+            Ok(None)
+        }
         // The three that route rather than compute: not one call between them.
         NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => Ok(None),
     }
@@ -325,20 +336,6 @@ fn emit_partitions(
         FbKind::Repartition { lanes },
         vec![Input::Batch],
         CallPattern::PerBatch,
-    )])))
-}
-
-fn cross_join(
-    _node: &GpuCrossJoin,
-    _inputs: &[&Schema],
-    writer: &mut Writer,
-) -> Result<Option<Recipe>, PlanError> {
-    let seq = writer.node(2, |b, kids| Ok(join::cross_join_payload(b, kids)))?;
-    Ok(Some(Recipe::of(vec![Call::seq(
-        seq,
-        FbKind::CrossJoin,
-        vec![Input::BuildSideCopy, Input::Batch],
-        CallPattern::PerProbeBatch,
     )])))
 }
 

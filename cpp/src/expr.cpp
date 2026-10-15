@@ -70,8 +70,6 @@ void debug_sync(const char* tag) {
 static bool is_predicate_op(fb::BinaryOp op);
 static cudf::type_id infer_expr_type(const fb::Expr* expr,
                                      cudf::table_view const& table);
-static std::unique_ptr<cudf::column> build_column_binary(
-    const fb::Expr* expr, cudf::table_view const& table);
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv);
 
 
@@ -242,6 +240,15 @@ cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
       auto* bin = expr->node_as_BinaryExprNode();
       auto& left = build_expr(bin->left(), ctx, col_map);
       auto& right = build_expr(bin->right(), ctx, col_map);
+      // IS [NOT] DISTINCT FROM is two AST nodes rather than one operator, so it is not
+      // fb_to_ast_op's: NULL_EQUAL, and NOT over it for IS DISTINCT FROM.
+      if (bin->op() == fb::BinaryOp_IsNotDistinctFrom || bin->op() == fb::BinaryOp_IsDistinctFrom) {
+        auto& equal = ctx.keep(std::make_unique<cudf::ast::operation>(
+            cudf::ast::ast_operator::NULL_EQUAL, left, right));
+        if (bin->op() == fb::BinaryOp_IsNotDistinctFrom) return equal;
+        return ctx.keep(
+            std::make_unique<cudf::ast::operation>(cudf::ast::ast_operator::NOT, equal));
+      }
       auto op = fb_to_ast_op(bin->op());
       return ctx.keep(std::make_unique<cudf::ast::operation>(op, left, right));
     }
@@ -505,6 +512,10 @@ static cudf::binary_operator fb_to_binop(fb::BinaryOp op) {
     case fb::BinaryOp_BitwiseAnd: return cudf::binary_operator::BITWISE_AND;
     case fb::BinaryOp_BitwiseOr:  return cudf::binary_operator::BITWISE_OR;
     case fb::BinaryOp_BitwiseXor: return cudf::binary_operator::BITWISE_XOR;
+    case fb::BinaryOp_IsNotDistinctFrom:
+      return cudf::binary_operator::NULL_EQUALS;
+    case fb::BinaryOp_IsDistinctFrom:
+      return cudf::binary_operator::NULL_NOT_EQUALS;
     default:
       throw std::runtime_error(
           "unsupported BinaryOp in column path: " + std::to_string(op));
@@ -533,6 +544,8 @@ static bool is_predicate_op(fb::BinaryOp op) {
     case fb::BinaryOp_GtEq:
     case fb::BinaryOp_And:
     case fb::BinaryOp_Or:
+    case fb::BinaryOp_IsDistinctFrom:
+    case fb::BinaryOp_IsNotDistinctFrom:
       return true;
     default:
       return false;

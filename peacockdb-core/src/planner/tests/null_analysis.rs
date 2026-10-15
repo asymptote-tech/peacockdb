@@ -17,12 +17,12 @@ use crate::plan::RowGroupMeta;
 use crate::plan::ScanMetadata;
 use crate::plan::Schema;
 use crate::plan::{
-    AggregateBody, GpuAggregate, GpuFilter, GpuLimit, GpuLoadParquet, GpuMergePartitions,
-    GpuProject, GpuSort, GpuUnion,
+    AggregateBody, GpuAggregate, GpuCrossJoin, GpuEmpty, GpuFilter, GpuLimit, GpuLoadParquet,
+    GpuMergePartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 use crate::plan::{GpuNode, RowInterval};
-use crate::planner::nulls::can_be_null;
+use crate::planner::nullability::can_be_null;
 
 /// A source declaring exactly the nullability asked for. The leaf reads this off parquet
 /// statistics; here it is stated, which is the only way to get a NOT-nullable column at all.
@@ -202,4 +202,81 @@ fn a_filter_that_projects_answers_for_the_columns_it_keeps() {
         one_column(),
     );
     assert_eq!(can_be_null(&filter), vec![false]);
+}
+
+#[test]
+fn a_nested_loop_join_pads_the_side_its_type_drops_and_then_projects() {
+    // Hand-built because no corpus query makes the difference visible: a Left nested loop
+    // pads its probe, and the projection's ordinals index the padded table rather than
+    // either side, so reading them off the unpadded concatenation reads the wrong columns.
+    let join = GpuNestedLoopJoin::new(
+        source(&[false, false]),
+        source(&[false, false]),
+        datafusion::common::JoinType::Left,
+        Expr::Literal(ScalarValue::Boolean(Some(true))),
+        Vec::new(),
+        Some(vec![2, 0]),
+        Schema::new(Arc::new(ArrowSchema::new(vec![
+            Field::new("p0", DataType::Int64, true),
+            Field::new("b0", DataType::Int64, true),
+        ]))),
+    );
+    assert_eq!(can_be_null(&join), vec![true, false]);
+}
+
+/// A scan of no column, which declares `__rowmarker__` (#63).
+fn rowmarker_source() -> Box<dyn GpuNode> {
+    let scan = ScanMetadata {
+        file: "/t.parquet".to_string(),
+        groups: vec![RowGroupMeta {
+            index: 0,
+            rows: 100,
+            bytes: 0,
+        }],
+        can_be_null: Vec::new(),
+    };
+    Box::new(GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        vec![vec![vec![0]]],
+        &scan,
+        None,
+        Schema::rowmarker(),
+    ))
+}
+
+#[test]
+fn a_scan_of_no_column_says_its_marker_holds_no_null() {
+    // The marker is a literal zero per row: one column, never NULL, whatever the footer says
+    // of the columns the scan does not read.
+    assert_eq!(can_be_null(rowmarker_source().as_ref()), vec![false]);
+}
+
+#[test]
+fn a_cross_join_reads_its_projection_past_the_rowmarker() {
+    // A cross join over a side of no column drops the marker through its projection; read
+    // unprojected, the crossed table reports the marker's `false` for the column it kept.
+    let join = GpuCrossJoin::new(
+        rowmarker_source(),
+        source(&[true]),
+        Some(vec![1]),
+        Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(
+            "c0",
+            DataType::Int64,
+            true,
+        )]))),
+    );
+    assert_eq!(can_be_null(&join), vec![true]);
+}
+
+/// A relation DataFusion proved empty has no row, so none of its columns holds a NULL —
+/// which is what spares a join key read from it #137's filter, though every field of it is
+/// declared nullable.
+#[test]
+fn an_empty_relation_says_no_column_holds_a_null() {
+    let schema = Schema::new(Arc::new(ArrowSchema::new(vec![
+        Field::new("a", DataType::Int64, true),
+        Field::new("b", DataType::Utf8, true),
+    ])));
+    assert_eq!(can_be_null(&GpuEmpty::new(schema)), vec![false, false]);
 }

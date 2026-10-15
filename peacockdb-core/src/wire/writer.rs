@@ -35,15 +35,22 @@ pub(crate) struct Writer<'a> {
     /// Created and not yet taken as somebody's child, oldest first.
     pool: Vec<WIPOffset<fb::PlanNode<'a>>>,
     next_seq: Seq,
+    join_scratch_bytes: u64,
 }
 
 impl<'a> Writer<'a> {
-    pub(crate) fn new() -> Self {
+    /// A writer whose joins carry `bytes` as their `chunk_bytes`: one plan, one budget.
+    pub(crate) fn with_join_scratch(bytes: u64) -> Self {
         Self {
             builder: FlatBufferBuilder::new(),
             pool: Vec::new(),
             next_seq: 0,
+            join_scratch_bytes: bytes,
         }
+    }
+
+    pub(crate) fn join_scratch_bytes(&self) -> u64 {
+        self.join_scratch_bytes
     }
 
     /// Build one addressed node: take `arity` inputs, stub whatever is missing, number it.
@@ -89,14 +96,15 @@ impl<'a> Writer<'a> {
     }
 
     /// A leaf with nothing to call, occupying one slot: the stub `take` would have made for
-    /// its parent, made now so a seqless parent still has a root. Test-built trees only —
-    /// a planned tree has no leaf but a scan.
+    /// its parent, made now so a seqless parent still has a root. A `GpuEmpty` is the one
+    /// planned leaf that takes it; a test-built leaf is the other.
     pub(crate) fn leaf(&mut self) -> Seq {
         self.scan_of_nothing().0
     }
 
-    /// `CudfScan` is the only leaf the schema has — every other table carries `input`,
-    /// `left`/`right` or `inputs` — so it is what both the stub and the leaf are made of.
+    /// `CudfScan` is the schema's one leaf that names nothing else — `CudfJoin` is read by a
+    /// session, and every other table carries `input` or `inputs` — so it is what both the
+    /// stub and the leaf are made of.
     fn scan_of_nothing(&mut self) -> (Seq, WIPOffset<fb::PlanNode<'a>>) {
         let scan = fb::CudfScan::create(&mut self.builder, &fb::CudfScanArgs::default());
         self.push(Payload {

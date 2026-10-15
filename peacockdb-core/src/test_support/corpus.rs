@@ -338,7 +338,11 @@ async fn collect(ctx: &SessionContext, sql: &str, what: &str) -> Vec<RecordBatch
         .unwrap_or_else(|e| panic!("{what}: the oracle does not run it: {e}"))
 }
 
-async fn session_for(dataset: &str, sf: &str, target_partitions: usize) -> SessionContext {
+pub(crate) async fn session_for(
+    dataset: &str,
+    sf: &str,
+    target_partitions: usize,
+) -> SessionContext {
     crate::register_tables_for(
         crate::build_session_state(target_partitions),
         &data_dir_for(dataset, sf),
@@ -347,7 +351,7 @@ async fn session_for(dataset: &str, sf: &str, target_partitions: usize) -> Sessi
     .expect("register the tables")
 }
 
-fn query_text(dataset: &str, query: &str) -> String {
+pub(crate) fn query_text(dataset: &str, query: &str) -> String {
     let path = queries_dir_for(dataset).join(format!("{query}.sql"));
     std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("query file not found: {}", path.display()))

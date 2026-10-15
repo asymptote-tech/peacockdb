@@ -7,13 +7,19 @@
 
 use std::sync::Arc;
 
+use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
+use datafusion::common::{JoinSide as DfJoinSide, JoinType, ScalarValue};
 use datafusion::datasource::physical_plan::ParquetExec;
+use datafusion::logical_expr::Operator;
+use datafusion::physical_expr::expressions::{BinaryExpr, Column};
+use datafusion::physical_expr::{PhysicalExpr, split_conjunction};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::Partitioning;
 use datafusion::physical_plan::aggregates::AggregateExec;
 use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
 use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
+use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::{CrossJoinExec, HashJoinExec, NestedLoopJoinExec};
 use datafusion::physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
@@ -32,17 +38,21 @@ use super::common::*;
 use super::expr::translate_expr;
 use super::scan_mapping::{parquet_table_name, partition, survivor_metadata};
 use crate::plan::BatchLayout;
+use crate::plan::JoinFilterColumn;
 use crate::plan::PlanError;
+use crate::plan::ROWMARKER;
 use crate::plan::Schema;
+use crate::plan::null_key_droppable;
 use crate::plan::{Batching, RowGroupMeta};
+use crate::plan::{BinaryOp, UnaryOp};
 use crate::plan::{Expr, NamedExpr};
 use crate::plan::{
-    GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter,
-    GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
+    GpuAccumulateBatchesAndSort, GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty,
+    GpuFilter, GpuHashJoin, GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions,
     GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion,
 };
 use crate::plan::{GpuNode, RowInterval};
-use crate::plan::{NestedLoopJoinType, capability};
+use crate::planner::nullability::can_be_null;
 
 pub(crate) fn node(
     t: &Translator,
@@ -68,6 +78,17 @@ pub(crate) fn node(
     }
     if let Some(project) = any.downcast_ref::<ProjectionExec>() {
         let input = node(t, project.input())?;
+        if project.expr().is_empty() {
+            // Rows and no column — what `count(*)` over a join reads (#63).
+            return Ok(Box::new(GpuProject::new(
+                input,
+                vec![NamedExpr::new(
+                    Expr::Literal(ScalarValue::Int8(Some(0))),
+                    ROWMARKER,
+                )],
+                Schema::rowmarker(),
+            )));
+        }
         let input_schema = project.input().schema();
         let mut exprs = Vec::with_capacity(project.expr().len());
         for (expr, name) in project.expr() {
@@ -108,11 +129,9 @@ pub(crate) fn node(
         // With no key to co-locate on, both sides are one lane — the probe as much as
         // the build, though only the build is also one batch.
         let probe = merged(node(t, cross.right())?);
+        let (projection, schema) = past_rowmarkers(cross, JoinType::Inner, None);
         return Ok(Box::new(GpuCrossJoin::new(
-            build,
-            probe,
-            None,
-            Schema::new(cross.schema()),
+            build, probe, projection, schema,
         )));
     }
     if let Some(nested) = any.downcast_ref::<NestedLoopJoinExec>() {
@@ -161,6 +180,10 @@ pub(crate) fn node(
             "{}: window functions (#143)",
             plan.name()
         )));
+    }
+
+    if let Some(empty) = any.downcast_ref::<EmptyExec>() {
+        return Ok(Box::new(GpuEmpty::new(Schema::new(empty.schema()))));
     }
 
     if any.is::<PlaceholderRowExec>() {
@@ -247,9 +270,6 @@ pub(crate) fn hash_join(
     t: &Translator,
     join: &HashJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    let has_filter = join.filter().is_some();
-    let capability = capability(*join.join_type(), has_filter)?;
-
     let mut keys = Vec::with_capacity(join.on().len());
     for (left, right) in join.on() {
         // Each side's key is an ordinal into that side, so each is read against that
@@ -259,11 +279,55 @@ pub(crate) fn hash_join(
             column_ordinal_of(right, &join.right().schema(), "join key")?,
         ));
     }
+    let residual = match join.filter() {
+        Some(filter) => Some((
+            translate_expr(filter.expression(), filter.schema())?,
+            filter_column_map(filter)?,
+        )),
+        None => None,
+    };
+    keyed_join(
+        t,
+        join,
+        *join.join_type(),
+        KeyedOn {
+            keys,
+            residual,
+            null_equals_null: join.null_equals_null(),
+            projection: projected(join.projection.as_ref()),
+        },
+    )
+}
 
+/// What a hash join is keyed on, whichever DataFusion node it was read from.
+struct KeyedOn {
+    keys: Vec<(u32, u32)>,
+    residual: Option<(Expr, Vec<JoinFilterColumn>)>,
+    null_equals_null: bool,
+    projection: Option<Vec<u32>>,
+}
+
+/// A hash join over `join`'s two sides, built first: the co-partitioning, #137's filters and
+/// the build's one batch per lane.
+fn keyed_join(
+    t: &Translator,
+    join: &dyn ExecutionPlan,
+    join_type: JoinType,
+    on: KeyedOn,
+) -> Result<Box<dyn GpuNode>, PlanError> {
+    let KeyedOn {
+        keys,
+        residual,
+        null_equals_null,
+        projection,
+    } = on;
+    let [left, right] = join.children()[..] else {
+        unreachable!("a join has two sides")
+    };
     // DataFusion collects its left input, so the build side is already left; what the
     // planner adds is the one batch per lane the join reads it as.
-    let mut build = node(t, join.left())?;
-    let mut probe = node(t, join.right())?;
+    let mut build = node(t, left)?;
+    let mut probe = node(t, right)?;
     if !co_partitioned(build.as_ref(), probe.as_ref(), &keys) {
         // DataFusion broadcasts a small build side rather than hashing both, so the
         // sides are not co-located and the engine has no broadcast to do it with
@@ -271,33 +335,126 @@ pub(crate) fn hash_join(
         build = merged(build);
         probe = merged(probe);
     }
+    // #137, before the build is coalesced: the key ordinals index each side's own output,
+    // which is the shuffle's input schema.
+    if !null_equals_null {
+        let (drop_build, drop_probe) = null_key_droppable(join_type);
+        if drop_build {
+            let ordinals: Vec<u32> = keys.iter().map(|(build, _)| *build).collect();
+            build = drop_null_keys_below_shuffle(build, &ordinals);
+        }
+        if drop_probe {
+            let ordinals: Vec<u32> = keys.iter().map(|(_, probe)| *probe).collect();
+            probe = drop_null_keys_below_shuffle(probe, &ordinals);
+        }
+    }
     if batches(build.as_ref()) != BatchLayout::SingleBatch {
         build = Box::new(GpuCoalesceAllBatches::new(build));
     }
-    if !capability.probe_streams && batches(probe.as_ref()) != BatchLayout::SingleBatch {
-        probe = Box::new(GpuCoalesceAllBatches::new(probe));
-    }
-
-    let (filter, filter_columns) = match join.filter() {
-        Some(filter) => (
-            Some(translate_expr(filter.expression(), filter.schema())?),
-            filter_column_map(filter)?,
-        ),
+    let (filter, filter_columns) = match residual {
+        Some((filter, columns)) => (Some(filter), columns),
         None => (None, Vec::new()),
     };
     Ok(Box::new(GpuHashJoin::new(
         build,
         probe,
-        *join.join_type(),
+        join_type,
         keys,
         filter,
         filter_columns,
-        join.null_equals_null(),
-        join.projection
-            .as_ref()
-            .map(|columns| columns.iter().map(|c| *c as u32).collect()),
+        null_equals_null,
+        projection,
         Schema::new(join.schema()),
     )))
+}
+
+/// A nested loop's `IS NOT DISTINCT FROM` conjuncts over one column of each side, as hash
+/// keys under `null_equals_null`; `None` where there is none. Only those become keys, since
+/// the flag is one for every key: any other conjunct stays the residual and keeps its own
+/// NULL semantics. DataFusion 45 extracts only `=` as a key, so a keyless join holds no `=`
+/// pair a key could have come from.
+fn null_equal_keys(join: &NestedLoopJoinExec) -> Result<Option<KeyedOn>, PlanError> {
+    let Some(filter) = join.filter() else {
+        return Ok(None);
+    };
+    let side_of = |expr: &Arc<dyn PhysicalExpr>| {
+        let column = expr.as_any().downcast_ref::<Column>()?;
+        let index = &filter.column_indices()[column.index()];
+        Some((index.side, index.index as u32))
+    };
+    let (mut keys, mut rest) = (Vec::new(), Vec::new());
+    for conjunct in split_conjunction(filter.expression()) {
+        let pair = conjunct
+            .as_any()
+            .downcast_ref::<BinaryExpr>()
+            .filter(|binary| *binary.op() == Operator::IsNotDistinctFrom)
+            .and_then(|binary| Some((side_of(binary.left())?, side_of(binary.right())?)));
+        match pair {
+            Some(((DfJoinSide::Left, build), (DfJoinSide::Right, probe)))
+            | Some(((DfJoinSide::Right, probe), (DfJoinSide::Left, build))) => {
+                keys.push((build, probe))
+            }
+            _ => rest.push(translate_expr(conjunct, filter.schema())?),
+        }
+    }
+    if keys.is_empty() {
+        return Ok(None);
+    }
+    let residual = rest
+        .into_iter()
+        .reduce(|left, right| Expr::binary(left, BinaryOp::And, right, DataType::Boolean));
+    Ok(Some(KeyedOn {
+        keys,
+        residual: match residual {
+            Some(residual) => Some((residual, filter_column_map(filter)?)),
+            None => None,
+        },
+        null_equals_null: true,
+        projection: projected(join.projection()),
+    }))
+}
+
+/// #137: a NULL key matches nothing on a side whose unmatched rows are never emitted, so
+/// where the data can hold one it is dropped before the shuffle instead of skewing the one
+/// lane every NULL hashes to.
+fn drop_null_keys_below_shuffle(side: Box<dyn GpuNode>, keys: &[u32]) -> Box<dyn GpuNode> {
+    // Whether this side shuffles here is a question about the TRANSLATED top, not about
+    // DataFusion's: a hash `RepartitionExec` always arrives wrapped in a
+    // `CoalesceBatchesExec` (`coalesce_batches.rs:57-80`) that translation drops.
+    if side.as_any().downcast_ref::<GpuEmitPartitions>().is_none() {
+        return side;
+    }
+    let n = lanes(side.as_ref());
+    let emit = side
+        .into_any_box()
+        .downcast::<GpuEmitPartitions>()
+        .expect("the downcast above answered");
+    let (input, hash_keys) = emit.into_parts();
+    let nullable = can_be_null(input.as_ref());
+    let schema = input
+        .kind()
+        .schema()
+        .cloned()
+        .expect("a shuffle's input declares a schema");
+    let tests: Vec<Expr> = keys
+        .iter()
+        .filter(|key| nullable[**key as usize])
+        .map(|key| {
+            Expr::unary(
+                UnaryOp::IsNotNull,
+                Expr::column(*key, schema.fields.field(*key as usize).name()),
+            )
+        })
+        .collect();
+    let Some(predicate) = tests
+        .into_iter()
+        .reduce(|left, right| Expr::binary(left, BinaryOp::And, right, DataType::Boolean))
+    else {
+        // Every key holds no NULL in the data: nothing to drop, and the plan does not move.
+        return Box::new(GpuEmitPartitions::new(input, hash_keys, n));
+    };
+    let filtered = Box::new(GpuFilter::new(input, predicate, None, schema));
+    Box::new(GpuEmitPartitions::new(filtered, hash_keys, n))
 }
 
 /// Union branches are planned independently, so one column can arrive as a different
@@ -395,9 +552,14 @@ pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn Gp
     let lanes = lanes_for(t, &scan.groups, config.limit);
     let partition_groups = partition(&scan.groups, lanes, batching_for_source(t))?;
 
-    let projection = match &config.projection {
+    let projection: Vec<u32> = match &config.projection {
         Some(columns) => columns.iter().map(|c| *c as u32).collect(),
         None => (0..config.file_schema.fields().len() as u32).collect(),
+    };
+    // A scan of no column declares the marker itself: a project cannot go below it (#63).
+    let schema = match projection.is_empty() {
+        true => Schema::rowmarker(),
+        false => Schema::new(parquet.schema()),
     };
     Ok(Box::new(GpuLoadParquet::new(
         parquet_table_name(parquet).unwrap_or_default(),
@@ -405,7 +567,7 @@ pub(crate) fn source(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn Gp
         partition_groups,
         &scan,
         config.limit,
-        Schema::new(parquet.schema()),
+        schema,
     )))
 }
 
@@ -466,49 +628,43 @@ pub(crate) fn nested_loop_join(
     t: &Translator,
     join: &NestedLoopJoinExec,
 ) -> Result<Box<dyn GpuNode>, PlanError> {
-    use datafusion::common::JoinType;
-    let join_type = match join.join_type() {
-        JoinType::Inner => NestedLoopJoinType::Inner,
-        JoinType::Left => NestedLoopJoinType::Left,
-        other => {
-            return Err(PlanError::Unsupported(format!(
-                "nested-loop join type {other:?} — the executor rejects anything but \
-                 Inner and Left (#160)"
+    let join_type = *join.join_type();
+    if let Some(on) = null_equal_keys(join)? {
+        return keyed_join(t, join, join_type, on);
+    }
+    // DataFusion uses a nested-loop join with no predicate where the product itself is
+    // what the query asked for — tpcds q9 pairs one-row aggregates that way. Only an
+    // Inner is a cross join by another name: every other type owes its preserved side
+    // rows a cross join never emits, so it keeps the node and joins over `true`.
+    let (predicate, filter_columns) = match join.filter() {
+        None if join_type == JoinType::Inner => {
+            let (projection, schema) =
+                past_rowmarkers(join, join_type, projected(join.projection()));
+            return Ok(Box::new(GpuCrossJoin::new(
+                build_side(t, join.left())?,
+                merged(node(t, join.right())?),
+                projection,
+                schema,
             )));
         }
-    };
-    // DataFusion uses a nested-loop join with no predicate where the product itself is
-    // what the query asked for — tpcds q9 pairs one-row aggregates that way — and that
-    // is a cross join by any other name.
-    let Some(filter) = join.filter() else {
-        let build = build_side(t, join.left())?;
-        let probe = node(t, join.right())?;
-        return Ok(Box::new(GpuCrossJoin::new(
-            build,
-            probe,
-            projected(join.projection()),
-            Schema::new(join.schema()),
-        )));
+        None => (Expr::Literal(ScalarValue::Boolean(Some(true))), Vec::new()),
+        // The filter is written against a table of its own, so its ordinals travel with
+        // the map that says which side each of them came from.
+        Some(filter) => (
+            translate_expr(filter.expression(), filter.schema())?,
+            filter_column_map(filter)?,
+        ),
     };
     let build = build_side(t, join.left())?;
-    let mut probe = merged(node(t, join.right())?);
-    // A Left form emits its unmatched build rows in the same pass, so it cannot
-    // stream: #136's finish trick accumulates keys and a predicate join has none.
-    if join_type == NestedLoopJoinType::Left && batches(probe.as_ref()) != BatchLayout::SingleBatch
-    {
-        probe = Box::new(GpuCoalesceAllBatches::new(probe));
-    }
-    // The filter is written against a table of its own, so its ordinals travel with
-    // the map that says which side each of them came from.
-    let predicate = translate_expr(filter.expression(), filter.schema())?;
-    let filter_columns = filter_column_map(filter)?;
+    let probe = merged(node(t, join.right())?);
+    let (projection, schema) = past_rowmarkers(join, join_type, projected(join.projection()));
     Ok(Box::new(GpuNestedLoopJoin::new(
         build,
         probe,
         join_type,
         predicate,
         filter_columns,
-        projected(join.projection()),
-        Schema::new(join.schema()),
+        projection,
+        schema,
     )))
 }

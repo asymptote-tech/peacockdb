@@ -34,29 +34,31 @@ mod tests;
 #[cfg(all(test, feature = "gpu"))]
 mod gpu_tests;
 
-use datafusion::common::JoinType;
-
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
+use crate::planner::{BatchSizing, PlanKnobs};
 
 use generated::peacock::plan as fb;
 
-// What a recipe is made of: the four ABI symbols, the legacy node kinds they address, the
-// handles a call is passed, and when the driver makes it.
+// What a recipe is made of: the ABI symbols, the node kinds they address, the handles a
+// call is passed, and when the driver makes it.
 
 /// A node of the recipe plan, addressed by its position in it. The number is the whole
 /// content of an address, which is why a call carries nothing else about the node it runs.
 pub(crate) type Seq = u32;
 
-/// The frozen entry points. Two of them take runtime bounds instead of a seq, which is
-/// the reason they exist: a frozen node cannot carry a number that is known only once the
-/// rows have been counted.
+/// The entry points. Two of them take runtime bounds instead of a seq, which is the reason
+/// they exist: a frozen node cannot carry a number that is known only once the rows have
+/// been counted. The three join symbols address one `CudfJoin` seq for the life of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AbiSymbol {
     ExecuteNode,
     ExecuteScanRowGroups,
     SliceHandle,
     ResultFromHandle,
+    JoinBuild,
+    JoinProbe,
+    JoinFinish,
 }
 
 impl AbiSymbol {
@@ -66,31 +68,23 @@ impl AbiSymbol {
             Self::ExecuteScanRowGroups => "execute_scan_rowgroups",
             Self::SliceHandle => "slice_handle",
             Self::ResultFromHandle => "result_from_handle",
+            Self::JoinBuild => "join_build",
+            Self::JoinProbe => "join_probe",
+            Self::JoinFinish => "join_finish",
         }
     }
 }
 
-/// Which of a join's two projects a seq is. Both are `CudfProject`, and telling them
-/// apart in a recipe of five calls is the difference between reading it and decoding it.
+/// Which project a seq is, where a node's recipe holds one beside another call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectRole {
-    /// The probe keys this batch contributes to the accumulation (#136).
-    ProbeKeys,
     /// An aggregate's finalize, which is ours rather than the executor's: both engines
     /// evaluate this expression, so they agree by construction.
     Finalize,
-    /// Build columns straight through, plus one typed NULL per probe column the join's
-    /// projection keeps — what makes the anti join's output the joined schema.
-    NullPad { nulls: usize },
-    /// The columns the node's projection keeps, out of what the finish emitted. No literal
-    /// in it: the build-side semi family's finish already emits the row, and a projection
-    /// only narrows it. Its absence was two engines answering with different columns.
-    Narrow,
 }
 
-/// The legacy node kinds the engine addresses, carrying the fields a reader cannot get
-/// from the plan line above: a per-call join type is not the node's own, and a
-/// repartition's lane count is the one number a recipe repeats.
+/// The node kinds the engine addresses, carrying the fields a reader cannot get from the
+/// plan line above: a repartition's lane count is the one number a recipe repeats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FbKind {
     Scan,
@@ -109,11 +103,9 @@ pub(crate) enum FbKind {
     Repartition {
         lanes: u32,
     },
-    HashJoin {
-        join_type: JoinType,
-    },
-    CrossJoin,
-    NestedLoopJoin,
+    /// One for all three join nodes: the session reads its type, keys and residual off the
+    /// payload, and the plan line above already names them.
+    Join,
 }
 
 impl FbKind {
@@ -129,36 +121,22 @@ impl FbKind {
             Self::SortPreservingMerge => fb::PlanNodeKind::CudfSortPreservingMerge,
             Self::CoalescePartitions => fb::PlanNodeKind::CudfCoalescePartitions,
             Self::Repartition { .. } => fb::PlanNodeKind::CudfRepartition,
-            Self::HashJoin { .. } => fb::PlanNodeKind::CudfHashJoin,
-            Self::CrossJoin => fb::PlanNodeKind::CudfCrossJoin,
-            Self::NestedLoopJoin => fb::PlanNodeKind::CudfNestedLoopJoin,
+            Self::Join => fb::PlanNodeKind::CudfJoin,
         }
     }
 }
 
 /// Where a call's input comes from. The driver owns every one; naming them is what makes
-/// a recipe checkable against consume-on-use (#152), since a copy appears here as a copy.
+/// a recipe checkable against consume-on-use. A join's calls name none: each symbol takes
+/// one handle, and which one is the symbol's own meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Input {
     /// The batch the call was scheduled for.
     Batch,
-    /// A copy of it, because the call below consumes it and something else needs it too.
-    /// The surface has no copy symbol, so a recipe naming this is one an executor refuses
-    /// until #152 gives it one. A handle can be shared since #145, but sharing is not a copy
-    /// symbol: the executor still has no way to hand the same batch over twice.
-    BatchCopy,
-    /// The build side, handed over: the call consumes it and nothing needs it again.
-    BuildSide,
-    /// A copy of the build side, because the next probe batch needs it as well. Same
-    /// absence as [`Input::BatchCopy`]: the first call gets the handle and a second is
-    /// refused naming #152.
-    BuildSideCopy,
     /// Every batch this lane accumulated.
     LaneBatches,
     /// Every lane's handle, partition-major.
     AllLanes,
-    /// The probe keys kept per batch, which the finish pass joins against (#136).
-    AccumulatedKeys,
     /// What the previous call in this recipe returned.
     PriorOutput,
     /// Not a handle: the row groups this batch reads, overriding the node's own list.
@@ -168,23 +146,11 @@ pub(crate) enum Input {
 }
 
 impl Input {
-    /// Whether this input is the build side, handed over or copied. Asked by an executor
-    /// pricing a call: a probe call that names neither is a call the build side does not
-    /// have to be there for. Only the GPU backend asks, so it carries the same cfg.
-    #[cfg(not(feature = "rust-only"))]
-    pub(crate) fn is_build_side(&self) -> bool {
-        matches!(self, Self::BuildSide | Self::BuildSideCopy)
-    }
-
     fn text(&self) -> &'static str {
         match self {
             Self::Batch => "batch",
-            Self::BatchCopy => "batch copy",
-            Self::BuildSide => "build",
-            Self::BuildSideCopy => "build copy",
             Self::LaneBatches => "lane batches",
             Self::AllLanes => "all lanes",
-            Self::AccumulatedKeys => "accumulated keys",
             Self::PriorOutput => "prior output",
             Self::RowGroups => "row groups",
             Self::RowRange => "row range",
@@ -197,6 +163,8 @@ impl Input {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CallPattern {
     PerBatch,
+    /// Once, with the build side or with none: a join session begins here.
+    JoinBuild,
     PerProbeBatch,
     /// Once, when the node's input is complete.
     AtDone,
@@ -210,9 +178,11 @@ pub(crate) enum CallPattern {
 }
 
 impl CallPattern {
+    /// Empty where the symbol already says when — `join_build` is made once, at the build.
     fn text(&self) -> &'static str {
         match self {
             Self::PerBatch => "per batch",
+            Self::JoinBuild => "",
             Self::PerProbeBatch => "per probe batch",
             Self::AtDone => "at done",
             Self::PerCompaction => "per compaction and at done",
@@ -243,6 +213,24 @@ impl Call {
             },
             target: Some((seq, kind)),
             inputs,
+            when,
+        }
+    }
+
+    /// A join session's call: the seq is the `CudfJoin` the session was built from, and
+    /// the handle each symbol takes is its own meaning, so the call names no input.
+    pub(crate) fn join(seq: Seq, when: CallPattern) -> Self {
+        Self {
+            symbol: match when {
+                CallPattern::JoinBuild => AbiSymbol::JoinBuild,
+                CallPattern::PerProbeBatch => AbiSymbol::JoinProbe,
+                CallPattern::AtDone => AbiSymbol::JoinFinish,
+                other => unreachable!(
+                    "a join session is called at build, per probe batch and at done, not {other:?}"
+                ),
+            },
+            target: Some((seq, FbKind::Join)),
+            inputs: Vec::new(),
             when,
         }
     }
@@ -297,6 +285,7 @@ pub(crate) struct RecipePlan {
     recipes: Vec<Option<Recipe>>,
     bytes: Vec<u8>,
     wire_nodes: Seq,
+    join_scratch_bytes: u64,
 }
 
 impl RecipePlan {
@@ -335,17 +324,42 @@ impl RecipePlan {
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    /// What every `CudfJoin` in the buffer carries as `chunk_bytes`: the scratch one join
+    /// call may spend, 0 being the session's own 1 GiB. An executor pricing a join call
+    /// reads it here, so the accountant and the session bound the same number.
+    // Its reader is the device executor, which `rust-only` does not build.
+    #[cfg_attr(feature = "rust-only", allow(dead_code))]
+    pub(crate) fn join_scratch_bytes(&self) -> u64 {
+        self.join_scratch_bytes
+    }
 }
 
 /// Build the recipe plan for a finished tree. It runs after planning because a recipe is
 /// a statement about a node, and a node is not finished until the plan is.
 ///
+/// `join_scratch_bytes` is what each join call may spend on pairs — the planner's
+/// `join_scratch_bytes(knobs)` for a planned query, 0 (the session's 1 GiB) for a tree no
+/// mode planned.
+///
 /// `Err` where a node's payload cannot be written — an expression the wire has no shape
-/// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
-/// handed, and the alternative is a buffer whose every later seq has to be checked against
-/// a list to be trusted.
-pub(crate) fn attach_recipes(root: &dyn GpuNode) -> Result<RecipePlan, PlanError> {
-    attach::attach_recipes(root)
+/// for (#168): a plan missing one node's arguments cannot be handed to the C++, and the
+/// alternative is a buffer whose every later seq must be checked against a list.
+pub(crate) fn attach_recipes(
+    root: &dyn GpuNode,
+    join_scratch_bytes: u64,
+) -> Result<RecipePlan, PlanError> {
+    attach::attach_recipes(root, join_scratch_bytes)
+}
+
+/// What one join call may spend on pairs and the cross product, written into every
+/// `CudfJoin` as `chunk_bytes`: a sixteenth of a budgeted mode's budget, at most 1 GiB, and 0
+/// — the session's own 1 GiB — where the mode sets no budget.
+pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
+    match knobs.sizing {
+        BatchSizing::Budgeted => (knobs.budget / 16).min(1 << 30),
+        BatchSizing::OneBatchPerLane | BatchSizing::OneBatchPerRowGroup => 0,
+    }
 }
 
 /// Every published seq holds a node of the kind its recipe claims.

@@ -1672,8 +1672,8 @@ static Allocated bare_probe_of(int64_t n) {
   });
 }
 
-// #154's join.cpp sites: the session moves its gathered columns into the output, so a deep
-// copy at the exit would show as a second output-sized allocation at the peak. The peak is
+// The session moves its gathered columns into the output, so a deep copy at the exit (#154)
+// would show as a second output-sized allocation at the peak. The peak is
 // bounded by the same cuDF calls on tables of the same shape rather than by a formula, and
 // `net` is bounded both ways — an upper bound is the only thing that can see the session
 // retaining the probe batch it was handed, which no peak would move.

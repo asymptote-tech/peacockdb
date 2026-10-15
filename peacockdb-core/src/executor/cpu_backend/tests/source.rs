@@ -225,3 +225,58 @@ fn a_column_the_file_holds_in_another_type_is_refused_rather_than_cast() {
         "{refused}"
     );
 }
+
+/// A scan of no column reads rows and nothing else, and answers them as the column the plan
+/// declares in their place — one non-null `Int8` zero per row (#63) — one batch per entry of
+/// its mapping, as any scan does.
+#[test]
+fn a_scan_of_no_column_answers_the_rowmarker_per_row() {
+    use datafusion::arrow::array::Int8Array;
+    let path = table();
+    let scan = ScanMetadata {
+        file: path.to_string_lossy().into_owned(),
+        groups: (0..3)
+            .map(|index| RowGroupMeta {
+                index,
+                rows: 2,
+                bytes: 0,
+            })
+            .collect(),
+        can_be_null: Vec::new(),
+    };
+    let node = GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        vec![vec![vec![0], vec![1, 2]]],
+        &scan,
+        None,
+        Schema::rowmarker(),
+    );
+    let NodeExecutors::Source(mut source) =
+        CpuBackend::executors_for(&ctx(), &node, 0, 0).expect("a loader builds a source")
+    else {
+        panic!("a loader is a source");
+    };
+    let mut rows = Vec::new();
+    while let SourceStep::Batch {
+        batch,
+        source: next,
+        ..
+    } = source.next_batch().expect("the read succeeds")
+    {
+        let record = batch.record_batch();
+        assert_eq!(
+            record.schema().fields(),
+            Schema::rowmarker().fields.fields()
+        );
+        let marker = record
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int8Array>()
+            .expect("an Int8 column");
+        assert!(marker.iter().all(|value| value == Some(0)), "{marker:?}");
+        rows.push(record.num_rows());
+        source = next;
+    }
+    assert_eq!(rows, vec![2, 4]);
+}

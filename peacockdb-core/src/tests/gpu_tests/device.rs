@@ -31,7 +31,13 @@ pub(crate) struct Device {
 
 impl Device {
     pub(crate) fn open(node: &dyn GpuNode) -> Self {
-        let recipes = attach_recipes(node).expect("every node's payload is writable");
+        Self::with_join_scratch(node, 0)
+    }
+
+    /// `open` with every join's pairs held to `bytes` a call, where `open`'s 0 is the
+    /// session's 1 GiB: what a case about chunking the pairs needs.
+    pub(crate) fn with_join_scratch(node: &dyn GpuNode, bytes: u64) -> Self {
+        let recipes = attach_recipes(node, bytes).expect("every node's payload is writable");
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
             unsafe { peacock_executor_create(GPU_BUDGET as u64, &mut executor) },

@@ -1,4 +1,4 @@
-//! What a plan is: the eighteen nodes, the vocabulary they are written in, and the rules a
+//! What a plan is: the nineteen nodes, the vocabulary they are written in, and the rules a
 //! tree has to satisfy.
 //!
 //! The IR is neither planner nor executor — it is what passes between them, and consumers
@@ -43,7 +43,7 @@ use common::{
 use exec_ops::{new_filter, new_project, new_sort};
 use join::{joined_layout, new_hash_join};
 use partition_ops::{new_emit_partitions, new_merge_partitions, new_merge_sorted_partitions};
-use source::{largest_batch_bytes, new_load_parquet};
+use source::{largest_batch_bytes, new_empty, new_load_parquet};
 use union::{new_interleave, new_union};
 
 /// What planning and validation return. Both are plan-time: a shape the engine cannot run
@@ -206,6 +206,11 @@ pub(crate) struct AggStateColumns {
     pub(crate) positions: Vec<u32>,
 }
 
+/// The one column of a table DataFusion plans with none. A device table's row count is its
+/// first column's, so a table of no columns reads as no rows; the plan declares this column
+/// instead, a literal zero per row, and a join above drops it through its projection (#63).
+pub(crate) const ROWMARKER: &str = "__rowmarker__";
+
 /// Column types in order — the index *is* the ordinal every plan reference uses — plus
 /// what those columns mean.
 #[derive(Debug, Clone, PartialEq)]
@@ -225,6 +230,16 @@ impl Schema {
             group_keys: Vec::new(),
             agg_state: Vec::new(),
         }
+    }
+
+    /// `[__rowmarker__: Int8]`, never NULL: what a node declares where DataFusion has rows
+    /// and no column (#63).
+    pub(crate) fn rowmarker() -> Self {
+        Self::new(Arc::new(ArrowSchema::new(vec![Field::new(
+            ROWMARKER,
+            DataType::Int8,
+            false,
+        )])))
     }
 
     /// The state columns an aggregate output carries, or `None` once the schema is
@@ -666,14 +681,6 @@ impl GpuAggregateBatches {
     }
 }
 
-/// DataFusion's join type, restricted to what a nested-loop join can run: the C++ rejects
-/// anything else outright.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NestedLoopJoinType {
-    Inner,
-    Left,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum JoinSide {
     Build,
@@ -724,7 +731,7 @@ impl GpuCrossJoin {
 #[derive(Debug)]
 pub(crate) struct GpuNestedLoopJoin {
     kind: NodeKind,
-    pub(crate) join_type: NestedLoopJoinType,
+    pub(crate) join_type: JoinType,
     pub(crate) filter: Expr,
     /// One entry per column the filter's own schema has, in its order.
     pub(crate) filter_columns: Vec<JoinFilterColumn>,
@@ -741,7 +748,7 @@ impl GpuNestedLoopJoin {
     pub(crate) fn new(
         build: Box<dyn GpuNode>,
         probe: Box<dyn GpuNode>,
-        join_type: NestedLoopJoinType,
+        join_type: JoinType,
         filter: Expr,
         filter_columns: Vec<JoinFilterColumn>,
         projection: Option<Vec<u32>>,
@@ -762,31 +769,8 @@ impl GpuNestedLoopJoin {
     }
 }
 
-/// What the capability matrix says about one join mode: whether the probe side can stream
-/// batch by batch, and whether the lane owes a pass at done for what a streamed probe
-/// cannot know — which build rows matched at least once (#136).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct JoinCapability {
-    pub(crate) probe_streams: bool,
-    pub(crate) needs_finish: bool,
-}
-
-impl JoinCapability {
-    /// Whether the whole join is one call: no probe keys kept and no finish pass.
-    ///
-    /// True where nothing needs a finish, and also where the probe cannot stream — the
-    /// planner makes that probe a single batch, and one call over the whole of it is the
-    /// plain join node the wire has always carried. Asked by the recipe writer for what to
-    /// publish and by an executor for what to build, because answering it twice is how a
-    /// filtered semi join ended up on the finish path with its residual dropped.
-    pub(crate) fn answers_in_one_call(&self) -> bool {
-        !self.probe_streams || !self.needs_finish
-    }
-}
-
-/// An equi-join: the build side is one batch per lane, the probe streams unless the
-/// capability matrix says otherwise, and lane p of each side holds exactly the rows that
-/// can match lane p of the other.
+/// An equi-join: the build side is one batch per lane, the probe streams, and lane p of each
+/// side holds exactly the rows that can match lane p of the other.
 #[derive(Debug)]
 pub(crate) struct GpuHashJoin {
     kind: NodeKind,
@@ -795,8 +779,9 @@ pub(crate) struct GpuHashJoin {
     pub(crate) keys: Vec<(u32, u32)>,
     pub(crate) filter: Option<Expr>,
     pub(crate) filter_columns: Vec<JoinFilterColumn>,
-    /// From DataFusion, per join: `false` — the SQL default — means a NULL key matches
-    /// nothing, `true` is what a set operation lowered to a join needs.
+    /// Per join: `false` — the SQL default — means a NULL key matches nothing. `true` is what
+    /// a set operation lowered to a join needs, and what keys made of `IS NOT DISTINCT FROM`
+    /// conjuncts mean.
     pub(crate) null_equals_null: bool,
     pub(crate) projection: Option<Vec<u32>>,
     build: Box<dyn GpuNode>,
@@ -829,8 +814,11 @@ impl GpuHashJoin {
         )
     }
 
-    pub(crate) fn capability(&self) -> Result<JoinCapability, PlanError> {
-        capability(self.join_type, self.filter.is_some())
+    /// Bytes a row of the keys its session takes distinct, 0 where it takes none: the build's
+    /// for RightSemi and RightAnti, held for the session; a probe batch's for LeftSemi,
+    /// LeftAnti and LeftMark, for that call.
+    pub(crate) fn distinct_key_width(&self) -> u64 {
+        join::distinct_key_width(self)
     }
 }
 
@@ -861,6 +849,12 @@ pub(crate) struct GpuEmitPartitions {
 impl GpuEmitPartitions {
     pub(crate) fn new(input: Box<dyn GpuNode>, hash_keys: Vec<u32>, n: usize) -> Self {
         new_emit_partitions(input, hash_keys, n)
+    }
+
+    /// Back into the input and the keys it hashes on, so a node can be put below it
+    /// (#137's filter) and the shuffle rebuilt over the result.
+    pub(crate) fn into_parts(self) -> (Box<dyn GpuNode>, Vec<u32>) {
+        (self.input, self.hash_keys)
     }
 }
 
@@ -922,6 +916,11 @@ impl GpuLoadParquet {
 }
 
 impl GpuLoadParquet {
+    /// Reads no column, only rows, which it answers as `__rowmarker__` (#63).
+    pub(crate) fn rows_only(&self) -> bool {
+        self.projection.is_empty()
+    }
+
     pub(crate) fn rows(&self) -> u64 {
         self.survivors.iter().map(|group| group.rows).sum()
     }
@@ -935,6 +934,19 @@ impl GpuLoadParquet {
     /// off the mapping rather than off the budget.
     pub(crate) fn largest_batch_bytes(&self) -> u64 {
         largest_batch_bytes(self)
+    }
+}
+
+/// A relation DataFusion proved empty (`EmptyExec`): one lane that emits no batch, on either
+/// engine, and calls nothing on the device.
+#[derive(Debug)]
+pub(crate) struct GpuEmpty {
+    kind: NodeKind,
+}
+
+impl GpuEmpty {
+    pub(crate) fn new(schema: Schema) -> Self {
+        new_empty(schema)
     }
 }
 
@@ -1057,8 +1069,22 @@ impl RowInterval {
     }
 }
 
+/// `Box<dyn GpuNode>` to `Box<dyn Any>`, so a translated node that [`GpuNode::as_any`] has
+/// already identified can be taken apart rather than only read. A blanket impl, so a node
+/// kind gains it with no line of its own; `pub` because a supertrait is as public as its
+/// trait, and `GpuNode` is the crate's.
+pub trait IntoAnyBox {
+    fn into_any_box(self: Box<Self>) -> Box<dyn Any>;
+}
+
+impl<T: Any> IntoAnyBox for T {
+    fn into_any_box(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 /// What a plan node offers the driver and the validator.
-pub trait GpuNode: std::fmt::Debug {
+pub trait GpuNode: std::fmt::Debug + IntoAnyBox {
     /// Layout and schema live inside the kind.
     fn kind(&self) -> &NodeKind;
 
@@ -1093,6 +1119,9 @@ pub trait GpuNode: std::fmt::Debug {
 /// match, the serializer — rather than a downcast chain per consumer.
 pub(crate) enum NodeRef<'a> {
     LoadParquet(&'a GpuLoadParquet),
+    // Nothing but the schema its kind carries, so no consumer reads the borrow.
+    #[allow(dead_code)]
+    Empty(&'a GpuEmpty),
     Filter(&'a GpuFilter),
     Project(&'a GpuProject),
     Sort(&'a GpuSort),
@@ -1137,6 +1166,8 @@ fn node_ref_of(any: &dyn std::any::Any) -> NodeRef<'_> {
 fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
     if let Some(n) = any.downcast_ref::<GpuLoadParquet>() {
         Some(NodeRef::LoadParquet(n))
+    } else if let Some(n) = any.downcast_ref::<GpuEmpty>() {
+        Some(NodeRef::Empty(n))
     } else if let Some(n) = any.downcast_ref::<GpuFilter>() {
         Some(NodeRef::Filter(n))
     } else if let Some(n) = any.downcast_ref::<GpuProject>() {
@@ -1203,7 +1234,7 @@ impl ExecutorCategory {
 /// mapping, and a second source of truth for it is a second thing to keep true.
 pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
     match as_node_ref(node) {
-        NodeRef::LoadParquet(_) => ExecutorCategory::Source,
+        NodeRef::LoadParquet(_) | NodeRef::Empty(_) => ExecutorCategory::Source,
         NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
             ExecutorCategory::Exec
         }
@@ -1229,6 +1260,7 @@ pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
 pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
     match node_ref_of(any) {
         NodeRef::LoadParquet(_) => "GpuLoadParquet",
+        NodeRef::Empty(_) => "GpuEmpty",
         NodeRef::Filter(_) => "GpuFilter",
         NodeRef::Project(_) => "GpuProject",
         NodeRef::Sort(_) => "GpuSort",
@@ -1274,56 +1306,59 @@ pub(crate) fn finalize_columns(
     aggregate::finalize_columns(body, state, output)
 }
 
-/// Whether the join's output carries a column from each side. False for the two semi
-/// families and for a mark join, whose row is one side's — read by an executor deciding
-/// whether the columns it owes have to be invented or only selected.
-pub(crate) fn emits_both_sides(join_type: JoinType) -> bool {
-    join::emits_both_sides(join_type)
+/// Whether a join owes rows only its last probe batch can settle — what a session's
+/// `join_finish` answers for: Left, Full and the build-side semi family.
+pub(crate) fn needs_finish(join_type: JoinType) -> bool {
+    join::needs_finish(join_type)
 }
 
-/// The three refused shapes are refusals of a defect or a missing cuDF variant, not of
-/// the engine: an outer join's residual filter is applied after the outer gather and drops
-/// the padded rows (#153), and no swapped `mixed_*` variant exists for the right-handed
-/// semi family.
-pub(crate) fn capability(
+/// What a join session holds besides its build batch, for `rows` build rows (design §4.3):
+/// a keyed join's hash table, 16 bytes a row; RightSemi and RightAnti's distinct build keys,
+/// at `distinct_key_width` a row; and `matched`, a byte a row, for the five that finish. The
+/// planner's resident model and the device's accountant both read this.
+pub(crate) fn session_bytes(
     join_type: JoinType,
-    has_filter: bool,
-) -> Result<JoinCapability, PlanError> {
-    join::capability(join_type, has_filter)
+    keyed: bool,
+    distinct_key_width: u64,
+    rows: u64,
+) -> u64 {
+    join::session_bytes(join_type, keyed, distinct_key_width, rows)
 }
 
-/// Whether a lane whose build side produced no batch owes no rows at all.
+/// A column's bytes per row as the join session counts them: its fixed width on the device,
+/// and 16 for a variable-width one. The device backend prices a residual by it, so a
+/// rust-only build has no caller.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn width_on_device(data_type: &DataType) -> u64 {
+    join::width_on_device(data_type)
+}
+
+/// The sides whose unmatched rows are never emitted, as `(build, probe)`: there a NULL key
+/// matches nothing, so it is dropped before the shuffle rather than skewing a lane (#137).
+pub(crate) fn null_key_droppable(join_type: JoinType) -> (bool, bool) {
+    join::null_key_droppable(join_type)
+}
+
+/// Whether a join whose build side holds no row — no batch, or batches of none — owes no
+/// rows at all.
 ///
 /// True where every output row is built from a build row, so an empty build side is an
-/// empty answer and the lane can end without a call. False for the three types that
-/// preserve unmatched PROBE rows: what they owe is the probe side, padded or not, and
-/// making it takes a call over a build table that does not exist.
-pub(crate) fn empty_build_answers_nothing(join_type: JoinType) -> bool {
-    join::empty_build_answers_nothing(join_type)
-}
-
-/// What the per-probe-batch join emits, which is not what the node is: a Left emits this
-/// batch's matches and waits for the finish, and a Full also emits the probe rows this
-/// batch had no match for — batch-local, because the build side was complete before the
-/// first call.
-///
-/// `None` is the build-side semi family, whose probe call is only the key project.
-pub(crate) fn per_call_join_type(join_type: JoinType) -> Option<JoinType> {
-    join::per_call_join_type(join_type)
-}
-
-/// The join the finish pass runs against the accumulated keys. Left and Full ask which
-/// build rows nothing ever matched; the semi family asks its own question, and asks it
-/// with the node's own NULL semantics, so the pass substitutes for a legacy single call
-/// rather than improving on it (#59, #80).
-pub(crate) fn finish_join_type(join_type: JoinType) -> JoinType {
-    join::finish_join_type(join_type)
+/// empty answer and the driver drops the lane's probe batches without a call. False for the
+/// three types that preserve unmatched PROBE rows: what they owe is the probe side, padded or
+/// not.
+pub(crate) fn empty_build_owes_nothing(join_type: JoinType) -> bool {
+    join::empty_build_owes_nothing(join_type)
 }
 
 /// How many columns a join emits before any projection of its own — the count half of
 /// [`emits`], which is the same fact its carry-over rule reads.
 pub(crate) fn emitted_columns(join_type: JoinType, build: usize, probe: usize) -> usize {
     join::emitted_columns(join_type, build, probe)
+}
+
+/// The sides whose columns a join type emits, as `(build, probe)`; a mark comes after both.
+pub(crate) fn emitted_sides(join_type: JoinType) -> (bool, bool) {
+    join::emitted_sides(join_type)
 }
 
 pub(crate) fn resolve(name: &str) -> Result<AggSpec, PlanError> {

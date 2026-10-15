@@ -58,13 +58,10 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
         "an unbudgeted run observed nothing"
     );
 
-    // Why the two figures differ, since a reader who tries to remove the double count
-    // finds this test red: a probing join's `resident_bytes` is its build side plus its
-    // accumulated keys, and its `scratch_bytes` adds the build side AGAIN, because the
-    // call is about to read it. The spec has scratch consult `self`, so it is deliberate.
-    // Measured here: peak 8,222, smallest fitting budget 9,556, and region — this join's
-    // build side — is 920 bytes on its own. So the gap is that side plus whatever else was
-    // resident at the instant the check ran, not that side alone.
+    // Why the two figures differ: the check before a call counts what is resident plus the
+    // call's scratch, which the observed peak never sees as one sum. So the gap is the
+    // transient of the call that ran nearest the budget, plus whatever else was resident
+    // at the instant the check ran.
     let fits =
         |budget: usize| run::<CpuBackend>(tree.as_ref(), &ctx.task_ctx(), Some(budget)).is_ok();
     // The observed peak is a floor for the search and not the answer, per the block above.
@@ -80,13 +77,13 @@ async fn a_query_has_a_smallest_budget_that_fits_and_trips_a_byte_below_it() {
     }
     assert!(fits(high), "the smallest fitting budget does not fit");
     // Asserted as a shape rather than as a number, so the case survives a fixture change:
-    // the excess is a real quantity of this plan's — one side of one join and the rest of
+    // the excess is a real quantity of this plan's — one call's transient and the rest of
     // what was live — rather than slack.
     let excess = high - watching.peak_bytes;
     assert!(
         excess > 0 && excess < watching.peak_bytes,
         "the smallest fitting budget is {high} against a peak of {}, and the gap should be \
-         one side of one join rather than a multiple of the run",
+         one call's transient rather than a multiple of the run",
         watching.peak_bytes
     );
 

@@ -14,11 +14,11 @@ use crate::plan::ColumnOrder;
 use crate::plan::RowInterval;
 use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
-    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
-    GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin, GpuProject, GpuSort,
-    GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
+    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty, GpuFilter, GpuHashJoin,
+    GpuInterleave, GpuLimit, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
+    GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref, category_of,
 };
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::common::JoinType;
 
 /// A stub input with a layout stated, since a join's two sides differ in exactly that.
@@ -113,7 +113,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             one_batch(),
             one_batch(),
-            NestedLoopJoinType::Inner,
+            JoinType::Inner,
             Expr::binary(
                 Expr::column(0, "v"),
                 BinaryOp::Gt,
@@ -143,6 +143,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
             columns(&GROUPED),
         )),
         Box::new(GpuUnload::new(streaming(), None)),
+        Box::new(GpuEmpty::new(columns(&GROUPED))),
     ]
 }
 
@@ -217,11 +218,12 @@ fn node_kind(node: &dyn GpuNode) -> u8 {
         NodeRef::Union(_) => 15,
         NodeRef::Interleave(_) => 16,
         NodeRef::Unload(_) => 17,
+        NodeRef::Empty(_) => 18,
     }
 }
 
 const LOAD_PARQUET: u8 = 0;
-const NODE_KINDS: u8 = 18;
+const NODE_KINDS: u8 = 19;
 
 fn category_built(node: &dyn GpuNode) -> ExecutorCategory {
     CpuBackend::executors_for(&ctx(), node, 0, 0)
@@ -262,8 +264,7 @@ fn every_node_kind_builds_the_executor_its_category_names() {
 
 /// The accountant reads `scratch_bytes` BEFORE the call, so a transient charged for a read
 /// that never happens refuses a query that fits. The build-side semi family's probe call
-/// is the key project alone — it does not touch the build side — and this charged it
-/// anyway until the review found it.
+/// answers nothing, and the build side it reads is the one the residency already counts.
 #[test]
 fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
     let build = grouped(vec![Some("a"), Some("b")], vec![Some(1), Some(2)]);
@@ -277,22 +278,24 @@ fn a_build_side_semi_joins_probe_is_not_charged_the_build_side() {
         ctx(),
     )
     .expect("a semi join builds");
-    let (probing, _) = semi.set_build(build).expect("the build side is set");
+    let (probing, _) = semi.set_build(Some(build)).expect("the build side is set");
     assert_eq!(
         probing.scratch_bytes(2, 64),
         64,
-        "a probe call that only projects keys transiently costs the batch"
+        "a probe call transiently costs the batch"
     );
     assert_eq!(
         probing.resident_bytes(),
         build_bytes,
-        "and the build side is still held until the finish consumes it"
+        "and the build side is held until the join is done"
     );
 }
 
-/// An Inner join, whose probe call does read the build side, so the charge is right there.
+/// An Inner join's probe call is charged its batch alone: the stream hashed the build side
+/// once and holds it, which the residency already counts, so charging it again per call
+/// would count one table twice.
 #[test]
-fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
+fn an_inner_joins_probe_is_charged_only_its_batch() {
     let build = grouped(vec![Some("a"), Some("b")], vec![Some(1), Some(2)]);
     let build_bytes = build.record_batch().get_array_memory_size();
     let inner = CpuJoin::hash(
@@ -302,8 +305,9 @@ fn an_inner_joins_probe_is_charged_the_build_side_it_reads() {
         ctx(),
     )
     .expect("an inner join builds");
-    let (probing, _) = inner.set_build(build).expect("the build side is set");
-    assert_eq!(probing.scratch_bytes(2, 64), build_bytes + 64);
+    let (probing, _) = inner.set_build(Some(build)).expect("the build side is set");
+    assert_eq!(probing.scratch_bytes(2, 64), 64);
+    assert_eq!(probing.resident_bytes(), build_bytes);
 }
 
 /// A mid-plan limit holds nothing between calls, whatever its offset — which is the whole

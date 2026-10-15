@@ -19,6 +19,7 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties, execute_stream,
 };
 use futures::StreamExt;
+use futures::stream::BoxStream;
 
 /// Execute exactly one plan node, fed by its children's already-computed batches in child
 /// order.
@@ -27,10 +28,28 @@ pub(crate) async fn execute_single_node(
     inputs: Vec<Vec<RecordBatch>>,
     task_ctx: Arc<TaskContext>,
 ) -> Result<Vec<RecordBatch>> {
+    let inputs = inputs
+        .into_iter()
+        .map(|batches| futures::stream::iter(batches.into_iter().map(Ok)).boxed())
+        .collect();
+    let mut stream = execute_stream(fed(node, inputs)?, task_ctx)?;
+    let mut out = Vec::new();
+    while let Some(batch) = stream.next().await {
+        out.push(batch?);
+    }
+    Ok(out)
+}
+
+/// `node` with each child replaced by a source that hands out one stream, in child order —
+/// a batch list replayed, or a channel a join's probe side is fed through call by call.
+pub(crate) fn fed(
+    node: &Arc<dyn ExecutionPlan>,
+    inputs: Vec<BoxStream<'static, Result<RecordBatch>>>,
+) -> Result<Arc<dyn ExecutionPlan>> {
     let children = node.children();
     if children.len() != inputs.len() {
         return Err(DataFusionError::Internal(format!(
-            "execute_single_node: {} expects {} inputs, got {}",
+            "{} expects {} inputs, got {}",
             node.name(),
             children.len(),
             inputs.len()
@@ -38,22 +57,14 @@ pub(crate) async fn execute_single_node(
     }
 
     let mut stubs: Vec<Arc<dyn ExecutionPlan>> = Vec::with_capacity(children.len());
-    for (child, batches) in children.iter().zip(inputs.into_iter()) {
+    for (child, input) in children.iter().zip(inputs.into_iter()) {
         let schema = child.schema();
         let eq = child.properties().equivalence_properties().clone();
-        let stream = Box::pin(RecordBatchStreamAdapter::new(
-            schema.clone(),
-            futures::stream::iter(batches.into_iter().map(Ok)),
-        )) as SendableRecordBatchStream;
+        let stream = Box::pin(RecordBatchStreamAdapter::new(schema.clone(), input))
+            as SendableRecordBatchStream;
         stubs.push(Arc::new(StreamSourceExec::new(schema, eq, stream)));
     }
-
-    let mut stream = execute_stream(node.clone().with_new_children(stubs)?, task_ctx)?;
-    let mut out = Vec::new();
-    while let Some(batch) = stream.next().await {
-        out.push(batch?);
-    }
-    Ok(out)
+    node.clone().with_new_children(stubs)
 }
 
 /// An `ExecutionPlan` that hands out one pre-built stream. Single-partition and

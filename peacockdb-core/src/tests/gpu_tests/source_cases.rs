@@ -1,7 +1,8 @@
 //! `GpuLoadParquet` through the harness: both backends read one parquet the test wrote
 //! from a synthetic batch, one batch per row group, with and without a pushed-down limit.
 //! The one helper this task adds is `write_parquet`, under the temp dir and removed after
-//! each case. Every case is green or a `bug_` test with its ticket above it.
+//! each case. Every case is green or a `bug_` test with its ticket above it. `GpuEmpty`, the
+//! source that reads nothing, closes the file: alone, and planned whole under a join.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,7 @@ use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 
 use super::script::{Outcome, Script, run_both};
-use crate::plan::{GpuLoadParquet, RowGroupMeta, ScanMetadata, Schema};
+use crate::plan::{GpuEmpty, GpuLoadParquet, RowGroupMeta, ScanMetadata, Schema};
 use crate::tests::compare::{Order, assert_same};
 use crate::tests::synthetic::{decimals, synthetic};
 
@@ -64,6 +65,45 @@ pub(crate) fn scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuL
         limit,
         Schema::new(schema),
     )
+}
+
+/// A scan of no column over `path`'s row groups, one batch per group, under `limit`: the plan
+/// declares `__rowmarker__` in place of the columns (#63).
+fn rows_only_scan(path: &Path, schema: SchemaRef, limit: Option<usize>) -> GpuLoadParquet {
+    let columns = scan(path, schema, None);
+    let groups = ScanMetadata {
+        file: columns.file.clone(),
+        groups: columns.survivors.clone(),
+        can_be_null: Vec::new(),
+    };
+    GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        columns.partition_groups.clone(),
+        &groups,
+        limit,
+        Schema::rowmarker(),
+    )
+}
+
+/// A rows-only scan of 64 rows in four row groups of sixteen, run on both and removed.
+fn rows_only_both(name: &str, limit: Option<usize>) -> Outcome {
+    let batch = synthetic(64, 1);
+    let path = write_parquet(name, &batch, 16);
+    let outcome = run_both(
+        &rows_only_scan(&path, batch.schema(), limit),
+        Script::Source { lane: 0 },
+    );
+    std::fs::remove_file(&path).expect("the file this case wrote");
+    outcome
+}
+
+fn rows_per_batch(batches: &[Vec<RecordBatch>]) -> Vec<usize> {
+    batches
+        .iter()
+        .flatten()
+        .map(|batch| batch.num_rows())
+        .collect()
 }
 
 /// Write, read on both, remove: the file is gone whether or not the comparison holds.
@@ -167,5 +207,70 @@ operator_case! {
     GpuLoadParquet,
     fn a_parquet_of_zero_rows_reads_as_nothing_on_both() {
         read_both("zero-rows", &synthetic(0, 1), 16, None).same(Order::AsEmitted);
+    }
+}
+
+// #63 — a scan of no column reads rows alone: the cpu off the reader's row count, the device
+// off the footer, each as one non-null Int8 zero per row.
+operator_case! {
+    GpuLoadParquet,
+    fn a_rows_only_scan_agrees_on_both_backends() {
+        let outcome = rows_only_both("rows-only", None);
+        outcome.same(Order::AsEmitted);
+        let gpu = outcome.gpu.as_ref().expect("the device answers");
+        assert_eq!(rows_per_batch(gpu), vec![16; 4]);
+    }
+}
+
+// #186 — a scan of no column decodes nothing, so its limit meets the call's row groups only
+// where the column read's does: refused together, as cuDF refuses them there.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_rows_only_scan_with_row_groups_and_a_limit_is_refused_on_the_device() {
+        gpu_refuses_with(&rows_only_both("rows-only-limit-gpu", Some(10)), GROUPS_AND_LIMIT);
+    }
+}
+
+// #186 — the cpu never reads the limit: four row groups of sixteen, all answered whole.
+operator_case! {
+    GpuLoadParquet,
+    fn bug_a_rows_only_scan_with_row_groups_and_a_limit_is_read_whole_on_the_cpu() {
+        let outcome = rows_only_both("rows-only-limit-cpu", Some(10));
+        let cpu = outcome.cpu.as_ref().expect("the cpu answers");
+        assert_eq!(rows_per_batch(cpu), vec![16; 4]);
+    }
+}
+
+// A relation DataFusion proved empty: one lane that ends before its first batch, and a plan
+// of it alone is one stub on the wire, which the device loads and never calls.
+operator_case! {
+    GpuEmpty,
+    fn an_empty_relation_emits_no_batch_on_either_engine() {
+        let empty = GpuEmpty::new(Schema::new(synthetic(0, 1).schema()));
+        let outcome = run_both(&empty, Script::Source { lane: 0 });
+        outcome.same(Order::AsEmitted);
+        assert!(outcome.gpu.as_ref().expect("the device answers").is_empty());
+    }
+}
+
+/// pbench's `empty-side-left-join`, planned at every mode and run whole through the driver on
+/// both engines: the empty relation is the build side of the Right join DataFusion swaps the
+/// `LEFT JOIN` into, so no lane gets a build batch and every probe row is padded — DuckDB's
+/// eight. The harness drives one node and never runs its children, so only a planned run
+/// puts the empty relation's stub on the device's wire under a join.
+#[tokio::test]
+async fn a_left_join_over_an_empty_relation_pads_every_row_on_both_engines() {
+    use crate::test_support::{MODES, batches_to_sorted_str};
+    for mode in &MODES {
+        let what = format!("empty-side-left-join at {}", mode.name);
+        let (cpu, gpu) =
+            super::whole_plan::answers_on_both("pbench", "empty-side-left-join", mode).await;
+        let rows = |batches: &[RecordBatch]| {
+            let padded: usize = batches.iter().map(|b| b.column(1).null_count()).sum();
+            (batches_to_sorted_str(batches), padded)
+        };
+        let (cpu, padded) = rows(&cpu);
+        assert_eq!(padded, 8, "{what}: every tiny row, padded, on the cpu");
+        assert_eq!(rows(&gpu), (cpu, 8), "{what}");
     }
 }

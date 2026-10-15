@@ -26,7 +26,8 @@ pub(crate) enum Script {
     /// One `emit` per batch; one slot per output lane per call.
     Emit(Vec<RecordBatch>),
     /// `set_build` then `probe_and_fetch` per probe batch then `finish_and_fetch`, one slot
-    /// per call; with no build, `without_build` and no slots at all.
+    /// per call. `build: None` is a build side that produced nothing, and a lane that owes
+    /// nothing over it reads no probe batch.
     Join {
         build: Option<RecordBatch>,
         probe: Vec<RecordBatch>,
@@ -136,6 +137,15 @@ fn shaped_for(node: &dyn GpuNode, script: &Script) {
 }
 
 pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
+    run_both_with_join_scratch(node, script, 0)
+}
+
+/// `run_both` with the device's join pairs held to `bytes` a call (`Device::with_join_scratch`).
+pub(crate) fn run_both_with_join_scratch(
+    node: &dyn GpuNode,
+    script: Script,
+    bytes: u64,
+) -> Outcome {
     shaped_for(node, &script);
     let cpu_ctx = SessionContext::new().task_ctx();
     let cpu = drive::<CpuBackend, _>(
@@ -146,7 +156,7 @@ pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
         |batch| Ok(batch.into_record_batch()),
         CpuBatch::into_record_batch,
     );
-    let device = Device::open(node);
+    let device = Device::with_join_scratch(node, bytes);
     // What the node declares its output to be is what the sink would tell the export.
     let declared = node.kind().schema().map(|schema| schema.fields.as_ref());
     let gpu = drive::<GpuBackend, _>(
@@ -262,24 +272,20 @@ fn drive<B: Backend, T>(
                 }
             }
         }
-        (NodeExecutors::Join(join), Script::Join { build, probe }) => match build {
-            Some(build) => {
-                let (mut probing, _) = join.set_build(up(build))?;
+        (NodeExecutors::Join(join), Script::Join { build, probe }) => {
+            let (mut probing, _) = join.set_build(build.as_ref().map(|batch| up(batch)))?;
+            // A lane that owes nothing is drained: the driver makes neither a probe nor a
+            // finish call over it, and this stands in for the driver. Calling the finish
+            // anyway is what `a_lane_with_no_build_batch_calls_set_build_none` denies.
+            if !probing.owes_nothing() {
                 for batch in probe {
                     let (out, _) = probing.probe_and_fetch(up(batch))?;
-                    slots.push(lower(out)?);
+                    slots.push(lower(out.into_iter().collect())?);
                 }
                 let (out, _) = probing.finish_and_fetch()?;
-                slots.push(lower(out)?);
+                slots.push(lower(out.into_iter().collect())?);
             }
-            None => {
-                assert!(
-                    probe.is_empty(),
-                    "a join with no build side is never probed"
-                );
-                join.without_build()?;
-            }
-        },
+        }
         (NodeExecutors::Unload(mut unload), Script::Unload { batch, rows }) => {
             let (out, _) = unload.unload(up(batch), *rows)?;
             slots.push(vec![unloaded(out)]);

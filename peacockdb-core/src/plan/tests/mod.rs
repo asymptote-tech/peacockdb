@@ -239,16 +239,6 @@ fn a_finalizing_merge_over_lanes_hashed_on_other_columns_is_refused() {
     );
 }
 
-fn unsupported(result: Result<(), PlanError>, mentions: &str) {
-    match result {
-        Err(PlanError::Unsupported(what)) => assert!(
-            what.contains(mentions),
-            "the refusal names the wrong shape: {what}"
-        ),
-        other => panic!("expected an unsupported shape naming {mentions}, got {other:?}"),
-    }
-}
-
 fn columns(names: &[&str]) -> Schema {
     Schema::new(Arc::new(ArrowSchema::new(
         names

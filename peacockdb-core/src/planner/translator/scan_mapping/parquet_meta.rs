@@ -14,6 +14,7 @@ use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
 use super::rowgroup_prune::surviving_row_groups;
 use crate::plan::PlanError;
 use crate::plan::RowGroupMeta;
+use crate::planner::parquet_nulls::nulls_possible;
 
 /// The table a scan reads, named after the parquet file rather than declared anywhere:
 /// DataFusion's `ParquetExec` carries paths, and the plan text and every node above it
@@ -90,11 +91,7 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
             bytes += chunk.uncompressed_size();
         }
         for (position, column) in projected.iter().enumerate() {
-            let nulls = group.columns()[*column]
-                .statistics()
-                .and_then(|statistics| statistics.null_count_opt());
-            // No statistic is not a promise of no nulls.
-            can_be_null[position] |= nulls.is_none_or(|count| count > 0);
+            can_be_null[position] |= nulls_possible(group.columns()[*column].statistics());
         }
         metadata.push(RowGroupMeta {
             index,

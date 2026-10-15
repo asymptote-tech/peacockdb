@@ -312,21 +312,25 @@ pub trait PartitionEmitterExecutor<B: Backend>: Executor {
 /// A typestate: build -> probe -> done, each transition consuming the last state.
 pub trait JoinExecutor<B: Backend>: Executor {
     type Probing: ProbingJoin<B>;
-    fn set_build(self, batch: B::Batch) -> CallResult<Self::Probing>;
 
-    /// The build side finished without a batch: a scatter that gave a lane no rows, for
-    /// the types that owe nothing, or an upstream that emitted nothing at all (#212).
-    /// `Ok` means the lane owes nothing and ends here; an `Err` names a type whose answer
-    /// is its probe side, which needs a call over a build table that does not exist.
-    ///
-    /// The driver asks rather than deciding, because what a lane owes is a property of
-    /// the join type and the executor is where that lives.
-    fn without_build(self) -> Result<(), BackendError>;
+    /// `None` is a build side that finished without a batch — a scatter that gave this
+    /// lane no rows, or an upstream that emitted nothing at all (#212). It is an argument
+    /// rather than a call of its own because the join answers it as it answers a batch of
+    /// no rows: what the lane owes is a property of the type, and
+    /// [`ProbingJoin::owes_nothing`] reports it.
+    fn set_build(self, batch: Option<B::Batch>) -> CallResult<Self::Probing>;
 }
 
 pub trait ProbingJoin<B: Backend>: Executor {
-    fn probe_and_fetch(&mut self, batch: B::Batch) -> CallResult<Vec<B::Batch>>;
-    fn finish_and_fetch(self) -> CallResult<Vec<B::Batch>>;
+    /// At most one batch per call — the one-batch rule, in the type (#220).
+    fn probe_and_fetch(&mut self, batch: B::Batch) -> CallResult<Option<B::Batch>>;
+    fn finish_and_fetch(self) -> CallResult<Option<B::Batch>>;
+
+    /// A build side of no rows — no batch, or a batch of none — under Inner, Left, LeftSemi,
+    /// LeftAnti, LeftMark or RightSemi: every row those emit is built from a build row, so
+    /// the lane owes nothing and the driver drops its probe batches without a call. Right,
+    /// Full and RightAnti owe their probe rows, padded, and answer `false` (#212).
+    fn owes_nothing(&self) -> bool;
 }
 
 /// Exhaustion consumes the source, so the driver's slot IS its liveness.
@@ -501,7 +505,7 @@ pub(crate) fn physical_expr(
     cpu_backend::physical_expr(expr, input, registry)
 }
 
-/// Whether the CPU executor for this join keeps probe keys and answers at done.
+/// Whether DataFusion answers rows at this join's finish, over `build` and one `probe` batch.
 ///
 /// `#[cfg(test)]` because its only caller is `wire/tests.rs`, which checks that answer
 /// against the recipe's `AtDone` call. Two hops rather than one: `cpu_backend` declares
@@ -509,8 +513,8 @@ pub(crate) fn physical_expr(
 #[cfg(test)]
 pub(crate) fn has_finish_pass(
     node: &crate::plan::GpuHashJoin,
-    build: &datafusion::arrow::datatypes::Schema,
-    probe: &datafusion::arrow::datatypes::Schema,
+    build: datafusion::arrow::array::RecordBatch,
+    probe: datafusion::arrow::array::RecordBatch,
     ctx: std::sync::Arc<datafusion::execution::TaskContext>,
 ) -> Result<bool, PlanError> {
     cpu_backend::has_finish_pass(node, build, probe, ctx)
@@ -580,9 +584,6 @@ pub(crate) enum CallKind {
     Accumulate,
     MarkDone,
     SetBuild,
-    /// A join lane whose build side ended with no batch — its scatter gave it no build
-    /// rows. No call was made and none will be: what the lane owed was nothing.
-    NoBuild,
     Probe,
     Finish,
     EndOfInput,
@@ -969,16 +970,6 @@ pub(crate) struct IndexedNode<'a> {
     /// Where this node's accounting slots start: one per lane when it is lane-scoped,
     /// one for the node otherwise.
     pub(crate) slot_base: usize,
-    /// Whether this node's output reaches the build child of a join whose type owes rows
-    /// when its build side is empty. Derived from the tree, once, at index time — a walk
-    /// per emitted batch would put a tree climb in the hot path to answer a question whose
-    /// answer cannot change.
-    ///
-    /// Three conditions and not one: the lane may feed no join; it may feed one through
-    /// intermediate nodes, so this is a climb rather than a parent lookup; and it may feed
-    /// the PROBE side, where keeping empty batches adds a probe call per empty lane and
-    /// the second is refused (#152).
-    pub(crate) feeds_owing_build: bool,
 }
 
 pub(crate) struct PlanIndex<'a> {
@@ -998,12 +989,6 @@ impl<'a> PlanIndex<'a> {
 
     pub(crate) fn slot(&self, node: usize, lane: usize) -> usize {
         driver::slot_of(self, node, lane)
-    }
-
-    /// Whether an empty batch from `node` is owed to a join above it — see
-    /// [`IndexedNode::feeds_owing_build`].
-    pub(crate) fn feeds_owing_build(&self, node: usize) -> bool {
-        self.nodes[node].feeds_owing_build
     }
 }
 

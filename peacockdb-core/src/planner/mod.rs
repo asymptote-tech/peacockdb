@@ -7,7 +7,9 @@
 //! `translator` and `memory_estimation` are subcomponents, so only this file may reach them;
 //! the four entry points below are what a test drives instead.
 mod memory_estimation;
-mod nulls;
+mod not_in;
+mod nullability;
+mod parquet_nulls;
 mod pipeline;
 mod translator;
 
@@ -106,15 +108,15 @@ pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, P
     memory_estimation::estimate(root, budget)
 }
 
-/// Refuses an anti or mark join whose NULLs can meet under SQL semantics. Everything else
-/// plans: semi honours the flag, and `null_equals_null=true` is asking for the equality the
-/// executor hardcodes.
-pub(crate) fn refuse_null_unsafe_joins(root: &dyn GpuNode) -> Result<(), PlanError> {
-    nulls::refuse_null_unsafe_joins(root)
-}
+/// DataFusion's `NOT IN` is two-valued and so wrong wherever a key can be NULL (#80). This
+/// rule rewrites it where the rewrite is exact and refuses it where it is not; `not_in.rs`
+/// implements `OptimizerRule` for it and `build_session_state` registers it ahead of
+/// `decorrelate_predicate_subquery`.
+#[derive(Debug)]
+pub(crate) struct NullAwareNotIn;
 
 /// A DataFusion physical plan as a node tree, without the pipeline around it: no
-/// validation, no null analysis and no memory model.
+/// validation and no memory model.
 ///
 /// `#[cfg(test)]` because only tests want a tree without the pipeline: `plan_text/tests.rs`
 /// and `planner/memory_estimation/tests.rs`. They are the reason this exists rather than

@@ -8,6 +8,7 @@
 use std::time::Instant;
 
 use crate::executor::{GpuBackend, NodeTiming, RunReport, run};
+use crate::wire::join_scratch_bytes;
 
 use super::corpus::plan_at;
 use super::gpu_session::Session;
@@ -22,6 +23,7 @@ pub(crate) async fn device_plan(dataset: &str, sf: &str, query: &str, mode: &str
     DevicePlan {
         _ctx: ctx,
         tree,
+        join_scratch: join_scratch_bytes(&mode.knobs_for(dataset)),
         what,
     }
 }
@@ -41,7 +43,7 @@ pub(crate) fn set_node_timing(mode: &str) {
 /// the FFI, and holding one across runs would time the second differently from the first.
 pub(crate) fn timed_run(plan: &DevicePlan) -> TimedRun {
     let what = plan.what.as_str();
-    let mut session = Session::open(plan.tree.as_ref(), what);
+    let mut session = Session::open(plan.tree.as_ref(), plan.join_scratch, what);
     let ctx = session.context();
     let started = Instant::now();
     let report =
