@@ -8,10 +8,12 @@
 
 #include "generated/gpu_plan_generated.h"
 
+#include <cudf/column/column.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,29 @@ cudf::data_type binop_output_type(fb::BinaryOp op, cudf::data_type lhs,
 // or must take the column-producing path (false). Routes decimal operands and
 // un-inferrable / mismatched-type binary ops to the column path.
 bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table);
+
+/// What an expression evaluated to: a column the evaluation made, or one of the input
+/// table's own columns, borrowed — a bare ColumnRef is the second. Copying it was #154's
+/// costliest site: a whole column per batch on every predicate cuDF's AST refuses.
+struct EvaluatedColumn {
+  std::unique_ptr<cudf::column> owned;  // null when borrowed
+  cudf::column_view borrowed;           // valid while the input table lives
+
+  [[nodiscard]] cudf::column_view view() const { return owned ? owned->view() : borrowed; }
+
+  /// Ownership, for a caller that keeps the column past the input: the made column, or a
+  /// copy of the borrowed one — the one place a borrowed column is copied.
+  [[nodiscard]] std::unique_ptr<cudf::column> take() && {
+    return owned ? std::move(owned) : std::make_unique<cudf::column>(borrowed);
+  }
+};
+
+// Evaluate an expression, borrowing the input's column for a bare ColumnRef (the non-AST
+// path); the borrowed view is valid only while `table` lives. Declared here rather than in
+// the private expr.h because ExitCopies.ABareColumnRefIsBorrowedNotCopied asserts the borrow
+// directly — that nothing is allocated and the view is the input's own buffer — which no
+// operator-level call can show.
+EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table);
 
 // Whether a harness range is open. Observable only so that push_harness_range's one-level
 // rule can be tested — NvtxRanges.ASecondPushReplacesTheFirstRatherThanNesting is the only

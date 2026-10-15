@@ -410,10 +410,12 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
 
       std::vector<std::unique_ptr<cudf::column>> cols;
       cols.reserve(static_cast<size_t>(nkeys) + 1 + res.size());
-      for (cudf::size_type i = 0; i < gk->num_columns(); ++i)
-        cols.push_back(std::make_unique<cudf::column>(gk->view().column(i)));
+      // This set's key table is fresh and ours, so its columns are handed over rather
+      // than copied (#154). The row count is read before the release empties it.
+      auto const set_rows = gk->num_rows();
+      for (auto& key : gk->release()) cols.push_back(std::move(key));
       cudf::numeric_scalar<int32_t> gid_s(gid, true);
-      cols.push_back(cudf::make_column_from_scalar(gid_s, gk->num_rows()));
+      cols.push_back(cudf::make_column_from_scalar(gid_s, set_rows));
       for (size_t a = 0; a < res.size(); ++a) {
         auto col = std::move(res[a].results[0]);
         if (gs_is_count[a] && col->type().id() == cudf::type_id::INT32)
@@ -638,6 +640,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
         // children back as columns. Count MUST be INT32 going in — cuDF 25.02's
         // group_merge_m2 rejects INT64 at runtime — and comes back out as INT64, so
         // a second merge reads the same widths this one did.
+        // mean and m2 are copied, not shared: make_structs_column owns its children and
+        // these are the input's columns (#154). A per-group state column at that.
         auto cnt = cudf::cast(tv.column(static_cast<cudf::size_type>(in_off)),
                               cudf::data_type{cudf::type_id::INT32});
         auto mean = std::make_unique<cudf::column>(
@@ -674,6 +678,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
         // group_merge_m2: child(0)=valid_count INT32, child(1)=mean f64,
         // child(2)=M2 f64. Count MUST be INT32 on cuDF 25.02, which rejects INT64
         // at runtime; 25.10 reverses it and accepts only INT64 or FLOAT64 (#94).
+        // mean and m2 are copied for the same reason as the Merge arm above: a struct
+        // owns its children, and these are the input's columns (#154).
         auto cnt = cudf::cast(tv.column(static_cast<cudf::size_type>(in_off)),
                               cudf::data_type{cudf::type_id::INT32});
         auto mean = std::make_unique<cudf::column>(
@@ -755,16 +761,22 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
         "in a project instead");
   }
 
-  // Assemble output: key columns then aggregate columns (per `builds`).
-  for (cudf::size_type i = 0; i < group_keys->num_columns(); ++i) {
-    out_cols.push_back(std::make_unique<cudf::column>(group_keys->view().column(i)));
-    out_names.push_back(key_names[i]);
+  // Assemble output: key columns then aggregate columns (per `builds`). Groupby's key
+  // table is fresh and ours, so its columns are handed over rather than copied (#154).
+  {
+    auto key_columns = group_keys->release();
+    for (size_t i = 0; i < key_columns.size(); ++i) {
+      out_cols.push_back(std::move(key_columns[i]));
+      out_names.push_back(key_names[i]);
+    }
   }
   for (auto& b : builds) {
     std::unique_ptr<cudf::column> col;
     if (b.struct_child >= 0) {
       // Merge-stddev/var: state out, not a value. cuDF's merged count child is
       // INT32; widen it so both merges of a chain read the same layout.
+      // The copy stays: up to three builds read one merged struct, a child each, so
+      // releasing it for one would strand the others — and it is per-group state (#154).
       auto merged = agg_results[b.req].results[b.res]->view();
       auto child = merged.child(b.struct_child);
       col = child.type().id() == cudf::type_id::INT32
