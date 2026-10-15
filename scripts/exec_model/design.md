@@ -51,25 +51,29 @@ Every other cross-folder import points the way the diagram does.
       │ plans/engine_plan       the tree, field values verbatim
       ▼
     EngineNode tree ──► optimizer/cardinality   every node's estimate
+      │ multijoin.named     each cluster's id, MJ<n>
       │
-      │ optimizer/dynamic_filters   probe plans run first; scans re-mapped;
+      │ optimizer/dynamic_filters, pass 1: builds with a filter and no join;
+      │                             probe plans run first; scans re-mapped;
       │                             each probed build kept as a GpuMemorySource
       ▼
     multijoin.clusters ──► dphyp (C_out) ──► join_order.orient ──► disassembly
-      │                                                               │
-      ▼                                                               ▼
-    replan.run_adaptive ◄────────────────────────────────── the rewritten tree
+                                                                      │
+      ┌───────────────────────────────────────────────────────────────┘
+      │ optimizer/dynamic_filters, pass 2: builds with a filter or a join,
+      ▼                             on the ordered tree
+    replan.run_adaptive ◄── the rewritten tree, both passes' builds kept
       │ engine/adaptive: BuildDone per join, before its build is set
       ├── within 2× of the estimate ──► run on to the answer
       └── further off, nothing else started ──► stop; every build made so far
                                                becomes a GpuMemorySource; back to
                                                clusters with those sizes known
 
-`optimizer/pipeline.run_optimized` composes the steps in that order, the order
-`run_adaptive`'s `kept` parameter is shaped for, and returns what each did as an
-`OptimizerReport` (`optimizer/report.py`, rendered by `report_text.py`). Each step also has a
-corpus suite of its own. The mechanics are in each module's docstring; what follows is why each
-step has its shape.
+`optimizer/pipeline.run_optimized` composes the steps in that order — `pipeline.filtered` is
+everything before the run, the order `run_adaptive`'s `kept` parameter is shaped for — and
+returns what each did as an `OptimizerReport` (`optimizer/report.py`, rendered by
+`report_text.py`). Each step also has a corpus suite of its own. The mechanics are in each
+module's docstring; what follows is why each step has its shape.
 
 - **The planner's own plans** (`plans/`), not a lowering of the SQL written for the prototype: a
   second lowering is a second reading of the planner, and the optimizer would then be tuned to a
@@ -92,6 +96,63 @@ step has its shape.
   1.5): on an unordered column every row group's range spans the keys and nothing prunes.
   Survivors are re-mapped by the planner's own policy, so the pruned plan is one the planner
   would have made.
+- **Two passes of dynamic filters.** The first runs on the engine's plan and takes a build that
+  holds a filter and no join: a join there is a cluster DPhyp has not ordered yet. The second
+  runs on the plan DPhyp ordered and takes a build that holds a filter, a join or both, so a
+  restriction a reorder brought down reaches the fact scan: tpcds q58's week, a semi join over a
+  date dimension, is the fact join's build only after the reorder. A bare scan never qualifies:
+  its keys span the domain. No estimate gates a joined build: the keys it makes are what the
+  estimator misses most. tpcds q6's month of dates is estimated at 916 keys and truly 31, which
+  prune store_sales from 24 row groups to 2; q16's order numbers are estimated at 174 and truly
+  607, spread over both of catalog_returns' row groups. A source keeps its side's schema, lanes
+  and hash, so the plan stays valid, and pruning keeps any correct order correct. Nothing is
+  ordered again after the second pass; a build of the main run off its estimate still replans. A
+  candidate whose build holds another candidate's join, or a scan another candidate prunes in
+  the same round, waits a round, so its probe reads the inner build from memory and the scan
+  pruned. Clusters are named before the first pass, so a cluster a second-pass build holds keeps
+  its id, and `.optimizer.txt` names it on that build's line.
+- **Probe plans run adaptively.** A probe plan is the build side, run first by
+  `replan.run_adaptive` as the main plan is: where a build inside it lands more than 2× off its
+  estimate, the probe stops, keeps what it made, and orders the rest again. A second-pass build
+  holds clusters DPhyp ordered on estimates, and run whole it would keep an order the main run
+  would have replanned: tpcds q16's probe joined customer_address first, 70 thousand rows where
+  dates first make 50 thousand, and cost 0.8 % more than the plan without it. Its last run is
+  priced as a probe plan, each run it stopped as a stopped run, and the main plan reads its
+  build from memory for nothing; what a probe cannot replan is the rest of the cluster outside
+  its build. That is the limit: a probe that prunes nothing still materialises its build, and
+  the main run reads it exactly, so the build gives the main run no miss of its own, and the
+  cluster around it is reordered only where another build misses (q64's replans take its pass-2
+  builds as relations); where the main run would have replanned at that build, the probe can
+  cost more than not probing. tpcds q84 is the corpus case, +0.2–0.5 % at every mode: its
+  candidate's build {customer_address, customer} is estimated at 139.5 rows and is 947, all of
+  customer_demographics' row groups stay, and the plan without the probe replans at
+  customer_address and joins income_band ⋈ household_demographics first, narrowing the customers
+  before customer_demographics and store_returns; at tp1 the probed plan costs 136,584 bytes
+  more. The probe's root keeps the hash it declares through a replan, since the join its build
+  feeds reads it (`multijoin.clusters`), and the memory sources its replans make take names no
+  other run of the query has given.
+- **Where a key lifts.** From the join's probe key down to a scan column, through wiring,
+  filters, projects that pick columns, hash joins of any type into the side the column comes
+  from, and every branch of a `GpuUnion` or `GpuInterleave`, whose output column k is each
+  branch's column k. Each scan reached is a candidate of its own, tested and pruned on its own
+  footers, and the branches share one probe. A branch where the column is computed — a cast the
+  planner put on a union branch included — adds nothing, and the others still prune: a pruned
+  row of one branch reaches the join and is dropped there, whatever the other branch does.
+- **Why a non-inner join passes the key.** The candidate join C matches no probe row whose key
+  is outside its build's keys, as every type in `PRUNES_PROBE` does, and no NULL probe key:
+  either it does not equate NULLs, or its build holds no NULL key. Anti and mark joins equate
+  NULLs whatever the plan says (#80, #59), as does a join the plan marks `null_equals_null`;
+  where such a join's build holds a NULL, that key prunes nothing. Remove a scan row r whose key
+  k is outside C's keys, under a join J the key lifts through. Every row J or a node above makes
+  from r carries k, through filters, plain projects and joins, and C drops it. A row of J's
+  other side that matched only r is now padded where J pads (`Left`, `Right`, `Full`), with k
+  NULL since k is on r's side, and C drops it; no other type outputs that side's rows alone. A
+  semi, anti or mark join outputs one side, and the key lifts only into that side, so the side
+  that decides its matches is never pruned; a mark column stops the lift. A filter between, the
+  anti join's `IS NULL` included, passes or drops a changed row but cannot give it a key C
+  matches. J equating NULLs changes none of this: what it matches differently carries k NULL or
+  outside C's keys. So C's output is unchanged. `test_dynamic_filters.py` holds it to the
+  unpruned answer over every type, either side, NULL keys on both, J equating NULLs or not.
 - **Clusters** (`multijoin.py`) are maximal trees of hash joins: inner ones, and left, right,
   full, semi and anti ones without a residual, which conflict detection places (below). Only
   hash joins carry the key edges DPhyp takes. A mark join stays a wall, its mark column being no
@@ -101,12 +162,13 @@ step has its shape.
   are `(relation, ordinal)` identities rather than positions, since a reordered tree renumbers
   every position.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
-  (`multijoin.named`, the first thing `join_order.ordered` does), and every join it holds carries
-  the id. It lives on the join node (`EngineNode.mj`), not in the plan text and not in a table
-  keyed by node identity: every rewrite copies nodes and the copy carries it, and disassembly
-  gives the joins it makes their cluster's. A replan's plan is named already and keeps its ids; a
-  cluster read from memory since leaves its number unused. `.cpu.txt` shows the id as `mj=MJ<n>`
-  on each clustered join, and `.optimizer.txt` heads each DPhyp call with it.
+  (`multijoin.named`, the first thing the pipeline does and `join_order.ordered` does for a plan
+  given unnamed), and every join it holds carries the id. It lives on the join node
+  (`EngineNode.mj`), not in the plan text and not in a table keyed by node identity: every
+  rewrite copies nodes and the copy carries it, and disassembly gives the joins it makes their
+  cluster's. A replan's plan is named already and keeps its ids; a cluster read from memory
+  since leaves its number unused. `.cpu.txt` shows the id as `mj=MJ<n>` on each clustered join,
+  and `.optimizer.txt` heads each DPhyp call with it.
 - **Disassembly** (`disassembly.py`) derives each new join's wiring as the translator would
   rather than carrying the old plan's exchanges, which were placed for keys the new join may not
   use. A join over the same relations as one the plan had keeps that join's lanes — DataFusion's
@@ -236,13 +298,14 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   no final ratio.
 
 The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and
-386 tpcds runs, dearer in 5 — tpcds q5 at every mode by under 0.06 % — and equal in the rest;
-the median ratio is 1.00 for tpch and 0.61 for tpcds. The final ratio is within the published
-report's 1.4 for 18 of 20 tpch rows and 67 of 79 tpcds rows. Over the 620 runs DPhyp is called
-3,249 times, 746 of the calls reorder and 45 stop at the budget, all tpcds q64's; orientation
-flips 584 joins, and 710 replans run, 107 more refused. Bytes do not see the prototype's own
-time: q64 replans 7 times at every mode and is cheaper at each (0.83–0.92), yet slower in wall
-time, which is Python estimation and DPhyp over 30 calls rather than anything in the plan.
+391 tpcds runs, dearer in none, and equal in the rest; the median ratio is 1.00 for tpch and
+0.52 for tpcds. The final ratio is within the published report's 1.4 for 18 of 20 tpch rows and
+70 of 79 tpcds rows. Over the 620 runs dynamic filters run 740 probes on the plan as written,
+narrowing 735 scans, and 165 on the order DPhyp made, narrowing 55. DPhyp is called 3,133 times,
+766 of the calls reorder and 10 stop at the budget, all tpcds q64's; orientation flips 556
+joins, and 692 replans run, probes' included, 114 more refused. Bytes do not see the prototype's
+own time: q64 replans 8 times at every mode and is cheaper at each (0.43–0.70), yet slower in
+wall time, which is Python estimation and DPhyp over 19 calls rather than anything in the plan.
 
 ## The runtime
 

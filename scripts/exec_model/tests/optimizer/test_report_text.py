@@ -14,7 +14,7 @@ import pandas as pd
 from ..harness import main
 from ...optimizer.dynamic_filters import KeySummary, Pruned
 from ...optimizer.report import (
-    BuildMiss, ChosenJoin, FilterCandidate, JoinOrder, OptimizerReport, PricedSet, Replan,
+    BuildMiss, ChosenJoin, FilterCandidate, FilterPass, JoinOrder, OptimizerReport, PricedSet, Replan,
 )
 from ...optimizer.report_text import render
 
@@ -31,12 +31,19 @@ PAIR = JoinOrder(
     joins=(ChosenJoin(0b01, 0b10, 100.0, 800.0),), plan_cost=800.0, flipped=())
 
 EVERY_RULE = OptimizerReport(
-    candidates=(FilterCandidate("dk", "sales", "sk", 0.9), FilterCandidate("d", "sales", "sd", 1.0)),
-    pruned=(Pruned("sales", "sk,sd", tuple(range(10)), (0, 1, 2, 4), (
-        ("sk", KeySummary(500, 549, None)), ("sd", KeySummary(pd.Timestamp("1999-01-02"), 7.0, (7.0,))))),
-        Pruned("returns", "rk", (0, 1), (), (("rk", KeySummary(None, None, ())),))),
-    probed=(("p0", 50),),
+    filters_before_order=FilterPass(
+        candidates=(FilterCandidate("dk", "sales", "sk", 0.9), FilterCandidate("d", "sales", "sd", 1.0)),
+        pruned=(Pruned("sales", "sk,sd", tuple(range(10)), (0, 1, 2, 4), (
+            ("sk", KeySummary(500, 549, None)), ("sd", KeySummary(pd.Timestamp("1999-01-02"), 7.0, (7.0,))))),
+            Pruned("returns", "rk", (0, 1), (), (("rk", KeySummary(None, None, ())),))),
+        probed=(("p0", 50, 400, ()),)),
     orders=(STAR,),
+    filters_after_order=FilterPass(
+        candidates=(FilterCandidate("dk", "spread", "pk", 1.0),),
+        pruned=(Pruned("spread", "pk", (0, 1, 2), (1,), (("pk", KeySummary(510, 519, None)),)),),
+        probed=(("p1", 10, 80, ("MJ1",)),),
+        replans=(("p1", Replan(BuildMiss("GpuHashJoin on=[(pk@0, sk@0)]", 40, 4.0), kept=(("m2", 40),), orders=(PAIR,))),),
+        refused=(("p1", BuildMiss("GpuHashJoin on=[(dk@0, pk@0)]", 30, 6.0)),)),
     replans=(Replan(BuildMiss("GpuHashJoin on=[(dk@0, sk@0)]", 100, 10.0), kept=(("m0", 100), ("m1", 1000)),
                     orders=(PAIR,)),),
     refused=(BuildMiss("GpuNestedLoopJoin", 3, 12.0),),
@@ -53,7 +60,7 @@ dynamic filters
     sd in [1999-01-02, 7], values 7
   returns: row groups 2 -> 0
     rk: no keys
-  build p0 read from memory: 50 rows
+  build p0 read from memory: 50 rows, 400 bytes
 join order MJ1: 3 relations
   r0 MemorySource p0
   r1 LoadParquet sales
@@ -67,6 +74,23 @@ join order MJ1: 3 relations
   join r0+r2 x r1: 500.0 rows, 12000 bytes
   C_out 12400 bytes, the plan's order 20000
   flipped: r2 builds, r0 probes
+dynamic filters after join order
+  candidate dk -> spread.pk, clustering 1.00
+  spread: row groups 3 -> 1 (1)
+    pk in [510, 519]
+  build p1 read from memory: 10 rows, 80 bytes, holding MJ1
+  probe p1 replan 1: a build of 40 rows against 4.0 estimated (q-error 10.00) for GpuHashJoin on=[(pk@0, sk@0)]
+    kept m2 (40 rows)
+    join order MJ2: 2 relations
+      r0 MemorySource m0
+      r1 LoadParquet spread
+      edge r0-r1: r0.dk = r1.pk
+      priced 1 sets
+      DPhyp stopped at its budget of 1 pairs after pricing 1 sets: the plan's order kept
+      oriented (r0 r1), build first
+      join r0 x r1: 100.0 rows, 800 bytes
+      C_out 800 bytes, the plan's order 800
+  probe p1 replan refused: a build of 30 rows against 6.0 estimated (q-error 5.00) for GpuHashJoin on=[(dk@0, pk@0)]
 replan 1: a build of 100 rows against 10.0 estimated (q-error 10.00) for GpuHashJoin on=[(dk@0, sk@0)]
   kept m0 (100 rows), m1 (1000 rows)
   join order MJ2: 2 relations
@@ -96,12 +120,12 @@ def test_every_rule_renders_its_lines_and_the_plan_its_diff():
 
 def test_a_report_where_nothing_fired_is_one_line():
     plan = "GpuUnload\n  GpuLoadParquet: t\n"
-    assert render(OptimizerReport((), (), (), (), (), (), plan, plan)) == "nothing fired\n"
+    assert render(OptimizerReport(FilterPass(), (), FilterPass(), (), (), plan, plan)) == "nothing fired\n"
 
 
 def test_a_cluster_left_as_it_was_says_the_plan_did_not_change():
     plan = "GpuUnload\n  GpuLoadParquet: t\n"
-    text = render(OptimizerReport((), (), (), (PAIR,), (), (), plan, plan))
+    text = render(OptimizerReport(FilterPass(), (PAIR,), FilterPass(), (), (), plan, plan))
     assert text.startswith("join order MJ2: 2 relations\n") and text.endswith("plan unchanged\n"), text
 
 

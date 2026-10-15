@@ -92,8 +92,9 @@ def is_reorderable(node: EngineNode) -> bool:
 
 
 def clusters(plan: EngineNode) -> list[MultiJoin]:
-    """Every cluster of `plan`, outermost first, those inside a cluster's relations included."""
-    found, stack = [], [(plan, False)]
+    """Every cluster of `plan`, outermost first, those inside a cluster's relations included. A hash
+    the root declares is read by what consumes the plan: a probe plan's root feeds a join's build."""
+    found, stack = [], [(plan, "hashed_on" in plan.fields)]
     while stack:
         node, hash_read = stack.pop()
         if is_reorderable(node):

@@ -127,6 +127,18 @@ def test_a_cluster_inside_a_relation_reads_its_hash_where_the_enclosing_join_may
     assert [c.hash_read_above for c in clusters(nested("c@1"))] == [False, False]
 
 
+def test_the_hash_a_plan_s_root_declares_is_read_by_what_consumes_the_plan():
+    # A probe plan is a build side: the join its build feeds reads the hash its root declares.
+    def side(hashed: str):
+        return plan(f"""GpuCoalesceAllBatches: lanes=1, batches=single{hashed}, schema=[b:Int64, c:Int64]
+  GpuHashJoin: join_type=Inner, on=[(b@0, c@0)], {L}, schema=[b:Int64, c:Int64]
+{scan("t2", "b", indent=4)}
+{scan("t3", "c", indent=4)}""")
+
+    assert [c.hash_read_above for c in clusters(side(", hashed_on=[b@0]"))] == [True]
+    assert [c.hash_read_above for c in clusters(side(""))] == [False]
+
+
 def test_a_cross_join_a_nested_loop_join_and_a_filtered_semi_join_carry_no_id():
     text = f"""GpuCrossJoin: {L}, schema=[a:Int64, c:Int64]
   GpuNestedLoopJoin: join_type=Inner, filter=a@build:0 < b@probe:0, projection=[a@0], {L}, schema=[a:Int64]

@@ -270,7 +270,8 @@ def _mode_cells(run: QueryCost | Marker | None) -> str:
 #: A chip per rule that changed the plan: its label and the count in `Fired` that says it did. A
 #: probe that narrowed nothing, a call that kept the plan's order, a budget hit or a refused replan
 #: changed nothing, and shows only in the hover.
-CHIPS = (("dynamic filters", "narrowed"), ("DPhyp", "reordered"), ("flips", "flips"), ("replans", "replans"))
+CHIPS = (("dynamic filters", "narrowed"), ("after join order", "narrowed_after_order"), ("DPhyp", "reordered"),
+         ("flips", "flips"), ("replans", "replans"))
 
 
 def _rules(row: Row) -> str:

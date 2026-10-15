@@ -250,7 +250,7 @@ class HashJoin(_PandasJoin):
         # Rows whose key is null are held OUT of the merge rather than dropped, so an
         # outer type can still emit them as unmatched. That is the whole difference
         # between null_equals_null false and true. Anti and mark are EQUAL regardless.
-        equal_nulls = self.null_equals_null or self.join_type in J.IGNORES_NULL_EQUALS_NULL
+        equal_nulls = J.equates_nulls(self.join_type, self.null_equals_null)
         if equal_nulls:
             build_live, probe_live = self.build, probe
         else:

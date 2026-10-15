@@ -8,7 +8,7 @@ name: Exec-model corpus (manual)
 #
 # PCK_SHARD=k/n gives process k every n-th test (scripts/exec_model/tests/harness.py), and a
 # shard that selects nothing is an error. So the matrix's shard list and the `/3` in PCK_SHARD
-# must agree, and the shard count may not exceed the smallest file's test count — 58 today,
+# must agree, and the shard count may not exceed the smallest file's test count — 73 today,
 # test_engine_dynamic_filters.py's.
 on:
   workflow_dispatch:

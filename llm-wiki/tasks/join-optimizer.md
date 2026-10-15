@@ -158,10 +158,16 @@ as written `(customer ⟕ orders) ⋈ σ(nation)`, ≈ 1.55M rows then 62k; reor
 A dynamic filter is taken today only from a build that holds a filter and no join, and its key
 lifts through wiring, filters, plain projects and inner joins. tpch q5's `o_orderkey ⋈
 lineitem` has a join in its build; tpcds q5's date filter stops at the `GpuUnion` of each
-channel's sales and returns, over fact columns ordered by date. A build may hold joins — its
-values are the probe plan's measured output, as now — and a key lifts through `GpuUnion` and
-`GpuInterleave` into every branch. q5 of both benchmarks and q58 are run before and after, and
-the costs go in the detail file.
+channel's sales and returns, over fact columns ordered by date. Filters run in two passes. The
+first, on the engine's plan, keeps today's build rule; a key lifts through `GpuUnion` and
+`GpuInterleave` into every branch, each branch's scan pruned on its own footers, and through a
+non-inner join into the side it outputs. The second runs on the plan DPhyp ordered, where a
+build may hold a filter or a join — its values are the probe plan's measured output, as now —
+so a restriction a reorder brought down, as q58's week, reaches the fact scan; nothing is ordered
+again after it. A probe plan runs adaptively: a build that misses inside it replans, as in the
+main run. tpch q5 gains nothing: `l_orderkey` is not ordered in lineitem, which is sorted by
+ship date. q5 of both benchmarks and q58 are run before and after, and the costs go in the
+detail file.
 
 ## DuckDB's cost for the named queries
 

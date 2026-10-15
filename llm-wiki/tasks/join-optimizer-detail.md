@@ -52,13 +52,17 @@ fixes #236 and #237):
 - Task 12: four named tpch queries with a non-inner join are registered. Non-inner joins enter
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
-  at every mode (Task 12 below). Tasks 13–18 are not started.
+  at every mode (Task 12 below). Tasks 14–18 are not started.
 - #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
   join that reads a share ran again at every mode into the committed outputs; no other query's
   output can move (#239 below).
+- Task 13: dynamic filters run twice, on the engine's plan and on the order DPhyp made; a key lifts
+  through unions and non-inner joins; probe plans run adaptively. The full `run.py` regenerated
+  every committed prototype output, and the answer suites passed over every (query, mode) that
+  differs from HEAD; tpcds q84 is the one ratio above HEAD, +0.2–0.5 % (Task 13 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (45 files, 431 cases), and q64 in the corpus answer,
+- Green otherwise: rust-only, DPhyp, the cheap tier (46 files, 452 cases), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
@@ -1602,3 +1606,381 @@ experiment still takes q93 from 10.7 to 1.03. Its "86 worse, 64 better" did not 
 under any counting tried, so design.md now gives the re-run's: rows and both matched shares
 scaled, a join counted where its q-error moves by more than 1 %, 157 worse and 175 better; q64's
 middle joins worst, 16.6 → 26.4.
+
+## Task 13
+
+### What it does
+
+- **Two passes.** `pipeline.filtered` is everything before the run: `named`, pass 1 on the engine's
+  plan (`Builds.FILTERED`, a filter and no join, today's rule), `ordered` with pass 1's builds
+  known, pass 2 on the ordered plan (`Builds.FILTERED_OR_JOINED`). No DPhyp call follows pass 2;
+  replans still order again where a build misses. `run_optimized` and `test_engine_dynamic_filters`
+  both call it. The rule is an enum, not a bool, at every call.
+- **Names before the filters.** Task 11's note above ("a cluster inside a build is read from memory
+  before naming and gets no number") no longer applies: `named` runs first, pass 1's builds hold
+  no join, so the numbers are the engine plan's as before. A pass-2 build keeps its clusters' ids;
+  their DPhyp calls keep their headings, and the build's line names them (`build p2 read from
+  memory: 48625 rows, 6673962 bytes, holding MJ2, MJ3`). Its joins leave `.cpu.txt` with the build,
+  as a replan's sources' do.
+- **Lift.** `lift` returns every (scan, column) the key reaches: `GpuUnion` and `GpuInterleave` fan
+  out by ordinal; a hash join of any type passes into the side the column comes from (`own_output`),
+  a mark column stops. One candidate per scan, each on its own footers; the branches share the one
+  probe. A branch that cannot lift stays whole and the others are pruned. No width check at a
+  union: its branches have its width by construction.
+- **The key lifts through non-inner joins, in this task.** The argument per type is design.md's
+  "Why a non-inner join passes the key". It is what prunes q40 (through `Right`, catalog_returns
+  building), q78 (store_sales under `Filter(IS NULL) ← Right`) and q80 (three channels), all in
+  pass 1.
+- **NULLs.** `join_types.equates_nulls` is the one rule for whether a join matches NULL to NULL:
+  the plan's `null_equals_null`, or an anti or mark join whatever the plan says (#80, #59);
+  `joins.py` and the candidates both read it. `summarize` records whether a build key is NULL.
+  A join that equates NULLs stays a candidate; where its build holds a NULL key, that key prunes
+  nothing, since the NULL matches the NULL probe keys any row group may hold. Before this, an
+  anti or mark candidate whose build held a NULL lost its match when its probe's NULL rows were
+  pruned: a `LeftAnti` answered a row the plan did not, a `LeftMark` flipped a mark to false.
+  The corpus's one such candidate is q16's pass-2 `LeftAnti` (`cs_order_number →
+  cr_order_number`), with no NULL in either column at sf1.
+- **The three traps.** `apply(plan, tables, batching, run, builds, kept)`: `run(side, frames)` gets
+  the frames of every source made so far, `kept`'s included; names continue after `kept`'s; a
+  candidate whose build holds another candidate's join waits a round. `kept_estimates` estimates
+  the kept builds in the order made, each over those before it.
+- **A scan pruned in the same round.** A candidate whose build holds the scan another ready
+  candidate prunes waits a round too. Probed in the same round, its build read the scan unpruned
+  and then became a memory source, while the report still counted the scan narrowed. The topmost
+  ready join waits for nothing, so a round is never empty.
+- **TES clusters (Task 12).** A rebuilt non-inner join keeps its plan type and build side, so
+  `PRUNES_PROBE` judges it as written. A pass-2 build may hold a non-inner edge (q58's semi join);
+  a cluster cut by a pass-2 source is reassembled in a replan with the source opaque and its TES
+  from the joins left, as `left-join-fixed`'s `m0` is. A rebuilt root's shuffle-back is an
+  `GpuEmitPartitions`, which `lift` passes. The memory source copies `hashed_on`, so a hash read
+  above stays met.
+- **Report.** `OptimizerReport` holds two `FilterPass`es; `.optimizer.txt` prints the second as
+  `dynamic filters after join order`, after the join orders and before the replans. Each probed
+  line gains its bytes (`PandasBatch.byte_size`'s measure) and, where it holds clusters, their ids.
+  `Fired` gains `probes_after_order` and `narrowed_after_order`; `cost_report.html` a chip `after
+  join order`. Every committed `.costs.txt` lacks the two fields until the full run writes them.
+- **tpch q5 gains nothing, and nothing is changed for it.** Neither the data nor a derived filter:
+  `l_orderkey` is not ordered (lineitem is sorted by `l_shipdate`), so no rule prunes lineitem. At `tp4-sized` alone DPhyp flips `σ orders ⋈ customer` so that orders
+  builds; pass 2 probes it (227,597 rows, 3.6 MB) against customer's two row groups and keeps both.
+  The ratio is unchanged to four places: the build's bytes move from the main run to the probe.
+- **Not in this task.** A row group whose key is all NULL (store_sales group 23) survives every
+  pruning; dropping it for a NULL-rejecting join is a rule of its own.
+
+### Red first
+
+- `test_dynamic_filters.py`: the union, computed-branch and interleave tests on no candidate past
+  the union; the per-type test on no candidate past a `Left` join (inner passed); the build rule's two tests on `ImportError: Builds`; the nested test on
+  the outer build probed first, over the returns unpruned; the second-pass test on `apply()` taking
+  no `kept`. `test_replan`: `KeyError: 'p0'` in `kept_estimates`. `test_report`: the pass-2 test on
+  `ImportError: FilterPass`. The report-text and cost-report expectations moved with the format.
+- Second round, all red first. The NULL-holding build test (LeftAnti, LeftMark, a null-equal
+  Inner) on `LeftAnti` pruned to groups 0–1; the NULL-free one on no candidate for the null-equal
+  Inner, which the first round dropped; the same-round scan test on the returns kept whole, 3 → 3.
+  Honouring only the plan's flag, not anti and mark, fails the NULL-holding test.
+- Mutants caught: every join lifted as inner (the per-type test); one sweep instead of rounds (the
+  nested test); names restarting per call (the nested and second-pass tests); pass 2 on the narrow
+  rule (`test_report`'s pass-2 test); the pass-2 block not rendered (`test_report_text`).
+
+### Sample
+
+`run.py` into a scratch `--out`, every mode, locally, Python 3.13, pandas and pyarrow as Task 12's:
+tpch q5, q20; tpcds q5, q7, q10, q15, q40, q58, q64, q77, q78, q80. 60 runs, none failed, 39 min. q20, q7,
+q15 and q77 fired before; their `.cpu.txt`, `.optimizer.txt` and `.costs.txt` sections equal the
+committed ones at every mode once the new bytes and the two `fired` fields are taken out, and so do
+tpch q5's at the four modes where pass 2 does not fire.
+
+Ratio, optimized over planned, committed → this run:
+
+| query | filters (pass 1 / pass 2) | row groups | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|---|---|
+| tpch q5 | 0 / 1 at tp4-sized | customer 2 → 2 | 0.9835 = | 0.9835 = | 0.9874 = | 0.9874 = | 0.9913 = |
+| tpch q20 | 1 / 0 | partsupp 7 → 7 | 1.0000 = | 1.0000 = | 1.0000 = | 1.0000 = | 1.0000 = |
+| tpcds q5 | 5 / 0 (union branches) | 47 → 7 | 1.0005 → 0.4478 | 1.0005 → 0.2235 | 1.0002 → 0.2234 | 1.0002 → 0.2238 | 1.0002 → 0.2234 |
+| tpcds q7 | 1 / 0 | 24 → 7 | 0.7657 = | 0.5057 = | 0.7228 = | 0.4163 = | 0.4155 = |
+| tpcds q10 | 3 / 1 | 42 → 5; cd 16 → 16 | 0.7516 = | 0.7212 = | 0.7181 = | 0.7181 = | 0.7489 = |
+| tpcds q15 | 1 / 0 | 12 → 1 | 0.0894 = | 0.0894 = | 0.0930 = | 0.0930 = | 0.0930 = |
+| tpcds q40 | 1 / 0 (through `Right`) | 12 → 2 | 0.2176 → 0.0650 | 0.2176 → 0.0650 | 0.2629 → 0.0708 | 0.2629 → 0.0708 | 0.2629 → 0.0708 |
+| tpcds q58 | 0 / 3 | 42 → 4 | 0.1453 → 0.0714 | 0.1453 → 0.0275 | 0.1826 → 0.0321 | 0.1826 → 0.0321 | 0.1826 → 0.0321 |
+| tpcds q64 | 0 / 6 | ss 48 → 13; cd 64 → 64 | 0.8298 → 0.6729 | 0.9084 → 0.4354 | 0.8795 → 0.7318 | 0.9238 → 0.4909 | 0.8795 → 0.4679 |
+| tpcds q77 | 5 / 0 | 47 → 7 | 0.4428 = | 0.2166 = | 0.1918 = | 0.1918 = | 0.1918 = |
+| tpcds q78 | 1 / 0 (through `Right`, `IS NULL`) | 24 → 7 | 0.8971 → 0.7833 | 0.8971 → 0.6554 | 0.9301 → 0.8165 | 0.9301 → 0.6887 | 0.9301 → 0.6887 |
+| tpcds q80 | 3 / 0 (through `Right`) | 42 → 5 | 0.3306 → 0.1520 | 0.3302 → 0.0754 | 0.3894 → 0.0822 | 0.3921 → 0.0822 | 0.3921 → 0.0822 |
+
+- Row groups are the same at every mode. tpcds q5: store_sales 24 → 3, store_returns 3 → 1,
+  catalog_sales 12 → 1, catalog_returns 2 → 1, web_sales 6 → 1; the web returns branch, under a
+  `Left` join with one row group, prunes nothing. q58: catalog_sales 12 → 1, store_sales 24 → 2,
+  web_sales 6 → 1, each build the week's 7 dates, each holding its cluster (`MJ2`, `MJ3`, `MJ4`).
+- q64's pass 2 nests: `p2` (holding `MJ2`, `MJ3`) is probed first, then `p4` (holding `MJ2`), which
+  reads `p2` from memory. Its four customer_demographics candidates keep all 16 groups.
+- q10: the pass-2 probe makes exact the build whose miss replanned at tp1-single, so that replan
+  is gone; the ratio is the same to four places.
+- Largest probed build: by rows, tpch q5 at tp4-sized, 227,597 rows, 3,641,552 bytes; by bytes,
+  tpcds q64's `p5`, 49,247 rows, 6,814,977 bytes at tp4-rowgroup. Outside these two queries the
+  largest is tpch q20's, 2,127 rows.
+
+The two corpus files narrowed to the sample's twelve queries, at every mode, against DuckDB, one
+process at a time: `test_engine_dynamic_filters` 11 at each mode but `tp4-sized`, 12 there (tpch q5
+has a candidate only there), `test_engine_optimized` 12 at each; 116 cases, all passed, 43 min.
+
+`test_engine_dynamic_filters` runs `pipeline.filtered` and takes a query where a candidate is on the
+plan as written or on the order DPhyp gives it before any probe: 71 at tp1-single, 73 at
+tp1-rowgroup, tp4-single and tp4-rowgroup, 75 at tp4-sized (58 before). Selecting costs an
+`ordered` per clustered plan at import, about 10 s a mode.
+
+### After the NULL and same-round fixes
+
+The sample again, with tpcds q16 added: `run.py` at every mode, 65 runs, none failed, 40 min. Every
+section of the twelve earlier queries is byte for byte what the first sample wrote, at every mode:
+neither fix moved an output there. The two corpus files over the thirteen queries at every mode:
+126 cases, all passed, 44 min.
+
+tpcds q16 rises: 1.0000 → 1.0073 at the tp1 modes, 1.0081 at the tp4 modes. Its pass-2 candidate
+is the `LeftAnti` on `cs_order_number`; its build holds `MJ2` (call_center, customer_address,
+date_dim, catalog_sales), and catalog_returns' two row groups both stay. The probe runs `MJ2` in
+DPhyp's order, customer_address first, estimated at 27,389 rows and truly 70,129 (3.37 MB of hash
+join output) where the plan's order, dates first, makes 49,794 (2.39 MB). HEAD's adaptive run
+stopped at that build (2,446 against 950) and replanned back to a plan priced as the planned one.
+A probe is run whole by `run_plan`, so no build inside it replans: a pass-2 build that prunes
+nothing can still cost more than the main run would have.
+
+### A joined build probed only where its keys are few (removed)
+
+This rule was tried and taken out again (next section); the evidence for it stands.
+
+Pass 2 takes a build holding a join only where the estimator puts its key at no more than
+`IN_LIMIT` (50) values; a build with a filter and no join keeps pass 1's rule. Past `IN_LIMIT` only
+the keys' bounds prune, and the estimator bounds a joined build's key by its base column's range
+(a filter on `d_year` does not narrow `d_date_sk`'s), so nothing says such a probe will narrow.
+The estimates before each round's probes, at tp1-single:
+
+| query | candidate | estimated key NDV | true NDV | row groups kept |
+|---|---|--:|--:|---|
+| q16 | `cs_order_number → cr_order_number`, joined | 174 | 607 | 2 of 2 |
+| q58 | `d_date_sk → *_sold_date_sk` ×3, joined | 7 | 7 | 1/12, 2/24, 1/6 |
+| q64 | `d_date_sk → ss_sold_date_sk` ×2, filter only | 363 | 365, 366 | 6/24, 7/24 |
+| q64 | `*_cdemo_sk → cd_demo_sk` ×4, joined | 11,373 | 25–30 thousand | 16 of 16 |
+| q10 | `c_current_cdemo_sk → cd_demo_sk`, joined | 52 | 92 | 16 of 16 |
+
+Neither the key's estimated range nor its NDV against the probe column's tells q16 from q64's
+dates: both keys' ranges are their base columns' whole range, and q16's 174 of 94,339 is the
+narrower share. Only a values list prunes scattered keys, which is what the rule asks for.
+`Builds.FILTERED_OR_JOINED` reads the estimates `apply` is given for each round, every build kept so
+far measured.
+
+Red first: the unit test on a joined build at `IN_LIMIT` and `IN_LIMIT + 1` estimated keys, and a
+filter-only one at a million (`TypeError` on `candidates` taking no estimates), and the pipeline
+test over year 5's hundred dates restricting the sales, all of them the sales' keys (a pass-2 probe
+ran). The narrow toy's predicate became `dk` in [500, 520): year 5 AND `dk < 520` is estimated at 52
+values under independence. Dropping the rule fails both.
+
+The sample again, 13 queries at every mode: 65 runs, none failed, 42 min.
+- q16: 1.0000 at every mode; its sections equal HEAD's byte for byte.
+- q10: its pass-2 probe is gone and its sections equal HEAD's byte for byte; its ratio was the
+  same either way, the probe making exact a build whose miss HEAD replans.
+- q64 keeps its two date prunings, 48 → 13 row groups, and loses its four customer-demographics
+  probes, which pruned nothing but made four 48-thousand-row builds exact: the run replans 9 times
+  instead of 4. At tp1-single and tp1-rowgroup its stopped runs cost 948 and 734 million against 42
+  million, its probes 2.4 million against 821 and 504 million. Ratio, HEAD → before the rule →
+  now:
+
+| tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|
+| 0.8298 → 0.6729 → 0.7133 | 0.9084 → 0.4354 → 0.5529 | 0.8795 → 0.7318 → 0.7456 | 0.9238 → 0.4909 → 0.5262 | 0.8795 → 0.4679 → 0.4817 |
+
+- Every other query's sections are byte for byte what the second sample wrote.
+- `test_engine_dynamic_filters` selects 67 queries at four modes and 68 at tp4-sized; tpcds q16 and
+  q10's pass-2 candidates no longer count.
+- The two corpus files over the 13 queries at every mode: 121 cases, all passed, 44 min
+  (`test_engine_dynamic_filters` 11 at each mode but tp4-sized, 12 there; tpcds q16 has no candidate
+  left).
+
+### Probes run adaptively
+
+The NDV gate is gone: in tpcds q6, DPhyp's order makes the month's dates (date_dim ⋈ distinct
+`d_month_seq`) the store_sales join's build, its key estimated at 916 values and truly 31, which
+prune store_sales 24 → 2 row groups; the gate dropped it, and cost q64 more than it saved q16.
+Estimated NDV gates a joined build in neither direction (q6 916 against 31, q16 174 against 607).
+Pass 2 is back to a filter, a join or both.
+
+What caused q16 was the probe running a misordered cluster with no replan, so every probe plan now
+runs through `replan.run_adaptive` (`pipeline.filtered` builds the probe), as the main plan does:
+- its last run is the build, priced as a probe plan; each run it stopped is priced as a stopped
+  run (`OptimizedRun.stopped` holds the probes' and the main run's);
+- its replans and refused replans are in `FilterPass.replans` and `.refused`, rendered under the
+  pass's block as `probe pN replan K: …`, counted in `Fired.replans`, `refused` and the DPhyp counts;
+- `apply` hands each probe the builds made so far, (side, frames) by name, so `run_adaptive` knows
+  their estimates; `kept_estimates` and the nesting rounds need nothing else;
+- a run's memory sources take names from one set shared by the probes and the main run
+  (`run_adaptive(taken=…)`); with no probe replan the main run's names are HEAD's;
+- a plan's root that declares a hash is read by what consumes the plan (`multijoin.clusters`), so
+  a probe that replans keeps the hash its build's join reads.
+
+Red first: the q6-shaped toy (`test_filter_passes`: a year's dates estimated at about 950 keys,
+truly 100, pruning the spread 10 → 1) on no pruned scan, under the gate; a build missing inside a
+probe replanning there (`FilterPass` had no `replans`); the q16-shaped toy (a fact under two
+dimensions, one estimated at a row and truly ten, keys spanning the probe's ten row groups) on
+71,472 against 69,552 for the plan without the second pass; shared names on `run_adaptive` taking
+no `taken`; the root's hash on `hash_read_above` false. The report-text and count expectations for
+probe replans were red with their rendering and counting taken out. The two gate tests are gone.
+Cheap tier 46 files, 449 passed; `test_engine_dynamic_filters` selects 71, 73, 73, 73 and 75 again.
+
+The sample at every mode, 23 queries: `run.py` 115 runs, none failed, 74 min; the two answer suites
+225 cases, all passed, 60 min. Ratio, HEAD → round 2 (no gate, probes run whole, emulated) → now;
+"=" is no change at four places:
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| tpcds q6 | 0.1647 → 0.0877 → 0.0877 | 0.1647 → 0.0358 → 0.0358 | 0.1922 → 0.0359 → 0.0359 | 0.1859 → 0.0300 → 0.0300 | 0.1910 → 0.0348 → 0.0348 |
+| tpcds q16 | 1.0000 → 1.0073 → 1.0000 | 1.0000 → 1.0073 → 1.0000 | 1.0000 → 1.0081 → 1.0000 | 1.0000 → 1.0081 → 1.0000 | 1.0000 → 1.0081 → 1.0000 |
+| tpcds q64 | 0.8298 → 0.6729 → 0.6526 | 0.9084 → 0.4354 → 0.4329 | 0.8795 → 0.7318 → 0.6955 | 0.9238 → 0.4909 → 0.4742 | 0.8795 → 0.4679 → 0.4512 |
+| tpcds q75 | 0.4186 → 0.4176 → 0.4176 | 0.3767 → 0.3757 → 0.3757 | 0.4188 → 0.4177 → 0.4177 | 0.3720 → 0.3709 → 0.3709 | 0.3720 → 0.3709 → 0.3709 |
+| tpcds q84 | 0.9883 → 0.9934 → 0.9934 | 0.9883 → 0.9934 → 0.9934 | 0.9918 → 0.9942 → 0.9942 | 0.9918 → 0.9942 → 0.9942 | 0.9918 → 0.9942 → 0.9942 |
+| tpch q9 | = | 0.9164 → 0.8792 → 0.9089 | 0.9317 → 0.9148 → 0.9317 | = | = |
+
+tpcds q5, q40, q58, q78, q80 and q85 move as in the full run below, the same in round 2 and now;
+tpch q2, q5, q20 and tpcds q7, q10, q15, q18, q35, q69, q77 and q91 stay at HEAD's.
+
+- tpcds q84 rises, 0.24–0.51 %, in round 2 and now alike: the second pass, not the probe's
+  adaptivity. It is the one ratio above HEAD, and a limit of probing a build that prunes nothing:
+  the probe materialises it and the main run reads it exactly, so it gives the main run no miss of
+  its own, and the cluster around it is reordered only where another build misses. `MJ1` holds six
+  relations; the candidate, `c_current_cdemo_sk → cd_demo_sk`, is its join r2+r3 × r4, and its
+  build is {customer_address, customer}, which DPhyp ordered by at 139.5 rows. The probe's first
+  run stops at customer_address (464 rows against 69.8); its replan has nothing to reorder, and the
+  build comes out at 947 rows, all 16 customer_demographics row groups kept. The main plan reads p0
+  exactly, so no build of its own misses and nothing replans. HEAD's main run stopped at the same
+  customer_address build and ordered all six relations again, income_band ⋈ household_demographics
+  first, which narrow the customers before customer_demographics and store_returns.
+- tpch q9: the probe's replan makes a cheaper build than HEAD's but a dearer one than running it
+  whole at tp1-rowgroup and tp4-single; never above HEAD.
+
+### The full run with adaptive probes
+
+These are the committed outputs. `run.py` in one invocation, `--jobs 1`, locally, Python 3.13.0,
+pandas 3.0.6, pyarrow 25.0.1: 620 runs, none failed, 5 h 17 min, at most 7.0 GiB resident, the host's
+available memory never under 3.6 GB. `cost_report.py` over them writes the committed page byte for
+byte, and tpch q9 and tpcds q6, q58 and q84 run again at tp1-single and tp4-single with the code as
+committed reproduce their `.cpu.txt`, `.optimizer.txt` and `.costs.txt` sections byte for byte.
+
+Against HEAD (bytes, clusters and the two new `fired` fields stripped): 575 of 710 sections are
+HEAD's byte for byte; 135 (query, mode) pairs differ, in 30 queries (23 tpcds, 7 tpch; q5, q10 and
+q18 in both); 120 pairs in 27 queries change the plan, and ratios move in 70 pairs of 16 queries.
+Ratio, HEAD → now, where it moved at four places:
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| tpcds q5 | 1.0005 → 0.4478 | 1.0005 → 0.2235 | 1.0002 → 0.2234 | 1.0002 → 0.2238 | 1.0002 → 0.2234 |
+| tpcds q6 | 0.1647 → 0.0877 | 0.1647 → 0.0358 | 0.1922 → 0.0359 | 0.1859 → 0.0300 | 0.1910 → 0.0348 |
+| tpcds q13 | = | 0.4247 → 0.4064 | 0.5783 → 0.5611 | 0.4230 → 0.4058 | 0.4230 → 0.4058 |
+| tpcds q32 | 0.6066 → 0.2136 | 0.6074 → 0.2152 | = | = | = |
+| tpcds q40 | 0.2176 → 0.0650 | 0.2176 → 0.0650 | 0.2629 → 0.0708 | 0.2629 → 0.0708 | 0.2629 → 0.0708 |
+| tpcds q54 | 0.9652 → 0.5469 | 0.9652 → 0.5469 | 0.9694 → 0.5960 | 0.9694 → 0.5960 | 0.9694 → 0.5960 |
+| tpcds q58 | 0.1453 → 0.0714 | 0.1453 → 0.0275 | 0.1826 → 0.0321 | 0.1826 → 0.0321 | 0.1826 → 0.0321 |
+| tpcds q64 | 0.8298 → 0.6526 | 0.9084 → 0.4329 | 0.8795 → 0.6955 | 0.9238 → 0.4742 | 0.8795 → 0.4512 |
+| tpcds q75 | 0.4186 → 0.4176 | 0.3767 → 0.3757 | 0.4188 → 0.4177 | 0.3720 → 0.3709 | 0.3720 → 0.3709 |
+| tpcds q78 | 0.8971 → 0.7833 | 0.8971 → 0.6554 | 0.9301 → 0.8165 | 0.9301 → 0.6887 | 0.9301 → 0.6887 |
+| tpcds q80 | 0.3306 → 0.1520 | 0.3302 → 0.0754 | 0.3894 → 0.0822 | 0.3921 → 0.0822 | 0.3921 → 0.0822 |
+| tpcds q83 | 0.2338 → 0.2202 | 0.2338 → 0.2202 | 0.2744 → 0.2568 | 0.2744 → 0.2568 | 0.2744 → 0.2568 |
+| tpcds q84 | 0.9883 → 0.9934 | 0.9883 → 0.9934 | 0.9918 → 0.9942 | 0.9918 → 0.9942 | 0.9918 → 0.9942 |
+| tpcds q85 | 0.8326 → 0.5123 | 0.8326 → 0.5123 | 0.8765 → 0.4203 | 0.8765 → 0.4203 | 0.8765 → 0.4203 |
+| tpcds q92 | 0.6218 → 0.2451 | 0.6218 → 0.2451 | = | = | 0.6114 → 0.2238 |
+| tpch q9 | = | 0.9164 → 0.9089 | = | = | = |
+
+- The one rise is tpcds q84, +0.24–0.51 % at every mode, the limit design.md's "Probe plans run
+  adaptively" states: its probe prunes nothing, and the build, read exactly, gives the main run no
+  miss to replan at, where HEAD's main run replanned at that build. q64's main run, by contrast,
+  replans with its pass-2 builds as relations. No run is dearer than planned anywhere (HEAD: tpcds q5 at every mode).
+- Plans changed with the ratio the same at four places: tpch q2, q5 (tp4-sized), q8 (one mode),
+  q9 (three modes), q10, q14, q18; tpcds q10, q16, q18, q25, q35, q69, q91 — mostly pass-2 probes
+  that prune nothing. tpcds q29 differs in its report and costs only.
+- Largest probed build: tpch q9 at four modes, 319,404 rows, 15,331,392 bytes, keeping all of
+  partsupp's 7 row groups.
+- 110 (query, mode) pairs have a pass-2 candidate, in 25 queries: tpch q2, q5, q8, q9, q10, q14,
+  q18; tpcds q6, q10, q13, q16, q18, q25, q29, q32, q35, q58, q64, q69, q75, q83, q84, q85, q91,
+  q92. No named tpch query has a dynamic filter at any mode.
+- Answers: `test_engine_dynamic_filters` and `test_engine_optimized` over the 135 changed (query,
+  mode) pairs against DuckDB, one process at a time: 270 cases, all passed, 67 min; both suites
+  selected every pair.
+- Totals are design.md's "The committed run".
+
+Also pinned: a probe replan's DPhyp call counted (dphyp 3); a probe's refused miss after its
+union branch streamed; a probe whose root is a four-lane coalesce hashed on `k`, which replans to a
+root on another column and must be shuffled back — red, a wrong answer, with
+`multijoin.clusters`' root-hash rule reverted; a probe with no miss equal to its side run whole;
+the q6 toy's build a partial cluster.
+
+Proving: cheap tier 46 files, 452 passed; dataset tier green; the corpus tier's two dynamic-filter
+files over every changed (query, mode), 270 cases, above; `run.py` full, above.
+
+### A reorder after the probes, tried and dropped
+
+A second `ordered` call after pass 2, made once where a probed build was more than 2× off the
+estimate DPhyp ordered by, with every build known, was implemented and sampled at every mode over
+17 queries, and taken out again. Ratio, HEAD → without it → with it:
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| tpcds q84 | 0.9883 → 0.9934 → 0.9907 | 0.9883 → 0.9934 → 0.9907 | 0.9918 → 0.9942 → 0.9955 | 0.9918 → 0.9942 → 0.9955 | 0.9918 → 0.9942 → 0.9955 |
+| tpch q9 | = | 0.9164 → 0.9089 → 0.9461 | 0.9317 → 0.9317 → 0.9526 | 0.9015 → 0.9015 → 0.9221 | 0.9048 → 0.9048 → 0.9257 |
+| tpcds q6 | 0.1647 → 0.0877 → 0.0827 | 0.1647 → 0.0358 → 0.0308 | 0.1922 → 0.0359 → 0.0312 | 0.1859 → 0.0300 → 0.0300 | 0.1910 → 0.0348 → 0.0300 |
+
+- q84 took HEAD's shape, ((income_band ⋈ household_demographics) ⋈ p0) ⋈ customer_demographics ⋈
+  store_returns. At tp1 the difference to HEAD fell from 136,584 to 64,385 bytes, exactly p0's
+  size; at tp4 it rose by 67 KB.
+- tpch q9's build was 319,404 rows against 1,200,243 estimated; the second call kept DPhyp's tree
+  but oriented one more join the other way, and the ratio rose above HEAD's at four modes, by 2–4 %.
+- Fourteen other queries were unchanged by it. q84 stays the one ratio above HEAD.
+
+### The full run under the NDV gate (superseded)
+
+The committed outputs in the working tree are this run's; they predate adaptive probes and the
+gate's removal, and the next full run replaces them.
+
+`run.py` in one invocation, both benches, every mode, `--jobs 1`, into the committed outputs, locally,
+Python 3.13.0, pandas 3.0.6, pyarrow 25.0.1: 620 runs, none failed, 5 h 24 min, at most 7.4 GiB
+resident (one worker); the host's available memory never fell under 3.4 GB. A first attempt, before
+the joined-build rule, was stopped at 148 runs when an editor's language server took 6 GB and
+available memory fell to 1.28 GB; it wrote nothing.
+
+Against HEAD, with the bytes and clusters taken off the `read from memory` lines and the two new
+`fired` fields off `.costs.txt`: 639 of 710 sections are HEAD's byte for byte. 71 (query, mode)
+pairs differ, in 16 queries; 56 of them change the optimized plan. No ratio rises; none is dearer
+than planned anywhere (HEAD: tpcds q5, by under 0.06 %, at every mode). Ratio, HEAD → now, where it
+moved at four places:
+
+| query | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| tpcds q5 | 1.0005 → 0.4478 | 1.0005 → 0.2235 | 1.0002 → 0.2234 | 1.0002 → 0.2238 | 1.0002 → 0.2234 |
+| tpcds q13 | = | 0.4247 → 0.4064 | 0.5783 → 0.5611 | 0.4230 → 0.4058 | 0.4230 → 0.4058 |
+| tpcds q32 | 0.6066 → 0.2136 | 0.6074 → 0.2152 | = | = | = |
+| tpcds q40 | 0.2176 → 0.0650 | 0.2176 → 0.0650 | 0.2629 → 0.0708 | 0.2629 → 0.0708 | 0.2629 → 0.0708 |
+| tpcds q54 | 0.9652 → 0.5469 | 0.9652 → 0.5469 | 0.9694 → 0.5960 | 0.9694 → 0.5960 | 0.9694 → 0.5960 |
+| tpcds q58 | 0.1453 → 0.0714 | 0.1453 → 0.0275 | 0.1826 → 0.0321 | 0.1826 → 0.0321 | 0.1826 → 0.0321 |
+| tpcds q64 | 0.8298 → 0.7133 | 0.9084 → 0.5529 | 0.8795 → 0.7456 | 0.9238 → 0.5262 | 0.8795 → 0.4817 |
+| tpcds q78 | 0.8971 → 0.7833 | 0.8971 → 0.6554 | 0.9301 → 0.8165 | 0.9301 → 0.6887 | 0.9301 → 0.6887 |
+| tpcds q80 | 0.3306 → 0.1520 | 0.3302 → 0.0754 | 0.3894 → 0.0822 | 0.3921 → 0.0822 | 0.3921 → 0.0822 |
+| tpcds q83 | 0.2338 → 0.2202 | 0.2338 → 0.2202 | 0.2744 → 0.2568 | 0.2744 → 0.2568 | 0.2744 → 0.2568 |
+| tpcds q85 | 0.8326 → 0.5123 | 0.8326 → 0.5123 | 0.8765 → 0.4203 | 0.8765 → 0.4203 | 0.8765 → 0.4203 |
+| tpcds q92 | 0.6218 → 0.2451 | 0.6218 → 0.2451 | = | = | 0.6114 → 0.2238 |
+
+- Unions: q5 and q54 (catalog and web sales under one union, 12 → 2 and 6 → 2). Non-inner joins:
+  q40, q78, q80. After join order: q58, q83 (the same week shape), q85 (a joined build of one
+  `cd_demo_sk`, 16 → 1), q64's two date builds. q32 and q92 prune their fact a second time where
+  the correlated subquery reads it again, its date build reaching the fact only after the order.
+- Changed with the ratio the same to four places: tpcds q25 and q29 (a pass-2 probe on `ss_item_sk`
+  over two row groups, keeping both), tpch q14 at every mode (a filtered build of 75,983 rows
+  flipped to the build side, against part's two row groups) and tpch q5 at tp4-sized (227,597
+  rows, customer's two row groups). q13's pass-2 build, a filter and no join (37,869 rows at the
+  tp1 modes and tp4-single, 20,103 at the other two), prunes nothing; made exact, it takes one
+  replan off at every mode, and the ratio moves at four.
+- Largest probed build: tpch q5 at tp4-sized, 227,597 rows, 3,641,552 bytes, by rows and by bytes;
+  then tpcds q13's 37,869 rows, 3,029,520 bytes, and tpch q14's 75,983 rows, 1,823,592 bytes.
+- No named tpch query has a dynamic filter at any mode, before or after join order.
+- Answers: `test_engine_dynamic_filters` and `test_engine_optimized` over the 71 changed (query,
+  mode) pairs against DuckDB, one process at a time: 142 cases, all passed, 46 min. Every pair was
+  selected by both. `test_engine_answers` and `test_engine_reassembled` run the planned and the
+  reassembled plans, which no filter touches, so they were not run.
+- `cost_report.py` over the regenerated `.costs.txt` writes the committed page byte for byte.
+- Totals are design.md's "The committed run": 740 probes before the order narrowing 735 scans, 66
+  after narrowing 45; DPhyp 3,315 calls (3,249 at HEAD), 69 at the budget, all q64's, which now
+  replans 9 times at every mode (7 at HEAD).

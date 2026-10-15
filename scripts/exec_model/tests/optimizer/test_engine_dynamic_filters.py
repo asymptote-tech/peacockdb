@@ -1,14 +1,15 @@
 """Dynamic filters on the engine's own plans, against DuckDB — answers and pruning.
 
-For each planned query with a dynamic-filter candidate, `dynamic_filters.apply` runs the
-probes and re-maps the pruned scans; the pruned plan — its builds the probes' — must still
-answer as DuckDB does, and
-each pruned scan must keep no more row groups than DuckDB's own dynamic filter would — the
-bound it recorded on that column (`testdata/duckdb-dynfilters`) nearest ours, since DuckDB, as
-we do, scans a fact table once per use, each use with its own bound.
+For each planned query with a dynamic-filter candidate, the optimizer's stages before the run
+(`pipeline.filtered`: filters on the plan as written, DPhyp, filters on its order) run the probes
+and re-map the pruned scans; the plan they leave — its builds the probes' — must still answer as
+DuckDB does, and each pruned scan must keep no more row groups than DuckDB's own dynamic filter
+would — the bound it recorded on that column (`testdata/duckdb-dynfilters`) nearest ours, since
+DuckDB, as we do, scans a fact table once per use, each use with its own bound. A query is taken
+where a candidate is on the plan as written or on the order DPhyp gives it before any probe.
 
 `PCK_MODE` picks the golden (default `tp4-single`); `PCK_SHARD=k/n` takes a share. Needs the
-sf1 datasets and DuckDB: it runs with the corpus files, not the cheap tier.
+sf1 datasets, DuckDB and the DPhyp library: it runs with the corpus files, not the cheap tier.
 """
 
 from __future__ import annotations
@@ -25,15 +26,19 @@ import os
 
 from .. import corpus
 from ..harness import main
-from ..plans.test_engine_answers import ROOT, order_positions
-from ...optimizer.dynamic_filters import KeySummary, apply, as_number, candidates, row_group_survives
-from ...optimizer.pipeline import mode_shape
+from ..plans.test_engine_answers import EMPTY_BY_DESIGN, ROOT, order_positions
+from ...optimizer.dynamic_filters import Builds, KeySummary, as_number, candidates, row_group_survives
+from ...optimizer.join_order import ordered
+from ...optimizer.multijoin import clusters
+from ...optimizer.pipeline import filtered, mode_shape
+from ...optimizer.replan import WithMaterialized
+from ...optimizer.stats import Statistics
+from ...plans.answers import UNORDERED_LIMIT
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import EngineNode, read_plans
-from ...optimizer.replan import WithMaterialized
 
 MODE = os.environ.get("PCK_MODE", "tp4-single")
-BATCHING = mode_shape(MODE).batching
+SHAPE = mode_shape(MODE)
 
 
 def _duckdb_bounds(bench: str, query: str) -> list[dict]:
@@ -54,18 +59,22 @@ def _nearest(bounds, summary):
 def _pruning_test(bench: str, query: str, plan: EngineNode):
     def test():
         tables = corpus.ParquetTables(ROOT / f"{bench}.sf1")
-        probe = lambda engine_plan: corpus.execute_lanes(build(engine_plan, tables), corpus.CORPUS_BUDGET)
-        pruned, report, kept = apply(plan, tables, BATCHING, probe)
+        stages = filtered(plan, Statistics(ROOT / f"{bench}.sf1"), tables, SHAPE, corpus.CORPUS_BUDGET)
         want = corpus.duckdb_answer(bench, query)
-        frames = {name: lanes for name, (_, lanes) in kept.items()}
-        got = corpus.execute(build(pruned, WithMaterialized(tables, frames)), corpus.CORPUS_BUDGET)[0]
-        got = got.set_axis(list(want.columns), axis=1)
-        positions = order_positions(pruned)
+        assert len(want) or (bench, query) in EMPTY_BY_DESIGN, f"{query}: DuckDB returns no rows"
+        frames = {name: lanes for name, (_, lanes) in stages.kept.items()}
+        got = corpus.execute(build(stages.plan, WithMaterialized(tables, frames)), corpus.CORPUS_BUDGET)[0]
         label = f"{bench} {query} {MODE} pruned"
-        corpus.matches_oracle(got, want, label, order_by=None if positions is None else
-                              [want.columns[at] for at in positions])
+        assert len(got.columns) == len(want.columns), (label, list(got.columns), list(want.columns))
+        got = got.set_axis(list(want.columns), axis=1)
+        if (bench, query) in UNORDERED_LIMIT:
+            assert len(got) == len(want), (label, len(got), len(want))
+        else:
+            positions = order_positions(stages.plan)
+            corpus.matches_oracle(got, want, label, order_by=None if positions is None else
+                                  [want.columns[at] for at in positions])
         duckdb = _duckdb_bounds(bench, query)
-        for scan in report:
+        for scan in stages.before_order.pruned + stages.after_order.pruned:
             ranges = tables.column_ranges(scan.table, scan.keys[0][0])
             for column, summary in scan.keys:
                 bounds = [(d[column]["lo"], d[column]["hi"]) for d in duckdb if column in d]
@@ -79,11 +88,20 @@ def _pruning_test(bench: str, query: str, plan: EngineNode):
     return test
 
 
+def _has_candidate(plan: EngineNode, tables, stats: Statistics) -> bool:
+    """A candidate on the plan as written, or on the order DPhyp gives it with no build probed."""
+    if candidates(plan, tables, Builds.FILTERED):
+        return True
+    if not clusters(plan):
+        return False
+    return bool(candidates(ordered(plan, stats, SHAPE.lanes)[0], tables, Builds.FILTERED_OR_JOINED))
+
+
 for _bench in ("tpch", "tpcds"):
-    _tables = corpus.ParquetTables(ROOT / f"{_bench}.sf1")
+    _tables, _stats = corpus.ParquetTables(ROOT / f"{_bench}.sf1"), Statistics(ROOT / f"{_bench}.sf1")
     for _query, _plan in read_plans(ROOT / "goldens" / f"{_bench}.sf1" / f"{MODE}.plans.txt").items():
         if isinstance(_plan, EngineNode) and (ROOT / f"{_bench}-queries" / f"{_query}.sql").exists() \
-                and candidates(_plan, _tables):
+                and _has_candidate(_plan, _tables, _stats):
             _test = _pruning_test(_bench, _query, _plan)
             globals()[_test.__name__] = _test
 

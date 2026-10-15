@@ -18,7 +18,7 @@ from ...optimizer.join_order import MAX_PAIRS, SetEstimates, ordered
 from ...optimizer.cardinality import estimator
 from ...optimizer.multijoin import clusters
 from ...optimizer.pipeline import mode_shape, run_optimized
-from ...optimizer.report import BuildMiss, ChosenJoin, FilterCandidate
+from ...optimizer.report import BuildMiss, ChosenJoin, FilterCandidate, FilterPass
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans, plan_text
 
@@ -60,15 +60,46 @@ def optimized(text, stats=None):
 
 def test_a_dynamic_filter_records_its_candidate_its_keys_and_the_row_groups_it_left():
     _, report = optimized(PRUNABLE, dataset(row_group_size=100))
-    [candidate] = report.candidates
+    [candidate] = report.filters_before_order.candidates
     assert candidate == FilterCandidate("dk", "sales", "sk", candidate.clustering)
     assert candidate.clustering < 1.5
-    [scan_] = report.pruned
+    [scan_] = report.filters_before_order.pruned
     assert (scan_.table, scan_.before, scan_.after) == ("sales", tuple(range(10)), (0, 1, 2, 3, 4))
     [(column, keys)] = scan_.keys
     assert (column, keys.low, keys.high) == ("sk", 500, 549)
-    assert report.probed == (("p0", 50),)
-    assert not report.replans and not report.refused
+    # Fifty Int64 keys: 400 bytes.
+    assert report.filters_before_order.probed == (("p0", 50, 400, ()),)
+    assert report.filters_after_order == FilterPass() and not report.replans and not report.refused
+
+
+def restricted_late(predicate: str) -> str:
+    """The dates `predicate` keeps restrict the dates joined to the sales by a semi join above them.
+    On the plan as written the semi join's build holds a filter and no join, but its key lifts to
+    the dates' scan, of one row group, so the first pass finds nothing. Ordered, the restricted
+    dates are the sales join's build, and it holds the semi join."""
+    return f"""GpuUnload
+  GpuHashJoin: join_type=RightSemi, on=[(dk@0, dk@0)], {L}, schema=[dk:Int64, sk:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[dk:Int64]
+      GpuFilter: predicate={predicate}, projection=[dk@0], {L}, schema=[dk:Int64]
+        {scan('dates', ['dk', 'y'])}
+    GpuHashJoin: join_type=Inner, on=[(dk@0, sk@0)], {L}, schema=[dk:Int64, sk:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[dk:Int64]
+        {scan('dates', ['dk'])}
+      GpuLoadParquet: table=sales, projections=[sk@0], partition_groups={TEN}, {L}, schema=[sk:Int64]
+"""
+
+
+def test_a_restriction_dphyp_brings_onto_the_fact_prunes_it_after_join_order():
+    # Twenty dates, estimated at twenty: they reach two of the sales' ten row groups.
+    _, report = optimized(restricted_late("(dk@0 >= 500) AND (dk@0 < 520)"), dataset(row_group_size={"sales": 100}))
+    assert report.filters_before_order == FilterPass()
+    [order] = report.orders
+    [candidate] = report.filters_after_order.candidates
+    assert (candidate.table, candidate.column) == ("sales", "sk")
+    [scan_] = report.filters_after_order.pruned
+    assert (scan_.table, scan_.before, scan_.after) == ("sales", tuple(range(10)), (0, 1))
+    # The build holds the cluster DPhyp ordered, and says so.
+    assert report.filters_after_order.probed == (("p0", 20, 160, (order.mj,)),)
 
 
 def test_a_dphyp_call_records_its_input_the_sets_it_priced_its_tree_and_each_flip():
@@ -88,7 +119,7 @@ def test_a_dphyp_call_records_its_input_the_sets_it_priced_its_tree_and_each_fli
     assert order.joins == (ChosenJoin(0b10, 0b01, sets.rows(0b11), sets.cost(0b11)),)
     assert order.plan_cost == sets.cost(0b11) and order.max_pairs == MAX_PAIRS
     assert report.before == plan_text(plan) and report.after != report.before
-    assert not report.candidates and not report.replans
+    assert report.filters_before_order == report.filters_after_order == FilterPass() and not report.replans
 
 
 def test_an_oriented_join_that_keeps_the_plan_s_build_is_no_flip():
@@ -147,8 +178,8 @@ def test_a_refused_replan_records_the_miss_and_changes_nothing():
 
 def test_a_plan_no_rule_touches_records_nothing():
     plan, report = optimized(NO_JOIN)
-    assert (report.candidates, report.pruned, report.probed, report.orders, report.replans, report.refused) == \
-        ((), (), (), (), (), ())
+    assert (report.filters_before_order, report.orders, report.filters_after_order, report.replans,
+            report.refused) == (FilterPass(), (), FilterPass(), (), ())
     assert report.before == report.after == plan_text(plan)
 
 

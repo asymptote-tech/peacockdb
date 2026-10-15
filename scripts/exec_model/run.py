@@ -141,7 +141,7 @@ def run_query(task: Task) -> QueryRun:
     return QueryRun(task, (middle - start, end - middle), render_run(plan, driver),
                     render_run(adaptive.plans[-1], adaptive.drivers[-1]),
                     tuple(render_run(side, probe) for side, probe in run.probes),
-                    tuple(render_run(p, d) for p, d in zip(adaptive.plans[:-1], adaptive.drivers[:-1])),
+                    tuple(render_run(p, d) for p, d in run.stopped),
                     run.report)
 
 

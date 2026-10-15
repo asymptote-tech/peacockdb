@@ -11,7 +11,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
-from ..corpus import ParquetTables, execute
+from ..corpus import ParquetTables, execute, execute_lanes
 from ..harness import main
 from .test_cardinality import dataset, scan
 from ...engine.adaptive import BuildDone
@@ -19,7 +19,7 @@ from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
 from ...engine.node import CpuBackendSelector
 from ...optimizer.multijoin import named
-from ...optimizer.replan import run_adaptive
+from ...optimizer.replan import WithMaterialized, kept_estimates, run_adaptive
 
 # Dates of year 5 with keys 500..599: 100 rows, which the estimator, taking the two columns as
 # independent, puts at 1000 · 1/10 · 1/10 = 10.
@@ -105,6 +105,35 @@ def test_a_replanned_cluster_keeps_its_id_when_one_before_it_is_read_from_memory
     assert joins[0] == [("RightSemi", "MJ1"), ("Inner", "MJ2"), ("Inner", "MJ1")]
     assert {mj for _, mj in joins[1]} == {"MJ1"} and len(joins[1]) == 2
     assert [order.mj for order in run.replans[0].orders] == ["MJ1"]
+
+
+def test_runs_that_share_their_taken_names_never_give_one_twice():
+    # A probe's replans and the main run's name their memory sources from one set.
+    stats = dataset()
+    tables = ParquetTables(stats.directory)
+    plan = named(parse_plans(f"== q\n{NESTED}", "test")["q"])
+    taken = set()
+    runs = [run_adaptive(plan, stats, tables, lanes=1, selector=CpuBackendSelector(), taken=taken)
+            for _ in range(2)]
+    names = [[name for name, _ in replan.kept] for run in runs for replan in run.replans]
+    assert names == [["m0", "m1"], ["m2", "m3"]] and taken == {"m0", "m1", "m2", "m3"}
+
+
+def test_a_kept_build_that_reads_an_earlier_one_is_estimated_by_what_it_measured():
+    # A second pass's build may read a first pass's from memory.
+    stats = dataset()
+    tables = ParquetTables(stats.directory)
+    dates = parse_plans(f"== q\nGpuUnload\n  {year_five(1)}\n", "test")["q"].children[0]
+    sold = parse_plans(f"""== q
+GpuUnload
+  GpuHashJoin: join_type=Inner, on=[(dk@0, sk@0)], projection=[sk@1], {L}, schema=[sk:Int64]
+    GpuMemorySource: name=p0, lanes=1, batches=single, schema=[dk:Int64]
+    {scan('sales', ['sk'])}
+""", "test")["q"].children[0]
+    first = execute_lanes(build(dates, tables))
+    second = execute_lanes(build(sold, WithMaterialized(tables, {"p0": first})))
+    estimates = kept_estimates({"p0": (dates, first), "p1": (sold, second)}, stats)
+    assert [estimates[name].rows for name in ("p0", "p1")] == [100, sum(len(frame) for frame in second)]
 
 
 def _nodes(node):

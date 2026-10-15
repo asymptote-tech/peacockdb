@@ -1,6 +1,7 @@
-"""An `OptimizerReport` as the body of its `.optimizer.txt` section: one block per rule that
-fired, in the order they act — dynamic filters, the DPhyp calls with their orientation, the
-replans — then the unified diff of the plan text. A report where nothing fired is one line.
+"""An `OptimizerReport` as the body of its `.optimizer.txt` section: one block per rule that fired,
+in the order they act — dynamic filters, the DPhyp calls with their orientation, dynamic filters
+on the order they made, the replans — then the unified diff of the plan text. A report where
+nothing fired is one line.
 """
 
 from __future__ import annotations
@@ -8,25 +9,18 @@ from __future__ import annotations
 import datetime
 import difflib
 
-from .report import BuildMiss, JoinOrder, JoinTree, OptimizerReport
+from .report import BuildMiss, FilterPass, JoinOrder, JoinTree, OptimizerReport
 
 
 def render(report: OptimizerReport) -> str:
-    fired = (report.candidates or report.pruned or report.probed or report.orders or report.replans
-             or report.refused or report.before != report.after)
+    fired = (report.filters_before_order != FilterPass() or report.orders
+             or report.filters_after_order != FilterPass() or report.replans or report.refused
+             or report.before != report.after)
     if not fired:
         return "nothing fired\n"
-    lines = []
-    if report.candidates or report.pruned or report.probed:
-        lines.append("dynamic filters")
-        lines += [f"  candidate {c.build_key} -> {c.table}.{c.column}, clustering {c.clustering:.2f}"
-                  for c in report.candidates]
-        for scan in report.pruned:
-            lines.append(f"  {scan.table}: row groups {len(scan.before)} -> {len(scan.after)}"
-                         + (f" ({_ranges(scan.after)})" if scan.after else ""))
-            lines += [f"    {column}{_keys(summary)}" for column, summary in scan.keys]
-        lines += [f"  build {name} read from memory: {rows} rows" for name, rows in report.probed]
+    lines = _filters(report.filters_before_order, "dynamic filters")
     lines += _orders(report.orders, "")
+    lines += _filters(report.filters_after_order, "dynamic filters after join order")
     for number, replan in enumerate(report.replans, 1):
         lines.append(f"replan {number}: {_miss(replan.miss)}")
         lines.append("  kept " + ", ".join(f"{name} ({rows} rows)" for name, rows in replan.kept))
@@ -39,6 +33,28 @@ def render(report: OptimizerReport) -> str:
         lines += difflib.unified_diff(report.before.splitlines(), report.after.splitlines(),
                                       "before", "after", lineterm="")
     return "\n".join(lines) + "\n"
+
+
+def _filters(filters: FilterPass, heading: str) -> list[str]:
+    if filters == FilterPass():
+        return []
+    lines = [heading]
+    lines += [f"  candidate {c.build_key} -> {c.table}.{c.column}, clustering {c.clustering:.2f}"
+              for c in filters.candidates]
+    for scan in filters.pruned:
+        lines.append(f"  {scan.table}: row groups {len(scan.before)} -> {len(scan.after)}"
+                     + (f" ({_ranges(scan.after)})" if scan.after else ""))
+        lines += [f"    {column}{_keys(summary)}" for column, summary in scan.keys]
+    lines += [f"  build {name} read from memory: {rows} rows, {size} bytes"
+              + (f", holding {', '.join(held)}" if held else "") for name, rows, size, held in filters.probed]
+    numbers: dict[str, int] = {}
+    for name, replan in filters.replans:
+        numbers[name] = numbers.get(name, 0) + 1
+        lines.append(f"  probe {name} replan {numbers[name]}: {_miss(replan.miss)}")
+        lines.append("    kept " + ", ".join(f"{source} ({rows} rows)" for source, rows in replan.kept))
+        lines += _orders(replan.orders, "    ")
+    lines += [f"  probe {name} replan refused: {_miss(miss)}" for name, miss in filters.refused]
+    return lines
 
 
 def _orders(orders: tuple[JoinOrder, ...], indent: str) -> list[str]:

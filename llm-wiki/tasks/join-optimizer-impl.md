@@ -245,9 +245,14 @@ tests, goldens.
 
 **Files:** `scripts/exec_model/optimizer/dynamic_filters.py`, tests, goldens.
 
-- [ ] A build holding joins qualifies; its values are the probe plan's output as now.
 - [ ] `lift` passes `GpuUnion` and `GpuInterleave`, the key mapped into every branch, each
-  branch's scan pruned on its own footers.
+  branch's scan pruned on its own footers; and a non-inner join into the side it outputs. A join
+  that equates NULLs, anti and mark included, prunes nothing by a build key holding a NULL.
+- [ ] A second pass on the DPhyp-ordered plan, where a build holding a filter or a join
+  qualifies; memory-source names unique across passes and replans; estimates of a build that
+  reads a first-pass source; a candidate inside another's build probed over its pruned scan.
+- [ ] Probe plans run adaptively: a build that misses inside one replans, its stopped runs priced
+  as the main run's.
 - [ ] Tests for both, red first. tpch q5, tpcds q5 and q58 at every mode, before and after, in
   the detail file. Answers equal to DuckDB's.
 - [ ] Proving: cheap tier, corpus tier, `run.py` full.

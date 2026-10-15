@@ -9,6 +9,7 @@ matches its estimate, so the loop ends within as many replans as the plan has jo
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -56,10 +57,11 @@ class AdaptiveRun:
 
 def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, selector: BackendSelector,
                  budget: int | None = None, threshold: float = DEFAULT_THRESHOLD,
-                 prefetch: bool = False, kept: dict | None = None) -> AdaptiveRun:
+                 prefetch: bool = False, kept: dict | None = None, taken: set[str] | None = None) -> AdaptiveRun:
     """`plan` run to its answer, replanned where a build is off by more than `threshold`; `lanes`
-    is the mode's, for the joins a replan makes anew. `kept` are the memory sources `plan`
-    already reads — the builds dynamic filters' probe plans made — by name: (side, frames)."""
+    is the mode's, for the joins a replan makes anew. `kept` are the memory sources `plan` may
+    read — the builds dynamic filters' probe plans made — by name: (side, frames). `taken` are the
+    names other runs of the query gave their memory sources; this run's join them."""
     run, frames = AdaptiveRun(), {name: lanes for name, (_, lanes) in (kept or {}).items()}
     known = run.known
     known.update(kept_estimates(kept or {}, stats))
@@ -85,7 +87,8 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
         if driver.stopped is None:
             return run
         had = set(frames)
-        plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames)
+        plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames,
+                                    set() if taken is None else taken)
         plan, orders = ordered(plan, stats, lanes, known=known)
         made = tuple((name, sum(len(frame) for frame in by_lane)) for name, by_lane in frames.items()
                      if name not in had)
@@ -94,20 +97,24 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
 
 def kept_estimates(kept: dict, stats: Statistics) -> dict[str, Estimate]:
     """The measured estimates of builds kept as memory sources, by name — `kept` as
-    `dynamic_filters.apply` returns it: (the side they replace, their frames by lane)."""
-    return {name: measured(estimator(side, stats).estimates[id(side)], lanes, hashed_names(side))
-            for name, (side, lanes) in kept.items()}
+    `dynamic_filters.apply` returns it: (the side they replace, their frames by lane), in the
+    order made, so a side that reads an earlier one from memory is estimated over it."""
+    known = {}
+    for name, (side, lanes) in kept.items():
+        known[name] = measured(estimator(side, stats, known).estimates[id(side)], lanes, hashed_names(side))
+    return known
 
 
 def _with_memory_sources(plan: EngineNode, extraction: Extraction, planned: Estimator,
-                         known: dict[str, Estimate], frames: dict) -> EngineNode:
+                         known: dict[str, Estimate], frames: dict, taken: set[str]) -> EngineNode:
     """`plan` with each extracted build's side a memory source over its frames, laid out as the
-    side was; `known` and `frames` gain them by name. A side that is one already stays."""
+    side was; `known`, `frames` and `taken` gain them by name. A side that is one already stays."""
     for join, lanes in extraction.builds.values():
         side = join.children[BUILD_SLOT]
         if side.kind == "GpuMemorySource":
             continue
-        name = f"m{len(frames)}"
+        name = next(f"m{n}" for n in itertools.count(len(frames)) if f"m{n}" not in taken | frames.keys())
+        taken.add(name)
         known[name] = measured(planned.estimates[id(side)], lanes, hashed_names(side))
         frames[name] = lanes
         plan = replaced(plan, side, memory_source(name, side))

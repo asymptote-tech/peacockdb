@@ -34,10 +34,12 @@ def query_cost(planned: int, final: int, probes: int = 0, stopped: int = 0, rule
 
 
 def test_a_report_counts_each_rule_that_fired():
-    # Two scans narrowed by one probe plan; STAR solved below the plan order's C_out with one flip,
-    # PAIR in the replan stopped at its budget, the plan's order kept; one replan and one refused.
-    assert fired(EVERY_RULE) == Fired(probes=1, narrowed=2, dphyp=2, reordered=1, budget=1, flips=1, replans=1,
-                                      refused=1)
+    # Two scans narrowed by one probe plan, and one by a probe plan after join order; STAR solved
+    # below the plan order's C_out with one flip, PAIR in the main run's replan and in the probe's
+    # stopped at its budget, the plan's order kept; a replan and a refused one in the main run, and
+    # one of each in a probe plan.
+    assert fired(EVERY_RULE) == Fired(probes=1, narrowed=2, probes_after_order=1, narrowed_after_order=1, dphyp=3,
+                                      reordered=1, budget=2, flips=1, replans=2, refused=2)
 
 
 def test_a_query_s_costs_are_a_section_that_reads_back_the_same():
@@ -49,7 +51,8 @@ def test_a_query_s_costs_are_a_section_that_reads_back_the_same():
         "optimized peacockdb_cost=90 scan_bytes=87 join_bytes=6 ram_to_vram_bytes=0\n"
         "probes peacockdb_cost=7 scan_bytes=7 join_bytes=0 ram_to_vram_bytes=0\n"
         "stopped peacockdb_cost=22 scan_bytes=20 join_bytes=4 ram_to_vram_bytes=0\n"
-        "fired probes=1 narrowed=1 dphyp=2 reordered=1 budget=0 flips=1 replans=1 refused=0\n")
+        "fired probes=1 narrowed=1 probes_after_order=0 narrowed_after_order=0 dphyp=2 reordered=1 budget=0 "
+        "flips=1 replans=1 refused=0\n")
     assert read_section(text, MODEL, "hand") == made
     assert read_section("skipped: refused by datafusion: X\n", MODEL, "hand") == "skipped: refused by datafusion: X"
 
@@ -86,7 +89,8 @@ ROWS = [
     # plan's order are in the hover, not on a chip.
     Row("q3", {"tp1-single": query_cost(200, 150, rules=Fired(probes=1, narrowed=1, dphyp=1, reordered=1, flips=1)),
                "tp4-single": query_cost(400, 500, probes=50, stopped=50,
-                                        rules=Fired(probes=2, dphyp=3, budget=1, replans=2))},
+                                        rules=Fired(probes=2, probes_after_order=1, narrowed_after_order=1,
+                                                    dphyp=3, budget=1, replans=2))},
         engine={"tp4-single": 520, "tp1-single": 1000}, duckdb=500),
     Row("q12", {mode: "skipped: refused by datafusion: SanityCheckPlan" for mode in MODES}, {}, duckdb=80),
     Row("join-int", {"tp1-single": query_cost(10, 10), "tp4-single": "failed: AssertionError: 3 rows vs 4"},
@@ -120,9 +124,10 @@ def test_a_row_carries_each_mode_s_costs_and_ratio_and_the_final_ratio_of_the_le
     # Projected: 1000 x 0.75 = 750 at tp1-single, 520 x 1.5 = 780 at tp4-single. The engine's figure
     # is the least projected mode's, and the final ratio 750 / 500.
     assert texts[16:19] == ["1000 B (tp1-single)", "500 B", "1.50 (tp1-single)"]
-    assert texts[19] == "dynamic filters 1/2 DPhyp 1/2 flips 1/2 replans 1/2", texts[19]
+    assert texts[19] == "dynamic filters 1/2 after join order 1/2 DPhyp 1/2 flips 1/2 replans 1/2", texts[19]
     hover = next(attrs["title"] for tag, attrs in Cells(page()).tags if "title" in attrs and "dphyp 3" in attrs["title"])
-    assert "tp4-single: probes 2, narrowed 0, dphyp 3, reordered 0, budget 1" in hover, hover
+    assert ("tp4-single: probes 2, narrowed 0, probes_after_order 1, narrowed_after_order 1, dphyp 3, reordered 0, "
+            "budget 1") in hover, hover
     ratio = {attrs.get("class") for _, attrs, text in q3 if text in ("0.75", "1.50")}
     assert {"num saving", "num regression"} <= ratio, ratio
     # Past the published report's 1.4 the row is red; a row with no final ratio is grey.
@@ -148,7 +153,8 @@ def test_a_rule_that_ran_and_changed_nothing_says_so_and_keeps_its_counts_in_the
     cells = Cells(page())
     assert [text for _, _, text in cells.rows[5]][-1] == "nothing changed the plan"
     hovers = [attrs.get("title") for tag, attrs in cells.tags if tag == "span"]
-    assert "tp1-single: probes 0, narrowed 0, dphyp 1, reordered 0, budget 0, flips 0, replans 0, refused 0" in hovers
+    assert ("tp1-single: probes 0, narrowed 0, probes_after_order 0, narrowed_after_order 0, dphyp 1, reordered 0, "
+            "budget 0, flips 0, replans 0, refused 0") in hovers
 
 
 def test_the_page_is_one_file_with_nothing_fetched():

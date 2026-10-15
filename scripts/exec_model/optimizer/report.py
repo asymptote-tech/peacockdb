@@ -25,6 +25,19 @@ class FilterCandidate:
 
 
 @dataclass(frozen=True)
+class FilterPass:
+    """One pass of dynamic filters: the candidates it found, the scans its probes reached, the
+    builds they made, read from memory by the main plan — name, rows, bytes and the clusters it
+    holds — and the replans and refused replans inside each probe plan, by its build's name."""
+
+    candidates: tuple[FilterCandidate, ...] = ()
+    pruned: tuple[Pruned, ...] = ()
+    probed: tuple[tuple[str, int, int, tuple[str, ...]], ...] = ()
+    replans: tuple[tuple[str, Replan], ...] = ()
+    refused: tuple[tuple[str, BuildMiss], ...] = ()
+
+
+@dataclass(frozen=True)
 class PricedSet:
     """A set of relations DPhyp asked the cost of, and what the estimates answered."""
 
@@ -88,14 +101,13 @@ class Replan:
 
 @dataclass(frozen=True)
 class OptimizerReport:
-    """`probed` are the builds the dynamic filters' probe plans made, read from memory by the
-    main plan (name, rows); `orders` the DPhyp calls before the run; `refused` the misses a
+    """The rules in the order they act: dynamic filters on the plan as written, the DPhyp calls
+    before the run, dynamic filters on the plan they ordered, the replans; `refused` the misses a
     replan could not take, the run going on."""
 
-    candidates: tuple[FilterCandidate, ...]
-    pruned: tuple[Pruned, ...]
-    probed: tuple[tuple[str, int], ...]
+    filters_before_order: FilterPass
     orders: tuple[JoinOrder, ...]
+    filters_after_order: FilterPass
     replans: tuple[Replan, ...]
     refused: tuple[BuildMiss, ...]
     before: str
@@ -104,12 +116,15 @@ class OptimizerReport:
 
 @dataclass(frozen=True)
 class Fired:
-    """How often each rule acted on one run: probe plans run and scans they narrowed; DPhyp calls —
-    before the run and in replans — those whose tree's C_out is below the plan order's, and those
-    stopped at their budget; joins flipped, replans and replans refused."""
+    """How often each rule acted on one run: probe plans run and scans they narrowed, before and
+    after join order; DPhyp calls — before the run and in replans — those whose tree's C_out is
+    below the plan order's, and those stopped at their budget; joins flipped, replans and replans
+    refused, the main run's and the probe plans'."""
 
     probes: int = 0
     narrowed: int = 0
+    probes_after_order: int = 0
+    narrowed_after_order: int = 0
     dphyp: int = 0
     reordered: int = 0
     budget: int = 0
@@ -119,8 +134,16 @@ class Fired:
 
 
 def fired(report: OptimizerReport) -> Fired:
-    orders = report.orders + tuple(order for replan in report.replans for order in replan.orders)
-    return Fired(probes=len(report.probed), narrowed=sum(len(p.after) < len(p.before) for p in report.pruned),
+    before, after = report.filters_before_order, report.filters_after_order
+    replans = report.replans + tuple(replan for _, replan in before.replans + after.replans)
+    orders = report.orders + tuple(order for replan in replans for order in replan.orders)
+    return Fired(probes=len(before.probed), narrowed=_narrowed(before),
+                 probes_after_order=len(after.probed), narrowed_after_order=_narrowed(after),
                  dphyp=len(orders), reordered=sum(sum(j.cost for j in o.joins) < o.plan_cost for o in orders),
                  budget=sum(o.unsolved is not None for o in orders), flips=sum(len(o.flipped) for o in orders),
-                 replans=len(report.replans), refused=len(report.refused))
+                 replans=len(replans),
+                 refused=len(report.refused) + len(before.refused) + len(after.refused))
+
+
+def _narrowed(filters: FilterPass) -> int:
+    return sum(len(p.after) < len(p.before) for p in filters.pruned)

@@ -65,6 +65,12 @@ IGNORES_NULL_EQUALS_NULL = frozenset(
 )
 
 
+def equates_nulls(join_type: JoinType, null_equals_null: bool) -> bool:
+    """Whether the join matches a NULL key to a NULL one: where the plan says so, and for anti and
+    mark joins whatever it says."""
+    return null_equals_null or join_type in IGNORES_NULL_EQUALS_NULL
+
+
 @dataclass(frozen=True)
 class Capability:
     """What the mode may do with one join, and why."""
