@@ -1,0 +1,52 @@
+name: nebius setup
+description: The nebius CLI with a service-account profile, and the VM's ssh key.
+
+# Shared by gpu-tests (pipeline.yml) and gpu-host-watch.yml, the only two jobs in the
+# nebius-gpu Environment. Every input is a secret, so each reaches the script through env,
+# never as a ${{ }} inside it.
+inputs:
+  sa-id:
+    description: NEBIUS_SA_ID, the service account
+    required: true
+  public-key-id:
+    description: NEBIUS_PUBLIC_KEY_ID, the service account's key ID
+    required: true
+  project-id:
+    description: NEBIUS_PROJECT_ID, the profile's parent
+    required: true
+  private-key:
+    description: NEBIUS_PRIVATE_KEY, the service account's PEM
+    required: true
+  ssh-key:
+    description: NEBIUS_GPU_SSH_KEY, the VM login
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SA_ID: ${{ inputs.sa-id }}
+        PK_ID: ${{ inputs.public-key-id }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+      run: |
+        set -euo pipefail
+        # Piped, the installer skips its interactive questions (it tests `-t 0`).
+        curl -sSfL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash
+        echo "$HOME/.nebius/bin" >> "$GITHUB_PATH"
+        install -d -m 700 "$RUNNER_TEMP/nebius"
+        printf '%s\n' "$PRIVATE_KEY" > "$RUNNER_TEMP/nebius/sa.pem"; chmod 600 "$RUNNER_TEMP/nebius/sa.pem"
+        # Flags from `nebius profile create --help`, CLI 0.12.289, checked 2026-10-14.
+        # --private-key-file copies the key into the profile (--private-key-file-path would
+        # keep a pointer to the file instead), so the PEM is removed right after. On a runner
+        # with no config yet, the new profile is created and activated as the default, with no
+        # prompt: gpu-host.sh uses whatever profile is active.
+        "$HOME/.nebius/bin/nebius" profile create ci --no-check-update \
+          --endpoint api.nebius.cloud \
+          --service-account-id "$SA_ID" --public-key-id "$PK_ID" \
+          --private-key-file "$RUNNER_TEMP/nebius/sa.pem" --parent-id "$PROJECT_ID" </dev/null
+        rm -f "$RUNNER_TEMP/nebius/sa.pem"
+        install -d -m 700 ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/nebius_gpu; chmod 600 ~/.ssh/nebius_gpu
+        echo "GPU_HOST_KEY=$HOME/.ssh/nebius_gpu" >> "$GITHUB_ENV"

@@ -134,9 +134,9 @@ grep -n '<a id="t94">' llm-wiki/tickets/*.md llm-wiki/archive/archived-tickets.m
 - **The C++ tests that need device memory run on nebius-gpu, not in `ctest -L cpu`.**
   `peacock_plan_tests` (where `test_aggregate_builder.cpp` links) is labelled `gpu`; only
   `peacock_cpu_tests` runs locally.
-- **Done**, as chain L's header defines it: CI green except the `gpu-tests` job (shad-gpu), and
-  this task's device tests passed on nebius-gpu, each run recorded (host, tree, per-binary
-  result) in `llm-wiki/tasks/welford-device-detail.md`. The sf40 binaries, `--run-benchmarks`
+- **Done**, as chain L's header defines it: CI green, the dispatched `gpu-tests` job ("GPU Tests
+  (nebius-gpu)") included, and this task's device tests passed on nebius-gpu, each run recorded
+  (host, tree, per-binary result) in `llm-wiki/tasks/welford-device-detail.md`. The sf40 binaries, `--run-benchmarks`
   and Nsight are out, recorded there as deferred.
 - Formatting on changed lines only: `git clang-format HEAD -- <files>`; `rustfmt --edition 2024
   --check <leaf>` on touched leaves, never a `mod.rs`. Files under 1000 lines, functions under
@@ -155,33 +155,37 @@ error. If `ssh` is refused at once while the host answers a raw socket, the sand
 the client, not the host.
 
 ```bash
-GPU=dmitry@89.169.109.150   # nebius-gpu, as chain L's header names it
+G=scripts/gpu-host.sh
 DIR=peacockdb-L             # the header's directory
-# The 25.02 env's lib: chain J's header says ~/data/miniforge3, #260 says ~/miniforge3. Use the
-# one that exists in CUDF_LIB, and record it in the detail file.
-timeout 60 ssh "$GPU" 'ls -d ~/data/miniforge3/envs/rapids-cuda-12.2/lib ~/miniforge3/envs/rapids-cuda-12.2/lib'
-CUDF_LIB='$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib'
 B="cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
-R="cd ~/$DIR && . ~/peacock-env.sh && export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:$CUDF_LIB PEACOCK_TESTDATA_DIR=\$PWD/testdata &&"
 # The fix's reverse.
 timeout 60 git diff -R HEAD -- $FIX > /tmp/welford-device-red.patch
-# The one sync: the working tree, uncommitted, and the reverse beside it.
-timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
-timeout 300 rsync -a /tmp/welford-device-red.patch "$GPU:welford-device-red.patch"
-# Red build: the tests without the fix; then the task's red set, each as `timeout … ssh "$GPU" "$R …"`.
-timeout 300 ssh "$GPU" "cd ~/$DIR && patch -p1 < ~/welford-device-red.patch"
-timeout 10800 ssh "$GPU" "$B"
+# Start the host (exit 75: no capacity; report it to the coordinator, which owns the retry).
+timeout 2400 $G start
+# The one sync: the working tree, uncommitted. It also generates a missing sf1 tree.
+timeout 3600 scripts/gpu-host-sync.sh --dest "$DIR"
+# The 25.02 env's lib: chain J's header says ~/data/miniforge3, #260 says ~/miniforge3. Use the
+# one that exists in CUDF_LIB, and record it in the detail file. Only now is the host up.
+timeout 60 $G ssh 'ls -d ~/data/miniforge3/envs/rapids-cuda-12.2/lib ~/miniforge3/envs/rapids-cuda-12.2/lib'
+CUDF_LIB='$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib'
+R="cd ~/$DIR && . ~/peacock-env.sh && export LD_LIBRARY_PATH=\$PWD/cpp/install/lib:$CUDF_LIB PEACOCK_TESTDATA_DIR=\$PWD/testdata &&"
+# Red build: the tests without the fix; then the task's red set, each as `timeout … $G ssh "$R …"`.
+timeout 300 $G ssh "cd ~/$DIR && patch -p1" < /tmp/welford-device-red.patch
+timeout 10800 $G ssh "$B"
 # Green build: the fix back in; then the task's green set.
-timeout 300 ssh "$GPU" "cd ~/$DIR && patch -p1 -R < ~/welford-device-red.patch"
-timeout 10800 ssh "$GPU" "$B"
+timeout 300 $G ssh "cd ~/$DIR && patch -p1 -R" < /tmp/welford-device-red.patch
+timeout 10800 $G ssh "$B"
+# After the task's last device run, a soft stop. Exit 2: someone's run is on the card; leave it.
+timeout 600 $G stop
 ```
 
 Every case the task names as red must fail, for the reason it names; a case red for another
 reason, or green where the task expects red, is a finding to settle before the fix
 (`superpowers:systematic-debugging`): a test that passes without its fix may assert nothing.
 Every case of the green set passes. One binary per `ssh`, so one red does not hide the next. A
-fresh `~/$DIR` has no sf1 parquet: copy it from chain J's `~/peacockdb-J/testdata`. Every Rust
-binary takes `--test-threads=1`. Not `peacock_cpu_tests` (local), not the sf40 pair, not
+sync generates a missing sf1 parquet in `~/$DIR/testdata`; never delete a chain's `testdata/`.
+Every Rust binary takes `--test-threads=1`. If the host is lost mid-step: `$G status`, `$G start`,
+sync, rerun the step. Never edit `~/.ssh/config`, and never accept a host key by hand. Not `peacock_cpu_tests` (local), not the sf40 pair, not
 `--run-benchmarks`.
 
 ## Review focus
@@ -761,8 +765,8 @@ wc -l cpp/tests/gpu/test_aggregate_builder.cpp peacockdb-core/src/tests/gpu_test
   the tests and `hand_tables.hpp` stay in both builds). The red build's runs:
 
 ```bash
-timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
-timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: --test-threads=1"
 ```
 
   Expected red: the two gtests Step 2 names and the two harness cases Step 3 names, each on a
@@ -770,10 +774,10 @@ timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welfor
   build's runs, the fix touching every grouped and grouping-set Welford:
 
 ```bash
-timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_gpu_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
 ```
 
   Expected: all green, the walk tests (`wire::gpu_tests::`) and the #216 `bug_` pins (still
@@ -1418,8 +1422,8 @@ wc -l cpp/src/operators/aggregate.cpp cpp/tests/gpu/test_aggregate_builder.cpp p
   runs:
 
 ```bash
-timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.AKeyless*'"
-timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: aggregate_dimension_cases:: aggregate_schema_cases:: aggregate_cases:: aggregate_identity_cases:: --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.AKeyless*'"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welford_cases:: aggregate_dimension_cases:: aggregate_schema_cases:: aggregate_cases:: aggregate_identity_cases:: --test-threads=1"
 ```
 
   Expected red, every one on the reduce path's one column or its `var` refusal: the four
@@ -1431,11 +1435,11 @@ timeout 3600 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib welfor
   passes, Task 2's `welford_cases` included. The green build's runs:
 
 ```bash
-timeout 1800 ssh "$GPU" "$R cpp/install/bin/peacock_gpu_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_plan_tests"
-timeout 3600 ssh "$GPU" "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
-timeout 1800 ssh "$GPU" "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
 ```
 
   Expected: all green, the walk tests (`wire::gpu_tests::`) included. Record both runs in
@@ -1565,11 +1569,13 @@ grep -n '216\|#94' peacockdb-core/tests/common/corpus_cases.inc
   the code is committed, only the cells move):
 
 ```bash
-timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ "$GPU:$DIR/"
-timeout 10800 ssh "$GPU" "$B"
-timeout 7200 ssh "$GPU" "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 global_stddev empty_dispersion"
-timeout 7200 ssh "$GPU" "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 shuffle_stddev rollup_stddev"
-timeout 600 rsync -a "$GPU:$DIR/testdata/goldens/" testdata/goldens/ --include='*/' --include='gpu-result.txt' --exclude='*'
+timeout 2400 $G start
+timeout 3600 scripts/gpu-host-sync.sh --dest "$DIR"
+timeout 10800 $G ssh "$B"
+timeout 7200 $G ssh "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 global_stddev empty_dispersion"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 shuffle_stddev rollup_stddev"
+timeout 600 rsync -a -e "$G rsh" "nebius-gpu:$DIR/testdata/goldens/" testdata/goldens/ --include='*/' --include='gpu-result.txt' --exclude='*'
+timeout 600 $G stop
 git diff --stat testdata/goldens/
 ```
 

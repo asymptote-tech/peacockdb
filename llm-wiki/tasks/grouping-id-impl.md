@@ -97,8 +97,8 @@ by a line number. What moves:
   `ctest --test-dir cpp/build -L cpu`. The cudf Rust shape goes through `scripts/cargo-cudf.sh`.
   The workspace needs the sf1 parquet under `testdata/` (gitignored): symlink it from the primary
   checkout if absent.
-- **Device** on nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02, in `~/peacockdb-L`, as chain L's
-  header says: **one sync per task, with as many back-to-back builds as its red/green pairs need,
+- **Device** on nebius-gpu through `scripts/gpu-host.sh` (never an IP from a plan; `build-test.md`,
+  "GPU host"), cuDF 25.02, in `~/peacockdb-L`, as chain L's header says: **one sync per task, with as many back-to-back builds as its red/green pairs need,
   the red build first.** Three tasks have device tests: Task 2 (a red build and a green build),
   Task 3 (one build, plus a pair if #55 is live) and Task 5 (the trial build and the final build).
   Each syncs once, as the *Device cycle* below, after its local tiers pass and before its commit;
@@ -107,9 +107,9 @@ by a line number. What moves:
   committed with the task that ran it.
 - **Out of every task, as the header says:** the sf40 binaries (`peacock_tpch_tests`,
   `peacock_tpchv_tests`), `--run-benchmarks`, Nsight captures and any H200 timing, each recorded in
-  the detail file as deferred. **Done** is CI green except the `gpu-tests` job ("GPU Tests
-  (remote)", shad-gpu), with every task's device runs passed on nebius-gpu and recorded in the
-  detail file.
+  the detail file as deferred. **Done** is CI green, the dispatched `gpu-tests`
+  job ("GPU Tests (nebius-gpu)") included, with every task's device runs passed on nebius-gpu
+  and recorded in the detail file.
 - Formatting applies to changed lines only. For C++, `git clang-format HEAD -- <files>`, and
   `clang-format -i` on a new file, all of whose lines are this task's. For Rust,
   `rustfmt --edition 2024 --check <file>`, applied only where its diff stays inside the lines this
@@ -128,22 +128,25 @@ backgrounded build chain dies mid-build with no error. If `ssh` seems dead while
 a raw socket, the sandbox is blocking the client, not the host.
 
 ```bash
-H=dmitry@89.169.109.150
+G=scripts/gpu-host.sh
 R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
 B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
 # The fix's reverse, for the red build.
 git diff -R HEAD -- $FIX > /tmp/grouping-id-red.patch
-# The task's one sync, from the workspace root.
-timeout 1200 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ $H:peacockdb-L/
-timeout 300 rsync -a /tmp/grouping-id-red.patch $H:grouping-id-red.patch
+# Start the host (exit 75: no capacity; report it to the coordinator, which owns the retry).
+timeout 2400 $G start
+# The task's one sync, from the workspace root. It also generates a missing sf1 tree.
+timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-L
 # Red build: the tests without the fix.
-timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 < ~/grouping-id-red.patch'
-timeout 7200 ssh $H "$B"
-timeout 3600 ssh $H "$R $CMD"     # once per command of the red set
+timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1' < /tmp/grouping-id-red.patch
+timeout 7200 $G ssh "$B"
+timeout 3600 $G ssh "$R $CMD"     # once per command of the red set
 # Green build: the fix back in.
-timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 -R < ~/grouping-id-red.patch'
-timeout 7200 ssh $H "$B"
-timeout 3600 ssh $H "$R $CMD"     # once per command of the green set
+timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1 -R' < /tmp/grouping-id-red.patch
+timeout 7200 $G ssh "$B"
+timeout 3600 $G ssh "$R $CMD"     # once per command of the green set
+# After the task's last device run, a soft stop. Exit 2: someone's run is on the card; leave it.
+timeout 600 $G stop
 ```
 
 A task with no red build (it says why) skips the patch and the red lines. A file changed after the
@@ -151,16 +154,13 @@ sync, for a further red/green pair or a changed declaration, travels by name fro
 root, then the next build runs back to back:
 
 ```bash
-timeout 300 rsync -aR $PATHS $H:peacockdb-L/   # PATHS: each file changed since the sync
+timeout 300 rsync -aR -e "$G rsh" $PATHS nebius-gpu:peacockdb-L/   # PATHS: each file changed since the sync
 ```
 
-A fresh `~/peacockdb-L` has no sf1 parquet. After the first sync and before its first build, copy
-it from chain J's tree;
-it is gitignored, so later syncs leave it alone. pbench's data is committed.
-
-```bash
-timeout 1800 ssh $H 'cd ~/peacockdb-L/testdata && for d in tpch.sf1 tpcds.sf1; do [ -d $d ] || cp -a ~/peacockdb-J/testdata/$d .; done'
-```
+The sync generates the sf1 parquet on the VM if `~/peacockdb-L/testdata` lacks it, and later syncs
+leave it alone (it is gitignored). pbench's data is committed. Never delete a chain's `testdata/`.
+If the host is lost mid-step: `$G status`, `$G start`, sync, rerun the step. Never edit
+`~/.ssh/config`, and never accept a host key by hand.
 
 Every case a task names as red must fail, for the reason it names. A case red for another reason,
 or green where the task expects red, is a finding to settle before the fix: a test that passes
@@ -1465,7 +1465,7 @@ grep -E '^test .* (ok|FAILED)$' /tmp/cells.log
 
 ```bash
 for d in tpch tpcds pbench; do
-  timeout 600 rsync -a "$H:peacockdb-L/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
+  timeout 600 rsync -a -e "$G rsh" "nebius-gpu:peacockdb-L/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
 done
 ```
 
@@ -1522,7 +1522,7 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
   any file a Step 4 fix touched, by name, not in a second sync:
 
 ```bash
-timeout 300 rsync -aR peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv $H:peacockdb-L/
+timeout 300 rsync -aR -e "$G rsh" peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv nebius-gpu:peacockdb-L/
 ```
 
   Build (`$B`), then run each of these, one `ssh` each:

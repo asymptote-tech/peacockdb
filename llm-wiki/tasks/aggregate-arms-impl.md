@@ -144,16 +144,17 @@ never by line. What moves, by the plan that moves it:
   DuckDB's sections are written with DuckDB 1.5.4's Python module in a venv outside the repo
   (`python3` here has no `duckdb`, and `duckdb_result.py` refuses any other version):
   `[ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }`.
-- **Device** on nebius-gpu, `dmitry@89.169.109.150`, cuDF 25.02, as chain L's header says: the
-  working tree synced uncommitted into `~/peacockdb-L` (its sf1 data copied from
-  `~/peacockdb-J/testdata`), **one sync per task with as many back-to-back builds as its red/green
-  pairs need, the red build first**, every CPU build and run local. Device commands run in the
-  foreground (a backgrounded build chain dies mid-build). If `ssh` seems dead while the host
-  answers a raw socket, the sandbox is blocking the client, not the host.
+- **Device** on nebius-gpu through `scripts/gpu-host.sh` (never an IP from a plan; `build-test.md`,
+  "GPU host"), cuDF 25.02, as chain L's header says: the working tree synced uncommitted into
+  `~/peacockdb-L` by `scripts/gpu-host-sync.sh --dest peacockdb-L` (it generates a missing sf1
+  tree), **one sync per task with as many back-to-back builds as its red/green pairs need, the red
+  build first**, every CPU build and run local. Device commands run in the foreground (a
+  backgrounded build chain dies mid-build). If `ssh` seems dead while the host answers a raw
+  socket, the sandbox is blocking the client, not the host.
 - **Out of every task, as the header says:** the sf40 binaries, `--run-benchmarks`, Nsight
   captures and any H200 timing, each recorded in `aggregate-arms-detail.md` as deferred. **Done**
-  is CI green except the `gpu-tests` job ("GPU Tests (remote)", shad-gpu), with every task's
-  device runs passed on nebius-gpu and recorded in the detail file.
+  is CI green, the dispatched `gpu-tests` job ("GPU Tests (nebius-gpu)") included, with every
+  task's device runs passed on nebius-gpu and recorded in the detail file.
 - New tickets take the next free number from master's `tickets.md` as it stands after J's merge.
 - Commit messages at most 10 lines, ending with the `Co-Authored-By` line shown in each task.
 
@@ -164,23 +165,26 @@ local tier passes, and before its commit. One sync carries the whole working tre
 reverse; the red build is the tree with the fix reversed, the green build the tree as written.
 Each task names its `FIX` (the paths whose diff is the fix, plus any test file that cannot compile
 without it; never a test the red build must run), its red set and its green set, each set a list
-of `ssh` commands written with `$H` and `$R` below. Run everything in the foreground.
+of `$G ssh` commands written with `$R` below. Run everything in the foreground.
 
 ```bash
-H=dmitry@89.169.109.150
+G=scripts/gpu-host.sh
 R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
 B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
 # The fix's reverse (git add -N any new file among FIX first, so the diff carries it).
 git diff -R HEAD -- $FIX > /tmp/aggregate-arms-red.patch
+# Start the host (exit 75: no capacity; report it to the coordinator, which owns the retry).
+timeout 2400 $G start
 # The one sync.
-timeout 900 rsync -a --delete-after --exclude=.git --filter=':- .gitignore' ./ $H:peacockdb-L/
-timeout 300 rsync -a /tmp/aggregate-arms-red.patch $H:aggregate-arms-red.patch
+timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-L
 # Red build: the tests without the fix; then the task's red set.
-timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 < ~/aggregate-arms-red.patch'
-timeout 10800 ssh $H "$B"
+timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1' < /tmp/aggregate-arms-red.patch
+timeout 10800 $G ssh "$B"
 # Green build: the fix back in; then the task's green set.
-timeout 300 ssh $H 'cd ~/peacockdb-L && patch -p1 -R < ~/aggregate-arms-red.patch'
-timeout 10800 ssh $H "$B"
+timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1 -R' < /tmp/aggregate-arms-red.patch
+timeout 10800 $G ssh "$B"
+# After the task's last device run, a soft stop. Exit 2: someone's run is on the card; leave it.
+timeout 600 $G stop
 ```
 
 A task with no red build (it says why) skips the patch and the red lines. Every case the task
@@ -190,7 +194,8 @@ may assert nothing. Every case of the green set passes. One binary per `ssh`, so
 hide the next. If the loader cannot find `libcudf`, the 25.02 env on that host is
 `~/miniforge3/envs/rapids-cuda-12.2` (#260 records that path): use whichever exists and say so in
 the detail file. Record each build (host, tree, command, pass and fail counts per binary) in
-`llm-wiki/tasks/aggregate-arms-detail.md`.
+`llm-wiki/tasks/aggregate-arms-detail.md`. If the host is lost mid-step: `$G status`, `$G start`,
+sync, rerun the step. Never edit `~/.ssh/config`, and never accept a host key by hand.
 
 ## Review focus
 
@@ -476,10 +481,10 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cud
   shows every construction site Step 4 moved still answers on the device. Green set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
 ```
 
   Expected: all green, `TableResultInvariant.ThreeColumnsAndTwoNamesAreRefused` among them; the
@@ -979,7 +984,7 @@ git grep -n 'stddev_ddof\|->alias()' cpp/src/operators/aggregate.cpp
   and 4's tests over the names from `alias`. Red set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 aggregate_schema_cases:: aggregate_cases::a_welford"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 aggregate_schema_cases:: aggregate_cases::a_welford"
 ```
 
   Expected red, each for the name: `stddev_holds_its_three_declared_state_names` and
@@ -990,8 +995,8 @@ timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-thr
   case in the set passes. Green set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
-timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
 ```
 
   Expected: all green — `AggregateMerge.*`, `PlanExecutor.Aggregate*`, `GroupingId.*` and
@@ -1218,9 +1223,9 @@ git diff --stat testdata/
   cpu tier at Step 1. Green set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
-timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
 ```
 
   Expected: all green, `AggregateMerge.*` (three cases), `PlanExecutor.AggregateCount` and
@@ -2223,8 +2228,8 @@ wc -l cpp/src/operators/aggregate.cpp
   did not touch it). Red set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
-timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 a_rollup_with_a_stddev a_rollup_welford_merge"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests --gtest_filter='AggregateBuilder.*'"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 a_rollup_with_a_stddev a_rollup_welford_merge"
 ```
 
   Expected: the six `AggregateBuilder` cases and two rollup cases Steps 1 and 2 name red, each for
@@ -2233,10 +2238,10 @@ timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-thr
   nowhere):
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
-timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
-timeout 14400 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 14400 $G ssh "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
 ```
 
   Expected: all green — the ten `AggregateBuilder`, `AggregateMerge.*`, `GroupingId.*` and
@@ -2584,9 +2589,9 @@ wc -l cpp/src/expr.cpp
   Task 6 left them. Red set:
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests --gtest_filter='ColumnRefs.*'"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests --gtest_filter='ColumnRefs.*'"
-timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 bug_a_global_stddev_finalize"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests --gtest_filter='ColumnRefs.*'"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_join_session_tests --gtest_filter='ColumnRefs.*'"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 bug_a_global_stddev_finalize"
 ```
 
   Expected red: `ASortKeyRefusesEachBadReference` and `AComputedKeyRefusesEachBadReferenceInsideIt`
@@ -2598,13 +2603,13 @@ timeout 3600 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-thr
   `shuffle-stddev`'s, which Task 10 runs):
 
 ```bash
-timeout 3600 ssh $H "$R cpp/install/bin/peacock_plan_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_gpu_tests"
-timeout 1800 ssh $H "$R cpp/install/bin/peacock_join_session_tests"
-timeout 7200 ssh $H "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
-timeout 1800 ssh $H "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
-timeout 3600 ssh $H "$R cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_ --test-threads=1"
-timeout 14400 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/bin/peacock_plan_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_gpu_tests"
+timeout 1800 $G ssh "$R cpp/install/bin/peacock_join_session_tests"
+timeout 7200 $G ssh "$R cpp/install/rust-tests/peacockdb_core_gpu_lib gpu_tests:: --test-threads=1"
+timeout 1800 $G ssh "$R cpp/install/rust-tests/test_node_timing --test-threads=1"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/peacock_gpu_benchmarks --skip bench_ --test-threads=1"
+timeout 14400 $G ssh "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1"
 ```
 
   Expected: all green — every gtest (`ColumnRefs.*`, `TableResultInvariant.*`, `AggregateBuilder.*`,
@@ -2873,9 +2878,9 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cud
   filtered to the new query so no other section's float digits move:
 
 ```bash
-timeout 3600 ssh $H "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev"
-timeout 3600 ssh $H "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev shuffle_stddev"
-timeout 600 rsync -a $H:peacockdb-L/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
+timeout 3600 $G ssh "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev"
+timeout 3600 $G ssh "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev shuffle_stddev"
+timeout 600 rsync -a -e "$G rsh" nebius-gpu:peacockdb-L/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
 git diff --stat testdata/goldens/
 ```
 

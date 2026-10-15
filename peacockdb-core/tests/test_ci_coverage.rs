@@ -21,7 +21,7 @@ mod runners;
 use std::collections::BTreeSet;
 
 use runners::{
-    GPU_RUN_STEP, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
+    GPU_HOST_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
     gpu_job_staged_targets, is_rust_gpu_runner_invocation, lib_rung_of,
     rust_gpu_runner_invocations, staged_by_name_of,
 };
@@ -286,9 +286,16 @@ fn line_matcher_rejects_both_false_coverage_modes() {
     assert!(is_rust_gpu_runner_invocation(
         r#"    "\$t" --nocapture --test-threads=1 > "\$rlog" 2>&1"#
     ));
+    assert!(is_rust_gpu_runner_invocation(
+        r#"    env LD_LIBRARY_PATH="$ld" "$t" --nocapture --test-threads=1 $rung > "$st/$name.log" 2>&1; trc=$?"#
+    ));
     assert!(
         !is_rust_gpu_runner_invocation(r#"    [ -x "\$t" ] || continue"#),
         "the loop's executable test is not the invocation"
+    );
+    assert!(
+        !is_rust_gpu_runner_invocation(r#"    [ -x "$t" ] || continue; name=${t##*/}"#),
+        "nor is it unescaped"
     );
     assert!(
         !is_rust_gpu_runner_invocation(r#"    # "\$t" --test-threads=1 > "\$tlog""#),
@@ -623,7 +630,7 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
     );
     let (keyed, rung) = gpu_job_lib_rung().unwrap_or_else(|| {
         panic!(
-            "the `{GPU_RUN_STEP}` loop hands no file a rung: no `[ \"$tname\" = <name> ] && \
+            "{GPU_HOST_TEST}'s rust loop hands no file a rung: no `[ \"$name\" = <name> ] && \
              rung=<filter>` line. The staged lib `{staged}` holds every rung, so unfiltered \
              it runs the cpu cases on the device and filtered by nothing it runs the device \
              cases nowhere — the zero-test guard sees the second, not the first."
@@ -635,10 +642,10 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
         "the run loop keys the rung on a different file, or a different rung, from the lib \
          the staging step ships — `{staged}` is staged, `{keyed}` gets `{rung}`"
     );
-    for inv in rust_gpu_runner_invocations(PIPELINE) {
+    for inv in rust_gpu_runner_invocations(GPU_HOST_TEST) {
         assert!(
-            inv.contains("\\$rung"),
-            "a rust invocation in the `{GPU_RUN_STEP}` loop does not pass $rung, so the \
+            inv.contains("$rung"),
+            "a rust invocation in {GPU_HOST_TEST}'s loop does not pass $rung, so the \
              assignment above it reaches nothing: {inv}"
         );
     }

@@ -8,7 +8,8 @@ Code and tests are authoritative; this page maps them.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
-CI GPU job on the remote host, `--test-threads=1` · `manual` = no CI step runs it · `2gpu` =
+CI GPU job, `--test-threads=1`, on nebius-gpu while shad-gpu is down (*GPU host*), so the sf40
+rows wait for shad-gpu · `manual` = no CI step runs it · `2gpu` =
 manual, host with ≥2 GPUs (verda-gpu) · `validate-large` = validate-large.yml manual dispatch.
 The first table says it once per block: cpu and ffi are dataset-matrix, gpu is shad-gpu. Everything
 except the `shad-gpu` and `2gpu` rows also runs locally; large CPU batches go to verda.
@@ -783,7 +784,7 @@ What the arrows are there to make checkable:
 `paths-ignore` skips a wholly-documentation diff, and the **changes** job skips a
 documentation-only push to a PR that carries code, which `paths-ignore` cannot see because
 it judges the whole PR diff. Both fail open, and a doc file that ever becomes an input to
-something has to come off both lists.
+something has to come off both lists. A `workflow_dispatch` always runs in full.
 
 Five independent job chains:
 
@@ -820,25 +821,37 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   unit-test binary as `peacockdb_core_gpu_lib`, whose `gpu_tests` modules exist only under
   that feature. Separate from dataset-matrix so the GPU
   job can start without waiting for the CPU tests.
-- **gpu-tests** (needs cpp-build-2502) — ssh to **shad-gpu** into a per-run `REMOTE_DIR`:
-  rsync artifact + testdata, patch the binaries for glibc 2.35, generate sf1 on the host
-  if absent, then run. Three guards, each closing a hole that shipped: sf40 presence is
-  asserted by CI (`tpch.sf40/lineitem.parquet`) because the binaries themselves skip and
-  exit 0, which would be green having verified nothing; every `peacock_*_tests` binary runs
-  by glob with a ran-any assertion (a hand-written list once let `peacock_tpchv_tests` be
-  built, shipped and patched but never run); and any binary reporting `PASSED 0 tests` is
-  an error. The staged rust binaries then run with `--test-threads=1` (cuDF/RMM share one
-  process-wide pool); `peacockdb_core_gpu_lib` alone also takes `gpu_tests::`, the path
-  filter that selects the device rung and leaves the CPU and FFI rungs it also holds to
-  dataset-matrix, and a rust binary reporting `running 0 tests` is the same error as the
-  C++ one; `peacock_gpu_benchmarks` runs under `--skip bench_`, so its harness assertions
-  run on every job and its timed cases only under `--run-benchmarks`. No `set -e` — statuses are OR'd so one failure cannot skip the rest — and
-  `REMOTE_DIR` is removed on `always()`.
-- **cost-report** — the report crate and its inputs, and nothing else: python
+- **gpu-tests**, "GPU Tests (nebius-gpu)" (needs cpp-build-2502) — runs on a push to master
+  and on a `workflow_dispatch`, never on a PR. A PR still runs the build job. A dispatch is
+  `gh workflow run pipeline.yml --ref <branch>`, and it runs the whole pipeline. The job sits in
+  the `nebius-gpu` Environment and the `nebius-gpu` concurrency group, one run at a time across
+  every ref, with a 150-minute limit. Its steps:
+  - the actor check against `GPU_ALLOWED_ACTORS` (*GPU host*), before any project code runs;
+  - the `cpp-install-25.02` artifact, and `nebius-setup`;
+  - `gpu-host.sh start`, retried on exit 75 for 30 minutes, then a failure;
+  - `cpp/install/`, `gpu-host-test.sh` and the testdata subset shipped to a per-run
+    `~/peacockdb-ci/run-<run id>-<attempt>`, and sf1 generated there;
+  - `gpu-host-test.sh run --foreground`: the L40S list (*GPU host*). Its guards each closed a
+    hole that shipped. Every `peacock_*_tests` binary runs by glob, because a hand-written list
+    once let `peacock_tpchv_tests` be built and shipped but never run. A binary that runs 0
+    tests fails, because one whose tests all skip exits 0. The rust binaries run with
+    `--test-threads=1`, because cuDF/RMM share one process-wide pool. `peacockdb_core_gpu_lib`
+    alone takes `gpu_tests::`, which selects the device rung and leaves its CPU and FFI rungs
+    to dataset-matrix. `peacock_gpu_benchmarks` runs under `--skip bench_`;
+  - whenever the start step ran: kill the run's processes on the VM, remove the run directory
+    and soft-stop the VM. A cancelled run's tests would otherwise keep running, and a running
+    test holds off the idle watcher.
+
+  No glibc patch: the VM has glibc 2.39 and CI's binaries need 2.35. No sf40 check: the sf40
+  pair is out on an L40S.
+- **gpu-host-watch.yml** — hourly and on dispatch: the hourly checker, which hard-stops an
+  unused nebius-gpu (*GPU host*). GitHub reads its schedule from master only.
+- **cost-report** — the report crate and its inputs, and the cheap script tests: python
   `testdata/test_duckdb_cost.py`, the `scripts/exec_model/tests/test_*.py` prototype set,
-  the `scripts/calibration/tests/test_*.py` cases over a synthetic capture, and
-  `cargo test -p cost-report`. Then report generation, the PR-comment upsert and the
-  cost-regression gate against the base SHA. Every query whose PeacockDB CPU Σout grew is a
+  the `scripts/calibration/tests/test_*.py` cases over a synthetic capture, the GPU host
+  script tests `scripts/gpu-host/tests/test_*.py` with `shellcheck` over the GPU host scripts
+  (*GPU host*), and `cargo test -p cost-report`. Then report generation, the PR-comment upsert
+  and the cost-regression gate against the base SHA. Every query whose PeacockDB CPU Σout grew is a
   regression and shows 🔴 in the comment, but the job fails only on growth of more than 10%
   (`REGRESSION_FAIL_PCT` in `cost-report/src/main.rs`), or on growth from a zero base. A change
   to how rows split across lanes moves Σout by a few bytes of padding without changing an
@@ -987,7 +1000,7 @@ Rules that keep this healthy:
   `CMAKE_PREFIX_PATH`, so cuVS and Arrow come from the same env and a fresh build dir needs
   nothing on PATH. Before that, a fresh dir configured only where the env's `bin` was on PATH,
   which CI's image has and a dev host does not.
-- cuDF version scope: a functional GPU run on **25.02** (shad-gpu) is sufficient
+- cuDF version scope: a functional GPU run on **25.02** (the GPU host) is sufficient
   verification; **26.02 needs only to compile** (CI builds both legs).
 
 ## Memory constraints (15 GiB-class hosts)
@@ -1000,11 +1013,192 @@ Rules that keep this healthy:
 - Full local CPU suite: run with `-- --test-threads=2` or less; the heavy golden suites
   OOM at default parallelism.
 
+## GPU host
+
+The device tier runs on **nebius-gpu** while shad-gpu is down. It is a paid VM. Every GPU step
+starts it and stops it after. Two guards stop it when nobody does.
+
+**The instance.** `computeinstance-e00tnrse7ayntnzcyt` in project
+`project-e00tdypyen10mmyep61c8q`. An NVIDIA L40S with 46 GB. Ubuntu 24.04 and glibc 2.39, so
+no binary needs a glibc patch. cuDF 25.02 in `~/data/miniforge3/envs/rapids-cuda-12.2`;
+`. ~/peacock-env.sh` sets up a shell. cuDF 26.02 there is out ([#260](tickets/system-hardening.md#t260),
+[#94](tickets/corpus-coverage.md#t94)).
+
+- **It is preemptible.** It can stop, change IP or vanish mid-step. Preemption is a stop: the
+  boot disk keeps its trees, builds and data.
+- **The IP changes on every start.** Never write it down. `gpu-host.sh` asks the API for it on
+  every call.
+- **Only GPU work goes there**: the device build and the device runs. Every CPU build and run
+  stays local, or on verda.
+
+### The scripts
+
+`scripts/gpu-host.sh` is the one door to the VM. It runs the `nebius` CLI with the caller's
+active profile.
+
+- `status`: the state, and the IP when RUNNING. `ip`: the IP alone.
+- `start`: starts the VM and waits for RUNNING, then for ssh. On a running VM it only waits for
+  ssh. It waits out a STOPPING VM first. If the VM is RUNNING but ssh never answers, it exits
+  1, and it stops the VM again if this call started it.
+- `stop`: a soft stop. It refuses, exit 2, while a process is on the card. An unreachable VM is
+  stopped on the API's word. `stop --force` stops it regardless.
+- `ssh <cmd…>`: runs a command on the VM. `rsh` is the same for `rsync -e`.
+- `install-watch`: installs the idle watcher and its API credentials on the VM. It ends by
+  running root's `nebius` profile the way the watcher does, and fails loudly if that profile
+  cannot reach the API.
+
+| exit | meaning | what to do |
+|---|---|---|
+| 0 | done | |
+| 2 | soft stop refused: a process is on the card | leave it; someone's run is on it |
+| 75 | no capacity or quota | retry later |
+| 69 | the instance no longer exists | stall; rebuilding it is the human's |
+| 1 | anything else; from `start`, most often the VM up but unreachable over ssh | read `~/.config/peacock/gpu-host/gpu-host.log`. From `start`: stall with that reason, do not retry |
+
+**Host keys.** Every ssh uses the alias `nebius-gpu` and its own known-hosts file under
+`~/.config/peacock/gpu-host/`, so a new IP never warns. When the key itself changes, the script
+asks the API whether the IP is this instance's. Only then does it replace the stored key, and it
+logs both fingerprints. Never edit `~/.ssh/config` for the VM, and never accept a key by hand.
+
+`scripts/gpu-host-sync.sh [--dest <dir>]` copies the working tree, uncommitted, to `~/<dir>` on
+the VM, and prints `<dir>`. The default is `peacockdb-<the worktree's directory name>`. Ignored
+build dirs, target dirs and generated data survive on both sides. It retries a failed rsync. It
+generates the sf1 tpch and tpcds data on the VM if it is missing. Do not commit to build.
+
+Build on the VM with `build-test-shadgpu.sh --build` only. Its `--run`, `--push-binaries` and
+`--patch` go to shad-gpu.
+
+`scripts/gpu-host-test.sh` runs on the VM, against a tree that holds `cpp/install/`:
+
+- `run <tree>` runs the list detached under `nohup`, so a dropped ssh does not kill it. Logs
+  and rc files go to `<tree>/.gpu-test/`. `run --foreground <tree>` waits; CI uses it.
+- `status <tree>` prints each binary's rc, or `running`, then `ALL rc=<n>`, `ALL running` or
+  `ALL died`. `ALL died` means a preemption or a reboot killed the run: rerun it.
+
+A GPU step, end to end (`<dest>` is what the sync printed):
+
+```
+scripts/gpu-host.sh start
+scripts/gpu-host-sync.sh
+scripts/gpu-host.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
+scripts/gpu-host.sh ssh '~/<dest>/scripts/gpu-host-test.sh run ~/<dest>'
+scripts/gpu-host.sh ssh '~/<dest>/scripts/gpu-host-test.sh status ~/<dest>'   # until ALL rc=
+scripts/gpu-host.sh stop
+```
+
+If the VM is lost mid-step: `status`, `start` again, sync, rerun the step.
+
+### The L40S list
+
+`gpu-host-test.sh` holds the one list, for the developer and for CI:
+
+- every `cpp/install/bin/peacock_*_tests`, except the sf40 pair, `peacock_tpch_tests` and
+  `peacock_tpchv_tests`;
+- every staged binary in `cpp/install/rust-tests/`, with `--test-threads=1`;
+  `peacockdb_core_gpu_lib` takes `gpu_tests::`, and `peacock_gpu_benchmarks` takes
+  `--skip bench_`. `PCK_TEST_FILTER` narrows every rust binary but the lib.
+
+A binary that runs 0 tests fails, and so does an empty glob or a segfault in any log. Every
+binary runs even after one fails.
+
+Out until further notice: the sf40 binaries, `--run-benchmarks`, Nsight captures and any H200
+timing. A task records each one it skips as deferred in its detail file.
+
+### The two idle guards
+
+**The watcher** is `scripts/gpu-host/idle_watch.py`, run every minute on the VM by the
+systemd timer `peacock-gpu-idle.timer`. The timer survives reboots. Test activity is a process
+on the card or a running test binary. Build activity is `rsync`, `cargo`, `cmake`, `ninja`,
+`nvcc` or `cc1plus`. The watcher stops the VM through the API:
+
+- after 1 hour with no test activity;
+- after 2 hours, measured from the last test, if a build was seen since that test;
+- when one test process has run for 4 hours. That is a process on the card, or a test binary
+  found by name. A hung CPU-side test is never on the card, and without the second it would
+  keep the VM up forever.
+
+The clocks never start before boot, so a fresh start is never stopped on old state. Each tick
+appends one JSON line to `/var/log/peacock-gpu-idle.log`, with the card's processes (`card`)
+and the test binaries found by name (`test_procs`), each with its start time. State lives in
+`/var/lib/peacock-gpu-idle/`.
+
+**The hourly checker** is `.github/workflows/gpu-host-watch.yml`, scheduled hourly and
+dispatchable. It keeps no state. If the VM is RUNNING, it reads the watcher's last log line over
+ssh and passes it to `scripts/gpu-host/check.py`. It hard-stops the VM when:
+
+- the line is missing, or more than an hour old (the watcher is dead);
+- the line, or the watcher's rule applied to it now, says stop;
+- ssh does not answer for 15 minutes.
+
+Any non-zero exit of `check.py` counts as a stop, a crash included. A VM up for less than
+10 minutes is skipped until the next hour. The dispatch input `clock_offset` adds that many
+seconds to the checker's clock. A test dispatch with `clock_offset=7200` against an idle VM
+that has been up for more than 10 minutes should hard-stop it.
+
+- **Run `install-watch` before the hourly checker is live**, and again after the VM is rebuilt.
+  Without it, the checker finds no watcher log and hard-stops a running VM.
+- **Run `install-watch` again after any change under `scripts/gpu-host/`** once it reaches
+  master. The VM's watcher and master's checker must apply the same rule. A checker newer than
+  the watcher can read its lines as malformed, and then it hard-stops the VM.
+- The tests live in `scripts/gpu-host/tests/`. Each runs as `python3 <file>`.
+- GitHub runs the schedule from master's copy of the file only.
+- GitHub delays top-of-hour scheduled runs, and sometimes drops them.
+- GitHub disables a public repo's schedules after 60 days with no activity. That silently
+  removes the hourly guard. Re-enable the workflow in the Actions tab.
+
+### CI and its secrets
+
+`gpu-tests` ("GPU Tests (nebius-gpu)", in *CI structure*) and `gpu-host-watch.yml` are the only
+jobs in the GitHub Environment `nebius-gpu`. It holds five secrets: `NEBIUS_SA_ID`,
+`NEBIUS_PUBLIC_KEY_ID`, `NEBIUS_PROJECT_ID`, `NEBIUS_PRIVATE_KEY`, and `NEBIUS_GPU_SSH_KEY`
+for the VM login. `.github/actions/nebius-setup` turns them into a CLI profile and an ssh key.
+
+The repo variable `GPU_ALLOWED_ACTORS` is a comma-separated list of logins.
+`scripts/gpu-host/check-actor.sh` fails `gpu-tests` unless both the actor and the triggering
+actor are on it. An empty list admits nobody. The coordinator's gh account must be on it.
+
+The Environment has no required-reviewers rule. The writers (alephonea, romak00) are trusted,
+and the allowlist with the actor check is the gate. A reviewer rule would block the
+coordinator's unattended dispatch.
+
+### Disk
+
+The boot disk is 96 GB in all, and two chains and CI share it.
+
+- Run `df -h /` on the VM before every build.
+- Below 20 GB free, clean what can be rebuilt: stale build and target dirs of your own tree,
+  `~/miniforge3/bin/conda clean -a`, and finished `~/peacockdb-ci/run-*` dirs. `du -xh -d2 ~ |
+  sort -rh | head` shows what is using it.
+- Below 10 GB free, do not start a build. Record it in the task's detail file as an obstacle.
+- Never delete the cuDF envs under `~/data/miniforge3/envs`, any chain's `testdata/`, or
+  another chain's tree.
+- Record what you removed in the task's detail file.
+
+### Who stops it
+
+- **Developers and CI stop softly**: `gpu-host.sh stop`. Exit 2 means another party's run is
+  on the card; leave it, and the guards take the VM down later.
+- **The coordinator stops hard**: `gpu-host.sh stop --force`, on entering `completeness
+  approved`, on entering `done`, and before every exit.
+- **The guards stop hard**: the watcher through the API, the checker with `stop --force`.
+
+Contention is accepted. Two chains and CI share the VM, with no lock. One party's stop can kill
+another's run; the loser reruns its step and does not diagnose it.
+
+### Credential files
+
+Never open a Nebius credential file: `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml` and
+any `*.pem` under `~/.nebius/`, on any host. That includes the VM's copy in `/root/.nebius/`.
+No `cat`, `grep`, `sed`, Read, or redaction attempt: a redaction leaked a private key into a
+transcript on 2026-10-14. Reach the cloud through `gpu-host.sh`. Learn the CLI from
+`nebius … --help`.
+
 ## Remote hosts
 
 | Host | Use | Managed by |
 |---|---|---|
-| **shad-gpu** (most used) | GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
+| **nebius-gpu** | GPU test suite while shad-gpu is down (L40S, cuDF 25.02, glibc 2.39) | `scripts/gpu-host.sh`, `gpu-host-sync.sh`, `gpu-host-test.sh`; see *GPU host* |
+| **shad-gpu** | Down until further notice; see *GPU host*. When up: GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
 | **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host verda --all` (add `--rust-only` to skip the C++/FFI half) |
 | **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host verda-gpu --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
 | **nebius** | large CPU-only VM | manual |
@@ -1025,7 +1219,7 @@ Rules that keep this healthy:
   for the engine's own run. Below its budget a binary does not
   shrink: the pool is not built, and the sf40 pair goes red on rmm's default resource. Read
   `[rmm] pool of N GiB could not be built` at the top of the log first; the
-  `cudaErrorMemoryAllocation` failures under it are its consequence. shad-gpu is a shared H200,
+  `cudaErrorMemoryAllocation` failures under it are its consequence. The GPU host is shared,
   so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets/testinfra.md#t178)). Budgets are
   H200 numbers; `PEACOCK_RMM_POOL_BYTES=<bytes>` replaces one for a sweep or another host.
 - **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
@@ -1035,7 +1229,7 @@ Rules that keep this healthy:
   are pure collation — this produced two false alarms in one session before checksums
   settled it. Compare `sha256sum`/`md5sum` output, not directory listings.
 - Rented hosts change SSH host keys on reprovision: `ssh-keygen -R <host>` + re-keyscan
-  rather than fighting the mismatch.
+  rather than fighting the mismatch. nebius-gpu is the exception: `gpu-host.sh` handles its key.
 - **The shad-gpu patch step uses the build host's glibc version.** shad-gpu runs glibc 2.31,
   so shipped binaries are patched to a prefix under `~/glibc-<version>` there: 2.35 for a
   22.04 build host and CI's container, 2.39 for a 24.04 host such as dev. The version is read
@@ -1065,7 +1259,7 @@ Rules that keep this healthy:
 - **Large runs (test or regen): arm a monitor that reports progress every 5 minutes** —
   progress may stall (flaky links, OOM kills), and a silent stall looks identical to a
   long run.
-- **Large CPU + GPU batches run in parallel** — kick off the shad-gpu run and the
+- **Large CPU + GPU batches run in parallel** — kick off the GPU host run and the
   verda/local CPU run concurrently; neither waits for the other.
 - **A run that outlives your ssh session** is `--run-detached`, read back with
   `--run-status`. That flag exits 0 only when the latest run finished with 0 — still
