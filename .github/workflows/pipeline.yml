@@ -405,11 +405,16 @@ jobs:
           # so a post-build strip can't help — debug info must not be emitted.
           RUSTFLAGS: "-C debuginfo=0"
 
+      # A tarball, not the directory: upload-artifact stores each symlink as a full copy of its
+      # target (lib/'s soname chains shipped libarrow three times) and drops the exec bits.
+      - name: Pack GPU test binaries
+        run: tar -C cpp -cf cpp-install.tar install
+
       - name: Upload GPU test binaries
         uses: actions/upload-artifact@v4
         with:
           name: cpp-install-25.02
-          path: cpp/install/
+          path: cpp-install.tar
           retention-days: 1
 
   # nebius-gpu, an L40S VM this job starts and soft-stops (llm-wiki/build-test.md, "GPU host").
@@ -469,7 +474,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cpp-install-25.02
-          path: cpp/install/
+          path: .
+
+      - name: Unpack GPU test binaries
+        run: mkdir -p cpp && tar -C cpp -xf cpp-install.tar && rm cpp-install.tar
 
       - uses: ./.github/actions/nebius-setup
         with:
@@ -498,46 +506,12 @@ jobs:
           exit 75
 
       - name: Ship binaries, scripts and testdata
-        timeout-minutes: 20
-        run: |
-          # download-artifact drops the exec bits; rsync -a carries them to the VM.
-          chmod +x cpp/install/bin/* cpp/install/rust-tests/* 2>/dev/null || true
-          # Three tries with a widening pause, and a stalled transfer gives up after five
-          # minutes of silence: a flaky link must be a retry, not an unbounded hang (the
-          # transfer step on the old host hung for hours twice before this was added).
-          # The bare `nebius-gpu:` host is a placeholder; gpu-host.sh rsh resolves the IP.
-          rs() {
-            local attempt
-            for attempt in 1 2 3; do
-              rsync -a --timeout=300 -e "scripts/gpu-host.sh rsh" "$@" && return 0
-              printf 'rsync attempt %d failed; retrying in %ds\n' "$attempt" "$((attempt * 15))" >&2
-              sleep "$((attempt * 15))"
-            done
-            return 1
-          }
-          scripts/gpu-host.sh ssh "mkdir -p ~/$REMOTE_DIR/cpp ~/$REMOTE_DIR/testdata ~/$REMOTE_DIR/scripts"
-          rs cpp/install "nebius-gpu:$REMOTE_DIR/cpp/"
-          rs scripts/gpu-host-test.sh "nebius-gpu:$REMOTE_DIR/scripts/"
-          # Query SQL + minimal dataset + testdata generator + committed goldens.
-          # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads
-          # read-only — the sections the cpu tier authored are what a device run is checked
-          # against, so without them test_gpu_corpus has nothing to compare to.
-          # cost-registry.csv is a committed fixture the registry test READS (it
-          # asserts the CSV against the suite's link-time inventory); without it the
-          # test dies on a missing file, which reads as a broken check rather than an
-          # unprovisioned host.
-          #
-          # NOTE this hand-maintained list is the standing trap — every new committed
-          # fixture must be remembered in EVERY provisioning path independently, and
-          # that has now bitten four times. A sweep of git-tracked testdata files
-          # would end the class; kept as a named entry here only to keep this push
-          # small and low-risk. See the follow-up.
-          rs testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal \
-            testdata/goldens \
-            testdata/tpch-vec-queries \
-            testdata/generate_testdata.sh \
-            testdata/cost-registry.csv \
-            "nebius-gpu:$REMOTE_DIR/testdata/"
+        # Into ~/peacockdb-ci/cache, which persists between runs, in four zstd rsync streams with
+        # retries; then a copy of it becomes this run's REMOTE_DIR. The runner-to-VM path is slow
+        # and lossy (0.24 MB/s for one stream, 2026-10-15), so a first run, or one after the
+        # cache is cleared, can take most of the limit; later runs send only what changed.
+        timeout-minutes: 50
+        run: scripts/gpu-host/ci-ship.sh "$REMOTE_DIR"
 
       - name: Generate SF-1 testdata
         run: |
@@ -692,7 +666,7 @@ jobs:
           status=0
           for f in "${files[@]}"; do echo "== $f"; python3 "$f" || status=1; done
           shellcheck scripts/gpu-host.sh scripts/gpu-host-sync.sh scripts/gpu-host-test.sh \
-            scripts/gpu-host/check-actor.sh || status=1
+            scripts/gpu-host/check-actor.sh scripts/gpu-host/ci-ship.sh || status=1
           exit "$status"
 
       - name: cost-report unit tests (Rust)

@@ -827,10 +827,16 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   the `nebius-gpu` Environment and the `nebius-gpu` concurrency group, one run at a time across
   every ref, with a 150-minute limit. Its steps:
   - the actor check against `GPU_ALLOWED_ACTORS` (*GPU host*), before any project code runs;
-  - the `cpp-install-25.02` artifact, and `nebius-setup`;
+  - the `cpp-install-25.02` artifact, unpacked, and `nebius-setup`. The artifact is a tarball
+    of `cpp/install/`, because upload-artifact copies every symlink's target in full and drops
+    the exec bits;
   - `gpu-host.sh start`, retried on exit 75 for 30 minutes, then a failure;
-  - `cpp/install/`, `gpu-host-test.sh` and the testdata subset shipped to a per-run
-    `~/peacockdb-ci/run-<run id>-<attempt>`, and sf1 generated there;
+  - `scripts/gpu-host/ci-ship.sh`, with a 50-minute limit: `cpp/install/`, `gpu-host-test.sh`
+    and the testdata subset rsynced into `~/peacockdb-ci/cache` on the VM. The cache persists
+    between runs, so only what changed crosses. The runner-to-VM path is slow and lossy, 0.24
+    MB/s for one stream when measured, so the script runs four rsync streams at once, with
+    zstd, `--checksum`, and retries that resume through `--partial-dir`. Then a copy of the
+    cache becomes this run's `~/peacockdb-ci/run-<run id>-<attempt>`, and sf1 is generated there;
   - `gpu-host-test.sh run --foreground`: the L40S list (*GPU host*). Its guards each closed a
     hole that shipped. Every `peacock_*_tests` binary runs by glob, because a hand-written list
     once let `peacock_tpchv_tests` be built and shipped but never run. A binary that runs 0
@@ -1168,7 +1174,8 @@ The boot disk is 96 GB in all, and two chains and CI share it.
 - Run `df -h /` on the VM before every build.
 - Below 20 GB free, clean what can be rebuilt: stale build and target dirs of your own tree,
   `~/miniforge3/bin/conda clean -a`, and finished `~/peacockdb-ci/run-*` dirs. `du -xh -d2 ~ |
-  sort -rh | head` shows what is using it.
+  sort -rh | head` shows what is using it. `~/peacockdb-ci/cache` may go too, but the next CI
+  run then sends the whole tree again, which takes most of its 50 minutes.
 - Below 10 GB free, do not start a build. Record it in the task's detail file as an obstacle.
 - Never delete the cuDF envs under `~/data/miniforge3/envs`, any chain's `testdata/`, or
   another chain's tree.
