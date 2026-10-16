@@ -27,6 +27,37 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t281"></a>
+### #281 — limits' and empty-sorts' device cells have never run
+**Done by [`limits`](../tasks/limits.md) and [`empty-sorts`](../tasks/empty-sorts.md) (chain K); awaiting merge.**
+
+empty-sorts and limits were proved on the cpu while chain J held the GPU host, so their device
+changes were built and not run, and a device answer could differ from the cpu's with nothing
+saying so.
+
+**Closed on nebius-gpu.** limits' four converted source cases and `tpch/scan-limit`'s five cells
+passed 2026-10-09; `tpch/nested-limits`' five pass on master's rows-only scan (2026-10-16).
+empty-sorts' four accumulate cases passed 2026-10-09, the mixed-lane merge among them.
+`tpcds/q17`'s device cells stay off: its tp1 cells on [#225](../tickets/corpus-coverage.md#t225),
+its tp4 cells untested against the answer's new header.
+
+<a id="t205"></a>
+### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+**Done by [`empty-sorts`](../tasks/empty-sorts.md) (chain K); awaiting merge.**
+
+A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches had zero rows
+emitted no batch on the cpu, where the device emits one of zero rows: DataFusion's `SortExec`
+yields nothing over zero rows, and `coalesce_or_nothing` read that as a lane that received
+nothing. An empty answer also lost its columns: `tpcds/q17`'s and `pbench/not-in-uncorrelated`'s
+result sections were a bare `++`/`++`, and both lines were `duckdb_divergent(205)`.
+
+**Closed.** The sort and merge answer held batches with no row as one zero-row batch
+(`sorted_and_cut`, `cpu_backend/accumulate.rs`). A query whose sink received nothing answers one
+zero-row batch under the sink's input schema, made by the driver (`Driver::answer`) and recorded
+as no node's emission. DataFusion's empty answer gets its columns the same way in the corpus and
+end-to-end oracles. Both result sections carry their header and both lines are `duckdb_exact`;
+the oracle's row-level exemption for a differing column count is gone.
+
 <a id="t186"></a>
 ### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it
 **Done by [`limits`](../tasks/limits.md) (chain K); awaiting merge.**
@@ -511,8 +542,8 @@ The divergences, and the oracle each line carries:
   shuffle-stddev, tpcds q39, below 1e-13.
 - **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
   (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows, so
-  the line is `duckdb_divergent(205)` — no positions, a row-level divergence — and it goes back
-  to `duckdb_exact` when #205 clears.
+  the line was `duckdb_divergent(205)` — no positions, a row-level divergence — and went back
+  to `duckdb_exact` when empty-sorts closed [#205](#t205).
 - **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
   q27 and q72 (#23), q28 (#62). Not compared.
 - **Queries over the cap on both sides** (4): tpch q16, anti-join, filter-project, semi-join.

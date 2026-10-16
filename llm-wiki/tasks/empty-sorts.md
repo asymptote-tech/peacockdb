@@ -97,3 +97,15 @@ original rule, kept for the record.
 Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
 job but the GPU tests is green; the GPU jobs are not waited on. The device cases are built, not
 run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints. Both rules landed as written; every Tests line exists, the unpruned
+predicate included; q17's result section is byte-identical to DuckDB's. The device half ran on
+nebius-gpu under the board's superseding note: all four accumulate cases pass, and with
+`assert_one_empty_batch` pinning the cpu side they tell one empty batch from none. Final pass:
+reviewer and analyst each found nothing blocking. Deviations, three: q17's device cells stay off,
+all five measured on open #225, #220 and #152, though #205's fix proposed tp1-single on;
+`cost-report/src/main.rs`, outside Scope, swapped its example tickets (205→214, 152→246) because
+archiving broke it; two nits traded — `count_of`'s unreachable `expect`, and an end-to-end case
+running its query twice.
