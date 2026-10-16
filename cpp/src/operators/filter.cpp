@@ -27,25 +27,20 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
     mask = build_column(filter->predicate(), input.view());
   }
   auto filtered = cudf::apply_boolean_mask(input.view(), mask->view());
+  auto result = TableResult::owning(std::move(filtered), std::move(input.column_names));
 
   // Optional projection, set when the planner fused a downstream ProjectionExec
   // into the filter. Skipping it leaves every input column in place and shifts all
   // downstream column indices by the number of columns that should have dropped.
+  // A selection over the filtered table rather than a copy of it (#154).
   if (filter->projection() && filter->projection()->size() > 0) {
-    auto fv = filtered->view();
-    std::vector<std::unique_ptr<cudf::column>> proj_cols;
-    std::vector<std::string> proj_names;
-    proj_cols.reserve(filter->projection()->size());
-    proj_names.reserve(filter->projection()->size());
-    for (auto idx : *filter->projection()) {
-      proj_cols.push_back(std::make_unique<cudf::column>(fv.column(idx)));
-      proj_names.push_back(input.column_names[idx]);
-    }
-    return TableResult::owning(std::make_unique<cudf::table>(std::move(proj_cols)),
-                               std::move(proj_names));
+    std::vector<cudf::size_type> ordinals;
+    ordinals.reserve(filter->projection()->size());
+    for (auto idx : *filter->projection()) ordinals.push_back(static_cast<cudf::size_type>(idx));
+    return result.select(ordinals);
   }
 
-  return TableResult::owning(std::move(filtered), std::move(input.column_names));
+  return result;
 }
 
 
