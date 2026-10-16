@@ -15,7 +15,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#199 — a global aggregate over no arrival drops its identity row](#t199)
   - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
   - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
-  - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
   - [#264 — the device refuses a group key that is not a bare column](#t264)
   - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 - [Sort / Limit](#sort--limit)
@@ -40,7 +39,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
-  - [#262 — the DISTINCT lowering's device cells have never run](#t262)
+  - [#262 — a DISTINCT under a grouping set has no device cell](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
   - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 — `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
@@ -67,8 +66,12 @@ them now, `stale-cells` having turned on the four device modes that a closed #18
 Validation was off for all five, so that run says nothing about the names and the refusal still
 stands at every mode; the row keeps no `225` only because no cell of it is off.
 
-**Corpus queries:** `tpch/shuffle-stddev` (schema validation only). `tpcds/q39` at every mode and
-`tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off here.
+**Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
+only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
+three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
+its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
+mode and `tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off
+here.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -235,18 +238,25 @@ plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
 `cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
 (`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
 3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
-reader is not. The schema validator refuses the width. Pinned by four `bug_` cases — two in
+reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
+`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
+validator refuses the width. Pinned by four `bug_` cases — two in
 `gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
 type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
 `GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
-55's duplicate ordinal is #228.
+55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
+the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
+the cast; the fix below covers both.
 
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
-q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
+`tpch/rollup-distinct`, tpcds q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
 device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
 meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
 id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
-window queries that never run.
+window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
+`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
+group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
+device answers the five subtotal rows with g = 2.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
 `grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
@@ -259,62 +269,6 @@ pins flip and `grouping_sets_as_exported` goes; a rollup contract case on both e
 test running the query above; the exec model's fold (`scripts/exec_model/operators/aggregates.py`)
 and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which stops hashing the
 id; independent of it.
-
-<a id="t62"></a>
-### #62 — a DISTINCT beside an avg or a count is refused at planning
-
-`avg(x), count(x), count(DISTINCT x)` does not plan: the translator refuses any aggregate that
-carries DataFusion's DISTINCT flag, on both backends.
-
-DataFusion's `SingleDistinctToGroupBy` removes the flag only when every other aggregate is `sum`,
-`min` or `max`: its outer level re-applies the same function, and `avg` and `count` are not their
-own merge. So q16, q94 and q95 plan, and q28 keeps the flag. `decompose`
-(`planner/translator/aggregate.rs`) refuses it with `DISTINCT inside … (#62)`. Pinned by
-`a_distinct_beside_a_companion_datafusion_cannot_rewrite_is_refused_naming_62`
-(`planner/tests/join_refusals.rs`); the plan golden reads `refused: … (#62)`.
-
-**Corpus queries:** `tpcds/q28`, six global `avg, count, count(DISTINCT ss_list_price)` blocks
-cross-joined. Refused at every mode on both engines (registry: cpu and gpu `na`). Next, per
-[`reports/corpus-fixes.md` fix 11](../reports/corpus-fixes.md#fix11) and unconfirmed: the cpu cells pass now that #163 has landed,
-and the device cells meet #152, the cross join copying its build side.
-
-**Fix proposed:** [fix 11 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix11), with `62-review.md`. The translator does
-the rewrite DataFusion declines, as two aggregate sequences in `aggregate_sequence`. It applies
-when every DISTINCT aggregate is a `count` of one shared argument `x`. The inner sequence groups
-by `(keys, x)` and runs the other aggregates' inits, shuffled on `(keys, x)` where lanes split;
-it emits state, no finalize. The outer sequence groups by `keys` over that state. Its init
-applies each state column's merge rule from `decomposition()` (`sum` over a count or a sum,
-`min`, `max`) plus `count(x)` for each DISTINCT, then merges and finalizes. The output is
-DataFusion's final schema, so nothing above changes. The DataFusion partial's DISTINCT state is
-ignored. Four traps, the first three still true in the code:
-- Pair the outer stage's state columns with `rule.state` by position, not by tag.
-  `declared_nullable` (`translator/aggregate.rs`) looks each up as `[tag]`, and this engine's own
-  names (`avg(…)$sum`, `$count`) do not match, so q28's `avg` would be refused as drifted.
-- Take each outer column's argument type from the inner stage's declared type at its position,
-  through `state_type(merge_func, …)`. `arg_type` reads `expressions().first()` off the raw input,
-  which in the outer stage is the wrong column or out of range.
-- A `count` companion merged by `sum` answers NULL over an empty keyless input, where SQL says 0.
-  Declare every from-state column nullable, and finalize a count companion as
-  `CASE WHEN o IS NULL THEN 0 ELSE o END`; `plan/aggregates.rs`'s count finalize is the bare
-  column today.
-- Refuse grouping sets under a DISTINCT. Also refused: a Welford state (`stddev`, `var`), which has
-  no plain merge, and a DISTINCT over two arguments (#144).
-
-Tests: the refusal pin becomes a plan test of the two sequences. An end-to-end case, red before
-the fix: `select count(ss_customer_sk), count(distinct ss_customer_sk) from store_sales where
-ss_quantity < 0;` (tpcds) answers `0, 0`.
-
-The wire's `AggregateFuncNode.distinct` goes in the same change, with the C++ guard that reads
-it (`aggregate.cpp`, "DISTINCT aggregate … see #62"). Nothing sets it, before or after this fix:
-the translator refuses DISTINCT and `PlanAgg` has no field for it; `aggregate_writer.rs` writes
-`false`; the three `CreateAggregateFuncNode` calls in `cpp/tests/gpu/test_plan_executor.cpp`
-pass `false`; every `peacock_executor_begin_plan` caller hands it `recipes.bytes()` from that
-writer. Mark the field `(deprecated)` in `gpu_plan.fbs`, so `alias` and the fields after it keep
-their slots and both generated sides lose the accessor. Delete the writer's `distinct: false`,
-the guard, and the argument in the three gtests. FlatBuffers omits a `false` at its default, so
-`recipe-payloads.txt` should not move; confirm with the payload test. The report prefers keeping
-the guard with a corrected comment (`hacks-audit.md` §10); deleting it is chosen here, since
-nothing can set the flag.
 
 <a id="t264"></a>
 ### #264 — the device refuses a group key that is not a bare column
@@ -830,22 +784,26 @@ the range each call was handed, and the backends' `LimitStream` tests take a ran
 a running count.
 
 <a id="t262"></a>
-### #262 — the DISTINCT lowering's device cells have never run
+### #262 — a DISTINCT under a grouping set has no device cell
 
-The DISTINCT lowering (distinct-companions, chain K, closes [#62](#t62)) is built and proven on
-the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
-reach the wire — a two-stage aggregate whose outer init runs merge aggregators over state, a
-`__distinct_arg` key, a narrowed grouping id — and no device has run one. A device answer could
-differ from the cpu's there, and nothing would say so, because the cells are off.
+No device has run a DISTINCT under a grouping set: `tpch/rollup-distinct`, the corpus query of
+that shape, is off at every device mode.
 
-**Corpus queries:** `tpch/distinct-functions`, gpu cells off at all five modes on this ticket
-alone. tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65, #189) carry it too once
-those close.
+The rest of the lowering is proven on a device. `tpch/distinct-functions` runs at all five modes
+on nebius-gpu (distinct-companions, chain K, which closed
+[#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
+match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. tpcds q28, six
+keyless DISTINCT blocks cross-joined, joined it at all five modes on 2026-10-16, once #152 had
+closed. So an outer init running merge aggregators over state and a `__distinct_arg` key work on
+a device, and the widened `avg(…)$sum` state reached it under the type id and scale the plan
+declares. Its *precision* is not part of that: a device holds `{type_id, scale}`, so the
+widening stays pinned by a plan test, which is the only reading of it there is.
 
-**Fix proposed:** on a GPU host, once chain J leaves one free: run distinct-functions' five
-device cells against the cpu golden; each one passing is enabled, each one failing gets the
-ticket it fails on. Then this ticket drops from the registry row and is archived. The same run
-takes q28's and rollup-distinct's cells when their own tickets have closed.
+**Corpus queries:** `tpch/rollup-distinct`, off on #65. Its row names this ticket beside #65,
+since it is the record that its device cells are the lowering's last unrun ones.
+
+**Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
+ticket is archived. grouping-id, later in chain K, takes it.
 
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run

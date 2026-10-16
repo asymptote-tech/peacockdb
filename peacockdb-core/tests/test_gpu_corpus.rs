@@ -10,22 +10,11 @@ use peacockdb_core::test_support::{
     gpu_recording, gpu_result_golden, result_golden,
 };
 
-/// The device's reading of a declaration: one test and one registration per enabled gpu
-/// mode, and nothing at all for `none`. The cpu arguments and the DuckDB oracle are
-/// consumed and dropped, which is what makes one list serve both binaries — the DuckDB
-/// comparison is a rust-only case in the cpu binary. The last argument says whether the run
-/// holds every batch to its node's declared schema; `gpu_case` decodes it.
-macro_rules! corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, all_modes, $($rest:tt)*) => {
-        corpus_query!($dataset, $sf, $query,
-            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
-    };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, all_modes, $($rest:tt)*) => {
-        corpus_query!($dataset, $sf, $query, $($cpu)|+,
-            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
-    };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {};
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+/// One test and one registration per enabled gpu mode of a declaration, given its schema
+/// validation already rendered. A helper because the mask does not repeat per mode: used
+/// inside the repetition over `$gpu`, a mask metavariable would have to repeat with it.
+macro_rules! gpu_cases {
+    ($dataset:ident, $sf:expr, $query:ident, $($gpu:ident)|+, $gpu_oracle:ident, $validation:expr) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -36,7 +25,7 @@ macro_rules! corpus_query {
                         &stringify!($query).replace('_', "-"),
                         stringify!($gpu),
                         stringify!($gpu_oracle),
-                        stringify!($validation),
+                        $validation,
                     )
                     .await;
                 }
@@ -52,6 +41,34 @@ macro_rules! corpus_query {
                 }
             }
         )+
+    };
+}
+
+/// The device's reading of a declaration: nothing at all for `none`, and otherwise the
+/// cases above. The cpu arguments and the DuckDB oracle are consumed and dropped, which is
+/// what makes one list serve both binaries — the DuckDB comparison is a rust-only case in the
+/// cpu binary. The last argument says whether the run holds every batch to its node's
+/// declared schema, at every mode or at all but the ones a `schema_validation_disabled(…)`
+/// mask names; `gpu_case` decodes it. Two arms carry it because a mask is optional, and
+/// `macro_rules` has no way to render an absent one.
+macro_rules! corpus_query {
+    ($dataset:ident, $sf:expr, $query:ident, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, all_modes, $($rest:tt)*) => {
+        corpus_query!($dataset, $sf, $query, $($cpu)|+,
+            tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident ($($vmode:ident)|+)) => {
+        gpu_cases!(
+            $dataset, $sf, $query, $($gpu)|+, $gpu_oracle,
+            stringify!($validation($($vmode)|+))
+        );
+    };
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+        gpu_cases!($dataset, $sf, $query, $($gpu)|+, $gpu_oracle, stringify!($validation));
     };
 }
 
