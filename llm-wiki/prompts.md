@@ -135,9 +135,12 @@ state, and a watchdog restarts you.
   `rebase needed(...)` is written on master where you cannot see it. One word per line:
   `pause` — write the board and wait, re-reading the file; `rebase` — run the rebase protocol,
   the whole chain and every branch in it, now rather than at the next boundary; `stop` — write
-  the board and exit cleanly, leaving `stop` in the file: you exit the same way when your
-  window gets tight, so the watchdog reads the word to know not to restart you, and clears it.
-  Clear any other word once you have acted on it. A dispatched subagent
+  the board and exit cleanly. **Never clear the control file on `stop`** — do not empty it,
+  truncate it or remove the word on your way out. You exit the same way when your window gets
+  tight, so the watchdog reads `stop` after you exit to know not to restart you, and only the
+  watchdog clears it. On 2026-10-16 a coordinator obeyed `stop`, emptied the file, and the
+  watchdog started a fresh run 13 seconds later. Clear `pause` or `rebase` once you have acted
+  on it — never `stop`. A dispatched subagent
   cannot be interrupted, so one subagent is the floor on how fast you can answer.
 - **You cannot arm a wake, so waiting means staying in the dispatch.** Under `claude -p` a
   backgrounded command does not outlive the run — a `sleep` armed to wake you dies with the
