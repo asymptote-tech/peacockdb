@@ -3305,7 +3305,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                                 schema: [i_item_sk:Int64, i_item_id:Utf8]
 == tpcds q5
-sha256=c1e4144ae5849389fc98b03b2fa878c4e700f904246ad9ee59e3d3942d1be68e
+sha256=04cace2c3998c40297cfbb23fb0f80741fcbc3d050a3c6cef31119a13a054f4e
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#98 CudfSortPreservingMerge, all lanes)
       #98 CudfSortPreservingMerge
@@ -3340,7 +3340,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#92 CudfRepartition{Hash, 1→4}, batch)
               #92 CudfRepartition{Hash, 1→4}
                 partitioning: Hash, 4
-                hash: channel@0, id@1, __grouping_id@2
+                hash: channel@0, id@1
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#91 CudfCoalescePartitions, lane batches)
                 #91 CudfCoalescePartitions
               GpuMergePartitions: none

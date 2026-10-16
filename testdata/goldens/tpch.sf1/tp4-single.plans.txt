@@ -2733,9 +2733,9 @@ GpuUnload: estimated_max_resident_size=186037665
                                                           GpuLoadParquet: estimated_max_resident_size=174647728, source_bytes=166059244, target_batch_bytes=33554432, amplification=4.0
 == rollup-over-join
 GpuUnload
-  GpuProject: exprs=[c_nationkey@0, c_mktsegment@1, count(*)@3], lanes=4, batches=single, schema=[c_nationkey:Int32, c_mktsegment:Utf8, count(*):Int64]
-    GpuAggregateBatches: group_by=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], final=[count(*)@3], lanes=4, batches=single, hashed_on=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
-      GpuEmitPartitions: hash=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], lanes=4, batches=multiple, hashed_on=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
+  GpuProject: exprs=[c_nationkey@0, c_mktsegment@1, count(*)@3], lanes=4, batches=single, hashed_on=[c_nationkey@0, c_mktsegment@1], schema=[c_nationkey:Int32, c_mktsegment:Utf8, count(*):Int64]
+    GpuAggregateBatches: group_by=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], final=[count(*)@3], lanes=4, batches=single, hashed_on=[c_nationkey@0, c_mktsegment@1], schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
+      GpuEmitPartitions: hash=[c_nationkey@0, c_mktsegment@1], lanes=4, batches=multiple, hashed_on=[c_nationkey@0, c_mktsegment@1], schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
         GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
           GpuMergePartitions: lanes=1, batches=multiple, schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]
             GpuAggregateBatches: group_by=[c_nationkey@0, c_mktsegment@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], lanes=4, batches=single, schema=[c_nationkey:Int32, c_mktsegment:Utf8, __grouping_id:UInt8, count(*):Int64]

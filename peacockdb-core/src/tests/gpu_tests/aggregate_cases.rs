@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, ArrayRef, AsArray, Int32Array, Int64Array};
+use datafusion::arrow::array::{Array, ArrayRef, AsArray, Float64Array, Int32Array, Int64Array};
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, UInt8Type};
 use datafusion::arrow::record_batch::RecordBatch;
@@ -20,7 +20,7 @@ use crate::plan::{
     AggCall, AggFunc, AggStateColumns, AggregateBody, BatchLayout, BinaryOp, Expr, GpuAggregate,
     GpuAggregateBatches, GpuNode, NamedExpr, PlanAgg, Schema,
 };
-use crate::tests::compare::{Order, assert_same, same_within_welford};
+use crate::tests::compare::{Order, Slot, assert_same, same_within_welford};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, schema, synthetic};
 
@@ -338,6 +338,49 @@ operator_case! {
 
 /// Two keys, `key` and `b`, over the sets given; `__grouping_id` is `UInt8` for up to
 /// eight keys, as DataFusion's partial declares it, and each masked key takes a typed NULL.
+/// `synthetic`'s eight columns with `f64` (ordinal 4) holding the six float keys #243
+/// measures: both zeros, both NaN signs, a NULL and an ordinary value.
+pub(crate) fn float_key_batch() -> RecordBatch {
+    let batch = synthetic(6, 1);
+    let mut columns = batch.columns().to_vec();
+    columns[4] = Arc::new(Float64Array::from(vec![
+        Some(0.0),
+        Some(-0.0),
+        Some(f64::NAN),
+        Some(f64::from_bits(f64::NAN.to_bits() | (1 << 63))),
+        None,
+        Some(1.0),
+    ]));
+    RecordBatch::try_new(batch.schema(), columns).expect("one Float64 column for another")
+}
+
+/// The rows across every slot of one side's answer.
+pub(crate) fn rows(slots: &[Slot]) -> usize {
+    slots.iter().flatten().map(RecordBatch::num_rows).sum()
+}
+
+// #243 — the cpu's float *equality*, which this task does not change: DataFusion groups a
+// float by its bits, so -0.0 and each NaN sign are their own group (six); cuDF groups by
+// value with NaNs equal (four). One lane, so the lane rule is not in play — since the float
+// arm both engines put every NaN and both zeros in one lane, and that is a separate rule.
+operator_case! {
+    GpuAggregate,
+    fn bug_a_float_group_key_splits_negative_zero_and_the_nans_on_the_cpu() {
+        let node = init_by(
+            &[(4, "f64", DataType::Float64)],
+            vec![call(
+                PlanAgg::Count,
+                Expr::column(0, "id"),
+                "count(id)",
+                DataType::Int64,
+            )],
+        );
+        let outcome = run_both(&node, Script::Exec(vec![float_key_batch()]));
+        assert_eq!(rows(outcome.cpu.as_ref().expect("the cpu answers")), 6);
+        assert_eq!(rows(outcome.gpu.as_ref().expect("the device answers")), 4);
+    }
+}
+
 pub(crate) fn grouping_sets(sets: Vec<Vec<bool>>) -> GpuAggregate {
     let state = columns(&[
         ("key", DataType::Int32),

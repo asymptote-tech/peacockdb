@@ -382,9 +382,10 @@ schema it already declares, since cuDF's parquet reader picks the narrowest fixe
 while DataFusion uses Decimal128 throughout. A count is the same shape one node up: cuDF counts
 in INT32 and the aggregate casts to the INT64 the state declares; and `date_part` the same at
 the expression, cuDF extracting every component in INT16 and the arm casting to the
-`return_type` the wire names. Hash key normalization feeds the hash alone and
-never reaches a returned value — a cast that cannot change an answer is not one the plan needs
-to carry.
+`return_type` the wire names. Hash key normalization feeds the hash alone and never reaches a
+returned value — a cast that cannot change an answer is not one the plan needs to carry — and it
+is the one of the four that is not only C++: the cpu's `hash_keys` does the same widening, because
+the two engines must agree on a lane.
 
 The device type is `{type_id, scale}`: a decimal's precision is a label the export is told,
 not a fact the device holds. The plan admits `Decimal128` alone, the unload hands the export
@@ -961,7 +962,7 @@ entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, an
 instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
 `nvtx_pop_range`, `executor_collect_node_regions`); and two test hooks:
 `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so the
-Rust side can compare it against comet's, and `peacock_handle_from_arrow`, which adopts one such
+Rust side can compare it against the production lane rule, and `peacock_handle_from_arrow`, which adopts one such
 batch into the live session as a handle so the operator harness can hand an executor a table it
 wrote.
 
@@ -1007,8 +1008,9 @@ thread-local forks when the file is split, so one half would read the other's in
 (coding-style.md carries the case).
 
 **[`peacock::partitioning`](../cpp/include/peacock/partitioning.hpp)** — the second public
-header: `spark_partition_ids` and `spark_hash_partition`, our own bit-exact Spark-murmur3 at
-seed 42, because cuDF ships only standard murmur3. Both take the stream and memory resource
+header: `spark_partition_ids` and `spark_hash_partition`, our own murmur3 at seed 42, bit-exact
+with the cpu's lane rule rather than with Spark — the three departures are above — because cuDF
+ships only standard murmur3. Both take the stream and memory resource
 as trailing defaults, which is what makes them usable off device 0.
 
 **[`ExprContext`](../cpp/src/peacock/expr.h)** — *de facto*. cuDF AST nodes hold references,
@@ -1051,8 +1053,31 @@ handling.
 So placement is identical by construction rather than by agreement. The CPU side calls comet's
 `create_murmur3_hashes` (`executor/cpu_backend/spark_partitioning.rs`), the GPU side owns a
 bit-exact kernel (`spark_hash_partition.cu`) and reuses cuDF only for the scatter, and a live
-gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two agree over the
-same bytes.
+gate (`peacock_spark_partition_ids`, `cpu_backend/gpu_tests/murmur_conformance.rs`) proves the two
+agree over the same bytes. **The gate calls production `rows_per_lane`**, and that is the whole of
+its value: a gate that compares the kernel against a second copy of the rule stays green when the
+seed, the `pmod` or the lane arithmetic moves under it, and proves only that the two copies agree
+([#201](archive/archived-tickets.md#t201)).
+
+**The rule is comet's with three departures**, and which counterparty each departs from is the
+thing to get right before changing either side. Comet is the shared implementation of Spark's
+murmur3, not a promise of Spark's placement, and nothing outside this engine reads our lane numbers.
+
+- A **decimal** key is cast to `Decimal128(38, s)` before comet sees it, so both sides hash 16
+  little-endian bytes of the unscaled value. This one departs from **Spark**, which hashes 8 bytes
+  at precision ≤ 18. cuDF's `data_type` carries no precision and the loader widens every decimal to
+  Decimal128, so the kernel cannot pick Spark's width itself.
+- Every **NaN** is canonicalized to one bit pattern before hashing. This departs from **comet**, not
+  from Spark: comet hashes a float's raw `to_le_bytes()`, while Spark's `Murmur3Hash` goes through
+  `doubleToLongBits`, which already collapses every NaN. So canonicalizing restores Spark's
+  placement, and leaving it out would put `NaN` and `-NaN` in different lanes at tp4 while tp1
+  equates them. `-0.0` folding to `+0.0` is Spark's rule and comet's both, and is not a departure.
+- An **unsigned** key has no Spark type to match and no comet arm at all, so the rule is ours: cast
+  by value to the next wider signed type (`UInt8`/`UInt16` to `Int32`, `UInt32` to `Int64`), and for
+  `UInt64` reinterpret its bits as `Int64`.
+
+Each is implemented twice, once per engine, and the gate above is the only thing holding the two
+copies together.
 
 ## C++ executor layout
 
@@ -1271,7 +1296,10 @@ same bytes: how much data the query had to move. build-test.md has how each file
 
 **Peacock cost** is a re-reading of the execution golden rather than a second measurement:
 each node's `output_bytes` is binned into a category and multiplied by that category's weight
-from `testdata/cost_model.conf`. Every real category is 1.0 today, so the total is Σ
+from `testdata/cost_model.conf`. So **a cost total is lane-split dependent**: `output_bytes`
+carries each batch's validity and offset padding, and any change to the lane rule moves it even
+where no row, node or lane count changes. The regression gate fires on a single byte, so changing
+how a key hashes is expected to trip it. Every real category is 1.0 today, so the total is Σ
 `output_bytes`; the weights exist so a phase can be priced without moving the goldens that
 record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
 because dropping a category rewrites the line list of every committed cost golden.
