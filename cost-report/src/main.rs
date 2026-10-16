@@ -1776,7 +1776,7 @@ mod tests {
     fn the_index_reads_the_anchors_of_every_wiki_file() {
         let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
         let index = TicketIndex::load(&wiki);
-        assert_eq!(index.path_for("205"), Some("llm-wiki/tickets/corpus-coverage.md"));
+        assert_eq!(index.path_for("214"), Some("llm-wiki/tickets/corpus-coverage.md"));
         assert_eq!(index.path_for("243"), Some("llm-wiki/tickets/joins.md"));
         assert_eq!(
             index.path_for("103"),

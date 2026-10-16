@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
@@ -163,7 +163,7 @@ async fn oracle_digest(dataset: &str, sf: &str, query: &str, what: &str) -> Resu
 
 async fn oracle_rows(dataset: &str, sf: &str, query: &str, what: &str) -> Vec<RecordBatch> {
     let ctx = session_for(dataset, sf, 1).await;
-    collect(&ctx, &query_text(dataset, query), what).await
+    oracle_answer(&ctx, &query_text(dataset, query), what).await
 }
 
 /// What an unordered `LIMIT` does determine, asked of the same session: how many rows come
@@ -276,7 +276,7 @@ pub(crate) fn take_rows(
 }
 
 async fn count_of(ctx: &SessionContext, body: &str, what: &str) -> u64 {
-    let counted = collect(ctx, &format!("SELECT count(*) FROM ({body})"), what).await;
+    let counted = oracle_answer(ctx, &format!("SELECT count(*) FROM ({body})"), what).await;
     let column = counted
         .first()
         .expect("a count returns a row")
@@ -336,13 +336,23 @@ pub(crate) fn without_its_limit(sql: &str, what: &str) -> (String, u64, Option<u
     (body[..at].to_string(), skip, Some(fetch))
 }
 
-async fn collect(ctx: &SessionContext, sql: &str, what: &str) -> Vec<RecordBatch> {
-    ctx.sql(sql)
+/// DataFusion's answer, with its columns even where it has no rows. Its sort answers zero
+/// rows with no batch at all, where the engine answers one batch of zero rows under the
+/// declared columns, and both comparisons read the columns off the first batch.
+pub(crate) async fn oracle_answer(ctx: &SessionContext, sql: &str, what: &str) -> Vec<RecordBatch> {
+    let frame = ctx
+        .sql(sql)
         .await
-        .unwrap_or_else(|e| panic!("{what}: the oracle does not plan it: {e}"))
+        .unwrap_or_else(|e| panic!("{what}: the oracle does not plan it: {e}"));
+    let schema = Arc::clone(frame.schema().inner());
+    let batches = frame
         .collect()
         .await
-        .unwrap_or_else(|e| panic!("{what}: the oracle does not run it: {e}"))
+        .unwrap_or_else(|e| panic!("{what}: the oracle does not run it: {e}"));
+    match batches.is_empty() {
+        true => vec![RecordBatch::new_empty(schema)],
+        false => batches,
+    }
 }
 
 pub(crate) async fn session_for(

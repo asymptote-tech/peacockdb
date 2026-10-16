@@ -258,11 +258,12 @@ corpus_query!(tpcds, 1, q14, all_modes, none, duckdb_exact, data_fusion_exact, g
 // seven run at every cpu mode; q18 and q22 carry a rollup, which held them off the three tp4
 // modes on #189's UInt8 grouping-set id at the shuffle until it stopped being hashed; q24's
 // nested-loop join projects, which the cpu applies. On the device q18 and q22 are off on #65.
-// q17's two tp1 cells meet #225's Welford names at the schema hook; its tp4 cells pass and stay
-// off with the row, whose answer #205 (chain K) moves. q32 is off at the tp4 modes on #199: its
+// q17's two tp1 cells meet #225's Welford names at the schema hook; its tp4 cells passed against
+// the answer before it gained its columns (#205), and stay off until a device run meets the new
+// one. q32 is off at the tp4 modes on #199: its
 // keyless sum sits over an Inner join whose build lands in one lane of four. The rest run
 // everywhere.
-corpus_query!(tpcds, 1, q17, all_modes, none, duckdb_divergent(205), data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q17, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q18, all_modes, none, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q22, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q24, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -331,7 +332,7 @@ corpus_query!(pbench, 1, nl_right_anti, all_modes, all_modes, duckdb_exact, data
 corpus_query!(pbench, 1, nl_right_semi, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, not_exists_null_keys, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, not_in_correlated, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, not_in_uncorrelated, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_divergent(205), data_fusion_exact, golden_exact, schema_validation_enabled); // zero rows, no batch: #205
+corpus_query!(pbench, 1, not_in_uncorrelated, tp1_single | tp1_rowgroup, tp1_single | tp1_rowgroup, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, not_in_under_or, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, not_not_in, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, not_or_not_in, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
