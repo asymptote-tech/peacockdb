@@ -551,3 +551,37 @@ shad-gpu's own script and to `pipeline.yml`'s GPU job — so nothing device-side
 
 The two commits after `ef01e93b` are documentation only, so `paths-ignore` and the `changes` job
 both skip them and no run was started.
+
+### 2026-10-16 — third rebase, onto master 8701463f
+
+The control file said `rebase`. master carried 36 commits over bc9b6e2f: chain J's eight merged
+tasks (duckdb-oracle, pbench, repartition-keys, refcounted-scatter, stale-cells, exit-copies,
+join-session-cpp, join-backend) and gpu-host, which replaced shad-gpu's CI job with
+`GPU Tests (nebius-gpu)` shipping through `scripts/gpu-host/ci-ship.sh`. Code, not documentation,
+so the task re-proves before it goes back to `done`.
+
+Two conflicts, both in the first code commit:
+
+- **`pipeline.yml`** (a developer resolved it). This task's whole change there was one line,
+  `testdata/fixtures` in the old shad-gpu job's rsync, because `peacock_cpu_tests` runs by glob
+  on the GPU host and reads `row-range-clamp.txt`. That job is gone. `pipeline.yml` is now
+  byte-identical to master's, and the line moved to `ci-ship.sh`'s `TESTDATA` array, with
+  `"fixtures"` added to `scripts/gpu-host/tests/test_ci_ship.py`'s `TESTDATA_DIRS`, which must
+  match it (the test builds a fake checkout from it). Red first (7/8, `FileNotFoundError` on
+  `testdata/fixtures/a.txt`), then 8/8; all six `scripts/gpu-host/tests/test_*.py` green;
+  `bash -n` clean. shellcheck is not installed here, so the cost-report job is its first run.
+  `gpu-host-sync.sh` copies the whole tree, so developer runs already had the fixture.
+  `build-test-shadgpu.sh` keeps its own fixtures line.
+- **`build-test.md`** counts. Resolved by re-summing the rows, not by deltas: the Plan types
+  row takes master's 40 plus this task's 3 (43) and both rows' prose; the C++ CPU/FFI row is 12
+  (three clamp cases became one table-driven case); the Recipes-per-join-type row is master's
+  rewrite (21), since this task's +1 there was a count correction to a row master replaced.
+  Sums: Rust 4369, C++ 170, Python 397, grand total 4936; cpu block 2763, `--lib` 774.
+
+So the chain K note's "nebius-gpu cannot exercise guard-checks' GPU-side edits" is no longer
+true: the fixture now ships through `ci-ship.sh`, which the nebius job runs. That job is
+also the note's final device run, so `done` waits on a dispatched pipeline's `gpu-tests`.
+
+After a merge, `ci-ship.sh` is under `scripts/gpu-host/`, so build-test.md's rule applies:
+run `gpu-host.sh install-watch` again. The change does not touch the watcher, so this is the
+rule followed, not a fix it needs.
