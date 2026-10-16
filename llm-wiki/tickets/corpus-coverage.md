@@ -803,7 +803,7 @@ widening stays pinned by a plan test, which is the only reading of it there is.
 since it is the record that its device cells are the lowering's last unrun ones.
 
 **Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
-ticket is archived. Chain L's grouping-id takes it.
+ticket is archived. grouping-id, later in chain K, takes it.
 
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run

@@ -1756,7 +1756,7 @@ Deferred, as the chain note says: sf40 and the benchmarks.
 
 - **q28 is on the device.** With #152 closed, its five device cells were tried in the same cycle
   and all pass, so they stay on, and its registry ticket column is empty. **#262 stays open,
-  narrowed** to `tpch/rollup-distinct`, which is off on #65. Chain L's grouping-id closes #262,
+  narrowed** to `tpch/rollup-distinct`, which is off on #65. grouping-id (chain L's, now folded into chain K) closes #262,
   so archiving it here would leave that task closing a ticket that no longer exists. The registry
   keeps `65 262` on rollup-distinct. The archived #62 entry says the same.
 - **Wiki reconciled** against the task's own final text (`git diff ef41d37c 58500891`), with
@@ -1780,3 +1780,8 @@ run was cancelled. Dispatched run
 [38964818149](https://github.com/asymptote-tech/peacockdb/actions/runs/38964818149) on `97ff10ed`:
 changes, both dataset-matrix legs, the GPU build, cost-report and **GPU Tests (nebius-gpu)** all
 green. Back to `done`.
+
+### 2026-10-16 — rebased onto master ca4dedeb, documentation only
+
+master's ca4dedeb folds chain L into chain K. It touches only `llm-wiki/`, so the task stays
+`done` without a re-run. #262's "Fix proposed" now names grouping-id as later in chain K.
