@@ -20,10 +20,10 @@ corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb_approx, data_fusion_exac
 corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but seven:
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but five:
 // q11 and q22 at tp4 modes where a keyless merge meets a lane with no arrival (#199), the rollup
-// and rollup-distinct (#65), mixed-join (#168), nested-limits and scan-limit (#186). The joins'
-// own blockers, #152's side copies and #220's batch splits, went with the join session.
+// and rollup-distinct (#65), and mixed-join (#168). The joins' own blockers, #152's side copies
+// and #220's batch splits, went with the join session.
 corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -31,16 +31,16 @@ corpus_query!(tpch, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact
 corpus_query!(tpch, 1, q10, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 1, the five smallest tpch plans the rollout list carries.
-// scan-limit's rows are not determined — an unordered LIMIT over lineitem — so its modes
-// need not agree and the cpu oracle is the subset one; filter-project returns most of
-// lineitem, which is over the result cap. Both take a live cpu run on the device for that.
-// scan-limit keeps duckdb_exact even so, because that case compares two COMMITTED files; its
-// device cells, which the same oracle would judge against a RECORDED answer, are off on #186
-// anyway — `an_undetermined_lines_rows_are_compared_only_against_committed_files` holds both.
-// scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit in
-// the scan alone and the cpu backend's reader does not apply it — six million rows for ten.
+// scan-limit's rows are not determined against DataFusion — an unordered LIMIT over lineitem
+// — so its cpu oracle is the subset one; filter-project returns most of lineitem, which is
+// over the result cap, so its device run takes a live cpu one. scan-limit's does not: #186
+// made its cut one lane over the covering prefix in index order, so its five modes answer the
+// same rows and the committed section serves them all, which is also what lets its
+// duckdb_exact judge the device's recorded answer — see
+// `an_undetermined_lines_rows_are_compared_only_against_committed_files`. Its device cells are
+// on and not yet proven on master's rows-only scans: the next device run proves or reverts them.
 // filter-project, aggregate-groupby, cross-join and shuffle-additive run everywhere.
-corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_exact, data_fusion_subset, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, scan_limit, all_modes, all_modes, duckdb_exact, data_fusion_subset, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, filter_project, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
 corpus_query!(tpch, 1, aggregate_groupby, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, cross_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -61,14 +61,15 @@ corpus_query!(tpch, 1, nested_loop_join, all_modes, all_modes, duckdb_exact, dat
 // mode is exact: tp1-single matches DataFusion to the digit, and it is the mode with a single
 // lane and so nothing to reassociate. The other four differ by ~3e-15 — the association order
 // of the Welford merge rather than its arithmetic, since a wrong merge would not come right at
-// one lane. shuffle-stddev and nested-loop-left-join run everywhere on both engines;
-// nested-limits is off on #186 (two intervals on one path, scan-limit's refusal), and
+// one lane. shuffle-stddev and nested-loop-left-join run everywhere on both engines, and so
+// does nested-limits, whose region scan reads no column and answers its rows as
+// `__rowmarker__` (#63) — on and not yet proven on a device, as scan-limit's cells are.
 // mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
 corpus_query!(tpch, 1, shuffle_additive_avg, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225
 corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_loop_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, nested_limits, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, nested_limits, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 5, the tpch list from here being aggregates over joins, and the cpu is where it
 // showed. q22's nested-loop join projects, which the cpu applies since its joins became

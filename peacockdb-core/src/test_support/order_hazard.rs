@@ -32,7 +32,7 @@ use super::corpus::{query_text, session_for};
 mod tests;
 
 /// The corpus case: `query` at one partition, refused naming the hazard if it has one. A
-/// `data_fusion_subset` line's device cells are refused before this, by
+/// `data_fusion_subset` line's device cells are held to a committed section besides, by
 /// `an_undetermined_lines_rows_are_compared_only_against_committed_files`.
 pub(crate) async fn device_order_case(dataset: &str, sf: &str, query: &str) {
     let ctx = session_for(dataset, sf, 1).await;
