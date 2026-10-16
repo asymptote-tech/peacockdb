@@ -19,6 +19,7 @@ from ..optimizer.pipeline import MODES, ModeShape, mode_shape
 from .optimizer.test_report_text import EVERY_RULE
 from ..optimizer.report import FilterPass, OptimizerReport, fired
 from ..optimizer.report_md import preamble
+from ..plans import goldens
 from ..plans.cost_model import parse
 from ..run import (
     QueryRun, Regeneration, Selection, Task, corpus_order, generate, merged, preflight, priced, sections, tasks,
@@ -80,7 +81,7 @@ def test_a_mode_name_is_its_lanes_and_batching_and_an_unknown_one_is_refused():
     assert mode_shape("tp4-rowgroup") == ModeShape(4, Batching.ONE_PER_ROW_GROUP)
     assert mode_shape("tp1-single") == ModeShape(1, Batching.ONE_PER_LANE)
     assert mode_shape("tp4-sized") == ModeShape(4, Batching.KEEP_BATCHES)
-    assert len(MODES) == 5
+    assert tuple(MODES) == goldens.MODES
     with raises(ValueError, match="tp1-single, tp1-rowgroup, tp4-single, tp4-rowgroup, tp4-sized"):
         mode_shape("tp8-standard")
 

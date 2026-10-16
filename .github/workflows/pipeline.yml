@@ -690,7 +690,8 @@ jobs:
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
   # committed goldens (.cpu.txt = PeacockDB cost, .duckdb_cost.txt = DuckDB
   # oracle) and the test skip list — no GPU, no verda, no executor build. On a
-  # PR it upserts a single comment; on master it publishes to GitHub Pages.
+  # PR it upserts a single comment; on master it publishes to GitHub Pages, with
+  # the join optimizer's report beside it at join-optimizer/.
   cost-report:
     name: Cost report (coverage + ratio)
     needs: changes
@@ -864,6 +865,13 @@ jobs:
               --sha "$REPORT_SHA" --generated-at "$GENERATED_AT" \
               --html report/index.html --md "$RUNNER_TEMP/pr_comment.md"
           fi
+          # The join optimizer's report, from the committed .costs.txt and .optimizer.txt,
+          # its links into that commit's files. This python3 has pandas from the prototype's
+          # step; test_cost_report renders the page with it blocked. Rendered on a PR too, so
+          # a page that cannot render fails here; only master's report/ is deployed.
+          python3 scripts/exec_model/cost_report.py --sha "$REPORT_SHA"
+          mkdir -p report/join-optimizer
+          cp scripts/exec_model/testdata/goldens/cost_report.html report/join-optimizer/index.html
 
       # PR: upsert exactly one comment, keyed on the hidden sentinel. Restricted
       # to same-repo PRs — fork PRs get a read-only token, so a comment write

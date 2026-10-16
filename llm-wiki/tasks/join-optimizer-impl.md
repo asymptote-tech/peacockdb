@@ -293,12 +293,13 @@ with Task 15: the page and the log share the report data both changed.
 **Files:** `scripts/exec_model/cost_report.py`, `run.py`, `.github/workflows/pipeline.yml`
 (`cost-report`, `deploy-pages`), tests.
 
-- [ ] `--sha`: ratio cells other than 1.00 link to `<mode>.optimizer.md#<query>` at that sha;
+- [x] `--sha`: ratio cells other than 1.00 link to `<mode>.optimizer.md#<query>` at that sha;
   rules fired per mode — multi-joins reordered, dynamic filters applied — linking to their lines
   of `<mode>.optimizer.txt`. Without `--sha` the links are relative.
-- [ ] CI renders it from the committed `.costs.txt` with the commit's sha and publishes it beside
+- [x] CI renders it from the committed `.costs.txt` with the commit's sha and publishes it beside
   the engine's page.
-- [ ] Proving: cheap tier; the published page's links resolve.
+- [x] Proving: cheap tier.
+- [ ] Proving: the published page's links resolve.
 
 ### Task 18: `optimizer.md`
 

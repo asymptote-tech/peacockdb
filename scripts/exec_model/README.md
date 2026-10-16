@@ -181,10 +181,24 @@ Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode
 - `<bench>/<mode>.costs.txt` — the planned and the optimized run priced by the engine's cost
   function, the optimized cost's probe-plan and stopped-run parts, and how often each rule fired;
 - `cost_report.html` — one page from every `.costs.txt` there, so a filtered run still renders
-  the whole corpus. A row per query: per mode non-optimized | optimized | ratio; the engine's own
+  the whole corpus. A row per query: per mode non-optimized | optimized | ratio, a ratio other
+  than 1.00 linking to the query's section of `<mode>.optimizer.md`; the engine's own
   `-mini.cost.txt` figure at the mode the final ratio takes; DuckDB's `duckdb_cost=`; the final
-  ratio, projected; the rules that changed the plan, every count in the hover. `cost_report.py` renders it again from the files alone; without `--out` it
-  re-renders the committed page here.
+  ratio, projected; rules fired, a line per mode where a multi-join was reordered, a dynamic
+  filter applied or a replan ran, `<mode>: n MJ, k/t + k/t DF, r replans` — the multi-joins whose
+  order a DPhyp call or a flip changed, in any call; per filter pass that applied one, the plan as
+  written first, the filters that narrowed a scan out of those applied, a scan counted once per
+  build that pruned it; the replans, probe plans' included — each linking to its lines of
+  `<mode>.optimizer.txt`, every count in the hover. A part whose count is 0 is left out; a plan the
+  log says changed with every part 0 reads `the plan changed` — a cluster rebuilt in its own order,
+  its projections folded or reordered — and `nothing changed the plan` is
+  only where every mode's log says `plan unchanged`. `cost_report.py` reads those counts and lines
+  from the `.optimizer.txt` it links to, and renders the page again from the files alone; without
+  `--out` it re-renders the committed page here. Its links are relative, to the files beside the
+  page; with `--sha` they are those files at that commit on GitHub. CI's cost-report job renders it
+  so from the committed files and, on master, publishes it beside the engine's report, at
+  `https://asymptote-tech.github.io/peacockdb/join-optimizer/`. It renders without pandas, pyarrow
+  or numpy, which `test_cost_report` checks with them blocked.
 
 One `== <query>` section each (`## <query>` in the page), in the engine's registry order (its
 `-mini.cpu.txt`); a query the planner refused has a `skipped:` line. A run without `--query` owns
@@ -256,7 +270,7 @@ driver tests' mock executors.
 | `plans/engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
 | `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, a clustered join's `mj=`, `output_rows`, per-lane `in_rows`/`batch_rows` |
 | `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]`; a scan's columns read once per `ParquetTables`, since a replan builds every scan again |
-| `plans/goldens.py` | where the engine's goldens and this prototype's live, and the `== <query>` sections every golden is cut into |
+| `plans/goldens.py` | where the engine's goldens and this prototype's live, the five modes they are named by, the `== <query>` sections every golden is cut into, and the anchor GitHub gives a page's heading |
 | `plans/cost_model.py` | the engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format, by `testdata/cost_model.conf`, read, summed and rounded as the Rust is; `GpuMemorySource` free, outside the conf |
 | `plans/answers.py` | two answers to one query compared as strictly as SQL allows — a multiset, the ORDER BY columns by position, money within a tolerance — and the queries whose LIMIT leaves which rows open |
 | `optimizer/dynamic_filters.py` | dynamic filters: which joins can prune a fact scan's row groups (on the engine's plan a build with a filter and no join, on DPhyp's order one with a filter, a join or both; the key lifted through hash joins of any type and every branch of a union to an ordered scan column; a join that equates NULLs pruning nothing by a build key holding one), the probe plan — the build side itself, whose lanes the main plan then reads as a memory source, so the side is read once — nested builds probed innermost first, the host reducer, and the replan that re-maps each pruned scan as the engine's partitioner would |
@@ -273,10 +287,11 @@ driver tests' mock executors.
 | `optimizer/conflicts.py` | conflict detection for non-inner joins: each join's TES by CD-A, from the `assoc`, `l-asscom` and `r-asscom` tables, and the edges a join of two sets applies |
 | `optimizer/disassembly.py` | a join order back into an engine plan — type, keys, residual and projection from the MultiJoin's identities, a non-inner join mirrored where its kept side probes, the root on the plan root's hash, wiring as the translator derives it; `baseline` is the order the plan already has, `join_type_of` a join's type from its two sides |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — clusters named, each table the plan reads more than once numbered, dynamic filters, DPhyp and orientation with the probes' builds known, dynamic filters again on that order, each probe plan run adaptively, then the adaptive run — and its report; each mode's lanes and batching, by name |
-| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates, pruned scans and the builds probed, each DPhyp call (the cluster's id, each relation's name, rows, width and key NDVs, the edges, the sets priced through the cost callback, its budget, the plan's order, the tree, the chosen joins and the plan order's C_out, the flips, the non-inner joins' types), each replan — its miss, the builds kept and what they are — and refusal, the plan text before and after; `Fired`, how often each rule acted |
+| `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates, pruned scans and the builds probed, each DPhyp call (the cluster's id, each relation's name, rows, width and key NDVs, the edges, the sets priced through the cost callback, its budget, the plan's order, the tree, the chosen joins and the plan order's C_out, the flips, the non-inner joins' types), each replan — its miss, the builds kept and what they are — and refusal, the plan text before and after; `fired`, how often each rule acted |
+| `optimizer/fired.py` | `Fired`, those counts, apart so that `cost_report.py` reads them back without pandas |
 | `optimizer/names.py` | how the report names a relation — its table, `(f)`, `agg(…)`, a memory source, `t#2` for the plan's second read of a table — which a call keeps until the relation itself becomes a memory source, a join tree in words, the build bracketed, and a missed join's words |
 | `optimizer/report_text.py` | that report as a `.optimizer.txt` section |
-| `optimizer/report_md.py` | that report as a `.optimizer.md` section, and the page's preamble and anchors |
+| `optimizer/report_md.py` | that report as a `.optimizer.md` section, the page's preamble, and the headings other pages link to |
 | `run.py` | the corpus through the optimizer, [above](#runpy-the-corpus-through-the-optimizer) |
-| `cost_report.py` | each (query, mode)'s costs as a section of `<mode>.costs.txt` and back, and `cost_report.html` rendered from those files |
+| `cost_report.py` | each (query, mode)'s costs as a section of `<mode>.costs.txt` and back; each `.optimizer.txt` section's changed multi-joins, filters applied per pass, replans and the lines of their blocks, and whether the plan changed; and `cost_report.html` rendered from those files, linking to them |
 | `tests/corpus.py` | the tests' default budget, the generated datasets found or the generator named, DuckDB's answer to a query's text, and an engine `cpu.txt` golden's rows per node |

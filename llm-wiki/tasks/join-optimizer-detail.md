@@ -52,7 +52,7 @@ fixes #236 and #237):
 - Task 12: four named tpch queries with a non-inner join are registered. Non-inner joins enter
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
-  at every mode (Task 12 below). Tasks 17 and 18 are not started.
+  at every mode (Task 12 below). Task 18 is not started.
 - #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
   join that reads a share ran again at every mode into the committed outputs; no other query's
   output can move (#239 below).
@@ -66,9 +66,14 @@ fixes #236 and #237):
   and `run.py` writes `<mode>.optimizer.md` beside it. The full `run.py` regenerated every
   committed prototype output; every `.cpu.txt` and `.costs.txt` section and `cost_report.html` are
   HEAD's byte for byte (Tasks 15 and 16 below).
+- Task 17: `cost_report.html` links each ratio other than 1.00 to the query's `.optimizer.md`
+  section and its rules fired, per mode, to their lines of `.optimizer.txt`, relatively as
+  committed and with `--sha` at a commit; the cost-report job renders it so and publishes it at
+  `join-optimizer/` on master. Whether the published links resolve is checked after a push
+  (Task 17 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 480 cases), and q64 in the corpus answer,
+- Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 488 cases), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
@@ -2304,3 +2309,97 @@ queries; every mode, 210 runs, none failed, 2 h 41 min). Every `.cpu.txt`, `.cos
 
 Proving: cheap tier 48 files, 480 cases; `test_cardinality_corpus`, `test_ordered_corpus` and
 `test_run_corpus` over the sf1 tables; the samples; the full run above.
+
+## Task 17
+
+### The links
+
+- `--sha` on `cost_report.py`: links are `https://github.com/asymptote-tech/peacockdb/blob/<sha>/scripts/exec_model/testdata/goldens/<bench>/<file>`;
+  without it `<bench>/<file>`, relative to the page. A sha is 7 to 40 hex digits, else refused.
+- A ratio cell whose shown text is not `1.00` links to `<bench>/<mode>.optimizer.md` and
+  `goldens.anchor(query)`; 0.998 shows as 1.00 and is plain. Dash, skipped and failed cells too.
+- Rules fired is a line per mode, `<mode>: n MJ, k/t + k/t DF, r replans`, a part left out where
+  its count is 0. `k/t` is per filter pass that applied a filter, the plan as written first:
+  the applications that narrowed a scan out of all, one per (scan, build), so `k` is `Fired`'s
+  `narrowed` and tpcds q6's `1/2` is one `store_sales` pruned by two builds. `0/1` stays: a probe
+  ran and the plan reads its build from memory. A mode whose log ends `plan diff:` with every part
+  0 reads `the plan changed`, and the page's legend says why: a cluster rebuilt in its own order,
+  its projections folded or reordered. That is tpch q3 and tpcds q2 and q93, at every mode, DPhyp
+  keeping the order each time. tpch q3: column order alone — one projection reorders, a parent's
+  key index goes `@0` → `@2` — at the same cost. tpcds q2: 9 `GpuProject` lines removed and 6
+  added, about 57 KB of passthrough. tpcds q93: the rebuild drops the `GpuProject` above the right
+  join and folds it into the join's projection; `cuda_passthrough_bytes` falls from 124,669,288 to
+  9,453,128 at tp1-single, the whole of its ratio, 0.68, and the same gives 0.81 at tp4. An oddity:
+  a saving no rule made, from the cluster's disassembly. `nothing changed the plan` is left only
+  where every mode's log says `plan unchanged`, `nothing fired` where every count of `Fired` is 0.
+  The hover keeps every `Fired` count.
+- Ranges are `#L<a>-L<b>`. A block is an unindented line and those indented under it. `n MJ`
+  spans the first join-order block (`MJ…`, `replan …`) to the last, one range, so it can hold the
+  filters after join order. Each DF fraction is its own pass's block. `r replans` runs from the
+  first replan's head — `replan K:` or a probe's `probe pN replan K:` inside a filter block — to the
+  end of the block holding the last.
+
+### The counts come from the log
+
+`Fired` lacks them: `reordered` counts calls cheaper than the plan's order, not distinct clusters,
+and nothing counts a filter applied without narrowing. Adding them would change every `.costs.txt`,
+a full run. So `cost_report.read_log` derives every count from `.optimizer.txt` in the same pass as
+the ranges: per call, the `plan's order`/`previous order` tree against the `oriented` one
+(`JoinOrder.changed`), keyed by the call's `MJ<n>` at any indent; per `  <alias>: row groups A -> B`
+line, applied, and narrowed where B < A; each replan's head; and whether the section has `plan
+diff:`. Two round trips through `report_text` tie the reader to its wording: `EVERY_RULE`, and a
+report whose MJ3 changes only inside a probe's replan and whose MJ4 keeps its previous order in a
+replan, reordered 2.
+
+Over the committed files, all 620 (query, mode) runs: per pass `k` sums to `Fired.narrowed +
+narrowed_after_order`, `r` equals `Fired.replans`, and n equals the `### <query> MJ<n>` tables of
+that mode's page. No mode whose log says the plan changed lacks a line.
+
+### No pandas
+
+`cost_report.py` imported `optimizer.pipeline` for the mode names and `optimizer.report` for
+`Fired`; both reach `dynamic_filters`, which imports pandas. The mode names are `plans/goldens.MODES`
+now, and `test_run` holds `pipeline.MODES`' keys to them; `Fired` is `optimizer/fired.py`, imported
+by `report.py`; `anchor` moved from `report_md.py` to `plans/goldens.py`. The cost-report job's
+`python3` has pandas from the prototype's step, so its render proves nothing about this;
+`test_the_committed_page_renders_with_pandas_pyarrow_and_numpy_blocked` sets the three to `None` in
+`sys.modules` and renders the committed files at a sha. The linuxbrew Python 3.13.0, which has no
+pandas, rendered the committed page.
+
+### CI
+
+The cost-report job's `Generate report` step, after the engine's report, runs `cost_report.py
+--sha "$REPORT_SHA"` and copies the page to `report/join-optimizer/index.html`, on a PR too, where
+nothing is uploaded. On master `report/` is the Pages artifact, so the page is published at
+`https://asymptote-tech.github.io/peacockdb/join-optimizer/`. The site's other paths are
+`index.html`, `history.tsv`, `history.html` and a `<sha>/` per report, which the next deploy
+carries forward by `history.tsv`; `join-optimizer/` is rendered again on every deploy. The
+engine's page lists its pages in the nav `render_html` writes (`latest · all reports`) in
+`cost-report/src/main.rs`; that crate is outside this task's scope, so nothing links there yet.
+
+### Red first
+
+- `test_cost_report` on `ImportError: Evidence`, later `Filters`; `test_report_md` on `ImportError:
+  anchor` from `goldens`.
+- Each guard against a mutation of what it guards, all red: the import through `report.py`; a
+  lazy `import pandas` in `render`; a 1.00 ratio linked, and a ratio linked by its exact value;
+  absolute links without `--sha`; every call counted as reordered; every scan as narrowed; a
+  range's first line moved; a zero MJ part shown; `_STARTED` blind to `previous order`, `_CALL`
+  only at two spaces, `_LEFT` only at four; `plan diff:` never read; the `the plan changed` line
+  dropped; DF only where a scan narrowed; one range for both passes; `goldens.MODES` reordered.
+
+### Proving
+
+- Cheap tier: 48 files, 488 cases (`test_cost_report` 10 → 18). `test_run_corpus` over the sf1
+  tables.
+- The committed `cost_report.html` re-rendered without `--sha`; every other file under
+  `scripts/exec_model/testdata/` HEAD's sha256. Against HEAD's page every cell but Rules fired has
+  the same text. Its 1,589 links: 449 ratio links whose anchors are headings of their page; 409 MJ,
+  425 DF and 306 replan ranges, each within one section, starting at a block of its kind (a DF one
+  at its pass's heading with no other block inside) and ending before the next unindented line.
+- Rules fired, tp4-single: tpch q16 `0/1 DF, 1 replan`; tpcds q75 `6/6 + 1/2 DF, 1 replan`
+  (L7805–L7829 and L7930–L7938); q58 `4 MJ, 3/3 DF, 3 replans`; q6 `1 MJ, 1/2 DF, 1 replan`.
+- The `Generate report` step's new lines, run with the pandas-free Python in a copy of the tree:
+  the page at `report/join-optimizer/index.html`, its links at the sha. The YAML parsed and the
+  step's `run:` passed `bash -n`.
+- Open: the published page's links resolve, checked after a push and a CI run.

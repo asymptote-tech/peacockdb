@@ -303,6 +303,12 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   so the planned cost is 3.4e-6 of the engine's. The prototype contributes only its own ratio.
   Where the engine has no figure at any mode run (tpch q11 and q22, tpcds q24 and q54) there is
   no final ratio.
+- **The report reads its rules from the log it links to.** Rules fired counts the multi-joins a
+  call reordered or flipped, the filters applied per pass and the replans, and links each to its
+  lines of `<mode>.optimizer.txt`; `cost_report.py` reads both from that file when it renders, not
+  from `.costs.txt`. A line number stored with the costs goes stale when a `--query` run rewrites a
+  section above it, and `Fired` counts calls rather than multi-joins, and no filter that narrowed
+  nothing.
 
 The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and
 391 tpcds runs, dearer in none, and equal in the rest; the median ratio is 1.00 for tpch and

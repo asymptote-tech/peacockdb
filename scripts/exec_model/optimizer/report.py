@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from ..operators.join_types import JoinType
 from .cardinality import Certainty
 from .dynamic_filters import Pruned
+from .fired import Fired
 
 #: a relation's index, or a pair of trees — `(build, probe)` once oriented
 JoinTree = int | tuple
@@ -210,25 +211,6 @@ class OptimizerReport:
     refused: tuple[BuildMiss, ...]
     before: str
     after: str
-
-
-@dataclass(frozen=True)
-class Fired:
-    """How often each rule acted on one run: probe plans run and scans they narrowed, before and
-    after join order; DPhyp calls — before the run and in replans — those whose tree's C_out is
-    below the plan order's, and those stopped at their budget; joins flipped, replans and replans
-    refused, the main run's and the probe plans'."""
-
-    probes: int = 0
-    narrowed: int = 0
-    probes_after_order: int = 0
-    narrowed_after_order: int = 0
-    dphyp: int = 0
-    reordered: int = 0
-    budget: int = 0
-    flips: int = 0
-    replans: int = 0
-    refused: int = 0
 
 
 def fired(report: OptimizerReport) -> Fired:

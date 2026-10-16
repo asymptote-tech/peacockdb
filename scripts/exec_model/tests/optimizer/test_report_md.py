@@ -20,7 +20,8 @@ from ...optimizer.dynamic_filters import KeySummary, Pruned, PrunedBy
 from ...optimizer.report import (
     BuildMiss, ChosenJoin, FilterPass, JoinOrder, Kept, OptimizerReport, Probed, RelationEstimate, Replan,
 )
-from ...optimizer.report_md import anchor, cluster_heading, filters_heading, note, preamble, section
+from ...optimizer.report_md import cluster_heading, filters_heading, note, preamble, section
+from ...plans.goldens import anchor
 
 
 def relations(*names):

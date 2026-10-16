@@ -1,12 +1,13 @@
-"""`cost_report.html`: per query and mode the cost of the plan as planned and as optimized, priced by
-the engine's own function (`plans/cost_model.py`), beside the engine's and DuckDB's figures and the
-rules that fired. `run.py` writes each query's costs as a section of `<bench>/<mode>.costs.txt` and
-renders the page from every such file, so a run of a few queries still renders the whole corpus.
+"""`cost_report.html`: per query and mode the plan's cost as planned and as optimized, priced by the
+engine's own function (`plans/cost_model.py`), beside the engine's and DuckDB's figures and the rules
+that fired, read from and linked to `<mode>.optimizer.txt`; a ratio links to `<mode>.optimizer.md`.
+`run.py` writes each query's costs as a section of `<bench>/<mode>.costs.txt` and renders the page
+from every such file, so a run of a few queries still renders the whole corpus.
 
-    python3 scripts/exec_model/cost_report.py [--out DIR]
+    python3 scripts/exec_model/cost_report.py [--out DIR] [--sha SHA]
 
-renders the page again from the files alone. README.md, "run.py", says what each column is.
-"""
+renders it again from the files alone, linking to them at `SHA` on GitHub or else beside the page.
+README.md, "run.py", says what each column is."""
 
 from __future__ import annotations
 
@@ -20,14 +21,15 @@ import argparse
 import html
 import os
 import pathlib
-from dataclasses import dataclass, fields
+import re
+from dataclasses import dataclass, field, fields
 
-from .optimizer.pipeline import MODES as SHAPES
-from .optimizer.report import Fired
+from .optimizer.fired import Fired
 from .plans.cost_model import CostModel, RunCost, load
-from .plans.goldens import BENCHES, OUT, ROOT, sections
+from .plans.goldens import BENCHES, MODES, OUT, ROOT, anchor, sections
 
-MODES = tuple(SHAPES)
+#: The committed goldens on GitHub, which a page rendered with `--sha` links into.
+GITHUB = "https://github.com/asymptote-tech/peacockdb/blob"
 #: The published cost report's threshold (`cost-report/src/main.rs`): a final ratio at or below it
 #: is green, above it red.
 RATIO_GREEN_MAX = 1.4
@@ -57,6 +59,36 @@ class QueryCost:
 Marker = str
 
 
+#: The first and last line of a stretch of `.optimizer.txt`, as GitHub numbers them.
+Lines = tuple[int, int]
+
+
+@dataclass(frozen=True)
+class Filters:
+    """One dynamic-filter pass of a section: the times a filter narrowed a scan, out of the times one
+    was applied to a scan — once per build that pruned it, so `Fired`'s count is the first — and its
+    block's lines."""
+
+    narrowed: int
+    applied: int
+    lines: Lines
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """One query's `.optimizer.txt` section read for what changed its plan: the multi-joins a DPhyp
+    call or a flip left other than as planned, in any call, and the lines from its first join-order
+    block to its last; each dynamic-filter pass; the replans, probe plans' included, from the first's
+    line to the end of the block holding the last; and whether it says the plan changed."""
+
+    reordered: int = 0
+    orders: Lines | None = None
+    passes: tuple[Filters, ...] = ()
+    replans: int = 0
+    replanned: Lines | None = None
+    changed: bool = False
+
+
 @dataclass(frozen=True)
 class Row:
     query: str
@@ -64,6 +96,8 @@ class Row:
     #: the engine's `peacockdb_cost` by mode, where its `-mini.cost.txt` has a run of the query
     engine: dict[str, int]
     duckdb: int | None
+    #: by mode, where its `.optimizer.txt` has the query
+    evidence: dict[str, Evidence] = field(default_factory=dict)
 
     def best(self) -> str | None:
         """The mode whose engine figure, scaled by the optimizer's ratio there, is least."""
@@ -112,6 +146,74 @@ def read_section(body: str, model: CostModel, source: str) -> QueryCost | Marker
     return QueryCost(**runs, fired=Fired(**{f.name: int(rules[f.name]) for f in fields(Fired)}))
 
 
+#: `.optimizer.txt`'s lines `read_log` keys on, as `report_text` writes them: a DPhyp call's head,
+#: the order it started from, the order it left, a scan a dynamic filter pruned, a replan's head, and
+#: the line a changed plan's section ends with.
+_CALL = re.compile(r" *(MJ\d+): \d+ relations, ordered ")
+_STARTED = re.compile(r" *(?:plan's|previous) order (.+), build first$")
+_LEFT = re.compile(r" *oriented (.+), build first$")
+_SCAN = re.compile(r"  \S+: row groups (\d+) -> (\d+)")
+_REPLAN = re.compile(r" *(?:probe \S+ )?replan \d+: ")
+_CHANGED = "plan diff"
+
+
+def read_log(text: str) -> dict[str, Evidence]:
+    """Each `== <query>` section of a `.optimizer.txt`, in one pass. A block is an unindented line and
+    the indented ones under it: a DPhyp call's or a replan's is a join-order block, a dynamic-filter
+    pass's a filter block; a probe plan's replans are inside its pass's."""
+    found: dict[str, _Reading] = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.startswith("== "):
+            reading = found.setdefault(line[3:].strip(), _Reading())
+        else:
+            reading.read(number, line)
+    return {query: reading.evidence() for query, reading in found.items()}
+
+
+class _Reading:
+    """One section's `Evidence` as its lines come."""
+
+    def __init__(self):
+        self.reordered: set[str] = set()
+        self.orders = self.replanned = None
+        self.passes: list[list] = []  # narrowed, applied, first line, last line
+        self.replans, self.changed = 0, False
+        self.block = self.mj = self.planned = None
+        self.holds_replan = False
+
+    def read(self, number: int, line: str) -> None:
+        if not line.startswith(" "):
+            self.block = "orders" if line.startswith(("MJ", "replan ")) else \
+                "filters" if line.startswith("dynamic filters ") else None
+            self.holds_replan = False
+            self.changed |= line.startswith(_CHANGED)
+            if self.block == "filters":
+                self.passes.append([0, 0, number, number])
+        if self.block == "orders":
+            self.orders = (self.orders or (number,))[0], number
+        elif self.block == "filters":
+            self.passes[-1][3] = number
+        if _REPLAN.match(line):
+            self.replans += 1
+            self.holds_replan = True
+        if self.holds_replan:
+            self.replanned = (self.replanned or (number,))[0], number
+        if call := _CALL.match(line):
+            self.mj = call[1]
+        elif started := _STARTED.match(line):
+            self.planned = started[1]
+        elif (left := _LEFT.match(line)) and left[1] != self.planned:
+            self.reordered.add(self.mj)
+        elif scan := _SCAN.match(line):
+            self.passes[-1][0] += int(scan[2]) < int(scan[1])
+            self.passes[-1][1] += 1
+
+    def evidence(self) -> Evidence:
+        return Evidence(len(self.reordered), self.orders,
+                        tuple(Filters(narrowed, applied, (a, b)) for narrowed, applied, a, b in self.passes),
+                        self.replans, self.replanned, self.changed)
+
+
 def collect(out: pathlib.Path, root: pathlib.Path, model: CostModel, benches=BENCHES) -> list[Bench]:
     """Each bench with a cost file under `out`: a row per query its files hold, in their order."""
     found = []
@@ -123,13 +225,19 @@ def collect(out: pathlib.Path, root: pathlib.Path, model: CostModel, benches=BEN
                 runs.setdefault(query, {})[mode] = read_section(body, model, f"{path} {query}")
         if not runs:
             continue
+        logs = {mode: _evidence(out / bench / f"{mode}.optimizer.txt") for mode in MODES}
         goldens = root / "goldens" / f"{bench}.sf1"
         engine = {mode: _totals(goldens / f"{mode}-mini.cost.txt", "peacockdb_cost=") for mode in MODES}
         found.append(Bench(bench, [
             Row(query, by_mode, {mode: engine[mode][query] for mode in MODES if query in engine[mode]},
-                _total(goldens / f"{query}.duckdb_cost.txt", "duckdb_cost="))
+                _total(goldens / f"{query}.duckdb_cost.txt", "duckdb_cost="),
+                {mode: logs[mode][query] for mode in MODES if query in logs[mode]})
             for query, by_mode in runs.items()]))
     return found
+
+
+def _evidence(path: pathlib.Path) -> dict[str, Evidence]:
+    return read_log(path.read_text()) if path.exists() else {}
 
 
 def _totals(path: pathlib.Path, key: str) -> dict[str, int]:
@@ -148,11 +256,11 @@ def _footer(text: str, key: str) -> int | None:
     return next((int(line[len(key):]) for line in text.splitlines() if line.startswith(key)), None)
 
 
-def write(out: pathlib.Path, root: pathlib.Path = ROOT) -> pathlib.Path:
-    """`out/cost_report.html` rendered from the cost files under `out`."""
+def write(out: pathlib.Path, root: pathlib.Path = ROOT, sha: str | None = None) -> pathlib.Path:
+    """`out/cost_report.html` rendered from the cost files under `out`, its links at `sha`."""
     path = out / "cost_report.html"
     staged = path.with_name(path.name + ".tmp")
-    staged.write_text(render(collect(out, root, load())))
+    staged.write_text(render(collect(out, root, load()), sha))
     os.replace(staged, path)
     return path
 
@@ -174,9 +282,7 @@ tr.red td:first-child{border-left:4px solid #cf222e;}
 tr.grey td:first-child{border-left:4px solid #8c959f;}
 tr.green{background:#e9f7ee;}tr.red{background:#ffe0e0;}tr.grey{background:#f3f4f6;}
 td.span{font-size:.75rem;color:#57606a;font-style:italic;}td.failed{color:#cf222e;font-style:normal;}
-td.rules{font-size:.68rem;}
-.chip{display:inline-block;background:#eef2f6;border:1px solid #d0d7de;border-radius:10px;
-padding:0 .4rem;color:#38434f;margin:.05rem 0;}
+td.rules{font-size:.68rem;white-space:nowrap;}
 .legend{margin-top:.6rem;color:#57606a;font-size:.85rem;}
 .caveat{margin-top:.8rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:.6rem .9rem;font-size:.9rem;}
 """
@@ -191,20 +297,47 @@ the device's, so these costs compare with each other and with nothing else.
 optimizer's pipeline did: the optimized plan's run, each dynamic filter's probe plan and each run a
 replan stopped. A build such a run made is read back through a memory source, which costs nothing:
 the build was paid for once, where it was made.
-<em>ratio</em> = optimized / non-optimized: green below 1, red above.</p>
+<em>ratio</em> = optimized / non-optimized: green below 1, red above; one other than 1.00 links to
+the query's section of <code>&lt;mode&gt;.optimizer.md</code>, what the optimizer changed.</p>
 <p class="legend"><em>Engine .cost.txt</em> is the engine's own CPU run's figure
 (<code>&lt;mode&gt;-mini.cost.txt</code>, Arrow bytes) at the mode named. <em>DuckDB</em> is the
 <code>duckdb_cost=</code> of <code>&lt;q&gt;.duckdb_cost.txt</code>, bytes materialized at pipeline
 breakers. <em>Final ratio (projected)</em> = min over modes of the engine's figure × that mode's
 ratio / DuckDB's: the engine's bytes as the optimizer is projected to change them, not a measured
 engine cost — directional only, as on the published report. The row is green at or below {green},
-red above. <em>Rules fired</em>: each rule with the modes where it
-changed the plan out of the modes run — dynamic filters that narrowed a scan, DPhyp trees cheaper
-than the plan's order, flips, replans; hover for every count per mode, calls and probes included.</p>
+red above. <em>Rules fired</em>, a line per mode where a multi-join was reordered, a
+dynamic filter applied or a replan ran: <em>n MJ</em>, the multi-joins whose order a DPhyp call or a
+flip changed, before the run or in a replan; <em>k/t DF</em> per filter pass that applied one, the
+plan as written first, the filters that narrowed a scan out of those applied, a scan counted once
+per build that pruned it; <em>r replans</em>, probe plans' included. Each links to its lines of
+<code>&lt;mode&gt;.optimizer.txt</code>. <em>the plan changed</em> where none of these did but the log says
+the plan did: a cluster rebuilt in its own order, its projections folded or reordered. <em>nothing
+changed the plan</em> where each mode's log says the plan is unchanged; hover for every count per
+mode, calls and probes included.</p>
 """
 
 
-def render(benches: list[Bench]) -> str:
+@dataclass(frozen=True)
+class Links:
+    """Where the page's links lead: each file beside the page, or with `sha` at that commit on GitHub."""
+
+    sha: str | None = None
+
+    def page(self, bench: str, mode: str, query: str) -> str:
+        """The query's section of the mode's `.optimizer.md`."""
+        return self._file(bench, f"{mode}.optimizer.md") + anchor(query)
+
+    def log(self, bench: str, mode: str) -> str:
+        return self._file(bench, f"{mode}.optimizer.txt")
+
+    def _file(self, bench: str, name: str) -> str:
+        if self.sha is None:
+            return f"{bench}/{name}"
+        return f"{GITHUB}/{self.sha}/{OUT.relative_to(ROOT.parent).as_posix()}/{bench}/{name}"
+
+
+def render(benches: list[Bench], sha: str | None = None) -> str:
+    links = Links(sha)
     parts = ["<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
              "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
              f"<title>PeacockDB join optimizer cost report</title><style>{STYLE}</style></head><body>",
@@ -219,7 +352,7 @@ def render(benches: list[Bench]) -> str:
                        "<th rowspan=\"2\">Final ratio (projected)</th><th rowspan=\"2\">Rules fired</th></tr>")
         parts.append("<tr>" + "<th class=\"sub\">non-optimized</th><th class=\"sub\">optimized</th>"
                                "<th class=\"sub\">ratio</th>" * len(MODES) + "</tr>")
-        parts += [_row(row) for row in bench.rows]
+        parts += [_row(row, bench.name, links) for row in bench.rows]
         parts.append("</table>")
     parts.append("</body></html>\n")
     return "\n".join(parts)
@@ -238,22 +371,23 @@ def _summary(bench: Bench) -> str:
             f"{skipped} skipped, {failed} failed.")
 
 
-def _row(row: Row) -> str:
+def _row(row: Row, bench: str, links: Links) -> str:
     final, best = row.final_ratio(), row.best()
     bucket = "grey" if final is None else "green" if final <= RATIO_GREEN_MAX else "red"
     markers = set(row.runs.values())
     if len(row.runs) == len(MODES) and len(markers) == 1 and isinstance(next(iter(markers)), str):
         modes = f"<td class=\"span\" colspan=\"{3 * len(MODES)}\">{html.escape(next(iter(markers)))}</td>"
     else:
-        modes = "".join(_mode_cells(row.runs.get(mode)) for mode in MODES)
+        modes = "".join(_mode_cells(row.runs.get(mode), links.page(bench, mode, row.query)) for mode in MODES)
     engine = f"{_bytes(row.engine[best])} ({best})" if best else "—"
     duckdb = _bytes(row.duckdb) if row.duckdb is not None else "—"
     ratio = f"{final:.2f} ({best})" if final is not None else "—"
+    rules = _rules(row, bench, links)
     return (f"<tr class=\"{bucket}\"><td>{html.escape(row.query)}</td>{modes}<td class=\"num\">{engine}</td>"
-            f"<td class=\"num\">{duckdb}</td><td class=\"num\">{ratio}</td><td class=\"rules\">{_rules(row)}</td></tr>")
+            f"<td class=\"num\">{duckdb}</td><td class=\"num\">{ratio}</td><td class=\"rules\">{rules}</td></tr>")
 
 
-def _mode_cells(run: QueryCost | Marker | None) -> str:
+def _mode_cells(run: QueryCost | Marker | None, page: str) -> str:
     if run is None:
         return "<td class=\"cost\">—</td>" * 3
     if isinstance(run, str):
@@ -261,20 +395,15 @@ def _mode_cells(run: QueryCost | Marker | None) -> str:
         return f"<td class=\"span{failed}\" colspan=\"3\">{html.escape(run)}</td>"
     shown = round(run.ratio, 2)
     kind = " saving" if shown < 1 else " regression" if shown > 1 else ""
+    ratio = f"{run.ratio:.2f}"
+    ratio = ratio if ratio == "1.00" else _link(ratio, page)
     parts = (f"of which probe plans {_bytes(run.probes.total)}, stopped runs {_bytes(run.stopped.total)}")
     return (f"<td class=\"cost\">{_bytes(run.planned.total)}</td>"
             f"<td class=\"cost\" title=\"{parts}\">{_bytes(run.optimized.total)}</td>"
-            f"<td class=\"num{kind}\">{run.ratio:.2f}</td>")
+            f"<td class=\"num{kind}\">{ratio}</td>")
 
 
-#: A chip per rule that changed the plan: its label and the count in `Fired` that says it did. A
-#: probe that narrowed nothing, a call that kept the plan's order, a budget hit or a refused replan
-#: changed nothing, and shows only in the hover.
-CHIPS = (("dynamic filters", "narrowed"), ("after join order", "narrowed_after_order"), ("DPhyp", "reordered"),
-         ("flips", "flips"), ("replans", "replans"))
-
-
-def _rules(row: Row) -> str:
+def _rules(row: Row, bench: str, links: Links) -> str:
     runs = {mode: run for mode, run in row.runs.items() if isinstance(run, QueryCost)}
     if not runs:
         return "—"
@@ -282,10 +411,35 @@ def _rules(row: Row) -> str:
         return "nothing fired"  # no rule ran, as `.optimizer.txt` says
     counts = "; ".join(f"{mode}: " + ", ".join(f"{f.name} {getattr(run.fired, f.name)}" for f in fields(Fired))
                        for mode, run in runs.items())
-    chips = [f"{label} {sum(getattr(run.fired, name) > 0 for run in runs.values())}/{len(runs)}"
-             for label, name in CHIPS if any(getattr(run.fired, name) for run in runs.values())]
-    shown = " ".join(f"<span class=\"chip\">{chip}</span>" for chip in chips) or "nothing changed the plan"
+    lines = [f"{mode}: {parts}" for mode in runs
+             if (parts := _mode_rules(row.evidence[mode], links.log(bench, mode)))]
+    shown = "<br>".join(lines) or "nothing changed the plan"
     return f"<span title=\"{counts}\">{shown}</span>"
+
+
+def _mode_rules(found: Evidence, log: str) -> str:
+    """`n MJ, k/t + k/t DF, r replans`, each part linking to its lines of `log` and left out where its
+    count is 0; a pass that applied no filter has no fraction. A plan the log says changed with all
+    of them 0 still says so, which keeps "nothing changed the plan" true."""
+    parts = []
+    if found.reordered:
+        parts.append(_link(f"{found.reordered} MJ", log + _lines(found.orders)))
+    applied = [p for p in found.passes if p.applied]
+    if applied:
+        parts.append(" + ".join(_link(f"{p.narrowed}/{p.applied}", log + _lines(p.lines)) for p in applied) + " DF")
+    if found.replans:
+        parts.append(_link(f"{found.replans} replan" + "s" * (found.replans > 1), log + _lines(found.replanned)))
+    if not parts and found.changed:
+        parts.append("the plan changed")
+    return ", ".join(parts)
+
+
+def _lines(span: Lines) -> str:
+    return f"#L{span[0]}-L{span[1]}"
+
+
+def _link(text: str, href: str) -> str:
+    return f"<a href=\"{html.escape(href)}\">{text}</a>"
 
 
 def _bytes(n: int) -> str:
@@ -299,8 +453,17 @@ def _bytes(n: int) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", type=pathlib.Path, default=OUT, help=f"default {OUT}")
-    print(f"wrote {write(parser.parse_args(argv).out)}")
+    parser.add_argument("--sha", type=_sha, help="the commit the files are at: links into it on GitHub, "
+                                                 "not beside the page")
+    args = parser.parse_args(argv)
+    print(f"wrote {write(args.out, sha=args.sha)}")
     return 0
+
+
+def _sha(text: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{7,40}", text):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a commit's sha")
+    return text
 
 
 if __name__ == "__main__":

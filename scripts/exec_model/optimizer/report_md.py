@@ -6,12 +6,11 @@ the order are a line under it. A cluster no call changed is one line. The dynami
 passes follow, a probe plan's replans with them. Relations are named as `names.py` names them.
 
 Headings are a query's name, `<query> MJ<n>` and `<query> dynamic filters`, so the anchors other
-pages link to are `anchor` of them; a `·`, `:` or `→` in a heading would change its anchor.
+pages link to are `goldens.anchor` of them; a `·`, `:` or `→` in a heading would change its anchor.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from .names import Words, joined
@@ -58,12 +57,6 @@ def cluster_heading(query: str, mj: str) -> str:
 
 def filters_heading(query: str) -> str:
     return f"{query} dynamic filters"
-
-
-def anchor(heading: str) -> str:
-    """GitHub's anchor for a heading: lower case, every character but a letter, a digit, `-`, `_` or a
-    space dropped, each space a `-`."""
-    return "#" + re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
 
 
 @dataclass(frozen=True)
