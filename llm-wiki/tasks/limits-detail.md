@@ -1020,3 +1020,9 @@ benchmarks.
   `test_cpu_corpus` 2005), gpu block 1505 (`gpu_tests::` 708, `test_gpu_corpus` 785), grand
   total 5035. The device prose has 783 cells and drops scan-limit and nested-limits from
   tpch's exceptions.
+
+#### CI on the rebased head, and `done`
+
+Dispatched run [38974842288](https://github.com/asymptote-tech/peacockdb/actions/runs/38974842288)
+on `a45c20b6`: changes, both dataset-matrix legs, the GPU build, cost-report and **GPU Tests
+(nebius-gpu)** all green. Back to `done`.
