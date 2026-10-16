@@ -18,6 +18,1249 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/join-backend.md -->
+
+**Merged 2026-10-16 as PR #179, chain J's task, two commits: the code `4b75f649` and the board `3e1bb4ba`, merged into master by `72103bf1`.**
+
+# Joins run on the session on both engines, with no recipe and no refusal left
+
+Kind: production
+
+**The cpu mirrors the device, wherever they diverge.** This task makes the device's joins the
+reference: the session, one batch per call, the empty-side rules, the pads and the projections.
+Any divergence between the two engines that appears while it builds — batch boundaries, a
+zero-row batch against no batch, row order where a comparison reads it, intermediate column names,
+nullability or types, `in_rows` and call counts, execution or cost sections — is investigated, and
+where the device's answer is the designed one, the cpu backend is changed to mirror it rather than
+the device bent to the cpu or the comparison loosened. The peacockdb-analyst may be dispatched to
+find what the cpu backend has to change; each divergence found and its resolution goes in the
+detail file, and one that cannot be resolved here is a ticket naming both engines' output.
+
+**Risks found before building** ([`reports/join-backend-divergence.md`](../reports/join-backend-divergence.md),
+2026-10-08), and what to do about each:
+1. **The cost gate** fails the PR on any rise in cpu bytes per section, and #137's `IS NOT NULL`
+   filters (about 73 tpcds plans at three modes) and the row marker raise them. Run the local
+   `cargo run -q -p cost-report -- --cost-diff --base <base sha>` before the PR, list every rise in
+   the detail file, and ask the human to accept them on the board, as chain K's header does for its
+   two tasks; until then the task waits at `completeness approved`.
+2. **Task 6's interim adapter** changes the cpu's goldens for #220's rows (about 82) but the plan
+   regenerates them only in Task 8: regenerate them in Task 6's own commit, so it stays green.
+3. **Task 14** turns on about 428 device cells: regenerate `gpu-result.txt` there too, or
+   duckdb-oracle's coverage check goes red.
+4. **An order-dependent selection over a device join** — an unordered `LIMIT`, or a fetch that cuts
+   between tied rows whose strings differ, above a hash or nested-loop join — would flap: cuco and
+   cuDF write join output through an atomic cursor, so its order varies run to run. No corpus query
+   does this today. Add a check that refuses to enable a device cell on such a shape (or on a
+   `data_fusion_subset` line), and one harness case pinning the cross join's emitted order
+   (`Order::AsEmitted`), which `tpch/nested-limits` relies on.
+5. **The empty-build rule** is decided once: the cpu calls the same rule function the device does.
+6. **`architecture.md`'s "one plan run twice gives one answer, byte for byte"** does not hold on the
+   device's join order; reword it to what does hold (the same rows, the same batch structure).
+   Float sums reordered across a join (q39) already compare with a tolerance.
+
+**This task closes** [#155](../archive/archived-tickets.md#t155) (umbrella: join execution through a wider C
+and FlatBuffers API), [#152](../archive/archived-tickets.md#t152) (the build handle does not survive a
+streamed probe), [#173](../archive/archived-tickets.md#t173) (a finish whose probe produced no keys refuses
+what it could answer from the build side), [#212](../archive/archived-tickets.md#t212) (a build side that
+emits no batch at all still refuses Right, Full and RightAnti), [#159](../archive/archived-tickets.md#t159)
+(RightSemi/RightAnti with a residual filter has no cuDF path), [#59](../archive/archived-tickets.md#t59)
+(nullable-key semantics for semi/anti/mark joins), [#80](../archive/archived-tickets.md#t80) (anti-join
+`NOT IN` three-valued logic), [#137](../archive/archived-tickets.md#t137) (the planner does not drop null
+join keys before the shuffle), [#220](../archive/archived-tickets.md#t220) (the cpu's joins answer several
+batches per call), [#190](../archive/archived-tickets.md#t190) (the cpu drops a nested-loop join's
+projection), [#207](../archive/archived-tickets.md#t207) (both backends drop a cross join's projection),
+[#208](../archive/archived-tickets.md#t208) (the cpu's cross join answers nothing over a zero-row build), and
+the tickets join-session-cpp built the C++ half of: [#136](../archive/archived-tickets.md#t136),
+[#153](../archive/archived-tickets.md#t153), [#160](../archive/archived-tickets.md#t160), [#215](../archive/archived-tickets.md#t215),
+[#63](../archive/archived-tickets.md#t63), and #154's `join.cpp` sites (so #154 closes whole). Eighth of the
+join-rewrite chain.
+
+The design is [`join-rewrite-design.md`](join-rewrite-design.md): §1.3 (validation), §3.5 (the
+`NOT IN` rewrite), §4 (planner, wire, executors, driver, exec_model), §5.7 (tests). This spec does
+not repeat it.
+
+## The work
+
+1. **Planner** (§4.1): the capability matrix as two facts; the refusals lifted (#153, #159, #160);
+   the nulls.rs anti/mark refusal **narrowed, not deleted** — moved with `can_be_null` to
+   `planner/nullability.rs`, it refuses a nullable `IN`/`NOT IN` subquery off a filter's AND/OR
+   spine after negation normal form (under `IS NULL`, `IS [NOT] TRUE/FALSE`, a comparison, a
+   function — a `NOT` no longer counts: NNF folds it into the leaf), where a mark join cannot give SQL's
+   NULL — refused on [#250](../tickets/joins.md#t250), filed (design §3.5); the two unreachable
+   refusals kept; the `NOT IN` rule (§3.5) — only on the AND/OR spine
+   from a `Filter` root, `Not(InSubquery{negated: false})` normalized there too, every `Filter`
+   visited including those inside expression subqueries, data-driven nullability opened through
+   `Url::to_file_path` with `SubqueryAlias` recursing, the counts as `count(lit(1i32))` so
+   `AggregateStatistics` cannot turn them into a `PlaceholderRowExec`; planner tests for
+   `NOT (x IN S)`, `w = 0 OR NOT (x IN S)`, `NOT (x NOT IN S)` (folded to `x IN S`, a semi join),
+   `NOT (w = 0 OR x NOT IN S)` (De Morgan, then `IN`), a `NOT IN` inside an `EXISTS`,
+   `(x IN S) IS NULL` (refused, #250) and the unfiltered-`S` count, each answer checked against
+   DuckDB; #137's `IS NOT NULL` filters, decided on the translated side (a side whose top node is
+   a `GpuEmitPartitions`); the predicate-free nested loop as cross for Inner only, over `true`
+   otherwise; the explicit `__rowmarker__` placeholder, including a scan's (`CudfScan.rows_only`);
+   an `EmptyExec` arm, a new leaf `GpuEmpty{schema}` that emits no batch on either engine (review
+   row 8); `IS [NOT] DISTINCT FROM` on the device — AST `NULL_EQUAL` / `NOT(NULL_EQUAL)`, column path
+   `NULL_EQUALS` / `NULL_NOT_EQUALS` — and its promotion to hash keys with `null_equals_null = true`
+   when every key of a keyless nested loop would be such a conjunct (review row 9).
+2. **Wire** (§4.2): `CudfJoin` written for all three plan nodes, with `chunk_bytes` from the
+   planner's scratch budget and both side schemas — Arrow `Timestamp(unit, _)` mapped to the fbs
+   `Timestamp*` variants repartition-keys adds and rendered in `fb_text`; an unmapped type is
+   already a `PlanError` in every schema (repartition-keys, #249), so `CudfJoin`'s schemas inherit
+   it. Cases: a
+   Left join carrying a `ts_us` probe column finished with no probe batch, a Right join whose lane
+   gets no build batch. `CudfScan.rows_only` written for a zero-column scan. The join recipes,
+   roles and inputs removed; the old three fbs tables and `execute_*_join` removed with them.
+3. **GPU executor** (§4.3): the session typestate, `set_build(Option)`, `Option` returns,
+   `owes_nothing`, `Drop` releasing; `copy_of`, `build_copy`, `finish_without_keys` go; pricing as
+   §4.3 says.
+4. **CPU executor** (§4.4): one DataFusion join stream per lane, `None` per probe for the
+   build-side semi family, one batch per call otherwise.
+5. **Driver** (§4.5) and **exec_model** (§4.6).
+6. **Tests** (§5.7): the 56 join pins flip; the new harness cases, including every pbench join
+   shape at node level and each `key_types` column as a join key; the planner, wire, executor,
+   driver and exec_model tests named there.
+7. **Corpus and pbench cells**: every cell whose last ticket closes here is run at its mode on
+   shad-gpu and compared with DuckDB, and enabled if it passes; one that meets another issue gets
+   that ticket on its row (or a new one).
+8. **Every commit green.** The plan goldens, the cpu goldens and the cost goldens of a change are
+   regenerated in the same commit (#137's tpcds filters, `__rowmarker__`, the recipe line); each
+   `bug_` pin flips in the commit that changes its behaviour; the cpu's interim adapter, while the
+   trait changes ahead of the stream executor, concatenates a call's chunks into one batch (#220's
+   fix) rather than refusing; tpcds q9's cpu cells, on today, stay green through the
+   `__rowmarker__` step (the cpu applies nested-loop and cross projections before, or with, it).
+9. **Cleanup — nothing of the old join path survives.** Removed, each checked gone by a grep the
+   PR quotes and by a build with no dead-code warning on either side:
+   - wire: `wire/join.rs`'s recipe writers (all but `CudfJoin`'s), `attach.rs`'s `cross_join`;
+     the join-only vocabulary — `Input::{BuildSide, BuildSideCopy, BatchCopy, AccumulatedKeys}`,
+     `ProjectRole::{ProbeKeys, NullPad, Narrow}`, `FbKind::{HashJoin, CrossJoin, NestedLoopJoin}`
+     and their `recipes.rs` renderings. `CallPattern::AtDone` and `Input::PriorOutput` stay: the
+     accumulators use them (`gpu_backend/accumulate.rs`, `attach.rs`).
+   - fbs and C++: `CudfHashJoin`, `CudfCrossJoin`, `CudfNestedLoopJoin`; `execute_hash_join`,
+     `execute_cross_join`, `execute_nested_loop_join` and their `dispatch.cpp` arms; the map arm's
+     "multi-partition joins are not implemented yet" refusal text (`node_session.cpp:584-596`),
+     which describes a path no join takes any more.
+   - Rust executors: `GpuJoin`'s `per_probe`/`at_done` lists, `make`, `copy_of`, `build_copy`,
+     `finish_without_keys`; the cpu's `Calls` (per-call join, key project, finish join, pad
+     project, `empty_build_answers_nothing`); `JoinExecutor::without_build`.
+   - planner and plan: `planner/nulls.rs` (its narrowed refusal and analysis move to
+     `nullability.rs`), `answers_in_one_call`,
+     `per_call_join_type`, `finish_join_type`, `empty_build_answers_nothing`, the probe-side coalesce.
+   - driver: `feeds_owing_build`, the scatter-drop exception, the mock's `empty_build_owes_its_probe`.
+   - exec_model: `operators/recipe_join.py`, `recipe.py`'s `copy_handle`, the `cudf_calls.py`
+     entries only the recipe join called.
+   - wiki: `architecture.md`'s join recipes and capability matrix rewritten from the design;
+     `hacks-audit.md`'s join items (P1, P4, P8, P9, P10, P13; findings 5, 11, 12) marked resolved;
+     `build-test.md`'s rows; `join-rewrite-design.md` archived with the specs.
+10. **The estimate.** [`reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-cell-estimate.md),
+   committed with the chain's specs, predicts which cells flip and which meet another issue. The
+   completeness record compares it with what turned on: each miss, either way, gets a line with its
+   cause.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/planner/` (translator `nodes.rs`, `common.rs`, `nulls.rs` → `nullability.rs`, the new `NOT IN` rule, `pipeline.rs`, `mod.rs`), `lib.rs` | §4.1, §3.5 |
+| `peacockdb-core/src/plan/join.rs`, `plan/mod.rs`, `plan/validate*` | the matrix; validation; no zero-column schema |
+| `peacockdb-core/src/wire/` (`join.rs`, `attach.rs`, `mod.rs`, `node_writer.rs`) | §4.2 |
+| `peacockdb-core/src/executor/gpu_backend/`, `cpu_backend/`, `driver/`, `executor/mod.rs` | §4.3–§4.5 |
+| `peacockdb-core/src/planner/memory_estimation.rs` | the session's pricing |
+| `cpp/src/operators/join.cpp`, `project.cpp`, `dispatch.cpp`, `flatbuffers/gpu_plan.fbs` | the old join paths and tables removed; an empty projection refused |
+| `cpp/src/operators/scan.cpp`, `flatbuffers/gpu_plan.fbs` (`CudfScan.rows_only`), `cpp/tests/gpu/test_plan_executor.cpp` | a zero-column scan answers `__rowmarker__`; its gtest |
+| `peacockdb-core/src/wire/serialize.rs` | `serialize_join_schema`, which consumes repartition-keys' timestamp mapping and unmapped-type refusal (#249) |
+| `peacockdb-core/src/plan/` (a new `GpuEmpty` node), `plan_text/node_text.rs`, `wire/attach.rs`, `executor/{cpu,gpu}_backend/backend.rs`, `planner/memory_estimation.rs` | the `EmptyExec` leaf |
+| `cpp/src/expr.cpp` | `IS [NOT] DISTINCT FROM` in `fb_to_ast_op`'s caller and the column path |
+| `peacockdb-core/src/tests/**`, `planner/tests/**`, `plan/tests/**`, `executor/**/tests*`, `wire/tests.rs`, `wire/gpu_tests/` | §5.7 |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the four `CudfHashJoin` tests onto the session |
+| `scripts/exec_model/` | §4.6 |
+| `peacockdb-core/Cargo.toml` | `url`, for the nullability tracer's `Url::to_file_path` |
+| `testdata/goldens/**`, `recipe-payloads.txt`, `cost-registry.csv`, `corpus_cases.inc` | the session's recipe line; #137's tpcds filters; the 19 `__rowmarker__` nodes and the zero-column scan's payload; cells |
+| `llm-wiki/architecture.md` (Joins), `build-test.md`, `tickets/`, `reports/` | the lasting parts of the design; counts; the closed tickets archived |
+
+Component-level API: the `JoinExecutor`/`ProbingJoin` traits (`set_build(Option)`, `Option`
+returns, `owes_nothing`; `without_build` removed); the wire's join vocabulary; three fbs tables
+removed. The C ABI's old join paths go with them.
+
+## Restriction
+
+Joins, and the planner pieces the design names. No change to non-join nodes' recipes. No
+broadcast (#140): the session is its foundation only. No float key normalization (#243).
+
+## Registry
+
+The estimate (`reports/join-rewrite-cell-estimate.md`) expects this task to flip 23 cpu cells
+(#190 ×20, #212 ×3) and up to about 428 gpu cells, about 306 of them weighted by confidence; and
+three groups to meet an out-of-chain issue instead: tpch rollup_over_join ×5 on #65 (its row lacks
+`65` today), tpcds q78 ×5 on #60, tpcds q32 at tp4 on #199. Those rows gain their tickets. The
+stale `183` rows' 25 join cells (tpch nested-loop-join, q4, cross-join, nested-loop-left-join,
+semi-join, anti-join, q15) are run here, since #183 is closed and #152 is their real blocker.
+pbench's join rows turn on with the rest — `empty-side-left-join` and `indf-full-join` among
+them. Each cell enabled with its DuckDB case green.
+
+## Verification bar
+
+- rust-only: the full cpu tier, the planner and wire tests, `test_cpu_corpus` with every newly
+  enabled cpu cell and its DuckDB case; the golden regenerations reviewed as one diff per kind
+  (recipe line, #137 filters, `__rowmarker__`).
+- device: the full gpu tier; `test_join_session.cpp`; every newly enabled gpu cell on shad-gpu at
+  its mode; `gpu-result.txt` against DuckDB.
+
+## Device workflow
+
+`build-test-shadgpu.sh`: a cycle for the harness, then the corpus in batches by dataset and mode
+(about five queries per round where cells are new).
+
+## Signoff — 2026-10-14
+
+Solved under its constraints: both engines run every join on the session; every refusal but #250's
+is lifted; the 18 tickets are archived; cpu +150 and device +670 cells, each held to DuckDB. Shortcuts:
+the cost gate is red (251 rises, 173 past 10%, `reports/join-backend-cost-rises.md`), pre-accepted by
+the board; the dead-code bar is read as "no new warning" (26 at base and head); exec_model's cuDF-call
+guard is retired rather than moved (§4.6), its model gone; `IS NOT DISTINCT FROM` keys merge to one
+lane rather than shuffle (§4.1); a rows-only scan beside row groups now refuses on #186; `IntoAnyBox`
+joins the crate's public surface; q66's cells are on with #55 open. Device runs were on nebius-gpu
+under the board's override; shad-gpu's `gpu-tests` job and the sf40 tier are deferred.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/join-session-cpp.md -->
+
+**Merged 2026-10-16 as PR #177, chain J's task, two commits: the code `4f5b3631` and the board `c32b613b`, merged into master by `67d79d85`.**
+
+# A join is a C++ session: built once, probed per batch, finished once
+
+Kind: production
+
+**This task closes no ticket on its own.** It builds the C++ half of
+[#136](../archive/archived-tickets.md#t136) (build-side match tracking when the probe side streams),
+[#153](../archive/archived-tickets.md#t153) (equi-join residual filter is applied after the outer gather),
+[#160](../archive/archived-tickets.md#t160) (nested-loop join supports Inner and Left only),
+[#215](../archive/archived-tickets.md#t215) (a left nested-loop join over a predicate the AST cannot take is
+refused on the device) and [#63](../archive/archived-tickets.md#t63) (a zero-column placeholder survives the
+cross join and shifts every ordinal above it), and removes #154's ten `join.cpp` sites. Each of
+those is reachable only through the planner and the Rust executors, so each closes in
+join-backend, where a query or a harness case first shows it fixed. Seventh of the join-rewrite
+chain.
+
+The design is [`join-rewrite-design.md`](join-rewrite-design.md): §1 (ABI and FlatBuffers), §2 (the
+core), §3 (per-case pseudocode naming every cuDF call), §5.6 (tests). This spec does not repeat it.
+
+## The work
+
+1. `flatbuffers/gpu_plan.fbs`: `CudfJoin` (§1.1), plus `chunk_bytes: uint64` (0 means 1 GiB),
+   which join-backend writes from the planner's scratch budget. Pad and absent-side schemas may
+   carry the `Timestamp*` `DataType` variants repartition-keys added. `CudfHashJoin`,
+   `CudfNestedLoopJoin` and `CudfCrossJoin` stay until join-backend stops writing them.
+2. `cpp/include/peacock_gpu.h`, `gpu_executor.cpp`, `node_session.cpp`: the four symbols (§1.2),
+   join ids in their own map in `NodeSession::Impl`, freed by `end_plan` and the error path; one
+   timing region per call.
+3. `cpp/src/operators/join.cpp`, rewritten as the session: §3.0–§3.10, with the validation's
+   corrections in place (the `hj` for a non-AST semi residual, `contains` not scatter, matches by
+   range, the owned distinct-key table, `R IS TRUE`, the per-side residual steps, chunking by
+   `inner_join_size` and `conditional_inner_join_size`). The semi family's cross conjuncts are
+   ANDed at the cuDF AST level (`NULL_LOGICAL_AND` over `ExprContext`-kept operands, hoisted
+   operands as `ast::column_reference`s), so several conjuncts make one `mixed_*` predicate;
+   `hj` is built whenever the pairs path can be taken, and a pairs call with no `hj` throws by name
+   rather than dereferencing null. Every pairs-producing path checks `inner_join_size` (or
+   `conditional_inner_join_size`) against `size_type`'s max, chunking further or refusing by name,
+   so 2³¹+k pairs never wrap. No rows-only arm: a zero-column side is
+   refused as a planner bug (§4.1's explicit `__rowmarker__`). The old `execute_hash_join`,
+   `execute_cross_join` and `execute_nested_loop_join` stay callable until join-backend switches,
+   then go with the old tables.
+4. The latent finish defect goes with the old code: today's Left/Full finish is a `LeftAnti` with
+   NULL = NULL hardcoded, which would drop NULL-key build rows it should pad. The session has no
+   finish join. A gtest pins the right answer.
+5. `peacockdb-ffi`: the four symbols' declarations, so join-backend can call them.
+6. The gtest binary `peacock_join_session_tests` is added to `install(TARGETS …)` and the
+   `INSTALL_RPATH` list (`cpp/CMakeLists.txt:321-327`) — CI and shad-gpu run only installed
+   `peacock_*_tests` — with a `main()` that installs the RMM pool and statistics adaptor, as
+   `test_plan_executor.cpp:2114` does. One allocation check on a session probe covers #154's
+   `join.cpp` sites (join-backend closes #154 whole).
+
+## Scope
+
+| path | change |
+|---|---|
+| `flatbuffers/gpu_plan.fbs` | `CudfJoin` |
+| `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`, `cpp/src/node_session.cpp` | the symbols, the join map |
+| `cpp/src/operators/join_session.{h,cpp}` (new) | the session — beside `join.cpp`, which keeps serving today's plans until join-backend deletes it |
+| `cpp/src/peacock/expr.h`, `cpp/src/expr.cpp` | `JoinFilterColMap` as a span; the AST-level AND of cross conjuncts |
+| `cpp/src/plan_executor.h`, `cpp/src/operators/dispatch.cpp` | the session's handle types; `CudfJoin` has no `execute_node` arm |
+| `cpp/tests/gpu/test_join_session.cpp` (new), `cpp/CMakeLists.txt` | the matrix of §5.6 |
+| `peacockdb-ffi/src/lib.rs` | declarations |
+| `llm-wiki/architecture.md`, `build-test.md` | the C ABI's new symbols; counts |
+
+Component-level API: four new C ABI symbols and one fbs table, both additive. No Rust behaviour
+change: nothing calls the symbols until join-backend.
+
+## Restriction
+
+C++ and the ABI. No planner, wire-writer, executor or driver change; no golden moves; the corpus
+does not change, since nothing reaches the session yet.
+
+## Verification bar
+
+- device: `test_join_session.cpp` green on 25.02 (shad-gpu), the shad-gpu log naming the installed
+  binary; the CI's 25.10a leg compiles it.
+  Every case of §5.6's matrix and named list, hand-counted.
+- device: the existing gpu tier unchanged (the old paths still serve it).
+
+## Device workflow
+
+`build-test-shadgpu.sh`, a cycle per arm group (hash, residual, semi family, nested loop, cross and
+empty sides), then one for the whole file.
+
+## Completeness signoff
+
+Solved under its constraints. 53 gtests over 213 hand-counted cases, green on nebius-gpu's L40S at
+cuDF 25.02 under the board's host override; the existing gpu tier unchanged. Four rounds; the
+completeness pass found one blocking gap and nine important items, all closed, and each fix proved
+red before being believed — #136's fold fails 10 of 53 under an overwriting `set_true`, #153's
+preserved-build half 6 of 53 under an empty conjunct list.
+
+Three deviations, each deliberate. §5.6's type × condition × build product is covered for three of
+its eight conditions, not all eight: the five absent ones reach the same `probe_empty_build` arm and
+the analyst judged them to add nothing. `join.cpp`'s ten #154 sites stay, as work item 6 provides —
+the session carries none of those copies and join-backend closes #154 whole. `plan_executor.h`
+keeps one clang-format reflow of an untouched declaration, left because the reflowed form is the
+conformant one. No bandaids.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/exit-copies.md -->
+
+**Merged 2026-10-16 as PR #176, chain J's task, two commits: the code `a8fcd4a2` and the board `26c2d587`, merged into master by `b4b83a82`.**
+
+# Operators hand their output over instead of copying it
+
+Kind: production
+
+**This task closes [#154](../archive/archived-tickets.md#t154)** (every operator exit path
+deep-copies its output into a fresh table) for the 11 sites outside `join.cpp`; join-session-cpp
+rewrites `join.cpp` and takes its 10. Sixth of the join-rewrite chain, after refcounted-scatter,
+whose `TableResult` (one owner per column, final shape) it uses without changing it.
+
+## Why it happens
+
+`std::make_unique<cudf::column>(view)` copies the device buffer, and the operators use it to
+build a table out of one they just produced, or out of their input. #154 lists the sites by kind.
+Outside `join.cpp`:
+- **ordinal subset of a fresh table:** `filter.cpp` 41 — a `select` over the fresh table (a repeated ordinal is two entries sharing one owner);
+- **an input column kept in the output:** `project.cpp` 44, `window.cpp` 46;
+- **a temporary that only needed a view:** `expr.cpp` 834, `build_column`'s `ColumnRef` arm, which
+  copies a whole column the caller views one line later — about 46 of the 107 GB q19's lineitem
+  filter moves at sf40, on every predicate the AST refuses;
+- **unresolved:** `aggregate.cpp` 413, 642, 644, 678, 680, 759, 771, each read and classed by this
+  task.
+
+## The work
+
+1. `expr.cpp`: the `ColumnRef` arm returns a view of the input column (`table.column(idx)`); its
+   callers take `column_view` already. No ownership change.
+2. `filter.cpp`: the kept columns are `select`ed from the fresh table's owners, so a repeated
+   ordinal is two entries sharing one owner and answers correctly — the "moved twice, a hole" trap
+   of a release cannot arise, and nothing is refused.
+3. `project.cpp`, `window.cpp`: an output mixing input columns with computed ones is built with
+   refcounted-scatter's `select` and `with`, so it views the input columns it keeps and owns the
+   ones it computes, and the input's other columns are freed as today. A repeated
+   `ColumnRef` is two entries sharing one owner, so the "moved twice, a hole" trap cannot arise;
+   tpcds q84 and q85 (a column projected twice, device cells on at tp1-single) are its regression.
+   If a site proves costlier to share than to copy, the task keeps that copy with a measured note
+   — the PR says which.
+4. `aggregate.cpp`: each of the seven read; a fresh-table site selected as in 2, an input-column
+   site as in 3, a site that must copy kept with a one-line reason. Expected outcome, from reading
+   them: 6 of the 11 sites outside `join.cpp` lose their copy; 5 keep it — the four Welford struct
+   members and one merged-state child, whose copies are small and whose shared form would cost
+   more than it saves. The PR lists each with its reason.
+5. Traps: a view taken before a release dangles (`ftv` near `join.cpp` ~L372 is the known one;
+   none may survive here).
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/expr.cpp`, `cpp/src/peacock/expr.h`, `operators/filter.cpp`, `project.cpp`, `window.cpp`, `aggregate.cpp`, `sort.cpp` | the sites; `evaluate_column`'s borrowed view |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the allocation cases |
+| `llm-wiki/tickets/corpus-coverage.md`, `build-test.md` | #154 reworded to `join.cpp`'s sites; counts |
+
+Component-level API: none; `TableResult` is unchanged (refcounted-scatter set it). No ABI, wire,
+Rust or golden change.
+
+## Restriction
+
+The 11 sites; `join.cpp` is join-session-cpp's. No operator's output changes.
+
+## Tests
+
+One gtest per family (aggregate, filter, project, window, a non-AST predicate's `ColumnRef`)
+under an RMM statistics adaptor: the call allocates the output's bytes, not twice them. A filter
+with a repeated projection ordinal answers both columns correctly. Every existing test green unchanged.
+
+## Verification bar
+
+- device: the gtests; the full gpu tier and the corpus unchanged; the sf40 q6 and q19 benchmark
+  before and after, recorded.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, two cycles.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints. **Six of the eleven sites lose their copy, five keep it** — §4's
+prediction — and `join.cpp`'s ten are untouched for the next task. Item 3 landed by a different
+mechanism than the spec named: `project.cpp` assembles its handle through the public fields rather
+than `select`/`with`, because no constructor can rename a kept column, with `register_handle` as
+the shape check. The outcome is identical, repeated ordinals included.
+
+**The nine gtests are the whole of the evidence, and two of them exist because the other seven
+could not fail.** Seven bound an allocation, each against the same cuDF work on the same input
+rather than a formula, and all seven came out exactly equal; all nine were watched red first. The
+two added by the completeness pass bound a *release*, and the run that proved they were needed is
+the argument for them: with both operators deliberately over-retaining, 75 of 77 cases passed —
+every byte bound green at its exact figure — and only these two went red.
+
+**Deferred, by the human host override and not by this task:** the Verification bar's sf40 q6 and
+q19 benchmark before and after. sf40 lives only on shad-gpu, down throughout. So the saving at
+`expr.cpp`'s `ColumnRef` arm — about 46 of the 107 GB q19's lineitem filter moves at sf40 — is
+**never quantified at that scale**, and the gtest table at 122,880 rows stands in for it. That is
+the one gap in this task's evidence. No bandaid applied.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/stale-cells.md -->
+
+**Merged 2026-10-16 as PR #175, chain J's task, two commits: the code `d3d78149` and the board `f982b8e7`, merged into master by `67dfe046`.**
+
+# The device cells a closed ticket still holds off are run
+
+Kind: production
+
+**This task closes no ticket.** Four tpch rows keep device cells off under tickets that are
+closed: `aggregate_groupby`, `shuffle_additive` and `shuffle_stddev` under #183 (utf8-everywhere,
+archived done), `filter_project` under #187 (decimal precision at export, archived done). The
+archived #183 kept its tag on a row "only where the other four modes have no ticket yet"
+(`corpus_cases.inc:53`: "a row keeping `183` has modes never run past the string class"). So 16
+device cells — `tp1_rowgroup`, `tp4_single`, `tp4_rowgroup`, `tp4_sized` on each of the four — have
+never been run since their tickets closed. Second of the join-rewrite chain, right after
+duckdb-oracle: none of these rows has a join, so nothing later in the chain changes them, and each
+cell meets DuckDB as it turns on.
+
+The estimate (`reports/join-rewrite-cell-estimate.md` §6) finds no known blocker on them. The
+chain's other `183` rows hold join cells (tpch nested-loop-join, q4, cross-join,
+nested-loop-left-join, semi-join, anti-join, q15); #152 blocks those, and join-backend runs them.
+
+## The work
+
+1. Run the 16 cells on shad-gpu at their modes, each compared with the cpu's golden as its line
+   says and with DuckDB.
+2. A cell that passes is enabled. A cell that fails gets the ticket it fails on — an open one, or
+   a new one filed with the query and mode that shows it — and stays off under it.
+3. `183` and `187` are struck from the four rows' tags once no off cell is left without another
+   ticket (`registry.rs`'s rule); the `corpus_cases.inc:53` comment is reworded or removed when no
+   row keeps `183`.
+4. `shuffle_stddev` runs with schema validation disabled on #225, as its line says; a cell that
+   fails on schema alone keeps `225`.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/tests/common/corpus_cases.inc` | the four lines' device modes; the comment |
+| `testdata/cost-registry.csv` | the four rows' cells and tags |
+| `llm-wiki/tickets/`, `build-test.md` | any ticket a failure needs; counts |
+
+Component-level API: none. No code change unless a failure is fixed here, which it is not: a
+failure is a ticket.
+
+## Restriction
+
+The 16 cells. No fix to anything they show.
+
+## Verification bar
+
+- device: the 16 cells run, each enabled or carrying its ticket; their DuckDB cases green for
+  the enabled ones.
+- rust-only: the registry tests both ways.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, one cycle under the corpus filter for the four rows.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints. All sixteen cells ran and all sixteen passed and met DuckDB, so
+item 2 is vacuous and no ticket was owed; `183` came off three rows and `187` off the fourth,
+which takes `187` out of the registry entirely. Seven join rows still keep `183` and are
+join-backend's, so `corpus_cases.inc`'s comment stays under item 3's own condition. No code
+changed, so the Restriction held by construction.
+
+**Measured on nebius-gpu, an L40S at cuDF 25.02, not the shad-gpu this spec names** — the human's
+host override routed it, shad-gpu being down throughout. Deferred by that override and by nothing
+else: `--run-benchmarks` and the `bench_` cases, Nsight, any H200 timing, the sf40 pair, and
+cuDF 26.02. The DuckDB half of the evidence is re-runnable without a device, by the 38
+`duckdb_gpu_tpch_` cases against the committed `gpu-result.txt`.
+
+One golden moved and it is accepted as float noise: `shuffle-stddev mode=tp1-single`, three lines
+in their last digits, 8.2e-16 relative against tolerances of 1e-11. The completeness pass found
+`architecture.md` claiming a plan run twice is byte-identical, which this contradicts and
+`build-test.md` already denied; that sentence now names the exception. No bandaid applied.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/refcounted-scatter.md -->
+
+**Merged 2026-10-16 as PR #173, chain J's task, two commits: the code `6a925839` and the board `bd30f15d`, merged into master by `8dfd068d`.**
+
+# A scatter's partitions share their table instead of each copying it
+
+Kind: production
+
+**This task closes [#145](../tickets/corpus-coverage.md#t145) (Refcounted handles: stop copying
+every partition out of a scatter) and [#197](../tickets/corpus-coverage.md#t197) (the repartition
+arm still concatenates a child it can only be handed one of).** Fifth of the join-rewrite chain,
+ahead of the join session so the session is written once against the shared-owner handle.
+`TableResult` changes here once, to its final shape — one owner per column — which exit-copies
+and the join session then use without changing it again. Drawn
+from `refcounted-tables.md` §1, §5, §6 (the scatter tests) and §8, which this chain drops; its
+join half (§2–§4, the retain symbol) is not needed, since the join session keeps its own build.
+
+## Why it happens
+
+`TableResult` is `{unique_ptr<cudf::table>, column_names}` (`cpp/src/plan_executor.h:16-19`),
+so a handle owns its memory alone. The hash repartition arm (`cpp/src/node_session.cpp:517-578`)
+takes its input (`combined`), writes the partitioned copy (`parted`, from `spark_hash_partition`),
+then deep-copies each partition out of `parted` into its own table (`:567`). `combined` and `parted`
+live until the arm returns, so the peak is about 3× the input (#145's text says 2×; inferred from
+scoping, not measured), once per aggregate shuffle and once per join side.
+
+#197: the arm concatenates `child[0]`'s handles, but only one ever arrives. The ticket's reason is
+wrong — join-side emits have no coalesce below them; the guarantee is the emitter sending
+`&[vec![handle]]` (`executor/gpu_backend/emit.rs:57`) — and so is its cost claim: with one handle
+`:537` moves the table, so the dead branch costs nothing. The fix is deletion either way.
+
+## The work
+
+1. `TableResult` takes its final shape, one owner per column:
+
+   ```cpp
+   struct TableResult {
+     std::vector<std::shared_ptr<cudf::column const>> owners;  // owners[i] keeps columns[i]'s buffers alive;
+                                                               // two entries may share one column
+     std::vector<cudf::column_view> columns;                   // a whole column of *owners[i], or a row slice of it
+     std::vector<std::string> column_names;
+     cudf::table_view view() const { return cudf::table_view{columns}; }
+     static TableResult owning(std::unique_ptr<cudf::table>, std::vector<std::string> names);
+     TableResult slice(cudf::size_type begin, cudf::size_type end) const;   // shares owners
+     TableResult select(std::vector<cudf::size_type> const& ordinals) const;  // shares owners
+     TableResult with(std::unique_ptr<cudf::column>, std::string name) const;  // appends a computed column
+   };
+   ```
+   Never zero columns (a zero-column view reads 0 rows; the plan's explicit `__rowmarker__` keeps
+   one). A consumer reads views; one that needs an owning column copies at that site, with a
+   reason. A column is freed when the last handle viewing it goes; a slice pins its parent column,
+   not the whole table.
+   
+   The 37 `.table` / `->table` sites across 11 files today (node_session 17, join 6, filter 4,
+   project 2, gpu_executor 2, one each in aggregate, dispatch, limit, sort, union, window) read the
+   view; a producer wraps its fresh table as owner and whole view. `execute_one`'s signature does
+   not change. Erase-on-read stays; erasing drops a reference.
+2. The scatter wraps `parted` with `owning` and registers N handles, each its `slice` — every
+   partition's columns view row ranges of `parted`'s columns, no copy. `combined` is dropped as soon as `spark_hash_partition` returns, so the peak is
+   2× during the partition (an out-of-place `cudf::partition` cannot do better) and 1× after.
+3. #197: the arm takes exactly one handle — `owned`/`views` become one, and `child[0].size() != 1`
+   is refused by name.
+4. **The cost of sharing**, said in the PR and the wiki: one undrained lane keeps all of `parted`
+   alive (worse under skew), and the per-partition timers of p1..N−1 drop toward zero, since the
+   copy they timed is gone.
+5. **String bytes of a slice.** `out_stats.varlen_content_bytes` (`node_session.cpp:229-240`) uses
+   `strings_column_view::chars_size`, which reports the unsliced parent's bytes for a sliced view
+   (`cudf/strings/strings_column_view.hpp:89-98`). Once partitions are views, every partition would
+   report the whole table's string bytes and the string-keyed emits' `batch_bytes` in the cpu
+   goldens would stop matching (tpch q1 and shuffle-additive-avg at tp4: six device cells on
+   today). The count is taken from the slice's own first and last offsets. The `out_stats` gtest
+   scatters a string column.
+6. **The accounting ticket**, filed by this task in `memory.md` when it lands: the driver prices
+   each lane's batch alone (`driver/accounting.rs`), so a released lane's bytes leave the model
+   while the device still holds them behind a sibling — the model under-reports. The fix it names
+   is device-reported residency (`GpuBackend::resident_bytes()`).
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/plan_executor.h`, `cpp/src/table_result.cpp` (new), `cpp/CMakeLists.txt` | `TableResult` and its constructors |
+| `cpp/src/node_session.cpp` | the scatter; #197; the registry |
+| `cpp/src/operators/*.cpp`, `cpp/src/gpu_executor.cpp`, `dispatch.cpp` | the `.table` sites |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the scatter tests |
+| `llm-wiki/architecture.md`, `build-test.md`, `tickets/` | the handle's shape; counts; #145/#197 archived; the accounting ticket |
+
+Component-level API: `TableResult` (internal to the C++ library). No C ABI change, no wire change.
+
+## Restriction
+
+Ownership and the scatter only. No change to any operator's output, to the driver, or to
+accounting beyond the ticket.
+
+## Tests
+
+gtests, an RMM statistics adaptor around each: a scatter's N handles share `parted`'s column owners (release
+N−1, read the survivor); the N outputs concatenate back to the input; `out_stats` per partition
+unchanged; the peak during the call is at most the partitioned table plus the scatter's own
+temporaries (hashes, the partition map, a gather map, string offsets) — not a whole input higher,
+which holding `combined` and the slice copies would add — and the drop against today's run is
+recorded by hand in the detail file (the partitioned table, about the input's size, stays resident
+after the call either way, so a before-minus-after bound cannot hold); a child of two handles is
+refused. No golden moves.
+
+## Verification bar
+
+- device: the gtests; the full gpu tier unchanged (every answer the same); one corpus cycle at the
+  tp4 modes, benchmark timings recorded before and after.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, two cycles (gtests, then the tiers).
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints: all six items of The work, the Restriction held, no golden moved,
+and the handle is the listing above plus two additive accessors (`num_rows`, `num_columns`).
+
+Two deliberate deviations. The Tests section's peak bound under-counts cuDF's strings gather by
+about three times, so a string scatter's peak never moved and a formula from that wording would
+have failed a correct arm; the test compares peak and requested total against partitioning the
+same input alone, which discriminated on both shapes. And the name-count check sits at
+`register_handle`, not in a constructor, because the fields are public and task 6's plan
+assembles handles through them.
+
+Deferred by the human host override, not by this task: the before-and-after benchmark timings,
+`--run-benchmarks`, Nsight, the sf40 pair. No bandaid applied.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/repartition-keys.md -->
+
+**Merged 2026-10-16 as PR #169, chain J's task, two commits: the code `5a756452` and the board `cfd024ac`, merged into master by `7990a493`.**
+
+# The shuffle hashes every key type the planner emits, by the rule the cpu uses
+
+Kind: production
+
+**This task closes [#201](../archive/archived-tickets.md#t201) (the murmur gate proves a copy of
+the lane rule, not the rule), [#206](../archive/archived-tickets.md#t206) (a float or boolean
+partition key is refused on the device), [#240](../archive/archived-tickets.md#t240) (a timestamp
+partition key is refused on the device), [#95](../archive/archived-tickets.md#t95) (a decimal
+partition key is refused on the device) and [#189](../archive/archived-tickets.md#t189) (the
+shuffle cannot hash a rollup's grouping-set id).** It also makes unsigned keys shuffle on both
+engines (the review's row 11; no ticket). Fourth of the join-rewrite chain: the joins
+that follow shuffle on keys of these types.
+
+## Why it happens
+
+The device kernel's key switch (`cpp/src/spark_hash_partition.cu:144-185`) hashes STRING, INT32
+and INT64, after narrowing INT8/16 and bit-casting TIMESTAMP_DAYS; every other type falls to
+`CUDF_FAIL "unsupported key column cuDF type_id=N"` (`:179`). Comet's hasher, the cpu's lane rule
+(`executor/cpu_backend/spark_partitioning.rs`), takes Boolean as i32, floats by their bits with
+-0.0 as 0, every timestamp unit as i64, and Decimal128 by declared precision — 8 LE bytes of the
+unscaled value at p ≤ 18, 16 above (`datafusion-comet-spark-expr-0.6.0/src/hash_funcs/utils.rs`).
+cuDF's `data_type` has no precision, and the loader widens every decimal to Decimal128, so the
+kernel cannot pick comet's width itself. The gate
+that proves the kernel matches comet (`cpu_backend/gpu_tests/murmur_conformance.rs`) proves it
+against its own `cpu_partition_ids`, not the production `rows_per_lane` (#201). The rollup shuffle
+copies DataFusion's keys, `__grouping_id: UInt8` among them, which comet has no arm for (#189).
+Comet has no unsigned arm at all, nor has the kernel, so any unsigned key across a shuffle is
+refused at run time on both engines; the tp1 modes, which do not shuffle, answer.
+
+## The work
+
+1. **#201 first.** The gate calls production `rows_per_lane` over the same columns and compares
+   lane by lane; its `cpu_partition_ids` and local `pmod` go, and `pmod_handles_negative_hashes`
+   tests the production `pmod`. Every new type below is proved against the real rule.
+2. **#189** (corpus-fixes fix 2): `aggregate_sequence` drops the grouping id from a rollup's
+   shuffle keys (`keys.retain(...)` before the shuffle, guarded on `!group.is_single()`), so it is
+   never hashed. Correct because hashing a subset of the Final group's keys still puts every row
+   of a group on one lane, and the validator's subset rule (`plan/aggregate.rs:236-256`) already
+   admits it; the cost is a little more skew where grouping sets share visible key values. A key
+   at or past `group.expr().len()` left after the drop, or an empty key list, is refused. Planner
+   only; a planner test asserts `hash_keys` at tp4.
+3. **Decimals hash 16 bytes on both engines** (decision D2, taken: the cpu's rule changes, not the
+   wire). The lane rule must make the cpu and the device agree (`architecture.md`, "Rehash and the
+   comet hash"); comet is the shared implementation of Spark's murmur3, not a promise of Spark's
+   placement, and nothing reads our lane numbers from outside. So `rows_per_lane` casts each
+   decimal key to `Decimal128(38, s)` before calling comet, which then always hashes the 16 LE
+   bytes of the unscaled value, and the kernel hashes the same 16 bytes of the `int128` (widening
+   a DECIMAL32/64 should one arrive). No wire field, no `partitioning.hpp` signature change, no FFI
+   change; a decimal's lane no longer matches Spark's at p ≤ 18. A scale drift at the emit's input
+   is the schema validator's to catch, where the line enables it.
+4. **Kernel arms**, each red first as a live gate: Boolean (as INT32); Float32 and Float64 (their
+   bits, -0.0 as +0.0, and **every NaN as one canonical bit pattern** — comet hashes a NaN by its
+   bits (`utils.rs:78-105`), which would put `NaN` and `-NaN` (x86's `0/0`) in different lanes at
+   tp4 while tp1 equates them on the device; so `rows_per_lane` canonicalizes NaN before calling
+   comet and the kernel does the same, the decision D2 took for decimals: the engines agree, not
+   Spark); Timestamp in all four units (as i64);
+   Decimal128 (16 LE bytes of the unscaled `int128`, matching step 3's cpu cast). Int8, a zero-row input and an all-NULL
+   key get gates too — the survey found them ungated.
+4b. **Unsigned keys, one rule on both engines.** Spark has no unsigned types, so there is no
+   placement to match: UInt8 and UInt16 cast to Int32, UInt32 to Int64 (value casts), UInt64
+   reinterpreted as Int64 bits, then hashed as that signed type is — by `hash_keys` before comet
+   and by the kernel's normalizing switch. A live gate per width, values past the signed maximum
+   included.
+5. **Operator harness cases** (`tests/gpu_tests/emit_cases.rs`, in-memory batches): one per key
+   type, both backends placing every row in the same lane — Int8, Int16, Int32, Int64, Float32,
+   Float64 (each with -0.0, 0.0, NaN, -NaN and NULL), Boolean, Date32, Timestamp in four units,
+   Decimal128 at p ≤ 18 and p > 18, Utf8, UInt8, UInt16, UInt32, UInt64, a mixed composite; `emit_schema_cases.rs` the same types
+   held as declared. `tests/synthetic.rs` gains `key_types(rows, seed)`, one column per hashable
+   type with those special values, which join-backend's join cases reuse. The `bug_` pins for
+   float, boolean (#206) and decimal (#95) flip.
+6. **Timestamps on the wire.** The fbs `DataType` enum gains `TimestampSecond`,
+   `TimestampMillisecond`, `TimestampMicrosecond` and `TimestampNanosecond` (an append), with the
+   Rust `convert_data_type` mapping from Arrow `Timestamp(unit, _)`, their `fb_text` rendering, and
+   the C++ `fb_to_type_id` arms. Today a timestamp reaches the device only because no node reads
+   its type from the wire; a cast to a timestamp type (pbench's `timestamp-s-key-group`) cannot be
+   written at all. join-session-cpp's pad and absent-side schemas consume these variants.
+   pbench's `timestamp-s-key-group`, declared not runnable on #240, is enabled here.
+   Then **an unmapped type is a `PlanError` in every schema**, never the silent `Null` of
+   `serialize_schema` (`serialize.rs:136`): the plan golden says "not runnable" naming the column
+   and its type ([#249](../tickets/complete-coverage.md#t249)). tpch and tpcds hold no such type, so
+   no golden of theirs moves; pbench's two #249 queries are declared not runnable on it.
+7. **#243's pins** (open; not fixed here): two `bug_` cases, cpu against device, over float keys
+   holding -0.0, 0.0, NaN and -NaN — a float-keyed `GpuAggregate` (cpu six groups, device four)
+   and a float-keyed Inner `GpuHashJoin` over one probe batch. Each asserts the divergence.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/spark_hash_partition.cu` | the arms, NaN canonicalized |
+| `flatbuffers/gpu_plan.fbs`, `peacockdb-core/src/wire/serialize.rs`, `plan_text/`, `cpp/src` (`fb_to_type_id`) | the timestamp `DataType` variants |
+| `testdata/goldens/recipe-payloads.txt` | only if a corpus payload carries a timestamp (none does today); regenerated if so |
+| `peacockdb-core/src/executor/cpu_backend/spark_partitioning.rs` | the decimal cast, the unsigned widening and the NaN canonicalization before comet |
+| `peacockdb-core/src/wire/serialize.rs` and its callers in `wire/`, `wire/expr_writer.rs` | #249: an unmapped type a `PlanError` in every schema; `data_type` cites `(#249)` |
+| `peacockdb-core/src/planner/tests/plan_goldens.rs` | `NOT_RUNNABLE`: `timestamp-s-key-group` leaves; the three #249 pbench queries enter |
+| `peacockdb-core/src/wire/tests.rs`, `planner/translator/tests.rs`, `cpp/tests/gpu/test_plan_executor.cpp` | the timestamp types, the #249 pin, #189's planner test, the timestamp cast gtest |
+| `peacockdb-core/src/planner/translator/aggregate.rs` | #189 |
+| `peacockdb-core/src/executor/cpu_backend/gpu_tests/murmur_conformance.rs` | #201; the new gates |
+| `peacockdb-core/src/tests/synthetic.rs`, `tests/gpu_tests/emit_cases.rs`, `emit_schema_cases.rs`, `aggregate_cases.rs`, `join_cases.rs` | the cases and pins |
+| `cpp/tests/gpu/test_cudf.cpp` | the hardcoded comet ids, a third copy of the rule: replaced by a case read from the gate's vectors, or deleted with the reason |
+| `testdata/cost-registry.csv`, `corpus_cases.inc`, `llm-wiki/` | cells, tags, counts, #95/#189/#201/#206/#240 archived |
+
+Component-level API: the fbs `DataType` enum gains four timestamp variants (an append; no C ABI
+symbol, no `partitioning.hpp` change). The cpu's lane rule changes for decimal keys (16 bytes) and
+NaN float keys (one canonical NaN).
+
+## Restriction
+
+Key types and the lane rule only. No float equality change on the cpu: #243 stays open, reworded
+by this task to the cpu's equality alone (`-0.0 ≠ 0.0` and `NaN ≠ -NaN` in DataFusion's compare
+and hash), since the lane split it also described is fixed here. No join change, no change to
+which keys DataFusion picks except #189's drop.
+
+## Registry
+
+#189's 15 cpu cells (tp4 × 3: tpch rollup_over_join; tpcds q5, q18, q22, q80) turn on, compared
+with DuckDB. #95's eight rows lose `95` where it is their last ticket on a cell (most wait on
+#152 too). pbench's key-type rows' tp4 device cells turn on where they pass, except the float
+rows, commented out on #243; `timestamp-s-key-group` comes off `NOT_RUNNABLE` and its cells turn
+on where they pass; `uint-key-group` and `uint-key-join` turn on at tp4 on both engines.
+
+## Verification bar
+
+- rust-only: the planner test for #189; `test_cpu_corpus` with the 15 cells and their DuckDB cases.
+- device: every live gate red before its arm and green after, a NaN and a -NaN key in one lane;
+  the emit cases and schema cases; the two #243 pins red as pins.
+- rust-only: a timestamp cast serializes and renders; the plan golden for `timestamp-s-key-group`
+  is runnable.
+
+## Device workflow
+
+`build-test-shadgpu.sh`; a cycle per arm group (bool and float, timestamp, decimal), then one for
+the corpus cells.
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints, on both engines, and **no shortcut or bandaid**: #201, #206, #240, #95 and
+#189 are closed and archived, every kernel arm landed red-first under a live gate, 21 device and 24 cpu
+cells are on, and the 24 left off carry a measured ticket each. #201 was the one worth having — the gate
+passed with production's seed moved, because it compared the kernel against a second copy of the rule.
+Three key types now depart from a counterparty by design: decimals from Spark, NaN from comet (which
+restores Spark), unsigned from both; `architecture.md` carries which from which. Two Registry claims are
+undelivered — the three #249 queries did not enter `NOT_RUNNABLE`, their `.sql` files being #255's, so
+that step was deleted, and `uint-key-join` turned on at tp4 on the cpu only, its four device cells
+measured as #152. One thing is not self-policing: nothing fails by count when `convert_data_type` gains
+a member, so the next key type can land unproven on both engines; a refusal, not a wrong answer.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/pbench.md -->
+
+**Merged 2026-10-16 as PR #168, chain J's task, two commits: the code `c6a67516` and the board `f8d81ab5`, merged into master by `745bbd2d`.**
+
+# pbench — a small dataset whose data holds what tpch and tpcds do not
+
+Kind: production
+
+**This task closes [#227](../tickets/corpus-coverage.md#t227)** (check schema nullability in
+tests), folded in below; otherwise it closes no ticket. It adds a third corpus dataset, `pbench`, at sf1 only. Its data
+deliberately holds what the two benchmarks lack: NULL join keys on both sides, NULLs under
+`NOT IN`, keys of every type the shuffle must hash, duplicate and skewed keys, and empty sides.
+Each in-scope ticket of the join-rewrite chain that can be shown in an answer gets a query that
+shows it, registered with its cells off. Every later task in the chain turns those cells on
+when its fix allows. Third of the chain, after `duckdb-oracle` and `stale-cells`, so every query is DuckDB-checked
+from the start.
+
+## Why
+
+The rewrite's defects — #59 and #80 (NULL keys under anti, mark and `NOT IN`), the latent Left/Full
+finish that drops NULL-key build rows (`join-rewrite-design.md` §5), #137's skew — are invisible
+in the corpus because tpch and tpcds hold no NULL join keys where these shapes read them, and
+`NOT IN` meets no NULL. Hand-written cases in `join_cases.rs` prove a node; pbench proves a query,
+against DuckDB, at all five modes.
+
+## The data
+
+Generated by DuckDB (the pinned 1.5.4 of `duckdb_result.py`), seeded, deterministic, and
+**committed** like `testdata/tpch.minimal/` — under 1 MB of parquet, so CI, shad-gpu and verda need
+no generator step and no S3 entry. The generator script is committed beside it:
+`testdata/pbench/gen.sql`, run by `testdata/generate_pbench.sh`, writing `testdata/pbench.sf1/`.
+
+| table | rows | row groups | columns |
+|---|---|---|---|
+| `fact` | 20,000 | 10 (DuckDB rounds row groups to 2,048 rows) | `f_id` Int64; `f_k` Int32 (5% NULL, half the rows on keys 0–2, the rest spread over 0–1000); one key column per hashable type — `f_k8` Int8, `f_kb` Boolean (NULLs), `f_kf32` Float32 and `f_kf64` Float64 (NaN, -0.0, 0.0, NULL), `f_kdec15` Decimal128(15,2), `f_kdec38` Decimal128(38,4) (NULLs), `f_ts_ms`, `f_ts_us`, `f_ts_ns` Timestamp, `f_ts_s` second-valued timestamps (parquet has no second unit: queries reach `Timestamp(Second)` through `arrow_cast`), `f_dt` Date32, `f_ku32` UInt32 (values past `i32::MAX`, NULLs); `f_kstruct` Struct(a Int32, b Utf8); `f_s` Utf8 (NULLs); measures `f_qty` Int32, `f_amount` Decimal128(15,2) |
+| `dim` | 2,000 | 1 | `d_id`; `d_k` Int32, every key twice (many-to-many against `fact`), 1 in 40 NULL; the same key-type columns as `fact`, its floats holding -0.0 and NaN too (so `float64-key-join` meets them), `d_ku32` and `d_kstruct` overlapping `fact`'s; `d_w` Int32; `d_name` Utf8 |
+| `sub` | 200 | 1 | `s_z` Int32 (the correlation column), `s_y` Int32, 1 in 25 NULL |
+| `tiny` | 8 | 1 | `t_id`, `t_k` (two distinct keys), `t_v`, `t_pat` Utf8 (`LIKE` patterns over `d_name`: `'name1%'`, `'%7'`, …) |
+| `empty` | 0 | 1 | `tiny`'s schema |
+
+A prototype of exactly this generator was run (`gen.sql` in the helper's scratchpad, reproduced
+as the task's starting point) and every query below planned on DataFusion 45 at four partitions.
+
+**The small-table rule is off for pbench.** `PlanKnobs.small_table_bytes` is 5 MB for every mode
+(`test_support/mod.rs:159`), which would plan every pbench scan as one lane. pbench plans with it
+at 0 through a per-dataset value; tpch and tpcds keep 5 MB. So `fact` splits across lanes at tp4,
+and the one-row-group tables leave three lanes empty — the empty-lane shapes (#173, #212) for free.
+
+## The queries
+
+`testdata/pbench-queries/<name>.sql`, one per row. "Plans as" is DataFusion 45's physical join (or
+the shuffle) at four partitions, measured on the prototype; the task confirms each from its plan
+golden and replaces a query whose plan drifts. "Off on" is the expected blocking tickets; the run
+decides (see Registry).
+
+### Shuffle key types — repartition-keys (#206, #240, #95, #189)
+
+| name | SQL | off on |
+|---|---|---|
+| float64-key-group | `SELECT f_kf64, count(*) AS n FROM fact GROUP BY f_kf64` | commented out: #243; gpu tp4: #206 |
+| float32-key-group | `SELECT f_kf32, count(*) AS n FROM fact GROUP BY f_kf32` | commented out: #243; gpu tp4: #206 |
+| bool-key-group | `SELECT f_kb, count(*) AS n FROM fact GROUP BY f_kb` | gpu tp4: #206 |
+| int8-key-group | `SELECT f_k8, count(*) AS n FROM fact GROUP BY f_k8` | none expected: every cell on if it passes; a failing cell gets its ticket (the registry rule allows no off cell without one) |
+| timestamp-ms-key-group | `SELECT f_ts_ms, count(*) AS n FROM fact GROUP BY f_ts_ms` | gpu tp4: #240 |
+| timestamp-us-key-group | `SELECT f_ts_us, count(*) AS n FROM fact GROUP BY f_ts_us` | gpu tp4: #240 |
+| timestamp-ns-key-group | `SELECT f_ts_ns, count(*) AS n FROM fact GROUP BY f_ts_ns` | gpu tp4: #240 |
+| timestamp-s-key-group | `SELECT arrow_cast(f_ts_s, 'Timestamp(Second, None)') AS ts, count(*) AS n FROM fact GROUP BY 1` | not runnable on #240: the cast to `Timestamp(Second)` cannot cross the wire until repartition-keys adds the fbs timestamp types — declared in `NOT_RUNNABLE` here, enabled there |
+| decimal15-key-group | `SELECT f_kdec15, count(*) AS n FROM fact GROUP BY f_kdec15` | gpu tp4: #95 |
+| decimal38-key-group | `SELECT f_kdec38, count(*) AS n FROM fact GROUP BY f_kdec38` | gpu tp4: #95 |
+| float64-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kf64 = d_kf64` | commented out: #243; gpu: #152, tp4 #206 |
+| decimal15-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kdec15 = d_kdec15` | gpu: #152, tp4 #95 |
+| rollup-small-keys | `SELECT f_k8, f_kb, sum(f_qty) AS q FROM fact GROUP BY ROLLUP (f_k8, f_kb)` | cpu and gpu tp4: #189 |
+| uint-key-group | `SELECT f_ku32, count(*) AS n FROM fact GROUP BY f_ku32` | cpu and gpu tp4: folded into repartition-keys (the review's row 11: comet and the kernel have no unsigned arm), tagged `189` until then — #189 is the same missing unsigned arm, met through the grouping id, and repartition-keys closes both; to confirm from the plan golden |
+| uint-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_ku32 = d_ku32` | cpu and gpu tp4: the same; gpu: #152 |
+
+The three float rows hold `-0.0` and NaNs of both signs, where the cpu answers differently from
+DuckDB and the device (#243, open, not fixed in this chain). Each lands with its SQL file and its
+goldens, and its `corpus_query!` line commented out with `// #243 — the cpu keys -0.0 and NaN by
+their bits` above it, so the line is enabled by the task that fixes #243. Its registry row carries
+`243` and every cell off.
+
+### Hash joins — join-session-cpp and join-backend
+
+| name | SQL | plans as | off on |
+|---|---|---|---|
+| inner-join-hot-keys | `SELECT f_id, d_id FROM fact JOIN dim ON f_k = d_k` | Inner | gpu: #152, #220 |
+| left-join-null-keys | `SELECT d_id, d_k, f_id FROM dim LEFT JOIN fact ON d_k = f_k` | Left | gpu: #152 (and the latent finish defect behind it) |
+| full-join-null-keys | `SELECT d_id, d_k, f_id FROM dim FULL JOIN fact ON d_k = f_k` | Full | gpu: #152 (the same) |
+| right-join-null-keys | `SELECT d_id, f_id, f_k FROM dim RIGHT JOIN fact ON d_k = f_k` | Right | gpu: #152 |
+| left-join-residual | `SELECT d_id, f_id FROM dim LEFT JOIN fact ON d_k = f_k AND f_qty > d_w` | Left + filter | both: #153 |
+| right-join-residual | `SELECT d_id, f_id FROM dim RIGHT JOIN fact ON d_k = f_k AND f_qty > d_w` | Right + filter | both: #153 |
+| full-join-residual | `SELECT d_id, f_id FROM dim FULL JOIN fact ON d_k = f_k AND f_qty > d_w` | Full + filter | both: #153 |
+| exists-null-keys | `SELECT d_id FROM dim WHERE EXISTS (SELECT 1 FROM fact WHERE f_k = d_k)` | LeftSemi | gpu: #152 |
+| not-exists-null-keys | `SELECT d_id FROM dim WHERE NOT EXISTS (SELECT 1 FROM fact WHERE f_k = d_k)` | LeftAnti | both: #59 |
+| exists-or-mark | `SELECT d_id FROM dim WHERE d_w = 0 OR EXISTS (SELECT 1 FROM fact WHERE f_k = d_k)` | LeftMark | both: #59 |
+| probe-exists-residual | `SELECT f_id FROM fact WHERE EXISTS (SELECT 1 FROM dim WHERE d_k = f_k AND d_w < f_qty)` | RightSemi + filter | both: #159 |
+| probe-not-exists-residual | `SELECT f_id FROM fact WHERE NOT EXISTS (SELECT 1 FROM dim WHERE d_k = f_k AND d_w < f_qty)` | RightAnti + filter | both: #159 |
+| anti-null-preserved-condition | `SELECT d_id FROM dim WHERE NOT EXISTS (SELECT 1 FROM fact WHERE f_k = d_k AND d_kb)` | LeftAnti + build-only filter | both: #59 (a NULL `d_kb` keeps the row) |
+| not-in-uncorrelated | `SELECT f_id FROM fact WHERE f_k NOT IN (SELECT s_y FROM sub)` | RightAnti | both: #80, #59 |
+| not-in-correlated | `SELECT f_id FROM fact WHERE f_k NOT IN (SELECT s_y FROM sub WHERE s_z = f_qty)` | RightAnti, two keys | both: #80, #59 |
+| not-in-under-or | `SELECT f_id FROM fact WHERE f_qty = 0 OR f_k NOT IN (SELECT s_y FROM sub WHERE s_z = f_qty)` | LeftMark, two keys | both: #80, #59 |
+| not-not-in | `SELECT f_id FROM fact WHERE NOT (f_k NOT IN (SELECT s_y FROM sub))` | after the rule's NNF fold, a semi join for `f_k IN (...)` | both: #80 |
+| not-or-not-in | `SELECT f_id FROM fact WHERE NOT (f_qty = 0 OR f_k NOT IN (SELECT s_y FROM sub))` | after NNF, `f_qty <> 0 AND f_k IN (...)` | both: #80 |
+| in-is-null | `SELECT f_id FROM fact WHERE (f_k IN (SELECT s_y FROM sub)) IS NULL` | refused at plan time: the `IN`'s NULL is read | both: #250 |
+| sparse-probe-left | `SELECT d_id, t_id FROM dim LEFT JOIN tiny ON d_k = t_k` | Right (build `tiny`) | gpu tp4: #152 |
+| sparse-probe-semi | `SELECT d_id FROM dim WHERE d_k IN (SELECT t_k FROM tiny)` | RightSemi | gpu: #152 |
+| finish-without-probe | `SELECT d_id FROM dim WHERE d_w = 0 OR EXISTS (SELECT 1 FROM tiny WHERE t_k = d_k)` | LeftMark (never swapped) over the two-key `tiny`: two probe lanes with no batch | gpu tp4: #173 |
+| sparse-build-right | `SELECT t_id, f_id FROM tiny RIGHT JOIN fact ON t_k = f_k` | Right, build lanes with no batch | both tp4: #212 |
+| sparse-build-full | `SELECT t_id, f_id FROM tiny FULL JOIN fact ON t_k = f_k` | Full, the same | both tp4: #212 |
+| sparse-build-anti | `SELECT f_id FROM fact WHERE NOT EXISTS (SELECT 1 FROM tiny WHERE t_k = f_k)` | RightAnti, the same | both tp4: #212 |
+| ts-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_ts_us = d_ts_us` | Inner on a timestamp key (review row 28), to confirm from the plan golden | gpu: #152; gpu tp4: #240 |
+| mark-cross-residual | `SELECT d_id FROM dim WHERE d_w = 0 OR EXISTS (SELECT 1 FROM fact WHERE f_k = d_k AND f_qty > d_w)` | LeftMark + cross filter (review row 29), to confirm from the plan golden | both: #59 |
+| empty-side-left-join | `SELECT t.t_id, d.d_id FROM tiny t LEFT JOIN (SELECT * FROM dim WHERE false) d ON t.t_k = d.d_k` | Left over an `EmptyExec` (review row 8), to confirm from the plan golden | both: `155` — no arm for `EmptyExec` until join-backend's `GpuEmpty` |
+| indf-full-join | `SELECT d.d_id, t.t_id FROM dim d FULL JOIN tiny t ON d.d_k IS NOT DISTINCT FROM t.t_k` | NLJ Full over `IS NOT DISTINCT FROM` (review row 9), to confirm from the plan golden; join-backend makes it a null-equal hash join | both: #160 (gpu also the AST's missing `NULL_EQUAL`, `155`) |
+
+### Nested loops and cross joins — #160, #215, #63, #190, #207, #208
+
+| name | SQL | plans as | off on |
+|---|---|---|---|
+| nl-inner | `SELECT f_id, t_id FROM fact JOIN tiny ON f_qty < t_v` | NLJ Inner | gpu: #152 |
+| nl-left | `SELECT f_id, t_id FROM fact RIGHT JOIN tiny ON f_qty < t_v` | NLJ Left | gpu: #152 |
+| nl-right | `SELECT f_id, t_id FROM tiny RIGHT JOIN fact ON f_qty < t_v` | NLJ Right | both: #160 |
+| nl-full | `SELECT f_id, t_id FROM fact FULL JOIN tiny ON f_qty < t_v` | NLJ Full | both: #160 |
+| nl-left-semi | `SELECT t_id FROM tiny WHERE EXISTS (SELECT 1 FROM fact WHERE t_v > f_qty)` | NLJ LeftSemi | both: #160 |
+| nl-left-anti | `SELECT t_id FROM tiny WHERE NOT EXISTS (SELECT 1 FROM fact WHERE t_v > f_qty)` | NLJ LeftAnti | both: #160 |
+| nl-right-semi | `SELECT f_id FROM fact WHERE EXISTS (SELECT 1 FROM tiny WHERE t_v > f_qty)` | NLJ RightSemi | both: #160 |
+| nl-right-anti | `SELECT f_id FROM fact WHERE NOT EXISTS (SELECT 1 FROM tiny WHERE t_v > f_qty)` | NLJ RightAnti | both: #160 |
+| nl-mark | `SELECT t_id FROM tiny WHERE t_k = 0 OR EXISTS (SELECT 1 FROM fact WHERE t_v > f_qty)` | NLJ LeftMark | both: #160 |
+| nl-left-decimal | `SELECT f_id, t_id FROM fact RIGHT JOIN tiny ON CAST(t_v AS DECIMAL(20,0)) > CAST(f_qty AS DECIMAL(20,0))` | NLJ Left, non-AST | gpu: #215 |
+| nl-projection | `SELECT f_id FROM fact JOIN tiny ON f_qty < t_v` | NLJ Inner, narrowed | cpu: #190; gpu: #152 |
+| cross-projection | `SELECT f_id FROM fact, tiny` | Cross, narrowed | both: #207 |
+| cross-empty-build | `SELECT e.t_id, t.t_id FROM empty e, tiny t` | Cross over a zero-row build | cpu: #208 |
+| scalar-subquery-cross | `SELECT CASE WHEN (SELECT count(*) FROM fact WHERE f_qty BETWEEN 1 AND 20) > 100 THEN (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 1 AND 20) ELSE (SELECT avg(f_amount) FROM fact WHERE f_qty BETWEEN 21 AND 40) END AS b1, (SELECT count(*) FROM dim WHERE d_w >= 0) AS b2 FROM tiny WHERE t_id = 1` | predicate-free NLJs over one-row aggregates (tpcds q9's shape) | gpu: #63 (the filter keeps DataFusion from answering an unfiltered `count(*)` from statistics with a `PlaceholderRowExec`, refused on #158) |
+| outer-on-true-empty | `SELECT t.t_id, e.t_id AS e_id FROM tiny t LEFT JOIN empty e ON true` | predicate-free NLJ Right over a zero-row build | both: #160 (and, once lifted, the cross-join mapping the design replaces) |
+
+### Complete join coverage — shapes that stay open after chain J
+
+Each carries a ticket of `joins.md`'s "Complete Join Coverage" section; the task that fixes the
+ticket turns the cells on.
+
+| name | SQL | plans as | off on |
+|---|---|---|---|
+| struct-key-join | `SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct` | Inner on a struct key, to confirm from the plan golden | all cells: #245 (no hasher arm for a nested type) and #249 (the wire names no struct type; not runnable from repartition-keys' Task 5c on) |
+| like-column-pattern | `SELECT d_id, t_id FROM dim JOIN tiny ON d_name LIKE t_pat` | NLJ Inner over a column pattern, to confirm from the plan golden | gpu: #246 |
+| interval-through-join | `SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k` | Left, carrying an interval column the join pads — confirm from the plan golden that `iv` crosses the join; if DataFusion hoists the literal above it, pick another construction (a `TIME` column on `tiny`, padded the same way) | not runnable: #249 (from repartition-keys on; before it, the silent `Null`) |
+| struct-through-join | `SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k` | Inner, carrying a struct column | not runnable: #249 |
+
+### Collapse to one lane — #140's cost, made visible
+
+Each runs over a four-lane `fact` (the small-table rule is off), and its plan golden shows the
+`GpuMergePartitions` that puts the join in one lane.
+
+| name | SQL | why one lane |
+|---|---|---|
+| collapse-not-in | `not-in-uncorrelated` above, after the rewrite | the rewrite's joins against one-row counts |
+| collapse-nested-loop | `nl-inner` above | a keyless join merges both sides |
+| collapse-cross | `cross-projection` above | the same |
+| collapse-collect-left | a `fact` join that DataFusion plans `CollectLeft`, if any shape here gets one | `CollectLeft` is merged, not broadcast (#140) |
+
+These reuse queries above rather than add new ones; the spec names them so the benchmark and the
+plan goldens are read for the merge. `collapse-collect-left` is a query only if the task finds a
+pbench join DataFusion plans `CollectLeft`; otherwise it is recorded as not reached.
+
+### Not covered by a query
+
+#136, #145, #154, #197 and #201 change cost or tests, not answers. #235 is the oracle itself.
+
+## The work
+
+1. `testdata/pbench/gen.sql` and `testdata/generate_pbench.sh`; `testdata/pbench.sf1/*.parquet`
+   committed; a determinism test regenerating into a temp dir and comparing row content with the
+   committed files (not parquet bytes). The generator writes single-threaded and ordered, and puts
+   -0.0 and NaN into `dim`'s floats and -NaN into `fact`'s, beside the specials of the table above.
+2. `testdata/pbench-queries/*.sql`, the queries above.
+3. Plumbing, wherever a dataset is named today (`git grep -lE '\btpcds\b'` outside goldens and
+   wiki, about 30 files): `test_support` (the per-dataset `small_table_bytes`; `golden_dir_for`),
+   `tests/common/corpus_cases.inc` (a `// --- pbench ---` section), `test_corpus_goldens.rs`'s five
+   dataset lists, `test_cost_model.rs`, `cost-registry.csv` rows, `cost-report/src/main.rs` (the
+   widget renders a pbench section beside TPC-H and TPC-DS, its render test gaining pbench; and a
+   mode cell whose five modes are all enabled shows one larger tick instead of five small ones —
+   `✔` in the PR comment, a larger `✓` on the HTML page — so a fully covered row reads at a glance),
+   `scripts/exec_model` corpus loaders, the CI workflows' dataset matrix, `build-test.sh` and
+   `build-test-shadgpu.sh` (pbench needs no generation and no upload), `dataset_checks.py` and
+   the S3 checks (pbench is not in S3: skipped by name).
+4. Goldens: `testdata/goldens/pbench.sf1/` — the five modes' plans, cpu and cost goldens,
+   `mini.result.txt`, `duckdb-result.txt` (from `duckdb_result.py --dataset pbench`), and
+   `gpu-result.txt` per duckdb-oracle.
+5. One device cycle: every gpu cell run once; the cells that pass are enabled.
+
+## Nullability is checked (#227)
+
+Folded in from [#227](../tickets/corpus-coverage.md#t227) (check schema nullability in tests), so
+the NULL-heavy data meets a check from its first run and the join rewrite after it is held to its
+declarations. Today the schema checks compare types only.
+- **cpu:** `declared_as` (`executor/cpu_backend/mod.rs:309`) refuses a batch whose column holds a
+  NULL where its field is declared non-nullable, naming the column — before its early return for an
+  equal schema, which today skips every check.
+- **device:** the schema validators (`test_support/schema_validation.rs`, `gpu_schema_validator`
+  and `cpu_schema_validator`) check the same against each handle's null counts, wherever a line's
+  `schema_validation` is enabled.
+- A violation found in tpch, tpcds or pbench is a ticket, not a fix here; its cells go off on it.
+  #227 closes when both checks land.
+
+## Scope
+
+| path | change |
+|---|---|
+| `testdata/pbench/`, `testdata/generate_pbench.sh`, `testdata/pbench.sf1/` | the generator and the committed data |
+| `testdata/pbench-queries/` | the queries |
+| `testdata/goldens/pbench.sf1/` | every golden kind for pbench |
+| `testdata/cost-registry.csv`, `peacockdb-core/tests/common/corpus_cases.inc` | the rows and lines |
+| `peacockdb-core/src/test_support/` | the dataset, its `small_table_bytes` |
+| `peacockdb-core/tests/test_corpus_goldens.rs`, `test_cost_model.rs` | pbench in the dataset lists |
+| `cost-report/src/main.rs` | the pbench section |
+| `testdata/duckdb_result.py` | `--dataset pbench`; a one-entry spelling map rewriting DataFusion's `arrow_cast(…, 'Timestamp(Second, None)')` as DuckDB's `::TIMESTAMP_S` |
+| `scripts/` (build-test, exec_model corpus, dataset checks) | pbench where datasets are listed |
+| `.github/workflows/` | pbench in the matrix, no generation step |
+| `peacockdb-core/src/executor/cpu_backend/mod.rs`, `src/test_support/schema_validation.rs` | #227: a NULL where the node declares none is refused (cpu) and reported (validators) |
+| `peacockdb-core/src/wire/expr_writer.rs` | a wire-type refusal cites its ticket (`(#240)` for a timestamp target, `(#249)` otherwise), so the plan goldens' meta tests accept the not-runnable lines |
+| `peacockdb-core/src/planner/tests/plan_goldens.rs` | pbench in `CORPUS_DATASETS`; `NOT_RUNNABLE` gains `timestamp-s-key-group` on #240 |
+| `cost-report/src/main.rs` | one larger tick for a fully enabled row |
+| `llm-wiki/build-test.md`, `architecture.md` | the third dataset; counts |
+
+Component-level API: none. Two engine changes, each a refusal that changes no answer: #227's
+nullability check (`declared_as` and the schema validators), and a wire-type refusal's text naming
+its ticket. The planner otherwise sees a per-dataset knob value it already takes.
+
+## Restriction
+
+Test data and plumbing, plus the two refusals above (#227's check, the ticket in a wire-type
+refusal's text). No fix to anything a query shows; a query that fails gets its ticket on the row.
+sf1 only, no scaling, no S3.
+
+## Registry
+
+Every pbench row lands with its tickets in the `tickets` column. cpu cells on where the cpu
+answers and agrees with DuckDB; every gpu cell run once, enabled if it passes. Each row's
+`duckdb_oracle` is `duckdb_exact` unless a ticket on the row says the engines diverge from
+DuckDB (`duckdb_divergent(<ticket>, <positions>)`), and `duckdb_none` where the cpu does not answer
+(a refused or not-runnable row) — the task that first turns its cells on moves it to its variant. A cell that fails on a ticket the table above does not
+expect is a finding: the ticket it fails on goes on the row, or a new ticket is filed.
+
+## Verification bar
+
+- rust-only: `test_cpu_corpus` (registry ↔ CSV both ways, `every_device_cell_has_a_cpu_cell`),
+  `test_corpus_goldens`, the determinism test, the widget's render test.
+- device: one shad-gpu cycle over the pbench rows.
+- The duckdb-oracle comparison over pbench, every row it marks exact passing.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, one cycle for the gpu cells.
+
+## Completeness signoff (2026-10-08, replacing the pre-cycle one)
+
+Solved under its constraints, on both engines: 588 KB committed, 57 corpus lines, 60 registry rows, 128
+cpu cells on, and the device cycle run on an L40S at cuDF 25.02 — 128 of 285 declarable gpu cells
+measured, 30 enabled, 98 off on a measured ticket, `gpu-result.txt` golden 18 of 18 with its 30 sections
+all agreeing with DuckDB. Five shortcuts. #227 closes half: the device null-count read has no plumbing.
+The determinism check sits in no Rust tier; this task's guard proves only that its `pipeline.yml` line
+exists. Three of the 63 queries are absent behind #255, leaving #245 and #249 no declared cell. Three of
+the 24 refusals cite no ticket, and citing them is a third engine change the Restriction forbids.
+`empty.parquet` holds zero row groups where the data table says one, so `cross-empty-build` is refused
+on #256 instead of reaching #208. Two claims this frozen text cannot correct: a query per demonstrable
+ticket misses eight, each now saying so on itself, and "Not covered by a query" omits #137.
+
+
+
+---
+
+<!-- archived from llm-wiki/tasks/duckdb-oracle.md -->
+
+**Merged 2026-10-16 as PR #167, chain J's task, two commits: the code `f1fd9d43` and the board `bca5f8d0`, merged into master by `3a0c5d10`.**
+
+# Every corpus answer is checked against DuckDB
+
+Kind: production
+
+**This task closes [#235](../archive/archived-tickets.md#t235)** (no independent oracle checks the
+result goldens), whole. First of the join-rewrite chain, so
+every later task's newly enabled cell meets DuckDB inside that task's own verification.
+
+With it, #235's two harness items (steps 7 and 8): the corpus helpers proven to fail on a wrong
+answer, and every oracle enum held to the lines that use it.
+
+## What exists
+
+`testdata/duckdb_result.py` (DuckDB 1.5.4 pinned, threads=1, DataFusion's NULL order and integer
+division) and both `testdata/goldens/{tpch,tpcds}.sf1/duckdb-result.txt`, landed 2026-09-28: tpch 39
+sections (5 `skipped:` over the cap), tpcds 99 (1 `skipped:`), none `failed:`. Nothing reads
+them. `corpus_query!` takes 8 arguments (`tests/test_cpu_corpus.rs:22`, `tests/test_gpu_corpus.rs:16`).
+The first run's differences are #235's: names (by position, not a divergence), decimal `avg` and
+division digits, float last digits, one empty answer (tpcds q17, #205), 18 tpcds queries DuckDB
+alone answers, and the over-cap sections.
+
+## The work
+
+1. **The ninth argument.** `corpus_query!` gains `duckdb_oracle` as its first oracle argument,
+   before `cpu_oracle`:
+   `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle, gpu_oracle, schema_validation)`.
+   It is written on every line — no default, no line without it, so a query's whole coverage still
+   reads off its line. Values:
+   - `duckdb_exact` — rows as multisets by column position, numbers equal as rendered;
+   - `duckdb_approx` — a decimal cell equal to one unit in the last place our rendering carries
+     (`|ours − duck| ≤ 10^−s`, `s` our cell's digits after the point), a float cell within a
+     relative 1e-11: for #235's decimal-truncation rows (DataFusion's fixed-scale `avg` and division
+     differ from DuckDB's double by up to 1.2e-5 relative on tpch q1, 1e-6 on tpcds q58 — measured,
+     far past any float tolerance) and its float-reassociation rows;
+   - `duckdb_divergent(<ticket>, <positions>)` — one variant taking a ticket number and the column
+     positions that diverge: the ticket must be open in `llm-wiki/tickets/` (a closed or unknown
+     number fails); the row count and every column not named are checked as `duckdb_approx` checks
+     them, and the named columns must still differ (one that stopped diverging fails, so the line
+     is updated). Empty positions mean a row-level divergence: the row count alone is checked. A
+     line that diverges in one column is not a line that checks nothing;
+   - `duckdb_fingerprint` — the section is at or over the 256 KB cap on both sides, so both hold its
+     fingerprint (step 3) and the comparison reads that; numeric columns compared within
+     `duckdb_approx`'s tolerance, since a sum of floats reassociates;
+   - `duckdb_none` — DuckDB or we do not answer (a refused or not-enabled query, a DuckDB
+     `failed:`), so there is nothing to compare.
+   `DuckdbOracle::ALL` lists the five, and a test asserts each is named by some line.
+   **A sixth, only if needed:** `duckdb_columns(<positions>)` — compare only the listed column
+   positions, as a multiset, for a LIMIT window whose cutoff ties, where both engines keep valid
+   but different rows. It is added only if the first run (step 6) finds a line that needs it,
+   confirmed by hand and named in the PR; if no line needs it, it is not added at all. The oracle is
+   explicit both ways: a fingerprinted section under any oracle but `duckdb_fingerprint` fails, and
+   so does `duckdb_fingerprint` over a section that is not fingerprinted.
+   **Mode sugar:** `all_modes` stands for `tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup |
+   tp4_sized` in `cpu_modes` and `gpu_modes`; both macros expand it to the five, and every line
+   that lists all five today is rewritten to it — and every reader that parses a line's modes
+   (`test_corpus_goldens/benchmark.rs::modes()`, `:356-362`, among them) expands it. Both corpus
+   binaries carry the argument through `declare_corpus_query!`.
+2. **The comparison**, in `test_cpu_corpus` (rust-only, no device): one case per line,
+   `duckdb_<dataset>_<query>`, reading the query's section from `duckdb-result.txt` and from
+   `mini.result.txt` (the authority's section, the last enabled mode's, as the widget reads it).
+   Row count first, then rows by position. A section absent on either side under any oracle but
+   `duckdb_none` fails, as does `duckdb_none` over two sections that both exist.
+3. **The over-cap fingerprint** (decided: option (c)). A section at or above the 262144-byte cap
+   is written by both writers — `duckdb_result.py` and the engine's result-golden writer — as a
+   fingerprint instead of `skipped:`:
+   ```
+   fingerprint: rows=<n>
+   col <i>: nonnull=<n> [sum=<x> min=<x> max=<x>]      -- the triple where the column is approximate
+   hash: <sha256 of the sorted rendered rows over the exact columns>
+   ```
+   A column is **exact** when it renders identically on both sides — integers, strings, dates,
+   booleans, timestamps — and goes into the hash; only a float column, or a decimal whose scale
+   differs between the sides (a decimal on ours, a double on DuckDB's), is **approximate** and
+   compared by its triple. An all-integer over-cap join is then checked row for row, not by sums
+   alone. Under `duckdb_fingerprint` the comparison checks `rows`, each column's `nonnull`, the
+   triples within `duckdb_approx`'s tolerance, and the hash exactly. A mismatch
+   names the column. Five sections take it today: tpch q16, anti-join, filter-project,
+   semi-join; tpcds q98. tpch q11 joins them when join-backend turns its cpu cells on (#190).
+4. **`gpu-result.txt`.** The device's corpus run writes its answers beside `mini.result.txt`
+   under a regeneration variable on shad-gpu — each section written **before** the device asserts
+   against the cpu, so an answer that differs from the cpu is recorded, the case DuckDB settles — the same sections, rendering and fingerprint,
+   pulled home with the benchmark tree. A record, never an authority: the device still asserts
+   against the cpu's `mini.result.txt`, and `test_gpu_corpus`'s check that a device run writes no
+   cpu golden stays. **Keyed by query and mode**: one section per enabled device cell,
+   `== <query> mode=<mode>`, so every device cell meets DuckDB, not only the last mode (a mode-
+   dependent device answer — #243's lane split, a shuffle defect — shows there). The comparison of
+   step 2 runs over every section (`duckdb_gpu_<dataset>_<query>_<mode>`). Two guards:
+   - **Coverage, both ways, rust-only in CI:** every enabled device cell has its section, and every
+     section is an enabled cell's. A task that turns a device cell on or off without regenerating
+     fails. Values are not compared against an earlier run: GPU float reductions are not
+     reproducible run to run, nor across cuDF versions.
+   - **One version per file:** the committed file is cuDF 25.02's (shad-gpu's). A run on another
+     version (verify-26.02) writes `gpu-result-<version>.txt` beside it, gitignored, compared with
+     DuckDB the same way and never committed over the 25.02 file.
+   **When to regenerate**, written into `build-test.md` by this task: run a cycle with
+   `PCK_WRITE_GPU_RESULT=1` and `--pull-results`, and inspect the diff of `gpu-result.txt`, every
+   time a change might move a device answer — a device code change, a cell turned on, a cuDF
+   update — and in every task that turns device cells on. A moved section is read before it is
+   committed, and a moved answer the change did not intend is a finding.
+5. **One rendering.** `duckdb_result.py` renders a timestamp as arrow-rs does — `NaiveDateTime`'s
+   form, no trailing zeros (`…00.001`, not `isoformat()`'s `…00.001000`; `arrow-cast`
+   `display.rs:495`) — so a millisecond timestamp is not a false divergence; a comparator case
+   pins it.
+6. **Every line's oracle**, from the comparison's first run: `duckdb_exact` where it passes,
+   `duckdb_approx` for #235's digit rows, `duckdb_fingerprint` for the five over-cap sections, `duckdb_none` for the 18 DuckDB-only and the 4
+   not-enabled queries, `duckdb_divergent(<ticket>, <positions>)` for a real divergence — a new
+   ticket where none exists. A line left at `duckdb_none` moves to its variant in the task that
+   first turns its cells on (join-backend for tpch q11 and q22, tpcds q24 and q54). #235's "decimal avg truncates at a fixed scale" is filed as a ticket of its own if
+   any row needs more than `duckdb_approx`'s tolerance.
+
+7. **The helpers fail on a wrong answer.** `assert_result_section` (`test_support/corpus.rs:430`)
+   and `assert_result` (`test_support/corpus_gpu.rs:97`) read their golden from the fixed testdata
+   path, so no test can show them failing. Each takes the golden section as an argument (the
+   corpus cases pass the file's section, as today); negative tests hand them a doctored section —
+   a wrong row, a missing row, a digit past the tolerance — and assert the failure, for the cpu
+   helper under each `CpuOracle` and the device helper under `golden_exact` and `golden_approx_std`.
+   Today only the string comparator is tested (`tests/test_golden_format.rs`).
+   The device helper's comparison is pure Rust, so it moves out of the device-gated `corpus_gpu`
+   module into an ungated function `assert_result` calls; its negative tests then run in the
+   rust-only tier, with `GpuResultMode` beside it.
+8. **Every oracle enum is held to its lines.** `CpuOracle::ALL` and `GpuResultMode::ALL`, each with
+   the test `DuckdbOracle::ALL` has (step 1): every variant is named by some `corpus_query!` line.
+   The variants no line names go first, with their keyword arms: `GpuResultMode::Skip` (`skip`) and
+   `GpuResultMode::GoldenApprox` (`golden_approx`) — 113 lines say `golden_exact`, 2
+   `golden_approx_std`, 5 `live_cpu`.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/tests/test_cpu_corpus.rs`, `test_gpu_corpus.rs` | the ninth argument; the comparison cases |
+| `peacockdb-core/tests/common/corpus_cases.inc` | every line's `duckdb_oracle` |
+| `peacockdb-core/src/test_support/` | `DuckdbOracle` and `ALL`; the comparator; the fingerprint writer and reader; `gpu-result.txt`'s writer |
+| `testdata/duckdb_result.py` | the fingerprint for over-cap sections |
+| `testdata/goldens/{tpch,tpcds}.sf1/` | `duckdb-result.txt` and `mini.result.txt` regenerated with fingerprints; `gpu-result.txt` |
+| `scripts/build-test-shadgpu.sh` | the regeneration variable, the pull home |
+| `.github/workflows/pipeline.yml` | the Python test of `duckdb_result.py`'s rendering in CI |
+| `testdata/test_duckdb_result.py` (new) | timestamps rendered as arrow-rs does |
+| `peacockdb-core/tests/test_golden_format.rs` | the fingerprint's round trip |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | `modes()` expands `all_modes` |
+| `testdata/.gitignore` | `gpu-result-*.txt` (a non-25.02 run's file) |
+| `llm-wiki/build-test.md`, `tickets/corpus-coverage.md` | the new tier and counts; when to regenerate `gpu-result.txt`; #235 archived |
+
+Component-level API: none outside the test harness. No engine change.
+
+## Restriction
+
+The oracle only. No fix to any divergence it finds; each is a ticket and a `duckdb_divergent`
+line. No change to what the cpu or device tiers assert (step 7 changes only where their helpers
+read the golden section from).
+
+## Verification bar
+
+- rust-only: `test_cpu_corpus` with every `duckdb_*` case green, the `ALL` test, the registry
+  tests; `test_golden_format` with the fingerprint's round trip; one doctored section per oracle
+  variant, failing as it should (a wrong row, a closed ticket under `duckdb_divergent`, a
+  fingerprint off in one column, a fingerprinted section declared `duckdb_exact`); `all_modes`
+  expanding to the same cases as the five spelled out.
+- device: one shad-gpu cycle writing `gpu-result.txt`; its comparison green, or each failing
+  section a ticket.
+
+## Device workflow
+
+`build-test-shadgpu.sh`, one cycle with the regeneration variable set.
+
+## Completeness signoff (2026-10-08, revised after the device cycle)
+
+Solved under its constraints, on both engines. Every corpus line names a `duckdb_oracle`, a case
+per line compares our answer with DuckDB's, four over-cap sections agree by fingerprint across the
+two writers, and both corpus helpers are shown failing. The device half ran last, on nebius-gpu
+under the host override: 26 sections at cuDF 25.02, every comparison green and none declining.
+
+No bandaid, no assertion weakened. One shortcut: making the wiki a test input left CI able to pass
+a tickets-only commit that reddens the rust tier, and the fix is a cost decision the human owns, so
+it is [#263](../tickets/testinfra.md#t263) with a by-hand interim. Three shortfalls stand as named:
+a decimal column against DuckDB's double cannot be approximate on both sides (#253, with the two
+other paths that cannot record a divergence); the negative tests miss `data_fusion_subset` (#254);
+`duckdb_columns` was looked for and not needed, no `duckdb_divergent` line being a LIMIT tie.
+
+
+
+---
+
 <!-- archived from llm-wiki/tasks/gpu-host.md -->
 
 **Merged 2026-10-15 as PR #180: one squashed commit, `1c4e6a2e`, merged into master by `d2b9daf8`.

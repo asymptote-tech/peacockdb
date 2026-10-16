@@ -47,49 +47,7 @@ its recipes. Shared design: [`join-rewrite-design.md`](join-rewrite-design.md). 
 refcounted-tables, whose scatter half is refcounted-scatter and whose join half the session makes
 unnecessary.
 
-### 1. [`duckdb-oracle.md`](duckdb-oracle.md) — closes [#235](../archive/archived-tickets.md#t235) — state: done — PR #167
-
-Every corpus line names its `duckdb_oracle`; a comparison case per line against
-`duckdb-result.txt`, over `mini.result.txt` and the device's new `gpu-result.txt`; a fingerprint
-for sections over the 256 KB cap. First, so every cell a later task enables meets DuckDB.
-
-### 2. [`pbench.md`](pbench.md) — closes half of [#227](../tickets/corpus-coverage.md#t227) — state: done — PR #168
-
-A third dataset, sf1 only, committed: NULL keys on both sides, `NOT IN` over NULLs, every
-hashable key type, skew, empty sides. One query per demonstrable ticket of the chain, cells off;
-each later task turns its own on. Folds in #227: both engines check declared non-nullability.
-
-### 3. [`repartition-keys.md`](repartition-keys.md) — closes [#201](../archive/archived-tickets.md#t201), [#206](../archive/archived-tickets.md#t206), [#240](../archive/archived-tickets.md#t240), [#95](../archive/archived-tickets.md#t95), [#189](../archive/archived-tickets.md#t189) — state: done — PR #169
-
-The murmur gate onto the production lane rule first; then float, boolean, timestamp and decimal
-keys on the device (decimals hashed as 16 bytes on both engines), and the rollup's grouping id
-out of the shuffle. #243's pins.
-
-### 4. [`refcounted-scatter.md`](refcounted-scatter.md) — closes [#145](../archive/archived-tickets.md#t145), [#197](../archive/archived-tickets.md#t197) — state: done — PR #173
-
-`TableResult` takes its final shape, one owner per column; a scatter's partitions share them. Peak
-3× → 2× during the partition, 1× after. Files the accounting ticket on landing.
-
-### 5. [`stale-cells.md`](stale-cells.md) — closes no ticket — state: done — PR #175
-
-The 16 device cells four tpch rows keep off under closed tickets (#183, #187), never run since:
-run, enabled or ticketed, tags struck.
-
-### 6. [`exit-copies.md`](exit-copies.md) — closes [#154](../archive/archived-tickets.md#t154) (outside `join.cpp`) — state: done — PR #176
-
-The 11 operator exit copies outside `join.cpp`, `expr.cpp`'s `ColumnRef` copy the costliest.
-
-### 7. [`join-session-cpp.md`](join-session-cpp.md) — closes no ticket on its own (the C++ half of #136, #153, #160, #215, #63; #154's `join.cpp` sites) — state: done — PR #177
-
-`CudfJoin`, the four symbols, `join.cpp` rewritten per the design's §3; a gtest matrix. Nothing
-calls it until join-backend.
-
-### 8. [`join-backend.md`](join-backend.md) — closes [#155](../archive/archived-tickets.md#t155), [#152](../archive/archived-tickets.md#t152), [#173](../archive/archived-tickets.md#t173), [#212](../archive/archived-tickets.md#t212), [#159](../archive/archived-tickets.md#t159), [#59](../archive/archived-tickets.md#t59), [#80](../archive/archived-tickets.md#t80), [#137](../archive/archived-tickets.md#t137), [#220](../archive/archived-tickets.md#t220), [#190](../archive/archived-tickets.md#t190), [#207](../archive/archived-tickets.md#t207), [#208](../archive/archived-tickets.md#t208), and, with task 7's C++, [#136](../archive/archived-tickets.md#t136), [#153](../archive/archived-tickets.md#t153), [#160](../archive/archived-tickets.md#t160), [#215](../archive/archived-tickets.md#t215), [#63](../archive/archived-tickets.md#t63), [#154](../archive/archived-tickets.md#t154) — state: done — PR #179
-
-Planner, wire, both executors and the driver onto the session; every join refusal lifted but #250's off-spine IN; the
-`NOT IN` rewrite; the corpus and pbench cells turned on, compared with the committed estimate.
-
-### 9. [`verify-26.02.md`](verify-26.02.md) — closes no ticket — state: new
+### 1. [`verify-26.02.md`](verify-26.02.md) — closes no ticket — state: new
 
 Every tier on shad-gpu's cuDF 26.02 environment, fixes, and the tpch sf40 benchmark of the cells
 the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to be built for now.
