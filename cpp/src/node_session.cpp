@@ -6,6 +6,7 @@
 #include "peacock/operators.h"
 #include "peacock/expr.h"
 #include "peacock/partitioning.hpp"
+#include "operators/join_session.h"
 #include "plan_executor_internal.h"
 
 #include <cudf/concatenate.hpp>
@@ -320,6 +321,10 @@ std::vector<const fb::PlanNode*> node_children(const fb::PlanNode* node) {
       return {node->node_as_CudfLimit()->input()};
     case fb::PlanNodeKind_CudfWindow:
       return {node->node_as_CudfWindow()->input()};
+    // A leaf: a session's build and probe tables arrive through peacock_join_build and
+    // peacock_join_probe, so the plan carries no child stubs for them.
+    case fb::PlanNodeKind_CudfJoin:
+      return {};
     default:
       throw std::runtime_error("node_children: unsupported PlanNodeKind: " +
                                std::to_string(node->node_type()));
@@ -332,6 +337,13 @@ struct NodeSession::Impl {
   std::vector<const fb::PlanNode*> post_order;
   std::unordered_map<uint64_t, TableResult> registry;
   uint64_t next_handle = 1;
+  /// Live join sessions, in their own map: a join id is not a handle, and a session
+  /// outlives every table it was given. Freed here, so `end_plan` and the error path free
+  /// them as they free handles.
+  std::unordered_map<uint64_t, std::unique_ptr<JoinSession>> joins;
+  uint64_t next_join = 1;
+  /// Which seq each join belongs to — its regions are that node's.
+  std::unordered_map<uint64_t, uint64_t> join_seq;
   /// Everything only a measurement reads, or null while timing is off — see
   /// `RegionSink`. Owned here, not by the timer, whose whole point is that it ends
   /// before the answer does.
@@ -376,6 +388,18 @@ struct NodeSession::Impl {
     note_producer(measuring_sink, handle, seq);
     registry.emplace(handle, std::move(result));
     return handle;
+  }
+
+  /// 0 when a call answers no table; otherwise a fresh handle with its stats, as a
+  /// one-output `execute_node` registers one.
+  uint64_t register_join_output(uint64_t seq, std::optional<TableResult> out, NodeStats* out_stats,
+                                RegionSink* measuring_sink) {
+    if (out_stats) *out_stats = NodeStats{};
+    if (!out) return 0;
+    auto tv = out->view();
+    if (out_stats)
+      *out_stats = NodeStats{static_cast<uint64_t>(tv.num_rows()), varlen_content_bytes(tv)};
+    return register_handle(std::move(*out), measuring_sink, seq);
   }
 
   ~Impl() {
@@ -752,6 +776,80 @@ uint64_t NodeSession::slice_handle(uint64_t handle, uint64_t offset, uint64_t le
   // The trimmed rows are still that node's output, so the export downstream of a limit
   // names the same seq the slice did.
   return impl_->register_handle(std::move(result), sink, seq);
+}
+
+namespace {
+/// A resident input by handle, consumed. The join calls take one table each, so they do
+/// not go through `execute_node`'s child-vector resolution.
+TableResult take_handle(std::unordered_map<uint64_t, TableResult>& registry, uint64_t handle,
+                        const char* who) {
+  auto it = registry.find(handle);
+  if (it == registry.end()) throw std::runtime_error(std::string(who) + ": unknown input handle");
+  TableResult t = std::move(it->second);
+  registry.erase(it);
+  return t;
+}
+}  // namespace
+
+uint64_t NodeSession::join_build(uint64_t seq, uint64_t build, NodeStats* out_stats) {
+  if (seq >= impl_->post_order.size())
+    throw std::runtime_error("NodeSession::join_build: seq out of range");
+  const fb::PlanNode* node = impl_->post_order[seq];
+  if (node->node_type() != fb::PlanNodeKind_CudfJoin)
+    throw std::runtime_error("NodeSession::join_build: seq " + std::to_string(seq) + " is a " +
+                             fb::EnumNamePlanNodeKind(node->node_type()) + ", not a CudfJoin");
+  RegionSink* sink = impl_->measuring();
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  OptionalRange node_range(
+      [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " join_build"; });
+  std::optional<TableResult> batch;
+  if (build != 0) batch = take_handle(impl_->registry, build, "NodeSession::join_build");
+  ScopedNodeTimer timer(sink, seq, 0, call_index);
+  auto session = std::make_unique<JoinSession>(node->node_as_CudfJoin(), std::move(batch));
+  timer.stop();
+  if (out_stats) *out_stats = NodeStats{};  // the build answers no table
+  const uint64_t id = impl_->next_join++;
+  impl_->joins.emplace(id, std::move(session));
+  impl_->join_seq.emplace(id, seq);
+  return id;
+}
+
+uint64_t NodeSession::join_probe(uint64_t join, uint64_t probe, NodeStats* out_stats) {
+  auto it = impl_->joins.find(join);
+  // JoinRefusal, so the C wrapper keeps the session for a call that named a join wrongly and
+  // ends the query for one that failed mid-work. Nothing has been consumed at this point.
+  if (it == impl_->joins.end())
+    throw JoinRefusal("NodeSession::join_probe: unknown join " + std::to_string(join));
+  const uint64_t seq = impl_->join_seq.at(join);
+  RegionSink* sink = impl_->measuring();
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  OptionalRange node_range(
+      [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " join_probe"; });
+  TableResult batch = take_handle(impl_->registry, probe, "NodeSession::join_probe");
+  ScopedNodeTimer timer(sink, seq, 0, call_index);
+  auto out = it->second->probe(std::move(batch));
+  timer.stop();
+  return impl_->register_join_output(seq, std::move(out), out_stats, sink);
+}
+
+uint64_t NodeSession::join_finish(uint64_t join, NodeStats* out_stats) {
+  auto it = impl_->joins.find(join);
+  if (it == impl_->joins.end())
+    throw JoinRefusal("NodeSession::join_finish: unknown join " + std::to_string(join));
+  const uint64_t seq = impl_->join_seq.at(join);
+  RegionSink* sink = impl_->measuring();
+  const uint64_t call_index = sink ? sink->take_call_index(seq, impl_->post_order.size()) : 0;
+  OptionalRange node_range(
+      [&] { return std::to_string(seq) + "." + std::to_string(call_index) + " join_finish"; });
+  ScopedNodeTimer timer(sink, seq, 0, call_index);
+  auto out = it->second->finish();
+  timer.stop();
+  return impl_->register_join_output(seq, std::move(out), out_stats, sink);
+}
+
+void NodeSession::join_release(uint64_t join) {
+  impl_->joins.erase(join);
+  impl_->join_seq.erase(join);
 }
 
 uint64_t NodeSession::adopt(TableResult result) {

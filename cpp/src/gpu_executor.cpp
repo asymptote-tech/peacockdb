@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -316,6 +317,76 @@ int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle,
     executor->session.reset();
     return 1;
   }
+}
+
+int peacock_join_build(peacock_executor_t* executor, uint64_t seq, uint64_t build,
+                       uint64_t* out_join, PeacockNodeStats* out_stats) {
+  if (!executor || !out_join) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded (call peacock_executor_begin_plan first)";
+    return 1;
+  }
+  try {
+    *out_join =
+        executor->session->join_build(seq, build, reinterpret_cast<peacock::NodeStats*>(out_stats));
+    return 0;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    // The build handle was consumed, so the lane's input is gone either way: end the query.
+    executor->session.reset();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    executor->session.reset();
+    return 1;
+  }
+}
+
+/// Shared by probe and finish: an unknown join id and a probe after finish are validation
+/// refusals and leave the session standing; anything else ends the query, as execute_node
+/// does. The C++ side marks the two with `peacock::JoinRefusal`, a type of its own — cuDF
+/// throws std::invalid_argument from inside a probe, after the lane's batch was consumed.
+template <typename F>
+static int join_call(peacock_executor_t* executor, uint64_t* out_handle, F body) {
+  if (!executor || !out_handle) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded (call peacock_executor_begin_plan first)";
+    return 1;
+  }
+  try {
+    *out_handle = body();
+    return 0;
+  } catch (const peacock::JoinRefusal& e) {
+    executor->last_error = e.what();
+    return 1;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    executor->session.reset();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    executor->session.reset();
+    return 1;
+  }
+}
+
+int peacock_join_probe(peacock_executor_t* executor, uint64_t join, uint64_t probe,
+                       uint64_t* out_handle, PeacockNodeStats* out_stats) {
+  return join_call(executor, out_handle, [&] {
+    return executor->session->join_probe(join, probe,
+                                         reinterpret_cast<peacock::NodeStats*>(out_stats));
+  });
+}
+
+int peacock_join_finish(peacock_executor_t* executor, uint64_t join, uint64_t* out_handle,
+                        PeacockNodeStats* out_stats) {
+  return join_call(executor, out_handle, [&] {
+    return executor->session->join_finish(join, reinterpret_cast<peacock::NodeStats*>(out_stats));
+  });
+}
+
+void peacock_join_release(peacock_executor_t* executor, uint64_t join) {
+  if (executor && executor->session) executor->session->join_release(join);
 }
 
 int peacock_executor_collect_node_regions(peacock_executor_t* executor, PeacockNodeRegion* out,

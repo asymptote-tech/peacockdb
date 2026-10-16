@@ -216,7 +216,7 @@ cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
         // left/right conditional tables directly.
         if (col->index() >= col_map->size())
           throw std::runtime_error("join filter ColumnRef out of range of filter_columns");
-        auto* fc = col_map->Get(col->index());
+        auto const* fc = &(*col_map)[col->index()];
         auto side = fc->side() == fb::JoinSide_Right
                         ? cudf::ast::table_reference::RIGHT
                         : cudf::ast::table_reference::LEFT;

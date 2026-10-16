@@ -20,6 +20,12 @@ Arrow C++ (tests only), gtest.
 **Spec:** [`join-session-cpp.md`](join-session-cpp.md) — frozen; the design it implements is
 [`join-rewrite-design.md`](join-rewrite-design.md) §1, §2, §3 and §5.6. Read §3 whole before Task 3.
 
+> **Round 1 (2026-10-09) worked this plan.** Every `Commit` step is left unticked: the developer
+> never mutates git state, and the coordinator commits. The device cycles ran on nebius-gpu under
+> the board's host override, not on shad-gpu. Task 8 was done after Tasks 9 and 10, and the file
+> was split in four at the end of Task 10 — both recorded, with the reasons, in
+> [`join-session-cpp-detail.md`](join-session-cpp-detail.md).
+
 ## Global constraints
 
 - Prerequisite: refcounted-scatter has landed, so `TableResult` is the per-column shape
@@ -83,7 +89,7 @@ Arrow C++ (tests only), gtest.
   schema can name a timestamp column here).
 - Produces: `fb::CudfJoin`, `fb::PlanNodeKind_CudfJoin`.
 
-- [ ] **Step 1: The fbs.** Append, never reorder:
+- [x] **Step 1: The fbs.** Append, never reorder:
 
 ```
 /// A join answered through the session symbols (peacock_join_*), never execute_node: a leaf,
@@ -106,11 +112,11 @@ table CudfJoin {
   `chunk_bytes` is not in design §1.1: it is the "scratch budget" §3.4 and §3.6 read, which the C++
   side has no other way to learn; join-backend writes it from the planner's budget (its Task 7),
   and the gtests set it small to force chunking.
-- [ ] **Step 2: Check the prerequisite.** `grep -n 'TimestampMicrosecond' flatbuffers/gpu_plan.fbs
+- [x] **Step 2: Check the prerequisite.** `grep -n 'TimestampMicrosecond' flatbuffers/gpu_plan.fbs
   cpp/src/expr.cpp` finds the enum value and its `fb_to_type_id` arm; if not, stop — repartition-keys
   has not landed.
 
-- [ ] **Step 3: A leaf, refused through `execute_node`.** `node_children`: `case
+- [x] **Step 3: A leaf, refused through `execute_node`.** `node_children`: `case
   fb::PlanNodeKind_CudfJoin: return {};`. `dispatch.cpp`'s kind-name switch: `"CudfJoin"`; its
   execute switch:
 
@@ -120,7 +126,7 @@ table CudfJoin {
             "CudfJoin runs through peacock_join_build/probe/finish, not execute_node");
 ```
 
-- [ ] **Step 4: The test target.** `CMakeLists.txt`, after `peacock_plan_tests`:
+- [x] **Step 4: The test target.** `CMakeLists.txt`, after `peacock_plan_tests`:
 
 ```cmake
 # The join session through its C ABI: plan bytes in, Arrow batches up, IPC answers down.
@@ -162,7 +168,7 @@ int main(int argc, char** argv) {
 ```
 
   (`#include "peacock/rmm_pool.hpp"` joins the includes of Step 5.)
-- [ ] **Step 5: The harness and the first test.** `test_join_session.cpp` opens with the helpers
+- [x] **Step 5: The harness and the first test.** `test_join_session.cpp` opens with the helpers
   every later task uses. Upload and download go through the public ABI; the plan is one `CudfJoin`
   root.
 
@@ -350,7 +356,7 @@ TEST(JoinSession, ExecuteNodeRefusesACudfJoin) {
 }
 ```
 
-- [ ] **Step 6:** `build-test-shadgpu.sh --build`, then `--run`: the shad-gpu log names
+- [x] **Step 6:** `build-test-shadgpu.sh --build`, then `--run`: the shad-gpu log names
   `peacock_join_session_tests` among the installed binaries it ran (if it does not, Step 4's install
   line is missing), and the case is green (it was red as "unknown node kind" before Step 3). The
   existing gpu tier green.
@@ -372,7 +378,7 @@ TEST(JoinSession, ExecuteNodeRefusesACudfJoin) {
   - C++: `uint64_t NodeSession::join_build(uint64_t seq, uint64_t build, NodeStats*)`, `uint64_t join_probe(uint64_t join, uint64_t probe, NodeStats*)`, `uint64_t join_finish(uint64_t join, NodeStats*)`, `void join_release(uint64_t join)`.
   - `class JoinSession { JoinSession(const fb::CudfJoin*, std::optional<TableResult> build); std::optional<TableResult> probe(TableResult); std::optional<TableResult> finish(); }`.
 
-- [ ] **Step 1: The lifecycle cases, red** (they fail to link until Step 3):
+- [x] **Step 1: The lifecycle cases, red** (they fail to link until Step 3):
 
 ```cpp
 static JoinSpec inner_on_k() {
@@ -427,7 +433,7 @@ TEST(JoinSession, ReleaseWithoutFinishAndEndPlanFreeTheSession) {
 }
 ```
 
-- [ ] **Step 2: `join_session.h`.**
+- [x] **Step 2: `join_session.h`.**
 
 ```cpp
 #pragma once
@@ -467,7 +473,7 @@ class JoinSession {
   `cudf::distinct_hash_join` in the header instead of including, so the header compiles on both
   layouts: `namespace cudf { class hash_join; class distinct_hash_join; }` (25.02 and 26.02 both
   declare non-template classes of those names).
-- [ ] **Step 3: `NodeSession`'s join map and methods.** In `Impl`:
+- [x] **Step 3: `NodeSession`'s join map and methods.** In `Impl`:
 
 ```cpp
   std::unordered_map<uint64_t, std::unique_ptr<JoinSession>> joins;
@@ -556,7 +562,7 @@ uint64_t NodeSession::register_join_output(uint64_t seq, std::optional<TableResu
   which stays an incomplete type there). `std::invalid_argument` marks the two validation refusals
   so the C wrapper can keep the session (Step 4). `Impl`'s destructor needs nothing new: the
   `joins` map frees its sessions with the plan.
-- [ ] **Step 4: The C symbols** (`peacock_gpu.h` after `peacock_executor_slice_handle`, with the
+- [x] **Step 4: The C symbols** (`peacock_gpu.h` after `peacock_executor_slice_handle`, with the
   design's §1.2 text as their comments; `gpu_executor.cpp`):
 
 ```cpp
@@ -630,7 +636,7 @@ void peacock_join_release(peacock_executor_t* executor, uint64_t join) {
         pub fn peacock_join_release(executor: *mut PeacockExecutor, join: u64);
 ```
 
-- [ ] **Step 5: The session's state and the Inner arm** (`join_session.cpp`):
+- [x] **Step 5: The session's state and the Inner arm** (`join_session.cpp`):
 
 ```cpp
 // The join session: join-rewrite-design.md §3. Names follow its pseudocode.
@@ -777,7 +783,7 @@ std::optional<TableResult> JoinSession::finish() {
 
   `hash_join` holds a `table_view` of `Bk`; the columns it views belong to `B`'s owners, which the
   session holds, so the object never outlives what it views.
-- [ ] **Step 6:** device cycle: the four cases green; the existing gpu tier green.
+- [x] **Step 6:** device cycle: the four cases green; the existing gpu tier green.
 - [ ] **Step 7: Commit.** `git commit -m "the join session's ABI and lifecycle, answering Inner"`.
 
 ### Task 3: Left, Right, Full and the finish (§3.2, §3.3)
@@ -799,7 +805,7 @@ std::optional<TableResult> JoinSession::finish() {
   `std::vector<std::string> names_of(const fb::Schema*)`;
   `State::matched` (`std::unique_ptr<cudf::column>`), `State::probe_types`/`probe_names` (from the first probe batch).
 
-- [ ] **Step 1: The cases, red.** Build `b_k {1, 2, 2, NULL}`, `b_v {a, b, c, n}`; probes as listed.
+- [x] **Step 1: The cases, red.** Build `b_k {1, 2, 2, NULL}`, `b_v {a, b, c, n}`; probes as listed.
 
 ```cpp
 static JoinSpec typed(fb::JoinType t) { auto s = inner_on_k(); s.type = t; return s; }
@@ -864,7 +870,7 @@ TEST(JoinSession, AProjectionCrossingSidesKeepsOnlyItsColumns) {
 }
 ```
 
-- [ ] **Step 2: The helpers.**
+- [x] **Step 2: The helpers.**
 
 ```cpp
 std::unique_ptr<cudf::column> bools(cudf::size_type n, bool v) {
@@ -933,7 +939,7 @@ std::vector<std::string> names_of(const fb::Schema* s) {
 }
 ```
 
-- [ ] **Step 3: State and arms.** `State` gains `std::unique_ptr<cudf::column> matched;`,
+- [x] **Step 3: State and arms.** `State` gains `std::unique_ptr<cudf::column> matched;`,
   `std::vector<cudf::data_type> probe_types; std::vector<std::string> probe_names;` (set from the
   first probe batch, else from `probe_schema` at finish). The constructor builds `hj` for every
   keyed type without a filter (later tasks narrow it) and, for `Left, Full, LeftSemi, LeftAnti,
@@ -992,7 +998,7 @@ std::vector<std::string> names_of(const fb::Schema* s) {
   }
 ```
 
-- [ ] **Step 4:** device cycle, `--gtest_filter='JoinSession.*'`: the five green, Task 2's still green.
+- [x] **Step 4:** device cycle, `--gtest_filter='JoinSession.*'`: the five green, Task 2's still green.
 - [ ] **Step 5: Commit.** `git commit -m "the join session's outer types: per-batch pads, one finish"`.
 
 ### Task 4: The semi family without a residual (§3.2, §3.3)
@@ -1005,7 +1011,7 @@ std::vector<std::string> names_of(const fb::Schema* s) {
   `State::Bd` (owned distinct build keys), `State::dhj`; `State::empty_build` (set here for an
   all-NULL build key under UNEQUAL, by Task 5 for a zero-row or absent build).
 
-- [ ] **Step 1: The cases, red.** Build `b_k {1, 2, 2, NULL}`, `b_v {a, b, c, n}`.
+- [x] **Step 1: The cases, red.** Build `b_k {1, 2, 2, NULL}`, `b_v {a, b, c, n}`.
 
 ```cpp
 TEST(JoinSession, LeftSemiAntiMarkAnswerOnlyAtFinishEachBuildRowOnce) {
@@ -1047,7 +1053,7 @@ TEST(JoinSession, RightAntiOverABuildWhoseKeysAreAllNullKeepsEveryProbeRow) {
 }
 ```
 
-- [ ] **Step 2: `distinct_keys`.**
+- [x] **Step 2: `distinct_keys`.**
 
 ```cpp
 std::unique_ptr<cudf::table> distinct_keys(cudf::table_view K, cudf::null_equality cmp) {
@@ -1064,7 +1070,7 @@ std::unique_ptr<cudf::table> distinct_keys(cudf::table_view K, cudf::null_equali
 }
 ```
 
-- [ ] **Step 3: The arms.** Constructor, for `RightSemi`/`RightAnti` without a cross filter:
+- [x] **Step 3: The arms.** Constructor, for `RightSemi`/`RightAnti` without a cross filter:
 
 ```cpp
     s_->Bd = distinct_keys(s_->Bk(), s_->cmp);              // owned: dhj views it
@@ -1103,7 +1109,7 @@ std::unique_ptr<cudf::table> distinct_keys(cudf::table_view K, cudf::null_equali
       return emit_build_only(s_->d, s_->B.with(std::move(s_->matched), "mark"));   // shares B's owners
 ```
 
-- [ ] **Step 4:** device cycle: the three green.
+- [x] **Step 4:** device cycle: the three green.
 - [ ] **Step 5: Commit.** `git commit -m "the join session's semi family: rows, never pairs"`.
 
 ### Task 5: Absent and empty sides (§3.8, #173, #212)
@@ -1113,7 +1119,7 @@ std::unique_ptr<cudf::table> distinct_keys(cudf::table_view K, cudf::null_equali
 **Interfaces:** Consumes Tasks 2–4. Produces `State::empty_build` for every reason (no batch, zero
 rows, all-NULL keys).
 
-- [ ] **Step 1: The matrix, red.** For each of the nine types × build ∈ {no batch, zero rows} ×
+- [x] **Step 1: The matrix, red.** For each of the nine types × build ∈ {no batch, zero rows} ×
   probe ∈ {one batch `p_k {1, NULL}`, none}, the expected output — all nine types in one table-driven
   test, plus a zero-row probe between two with rows:
 
@@ -1170,7 +1176,7 @@ TEST(JoinSession, NoProbeBatchStillFinishesFromTheBuildSide) {   // #173
 }
 ```
 
-- [ ] **Step 2: The arms.** Constructor: `B = build ? *build : null_table(types_of(build_schema),
+- [x] **Step 2: The arms.** Constructor: `B = build ? *build : null_table(types_of(build_schema),
   names_of(build_schema), 0)`; `if (B.view().num_rows() == 0) { empty_build = true; return; }` before
   any cuDF object is made, after `matched` would have been made (empty is fine: zero rows). `probe`
   with `empty_build`:
@@ -1196,7 +1202,7 @@ TEST(JoinSession, NoProbeBatchStillFinishesFromTheBuildSide) {   // #173
   build-side semi family answer `emit` over zero build rows (and, for `LeftMark`, a zero-row
   `mark`). Note `types_of(B.view())` for an absent build comes from `build_schema` (Step 2's
   `null_table`), so a timestamp build column needs the `DataType` arms repartition-keys added.
-- [ ] **Step 3:** device cycle: both green, earlier tasks green.
+- [x] **Step 3:** device cycle: both green, earlier tasks green.
 - [ ] **Step 4: Commit.** `git commit -m "the join session answers an empty or absent side for every type"`.
 
 ### Task 6: The residual — pairs path, per-side conjuncts, chunking (§3.4)
@@ -1215,7 +1221,7 @@ TEST(JoinSession, NoProbeBatchStillFinishesFromTheBuildSide) {   // #173
   `std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view P, cudf::column_view bi, cudf::column_view pi, std::vector<Conjunct> const&)`,
   `std::vector<std::pair<cudf::size_type, cudf::size_type>> chunks(std::size_t pairs, std::size_t row_bytes, cudf::size_type rows, uint64_t budget)`.
 
-- [ ] **Step 1: The cases, red.** Build `b_k {1, 2}`, `b_v {a, b}`, `b_lim {5, 5}`; filter `p_w >
+- [x] **Step 1: The cases, red.** Build `b_k {1, 2}`, `b_v {a, b}`, `b_lim {5, 5}`; filter `p_w >
   b_lim` (filter schema `[Probe 1, Build 2]`, i.e. `col(0) > col(1)`).
 
 ```cpp
@@ -1276,7 +1282,7 @@ TEST(JoinSession, ANullPreservedSideConditionIsNoMatch) {
 }
 ```
 
-- [ ] **Step 1a: The column map as a span.** A FlatBuffers vector of structs stores the structs
+- [x] **Step 1a: The column map as a span.** A FlatBuffers vector of structs stores the structs
   inline, but its `data()` is typed `const S* const*` (`flatbuffers/vector.h:281`), so
   `{v->data(), v->size()}` does not compile; `Data()` is the raw bytes. A `true` filter carries no
   `filter_columns`, so a null vector is an empty span. In `expr.h`:
@@ -1299,7 +1305,7 @@ inline JoinFilterColMap col_map_of(const flatbuffers::Vector<const fb::JoinFilte
   check stays). `join.cpp`'s two callers (`:98`, `:233`) become `auto map = col_map_of(join->filter_columns());
   build_expr(join->filter(), ctx, &map)`; its loops over `filter_columns()` (`:356`, `:443`, `:470`)
   are unchanged. The old gpu tier must stay green: these are the semi and mark joins it runs today.
-- [ ] **Step 2: Splitting the residual.** At construction, when `filter()` is present:
+- [x] **Step 2: Splitting the residual.** At construction, when `filter()` is present:
 
 ```cpp
 /// The top-level AND-chain, flattened.
@@ -1326,7 +1332,7 @@ void sides_read(const fb::Expr* e, JoinFilterColMap map, bool& b, bool& p) {
   classified: `cross` (reads both), `build_only`, `probe_only`. `ast_able` is
   `cudf_ast_can_evaluate(e, type_table)` over the zero-row type table `join.cpp:433-451` builds
   (filter-schema order, zero-row slices of each side's column).
-- [ ] **Step 3: The per-side evaluator, NULL as false.**
+- [x] **Step 3: The per-side evaluator, NULL as false.**
 
 ```cpp
 /// AND over `cs` of `c IS TRUE`, evaluated over one side's rows. A conjunct's ColumnRef(i) is
@@ -1355,7 +1361,7 @@ std::unique_ptr<cudf::column> eval_on(std::vector<Conjunct> const& cs, cudf::tab
     is `R` at finish: `m = matched ∧ R` (`LeftSemi` keeps `m`, `LeftAnti` `¬m`, `LeftMark` marks `m`).
   - `Inner`/`Left`/`Right`/`Full`: every conjunct goes to the pairs path below (outer types cannot
     push a one-side conjunct: it decides unmatched rows).
-- [ ] **Step 4: The pairs path with chunking.**
+- [x] **Step 4: The pairs path with chunking.**
 
 ```cpp
 std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view P,
@@ -1426,7 +1432,7 @@ std::vector<std::pair<cudf::size_type, cudf::size_type>> chunks(std::size_t pair
 
   `concat_rows` is `cudf::concatenate` over the parts' views, wrapped `owning` with the first part's
   names (a single part is returned as is). `B.select` above is `table_view::select`.
-- [ ] **Step 5:** device cycle: the three green.
+- [x] **Step 5:** device cycle: the three green.
 - [ ] **Step 6: Commit.** `git commit -m "the join session's residual: pairs over the filter's columns, per-side conjuncts, chunks"`.
 
 ### Task 7: The semi family with a residual reading both sides (§3.1, §3.4; D1, D13)
@@ -1436,7 +1442,7 @@ std::vector<std::pair<cudf::size_type, cudf::size_type>> chunks(std::size_t pair
 **Interfaces:** Consumes Task 6's `Conjunct`, `residual_mask`, `chunks`, `JoinFilterColMap`.
 Produces `State::flipped` (the col map with sides swapped, for the probe as cuDF's left).
 
-- [ ] **Step 1: The cases, red.** The AST-able cross residual `p_w > b_lim` (Task 6's spec) over
+- [x] **Step 1: The cases, red.** The AST-able cross residual `p_w > b_lim` (Task 6's spec) over
   LeftSemi/LeftAnti/LeftMark/RightSemi/RightAnti, and the same with the residual made non-AST by a
   decimal comparison (`build`'s `b_dlim` Decimal128(15,2) against the probe's `p_d` Decimal128(15,2)
   — `cudf_ast_can_evaluate` refuses any decimal operand, `expr.cpp:415`): both must give the same
@@ -1445,12 +1451,12 @@ Produces `State::flipped` (the col map with sides swapped, for the probe as cuDF
   p1)` only (7 > 5). Expected: LeftSemi `{1|5}`; LeftAnti `{1|9, 2|5}`; LeftMark `{1|5|true,
   1|9|false, 2|5|false}`; RightSemi `{1|7}`; RightAnti `{2|1, 3|9}`. Write them as Task 6's
   table-driven loop, once with the int filter and once with the decimal one.
-- [ ] **Step 1b: Several cross conjuncts, red.** A LeftSemi over `p_w > b_lim AND p_w < b_hi`
+- [x] **Step 1b: Several cross conjuncts, red.** A LeftSemi over `p_w > b_lim AND p_w < b_hi`
   (build `b_k {1, 1}`, `b_lim {5, 5}`, `b_hi {8, 20}`; probe `p_k {1}`, `p_w {10}`): only `(b2, p1)`
   passes, so LeftSemi `{1|5|20}`, LeftMark `{1|5|8|false, 1|5|20|true}`. And the same with one of the
   two conjuncts a decimal comparison (not AST-able): the same rows, through the pairs path — the
   shape that would otherwise reach a null `hj`.
-- [ ] **Step 2: The matchers.** A cross residual is one AST when every cross conjunct is AST-able
+- [x] **Step 2: The matchers.** A cross residual is one AST when every cross conjunct is AST-able
   (after Task 8's hoisting): their AND is built at the cuDF AST level, in one `ExprContext`, never
   in a FlatBuffer:
 
@@ -1506,7 +1512,7 @@ cudf::ast::expression const& cross_ast(std::vector<Conjunct> const& cs, ExprCont
   pi')` as the mask). Note `s_->flipped`: a copy of the filter-column map with every `side`
   swapped, built once at construction and held by `State` (`std::vector<fb::JoinFilterColumn>`
   with a span over it), so `flipped` outlives every AST built from it.
-- [ ] **Step 3:** device cycle: green with both filters.
+- [x] **Step 3:** device cycle: green with both filters.
 - [ ] **Step 4: Commit.** `git commit -m "the join session's semi family over a residual reading both sides"`.
 
 ### Task 8: Hoisting one-side operands so more conditions run on the AST (§3.6's `hoist`)
@@ -1518,7 +1524,7 @@ maps `State::map_h` / `flipped_h` (owned vectors with spans over them), and the 
 with their hoisted columns, `State::B_cond` and the per-batch `P_cond`. No FlatBuffer is written:
 a hoisted conjunct is built directly as cuDF AST nodes.
 
-- [ ] **Step 1: The case, red.** A Left nested loop whose condition is `upper(b_s) = p_s` (filter
+- [x] **Step 1: The case, red.** A Left nested loop whose condition is `upper(b_s) = p_s` (filter
   columns `[Build 1, Probe 0]`): `upper` is a string function the AST refuses, but it reads the build
   alone, so it is hoisted into a build column and the comparison becomes AST-able. Build `b_id {1,
   2}`, `b_s {"x", "y"}`; probe `p_s {"X", "z"}`. Expected per probe: `{1|x|X}`; finish `{2|y|NULL}`.
@@ -1527,7 +1533,7 @@ a hoisted conjunct is built directly as cuDF AST nodes.
   #215 shape. A third, a keyed LeftSemi whose cross residual is `upper(b_s) = p_s AND p_w > b_lim`:
   the first conjunct hoisted, both then AST, one `mixed_left_semi_join` — the same rows as the
   pairs path gives with hoisting disabled (`chunk_bytes` small, so the pairs path also chunks).
-- [ ] **Step 2: The rule, bounded.** Hoisting applies to a conjunct of the form `lhs OP rhs` with
+- [x] **Step 2: The rule, bounded.** Hoisting applies to a conjunct of the form `lhs OP rhs` with
   `OP` one of `Eq, NotEq, Lt, LtEq, Gt, GtEq`, where each operand reads one side only and the
   conjunct as a whole is not AST-able. Each operand that is not a bare `ColumnRef` is evaluated over
   its side's rows with `build_column` (the side table in filter-schema order, as `eval_on` builds
@@ -1577,7 +1583,7 @@ cudf::ast::expression const& hoisted_ast(fb::BinaryOp op, Operand lhs, Operand r
   hoisting: the column path evaluates anything). Hoisted columns never reach an output: `emit` reads
   `B` and `P`, not `B_cond`/`P_cond`. The `mixed_*` call passes `B_cond`/`P_cond` (each the side's
   columns, then its hoisted ones) as the conditional tables.
-- [ ] **Step 3:** device cycle: green.
+- [x] **Step 3:** device cycle: green.
 - [ ] **Step 4: Commit.** `git commit -m "the join session hoists one-side operands into columns"`.
 
 ### Task 9: Nested loops — every type, literal `true`, chunked (§3.6)
@@ -1586,7 +1592,7 @@ cudf::ast::expression const& hoisted_ast(fb::BinaryOp op, Operand lhs, Operand r
 
 **Interfaces:** Consumes Tasks 6–8. Produces the keyless arms.
 
-- [ ] **Step 1: The cases, red.** Condition `p_v < b_v` (filter `[Probe 0, Build 1]`), build `b_id
+- [x] **Step 1: The cases, red.** Condition `p_v < b_v` (filter `[Probe 0, Build 1]`), build `b_id
   {1, 2}`, `b_v {5, 10}`, probe `p_v {3, 7, 12}`. Pairs passing: (1,3) (2,3) (2,7). Expected per
   type (columns `b_id|b_v|p_v` or one side's):
   - Inner probe `{1|5|3, 2|10|3, 2|10|7}`;
@@ -1599,7 +1605,7 @@ cudf::ast::expression const& hoisted_ast(fb::BinaryOp op, Operand lhs, Operand r
   empty build (`tiny LEFT JOIN empty ON true` gives the build padded — 8 rows in pbench; here 2),
   then `chunk_bytes = 16` over the A∧R form (`p_v < b_v AND cast(p_v as decimal) <>
   cast(b_v as decimal)`) and over the A-empty form (a decimal-only condition) — same rows as unchunked.
-- [ ] **Step 2: The arms.** With no keys, the conjuncts split into `A` (AST-able after Task 8) and `R`:
+- [x] **Step 2: The arms.** With no keys, the conjuncts split into `A` (AST-able after Task 8) and `R`:
 
 ```cpp
   // A non-empty, R empty — row-wise where the type allows
@@ -1662,14 +1668,14 @@ cudf::ast::expression const& hoisted_ast(fb::BinaryOp op, Operand lhs, Operand r
   (design §4.1); it is AST-able, so it takes the first arm. `Full` with `A` only also uses the pairs
   recipe (never `conditional_full_join`, which has no streaming form, and not the left-join
   sentinel, D8).
-- [ ] **Step 3:** device cycle: the nine × three green.
+- [x] **Step 3:** device cycle: the nine × three green.
 - [ ] **Step 4: Commit.** `git commit -m "the join session's nested loops: every type, true, chunked"`.
 
 ### Task 10: Cross (§3.7)
 
 **Files:** Modify `cpp/src/operators/join_session.cpp`; Test `cpp/tests/gpu/test_join_session.cpp`.
 
-- [ ] **Step 1: The cases, red.** Inner, no keys, no filter: build `{1, 2}` × probe `{x, y, z}` → 6
+- [x] **Step 1: The cases, red.** Inner, no keys, no filter: build `{1, 2}` × probe `{x, y, z}` → 6
   rows; a zero-row build → one zero-row table; a zero-row probe → one zero-row table; a projection
   keeping one probe column → 6 rows of it (#207's device half); a build of zero *columns* is refused
   naming the planner (the explicit `__rowmarker__` keeps one, design §4.1); `nb × np` over `INT32_MAX`
@@ -1684,7 +1690,7 @@ TEST(JoinSession, ACrossJoinOverTwoBillionRowsIsRefusedByName) {
 ```
 
   (`cross_rows_or_throw` is declared in `join_session.h` for this test.)
-- [ ] **Step 2: The arm.**
+- [x] **Step 2: The arm.**
 
 ```cpp
 cudf::size_type cross_rows_or_throw(std::int64_t nb, std::int64_t np) {
@@ -1704,18 +1710,18 @@ cudf::size_type cross_rows_or_throw(std::int64_t nb, std::int64_t np) {
     std::iota(po.begin(), po.end(), nbc);
     return emit(s_->d, out.select(bo), out.select(po));        // both share out's owners; #207
 ```
-- [ ] **Step 3:** device cycle green.
+- [x] **Step 3:** device cycle green.
 - [ ] **Step 4: Commit.** `git commit -m "the join session's cross join: projection, empties, the one overflow check"`.
 
 ### Task 11: Typed pads and stats (§3.0, §3.9)
 
 **Files:** Test `cpp/tests/gpu/test_join_session.cpp` (and any fix the cases show in `join_session.cpp`).
 
-- [ ] **Step 0: Timestamps in a pad.** The `ts_us` pad below reads `TimestampMicrosecond` from
+- [x] **Step 0: Timestamps in a pad.** The `ts_us` pad below reads `TimestampMicrosecond` from
   `probe_schema` — the `DataType` arm repartition-keys added. repartition-keys' Tasks 5b and 5c map
   Arrow's timestamps to it and refuse an unmapped type instead of writing `Null`; join-backend's
   writer calls that.
-- [ ] **Step 1: Pads, red until right.** A Left join whose probe carries one column of each type —
+- [x] **Step 1: Pads, red until right.** A Left join whose probe carries one column of each type —
   `i32`, `i64`, `utf8`, `date32`, `dec(15,2)`, `dec(38,4)`, `boolean`, `ts_us` — finished with no
   probe batch (pads from `probe_schema`, so the schema names each type: Decimal128 with its scale in
   `decimal_scale`, `TimestampMicrosecond`) and once after one probe batch (pads from the batch). Read
@@ -1723,14 +1729,14 @@ cudf::size_type cross_rows_or_throw(std::int64_t nb, std::int64_t np) {
   each probe column's type equals the probe batch's, decimal scale included. The `JoinSpec` needs
   a `decimal_scale` per field: extend `schema_of` to take a scale (and `CreateField`'s
   `decimal_precision`, `decimal_scale`).
-- [ ] **Step 2: Stats.** One probe of an Inner join over a `utf8` build column: `PeacockNodeStats`
+- [x] **Step 2: Stats.** One probe of an Inner join over a `utf8` build column: `PeacockNodeStats`
   from `peacock_join_probe` has `rows` = the output's rows and `varlen_content_bytes` = the sum of
   the output strings' bytes (count them by hand); a probe answering handle 0 leaves `{0, 0}`; the
   build's stats are `{0, 0}`.
-- [ ] **Step 3: Regions.** With `peacock_set_node_timing(1)`: a build, two probes and a finish
+- [x] **Step 3: Regions.** With `peacock_set_node_timing(1)`: a build, two probes and a finish
   record four regions for seq 0, `partition` 0 each, `call_index` 0, 1, 2, 3
   (`peacock_executor_collect_node_regions`).
-- [ ] **Step 3a: No exit copy (#154's `join.cpp` sites).** The session moves gathered columns into
+- [x] **Step 3a: No exit copy (#154's `join.cpp` sites).** The session moves gathered columns into
   its output; a deep copy at the exit would show as a second output-sized allocation at the peak.
   The statistics adaptor `main()` installs (Task 1) measures it, with the probe the only call inside:
 
@@ -1771,7 +1777,7 @@ TEST(JoinSession, AProbeHandsItsGatheredColumnsOverWithoutACopy) {
   (`stats_mr()` and `install_rmm_pool` are `cpp/include/peacock/rmm_pool.hpp`'s, as
   refcounted-scatter's `allocated_by` uses them; the input batches are uploaded before the
   measured call, and consumed by it, so they free inside it and only lower `net`.)
-- [ ] **Step 4:** device cycle green; the whole file green; the existing gpu tier green.
+- [x] **Step 4:** device cycle green; the whole file green; the existing gpu tier green.
 - [ ] **Step 5: Commit.** `git commit -m "the join session's pads hold their types; one region per call; no exit copy"`.
 
 ### Task 11b: The rest of §5.6's named cases
@@ -1781,7 +1787,7 @@ TEST(JoinSession, AProbeHandsItsGatheredColumnsOverWithoutACopy) {
 Five items of design §5.6's named list no earlier task pins. Each is red until the arm it names is
 right; each expected answer is counted by hand.
 
-- [ ] **Step 1: The cases.**
+- [x] **Step 1: The cases.**
 
 ```cpp
 // A present-but-empty projection keeps no column (the plan never asks for that: the session
@@ -1852,17 +1858,17 @@ TEST(JoinSession, ARightSemiOverAnAllNullBuildAnswersNothingAndRightAntiEveryRow
   (`inner_on_k()` is Task 2's spec, `residual()` Task 6's; `fits_or_throw` is exported from
   `join_session.h` in the `peacock::join` namespace for this case. If the zero-column refusal's
   message is worded otherwise in Task 10, match it.)
-- [ ] **Step 2: Run** on shad-gpu (`build-test-shadgpu.sh --run` with `PCK_TEST_FILTER=JoinSession`):
+- [x] **Step 2: Run** on shad-gpu (`build-test-shadgpu.sh --run` with `PCK_TEST_FILTER=JoinSession`):
   each red until its arm is right, then green; record the reds in the detail file.
 - [ ] **Step 3: Commit.** `git commit -m "the session's remaining named cases: projection, size, composite NULL, empty-probe residual, all-NULL build"`.
 
 ### Task 12: The wiki and the record
 
-- [ ] `llm-wiki/architecture.md`, Interfaces: the four symbols, their consume and failure rules
+- [x] `llm-wiki/architecture.md`, Interfaces: the four symbols, their consume and failure rules
   (an unknown join id and a probe after finish leave the session; anything else ends the query),
   the join map's lifetime; the symbol count. `build-test.md`: a row for `peacock_join_session_tests`
   (gpu, shad-gpu) with its case count; the grand total.
-- [ ] Detail file: each task's device-cycle lines; the gaps below.
+- [x] Detail file: each task's device-cycle lines; the gaps below.
 - [ ] `git commit -m "join-session-cpp: the C ABI documented, the record"`.
 
 ## Gaps the plan resolves on its own (for the reviewer)

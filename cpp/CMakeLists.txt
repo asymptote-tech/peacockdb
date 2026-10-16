@@ -156,6 +156,9 @@ add_library(peacock_gpu SHARED
   src/operators/project.cpp
   src/operators/aggregate.cpp
   src/operators/join.cpp
+  src/operators/join_session.cpp
+  src/operators/join_columns.cpp
+  src/operators/join_residual.cpp
   src/operators/sort.cpp
   src/operators/union.cpp
   src/operators/limit.cpp
@@ -216,6 +219,23 @@ set_target_properties(peacock_plan_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD
 add_dependencies(peacock_plan_tests gpu_plan_fbs)
 add_test(NAME peacock_plan_tests COMMAND peacock_plan_tests)
 set_tests_properties(peacock_plan_tests PROPERTIES LABELS "gpu")
+
+# The join session through its C ABI: plan bytes in, Arrow batches up, IPC answers down.
+add_executable(peacock_join_session_tests tests/gpu/test_join_session.cpp)
+target_include_directories(peacock_join_session_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${FBS_GENERATED_DIR}/..
+)
+# Arrow both ways: the uploads are Arrow C-Data batches and the answers are read back
+# out of the IPC stream the export writes.
+target_link_libraries(peacock_join_session_tests PRIVATE peacock_gpu cudf::cudf flatbuffers
+                      Arrow::arrow_shared GTest::gtest)
+set_target_properties(peacock_join_session_tests PROPERTIES CXX_STANDARD 20
+                      CXX_STANDARD_REQUIRED ON)
+add_dependencies(peacock_join_session_tests gpu_plan_fbs)
+add_test(NAME peacock_join_session_tests COMMAND peacock_join_session_tests)
+set_tests_properties(peacock_join_session_tests PROPERTIES LABELS "gpu")
 
 # TPC-H bare-cudf query tests — hand-written operator chains over the LARGE (sf40)
 # dataset that lives on the GPU host, checked against committed DuckDB goldens. Skips
@@ -320,11 +340,12 @@ set_target_properties(peacock_multi_gpu_tpchv_tests PROPERTIES CXX_STANDARD 20 C
 # ---------------------------------------------------------------------------
 install(TARGETS peacock_gpu LIBRARY DESTINATION lib)
 install(TARGETS peacock_gpu_tests peacock_cpu_tests peacock_plan_tests peacock_tpch_tests
-        peacock_tpchv_tests RUNTIME DESTINATION bin)
+        peacock_tpchv_tests peacock_join_session_tests RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 
 # Ensure installed test binaries can find libpeacock_gpu.so in ../lib.
-set_target_properties(peacock_cpu_tests peacock_gpu_tests peacock_plan_tests PROPERTIES
+set_target_properties(peacock_cpu_tests peacock_gpu_tests peacock_plan_tests
+                      peacock_join_session_tests PROPERTIES
   INSTALL_RPATH "$ORIGIN/../lib"
 )
 

@@ -30,6 +30,7 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
     case fb::PlanNodeKind_CudfUnion:               return "CudfUnion";
     case fb::PlanNodeKind_CudfLimit:               return "CudfLimit";
     case fb::PlanNodeKind_CudfWindow:              return "CudfWindow";
+    case fb::PlanNodeKind_CudfJoin:                return "CudfJoin";
     default:                                       return "Unknown";
   }
 }
@@ -76,6 +77,9 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
         result = execute_limit(node->node_as_CudfLimit(), in); break;
       case fb::PlanNodeKind_CudfWindow:
         result = execute_window(node->node_as_CudfWindow(), in); break;
+      case fb::PlanNodeKind_CudfJoin:
+        throw std::runtime_error(
+            "CudfJoin runs through peacock_join_build/probe/finish, not execute_node");
       default:
         throw std::runtime_error(
             "unsupported PlanNodeKind: " + std::to_string(node->node_type()));

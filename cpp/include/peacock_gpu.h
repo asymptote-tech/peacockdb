@@ -246,6 +246,34 @@ int peacock_executor_execute_scan_rowgroups(peacock_executor_t* executor, uint64
 int peacock_executor_slice_handle(peacock_executor_t* executor, uint64_t handle, uint64_t offset,
                                   uint64_t length, uint64_t* out_handle);
 
+/// Build the join session for the `CudfJoin` at post-order `seq` over `build` (0 = no build
+/// batch for this lane), CONSUMING that handle, and write the join id to *out_join. A
+/// `CudfJoin` is a plan leaf: it never goes through peacock_executor_execute_node, which
+/// refuses it by name. The session holds the build table, the cuDF join object and the
+/// build-matched column until peacock_join_release or peacock_executor_end_plan. Any lane
+/// may probe it (#140). A failure ends the query.
+/// @return 0 on success, non-zero on failure.
+int peacock_join_build(peacock_executor_t* executor, uint64_t seq, uint64_t build,
+                       uint64_t* out_join, PeacockNodeStats* out_stats);
+
+/// One probe batch against a live session, CONSUMING `probe`: exactly one output handle,
+/// possibly of zero rows, or *out_handle == 0 for LeftSemi, LeftAnti and LeftMark, which
+/// answer only at finish. An unknown join id and a probe after finish leave the session
+/// standing; anything else ends the query, as execute_node does.
+/// @return 0 on success, non-zero on failure.
+int peacock_join_probe(peacock_executor_t* executor, uint64_t join, uint64_t probe,
+                       uint64_t* out_handle, PeacockNodeStats* out_stats);
+
+/// Called once, after the last probe: one handle for the types that finish (Left, Full,
+/// LeftSemi, LeftAnti, LeftMark), *out_handle == 0 for the rest. Failure policy as
+/// peacock_join_probe.
+/// @return 0 on success, non-zero on failure.
+int peacock_join_finish(peacock_executor_t* executor, uint64_t join, uint64_t* out_handle,
+                        PeacockNodeStats* out_stats);
+
+/// Release a join session (idempotent, as peacock_handle_release is).
+void peacock_join_release(peacock_executor_t* executor, uint64_t join);
+
 /// Materialize rows [offset, offset+length) of a resident handle to an Arrow IPC stream
 /// (called once per handle, at root). `length == UINT64_MAX` means to the end. An offset at
 /// or past the end, and any other range naming no rows of a non-empty table, is an empty
