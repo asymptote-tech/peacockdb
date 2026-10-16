@@ -12,17 +12,17 @@ standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
 New tickets take the next free number (currently 287), one ID space across every file. 264–279
-are left to chain J, whose branches number from 263 on their own boards.
+are reserved for chain J, whose branches number from 264 on their own boards.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-120 open tickets, in file order.
+124 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 36 | #225 #216 #94 #280 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #186 #282 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #235 #262 #281 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 38 | #225 #216 #94 #280 #199 #55 #65 #62 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #251 #186 #282 #206 #240 #189 #145 #95 #197 #154 #227 #164 #201 #174 #233 #234 #262 #281 #253 #254 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 7 | #239 #195 #161 #144 #261 #249 #283 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 11 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 |
 | [`joins.md`](tickets/joins.md) | Join execution | 21 | #155 #152 #153 #80 #59 #215 #208 #207 #190 #63 #212 #173 #136 #137 #159 #160 #220 #243 #245 #246 #250 |
@@ -32,4 +32,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #149 #148 #231 #232 #242 #248 #286 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 3 | #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 5 | #263 #252 #178 #176 #129 |

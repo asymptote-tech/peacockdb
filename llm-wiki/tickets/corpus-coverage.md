@@ -28,6 +28,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#57 — the device refuses a value-form CASE](#t57)
   - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
   - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
+  - [#251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
@@ -47,9 +48,10 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
-  - [#235 — no independent oracle checks the result goldens](#t235)
   - [#262 — the DISTINCT lowering's device cells have never run](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
+  - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
+  - [#254 — `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
 
 ## Welford aggregation
 
@@ -580,6 +582,27 @@ untouched; no golden moves. Test: a walk test `ROUND_PLACES` running the query a
 `ONE_LANE`, red on two rows today; `scripts/exec_model/operators/expressions.py`'s docstring.
 Registry: q78's row drops `60`. `round` over Float32 is #221.
 
+<a id="t251"></a>
+### #251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up
+
+DataFusion cuts a decimal division at the scale it declared for the result rather than rounding,
+and we follow it. The truncated value then feeds the rest of the expression, so the answer is
+wrong in digits it printed.
+
+Two shapes, measured against DuckDB by #235's comparison. `(x / y) * 100` multiplies the
+truncation by a hundred: tpcds q58's `ss_dev` is `103.719200` against `103.71926462…`, and q61's
+ratio `51.82319100` against `51.82319145…` — 45 to 97 units in our last rendered place.
+`sum(x / y)` adds one truncation per row: q66's twelve `*_per_sq_foot` columns are 1 to 2 units
+short. A quotient nothing consumes stays inside its scale — tpch q1's `avg_qty` is `25.522005`
+against `25.522005853…` — so it is the expression around the division that loses the digits.
+
+**Corpus queries:** `tpcds/q58` (columns 2, 4, 6), `tpcds/q61` (column 2) and `tpcds/q66`
+(columns 20-31), each `duckdb_divergent(251, ...)` in `corpus_cases.inc`.
+
+**Fix proposed:** round the quotient at its declared scale, or widen the scale a division
+declares so the next operand has digits to spend. Either departs from DataFusion's convention,
+so the decision comes before the code.
+
 ## Source
 
 <a id="t186"></a>
@@ -922,89 +945,6 @@ range never needs the ABI's clamp then covers the limit too. Tests: the driver's
 the range each call was handed, and the backends' `LimitStream` tests take a range rather than
 a running count.
 
-<a id="t235"></a>
-### #235 — no independent oracle checks the result goldens
-
-Every answer the corpus checks is checked against DataFusion or against our own goldens, which
-our cpu engine wrote. A defect DataFusion shares with us — a limit it drops (#166), `NOT IN` over
-NULLs (#80) — passes every tier. DuckDB answers exist only for the hand-written bare-cuDF
-gtests at sf40 (`testdata/gen_duckdb_goldens.sh`, `cpp/tests/gpu/test_tpch.cpp`), never for the
-engine's corpus.
-
-**Corpus queries:** every section of `testdata/goldens/{tpch,tpcds}.sf1/mini.result.txt`: 120
-queries, 8 of them skipped (4 over the 262144-byte cap, 4 not enabled).
-
-**Fix proposed:** a DuckDB golden beside each result golden, and a Rust test comparing them.
-The generator and both `duckdb-result.txt` files landed 2026-09-28; the comparison test, the
-`duckdb_oracle` argument and the enum consts are what remain.
-- A Python generator (`testdata/duckdb_result.py`, beside `duckdb_cost.py`) runs each query of
-  `testdata/{tpch,tpcds}-queries/` over the same sf1 parquet with the DuckDB 1.5.4 CLI CI already
-  pins for `generate_testdata.sh`, binding the parquet as views the way `gen_duckdb_goldens.sh`
-  does, and writes `duckdb-result.txt` beside `mini.result.txt`: the
-  same `== <query>` sections and table rendering, rows sorted, the same cap and skip markers. The
-  session sets `default_null_order='nulls_last_on_asc_first_on_desc'` and
-  `integer_division=true`, DataFusion's rules, so those two are not divergences.
-- A Rust test reads both files and compares each query both have: row count, then rows as
-  multisets, by column position, numbers within a relative tolerance. A declared list of
-  (query, reason, ticket) holds the expected divergences, asserted both ways as `NOT_RUNNABLE`
-  is: an undeclared divergence fails, and so does a declared one that stopped diverging.
-- The comparison mode is a ninth `corpus_query!` argument, `duckdb_oracle`, beside `cpu_oracle`
-  and `gpu_oracle`, so a query's whole coverage still reads off its line: `duckdb_exact`,
-  `duckdb_approx` (the tolerance, for the float and decimal-typing divergences below),
-  `duckdb_divergent_<ticket>` (the declared list, per line), `duckdb_none` (only one side answers,
-  or the section is over the cap). Every existing line gains it once the generator's first run
-  says which each query needs.
-- The device run writes its own answers, `gpu-result.txt` beside `mini.result.txt`: the same
-  sections and rendering, from the device's unload, under a regeneration variable on shad-gpu and
-  pulled home as the benchmark tree is. A record, never an authority: the device still asserts
-  against the cpu's `mini.result.txt`, and `test_gpu_corpus`'s check that a device run leaves the
-  cpu's three goldens byte for byte stays. What it buys is a three-way comparison that can be read
-  without a device — ours on the cpu, ours on the device, DuckDB — and the same comparator applied
-  to `gpu-result.txt` against `duckdb-result.txt`, so the device meets an oracle other than our cpu.
-- Negative tests of the corpus helpers: a wrong row in the result golden makes the helper fail
-  with a result divergence, for the cpu tier's `assert_result_section` (`test_support/corpus.rs`),
-  the device tier's `assert_result` under `golden_exact` and `golden_approx*`
-  (`test_support/corpus_gpu.rs`), and the new DuckDB comparison. Today only the section comparator
-  is tested, on strings (`tests/test_golden_format.rs`); the helpers read their golden from the
-  fixed testdata path, so each takes the section as an argument, or its path, for a test to hand
-  it a doctored one.
-- Each oracle enum gains an `ALL` const listing its variants — `CpuOracle`
-  (`test_support/corpus.rs`), `GpuResultMode` (`test_support/corpus_gpu.rs`) and the new DuckDB
-  one — and a test asserts every variant is named by some `corpus_query!` line, so an unused kind
-  is deleted rather than kept. Today `GpuResultMode::Skip` and `GoldenApprox` are unused: 113
-  lines say `golden_exact`, 2 `golden_approx_std`, 5 `live_cpu`.
-
-Measured by the first run (2026-09-28), over every section both files hold: no row count, string
-or NULL differs. tpch 39 queries: 22 identical, 6 differ in column names only, 5 in float or decimal
-digits, 6 not compared. tpcds 99: 53 identical, 12 names only, 3 formatting only, 10 digits, 1
-empty answer, 2 not compared, 18 answered by DuckDB alone. `round(x, 2)` (q2) agrees on the cpu;
-no tie under a LIMIT and no NULL-order difference appeared; turning DuckDB's integer division off
-changes only the typing of two decimal divisions (q2, q61), no value.
-
-Expected divergences, to declare or to normalize in the comparator:
-- **Column names** (18 queries). DataFusion names an unaliased expression by its qualified text
-  (`sum(lineitem.l_quantity)`), DuckDB by its own (`sum(l_quantity)`). Compared by position.
-- **Decimal `avg` and division truncate at a fixed scale.** We follow DataFusion's rule, a decimal
-  cut (not rounded) at its declared scale; DuckDB answers a double. On its own it is formatting:
-  tpch q1's `avg_qty` is `25.522005` against `25.522005853…`. Inside an expression the truncated
-  intermediates compound: tpcds q58's `ss_dev` is right to about four places, and q66 answers
-  `9.282779` where truncating the true `9.2827805…` gives `9.282780` — up to 1e-6 relative. A
-  candidate ticket of its own: whether to round, or declare it (tpch q1, q8,
-  shuffle-additive-avg; tpcds q7, q9, q13, q18, q26, q58, q59, q61, q66, q75, q85, q90).
-- **Float last digits.** Floating sums and Welford `stddev`/`var` reassociate: tpch q14 and
-  shuffle-stddev, tpcds q39, below 1e-13.
-- **An empty answer.** `tpcds/q17` renders with no header on our side, the cpu emitting no batch
-  (#205), so its column names and types go unchecked; DuckDB prints them. Equal as zero rows; a
-  candidate ticket to render the declared schema.
-- **Queries only DuckDB answers** (18, tpcds): the window queries our planner refuses (#143),
-  q27 and q72 (#23), q28 (#62). Not compared.
-- **Queries neither side checks** (10). Over the 262144-byte cap on both: tpch q16, anti-join,
-  filter-project, semi-join. Not enabled on ours: tpch q11 and q22, tpcds q24 and q54 (#190);
-  DuckDB answers them. **The spec for this ticket decides what to do about the over-cap
-  queries**: raise the cap, compare a digest of the normalized rows on both sides, or leave them
-  unchecked and say so.
-- **A real divergence** is a ticket, and its line in the declared list names it.
-
 <a id="t262"></a>
 ### #262 — the DISTINCT lowering's device cells have never run
 
@@ -1038,3 +978,53 @@ from the cpu's, and nothing would say so.
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
+<a id="t253"></a>
+### #253 — the DuckDB oracle cannot record a divergence it finds on two of its paths
+
+`duckdb_divergent(<ticket>, <positions>)` is how a corpus line records a difference the oracle
+found and a ticket explains. It reaches the per-line cpu comparison and nothing else, so two
+paths can find a divergence and have no way to say so. Both block tasks already on chain J's
+board.
+
+**A device answer that differs from DuckDB while the cpu's matches.** One `duckdb_oracle` per
+line serves the cpu case and every `duckdb_gpu_<query>_<mode>` case, and the two values a
+developer has both go red: `duckdb_exact` fails the device case, and `duckdb_divergent` fails
+the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
+diverging". An empty position list does the same at the row level. So the only green options are
+to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
+keyed by mode for in the first place — a lane split or a shuffle defect shows per mode — and
+[`stale-cells`](../tasks/stale-cells.md) is a task that can produce one.
+
+**An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
+column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
+"declare `duckdb_fingerprint`" — the error text at `test_support/fingerprint.rs` says
+`duckdb_divergent does not reach this path`. So an over-cap answer is all or nothing: one
+SHA-256 over the rendered rows either matches or the line cannot be green at all.
+[`join-backend`](../tasks/join-backend.md) turns tpch q11's cpu cells on, and DuckDB's side of
+q11 is already a 27,604-row fingerprint with no approximate column, so that task is the first to
+hold a fingerprint nobody has compared.
+
+A third shape reaches the same door: the two writers classing one column differently — a decimal
+on our side against a double on DuckDB's, which the [`duckdb-oracle`](../tasks/duckdb-oracle.md)
+spec's step 3 asks to be approximate and which cannot be, since neither writer can see the
+other's declared type and a fingerprint no longer holds the rows to rehash. Today that is a hard
+error naming both classifiers. No committed section has the shape.
+
+**Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
+give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
+a triple or a per-column exemption can carry a known difference while `rows` and the remaining
+columns stay checked. Decide it before `stale-cells` builds rather than inside it.
+
+<a id="t254"></a>
+### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
+
+[#235](../archive/archived-tickets.md#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
+and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
+`result_matches` were split out of their panicking wrappers and are driven by negative cases.
+`CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited` (`test_support/corpus.rs`),
+which runs a live DataFusion query and takes no injectable answer, so nothing hands it a wrong
+one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
+
+One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
+not determined — so the exposure is small and the fix is the same shape as the other two: split
+the comparison from the query, and hand the split a doctored answer that is not a subset.

@@ -18,7 +18,7 @@ comparison duckdb-oracle added.
 
 - The 16 cells only: `gpu_tp1_rowgroup`, `gpu_tp4_single`, `gpu_tp4_rowgroup`, `gpu_tp4_sized` on
   `tpch/aggregate_groupby`, `tpch/shuffle_additive`, `tpch/shuffle_stddev`, `tpch/filter_project`
-  (`cost-registry.csv:123,126,137,139`; `corpus_cases.inc:43,44,46,70`).
+  (`cost-registry.csv:123,126,137,139`; `corpus_cases.inc:46,47,49,73`).
 - No fix to anything they show. A failure keeps its cell off under an open ticket, or a new one.
 - `shuffle_stddev` keeps `schema_validation_disabled` (#225); a cell failing on schema alone keeps
   `225` on the row.
@@ -37,14 +37,14 @@ comparison duckdb-oracle added.
    off, not all four. Task 2 Step 1.
 4. **The registry tests in both binaries** — `the_registry_matches_the_cpu_corpus_in_both_directions`
    and the device's twin must both be green; the device one runs only on shad-gpu. Task 2 Step 4.
-5. **The `183` comment at `corpus_cases.inc:53`** — it must not be left describing rows that no
+5. **The `183` comment at `corpus_cases.inc:56`** — it must not be left describing rows that no
    longer keep `183`. Task 3.
 
 ## File structure
 
 | file | responsibility |
 |---|---|
-| `peacockdb-core/tests/common/corpus_cases.inc:43,44,46,70` | the four lines' `gpu_modes` |
+| `peacockdb-core/tests/common/corpus_cases.inc:46,47,49,73` | the four lines' `gpu_modes` |
 | `testdata/cost-registry.csv:123,126,137,139` | the four rows' gpu cells and tags |
 | `testdata/goldens/tpch.sf1/gpu-result.txt` | the device's answers, pulled home |
 | `llm-wiki/tickets/*.md`, `tickets.md` | any ticket a failure needs |
@@ -55,7 +55,7 @@ comparison duckdb-oracle added.
 ### Task 1: Run the 16 cells
 
 **Files:**
-- Modify: `peacockdb-core/tests/common/corpus_cases.inc:43,44,46,70`
+- Modify: `peacockdb-core/tests/common/corpus_cases.inc:46,47,49,73`
 - Modify: `testdata/cost-registry.csv:123,126,137,139`
 
 - [ ] **Step 1: Enable all 16 for the run.** Each line's `gpu_modes` becomes `all_modes`; e.g.
@@ -93,7 +93,7 @@ PCK_TEST_FILTER='gpu_tpch_aggregate_groupby_|gpu_tpch_shuffle_additive_|gpu_tpch
 ### Task 2: Settle each cell
 
 **Files:**
-- Modify: `peacockdb-core/tests/common/corpus_cases.inc:43,44,46,70`
+- Modify: `peacockdb-core/tests/common/corpus_cases.inc:46,47,49,73`
 - Modify: `testdata/cost-registry.csv:123,126,137,139`
 - Modify (if needed): `llm-wiki/tickets/*.md`, `llm-wiki/tickets.md`
 
@@ -115,7 +115,7 @@ PCK_TEST_FILTER='gpu_tpch_aggregate_groupby_|gpu_tpch_shuffle_additive_|gpu_tpch
 
 ### Task 3: The record
 
-- [ ] `corpus_cases.inc:53`: the comment "A row keeping `183` has modes never run past the string
+- [ ] `corpus_cases.inc:56`: the comment "A row keeping `183` has modes never run past the string
   class" reworded to the rows that still keep `183` (the join rows join-backend runs), or deleted
   if none of this file's batch keeps it.
 - [ ] `build-test.md`: the gpu tier's `test_gpu_corpus` count and the enabled-cell prose that names

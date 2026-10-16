@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, RunMeta, SKIPPED, ordered_sections, record_header,
-    rows_match_the_recipes, testdata_root,
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RunMeta, SKIPPED, macro_invocations,
+    ordered_sections, record_header, rows_match_the_recipes, testdata_root,
 };
 
 /// Every `.benchmark.txt` the tree holds.
@@ -296,11 +296,11 @@ fn a_bare_calls_row_names_the_seq_it_was_handed() {
 #[test]
 fn every_timed_case_is_enabled_on_a_device() {
     let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common");
-    let timed = read_cases(
+    let timed = macro_invocations(
         &cases.join("corpus_benchmark_cases.inc"),
         "corpus_query_benchmark!",
     );
-    let corpus = read_cases(&cases.join("corpus_cases.inc"), "corpus_query!");
+    let corpus = macro_invocations(&cases.join("corpus_cases.inc"), "corpus_query!");
     assert!(!timed.is_empty(), "the benchmark list declares nothing");
 
     for args in &timed {
@@ -324,39 +324,13 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
-/// The arguments of every `name(…)` invocation in a case list, one vector per line.
-fn read_cases(path: &Path, name: &str) -> Vec<Vec<String>> {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix(name) else {
-            continue;
-        };
-        let args = rest
-            .strip_prefix('(')
-            .unwrap_or_else(|| panic!("{}: {line:?} does not open", path.display()));
-        // The last `)` rather than the first, with the tail asserted: an argument list here
-        // carries no parentheses of its own, and that is what makes either end the same one.
-        // A line may end in a comment naming its ticket, which is not a second invocation.
-        let (args, tail) = args
-            .rsplit_once(')')
-            .unwrap_or_else(|| panic!("{}: {line:?} does not close", path.display()));
-        let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
-        assert_eq!(
-            tail.trim(),
-            ";",
-            "{}: {line:?} carries more than one invocation",
-            path.display()
-        );
-        out.push(args.split(',').map(|a| a.trim().to_string()).collect());
-    }
-    out
-}
-
-/// A `mode1 | mode2` argument as a set. `none` is the empty set.
+/// A `mode1 | mode2` argument as a set. `none` is the empty set, `all_modes` the five —
+/// this reader parses the include as text, so the macro's sugar has to be expanded here too
+/// or `all_modes` reads as a mode of that name and nothing is enabled.
 fn modes(argument: &str) -> BTreeSet<String> {
     match argument {
         "none" => BTreeSet::new(),
+        "all_modes" => MODES.iter().map(Mode::ident).collect(),
         named => named.split('|').map(|m| m.trim().to_string()).collect(),
     }
 }

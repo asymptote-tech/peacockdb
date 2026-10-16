@@ -6,8 +6,9 @@
 //! that hold today because someone wrote the tree that way and nothing would notice if the
 //! next change did not.
 //!
-//! `llm-wiki/coding-style.md` has the rules. The reason each one needs a test rather than a
-//! reviewer is recorded at the test that carries it.
+//! `llm-wiki/coding-style.md` has the rules, and `write_order.rs` carries one of the same kind
+//! that a task spec states instead: an order between two calls in one function. The reason each
+//! one needs a test rather than a reviewer is recorded at the test that carries it.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps them under a directory named for this one.
@@ -23,6 +24,8 @@ mod tree;
 mod visibility;
 #[path = "test_module_layout/walls.rs"]
 mod walls;
+#[path = "test_module_layout/write_order.rs"]
+mod write_order;
 
 use std::path::PathBuf;
 
