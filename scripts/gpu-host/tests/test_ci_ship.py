@@ -10,7 +10,7 @@ from harness import main  # noqa: E402
 
 SCRIPT = str(pathlib.Path(__file__).resolve().parents[1] / "ci-ship.sh")
 TESTDATA_DIRS = ["tpch-queries", "tpcds-queries", "tpch.minimal", "goldens", "tpch-vec-queries",
-                 "pbench-queries", "pbench.sf1"]
+                 "pbench-queries", "pbench.sf1", "fixtures"]
 TESTDATA_FILES = ["generate_testdata.sh", "cost-registry.csv"]
 # rsync's -e transport: drop the host, run the command with the fake VM home as cwd.
 RSH = '#!/bin/sh\nshift\ncd "$FAKE_HOME" && exec sh -c "$*"\n'

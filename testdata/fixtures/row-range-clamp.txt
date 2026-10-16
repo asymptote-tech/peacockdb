@@ -1,0 +1,29 @@
+# The row-range clamp: offset length rows -> begin end
+#
+# The rows of a batch a limit keeps, as the half-open span [begin, end). Read by both clamps'
+# tests: Rust's RowRange::clamp (executor/row_range/tests.rs) and C++'s clamp_row_range
+# (cpp/tests/cpu/test_executor.cpp). `max` is u64::MAX, the to-the-end sentinel, and is
+# allowed in offset and length only.
+
+# A range to the end of the batch
+0    max   100   ->  0    100
+40   max   100   ->  40   100
+0    max   4     ->  0    4
+3    max   4     ->  3    4
+
+# A range past the end is clamped to the rows that are there
+90   1000  100   ->  90   100
+0    100   100   ->  0    100
+1    100   4     ->  1    4
+
+# A range at or past the end is empty
+100  10    100   ->  100  100
+500  max   100   ->  100  100
+9    1     4     ->  4    4
+0    0     100   ->  0    0
+0    max   0     ->  0    0
+
+# The sentinel does not overflow: the length is taken against the rows remaining, because
+# offset + max wraps and the wrapped end lands inside the batch
+1    max   100   ->  1    100
+max  max   100   ->  100  100
