@@ -146,7 +146,7 @@ never by line. What moves, by the plan that moves it:
   `[ -x /tmp/duckdb-1.5.4/bin/python ] || { python3 -m venv /tmp/duckdb-1.5.4 && /tmp/duckdb-1.5.4/bin/pip install duckdb==1.5.4; }`.
 - **Device** on nebius-gpu through `scripts/gpu-host.sh` (never an IP from a plan; `build-test.md`,
   "GPU host"), cuDF 25.02, as chain L's header says: the working tree synced uncommitted into
-  `~/peacockdb-L` by `scripts/gpu-host-sync.sh --dest peacockdb-L` (it generates a missing sf1
+  `~/peacockdb-K` by `scripts/gpu-host-sync.sh --dest peacockdb-K` (it generates a missing sf1
   tree), **one sync per task with as many back-to-back builds as its red/green pairs need, the red
   build first**, every CPU build and run local. Device commands run in the foreground (a
   backgrounded build chain dies mid-build). If `ssh` seems dead while the host answers a raw
@@ -169,19 +169,19 @@ of `$G ssh` commands written with `$R` below. Run everything in the foreground.
 
 ```bash
 G=scripts/gpu-host.sh
-R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
-B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
+R='cd ~/peacockdb-K && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
+B='cd ~/peacockdb-K && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
 # The fix's reverse (git add -N any new file among FIX first, so the diff carries it).
 git diff -R HEAD -- $FIX > /tmp/aggregate-arms-red.patch
 # Start the host (exit 75: no capacity; report it to the coordinator, which owns the retry).
 timeout 2400 $G start
 # The one sync.
-timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-L
+timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-K
 # Red build: the tests without the fix; then the task's red set.
-timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1' < /tmp/aggregate-arms-red.patch
+timeout 300 $G ssh 'cd ~/peacockdb-K && patch -p1' < /tmp/aggregate-arms-red.patch
 timeout 10800 $G ssh "$B"
 # Green build: the fix back in; then the task's green set.
-timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1 -R' < /tmp/aggregate-arms-red.patch
+timeout 300 $G ssh 'cd ~/peacockdb-K && patch -p1 -R' < /tmp/aggregate-arms-red.patch
 timeout 10800 $G ssh "$B"
 # After the task's last device run, a soft stop. Exit 2: someone's run is on the card; leave it.
 timeout 600 $G stop
@@ -2880,7 +2880,7 @@ CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 timeout 3600 scripts/cargo-cud
 ```bash
 timeout 3600 $G ssh "$R PCK_WRITE_GPU_RESULT=1 cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev"
 timeout 3600 $G ssh "$R cpp/install/rust-tests/test_gpu_corpus --test-threads=1 rollup_stddev shuffle_stddev"
-timeout 600 rsync -a -e "$G rsh" nebius-gpu:peacockdb-L/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
+timeout 600 rsync -a -e "$G rsh" nebius-gpu:peacockdb-K/testdata/goldens/tpch.sf1/gpu-result.txt testdata/goldens/tpch.sf1/
 git diff --stat testdata/goldens/
 ```
 

@@ -183,7 +183,7 @@ blocking it, not the host.
 
 ```bash
 G=scripts/gpu-host.sh
-DIR=peacockdb-L              # the header's directory there
+DIR=peacockdb-K              # the header's directory there
 # START (exit 75: no capacity; report it to the coordinator, which owns the retry)
 timeout 2400 $G start
 # SYNC, once per task: the working tree, uncommitted, from the workspace root

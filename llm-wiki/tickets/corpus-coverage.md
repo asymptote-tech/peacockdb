@@ -146,7 +146,7 @@ l_linestatus, stddev_samp(l_quantity), var_pop(l_quantity) from lineitem group b
 
 **Fix proposed:** one request builder for the grouped and grouping-set paths, so the
 grouping-set path builds the Welford triple the grouped one does; the query above added as
-`tpch/rollup-stddev`. Both in aggregate-arms, chain L.
+`tpch/rollup-stddev`. Both in aggregate-arms, chain K.
 
 ## Aggregates
 
@@ -704,7 +704,7 @@ was written for #208 and shows that fix once this lifts. Simplest:
 `select count(*) from nation where n_nationkey < 0;` (tpch).
 
 **Fix proposed:** a scan with no survivors plans one lane that holds no batch, so its executors
-make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
+make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain K) makes
 every node answer right. In keyless-identity. The mapping has no way to say "no partitions", so
 the fix is a representation for an empty scan, not a laxer check; a `GpuEmpty` leaf, which
 join-backend added for an `EmptyExec` ([#155](../archive/archived-tickets.md#t155)), is the other one.

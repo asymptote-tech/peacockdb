@@ -151,7 +151,7 @@ keyless-identity, which makes a keyless aggregate answer its row and leaves this
 
 **Corpus query:** none. Simplest: the query above, or over a filtered `nation` (tpch).
 
-**Fix proposed:** after keyless-identity (chain L): an init with grouping sets, over no rows, emits
+**Fix proposed:** after keyless-identity (chain K): an init with grouping sets, over no rows, emits
 the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
 set's. DataFusion is not the oracle for it; DuckDB is.
 

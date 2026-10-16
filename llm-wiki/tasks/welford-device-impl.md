@@ -102,7 +102,7 @@ grep -n '<a id="t94">' llm-wiki/tickets/*.md llm-wiki/archive/archived-tickets.m
   plan.
 - **Scripts (verify-26.02, J).** If `scripts/build.sh` takes `--build-dir` (`grep -n -- --build-dir
   scripts/build.sh`), verify-26.02's 26.02 mode landed, and Task 1 Step 5 uses it.
-- **The GPU host's directory.** All three upstream plans of chain L use `~/peacockdb-L`, as the
+- **The GPU host's directory.** All three upstream plans of chain L use `~/peacockdb-K`, as the
   chain header says; so does this one.
 
 ## Global constraints
@@ -156,7 +156,7 @@ the client, not the host.
 
 ```bash
 G=scripts/gpu-host.sh
-DIR=peacockdb-L             # the header's directory
+DIR=peacockdb-K             # the header's directory
 B="cd ~/$DIR && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build"
 # The fix's reverse.
 timeout 60 git diff -R HEAD -- $FIX > /tmp/welford-device-red.patch

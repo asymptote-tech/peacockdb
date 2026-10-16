@@ -83,7 +83,8 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 
 Corpus-coverage tickets and #62, proved on the cpu first while chain J held the GPU host; their
 GPU halves now run on nebius-gpu beside chain J. limits and empty-sorts were added after the chain
-started.
+started. grouping-id through welford-device came from chain L: the Welford and aggregate tickets,
+and the column references the device aggregate reads by counting.
 
 ### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: approved to build
 
@@ -107,53 +108,26 @@ limit's emitted rows rather than its input; scan-limit's tp1 cpu cells on.
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.
 
-## Chain L (base: master after chains J and K have both merged)
-
-> **Base: J and K merged, not master as it stands.** Branch the first task from master only once
-> both chains are on it. J closes #152, #220 and #189, which hold most of the device cells this
-> chain turns on, and adds pbench's `empty` table; K adds the DISTINCT lowering, whose device
-> cells (#262) and `tpch/rollup-distinct` this chain runs. Until both have merged, no task here
-> starts.
->
-> **GPU host:** nebius-gpu through `scripts/gpu-host.sh`, `gpu-host-sync.sh` and `gpu-host-test.sh`
-> (`build-test.md`, "GPU host"). The L40S list only; sf40 and benchmarks are out and deferred.
-> The final device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
-> This pointer overrides the device cycle of every spec and every `-impl.md` of this chain. No
-> agent uses an IP from a plan: every host call goes through `gpu-host.sh`.
->
-> - **This chain's tree on the VM is `~/peacockdb-L`**: sync with `gpu-host-sync.sh --dest
->   peacockdb-L`. Chain J will have finished with the VM.
-> - **One sync per plan task** (each numbered task of a `-impl.md`) to the host, with as many
->   back-to-back builds as its red/green pairs need, the red build first. This overrides each spec's "one GPU cycle per round".
-> - **Large tests and benchmark measurements are out of every task**, as in chain J: the sf40
->   binaries, `--run-benchmarks`, Nsight captures, any H200 timing. Record each skipped item in the
->   task's detail file as deferred.
-> - **Ticket numbers:** take the next free number from master's `tickets.md` as it stands after
->   J's merge, which reconciles J's 263–279 with K's 280 on.
-
-The Welford and aggregate tickets of corpus-coverage, and the column references the device
-aggregate reads by counting.
-
-### 1. [`grouping-id.md`](grouping-id.md) — closes [#65](../tickets/corpus-coverage.md#t65), [#55](../tickets/corpus-coverage.md#t55), [#262](../tickets/corpus-coverage.md#t262) — state: new
+### 5. [`grouping-id.md`](grouping-id.md) — closes [#65](../tickets/corpus-coverage.md#t65), [#55](../tickets/corpus-coverage.md#t55), [#262](../tickets/corpus-coverage.md#t262) — state: approved to build
 
 The device's grouping-set id folds and widens as DataFusion's; walk tests prove q66's quotient and
 the two-stage DISTINCT on a device; `tpch/rollup-grouping` added; the rollup, q66 and DISTINCT
 device cells run and enabled where they pass.
 
-### 2. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../tickets/corpus-coverage.md#t199), [#282](../tickets/corpus-coverage.md#t282) — state: new
+### 6. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../tickets/corpus-coverage.md#t199), [#282](../tickets/corpus-coverage.md#t282) — state: approved to build
 
 `empty_state` beside `state_type`; every aggregate init a batch accumulator that skips zero-row
 batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; a scan of no row
 group maps one lane with no batch; six pbench `empty-*` queries; the q96, q88 and q90 tp4 cells
 on.
 
-### 3. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../tickets/corpus-coverage.md#t164), [#225](../tickets/corpus-coverage.md#t225), [#280](../tickets/corpus-coverage.md#t280) — state: new
+### 7. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../tickets/corpus-coverage.md#t164), [#225](../tickets/corpus-coverage.md#t225), [#280](../tickets/corpus-coverage.md#t280) — state: approved to build
 
 The device aggregate reads every state column through its `args` and names every column from the
 wire's `state_names`; one request builder; the dead arms go; `ColumnRef`s checked for bounds and
 name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
 
-### 4. [`welford-device.md`](welford-device.md) — closes [#216](../tickets/corpus-coverage.md#t216), [#94](../tickets/corpus-coverage.md#t94) — state: new
+### 8. [`welford-device.md`](welford-device.md) — closes [#216](../tickets/corpus-coverage.md#t216), [#94](../tickets/corpus-coverage.md#t94) — state: approved to build
 
 A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
 Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.

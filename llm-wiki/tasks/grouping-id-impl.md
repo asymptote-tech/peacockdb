@@ -98,7 +98,7 @@ by a line number. What moves:
   The workspace needs the sf1 parquet under `testdata/` (gitignored): symlink it from the primary
   checkout if absent.
 - **Device** on nebius-gpu through `scripts/gpu-host.sh` (never an IP from a plan; `build-test.md`,
-  "GPU host"), cuDF 25.02, in `~/peacockdb-L`, as chain L's header says: **one sync per task, with as many back-to-back builds as its red/green pairs need,
+  "GPU host"), cuDF 25.02, in `~/peacockdb-K`, as chain L's header says: **one sync per task, with as many back-to-back builds as its red/green pairs need,
   the red build first.** Three tasks have device tests: Task 2 (a red build and a green build),
   Task 3 (one build, plus a pair if #55 is live) and Task 5 (the trial build and the final build).
   Each syncs once, as the *Device cycle* below, after its local tiers pass and before its commit;
@@ -129,20 +129,20 @@ a raw socket, the sandbox is blocking the client, not the host.
 
 ```bash
 G=scripts/gpu-host.sh
-R='cd ~/peacockdb-L && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
-B='cd ~/peacockdb-L && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
+R='cd ~/peacockdb-K && . ~/peacock-env.sh && export LD_LIBRARY_PATH=$PWD/cpp/install/lib:$HOME/data/miniforge3/envs/rapids-cuda-12.2/lib PEACOCK_TESTDATA_DIR=$PWD/testdata &&'
+B='cd ~/peacockdb-K && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'
 # The fix's reverse, for the red build.
 git diff -R HEAD -- $FIX > /tmp/grouping-id-red.patch
 # Start the host (exit 75: no capacity; report it to the coordinator, which owns the retry).
 timeout 2400 $G start
 # The task's one sync, from the workspace root. It also generates a missing sf1 tree.
-timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-L
+timeout 3600 scripts/gpu-host-sync.sh --dest peacockdb-K
 # Red build: the tests without the fix.
-timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1' < /tmp/grouping-id-red.patch
+timeout 300 $G ssh 'cd ~/peacockdb-K && patch -p1' < /tmp/grouping-id-red.patch
 timeout 7200 $G ssh "$B"
 timeout 3600 $G ssh "$R $CMD"     # once per command of the red set
 # Green build: the fix back in.
-timeout 300 $G ssh 'cd ~/peacockdb-L && patch -p1 -R' < /tmp/grouping-id-red.patch
+timeout 300 $G ssh 'cd ~/peacockdb-K && patch -p1 -R' < /tmp/grouping-id-red.patch
 timeout 7200 $G ssh "$B"
 timeout 3600 $G ssh "$R $CMD"     # once per command of the green set
 # After the task's last device run, a soft stop. Exit 2: someone's run is on the card; leave it.
@@ -154,10 +154,10 @@ sync, for a further red/green pair or a changed declaration, travels by name fro
 root, then the next build runs back to back:
 
 ```bash
-timeout 300 rsync -aR -e "$G rsh" $PATHS nebius-gpu:peacockdb-L/   # PATHS: each file changed since the sync
+timeout 300 rsync -aR -e "$G rsh" $PATHS nebius-gpu:peacockdb-K/   # PATHS: each file changed since the sync
 ```
 
-The sync generates the sf1 parquet on the VM if `~/peacockdb-L/testdata` lacks it, and later syncs
+The sync generates the sf1 parquet on the VM if `~/peacockdb-K/testdata` lacks it, and later syncs
 leave it alone (it is gitignored). pbench's data is committed. Never delete a chain's `testdata/`.
 If the host is lost mid-step: `$G status`, `$G start`, sync, rerun the step. Never edit
 `~/.ssh/config`, and never accept a host key by hand.
@@ -1465,7 +1465,7 @@ grep -E '^test .* (ok|FAILED)$' /tmp/cells.log
 
 ```bash
 for d in tpch tpcds pbench; do
-  timeout 600 rsync -a -e "$G rsh" "nebius-gpu:peacockdb-L/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
+  timeout 600 rsync -a -e "$G rsh" "nebius-gpu:peacockdb-K/testdata/goldens/$d.sf1/gpu-result.txt" "testdata/goldens/$d.sf1/"
 done
 ```
 
@@ -1522,7 +1522,7 @@ timeout 3600 cargo test --features rust-only -p peacockdb-core --lib
   any file a Step 4 fix touched, by name, not in a second sync:
 
 ```bash
-timeout 300 rsync -aR -e "$G rsh" peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv nebius-gpu:peacockdb-L/
+timeout 300 rsync -aR -e "$G rsh" peacockdb-core/tests/common/corpus_cases.inc testdata/cost-registry.csv nebius-gpu:peacockdb-K/
 ```
 
   Build (`$B`), then run each of these, one `ssh` each:
