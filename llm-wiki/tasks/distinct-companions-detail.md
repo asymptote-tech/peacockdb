@@ -1623,3 +1623,51 @@ timed out`, exit 255 — shad-gpu unreachable, so no pool was built: not
 [#178](../tickets/testinfra.md#t178) and not this branch. Chain K's rule exempts that job and
 asks instead for a recorded nebius-gpu pass, which is the section above: six binaries, all green,
 re-run at `91a59466`.
+
+### 2026-10-16 — third rebase, onto ENS-guard-checks on master 8701463f
+
+master brought chain J's eight tasks and gpu-host. guard-checks went first and is `done` again
+(dispatched CI green, nebius-gpu job included). This branch was replayed with `git rebase --onto
+ENS-guard-checks ef41d37c`, 28 commits. One developer resolved every code stop. Its reports, in
+short:
+
+- **a0383ad1, the main commit: master moved the ground in three places.**
+  - #189 is closed. master's grouping-id drop sat in `aggregate_sequence`, which this task had
+    moved into `sequence`. The drop moved with it, keyed on each stage's own id position: `n` on
+    the ordinary path, `n + 1` in the DISTINCT inner stage. So `tpch/rollup-distinct`'s three tp4
+    cpu cells are on. They have never run.
+  - master added a DuckDB oracle field to `corpus_query!`. q28, rollup-distinct and
+    distinct-functions take `duckdb_approx`, checked by hand against DuckDB 1.5.4.
+  - #152 is closed, so q28's device cells are off on #262 alone.
+  - The spec's two "if X has merged" conditionals, recorded above as "has not merged", have now
+    both merged.
+- **1de724ba / 62de864b.** The oracle register (`ANSWER_HELD_ELSEWHERE` and its claim checks) is
+  superseded by master's DuckDB oracle. It became one test,
+  `a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb` (`test_cpu_corpus`): every
+  `data_fusion_disabled` line must compare its whole answer with DuckDB, and exactly one such
+  line exists.
+- **ba1ecf20, the GPU half.** distinct-functions' five device cells are on again. They were
+  proven on the old base, and `tpch.sf1/gpu-result.txt` has no sections for them yet, so master's
+  `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` fails until a device
+  cycle records them. The registry's ticket column stays empty: on master a row with every cell on
+  carries no ticket, and #225 sits on the line's comment.
+- **5e2e068f / 4a0c8419 / 8a5ca814, the schema-validation mask.** master had no per-mode form, so
+  the mask is new on master's macro arms, and a bare keyword reads as before. The comment-paren
+  reader fix and the dead-mask check moved into master's shared reader, `macro_invocations`
+  (`test_support/corpus.rs`), with `invocations_in` and a facade `macro_invocations_in`. The
+  tests are `a_mask_and_a_comments_parenthesis_are_not_the_invocations_close` (`corpus/tests.rs`)
+  and `a_mask_entry_its_line_never_runs_on_a_device_is_dead`. The re-export guard is now
+  `nothing_re_exports_a_child_through_its_parent`.
+- **Stop 1's device build was broken.** master's exit-copies added a fourth `CreateAggregateFuncNode`
+  in `cpp/tests/gpu/test_plan_executor.cpp` that still passed `/*distinct=*/false`. The
+  argument was dropped there too, in the 5e2e068f commit.
+
+Markdown, resolved by the coordinator: `tasks.md` by ownership. `build-test.md` and
+`tickets/corpus-coverage.md` took master's side at every stop, and are reconciled against the
+task's own final text after the re-proving measures the counts. #62 is archived in master's
+format, and the index reads 105 open.
+
+Owed before the task returns to `done`: regenerate every generated file (plan goldens, both
+`mini.result.txt`, all `*-mini.{cost,cpu}.txt`, `tpch.sf1/duckdb-result.txt` without `--only`),
+the cpu tiers, and a device cycle on nebius-gpu that re-proves distinct-functions' cells and
+records their five `gpu-result.txt` sections. Then a dispatched CI.
