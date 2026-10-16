@@ -585,3 +585,62 @@ also the note's final device run, so `done` waits on a dispatched pipeline's `gp
 After a merge, `ci-ship.sh` is under `scripts/gpu-host/`, so build-test.md's rule applies:
 run `gpu-host.sh install-watch` again. The change does not touch the watcher, so this is the
 rule followed, not a fix it needs.
+
+#### Re-proved on master 8701463f
+
+Local, CPU side only, on `d81fc1ea`: verda is down, and the device run is the coordinator's CI
+dispatch. **Every target green, exit 0.** Rust rows are one `cargo test --features rust-only -p
+peacockdb-core` each, one `--test` per invocation, heavy suites at `--test-threads=2`.
+
+| target | command | result |
+|---|---|---|
+| `--lib` | `--lib -- --test-threads=2`, 71s | **772 passed, 0 failed, 2 ignored (774 listed)** |
+| `test_cpu_corpus` | `--test test_cpu_corpus -- --test-threads=2`, 173s | **1960 passed, 0 failed** |
+| `test_corpus_goldens` | own run | 26 passed, 0 failed |
+| `test_cost_model` | own run | 3 passed, 0 failed |
+| `test_golden_format` | own run | 43 passed, 0 failed |
+| `test_ci_coverage` | own run | 11 passed, 0 failed |
+| `test_module_layout` | own run | 18 passed, 0 failed |
+| `test_gpu_corpus` | own run | `running 0 tests`, 0 passed |
+| `test_node_timing` | own run | `running 0 tests`, 0 passed |
+| `peacock_gpu_benchmarks` | `--test peacock_gpu_benchmarks -- --skip bench_` | `running 0 tests`, 0 passed |
+| ffi `--lib` | `CUDF_ROOT=<rapids-cuda-12.2> scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::` | 4 passed, 0 failed, 774 filtered out |
+| `test_ffi` | `… scripts/cargo-cudf.sh test -p peacockdb-ffi --test test_ffi` | 3 passed, 0 failed |
+| `cost-report` | `cargo test -p cost-report` | 41 passed, 0 failed |
+| C++ 25.02 build | `scripts/build.sh --configure --build --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12` | `Using host cudf: 25.02.02`, 27 steps (21 compiles, `node_session.cpp` and `test_executor.cpp` among them), 0 warnings |
+| `peacock_cpu_tests` | `./cpp/build/peacock_cpu_tests` | 12 tests from 7 suites, 12 passed, `ClampRowRange.AnswersEveryCaseInTheSharedTable` included |
+| `ctest -L cpu` | `ctest --test-dir cpp/build -L cpu` | 1/1 passed |
+| warnings | `touch peacockdb-core/src/lib.rs && cargo check --features rust-only -p peacockdb-core --all-targets` | recompiled peacockdb-core and peacockdb-ffi, 0 warnings |
+| gpu-host scripts | `python3 scripts/gpu-host/tests/test_*.py`, each | check 19, check_actor 7, ci_ship 8, gpu_host 29, gpu_host_test 11, idle_watch 30; 0 failed |
+
+**The width rule over master's plan shapes.** The planner validates every plan it builds
+(`planner/pipeline.rs`), and so does the corpus harness (`test_support/corpus.rs`). So the 1960
+corpus cases ran this task's rule over chain J's plans. That covers the join rewrite, `GpuEmpty`,
+`__rowmarker__` scans and pbench, with the DuckDB oracle where the line names it. The `--lib`
+plan goldens ran it too. None was refused, so nothing needed fixing.
+
+**The ffi rung's first run exited 127.** That is the documented loader error (build-test.md,
+"A cudf-shape binary needs `LD_LIBRARY_PATH`"), not a defect: `libpeacock_gpu.so: cannot open
+shared object file`. Rerun with `LD_LIBRARY_PATH` set to the fresh
+`target-cudf-rapids-cuda-12.2/debug/build/peacockdb-ffi-c2ff8be8e892f44d/out/lib` plus the
+cuDF env's `lib`. The target dir holds a second, stale `peacockdb-ffi-a484669a14d7e1ec` from
+10-09. Pick the dir by its mtime, not by glob order.
+
+**One warning, inherited.** `cost-report` still warns `function sha_links is never used`, now at
+`cost-report/src/main.rs:1590`. `git diff 8701463f HEAD -- cost-report/` is empty, so it is
+master's, as recorded in the second rebase. Not fixed: it is outside this task's scope.
+
+**`build-test.md` agrees with the run on every row this task owns:**
+
+- The cpu block header is 2763: `--lib` 774, `test_cpu_corpus` 1960, `test_corpus_goldens` 26,
+  `test_cost_model` 3.
+- Plan types is 43: `plan::validate::tests` 35, `plan::layout::tests` 4 and
+  `plan::aggregate::tests` 4, from `--lib -- --list plan::`. The last two are the row's "layout
+  canonical forms" and "whether a hash survives a regrouping", and no other row names them.
+- Forwarders and row ranges is 4: `executor::forwarder::tests` 3 and `executor::row_range` 1.
+- The C++ CPU/FFI unit row is 12.
+- The grand total is consistent with the rows. The N columns sum to 4936: Rust 4369 (engine
+  rows 4256, plus 113 in "Everything else"), C++ 170, Python 397. The ffi block is 7, which
+  matches the 4 + 3 measured.
+- The non-engine Rust rows match their targets: golden format 43, CI wiring 11, module layout
+  18, cost-report 41.
