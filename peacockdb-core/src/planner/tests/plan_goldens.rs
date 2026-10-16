@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::plan::GpuNode;
 use crate::plan::{ExecutorCategory, category_of};
+use crate::plan::{NodeRef, as_node_ref};
 use crate::plan_text::{render_plan, render_plan_memory};
 use crate::planner;
 use crate::planner::PlanKnobs;
@@ -17,7 +18,9 @@ use crate::test_support::{
     CORPUS_DATASETS, MODES, Mode, data_dir_for, golden_dir_for, mode_named, ordered_sections,
     queries_dir_for, section_differences, testdata_root,
 };
-use crate::wire::{Payloads, attach_recipes, check_seq_kinds, depth, render_plan_recipes};
+use crate::wire::{
+    Payloads, attach_recipes, check_seq_kinds, depth, join_scratch_bytes, render_plan_recipes,
+};
 
 fn queries(dataset: &str) -> Vec<(String, PathBuf)> {
     let mut found: Vec<(String, PathBuf)> = std::fs::read_dir(queries_dir_for(dataset))
@@ -74,7 +77,7 @@ async fn render_query(
         Ok((tree, model)) => format!(
             "{}--- recipes ---\n{}--- memory ---\n{}",
             render_plan(tree.as_ref()),
-            recipes_of(tree.as_ref()),
+            recipes_of(tree.as_ref(), join_scratch_bytes(&knobs)),
             render_plan_memory(tree.as_ref(), &model)
         ),
         Err(e) => format!("refused: {}\n", relative_to_testdata(&e.to_string())),
@@ -86,8 +89,8 @@ async fn render_query(
 /// `not runnable`, never `refused:` — the plan plans, validates and runs on the CPU, and
 /// what failed is the crossing to the device. Naming its ticket is not decoration: the
 /// meta test below asserts that every line of this shape names a ticket that exists.
-fn recipes_of(tree: &dyn GpuNode) -> String {
-    match attach_recipes(tree) {
+fn recipes_of(tree: &dyn GpuNode, join_scratch: u64) -> String {
+    match attach_recipes(tree, join_scratch) {
         Ok(plan) => render_plan_recipes(tree, &plan, Payloads::Omitted),
         Err(e) => format!("not runnable: {}\n", relative_to_testdata(&e.to_string())),
     }
@@ -155,43 +158,42 @@ const PAYLOAD_MODE: &str = "tp4_rowgroup";
 /// The queries, and the rule for adding one.
 ///
 /// Chosen by cover rather than by taste: every fb node kind the mapping emits (join types
-/// spelled out, both project roles, the repartition, the two symbols that address no seq,
+/// spelled out, the finalize project, the repartition, the two symbols that address no seq,
 /// the rows that emit nothing), every call shape longer than one call, and every
 /// expression kind a payload can carry — LIKE, CASE, casts, scalar functions, decimal
 /// scales, grouping sets, null substitutions, Welford state, an avg's finalize, fetch and
 /// skip.
 ///
 /// Which half of that a test enforces, so a reader knows what rests on a person: the fb
-/// kinds and the call shapes are asserted against the ten mode goldens by
+/// kinds and the call shapes are asserted against the fifteen mode goldens by
 /// `the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce` — a mapping arm
 /// or a call pattern that appears there and not here goes red. The expression features are
 /// prose, checked by reading.
 ///
 /// So a query earns a place here by covering something no other query does. Adding one
 /// that covers nothing new adds lines no reader can check against anything.
-const PAYLOAD_QUERIES: [(&str, &str); 20] = [
+const PAYLOAD_QUERIES: [(&str, &str); 22] = [
     // Nested-loop join lives nowhere else in the corpus; the stddev query is the Welford
     // init, both merges and the finalize project; q13 is the outer join's finish pass.
     ("tpch", "q13"),
     ("tpch", "shuffle-stddev"),
     ("tpch", "nested-loop-join"),
-    // The Left form of it, which is the one shape whose probe side is a single batch: its
-    // call takes the build side rather than a copy, because with one call there is no
-    // second batch for the build side to still be there for.
+    // The Left form of it, the one nested loop here whose session finishes: it pads the
+    // build rows no probe row matched.
     ("tpch", "nested-loop-left-join"),
-    // q22 is the build-side semi family's finish, whose join type is the node's OWN
-    // LeftAnti: a key project per batch, then coalesce and that join at done. The other
-    // LeftAnti here is a Left outer's DERIVED finish — different keys, no projection, and
-    // a pad project after it — so neither covers the other.
+    // q22's LeftAnti is the build-side semi family: its session answers nothing per probe
+    // and everything at the finish, where q13's Left answers per probe and pads at the end.
     ("tpch", "q22"),
-    // q21 is the single-batch probe, where a filtered semi or anti join is one legacy call
-    // that hands the build side over rather than copying it — the same join types as q22
-    // and q13, and a different shape.
+    // q21's LeftSemi and LeftAnti carry a residual, which the `CudfJoin` payload writes as
+    // `filter` and `filter_columns` — q22's join type with a condition on each pair.
     ("tpch", "q21"),
     // q15 is the aggregate that finalizes on its own: one batch in one lane is already the
     // whole of every group, so the init node carries the finalize and its recipe is the
     // partial plus a finalize project. Every other finalize here rides a merge.
     ("tpch", "q15"),
+    // nested-limits' region scan reads no column: `rows_only` is a field no other scan sets,
+    // and the call shape is every scan's, so the coverage check cannot ask for it.
+    ("tpch", "nested-limits"),
     ("tpcds", "q14"),
     ("tpcds", "q97"),
     ("tpcds", "q61"),
@@ -211,6 +213,9 @@ const PAYLOAD_QUERIES: [(&str, &str); 20] = [
     // q40 is a plain Right outer: probe-local, one call, no finish. The Right in q97 is a
     // Full outer's per-batch call, which is the same kind doing a different thing.
     ("tpcds", "q40"),
+    // The build side is a relation DataFusion proved empty: a `GpuEmpty`, which calls
+    // nothing and holds its slot with a stub scan no other planned query writes.
+    ("pbench", "empty-side-left-join"),
 ];
 
 /// A FIXED path that stands in for the testdata root when a plan's own BYTES are the
@@ -270,10 +275,10 @@ fn digest_of(bytes: &[u8]) -> String {
 async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
     let mode = mode_named(PAYLOAD_MODE);
     let mut text = String::new();
-    // The two datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
-    // CORPUS_DATASETS: this file is twenty chosen queries, and a dataset earns a place in it
+    // The three datasets PAYLOAD_QUERIES draws from, spelled out rather than read off
+    // CORPUS_DATASETS: this file is twenty-two chosen queries, and a dataset earns a place in it
     // by covering a call shape no query here already carries.
-    for dataset in ["tpch", "tpcds"] {
+    for dataset in ["tpch", "tpcds", "pbench"] {
         let wanted: Vec<&str> = PAYLOAD_QUERIES
             .iter()
             .filter(|(bench, _)| *bench == dataset)
@@ -302,9 +307,10 @@ async fn the_payload_golden_carries_what_each_call_hands_the_executor() {
                 .create_physical_plan()
                 .await
                 .expect("the query plans");
-            let (tree, _) =
-                planner::plan(&plan, mode.knobs_for(dataset)).expect("this mode runs it");
-            let recipes = attach_recipes(tree.as_ref()).expect("a plan's recipes are structural");
+            let knobs = mode.knobs_for(dataset);
+            let (tree, _) = planner::plan(&plan, knobs).expect("this mode runs it");
+            let recipes = attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs))
+                .expect("a plan's recipes are structural");
             text.push_str(&format!("== {dataset} {name}\n"));
             text.push_str(&format!("sha256={}\n", digest_of(recipes.bytes())));
             text.push_str(&render_plan_recipes(
@@ -390,10 +396,11 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
             };
             // A query the engine refuses has no recipes to check; a query it plans has to
             // publish seqs that resolve.
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
+            let knobs = mode.knobs_for(dataset);
+            let Ok((tree, _)) = planner::plan(&plan, knobs) else {
                 continue;
             };
-            match attach_recipes(tree.as_ref()) {
+            match attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs)) {
                 Ok(recipes) => {
                     checked += 1;
                     if let Err(e) = check_seq_kinds(&recipes) {
@@ -551,14 +558,13 @@ fn call_shapes(text: &str) -> std::collections::BTreeSet<String> {
     shapes
 }
 
-/// Every fb kind and every call shape the ten mode goldens hold appears in the payload
+/// Every fb kind and every call shape the fifteen mode goldens hold appears in the payload
 /// golden too.
 ///
 /// This is the checked half of [`PAYLOAD_QUERIES`]'s claim. A mapping arm added later
 /// without a payload query for it goes red here rather than waiting for a careful reader —
-/// and the shapes matter as much as the kinds, since the build-side semi family's finish
-/// and a Left outer's derived finish both address a `CudfHashJoin{LeftAnti}` while doing
-/// different things with different arguments.
+/// and the shapes matter as much as the kinds, since one `CudfJoin` is called in two
+/// shapes: built and probed, and for the five finishing types finished too.
 #[test]
 fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
     let payloads =
@@ -737,7 +743,41 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     ("nl-projection", "GpuNestedLoopJoin: join_type=Inner"),
     ("like-column-pattern", "GpuNestedLoopJoin: join_type=Inner"),
     ("cross-projection", "GpuCrossJoin"),
-    ("scalar-subquery-cross", "GpuCrossJoin"),
+    // The name says cross, but DataFusion plans a scalar subquery as a predicate-free LEFT
+    // join, and only an Inner is a cross join by another name — a Left owes its preserved
+    // side rows a cross join never emits. tpcds q9 is fifteen of the same shape.
+    ("scalar-subquery-cross", "GpuNestedLoopJoin: join_type=Left"),
+    // Lifted from a refusal by join-backend: a residual on an outer or right-handed semi join
+    // (#153, #159), a nested loop of any type (#160), and anti and mark joins over keys NULL on
+    // both sides (#59). `not-in-uncorrelated` plans at tp1 only, refused here on #267.
+    ("left-join-residual", "GpuHashJoin: join_type=Left"),
+    ("right-join-residual", "GpuHashJoin: join_type=Right"),
+    ("full-join-residual", "GpuHashJoin: join_type=Full"),
+    ("probe-exists-residual", "GpuHashJoin: join_type=RightSemi"),
+    (
+        "probe-not-exists-residual",
+        "GpuHashJoin: join_type=RightAnti",
+    ),
+    ("not-in-correlated", "GpuHashJoin: join_type=RightAnti"),
+    ("nl-full", "GpuNestedLoopJoin: join_type=Full"),
+    ("nl-right", "GpuNestedLoopJoin: join_type=Right"),
+    ("nl-left-semi", "GpuNestedLoopJoin: join_type=LeftSemi"),
+    ("nl-left-anti", "GpuNestedLoopJoin: join_type=LeftAnti"),
+    ("nl-mark", "GpuNestedLoopJoin: join_type=LeftMark"),
+    ("nl-right-semi", "GpuNestedLoopJoin: join_type=RightSemi"),
+    ("nl-right-anti", "GpuNestedLoopJoin: join_type=RightAnti"),
+    (
+        "indf-full-join",
+        "GpuHashJoin: join_type=Full, on=[(t_k@1, d_k@1)], null_equals_null=true",
+    ),
+    ("not-exists-null-keys", "GpuHashJoin: join_type=LeftAnti"),
+    (
+        "anti-null-preserved-condition",
+        "GpuHashJoin: join_type=LeftAnti",
+    ),
+    ("exists-or-mark", "GpuHashJoin: join_type=LeftMark"),
+    ("mark-cross-residual", "GpuHashJoin: join_type=LeftMark"),
+    ("not-in-under-or", "GpuHashJoin: join_type=LeftMark"),
 ];
 
 #[test]
@@ -815,7 +855,10 @@ fn the_registry_matches_the_goldens_in_both_directions() {
                     panic!("{column}: {} has a registry row and no section", row.query)
                 });
                 let declared = if body.starts_with("refused by datafusion") {
-                    // Not the engine declining: the query never reaches its planner.
+                    // The query never reaches our planner, so no plan cell is about it.
+                    // Two ways in, and the prefix cannot tell them apart: DataFusion
+                    // declining, and one of our own optimizer rules declining inside its
+                    // loop, which comes back wrapped the same way (#250's refusal does).
                     "na"
                 } else if body.starts_with("refused") {
                     "disabled"
@@ -1038,10 +1081,11 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
             let Ok(plan) = frame.create_physical_plan().await else {
                 continue;
             };
-            let Ok((tree, _)) = planner::plan(&plan, mode.knobs_for(dataset)) else {
+            let knobs = mode.knobs_for(dataset);
+            let Ok((tree, _)) = planner::plan(&plan, knobs) else {
                 continue;
             };
-            let Ok(recipes) = attach_recipes(tree.as_ref()) else {
+            let Ok(recipes) = attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs)) else {
                 continue;
             };
             let index = crate::executor::PlanIndex::build(tree.as_ref()).expect("the plan indexes");
@@ -1064,7 +1108,9 @@ async fn the_index_and_the_recipes_number_the_same_nodes_the_same_way() {
                      another node",
                     node.name()
                 );
-                let makes_calls = category_of(*node) != ExecutorCategory::BatchForwarder;
+                // A forwarder routes and a `GpuEmpty` reads nothing: neither makes a call.
+                let makes_calls = category_of(*node) != ExecutorCategory::BatchForwarder
+                    && !matches!(as_node_ref(*node), NodeRef::Empty(_));
                 assert_eq!(
                     recipes.get(*position).is_some(),
                     makes_calls,

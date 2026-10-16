@@ -9,13 +9,11 @@
 //! Every cardinality here is the trivial estimate the planner has today (#19, #73): a
 //! filter passes everything and a join is 1:1. Widths are real, from the declared schemas.
 
-use datafusion::arrow::datatypes::{Fields, Schema as ArrowSchema};
-
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
 use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
-use crate::plan::NodeKind;
 use crate::plan::PlanError;
+use crate::plan::session_bytes;
 use crate::plan::{NodeRef, as_node_ref};
 
 pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
@@ -127,9 +125,11 @@ impl<'a> Tree<'a> {
         self.nodes.len() - 1
     }
 
+    /// The scans, which are what the budget sizes. A `GpuEmpty` reads nothing, and the
+    /// translator's second pass counts scans alone, so it is not one.
     fn sources(&self) -> Vec<usize> {
         (0..self.nodes.len())
-            .filter(|seq| matches!(self.nodes[*seq].kind(), NodeKind::Source { .. }))
+            .filter(|seq| matches!(as_node_ref(self.nodes[*seq]), NodeRef::LoadParquet(_)))
             .collect()
     }
 
@@ -232,23 +232,26 @@ impl<'a> Tree<'a> {
             NodeRef::AggregateBatches(_) => {
                 Some(self.rows(self.children[seq][0]) * self.width(seq))
             }
+            // The build batch and what the session holds beside it, every one a function of
+            // the BUILD side and priced as the device's accountant prices it. A nested loop
+            // has no table; a cross join, Inner alone, no finish either.
             NodeRef::Join(join) => {
-                let build = self.bytes(self.children[seq][0]);
-                // A build-preserving join on the frozen surface also holds the key columns
-                // of every probe row it has seen, per lane, until the finish pass — the
-                // term that decides whether such a plan fits (#136).
-                let keys = match join.capability() {
-                    Ok(capability) if capability.needs_finish => {
-                        let probe = self.children[seq][1];
-                        self.rows(probe) * self.key_width(join, probe)
-                    }
-                    _ => 0,
-                };
-                Some(build + keys)
+                let build = self.children[seq][0];
+                Some(
+                    self.bytes(build)
+                        + session_bytes(
+                            join.join_type,
+                            true,
+                            join.distinct_key_width(),
+                            self.rows(build),
+                        ),
+                )
             }
-            NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_) => {
-                Some(self.bytes(self.children[seq][0]))
+            NodeRef::NestedLoopJoin(join) => {
+                let build = self.children[seq][0];
+                Some(self.bytes(build) + session_bytes(join.join_type, false, 0, self.rows(build)))
             }
+            NodeRef::CrossJoin(_) => Some(self.bytes(self.children[seq][0])),
             _ => None,
         }
     }
@@ -261,21 +264,6 @@ impl<'a> Tree<'a> {
             }
             _ => 0,
         }
-    }
-
-    /// The key columns a finish pass accumulates, per probe row.
-    fn key_width(&self, join: &crate::plan::GpuHashJoin, probe: usize) -> u64 {
-        let Some(schema) = self.nodes[probe].kind().schema() else {
-            return 0;
-        };
-        join.keys
-            .iter()
-            .filter_map(|(_, ordinal)| schema.fields.fields().get(*ordinal as usize))
-            .map(|field| {
-                let one = ArrowSchema::new(Fields::from(vec![field.as_ref().clone()]));
-                logical_size_from_schema(&one, 1, 0) as u64
-            })
-            .sum()
     }
 
     /// A source's amplification: the largest its batch gets anywhere on the way to the

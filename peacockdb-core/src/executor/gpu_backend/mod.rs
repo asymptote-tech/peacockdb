@@ -1,13 +1,11 @@
 //! The GPU backend's executors: a node's recipe is the instruction set, and running it is
-//! all these do.
-//!
-//! Nothing here builds a cuDF call of its own, deliberately: the recipe already says which
-//! seqs to address and in what order, so an executor that also built calls would be a
-//! second path to the same kernels, and the two would drift where the plan golden pins
+//! all these do. None builds a cuDF call of its own: the recipe already names the seqs and
+//! their order, and a second path to the same kernels would drift where the plan golden pins
 //! only the recipe.
 //!
 //! So an executor holds a borrowed session pointer, its recipe's calls, and the schema its
-//! output is priced by. Handles thread from one call to the next.
+//! output is priced by. Handles thread from one call to the next. A join is the one
+//! executor that holds a device object between calls: its session, by id.
 
 mod accumulate;
 mod backend;
@@ -76,29 +74,31 @@ pub(crate) struct GpuEmitter {
     schema: SchemaRef,
 }
 
-/// A join before its build side arrives.
+/// A join before its build side arrives: the `CudfJoin` seq its session will be built
+/// from, and what that session's calls are priced by.
 pub(crate) struct GpuJoin {
     site: CallSite,
-    /// The node's own type, and `None` for the two joins that have none — cross and
-    /// nested-loop. What a finish over no keys owes is decided by this rather than read
-    /// back off the call list: two different nodes publish a LeftAnti at done, and one of
-    /// them owes padded rows.
-    join_type: Option<JoinType>,
-    per_probe: Vec<join::JoinCall>,
-    at_done: Vec<join::JoinCall>,
-    keys_schema: Option<SchemaRef>,
+    seq: Seq,
+    /// The node's own; a cross join is Inner. Decides whether the session finishes and
+    /// what a lane with no build batch owes.
+    join_type: JoinType,
+    scratch: join::PairScratch,
+    /// Bytes a row of the keys the session takes distinct, 0 where it takes none
+    /// (`GpuHashJoin::distinct_key_width`).
+    distinct_key_width: u64,
     output: SchemaRef,
 }
 
-/// A join with its build side set, taking probe batches.
+/// A join with its session built, taking probe batches. Dropping it releases the session.
 pub(crate) struct GpuProbingJoin {
     join: GpuJoin,
-    /// `None` once a call has consumed it, which is the last probe call for a join that
-    /// hands it over and the finish call for one that does not.
-    build: Option<GpuBatch>,
-    /// The probe keys each batch contributed, held until the finish concatenates them.
-    accumulated: Vec<GpuBatch>,
-    probes: u64,
+    /// The session's id, which is not a handle: the C++ keeps sessions in a map of their own.
+    session: u64,
+    build_rows: u64,
+    build_bytes: u64,
+    /// What this lane owes with no build batch: nothing, for the six types every row of
+    /// which is built from a build row. Read off the join type at `set_build`.
+    owes_nothing: bool,
 }
 
 /// A lane's reads, in the order the mapping named them.
@@ -106,6 +106,12 @@ pub(crate) struct GpuProbingJoin {
 /// Declared here because `Backend::Source` names it, so a caller holding a `GpuBackend`
 /// reaches it without any file importing the type.
 pub(crate) struct GpuSource {
+    /// `None` for a `GpuEmpty`, a relation DataFusion proved empty: no seq, and no batch.
+    pub(crate) read: Option<LaneRead>,
+}
+
+/// The scan one lane of a `GpuLoadParquet` makes, a call per batch.
+pub(crate) struct LaneRead {
     pub(crate) site: CallSite,
     pub(crate) seq: Seq,
     pub(crate) kind: FbKind,

@@ -171,7 +171,8 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
                 .collect();
             fields.push(format!("hash=[{}]", keys.join(", ")));
         }
-        NodeRef::CoalesceAllBatches(_)
+        NodeRef::Empty(_)
+        | NodeRef::CoalesceAllBatches(_)
         | NodeRef::MergePartitions(_)
         | NodeRef::Union(_)
         | NodeRef::Interleave(_) => {}

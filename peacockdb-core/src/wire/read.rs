@@ -69,18 +69,6 @@ pub(crate) fn children<'a>(node: &fb::PlanNode<'a>) -> Result<Vec<fb::PlanNode<'
             .and_then(|n| n.input())),
         fb::PlanNodeKind::CudfLimit => one(node.node_as_cudf_limit().and_then(|n| n.input())),
         fb::PlanNodeKind::CudfWindow => one(node.node_as_cudf_window().and_then(|n| n.input())),
-        fb::PlanNodeKind::CudfHashJoin => node
-            .node_as_cudf_hash_join()
-            .map(|n| pair(n.left(), n.right()))
-            .unwrap_or_default(),
-        fb::PlanNodeKind::CudfCrossJoin => node
-            .node_as_cudf_cross_join()
-            .map(|n| pair(n.left(), n.right()))
-            .unwrap_or_default(),
-        fb::PlanNodeKind::CudfNestedLoopJoin => node
-            .node_as_cudf_nested_loop_join()
-            .map(|n| pair(n.left(), n.right()))
-            .unwrap_or_default(),
         // A leaf, as the C++ twin has it: a session's two tables arrive through
         // peacock_join_build and peacock_join_probe, so the node carries no child stubs.
         fb::PlanNodeKind::CudfJoin => Vec::new(),
@@ -100,13 +88,6 @@ pub(crate) fn children<'a>(node: &fb::PlanNode<'a>) -> Result<Vec<fb::PlanNode<'
 
 fn one<'a>(child: Option<fb::PlanNode<'a>>) -> Vec<fb::PlanNode<'a>> {
     child.into_iter().collect()
-}
-
-fn pair<'a>(
-    left: Option<fb::PlanNode<'a>>,
-    right: Option<fb::PlanNode<'a>>,
-) -> Vec<fb::PlanNode<'a>> {
-    left.into_iter().chain(right).collect()
 }
 
 /// Every published seq resolves to a node, and to a node of the kind its recipe claims.

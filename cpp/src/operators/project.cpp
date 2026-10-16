@@ -5,7 +5,6 @@
 
 #include <cudf/table/table.hpp>
 #include <cudf/copying.hpp>
-#include <cudf/column/column_factories.hpp>
 #include <cudf/transform.hpp>
 
 #include <algorithm>
@@ -15,20 +14,10 @@
 namespace peacock {
 
 TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
+  if (!proj->exprs() || proj->exprs()->size() == 0)
+    throw std::runtime_error(
+        "CudfProject with no expression: the plan declares __rowmarker__ (#63)");
   auto input = take_input(in);
-
-  if (!proj->exprs() || proj->exprs()->size() == 0) {
-    // Empty projection (DataFusion emits one feeding count(*) — it needs no
-    // input columns, only the row count). A 0-column table would lose that
-    // count, so emit a single non-null placeholder column of the input length;
-    // count(*) reads column 0 as size − null_count and gets the right answer.
-    auto n_rows = input.num_rows();
-    cudf::numeric_scalar<int8_t> zero(0, true);
-    std::vector<std::unique_ptr<cudf::column>> columns;
-    columns.push_back(cudf::make_column_from_scalar(zero, n_rows));
-    std::vector<std::string> names{"__rowcount__"};
-    return TableResult::owning(std::make_unique<cudf::table>(std::move(columns)), std::move(names));
-  }
 
   auto tv = input.view();
   // Assembled by hand rather than through `with`: a project reorders and renames, so

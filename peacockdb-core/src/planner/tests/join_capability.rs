@@ -2,10 +2,10 @@
 //!
 //! No goldens: a golden says a file moved, and what is under test here is which rule
 //! decided what. Two lists, both positive: the hand-built matrix of every join type
-//! crossed with a residual filter, and the sql that reaches each type. The shapes that are
-//! REFUSED live in `join_refusals.rs`, since what plans and what does not
-//! read differently — except the three refusals no query reaches, which are at the end of
-//! this file because a constructor is the only way to build them.
+//! crossed with a residual filter, every cell of which plans, and the sql that reaches each
+//! type. The shapes that are REFUSED live in `join_refusals.rs`, since what plans and what
+//! does not read differently — except the three refusals no query reaches, which are at the
+//! end of this file because a constructor is the only way to build them.
 //!
 //! The fixture is `crate::tests::join_fixture`, shared with that file.
 
@@ -35,8 +35,7 @@ fn equi(left: usize, right: usize) -> (Arc<dyn PhysicalExpr>, Arc<dyn PhysicalEx
     )
 }
 
-/// A residual filter over one column of each side — the shape that decides three of the
-/// refusals.
+/// A residual filter over one column of each side.
 fn residual() -> JoinFilter {
     // The filter's own table names its columns as the sides do, which is what validation
     // checks a reference against.
@@ -108,61 +107,18 @@ fn the_join(tree: &dyn GpuNode) -> &dyn GpuNode {
     .expect("a join in the tree")
 }
 
-/// What the matrix promises for one mode, written from the spec rather than read back from
-/// the planner's own `capability`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
-    /// The probe streams; `finish` is whether the lane owes a pass at done.
-    Streams {
-        finish: bool,
-    },
-    /// The probe is made one batch first, and the join is then one legacy call.
-    SingleBatchProbe {
-        finish: bool,
-    },
-    Refused(&'static str),
-}
-
-/// Exhaustive by construction: a tenth join type stops this compiling rather than going
-/// silently uncovered.
-fn expected(join_type: JoinType, has_filter: bool) -> Outcome {
+/// Whether a type owes the finish, written from the spec rather than read back from the
+/// planner: the build rows nothing matched (Left, Full) or the build side's own answer (the
+/// semi family). Exhaustive by construction: a tenth join type stops this compiling rather
+/// than going silently uncovered.
+fn expected_finish(join_type: JoinType) -> bool {
     match join_type {
-        JoinType::Inner => Outcome::Streams { finish: false },
-        // The build side is complete before the first probe call, so an unmatched probe row
-        // is unmatched everywhere and nothing is owed at done.
-        JoinType::Right => {
-            if has_filter {
-                Outcome::Refused("#153")
-            } else {
-                Outcome::Streams { finish: false }
-            }
-        }
-        // A preserved build side is what the finish pass answers for.
-        JoinType::Left | JoinType::Full => {
-            if has_filter {
-                Outcome::Refused("#153")
-            } else {
-                Outcome::Streams { finish: true }
-            }
-        }
-        // The per-call join disappears — a probe call is only the key project — so the
-        // filtered form gives up streaming instead of the finish.
-        JoinType::LeftSemi | JoinType::LeftAnti | JoinType::LeftMark => {
-            if has_filter {
-                Outcome::SingleBatchProbe { finish: true }
-            } else {
-                Outcome::Streams { finish: true }
-            }
-        }
-        // Membership in a complete build side is a per-row question, and no swapped mixed_*
-        // variant exists to ask it with a residual.
-        JoinType::RightSemi | JoinType::RightAnti => {
-            if has_filter {
-                Outcome::Refused("mixed_*")
-            } else {
-                Outcome::Streams { finish: false }
-            }
-        }
+        JoinType::Left
+        | JoinType::Full
+        | JoinType::LeftSemi
+        | JoinType::LeftAnti
+        | JoinType::LeftMark => true,
+        JoinType::Inner | JoinType::Right | JoinType::RightSemi | JoinType::RightAnti => false,
     }
 }
 
@@ -179,7 +135,7 @@ const HASH_JOIN_TYPES: [JoinType; 9] = [
 ];
 
 #[tokio::test]
-async fn every_hash_join_type_plans_or_refuses_as_the_matrix_says() {
+async fn every_hash_join_type_plans_with_and_without_a_residual() {
     let fixture = Fixture::new("matrix").await;
     for join_type in HASH_JOIN_TYPES {
         for has_filter in [false, true] {
@@ -192,46 +148,26 @@ async fn every_hash_join_type_plans_or_refuses_as_the_matrix_says() {
                 filter,
                 false,
             );
-            let outcome = expected(join_type, has_filter);
-            match (planned(&plan), outcome) {
-                (Err(PlanError::Unsupported(what)), Outcome::Refused(names)) => {
-                    assert!(
-                        what.contains(names),
-                        "{join_type:?} filter={has_filter}: refused without naming {names}: {what}"
-                    );
-                }
-                (Ok(tree), Outcome::Streams { finish } | Outcome::SingleBatchProbe { finish }) => {
-                    let join = the_join(tree.as_ref());
-                    let NodeRef::Join(node) = as_node_ref(join) else {
-                        panic!("{join_type:?}: not an equi-join");
-                    };
-                    let capability = node.capability().expect("a capability");
-                    assert_eq!(
-                        capability.needs_finish, finish,
-                        "{join_type:?} filter={has_filter}: finish"
-                    );
-                    let streams = matches!(outcome, Outcome::Streams { .. });
-                    assert_eq!(
-                        capability.probe_streams, streams,
-                        "{join_type:?} filter={has_filter}: streaming"
-                    );
-                    // A probe that cannot stream is made one batch by the planner, which is
-                    // the tree consequence rather than the node's own answer.
-                    let probe_coalesced = matches!(
-                        as_node_ref(join.children()[1]),
-                        NodeRef::CoalesceAllBatches(_)
-                    );
-                    assert_eq!(
-                        probe_coalesced, !streams,
-                        "{join_type:?} filter={has_filter}: probe coalesce"
-                    );
-                }
-                (planned, expected) => {
-                    panic!(
-                        "{join_type:?} filter={has_filter}: got {planned:?}, expected {expected:?}"
-                    )
-                }
-            }
+            let tree =
+                planned(&plan).unwrap_or_else(|e| panic!("{join_type:?} filter={has_filter}: {e}"));
+            let join = the_join(tree.as_ref());
+            let NodeRef::Join(node) = as_node_ref(join) else {
+                panic!("{join_type:?}: not an equi-join");
+            };
+            assert_eq!(
+                crate::plan::needs_finish(node.join_type),
+                expected_finish(join_type),
+                "{join_type:?} filter={has_filter}: finish"
+            );
+            // Every probe streams, residual or not: the session matches a build row across
+            // calls, so nothing below the join is made one batch for it.
+            assert!(
+                !matches!(
+                    as_node_ref(join.children()[1]),
+                    NodeRef::CoalesceAllBatches(_)
+                ),
+                "{join_type:?} filter={has_filter}: the probe side was coalesced"
+            );
         }
     }
 }
@@ -306,51 +242,25 @@ async fn a_small_build_side_plans_one_lane_and_a_large_one_does_not() {
 }
 
 #[tokio::test]
-async fn an_anti_join_refuses_only_when_nulls_can_meet_on_both_sides() {
+async fn an_anti_or_mark_join_plans_whatever_its_keys_hold() {
     let fixture = Fixture::new("nulls").await;
     for join_type in [JoinType::LeftAnti, JoinType::RightAnti, JoinType::LeftMark] {
-        // Only the probe side carries NULLs: a NULL there matches nothing on a NULL-free
-        // build, so the hardcoded EQUAL cannot invent a match. This must plan — it is what
-        // tpcds q10, q35 and q69 rest on.
-        let one_side = hash_join(
-            fixture.scattered("tiny").await,
-            fixture.scattered("nulls").await,
-            join_type,
-            None,
-            false,
-        );
-        assert!(
-            planned(&one_side).is_ok(),
-            "{join_type:?}: a NULL-free build side has no NULL to match"
-        );
-
-        // Both sides carry them, and the executor matches NULL to NULL whatever the flag
-        // says — which is set semantics, not SQL's.
-        let both_sides = hash_join(
-            fixture.scattered("nulls").await,
-            fixture.scattered("nulls").await,
-            join_type,
-            None,
-            false,
-        );
-        let err = planned(&both_sides).expect_err("both sides nullable must refuse");
-        assert!(
-            matches!(&err, PlanError::Unsupported(what) if what.contains("#59") && what.contains("#80")),
-            "{join_type:?}: {err}"
-        );
-
-        // The same plan asking for set semantics is asking for what the executor does.
-        let set_semantics = hash_join(
-            fixture.scattered("nulls").await,
-            fixture.scattered("nulls").await,
-            join_type,
-            None,
-            true,
-        );
-        assert!(
-            planned(&set_semantics).is_ok(),
-            "{join_type:?}: null_equals_null=true is the equality the executor hardcodes"
-        );
+        // NULLs on the probe side alone, on both, and both under set semantics: every type
+        // honours the plan's `null_equals_null`, which is `NOT EXISTS`'s meaning under `false`
+        // (#59). What `NOT IN` needs beyond it is the planner's rewrite (`not_in.rs`).
+        for (build, null_equals_null) in [("tiny", false), ("nulls", false), ("nulls", true)] {
+            let plan = hash_join(
+                fixture.scattered(build).await,
+                fixture.scattered("nulls").await,
+                join_type,
+                None,
+                null_equals_null,
+            );
+            assert!(
+                planned(&plan).is_ok(),
+                "{join_type:?} over {build}, null_equals_null={null_equals_null}"
+            );
+        }
     }
 }
 
@@ -375,8 +285,8 @@ async fn a_semi_join_plans_with_nulls_on_both_sides_because_it_honours_the_flag(
 #[tokio::test]
 async fn an_outer_join_makes_its_padded_side_nullable_for_the_join_above_it() {
     let fixture = Fixture::new("padding").await;
-    // The Left join pads its probe side, so the anti join above it meets NULLs on both
-    // sides even though no column in either file holds one.
+    // The Left join pads its probe side, so the anti join above it meets NULLs there even
+    // though no column in either file holds one.
     let padded = hash_join(
         fixture.scattered("tiny").await,
         fixture.scattered("tiny").await,
@@ -405,10 +315,18 @@ async fn an_outer_join_makes_its_padded_side_nullable_for_the_join_above_it() {
         )
         .expect("a hash join"),
     ) as Arc<dyn ExecutionPlan>;
-    let err = planned(&anti).expect_err("the padding is a NULL the analysis must see");
+    // The anti join's probe is the padded side, so the analysis has to see a NULL there and
+    // drop it before the shuffle (#137) — no column in either file holds one.
+    let tree = planned(&anti).expect("an anti join over a padded side plans");
+    let anti = find(tree.as_ref(), &|node| {
+        matches!(as_node_ref(node), NodeRef::Join(join) if join.join_type == JoinType::LeftAnti)
+    })
+    .expect("the anti join");
+    let shuffle = anti.children()[1];
     assert!(
-        matches!(&err, PlanError::Unsupported(what) if what.contains("#59")),
-        "{err}"
+        matches!(as_node_ref(shuffle), NodeRef::EmitPartitions(_))
+            && matches!(as_node_ref(shuffle.children()[0]), NodeRef::Filter(_)),
+        "the padded key reached the shuffle unfiltered"
     );
 }
 
@@ -445,9 +363,9 @@ async fn cross_and_nested_loop_joins_take_both_sides_to_one_lane() {
 }
 
 #[tokio::test]
-async fn a_nested_loop_join_beyond_inner_and_left_is_refused() {
+async fn a_nested_loop_join_of_every_type_plans_and_streams_its_probe() {
     let fixture = Fixture::new("nlj-types").await;
-    for join_type in [JoinType::Right, JoinType::Full, JoinType::LeftSemi] {
+    for join_type in HASH_JOIN_TYPES {
         let plan: Arc<dyn ExecutionPlan> = Arc::new(
             NestedLoopJoinExec::try_new(
                 fixture.scan("tiny").await,
@@ -458,10 +376,18 @@ async fn a_nested_loop_join_beyond_inner_and_left_is_refused() {
             )
             .expect("a nested-loop join"),
         );
-        let err = planned(&plan).expect_err("the executor rejects these outright");
+        let tree = planned(&plan).unwrap_or_else(|e| panic!("{join_type:?}: {e}"));
+        let join = the_join(tree.as_ref());
+        let NodeRef::NestedLoopJoin(node) = as_node_ref(join) else {
+            panic!("{join_type:?}: not a nested-loop join");
+        };
+        assert_eq!(node.join_type, join_type);
         assert!(
-            matches!(&err, PlanError::Unsupported(what) if what.contains("Inner and Left")),
-            "{join_type:?}: {err}"
+            !matches!(
+                as_node_ref(join.children()[1]),
+                NodeRef::CoalesceAllBatches(_)
+            ),
+            "{join_type:?}: the probe side was coalesced"
         );
     }
 }

@@ -37,9 +37,6 @@ TableResult execute_scan(const fb::CudfScan* scan,
 TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in);
 TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in);
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in);
-TableResult execute_hash_join(const fb::CudfHashJoin* join, NodeInputs* in);
-TableResult execute_cross_join(const fb::CudfCrossJoin* join, NodeInputs* in);
-TableResult execute_nested_loop_join(const fb::CudfNestedLoopJoin* join, NodeInputs* in);
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in);
 TableResult execute_union(const fb::CudfUnion* u, NodeInputs* in);
 TableResult execute_limit(const fb::CudfLimit* limit, NodeInputs* in);

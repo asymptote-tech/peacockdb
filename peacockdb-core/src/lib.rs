@@ -35,6 +35,7 @@ use datafusion::datasource::listing::{
 use datafusion::error::Result;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::execution::context::SessionContext;
+use datafusion::optimizer::Optimizer;
 
 pub fn build_session_state(target_partitions: usize) -> SessionContext {
     let base = SessionContext::new();
@@ -47,8 +48,17 @@ pub fn build_session_state(target_partitions: usize) -> SessionContext {
         .execution
         .parquet
         .schema_force_view_types = false;
+    // `NOT IN` is wrong in DataFusion 45 wherever a key can be NULL, and the rewrite has to
+    // run before the subquery is decorrelated into a join (#80, join-rewrite-design.md §3.5).
+    let mut rules = Optimizer::new().rules;
+    let at = rules
+        .iter()
+        .position(|rule| rule.name() == "decorrelate_predicate_subquery")
+        .expect("DataFusion 45 has decorrelate_predicate_subquery");
+    rules.insert(at, Arc::new(planner::NullAwareNotIn));
     let state = SessionStateBuilder::new_from_existing(base.state())
         .with_config(config)
+        .with_optimizer_rules(rules)
         .build();
 
     SessionContext::new_with_state(state)

@@ -91,19 +91,19 @@ macro_rules! stub_backend {
         }
         impl JoinExecutor<$backend> for $ops {
             type Probing = $probing;
-            fn set_build(self, _batch: $batch) -> CallResult<$probing> {
+            fn set_build(self, _batch: Option<$batch>) -> CallResult<$probing> {
                 Ok(($probing, CallStats::default()))
-            }
-            fn without_build(self) -> Result<(), BackendError> {
-                Ok(())
             }
         }
         impl ProbingJoin<$backend> for $probing {
-            fn probe_and_fetch(&mut self, batch: $batch) -> CallResult<Vec<$batch>> {
-                Ok((vec![batch], CallStats::default()))
+            fn probe_and_fetch(&mut self, batch: $batch) -> CallResult<Option<$batch>> {
+                Ok((Some(batch), CallStats::default()))
             }
-            fn finish_and_fetch(self) -> CallResult<Vec<$batch>> {
-                Ok((Vec::new(), CallStats::default()))
+            fn finish_and_fetch(self) -> CallResult<Option<$batch>> {
+                Ok((None, CallStats::default()))
+            }
+            fn owes_nothing(&self) -> bool {
+                false
             }
         }
         impl UnloadExecutor<$backend> for $ops {
@@ -156,7 +156,7 @@ stub_backend!(
 
 /// One build -> probe -> finish transition, written once for every backend.
 fn drive_join<B: Backend>(join: B::Join, build: B::Batch, probe: B::Batch) -> usize {
-    let (mut probing, _) = join.set_build(build).expect("the build side is set");
+    let (mut probing, _) = join.set_build(Some(build)).expect("the build side is set");
     let (probed, _) = probing.probe_and_fetch(probe).expect("probed");
     let held = probing.resident_bytes();
     let (finished, _) = probing.finish_and_fetch().expect("finished");

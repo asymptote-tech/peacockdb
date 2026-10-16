@@ -330,17 +330,16 @@ macro_rules! injected_queries {
 //
 // nested-loop Inner, and the smallest plan in the corpus that carries a join at all.
 // injected: tpch/nested-loop-join
-// nested-loop Left: the one mode whose probe side is a single batch, so its call takes the
-// build side rather than a copy of it.
+// nested-loop Left: the finish pads the build rows no probe row matched.
 // injected: tpch/nested-loop-left-join
 // RightAnti — the probe-side semi family, answered per batch with no finish pass.
 // injected: tpch/anti-join
-// Left outer: the finish pass, and the only cell with no device path at all (#152).
+// Left outer: the finish pass.
 end_to_end!(tpch, left_join);
 // Inner, multi-key Inner, Inner with a residual filter, LeftSemi and RightSemi in one plan.
 end_to_end!(tpch, q20);
-// LeftAnti with a residual filter, which the matrix answers in one legacy call over a
-// probe side the planner made single-batch.
+// LeftAnti with a residual filter, its probe streamed and its build rows settled at the
+// finish.
 end_to_end!(tpch, q21);
 // Full outer: Right's per-batch call and Left's finish, in one node.
 // injected: tpcds/q97
@@ -363,10 +362,7 @@ end_to_end!(tpcds, q87);
 // injected: tpcds/q33
 // A union that cannot interleave: its two unions carry branches that disagree on lane
 // count, which is what makes them unions rather than interleaves, and the lanes above are
-// their sum. q77 is the shape this claim was written for — 4+1+4 — and it is not here
-// because its Right outer's build side emits no batch at all: the Inner join under it
-// drops its empty lane as it should, so the outer is refused by name
-// ([#212](../../../llm-wiki/tickets/joins.md#t212)).
+// their sum. tpcds q77 is the other such plan, 4+1+4.
 // injected: tpcds/q2
 // Both row-interval lowerings on one root-to-leaf path — the root-adjacent one becoming
 // the unload's skip/fetch and the mid-plan one a limit over the scan — and the only
@@ -376,6 +372,36 @@ end_to_end!(tpcds, q87);
 // A merge over state worth merging: the Welford init, both merges and the finalize
 // project. Every other aggregate here merges a sum.
 end_to_end!(tpch, shuffle_stddev, Some(WELFORD_TOLERANCE));
+// A relation DataFusion proved empty, kept under the Right join its swap makes of a `LEFT
+// JOIN`: the build side emits no batch on any lane, so every probe row is padded.
+end_to_end!(pbench, empty_side_left_join);
+
+/// A relation DataFusion proved empty with nothing above it but the unload: the plan is the
+/// one leaf, and it answers no batch at every mode.
+#[tokio::test]
+async fn an_empty_relation_alone_answers_no_batch() {
+    let data_dir = data_dir_for("pbench", "1");
+    for mode in &MODES {
+        let ctx = crate::register_tables_for(
+            crate::build_session_state(mode.target_partitions),
+            &data_dir,
+        )
+        .await
+        .expect("register the tables");
+        let plan = ctx
+            .sql("SELECT t_id FROM tiny WHERE false")
+            .await
+            .expect("the query plans")
+            .create_physical_plan()
+            .await
+            .expect("the query has a physical plan");
+        let (tree, _memory) = planner::plan(&plan, mode.knobs())
+            .unwrap_or_else(|error| panic!("at {}: {error}", mode.name));
+        let report = run::<crate::executor::CpuBackend>(tree.as_ref(), &ctx.task_ctx(), None)
+            .unwrap_or_else(|error| panic!("at {}: {error}", mode.name));
+        assert!(report.batches.is_empty(), "at {}", mode.name);
+    }
+}
 
 // ── the injected set ────────────────────────────────────────────────────────
 

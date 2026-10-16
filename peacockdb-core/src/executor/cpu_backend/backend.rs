@@ -68,6 +68,7 @@ impl Backend for CpuBackend {
                 lane,
                 &node.kind().schema().expect("a source is not a sink").fields,
             )?),
+            NodeRef::Empty(_) => NodeExecutors::Source(CpuSource::empty()),
             NodeRef::Filter(filter) => {
                 NodeExecutors::Exec(CpuExec::filter(filter, &input(0), ctx.clone())?)
             }
@@ -238,38 +239,33 @@ impl Executor for CpuJoin {
 
 impl JoinExecutor<CpuBackend> for CpuJoin {
     type Probing = CpuProbingJoin;
-    fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
         CpuJoin::set_build(self, batch)
-    }
-    fn without_build(self) -> Result<(), BackendError> {
-        CpuJoin::without_build(self)
     }
 }
 
 impl Executor for CpuProbingJoin {
-    /// The build side for as long as this join lives, and the probe keys a finishing type
-    /// keeps until its finish pass runs.
+    /// The build side, which the stream hashed once and holds for as long as this join
+    /// lives.
     fn resident_bytes(&self) -> usize {
-        self.build_bytes() + self.accumulated_bytes()
+        self.build_bytes()
     }
-    /// The build side only where a probe call reads it: the build-side semi family's probe
-    /// call is the key project, and charging it the build side would refuse a query that
-    /// fits, since the accountant reads this before the call rather than after it.
+    /// The batch alone: no call re-reads the build side, which the residency already
+    /// counts, and charging it again would refuse a query that fits.
     fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
-        if self.probe_reads_build() {
-            self.build_bytes() + n_bytes
-        } else {
-            n_bytes
-        }
+        n_bytes
     }
 }
 
 impl ProbingJoin<CpuBackend> for CpuProbingJoin {
-    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
         CpuProbingJoin::probe_and_fetch(self, batch)
     }
-    fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
+    fn finish_and_fetch(self) -> CallResult<Option<CpuBatch>> {
         CpuProbingJoin::finish_and_fetch(self)
+    }
+    fn owes_nothing(&self) -> bool {
+        CpuProbingJoin::owes_nothing(self)
     }
 }
 

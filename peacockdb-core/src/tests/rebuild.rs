@@ -24,12 +24,12 @@ use crate::plan::Schema;
 use crate::plan::{AggCall, AggFunc, PlanAgg, decomposition};
 use crate::plan::{
     AggregateBody, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
-    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave,
-    GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuNestedLoopJoin,
-    GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
+    GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty, GpuFilter, GpuHashJoin,
+    GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions,
+    GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
 };
 use crate::plan::{Expr, NamedExpr};
-use crate::plan::{JoinFilterColumn, JoinSide, NestedLoopJoinType};
+use crate::plan::{JoinFilterColumn, JoinSide};
 
 /// `node` rebuilt over `children`, which are the rewritten children in the order
 /// [`GpuNode::children`] reports them. Handed a node's own children back it is the
@@ -54,6 +54,7 @@ pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Bo
                 schema_of(node),
             ))
         }
+        NodeRef::Empty(_) => Box::new(GpuEmpty::new(schema_of(node))),
         NodeRef::Filter(filter) => Box::new(GpuFilter::new(
             one(),
             filter.predicate.clone(),
@@ -330,7 +331,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             source(None),
             source(Some(7)),
-            NestedLoopJoinType::Left,
+            JoinType::Left,
             column(0, "f"),
             vec![JoinFilterColumn {
                 side: JoinSide::Probe,
@@ -342,7 +343,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuNestedLoopJoin::new(
             other_source(),
             source(None),
-            NestedLoopJoinType::Inner,
+            JoinType::Inner,
             column(1, "f"),
             Vec::new(),
             None,
@@ -386,6 +387,8 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             }),
         )),
         Box::new(GpuUnload::new(other_source(), None)),
+        Box::new(GpuEmpty::new(columns())),
+        Box::new(GpuEmpty::new(other_columns())),
     ]
 }
 

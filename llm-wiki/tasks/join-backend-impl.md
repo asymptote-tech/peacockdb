@@ -76,7 +76,7 @@ Estimate: [`../reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-c
 | `peacockdb-core/src/wire/join.rs`, `attach.rs`, `mod.rs`, `recipes.rs` | `CudfJoin`; the session recipe line |
 | `peacockdb-core/src/executor/mod.rs` | the trait change |
 | `peacockdb-core/src/executor/gpu_backend/{join.rs,mod.rs,backend.rs}` | the session typestate |
-| `peacockdb-core/src/executor/cpu_backend/{join.rs,mod.rs,backend.rs,channel.rs (new)}` | the stream per lane |
+| `peacockdb-core/src/executor/cpu_backend/{join.rs,mod.rs,backend.rs,single_node.rs}` | the stream per lane |
 | `peacockdb-core/src/executor/driver/{single_partition.rs,partitioned.rs,index.rs}`, `driver/tests/mock.rs` | `set_build(None)`, `owes_nothing`, scaffolding gone |
 | `peacockdb-core/src/planner/memory_estimation.rs` | the session's pricing |
 | `peacockdb-core/src/tests/**`, `planner/tests/**`, `plan/tests/**`, `executor/**/tests*`, `wire/tests.rs`, `wire/gpu_tests/mod.rs`, `tests/end_to_end/dimensions.rs`, `tests/injection.rs` | §5.7 |
@@ -101,7 +101,7 @@ Estimate: [`../reports/join-rewrite-cell-estimate.md`](../reports/join-rewrite-c
   (`parquet_nulls.rs`); `pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool`
   (`nullability.rs`); `can_be_null(node: &dyn GpuNode) -> Vec<bool>` unchanged.
 
-- [ ] **Step 1: The failing tests.** In `planner/tests/logical_nullability.rs`, over the tpch sf1
+- [x] **Step 1: The failing tests.** In `planner/tests/logical_nullability.rs`, over the tpch sf1
   session (`build_session_state(4)` + `register_tables_for`, the way `planner/tests/join_capability.rs`
   builds its fixture):
 
@@ -111,6 +111,16 @@ async fn a_key_whose_row_groups_hold_no_null_is_not_nullable() {
     let ctx = tpch_ctx().await;
     let plan = ctx.sql("SELECT o_custkey FROM orders").await.unwrap().into_optimized_plan().unwrap();
     assert!(!logical_can_be_null(&plan, &Column::from_name("o_custkey")));
+}
+
+// Added while building: without a column that really holds NULLs, a reader hardwired to
+// "no NULL" passes every other case here. tpcds `ss_sold_date_sk` holds 129,850 at sf1.
+#[tokio::test]
+async fn a_key_whose_row_groups_hold_a_null_is_nullable() {
+    let ctx = tpcds_ctx().await;
+    let plan = ctx.sql("SELECT ss_sold_date_sk FROM store_sales").await.unwrap()
+        .into_optimized_plan().unwrap();
+    assert!(logical_can_be_null(&plan, &Column::from_name("ss_sold_date_sk")));
 }
 
 #[tokio::test]
@@ -139,15 +149,15 @@ async fn an_outer_join_pads_and_so_nullable() {
 }
 ```
 
-- [ ] **Step 2: Run red.** `cargo test -p peacockdb-core --lib --features rust-only logical_nullability` —
+- [x] **Step 2: Run red.** `cargo test -p peacockdb-core --lib --features rust-only logical_nullability` —
   fails: `logical_can_be_null` not found.
-- [ ] **Step 3: The reader.** `parquet_nulls.rs` opens the file with `SerializedFileReader` (as
+- [x] **Step 3: The reader.** `parquet_nulls.rs` opens the file with `SerializedFileReader` (as
   `parquet_meta.rs:56-59` does), finds the column by name in the schema descriptor, and answers
   `true` if any row group's `statistics().and_then(|s| s.null_count_opt())` is `None` or `> 0` —
   the same rule as `parquet_meta.rs:95-97` ("no statistic is not a promise of no nulls").
   `parquet_meta.rs` keeps its per-group loop (it needs bytes too) but calls the same predicate
   helper `fn nulls_possible(stats: Option<&Statistics>) -> bool`, defined once in `parquet_nulls.rs`.
-- [ ] **Step 4: The tracer.** In `nullability.rs`:
+- [x] **Step 4: The tracer.** In `nullability.rs`:
 
 ```rust
 /// Whether `column` of `plan`'s output can hold a NULL, read off the data where the column
@@ -169,10 +179,11 @@ pub(crate) fn logical_can_be_null(plan: &LogicalPlan, column: &Column) -> bool {
         LogicalPlan::Limit(l) => logical_can_be_null(&l.input, column),
         // An alias renames the relation, not the column: the input answers for the bare name.
         LogicalPlan::SubqueryAlias(a) => logical_can_be_null(&a.input, &Column::from_name(column.name.clone())),
-        LogicalPlan::Join(j) if j.join_type == JoinType::Inner => {
-            let side = if j.left.schema().has_column(column) { &j.left } else { &j.right };
-            logical_can_be_null(side, column)
-        }
+        // Inner alone is not enough: `an_outer_join_pads_and_so_nullable` asserts the
+        // PRESERVED side of a Left join keeps its non-nullability, which `_ => true` denies.
+        // Shipped as `join_can_be_null`: the padded side is nullable whatever it holds, the
+        // preserved side answers from its own input, and a name on both sides decides nothing.
+        LogicalPlan::Join(j) => join_can_be_null(j, column),
         _ => true,
     }
 }
@@ -200,7 +211,7 @@ fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanE
   also the path's own: with `prefix()` the file never opens, `unwrap_or(true)` answers nullable,
   and it stays red. Re-export
   `can_be_null` from `nullability.rs` under the same name so the GpuNode callers do not move.
-- [ ] **Step 5: Run green**, then `cargo test -p peacockdb-core --lib --features rust-only null_analysis`
+- [x] **Step 5: Run green**, then `cargo test -p peacockdb-core --lib --features rust-only null_analysis`
   (the moved tests) green unchanged.
 - [ ] **Step 6: Commit.** `git commit -m "nullability: one footer reader, and a tracer over the logical plan"`.
 
@@ -220,7 +231,7 @@ fn scan_column_may_hold_null(scan: &TableScan, name: &str) -> Result<bool, PlanE
   `pub(crate) fn in_subquery_may_meet_null(x: &Expr, sub: &Subquery, outer: &LogicalPlan) -> bool`
   and the narrowed refusal `pub(crate) fn refuse_nullable_in_off_the_spine(e: &Expr, outer: &LogicalPlan) -> Result<()>`.
 
-- [ ] **Step 1: The failing tests** — the scratch probe's four forms (`notin-probe`, measured
+- [x] **Step 1: The failing tests** — the scratch probe's four forms (`notin-probe`, measured
   2026-10-07: correlated 3 rows, uncorrelated 2, both under `OR` the same). The fixture registers
   two in-memory tables exactly as the probe did:
 
@@ -356,7 +367,15 @@ async fn not_in_over_an_untraceable_operand_is_rewritten() {
   here, so a refusal cannot cite it; #250's text gains the nested form), and
   `a_not_in_nested_in_an_exists_is_rewritten_too` becomes `bug_a_not_in_nested_in_an_exists_is_refused`, asserting `#250` —
   recorded in the detail file with the planner's error.
-- [ ] **Step 1b: The pins for what stays refused.** One `bug_` test per ticketed refusal this
+- [~] **Step 1b: The pins for what stays refused.** The #247 pin landed, split in two:
+  `bug_datafusion_45_refuses_six_subquery_shapes` over the six refused shapes and
+  `bug_a_scalar_subquery_of_several_rows_is_not_refused` over the seventh, which is an answer
+  rather than a refusal and so cannot share the loop (the sketch's `rows_any` had no
+  definition). **The #246 pin is deferred**: `nested_cases.rs` is `src/tests/gpu_tests/`, so it
+  needs a device to run and a cudf-feature cargo build even to typecheck, which
+  `build-test.md` forbids in `./target`. It belongs in a round that pays for a device cycle
+  anyway (task 7), and nothing in task 2 changes the behaviour it pins.
+  Original text: One `bug_` test per ticketed refusal this
   chain leaves, each asserting today's refusal and citing its ticket:
 
 ```rust
@@ -393,9 +412,9 @@ operator_case! {
   `like_column_residual()` builds `Expr::Like { expr: build "s", pattern: probe "s" }` with its
   `JoinFilterColumn`s, as `decimal_residual()` builds its cast (`nested_cases.rs:98`); the
   message is `expr.cpp:873-877`'s.
-- [ ] **Step 2: Run red**: today's DataFusion answers 7 and 5 rows for the first two, keeps the
+- [x] **Step 2: Run red**: today's DataFusion answers 7 and 5 rows for the first two, keeps the
   NULL-keyed rows under the negated positive form, and plans the two off-spine forms.
-- [ ] **Step 3: The rule, on the spine only.** `rewrite` visits every `LogicalPlan::Filter`, the
+- [x] **Step 3: The rule, on the spine only.** `rewrite` visits every `LogicalPlan::Filter`, the
   ones inside subqueries included, and rewrites its predicate's **spine** — the AND/OR tree from the
   root — never below a `NOT`, an `IS NULL`, a comparison or a function:
 
@@ -545,7 +564,7 @@ fn rewrite_not_in(x: Expr, sub: Subquery, outer: &LogicalPlan) -> Result<Expr> {
   `apply_order` is `None` and `rewrite` walks with `LogicalPlan::transform_down_with_subqueries`
   (DataFusion 45, `logical_plan/tree_node.rs:740`), so a filter under a join, and one inside an
   `EXISTS` or `IN` subquery's plan, is reached before `decorrelate_predicate_subquery` runs.
-- [ ] **Step 4: Register it.** In `build_session_state`:
+- [x] **Step 4: Register it.** In `build_session_state`:
 
 ```rust
 let mut rules = datafusion::optimizer::Optimizer::new().rules;
@@ -558,8 +577,21 @@ let state = SessionStateBuilder::new_from_existing(base.state())
     .build();
 ```
 
-- [ ] **Step 5: Run green** — the thirteen cases (fourteen with Step 1b's #247 pin); then `test_cpu_corpus` for tpch q16 and anti-join
-  (their plans do not move: the reader finds no NULL), `cargo test --lib plan_goldens` unchanged.
+- [x] **Step 5: Run green** — sixteen cases: the thirteen above, Step 1b's #247 pin as two, and
+  one added case (below). `test_cpu_corpus` is unchanged at 983, tpch q16 and anti-join included —
+  the reader finds no NULL in their keys.
+  **`plan_goldens` is NOT unchanged**, which this step had wrong: pbench's `in-is-null`,
+  `not-in-correlated` and `not-in-uncorrelated` move at all five modes, three sections per file,
+  every one of them a refusal line. Regenerated in this round with `UPDATE_CANONICAL=1` over
+  `plan_goldens::pbench_tp`. `in-is-null` now meets the #250 refusal instead of #257's
+  `EmptyExec` fold, so `cost-registry.csv`'s `in_is_null` row becomes `na` ×5 with
+  `plan_status=fail` and ticket `250`.
+  **One case added:** `a_nested_not_in_over_a_set_holding_a_null_empties_its_exists`. The
+  sketch's `a_not_in_nested_in_an_exists_is_rewritten_too` answers the same six rows before and
+  after the rule — DuckDB agrees, so it is a valid answer check, but it cannot witness the walk
+  reaching inside a subquery. The added case can: its inner set holds a NULL, so SQL answers no
+  rows where a two-valued engine answers six. Proved by mutating the walk to `transform_down`,
+  which reddens the added case alone.
 - [ ] **Step 6: Commit.** `git commit -m "NOT IN answers as SQL: a logical rewrite, where the data can hold a NULL (#80)"`.
 
 ### Task 3: #137 — no NULL key crosses a shuffle it cannot match through
@@ -574,7 +606,17 @@ let state = SessionStateBuilder::new_from_existing(base.state())
 - Produces: `fn drop_null_keys_below_shuffle(side: Box<dyn GpuNode>, keys: &[u32]) -> Box<dyn GpuNode>`
   in `nodes.rs`; `GpuEmitPartitions::into_parts(self) -> (Box<dyn GpuNode>, Vec<u32>)`.
 
-- [ ] **Step 1: The failing tests** (pbench is committed by then, chain task 3; the cases plan
+- [x] **Step 1: The failing tests.** In a new `planner/tests/null_key_filters.rs`, not in
+  `join_capability.rs`: that file's header says it writes its own parquet and reads no dataset,
+  and these cases need real footers. Seven cases, not four — three added while building:
+  `one_lane_shuffles_nothing_and_so_drops_nothing` (tp1, where there is no
+  `GpuEmitPartitions` and so no shuffle to skew), and, over the hand-built
+  `tests::join_fixture`, `set_semantics_keeps_the_null_keys_a_shuffle_would_skew` and
+  `the_filter_goes_below_the_shuffle_and_not_above_it` — no corpus SQL sets
+  `null_equals_null` on a nullable key, and nothing but the plan goldens said which side of
+  the shuffle the filter landed on. `plan::tests::joins::every_join_type_says_which_side_may_drop_a_null_key`
+  pins the nine-way table exhaustively; the query cases reach three of the nine.
+  (pbench is committed by then, chain task 3; the cases plan
   over `pbench.sf1` with pbench's own knobs — `MODES[2].knobs_for("pbench")`, tp4-single with the
   small-table rule off, so `fact` and `dim` really shuffle):
 
@@ -620,8 +662,9 @@ async fn a_tpch_join_gains_no_filter() {
   (`data_dir_for`, `queries_dir_for`, `MODES` and `knobs_for` are test_support's — the last pbench's; if a
   helper's name differs on master when this runs, use the one the corpus tier calls.)
 
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The sides per type** (design §4.1): a function in `plan/join.rs`
+- [x] **Step 2: Run red.** 2 of 4 red (the inner and left cases); the Full and tpch cases pass
+  before the rule and are the two that must not move.
+- [x] **Step 3: The sides per type** (design §4.1): a function in `plan/join.rs`
 
 ```rust
 /// The sides whose unmatched rows are never emitted: there a NULL key can match nothing
@@ -686,13 +729,25 @@ impl GpuEmitPartitions {
 
   (`schema.fields.field(k).name()` is the `Schema` wrapper's Arrow field; if master spells the
   wrapper's accessor differently, use the one `new_filter`'s callers use.)
-- [ ] **Step 4: Run green**; then regenerate every golden the filters move, **in the same
-  commit** as the code, so no commit leaves a tier red: `UPDATE_CANONICAL=1 cargo test --lib
-  plan_goldens` (about 73 tpcds plans gain the filter at the three tp4 modes), the cpu per-node
-  goldens over the corpus cpu tier at the three tp4 modes (`UPDATE_CANONICAL=1 cargo test --test
-  test_cpu_corpus -- tp4`), and the cost goldens (`UPDATE_CANONICAL=1 cargo test --test
-  test_cost_model`). Review the diff: `GpuFilter … IS NOT NULL` lines, the counts and row figures
-  under them, and nothing in `mini.result.txt`.
+- [x] **Step 4: Run green**; then regenerate every golden the filters move, **in the same
+  commit** as the code. What actually moved, and the three corrections to this step:
+  - `*.plans.txt` at the three tp4 modes only (tp1 has one lane, so no shuffle): **tpcds 74 of
+    99** sections, +416 filter lines per mode — "about 73" was right. **pbench 9 of 60**, +13.
+    **tpch 2 of 39, +3 — which this plan and design §4.1 both said would not happen.** q2 and
+    q15 join on an aggregate output (`min(ps_supplycost)`, `total_revenue`), and `can_be_null`
+    says an aggregate can be NULL — a sum over no rows is. The rule is right and the
+    prediction was about scan keys.
+  - **`recipe-payloads.txt` moves too**, 12 of 20, and this step does not mention it. Its
+    `sha256=` lines are guarded: `UPDATE_CANONICAL=1` alone verifies them and goes red, so the
+    regen needs `PEACOCK_REWRITE_RECIPE_BYTES=1` beside it. Every inserted node renumbers the
+    seqs above it, so the bytes move for any query that gained a filter.
+  - **`UPDATE_CANONICAL=1 … --test test_cpu_corpus -- tp4` is the wrong variable for a
+    filtered run**: `UPDATE_CANONICAL` means whole-file, which prunes, and `<tier>.result.txt`
+    is keyed by query with its author mode. Run the whole tier unfiltered instead, which is
+    what the whole-file contract means. `.cost.txt` comes with it — `test_cost_model` only
+    re-derives.
+  - Reviewed per kind: in every `.cpu.txt` the only node-kind count that changed is
+    `GpuFilter` (tpch +3, tpcds +363, pbench +12), and **no `.result.txt` moved at all**.
 - [ ] **Step 5: Commit.** `git commit -m "#137: a NULL key is dropped before a shuffle where it can match nothing"`.
 
 ### Task 4: `__rowmarker__` is a column the plan declares (#63) — run after task 8
@@ -714,19 +769,30 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
 - Produces: `pub(crate) const ROWMARKER: &str = "__rowmarker__";` in `plan/mod.rs`; plan validation
   refuses a zero-column schema with `PlanError::Invalid("… declares no column …")`.
 
-- [ ] **Step 1: The failing tests.** (a) `translated_at_tp4("SELECT count(*) FROM lineitem", 0)`
+- [x] **Step 1: The failing tests.** (a) `translated_at_tp4("SELECT count(*) FROM lineitem", 0)`
   has a `GpuProject: exprs=[Int8(0) AS __rowmarker__]` and no `exprs=[]`; (b) tpch `nested-limits`'
   zero-column scan declares `__rowmarker__`; (c) validation refuses a hand-built `GpuProject` with
   no expression; (d) in `nested_cases.rs`, `a_cross_join_of_two_rowmarker_sides_keeps_one_placeholder`
   — both backends answer `|B|×|P|` rows of one `__rowmarker__` column.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The project arm.** Where DataFusion's `ProjectionExec` has no expression, plan
+  **Landed with more**, and (a) changed: the minimal dataset has no `lineitem`, and a one-table
+  `count(*)` is answered from statistics (#158), so (a) is `count(*)` over a join. Translator: the
+  Left nested loop over a marker build (q9's) and the cross join of two marker sides, each asserting
+  the projection itself and running the whole-tree `validate`; validation: a rows-only scan
+  declaring anything but the marker; the cpu reader's rows-only answer; the scan's nullability leaf;
+  the harness's marker project (`exec_cases.rs`); the project refusal as a gtest.
+- [x] **Step 2: Run red.** Seven of the rust-only cases red for their own reasons; the device's by
+  mutation after green. Both in the detail file.
+- [x] **Step 3: The project arm.** Where DataFusion's `ProjectionExec` has no expression, plan
   `GpuProject::new(input, vec![NamedExpr { expr: Expr::Literal(ScalarValue::Int8(Some(0))), name: ROWMARKER.into() }], Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(ROWMARKER, DataType::Int8, false)]))))`.
   Consumers: `count(1)` over it reads rows, not the column; a join above drops it through its
   projection (task 9 makes the projection apply on every type); a join whose kept columns would
   be none keeps one placeholder — its projection is `[ordinal of one placeholder]` and its schema
   `[__rowmarker__]`.
-- [ ] **Step 4: The scan arm.** A `ParquetExec` projecting no column declares `[__rowmarker__]`.
+  **As landed:** only a keyless join can meet a marker side — a side with a key has a column, and
+  DataFusion never embeds an empty projection into a join (`try_embed_projection`) — so
+  `translator/common.rs`'s `past_rowmarkers` runs on the cross and nested-loop arms alone, reading
+  which sides a type emits from `plan::emitted_sides`. The schema is `Schema::rowmarker()`.
+- [x] **Step 4: The scan arm.** A `ParquetExec` projecting no column declares `[__rowmarker__]`.
   The wire says so explicitly: today an empty `projection` means *all* columns
   (`scan.cpp:45-53`), so the signal is a new field, appended to `CudfScan`:
 
@@ -765,13 +831,22 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
   count); a harness case in `source_cases.rs`, `a_rows_only_scan_agrees_on_both_backends`.
   `recipe-payloads.txt` moves for the scans that set the field (tpch nested-limits'), regenerated
   in this task's commit (`PEACOCK_REWRITE_RECIPE_BYTES=1`).
-- [ ] **Step 5: The refusal.** `project.cpp`'s empty-expression arm throws
+  **As landed:** nested-limits was not in the payload subset, so it is added as the 21st query —
+  nothing else would show `rows_only`; tpcds q87's marker project moves the file too. The gtest
+  reads customer, not nation: nation has one row group, so "that group's count" is the whole
+  count and proves nothing. `GpuLoadParquet::rows_only()` is the empty projection; the scan
+  declares `[false]` nullability and validation counts its width as one.
+- [x] **Step 5: The refusal.** `project.cpp`'s empty-expression arm throws
   `"CudfProject with no expression: the plan declares __rowmarker__ (#63)"`; validation refuses a
-  zero-column schema at every node.
-- [ ] **Step 6: Run green**; in the same commit, every golden the placeholder moves: plan goldens
+  zero-column schema at every node. **As landed:** the refusal comes before `take_input`, so it
+  consumes nothing.
+- [x] **Step 6: Run green**; in the same commit, every golden the placeholder moves: plan goldens
   (tpcds q38, q87, q88, q9, q90, q96: the 19 nodes; tpch nested-limits' scan), the cpu per-node and
   cost goldens of those queries, and the payload golden. tpcds q9's cpu cells and the nested-limits
   cpu cells stay green (the cpu applies the projections since task 8).
+  **Measured:** pbench moves too — `scalar-subquery-cross`'s three marker projects and
+  `cross-projection`'s scan of no column — and every plan golden's `--- memory ---` section
+  re-prices the marker. No answer moved.
 - [ ] **Step 7: Commit.** `git commit -m "#63: __rowmarker__ is a column the plan declares"`.
 
 ### Task 5: A predicate-free nested loop is a cross join only when Inner
@@ -784,22 +859,44 @@ this earlier turns tpcds q9's five cpu cells — on today — red until then.
 - Produces: `GpuNestedLoopJoin.join_type: datafusion::common::JoinType` (replacing
   `NestedLoopJoinType`, deleted in task 15); `GpuNestedLoopJoin::new(build, probe, join_type, filter: Expr, filter_columns, projection, schema)`.
 
-- [ ] **Step 1: The failing tests:** tpcds q9's 15 predicate-free `Left` joins plan as
+- [x] **Step 1: The failing tests.** In `planner/translator/tests.rs`, over a hand-built
+  predicate-free `NestedLoopJoinExec` per join type, since no sql over `tpch.minimal` reaches
+  the shape for anything but Inner: `a_predicate_free_left_nested_loop_is_not_a_cross_join`,
+  `a_predicate_free_inner_nested_loop_merges_its_probe` and
+  `bug_a_predicate_free_outer_nested_loop_is_refused`. tpcds q9 is pinned by its plan golden
+  rather than by a case of its own — `translator/tests.rs` reads `tpch.minimal` only, and its
+  header says each case comes from the smallest plan that shows the rule.
+  Original text: tpcds q9's 15 predicate-free `Left` joins plan as
   `GpuNestedLoopJoin{Left, filter=true}` (not `GpuCrossJoin`); `tiny LEFT JOIN empty ON true`
   (pbench `outer-on-true-empty`, planned `Right` by DataFusion) is refused with `#160` until task
   9 — a `bug_` pin, `bug_a_predicate_free_outer_nested_loop_is_refused` (#160), flipped in Task 9
   Step 1 to `a_predicate_free_outer_nested_loop_pads_its_preserved_side`; an Inner predicate-free
   nested loop is still `GpuCrossJoin`.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3:** In `nested_loop_join`, `let Some(filter) = join.filter() else { … }` becomes:
+- [x] **Step 2: Run red.** The type assertion is a compile error (the field is still
+  `NestedLoopJoinType`); with it written against today's type, 2 of 3 fail — the Left case
+  plans as `GpuCrossJoin`, the Inner case leaves its probe unmerged. The `bug_` pin passes
+  before and after, which is what a `bug_` pin is.
+- [x] **Step 3:** In `nested_loop_join`, `let Some(filter) = join.filter() else { … }` becomes:
   Inner → `GpuCrossJoin` with **merged** probe (`merged(node(t, join.right())?)` — today's arm
   does not merge, design §4.1); any other type → the nested-loop arm with
   `predicate = Expr::Literal(ScalarValue::Boolean(Some(true)))` and `filter_columns = vec![]`.
   The type switch accepts every `JoinType` but still refuses non-Inner/Left with `#160` until task 9.
-- [ ] **Step 4: Run green**; in the same commit, tpcds q9's plan, cpu per-node and cost goldens
+- [x] **Step 4: Run green**; in the same commit, tpcds q9's plan, cpu per-node and cost goldens
   (its Left nested loops over `true`; the answer, `mini.result.txt`, unchanged). Both engines run a
   Left nested loop over `true` today (the device's AST path, the cpu's `NestedLoopJoinExec`), so q9's
-  cells stay green.
+  cells stay green. Three corrections to this step:
+  - **q9 is not the only query that moves.** pbench's `scalar-subquery-cross` is the same shape —
+    DataFusion plans a scalar subquery as a predicate-free `Left` nested loop — and moves at all
+    five modes, four joins each. `every_pbench_join_plans_as_its_spec_says` claimed it plans as
+    `GpuCrossJoin`; corrected in place, with the reason.
+  - **The cost goldens do not move at all.** `cargo run -q -p cost-report -- --cost-diff` reports
+    703 compared, 0 changed. The cost is derived from bytes out per node, and the change is a node
+    name and a handle rule, not a byte.
+  - **`.cpu.txt` does move, by one batch per call.** The cpu's Left `NestedLoopJoinExec` emits the
+    matched rows and the unmatched-build pass as two batches where `CrossJoinExec` emitted one, so
+    q9's `batch_rows=[[1]]` becomes `[[1,0]]`. That is #220's shape, already visible in the
+    `nested-loop-left-join` golden, and task 8's adapter folds it back. `*.result.txt` does not
+    move, and no cell changes state.
 - [ ] **Step 5: Commit.** `git commit -m "a predicate-free nested loop is a cross join only when Inner"`.
 
 ### Task 6: The join traits, the driver, the mock and the harness
@@ -830,7 +927,7 @@ pub trait ProbingJoin<B: Backend>: Executor {
 }
 ```
 
-- [ ] **Step 1: The failing driver tests.** In `flow.rs`, replace the mock's
+- [x] **Step 1: The failing driver tests.** In `flow.rs`, replace the mock's
   `empty_build_owes_its_probe` with a `JoinRule.owes_nothing_when_empty: bool` the mock's
   `owes_nothing()` reads; rewrite :211, :235, :288, :307, :341, :371, :391 to the new calls:
   `a_lane_with_no_build_batch_calls_set_build_none` (counts `CallKind::SetBuild` with no input = 1,
@@ -840,22 +937,43 @@ pub trait ProbingJoin<B: Backend>: Executor {
   dropped (`a_zero_row_scatter_output_is_dropped_under_every_join_type`).
   `single_partition/tests.rs:300` asserts `LaneCall::SetBuild` for a build side done without a
   batch. `index/tests.rs:178` is deleted with `feeds_owing_build`.
-- [ ] **Step 2: Run red** (`cargo test --lib --features rust-only executor::driver`).
-- [ ] **Step 3: The driver.** `LaneCall::NoBuild` is removed; `select` answers `SetBuild` both when
+- [x] **Step 2: Run red.** The trait change is a compile error first; with everything compiling
+  against the new traits, 15 of the lib tier are red, listed in the detail file.
+- [x] **Step 3: The driver.** `LaneCall::NoBuild` is removed; `select` answers `SetBuild` both when
   the build slot has a batch and when the build side is done without one; the `SetBuild` arm takes
   `input.map(|h| h.batch)`, and after the call moves to `LaneState::Draining` if
   `probing.owes_nothing()`, else `LaneState::Probe(probing)`. `Probe` and `Finish` wrap the
   `Option` into the outputs list: `hold_all(out.into_iter().collect(), …)`. `partitioned.rs:430`
   drops every zero-row scatter output (`if out.num_rows() == 0 { continue; }`); `index.rs`'s
   `feeds_owing_build` field and climb go.
-- [ ] **Step 4: Adapters**, so both backends compile against the new traits before tasks 7 and 8
+  **The last clause does not land here, measured.** Removing the scatter-drop exception makes
+  `set_build(None)` the route for a Right, Full or RightAnti lane whose build side is empty, and
+  the adapters cannot answer that — they call today's refusal. Six tests go red with #212's
+  message over four queries (`tests::end_to_end::{tpcds_q93, tpcds_q97, tpch_anti_join}`,
+  `dimensions::{a_right_join_with_an_empty_build_pads_every_probe_row,
+  a_right_anti_join_with_an_empty_build_returns_every_probe_row}` and
+  `flow::holds_and_releases_balance_over_a_plan_with_empty_lanes`). `feeds_owing_build`, the
+  exception and `dimensions.rs`'s use of it belong to the rounds that give an engine an answer:
+  the device in task 7 and the cpu in task 8. Also needed and not in this step:
+  `LaneCall::needs_its_batch`, because `consumes()` says `SetBuild` reads slot 0 and
+  `take_input` refuses an empty queue.
+- [x] **Step 4: Adapters**, so both backends compile against the new traits before tasks 7 and 8
   rewrite them: gpu and cpu `set_build(None)` call today's `without_build` and, on `Ok`, return a
   probing join with `owes_nothing() == true`; `Vec` returns map to `Option` by **concatenating**:
   none → `None`, one → it, several → `concat_batches` over the output schema (the cpu's chunks; the
   device answers at most one already). That is #220's fix in miniature, so every cpu corpus join
   cell whose call yields more than `batch_size` rows stays green through tasks 6–7; task 8 replaces
-  the adapter. No pin changes behaviour in this task.
-- [ ] **Step 5: The harness.** `script.rs`'s join arm:
+  the adapter.
+  **"No pin changes behaviour in this task" is wrong about the goldens.** The concatenation is a
+  behaviour change to the cpu, so 497 corpus cells over 116 queries move their `.cpu.txt` and
+  `.cost.txt` — the spec's risk 2 says to regenerate them here and this step list did not.
+  **Which adapter lines each later task deletes**, so a later round does not re-derive it:
+  task 7 takes `gpu_backend/backend.rs`'s `one_batch` and `GpuJoin::without_build_allowed`,
+  which the session answers itself; task 8 takes `cpu_backend/backend.rs`'s `one_batch` and
+  the whole `CpuJoin::without_build_allowed` path, since one stream per lane answers an
+  absent build and one batch per call by construction. `CpuProbingJoin::build:
+  Option<RecordBatch>` and its `build()` accessor go with task 8 too.
+- [x] **Step 5: The harness.** `script.rs`'s join arm (edited and **not compiled** — the gpu rung needs `CUDF_ROOT`):
 
 ```rust
 (NodeExecutors::Join(join), Script::Join { build, probe }) => {
@@ -873,7 +991,8 @@ pub trait ProbingJoin<B: Backend>: Executor {
 
   The `"a join with no build side is never probed"` assertion goes. `tests/injection.rs`'s
   wrapper follows the trait.
-- [ ] **Step 6: Run green** — driver tests, `--lib` rust-only.
+- [x] **Step 6: Run green** — driver tests, `--lib` rust-only, and the cpu corpus with its
+  regenerated goldens (the spec's risk 2, which this step list did not carry).
 - [ ] **Step 7: Commit.** `git commit -m "join traits: set_build(Option), one batch per call, owes_nothing; the driver asks no more"`.
 
 ### Task 7: The device on the session, and `CudfJoin` on the wire
@@ -895,7 +1014,7 @@ pub trait ProbingJoin<B: Backend>: Executor {
   rendered `join_build(#N), per probe batch: join_probe, at done: join_finish`;
   `GpuJoin { site, seq, join_type, output }`, `GpuProbingJoin { join: u64 /*session id*/, … }`.
 
-- [ ] **Step 1: The failing tests.** `wire/tests.rs`: `every_join_node_writes_one_cudf_join_leaf`
+- [x] **Step 1: The failing tests.** `wire/tests.rs`: `every_join_node_writes_one_cudf_join_leaf`
   (three cases: hash, nested loop, cross; the payload is `CudfJoin` with `build_schema`,
   `probe_schema`, `projection` and `null_equals_null` as the node says, and no child stub);
   `a_join_recipe_line_is_the_session` (the rendered line for Left: `join_build(#4), per probe batch:
@@ -903,8 +1022,13 @@ pub trait ProbingJoin<B: Backend>: Executor {
   `a_session_probed_three_times_answers_each`, `dropping_a_probing_join_releases_its_session`
   (the executor's live-join count back to zero), `an_empty_build_under_inner_owes_nothing`,
   `a_build_preserving_finish_answers_once`.
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The writer.** `wire/join.rs` keeps `wire_join_type`, `filter_column`, `column` and
+  **Landed with more**: in `gpu_tests/join.rs` the journal-and-region case, the residency case
+  and the pair-scratch formula; in `wire/tests.rs` the flag and the leaf's inputs gathered under
+  a union. No live-join count exists, so the drop case asks the device about the released id.
+  The line keeps the format's `; ` between phases and the kind beside the seq:
+  `join_build(#4 CudfJoin); per probe batch: join_probe; at done: join_finish`.
+- [x] **Step 2: Run red.** Measured by mutation after green — each one is in the detail file.
+- [x] **Step 3: The writer.** `wire/join.rs` keeps `wire_join_type`, `filter_column`, `column` and
   gains one writer for the three nodes:
 
 ```rust
@@ -927,7 +1051,7 @@ pub(crate) fn join(node: JoinNode<'_>, inputs: &[&Schema], writer: &mut Writer) 
   ColumnRef pairs, the residual and its `filter_columns`, the projection (present-but-empty is
   written as an empty vector, absent as no field — design D15), and `null_equals_null`.
   `JoinNode` is an enum over `&GpuHashJoin | &GpuNestedLoopJoin | &GpuCrossJoin`.
-- [ ] **Step 4: The executor.** `GpuJoin::set_build`:
+- [x] **Step 4: The executor.** `GpuJoin::set_build`:
 
 ```rust
 pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJoin> {
@@ -953,14 +1077,19 @@ pub(crate) fn set_build(self, build: Option<GpuBatch>) -> CallResult<GpuProbingJ
   `empty_build_owes_nothing(t)` is today's `empty_build_answers_nothing` renamed, in `plan/join.rs`,
   with a nested loop or cross reading as Inner/its own type. The `per_probe`/`at_done` lists,
   `make`, `copy_of`, `build_copy`, `finish_without_keys`, `JoinCall` go.
-- [ ] **Step 5: Pricing** (design §4.3): `resident_bytes` = build bytes + 16 × build rows (the
-  hash table) + build rows (the `matched` column) for the build-preserving types; `scratch_bytes`
-  = `n_bytes` + the output estimate + 8 B per key-match pair (bounded by the build's rows × the
-  batch's rows for a nested loop). `memory_estimation.rs`'s `Join` arm drops the accumulated-key
+  **`owes_nothing` is `build.is_none() && …`, not the sketch's `taken.rows == 0`.** A zero-row
+  build batch still goes through the session, as today's adapters do: the cpu cannot drain that
+  lane until task 8, and one engine skipping calls the other makes moves the device's per-node
+  lists off the cpu goldens. Task 8 switches both engines to the row count together.
+- [x] **Step 5: Pricing** (design §4.3): `resident_bytes` = build bytes + 16 × build rows (the
+  hash table, keyed joins only) + build rows (the `matched` column) for the build-preserving
+  types; `scratch_bytes` = `n_bytes` + the output estimate + `pairs × (8 + the residual's per-row
+  bytes)` — `gpu_plan.fbs`'s formula, not a flat 8 B a pair — bounded by `chunk_bytes`; pairs are
+  one per probe row keyed, the build's rows × the batch's rows keyless. `memory_estimation.rs`'s `Join` arm drops the accumulated-key
   term and adds the 16 B/row and the `matched` column;
   `memory_estimation/tests.rs:217` (`a_build_preserving_join_is_charged_for_the_keys_it_accumulates`)
   becomes `a_build_preserving_join_is_charged_for_its_matched_column`.
-- [ ] **Step 5a: The schema writer refuses what it cannot name.** `CudfJoin`'s `build_schema` and
+- [x] **Step 5a: The schema writer refuses what it cannot name.** `CudfJoin`'s `build_schema` and
   `probe_schema` are what the session reads pad types and an absent side's types from, so a field
   the wire cannot type must not be written as `Null`. repartition-keys (Task 5c, #249) already
   made `serialize_schema` refuse an unmapped type in every schema, so `cudf_join` calls it with `?`
@@ -986,7 +1115,7 @@ pub(super) fn serialize_join_schema<'a>(b: &mut FlatBufferBuilder<'a>, schema: &
   `a_right_join_whose_lane_got_no_build_batch_pads_a_timestamp_build_column`; in `wire/tests.rs`,
   `bug_a_join_side_holding_a_list_column_is_not_runnable` (#249; a `List<Int32>` probe column: the plan
   says "not runnable" naming the column).
-- [ ] **Step 5b: The chunk budget.** `CudfJoin.chunk_bytes` (join-session-cpp's field; `0` reads
+- [x] **Step 5b: The chunk budget.** `CudfJoin.chunk_bytes` (join-session-cpp's field; `0` reads
   as 1 GiB in C++) is written from the plan's budget, so a budgeted mode's joins stay inside it and
   the accountant prices what they hold. The pipeline passes the budget to the writer
   (`Writer::with_join_scratch(bytes)`), and `cudf_join` writes it:
@@ -1003,9 +1132,11 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
 ```
 
   Step 5's pricing bounds a join's per-call scratch by the same number, so the accountant and the
-  session agree. Test (`wire/tests.rs`): `a_budgeted_join_carries_its_chunk_budget` (tp4-sized:
+  session agree. **The pipeline never builds recipes**, so the budget reaches the writer as
+  `attach_recipes(root, join_scratch_bytes)`, and the executor prices by
+  `RecipePlan::join_scratch_bytes`; `join_scratch_bytes(knobs)` lives in `wire/mod.rs`. Test (`wire/tests.rs`): `a_budgeted_join_carries_its_chunk_budget` (tp4-sized:
   `chunk_bytes == budget / 16`; tp1-single: `0`).
-- [ ] **Step 6: Flip the pins this task changes, in this commit** (task 10 lists them all):
+- [x] **Step 6: Flip the pins this task changes, in this commit** (task 10 lists them all):
   the #152 pins (30: the device now answers every probe batch; the cpu always did) →
   `*_agrees` over the same script; the #173 pins (4: the device's finish over no probe batch
   answers) → `*_agrees`; the #59 pins (10: the session honours `null_equals_null` for anti and
@@ -1017,7 +1148,10 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
   `bug_*_with_no_build_batch_is_refused_on_the_cpu` (#212, until task 8; the device's rows asserted hand-counted, the cpu's
   `NO_BUILD` refusal asserted); `nested_cases.rs:438` keeps the cpu's `THREE_OF_SIXTEEN`;
   `nested_cases.rs:255` (#207, "dropped on both") keeps the cpu's `TWO_OF_SIXTEEN`.
-- [ ] **Step 7: Run green on the device** — `scripts/build-test-shadgpu.sh` with
+  **Nine cases expected to agree split by call instead**: the cpu answers in its one probe call
+  what the session answers at finish (the filtered build-side semi family, the Left nested loop).
+  Same rows, different slots — pinned `bug_` under #220 for task 8 to flip.
+- [x] **Step 7: Run green on the device** — `scripts/build-test-shadgpu.sh` with
   `PCK_TEST_FILTER='gpu_backend::gpu_tests::join|join_cases|nested_cases|nested_schema_cases|join_dimension_cases'`,
   every case green. In this commit too, task 12 step 1's regeneration: the plan goldens' join
   recipe lines become the session's and `recipe-payloads.txt` gains `CudfJoin` payloads — the
@@ -1027,15 +1161,19 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
 ### Task 8: The cpu on one DataFusion stream per lane
 
 **Files:**
-- Create: `peacockdb-core/src/executor/cpu_backend/channel.rs`
+- Create: `peacockdb-core/src/executor/cpu_backend/channel.rs` — **not created**: see step 3
 - Modify: `peacockdb-core/src/executor/cpu_backend/join.rs` (all), `cpu_backend/mod.rs:83-92`, `cpu_backend/backend.rs:239-275`
 - Test: `executor/cpu_backend/tests/join.rs` (rewritten)
+- **Also moved, measured:** `single_node.rs` (`fed`), the driver's `feeds_owing_build` and
+  scatter-drop exception, the mock, `gpu_backend/join.rs`'s `owes_nothing`, `plan/`'s four dead
+  decomposition helpers, `wire/tests.rs`, `dimensions.rs`, the device harness pins, and the 23
+  cpu cells of task 14 step 1 (#190 ×20, #212 ×3) — the detail file's task 8 record.
 
 **Interfaces:**
 - Produces: `CpuJoin { plan: Arc<dyn Fn(Arc<dyn ExecutionPlan>, Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>>>, join_type, output, ctx }`;
   `CpuProbingJoin { tx: Option<UnboundedSender<RecordBatch>>, stream: SendableRecordBatchStream, join_type, output, owes_nothing }`.
 
-- [ ] **Step 1: The failing tests** (rust-only):
+- [x] **Step 1: The failing tests** (rust-only):
   `every_type_answers_at_most_one_batch_per_probe_call` (nine types, hash and nested loop, a
   probe batch producing more rows than `batch_size`: one batch out), 
   `the_build_side_semi_family_answers_nothing_per_probe` (Review Focus 2: `None`, not a zero-row
@@ -1043,8 +1181,14 @@ pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
   these, `joins/hash_join.rs:1543-1567`), `a_nested_loop_join_applies_its_projection` (#190),
   `a_cross_join_applies_its_projection` (#207), `a_cross_join_over_a_zero_row_build_answers_one_zero_row_batch`
   (#208), `set_build_none_runs_over_an_empty_build` (#212: Right pads every probe row).
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3: The channel input** (`channel.rs`), the measured shape of `scratchpad/stream-probe`:
+  **Landed with more:** `a_zero_row_probe_between_two_with_rows_is_answered_by_a_zero_row_batch`
+  and `a_zero_row_build_batch_owes_what_no_build_batch_owes`; the semi-family case covers the
+  filtered forms too, which is what makes it red against the old executor.
+- [x] **Step 2: Run red.** All eight red for their own reasons; then mutations, in the detail file.
+- [x] **Step 3: The channel input** (`channel.rs`), the measured shape of `scratchpad/stream-probe`.
+  **Not as sketched:** `single_node.rs`'s `StreamSourceExec` already hands out any stream, so its
+  child-replacing half became `fed(node, streams)` and both sides are streams through it — the
+  build a replayed one, the probe an unbounded channel. A `ChannelExec` would have been a copy.
 
 ```rust
 #[derive(Debug)]
@@ -1086,7 +1230,7 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
 }
 ```
 
-- [ ] **Step 4: The executor.** `set_build(build)`: `left = MemoryExec::try_new(&[vec![build.unwrap_or_else(|| RecordBatch::new_empty(build_schema))]], …)`;
+- [x] **Step 4: The executor.** `set_build(build)`: `left = MemoryExec::try_new(&[vec![build.unwrap_or_else(|| RecordBatch::new_empty(build_schema))]], …)`;
   `(right, tx) = ChannelExec::new(probe_schema)`; the plan is `HashJoinExec::try_new(left, right, on, filter, &join_type, projection, PartitionMode::CollectLeft, null_equals_null)`,
   `NestedLoopJoinExec::try_new(left, right, Some(filter), &join_type, projection)` (the projection
   passed — #190), or `ProjectionExec::try_new(kept, Arc::new(CrossJoinExec::new(left, right)))` (#207);
@@ -1097,16 +1241,25 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   type, else one concatenated batch, cast with `declared_as`. `owes_nothing` reads the type and
   the build's row count, as the device's does. `Calls`, `key_project`, `finish_join`,
   `finish_project`, `pad_project` go.
-- [ ] **Step 5: Flip the pins this task changes, in this commit:** the #190 pins (4: the cpu
+  **As landed:** `CpuJoin` holds the join built over placeholders (and a cross join's
+  `ProjectionExec`) and feeds it with `with_new_children`, not a closure; the finish collects with
+  `block_on`, since nothing more will arrive. A probe call's scratch is its batch alone.
+- [x] **Step 5: Flip the pins this task changes, in this commit:** the #190 pins (4: the cpu
   applies a nested loop's projection), the #208 pins (2: one zero-row batch over a zero-row build),
   `nested_cases.rs:255` and `:438` (their cpu halves, left by task 7) and the three #212 pins
   (task 7's `bug_*_refused_on_the_cpu` → `*_with_no_build_batch_pads_every_probe_row`, both backends)
   → the positive cases over the same scripts. The `TWO_OF_SIXTEEN`, `THREE_OF_SIXTEEN`, `NO_BUILD`
   consts go with their last user.
-- [ ] **Step 6: Run green** (rust-only); then the harness on the device
+  **Also:** task 7's #220 ×7 and their wire twin flip to agreement, and
+  `the_cpu_answers_in_its_probe_call_what_the_device_finishes` goes. The #208 harness pins show
+  agreement and not the zero-row batch: over a zero-row build both engines drain.
+- [x] **Step 6: Run green** (rust-only); then the harness on the device
   (`PCK_TEST_FILTER='join_cases|nested_cases|join_dimension_cases'`), every case green; the cpu
   corpus tier's join cells green, their per-node goldens regenerated in this commit (one batch per
   call, none per probe for the build-side semi family — task 12's step 2 moves here).
+  **Measured:** task 6's adapter had already concatenated, so only the Left nested loop's
+  finish (q9, `scalar-subquery-cross`, `nested-loop-left-join`) and the dropped scatter empties
+  (`sparse-build-*`, q16 at tp4) moved. Run on the whole device list, not only the harness.
 - [ ] **Step 7: Commit.** `git commit -m "the cpu's joins are one DataFusion stream per lane, one batch per call (#220, #190, #207, #208)"`.
 
 ### Task 9: The refusals lifted
@@ -1115,32 +1268,44 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
 - Modify: `peacockdb-core/src/plan/join.rs:400-445` (capability), `:505-575` (validation), `:60-90` (nested loop validation);
   `planner/translator/nodes.rs:246-301,465-514`; `planner/pipeline.rs:75`, `planner/mod.rs:108-114`, `planner/nullability.rs` (the refusal)
 - Test: `planner/tests/join_refusals.rs:16,30,52,64,76`, `join_capability.rs:128-182,309,376,448`, `translator/tests.rs:542`, `plan/tests/joins.rs:159,190,253`
+- **Also moved, measured:** `plan/validate.rs`'s `declared_width` (a nested loop's width by its
+  type — the plan missed it, and it refused every projection-free semi-family nested loop),
+  `planner/memory_estimation.rs` and `executor/cpu_backend/join.rs` (the last two readers of
+  `capability`), `wire/tests.rs`' same-path test, `cpu_backend/tests/join.rs`' five cells,
+  `tests/join_fixture.rs` (`answers_as_datafusion`), the device harness (`join_cases.rs`,
+  `nested_cases.rs`), the registry's pbench plan columns, and ticket #267 — the detail file's
+  task 9 record.
 
 **Interfaces:**
 - Produces: `pub(crate) fn needs_finish(join_type: JoinType) -> bool` (Left, Full, LeftSemi,
-  LeftAnti, LeftMark); `JoinCapability`, `capability`, `answers_in_one_call`, `per_call_join_type`,
-  `finish_join_type` gone.
+  LeftAnti, LeftMark) — task 7 already added it; `JoinCapability`, `capability`,
+  `GpuHashJoin::capability`, `refuse_null_unsafe_joins` gone. (`answers_in_one_call`,
+  `per_call_join_type` and `finish_join_type` went in task 8.)
 
-- [ ] **Step 1: Flip the tests.** `join_refusals.rs`' five: #153, #159 and #160's become
+- [x] **Step 1: Flip the tests.** `join_refusals.rs`' five: #153, #159 and #160's become
   plans-and-answers tests (`an_outer_join_with_a_residual_filter_plans_and_answers_as_datafusion`,
-  … `_159`, `a_nested_loop_join_of_every_type_plans`), each comparing the cpu's answer with
+  `a_swapped_semi_or_anti_join_with_a_residual_filter_plans_and_answers_as_datafusion`,
+  `a_nested_loop_join_of_every_type_plans`), each comparing the cpu's answer with
   DataFusion's own collect over the same SQL. The two `_59_80` ones (`:52`, `:64`: a `NOT EXISTS`
   and a mark join over keys NULL on both sides) become
-  `an_anti_join_over_null_keys_plans_with_not_exists_semantics` and its mark twin — the physical
+  `an_anti_join_over_null_keys_plans_with_not_exists_semantics` and
+  `a_mark_join_over_null_keys_plans_with_in_semantics` — the physical
   refusal goes because every type now honours `null_equals_null`, which is `NOT EXISTS`'s meaning;
   what `NOT IN` needs beyond that is task 2's rewrite, and what it cannot answer is task 2's
   narrowed refusal, which **stays** (the planner tests of task 2 hold it). Task 5's
   `bug_a_predicate_free_outer_nested_loop_is_refused` (#160) flips to
-  `a_predicate_free_outer_nested_loop_pads_its_preserved_side` (8 padded rows over `empty`, as
-  DuckDB answers). pbench's hand-off: `PBENCH_JOINS` (pbench's `plan_goldens` test) gains each
-  query this task lifts from a refusal, with the join line its plan golden now shows.
+  `a_predicate_free_outer_nested_loop_pads_its_preserved_side` (8 padded rows, as DuckDB answers
+  `outer-on-true-empty`; over pbench's `tiny` filtered empty, since `empty` itself meets #256).
+  pbench's hand-off: `PBENCH_JOINS` gains 19 queries this task lifts from a refusal, with the
+  join line its plan golden now shows (`not-in-uncorrelated` is refused at tp4 on #267).
   `join_capability.rs`'s matrix (`expected()` at :128) becomes nine rows
   of `(type, needs_finish)` × filtered/not, and :182 asserts no probe-side `GpuCoalesceAllBatches`
-  anywhere; :309 and :376 assert planning; :448 asserts Right, Full, LeftSemi nested loops plan.
+  anywhere; :309 and :376 assert planning (:376 also that the padded side's NULL reaches #137's
+  filter); :448 asserts all nine nested-loop types plan with the probe streamed.
   `translator/tests.rs:542` and `plan/tests/joins.rs:159,190,253` follow (the probe-coalesce rule
   and the streaming-Left-nested-loop rule are gone).
-- [ ] **Step 2: Run red.**
-- [ ] **Step 3:** narrow the NULL-key refusal, do not drop it: the physical
+- [x] **Step 2: Run red.** 15 red, each on the refusal or validation it names.
+- [x] **Step 3:** narrow the NULL-key refusal, do not drop it: the physical
   `refuse_null_unsafe_joins` (`nullability.rs`, `planner/mod.rs:108-114`, `pipeline.rs:75`) and
   `hardcodes_null_equality` go — they existed because the C++ hardcoded NULL = NULL for anti and
   mark, which the session no longer does — and `nullability.rs` keeps `can_be_null`,
@@ -1148,11 +1313,14 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   2's logical refusal of an IN or NOT IN read off a WHERE's AND/OR spine where it can meet a NULL); replace `capability` with `needs_finish`; in
   `hash_join` the probe is never coalesced; `nested_loop_join` accepts every type and never
   coalesces its probe (`GpuNestedLoopJoin`'s Left single-batch validation goes); the nested-loop
-  `check_projection` reads the node's `JoinType`. The two unreachable refusals stay
+  `check_projection` reads the node's `JoinType` (already true since task 5), and so must
+  `validate.rs`'s `declared_width`. The two unreachable refusals stay
   (`common.rs:94` mark column; `column_ordinal_of`'s bare-column key).
-- [ ] **Step 4: Run green** (rust-only, then the harness on the device); plan goldens regenerate
-  (probe-side coalesces disappear; nested loops beyond Inner/Left appear in pbench).
-- [ ] **Step 5: Commit.** `git commit -m "every join shape plans: #153, #159, #160 lifted; the NULL-key refusal narrowed to IN off the spine"`.
+- [x] **Step 4: Run green** (rust-only, then the harness on the device); plan goldens regenerate
+  (probe-side coalesces disappear; nested loops beyond Inner/Left appear in pbench), and with them
+  the cpu and cost goldens of the four queries that lost a coalesce, the payload golden, and the
+  registry's pbench plan columns.
+- [ ] **Step 5: Commit.** `git commit -m "every join shape plans: #153, #159, #160 lifted; the NULL-key refusal narrowed to IN off the spine"` — the coordinator's.
 
 ### Task 9b: A side DataFusion folds to nothing — `GpuEmpty` (review row 8)
 
@@ -1163,12 +1331,18 @@ pub(crate) fn drain(stream: &mut SendableRecordBatchStream) -> Result<(Vec<Recor
   `wire/attach.rs:83` (no device call), `executor/cpu_backend/backend.rs:66`,
   `executor/gpu_backend/backend.rs:79`
 - Test: `planner/translator/tests.rs`, `tests/gpu_tests/join_cases.rs`
+- **Also moved, measured:** `planner/memory_estimation.rs`'s `sources()` (the sizing pass
+  counted the leaf as a source and refused at tp4-sized), `wire/attach.rs` writes the writer's
+  stub rather than nothing (a bare `EmptyExec` — `WHERE false`, `LIMIT 0` — had no root),
+  `testdata/cost_model.conf` and the 15 cost goldens' comment, the payload golden (+ pbench's
+  query), the registry's plan columns, `tests/rebuild.rs`'s nineteen kinds; the device case is
+  in `source_cases.rs`, not `join_cases.rs` — the detail file's task 9b record.
 
 **Interfaces:**
 - Produces: `pub(crate) struct GpuEmpty { kind: NodeKind }` with `GpuEmpty::new(schema: Schema)`;
   `NodeRef::Empty(&GpuEmpty)`; `ExecutorCategory::Source` for it; plan text `GpuEmpty: lanes=1, schema=[…]`.
 
-- [ ] **Step 1: The failing tests.**
+- [x] **Step 1: The failing tests.**
 
 ```rust
 #[tokio::test]
@@ -1201,8 +1375,8 @@ operator_case! {
 ```
   (`hash_join_over`, `build_given`, `build_batch` and `rows` are `join_cases.rs`'s fixtures at
   `:21-190`; where one is named otherwise, use that one.)
-- [ ] **Step 2: Run red** — `Unsupported("plan node EmptyExec")`.
-- [ ] **Step 3: The node.** In `plan/mod.rs`:
+- [x] **Step 2: Run red** — `Unsupported("plan node EmptyExec")`.
+- [x] **Step 3: The node.** In `plan/mod.rs`:
 
 ```rust
 /// A relation DataFusion proved empty (`EmptyExec`): one lane, no batch, on either engine.
@@ -1243,7 +1417,7 @@ impl GpuNode for GpuEmpty {
         return Ok(Box::new(GpuEmpty::new(Schema::new(empty.schema()))));
     }
 ```
-- [ ] **Step 4: Run green** (rust-only, then the harness on the device); pbench's
+- [x] **Step 4: Run green** (rust-only, then the harness on the device); pbench's
   `empty-side-left-join` plan golden regenerates in this commit.
 - [ ] **Step 5: Commit.** `git commit -m "an empty relation plans as GpuEmpty, a leaf that emits nothing"`.
 
@@ -1254,8 +1428,15 @@ impl GpuNode for GpuEmpty {
   column path's binary operators); `planner/translator/nodes.rs:465-514` (`nested_loop_join`)
 - Test: `cpp/tests/gpu/test_plan_executor.cpp`, `tests/gpu_tests/nested_cases.rs`,
   `tests/gpu_tests/exec_cases.rs`, `planner/translator/tests.rs`
+- **Also moved, measured:** `expr.cpp`'s `is_predicate_op` (the column path declared the
+  result in the left operand's type, and cuDF refused it), `plan/mod.rs`'s `null_equals_null`
+  doc, the registry's `indf_full_join` feature tag; the cases went to a new
+  `tests/gpu_tests/distinct_cases.rs` (a project, which shows a NULL a filter hides) and a new
+  `planner/tests/distinct_from_keys.rs` (`translator/tests.rs` is past the 1,000-line cap,
+  `exec_cases.rs` near it); the whole-plan run in `source_cases.rs` became `tests/gpu_tests/whole_plan.rs`,
+  shared — the detail file's task 9c record.
 
-- [ ] **Step 1: The failing tests.** Device: a `GpuFilter` over `i32 IS NOT DISTINCT FROM i64`
+- [x] **Step 1: The failing tests.** Device: a `GpuFilter` over `i32 IS NOT DISTINCT FROM i64`
   and `IS DISTINCT FROM` on `synthetic` (NULLs on both sides at their strides) agrees with the cpu,
   on the AST path and with a non-AST operand forcing the column path:
 
@@ -1281,9 +1462,9 @@ operator_case! {
   `GpuHashJoin{Full, null_equals_null=true}`; with `ON d.d_k = t.t_k AND d.d_w IS NOT DISTINCT FROM
   t.t_v` the `=` stays the key, `null_equals_null=false`, and the IS NOT DISTINCT FROM conjunct is
   the residual.
-- [ ] **Step 2: Run red** — the device throws `unsupported BinaryOp: <n>`; the planner plans a
+- [x] **Step 2: Run red** — the device throws `unsupported BinaryOp: <n>`; the planner plans a
   nested loop.
-- [ ] **Step 3: The device.** In `build_expr`'s binary arm, before `fb_to_ast_op`:
+- [x] **Step 3: The device.** In `build_expr`'s binary arm, before `fb_to_ast_op`:
 
 ```cpp
     if (op == fb::BinaryOp_IsNotDistinctFrom || op == fb::BinaryOp_IsDistinctFrom) {
@@ -1300,7 +1481,7 @@ operator_case! {
     case fb::BinaryOp_IsDistinctFrom:    return cudf::binary_operator::NULL_NOT_EQUALS;
 ```
   (`ctx.keep` is `ExprContext::keep`, `expr.h:24-31`, which owns AST nodes for the expression's life.)
-- [ ] **Step 4: The promotion.** In `nested_loop_join`, before the nested-loop arm:
+- [x] **Step 4: The promotion.** In `nested_loop_join`, before the nested-loop arm:
 
 ```rust
     // DataFusion 45 extracts only `=` as a key; a keyless join on IS NOT DISTINCT FROM is a hash
@@ -1319,7 +1500,7 @@ operator_case! {
   returns the rest re-joined with `AND` against the filter's schema; `hash_join_from_parts` is
   `hash_join`'s body (`nodes.rs:246-301`) taking keys, filter and the flag instead of reading a
   `HashJoinExec`, so the two arms share the co-partitioning, coalescing and #137 logic.
-- [ ] **Step 5: Run green** (rust-only; the harness on the device); pbench's `indf-full-join` plan
+- [x] **Step 5: Run green** (rust-only; the harness on the device); pbench's `indf-full-join` plan
   golden shows `GpuHashJoin{Full}` with `null_equals_null=true`, regenerated in this commit.
 - [ ] **Step 6: Commit.** `git commit -m "IS NOT DISTINCT FROM: NULL_EQUAL on the device, a null-equal hash key in the plan"`.
 
@@ -1329,7 +1510,8 @@ operator_case! {
 - Modify: `peacockdb-core/src/tests/gpu_tests/join_cases.rs`, `join_dimension_cases.rs`, `nested_cases.rs`, `nested_schema_cases.rs`, `join_schema_cases.rs`;
   `tests/end_to_end/dimensions.rs:125-221`; `wire/gpu_tests/mod.rs:445,701,709,916,953,974,1020`
 
-- [ ] **Step 1: Check the 56 pins are flipped** (#152 30, #59 10, #173 4, #190 4, #212 3, #207 2,
+- [x] **Step 1: Check the 56 pins are flipped** — all 56 were, by tasks 7 and 8, none missed;
+  the ledger is in the detail file's task 10 record. (#152 30, #59 10, #173 4, #190 4, #212 3, #207 2,
   #208 2, #215 2; `nested_cases.rs:438` counts for #190 and #215) — each in the commit that changed
   its behaviour (task 7 the device's, task 8 the cpu's), to the positive case with its script, e.g.
   `bug_a_left_join_refuses_its_first_probe_batch_on_the_device` →
@@ -1343,8 +1525,13 @@ operator_case! {
   is empty; `BUILD_COPY`, `PROBE_COPY`, `NO_KEYS`, `NO_BUILD`, `INNER_ONLY`, `TWO_OF_SIXTEEN`,
   `THREE_OF_SIXTEEN` and `device_answers_as_if_null_equals_null` are gone. One #59 case gains a
   hand-counted assertion beside `same`. `crossing_projection`'s `Left | Full => unreachable!` arm
-  gets real arms; `nested_with` gives Left a multi-batch probe.
-- [ ] **Step 2: The new cases** (design §5.7, in-memory batches; `synthetic::key_types` from
+  gets real arms; `nested_with` gives Left a multi-batch probe. (The arms were real since task
+  7, but no Left or Full case used them, and no Left nested loop had two probe batches: both
+  added here.)
+- [x] **Step 2: The new cases** — in `join_shape_cases.rs`, `join_key_type_cases.rs` and the
+  existing files, with `PBENCH_SHAPES` naming a case per pbench join query and a guard over
+  pbench's plan golden; plus the spec's risk 4 (`test_support/order_hazard.rs`, a
+  `device_order_` case per line with a device cell) and the cross join's emitted order (design §5.7, in-memory batches; `synthetic::key_types` from
   repartition-keys):
   - NULL keys on both sides for all nine types under `false` and `true` — Left and Full new:
     `a_left_join_pads_a_null_key_build_row_under_the_sql_default` (hand count: the build's NULL-key
@@ -1357,15 +1544,15 @@ operator_case! {
   - `a_predicate_free_left_nested_loop_over_an_empty_probe_pads_every_build_row`, and Right, Full;
   - `a_keyed_left_semi_join_with_a_decimal_residual_agrees` (the non-AST cross residual);
   - for every type, three probe batches with a zero-row one between (Review Focus 2).
-- [ ] **Step 3: `dimensions.rs`** is rewritten: its helper no longer reads `feeds_owing_build`;
+- [x] **Step 3 (done in task 8): `dimensions.rs`** is rewritten: its helper no longer reads `feeds_owing_build`;
   `an_empty_build_lane_answers_like_the_oracle` asserts the lane reached `SetBuild` with no batch
   and answered as the oracle; its two drivers (tpcds q93 Right, tpch anti-join over an empty build)
   stay.
-- [ ] **Step 4: `wire/gpu_tests/mod.rs`:** the join walker (`:445`) walks the session calls;
+- [x] **Step 4 (done in task 7): `wire/gpu_tests/mod.rs`:** the join walker (`:445`) walks the session calls;
   `driven()` (`:974`) lists `FbKind::Join` as driven; `:709` (one `HashJoin{LeftSemi}` call) goes;
   `:916` and `:953` follow `FbKind::Join`; `SEMI_JOIN` (`:674`) stays as the device's regression
   for the non-AST semi residual.
-- [ ] **Step 5: Run green** on the device: the harness, `--lib -- gpu_tests::`, `test_node_timing`.
+- [x] **Step 5: Run green** on the device: the harness, `--lib -- gpu_tests::`, `test_node_timing`.
 - [ ] **Step 6: Commit.** `git commit -m "join cases for every pbench shape at node level"`.
 
 ### Task 11: The four plan-executor gtests onto the session
@@ -1373,24 +1560,26 @@ operator_case! {
 **Files:**
 - Modify: `cpp/tests/gpu/test_plan_executor.cpp:375,427,609,1054`
 
-- [ ] **Step 1:** `HashJoinNationRegion`, `HashJoinWithProjection`, `AggregateGroupBy`,
+- [x] **Step 1:** `HashJoinNationRegion`, `HashJoinWithProjection`, `AggregateGroupBy`,
   `JoinProjectSort` build a `CudfJoin` leaf instead of `CudfHashJoin` and drive it through
   `peacock_join_build`/`_probe`/`_finish` (the helper `run_join(session, build, probe)` in the
-  file), asserting the same 25/25/5/25 rows.
-- [ ] **Step 2:** device cycle, the plan-executor target.
-- [ ] **Step 3: Commit.** `git commit -m "plan-executor: the join gtests drive the session"`.
+  file), asserting the same 25/25/5/25 rows. (No `run_join` existed: it is new, with the
+  `NodeSession` methods the file already drives, and `WholePlan` walks the wire's layout —
+  both sides and the leaf under one structural union. Detail file, round 2 tasks 11–13.)
+- [x] **Step 2:** device cycle, the plan-executor target.
+- [x] **Step 3: Commit.** `git commit -m "plan-executor: the join gtests drive the session"`.
 
 ### Task 12: The goldens, checked current
 
 Each regeneration below lands in the commit of the code that moves it (task 7 the recipe line,
 task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confirms no diff is left.
 
-- [ ] **Step 1: The recipe line** (run in task 7's commit; here, re-run for no diff). `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test -p peacockdb-core --lib plan_goldens`
+- [x] **Step 1: The recipe line** (run in task 7's commit; here, re-run for no diff). `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test -p peacockdb-core --lib plan_goldens`
   (with the `/tmp` testdata symlink `build-test.md:646` names): every join's recipe line becomes
   the session's (75 per tpch mode, 656 per tpcds mode); `recipe-payloads.txt` loses its 134 join
   recipe lines and gains `CudfJoin` payloads. Review: the diff touches join recipe lines and
   payload bytes only. Commit `"goldens: a join's recipe is its session"`.
-- [ ] **Step 2: Check** that the cpu per-node and cost goldens are current: task 8 regenerated
+- [x] **Step 2: Check** that the cpu per-node and cost goldens are current: task 8 regenerated
   them with the cpu's stream, tasks 3, 4 and 5 with their own changes. `UPDATE_CANONICAL=1` over
   the corpus cpu tier and `test_cost_model` produce no diff; if one does, it belongs to step 1's
   commit and lands there, with `mini.result.txt` byte-identical.
@@ -1401,23 +1590,25 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
 - Delete: `scripts/exec_model/operators/recipe_join.py`
 - Modify: `scripts/exec_model/operators/{nodes.py:551,568,586,join_types.py:82-121,recipe.py:392,cudf_calls.py}`, `node.py:109`, `tests/corpus.py:461`, `tests/test_join_capability.py`
 
-- [ ] **Step 1:** `BACKENDS` (`test_join_capability.py:157`) keeps the pandas oracle only; the four
+- [x] **Step 1:** `BACKENDS` (`test_join_capability.py:157`) keeps the pandas oracle only; the four
   recipe-only tests (:421, :438, :481, :516) go; :329, :349, :365, :623 flip to "answers as the
   oracle"; :527 (`…_is_wrong_today_which_is_153`) flips to the right answer; the guards :654 and
   :666 read the session's `cpp/src/operators/join_session.cpp` (its `fb::JoinType_` arms and its cuDF calls, which
   `cudf_calls.py` models: `hash_join`, `distinct_hash_join`, `mixed_left_semi_join`,
   `conditional_*`, `contains`, `gather`, `apply_boolean_mask`, `cross_join`).
-- [ ] **Step 2:** `join_types.py`'s capability follows design §4.1 (two facts per type);
-  `recipe.py`'s `copy_handle` goes.
-- [ ] **Step 3:** `python -m pytest scripts/exec_model/tests -q` green.
-- [ ] **Step 4: Commit.** `git commit -m "exec_model: the recipe join retires"`.
+- [x] **Step 2:** `join_types.py`'s capability follows design §4.1 (two facts per type);
+  `recipe.py`'s `copy_handle` goes. (All of `recipe.py` and `cudf_calls.py` went: with
+  `recipe_join.py` gone nothing imports them, and task 15's grep over `scripts` names their
+  join models. The cuDF-call guard went with them; see the detail file.)
+- [x] **Step 3:** `python -m pytest scripts/exec_model/tests -q` green.
+- [x] **Step 4: Commit.** `git commit -m "exec_model: the recipe join retires"`.
 
 ### Task 14: The cells, in batches
 
-- [ ] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
+- [x] **Step 1:** for each batch of about five queries (dataset by dataset, mode by mode, in the
   estimate's per-query table order, `reports/join-rewrite-cell-estimate.md` §7), set
-  **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (and cpu modes for #190's
-  four and #212's q77 rows) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
+  **`cost-registry.csv` first and then** the `corpus_cases.inc` gpu modes (the cpu modes for #190's
+  four and #212's q77 rows landed in task 8, with their oracles) — `declared_sections` reads the CSV, not the `.inc`, so a golden for a
   cell the CSV still calls `disabled` is not written and the case reports `ok` anyway
   (`build-test.md`, "Consequences worth knowing before you regenerate"; it cost `repartition-keys`
   a round). Then run on
@@ -1425,32 +1616,38 @@ task 8 the cpu goldens, tasks 3–5 their own); this task re-runs them and confi
   green, ticket the rest: tpch rollup_over_join gains `65`, tpcds q78 `60`, tpcds q32 at tp4
   `199`, as the estimate expects. The stale `183` rows' join cells are among the batches. A line
   whose first cells this batch turns on (tpch q11 and q22, tpcds q24 and q54, whose cpu cells #190
-  kept off) moves its `duckdb_oracle` off `duckdb_none` in the same commit, to the variant its first
+  kept off — done in task 8) moves its `duckdb_oracle` off `duckdb_none` in the same commit, to the variant its first
   DuckDB case passes under (tpch q11 → `duckdb_fingerprint`, being over the cap): `duckdb_none`
   over two sections that both exist fails.
-- [ ] **Step 2:** pbench's join rows: enable their cells (the float rows stay commented out on
+- [x] **Step 2:** pbench's join rows: enable their cells (the float rows stay commented out on
   #243), and each row this task first answers moves its `duckdb_oracle` off `duckdb_none` the same
   way; `test_cpu_corpus`'s registry test and `every_device_cell_has_a_cpu_cell_at_the_same_mode`
   green after each batch.
-- [ ] **Step 2b: The collapse readings pbench left to this task.** `collapse-not-in` (pbench.md's
+- [x] **Step 2b: The collapse readings pbench left to this task.** `collapse-not-in` (pbench.md's
   collapse table, the uncorrelated `not-in-uncorrelated` after the rewrite): read its tp4 plan
   goldens and record in the detail file where `GpuMergePartitions` puts the outer side in one lane
   (the rewrite's joins against one-row counts), as pbench's detail file did for the other three.
-- [ ] **Step 3:** strike each closed ticket from a row only when every off cell on it carries
+- [x] **Step 3:** strike each closed ticket from a row only when every off cell on it carries
   another (`registry.rs:229-240`).
-- [ ] **Step 4: Commit** per batch: `"cells: <dataset> <queries> on (#152 …)"`.
+- [x] **Step 4: Commit** per batch: `"cells: <dataset> <queries> on (#152 …)"`.
 
 ### Task 15: Nothing of the old join path survives
 
-- [ ] **Step 1: Remove** (spec step 9): `cpp/src/operators/join.cpp` and its `cpp/CMakeLists.txt` entry (the session lives in `join_session.cpp`, join-session-cpp); `wire/join.rs`'s old writers and `attach.rs`'s
+- [x] **Step 1: Remove** (spec step 9): `cpp/src/operators/join.cpp` and its `cpp/CMakeLists.txt` entry (the session lives in `join_session.cpp`, join-session-cpp); `wire/join.rs`'s old writers and `attach.rs`'s
   `cross_join`; `Input::{BuildSide, BuildSideCopy, BatchCopy, AccumulatedKeys}`,
   `ProjectRole::{ProbeKeys, NullPad, Narrow}`, `FbKind::{HashJoin, CrossJoin, NestedLoopJoin}` and
   their renderings (`recipes.rs:150-160`, `mod.rs:41-50`); `CudfHashJoin`, `CudfCrossJoin`,
   `CudfNestedLoopJoin` from `gpu_plan.fbs` and the generated code regenerated; `execute_hash_join`,
   `execute_cross_join`, `execute_nested_loop_join` and `dispatch.cpp:58-62`; the map arm's
   "multi-partition joins are not implemented yet" text (`node_session.cpp:584-596`);
-  `NestedLoopJoinType`; `empty_build_answers_nothing` (renamed in task 7).
-- [ ] **Step 2: The checks**, quoted in the PR, each empty:
+  `NestedLoopJoinType` (already gone — task 5 removed it, since nothing referenced it after the
+  type switch); `empty_build_answers_nothing` (renamed in task 7); and **the driver's
+  `feeds_owing_build` with the scatter-drop exception it gates, plus `dimensions.rs`'s use of
+  both** — task 6 measured that removing them there costs six red tests over four queries, because
+  a Right/Full/RightAnti lane with an empty build then reaches `set_build(None)` and only tasks 7
+  and 8 can answer it. Step 2's grep already names `feeds_owing_build`, so this is the work behind
+  a check that would otherwise fail with no instruction attached.
+- [x] **Step 2: The checks**, quoted in the PR, each empty:
 
 ```bash
 git grep -nE 'BuildSideCopy|BatchCopy|AccumulatedKeys|Input::BuildSide\b|ProbeKeys|NullPad|ProjectRole::Narrow' -- peacockdb-core scripts
@@ -1461,20 +1658,25 @@ git grep -n 'multi-partition joins are not implemented' -- cpp
 ```
 
   and `cargo build -p peacockdb-core --features gpu 2>&1 | grep -c 'never used\|never constructed'`
-  is 0, as is the C++ build's `-Wunused-function` count.
-- [ ] **Step 3: The wiki:** `architecture.md`'s Joins section rewritten from the design (the
-  session, the matchers, the capability as two facts, the `NOT IN` rewrite, #137, `__rowmarker__`);
+  is 0, as is the C++ build's `-Wunused-function` count. (The C++ count is 0. The Rust count is
+  25, every one an instrumentation item no production path calls, in files this branch never
+  touched; none is a join item. Detail file, round 2 task 15.)
+- [x] **Step 3: The wiki:** `architecture.md`'s Joins section rewritten from the design (the
+  session, the matchers, the capability as two facts, the `NOT IN` rewrite, #137, `__rowmarker__`),
+  and its scheduling rule's scatter-drop exception — "a scatter feeding the build side of a Right,
+  Full or RightAnti join keeps its zero-row table" — which sits outside the Joins section and
+  stops being true when step 1 removes the exception;
   `hacks-audit.md`'s P1, P4, P8, P9, P10, P13 and findings 5, 11, 12 marked resolved with this PR;
   `build-test.md`'s rows and counts.
-- [ ] **Step 4: Commit.** `git commit -m "the old join path removed: recipes, tables, executors, scaffolding"`.
+- [x] **Step 4: Commit.** `git commit -m "the old join path removed: recipes, tables, executors, scaffolding"`.
 
 ### Task 16: The estimate, compared; the record
 
-- [ ] **Step 1:** in the detail file, the estimate's per-query table (§7) against what turned on:
+- [x] **Step 1:** in the detail file, the estimate's per-query table (§7) against what turned on:
   each cell the estimate called FLIP and stayed off, and each it did not call FLIP and turned on,
   gets one line with its cause; each NEXT ISSUE confirmed or not; the eight checkable statements
   (§8) answered true or false.
-- [ ] **Step 2:** the closed tickets archived (`archive/archived-tickets.md`) — #155, #152, #173,
+- [x] **Step 2:** the closed tickets archived (`archive/archived-tickets.md`) — #155, #152, #173,
   #212, #159, #59, #80, #137, #220, #190, #207, #208, #136, #153, #160, #215, #63, #154; any ticket
   a cell met filed with its query and mode.
-- [ ] **Step 3: Commit.** `git commit -m "join-backend: the estimate compared, the record"`.
+- [x] **Step 3: Commit.** `git commit -m "join-backend: the estimate compared, the record"`.

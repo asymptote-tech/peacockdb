@@ -11,11 +11,10 @@
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::ipc::reader::StreamReader;
-use datafusion::common::JoinType;
 
 use super::{
     AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan, Seq,
-    attach_recipes,
+    attach_recipes, join_scratch_bytes,
 };
 use crate::executor::{BatchForwarder, forwarder_for};
 use crate::plan::GpuNode;
@@ -26,7 +25,8 @@ use crate::planner::{BatchSizing, PlanKnobs};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_executor_execute_node,
-    peacock_executor_execute_scan_rowgroups, peacock_last_error, peacock_result_free,
+    peacock_executor_execute_scan_rowgroups, peacock_join_build, peacock_join_finish,
+    peacock_join_probe, peacock_join_release, peacock_last_error, peacock_result_free,
     peacock_result_from_handle,
 };
 
@@ -161,6 +161,37 @@ impl Session {
         handles
     }
 
+    /// A join session's build, over `build` or over nothing (0): the session's id.
+    fn join_build(&self, seq: Seq, build: u64) -> u64 {
+        let mut join = 0u64;
+        let mut stats = PeacockNodeStats::default();
+        let rc = unsafe {
+            peacock_join_build(self.executor, seq as u64, build, &mut join, &mut stats)
+        };
+        assert_eq!(rc, 0, "join_build(#{seq}) failed: {}", self.last_error());
+        join
+    }
+
+    /// A probe or a finish: the handle it answered, 0 where it answered nothing.
+    fn join_call(&self, join: u64, probe: Option<u64>) -> u64 {
+        let mut handle = 0u64;
+        let mut stats = PeacockNodeStats::default();
+        let rc = unsafe {
+            match probe {
+                Some(batch) => {
+                    peacock_join_probe(self.executor, join, batch, &mut handle, &mut stats)
+                }
+                None => peacock_join_finish(self.executor, join, &mut handle, &mut stats),
+            }
+        };
+        assert_eq!(rc, 0, "a call on join {join} failed: {}", self.last_error());
+        handle
+    }
+
+    fn join_release(&self, join: u64) {
+        unsafe { peacock_join_release(self.executor, join) }
+    }
+
     /// The whole handle across the boundary. No shape here plans a limit, so the sink's
     /// range is always the batch it is handed; nothing here declares a precision.
     fn export(&self, handle: u64) -> Vec<RecordBatch> {
@@ -212,28 +243,20 @@ impl Drop for Session {
 #[derive(Default)]
 struct At {
     batch: Option<u64>,
-    build: Option<u64>,
     lane: Vec<u64>,
     all_lanes: Vec<u64>,
     prior: Option<u64>,
 }
 
 /// Where a call's named input comes from, in the handles the walk is already holding.
-///
-/// The two copies resolve to the handle itself. They name a device copy of something a
-/// later call still needs and the ABI has no symbol for one (#152). `BuildSideCopy` is
-/// safe because every shape here plans one probe batch, so the handle is used once and
-/// handed over, which the join arm asserts before anything reaches this. `BatchCopy`
-/// never reaches here: `driven` refuses the ProbeKeys project that names it.
 fn resolve(input: Input, at: &At) -> Vec<u64> {
     let held = |handle: Option<u64>| vec![handle.unwrap_or_else(|| panic!("no {input:?} here"))];
     match input {
-        Input::Batch | Input::BatchCopy => held(at.batch),
-        Input::BuildSide | Input::BuildSideCopy => held(at.build),
+        Input::Batch => held(at.batch),
         Input::PriorOutput => held(at.prior),
         Input::LaneBatches => at.lane.clone(),
         Input::AllLanes => at.all_lanes.clone(),
-        Input::AccumulatedKeys | Input::RowGroups | Input::RowRange => {
+        Input::RowGroups | Input::RowRange => {
             panic!("{input:?} is not a handle the walk holds")
         }
     }
@@ -442,39 +465,46 @@ impl Walk<'_> {
         )]]
     }
 
+    /// A session per lane: built over the lane's build batch, probed with every probe
+    /// batch, finished where the recipe says so. Each answer that is a handle is the lane's
+    /// next batch; a probe of the build-side semi family answers none.
     fn join(&mut self, node: &dyn GpuNode, recipe: &Recipe, build: &Lanes, probe: &Lanes) -> Lanes {
-        assert!(
-            recipe
-                .calls
-                .iter()
-                .all(|call| call.when == CallPattern::PerProbeBatch),
-            "{}: a finish pass accumulates probe keys across batches (#136), which no shape \
-             here plans",
-            node.name()
-        );
         assert_eq!(
             build.len(),
             probe.len(),
             "{}: lane p of one side must hold what can match lane p of the other",
             node.name()
         );
-        let calls: Vec<&Call> = recipe.calls.iter().collect();
+        let seq = match recipe.calls.first().map(|call| (call.symbol, call.target)) {
+            Some((AbiSymbol::JoinBuild, Some((seq, FbKind::Join)))) => seq,
+            other => panic!("{}: a join's recipe opens with join_build, not {other:?}", node.name()),
+        };
+        let finishes = recipe.calls.iter().any(|call| call.symbol == AbiSymbol::JoinFinish);
         let mut lanes = Vec::with_capacity(build.len());
         for (build_lane, probe_lane) in build.iter().zip(probe) {
-            assert_eq!(
-                probe_lane.len(),
-                1,
-                "{}: {} probe batches, and the call consumes the build handle with no ABI \
-                 symbol to copy it (#152) — every shape here plans one probe batch",
-                node.name(),
-                probe_lane.len()
-            );
-            let mut at = At {
-                batch: Some(probe_lane[0]),
-                build: Some(only(build_lane.clone(), "a join's build side")),
-                ..At::default()
+            let build_handle = match build_lane.as_slice() {
+                [] => 0,
+                [one] => *one,
+                more => panic!("{}: {} build batches in one lane", node.name(), more.len()),
             };
-            lanes.push(vec![only(self.chain(&calls, &mut at), node.name())]);
+            let join = self.session.join_build(seq, build_handle);
+            self.made.push((seq, FbKind::Join));
+            (self.on_call)(seq, FbKind::Join, &[], self.session);
+            let mut out = Vec::new();
+            let answers: Vec<Option<u64>> = probe_lane
+                .iter()
+                .map(|batch| Some(*batch))
+                .chain(finishes.then_some(None))
+                .collect();
+            for answer in answers {
+                let handle = self.session.join_call(join, answer);
+                self.made.push((seq, FbKind::Join));
+                let handles: Vec<u64> = (handle != 0).then_some(handle).into_iter().collect();
+                (self.on_call)(seq, FbKind::Join, &handles, self.session);
+                out.extend(handles);
+            }
+            self.session.join_release(join);
+            lanes.push(out);
         }
         lanes
     }
@@ -586,7 +616,8 @@ async fn walk_with(
         .await
         .expect("datafusion lowers it");
     let (tree, _) = planner::plan(&plan, knobs).expect("this mode plans it");
-    let recipes = attach_recipes(tree.as_ref()).expect("a planned tree has recipes");
+    let recipes = attach_recipes(tree.as_ref(), join_scratch_bytes(&knobs))
+        .expect("a planned tree has recipes");
     let session = Session::open(&recipes);
     let mut walk = Walk {
         session: &session,
@@ -702,21 +733,16 @@ async fn an_inner_join_matches_the_oracle_as_a_multiset() {
     assert_walk_matches_datafusion(INNER_JOIN, ONE_LANE).await;
 }
 
-/// A filtered semi join is the build-preserving type whose single probe batch takes the
-/// legacy one-call form: the capability matrix makes the probe single-batch, so the one
-/// call hands the build side over rather than needing a copy of it.
+/// A semi join whose residual the AST cannot take — `o_totalprice > c_acctbal` over two
+/// decimals — is one session like any other: built, probed once, and finished, where its
+/// answer is.
 #[tokio::test]
-async fn a_semi_join_that_keeps_its_build_side_runs_as_one_call() {
+async fn a_semi_join_with_a_residual_the_ast_cannot_take_is_one_session() {
     let calls = assert_walk_matches_datafusion(SEMI_JOIN, ONE_LANE).await;
     assert_eq!(
-        times(
-            &calls,
-            FbKind::HashJoin {
-                join_type: JoinType::LeftSemi
-            }
-        ),
-        1,
-        "the join ran as something other than one LeftSemi call: {}",
+        times(&calls, FbKind::Join),
+        3,
+        "build, one probe batch and the finish: {}",
         trail(&calls)
     );
 }
@@ -919,10 +945,7 @@ async fn an_inner_join_holds_its_two_projected_strings_build_side_first() {
         column("r_name", TypeId::String),
         column("n_name", TypeId::String),
     ]);
-    let inner = FbKind::HashJoin {
-        join_type: JoinType::Inner,
-    };
-    assert_eq!(after(&held, inner), vec![&expected]);
+    assert_eq!(after(&held, FbKind::Join), vec![&expected], "the probe's one answer");
 }
 
 /// The inner aggregate's finalize emits its key and its sum under the aggregate's own
@@ -953,10 +976,7 @@ async fn the_outer_max_holds_one_scale_2_decimal() {
 async fn a_semi_join_holds_the_build_sides_int64_key() {
     let held = held(SEMI_JOIN, ONE_LANE).await;
     let expected = DeviceSchema(vec![column("c_custkey", TypeId::Int64)]);
-    let semi = FbKind::HashJoin {
-        join_type: JoinType::LeftSemi,
-    };
-    assert_eq!(after(&held, semi), vec![&expected]);
+    assert_eq!(after(&held, FbKind::Join), vec![&expected], "the finish's one answer");
 }
 
 /// Which fb kinds a device has now run, and which this walk refuses — the set T15 and T16
@@ -979,27 +999,16 @@ fn driven(kind: FbKind) -> Driven {
         | FbKind::CoalescePartitions
         | FbKind::Repartition { .. }
         | FbKind::Aggregate { .. }
-        | FbKind::Project(ProjectRole::Finalize) => Driven::Handled,
-        FbKind::HashJoin { join_type } => match join_type {
-            JoinType::Inner | JoinType::LeftSemi => Driven::Handled,
-            _ => Driven::Refused("a join type no shape here plans"),
-        },
-        FbKind::Project(ProjectRole::ProbeKeys)
-        | FbKind::Project(ProjectRole::NullPad { .. })
-        | FbKind::Project(ProjectRole::Narrow) => {
-            Driven::Refused("the finish pass accumulates probe keys across batches (#136)")
-        }
+        | FbKind::Project(ProjectRole::Finalize)
+        | FbKind::Join => Driven::Handled,
         FbKind::Sort | FbKind::SortPreservingMerge => Driven::Refused("no shape here plans a sort"),
-        FbKind::CrossJoin | FbKind::NestedLoopJoin => {
-            Driven::Refused("both copy their build side, and the ABI has no copy (#152)")
-        }
     }
 }
 
 /// The kinds the queries above put on a device. Checked against the walk both ways: a kind
 /// here that no query produces is a claim on paper, and a kind produced that is not here is
 /// an arm that quietly gained a shape.
-const PROVEN: [FbKind; 10] = [
+const PROVEN: [FbKind; 9] = [
     FbKind::Scan,
     FbKind::Filter,
     FbKind::PlainProject,
@@ -1008,12 +1017,7 @@ const PROVEN: [FbKind; 10] = [
     FbKind::Aggregate { merge: false },
     FbKind::Aggregate { merge: true },
     FbKind::Project(ProjectRole::Finalize),
-    FbKind::HashJoin {
-        join_type: JoinType::Inner,
-    },
-    FbKind::HashJoin {
-        join_type: JoinType::LeftSemi,
-    },
+    FbKind::Join,
 ];
 
 #[tokio::test]

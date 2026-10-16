@@ -8,7 +8,7 @@ merged out of order, a join whose finish pass runs per lane, a sort whose batche
 individually ordered and collectively not.
 
 Joins live in `test_join_capability.py`, which shares this file's helpers — one case per
-join mode on two backends outgrew this file.
+join mode outgrew this file.
 
 pandas is imported unconditionally. If it is missing this file fails rather than skipping:
 a skipped operator suite reads exactly like a passing one.

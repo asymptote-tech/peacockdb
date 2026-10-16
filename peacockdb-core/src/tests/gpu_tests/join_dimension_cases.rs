@@ -1,29 +1,27 @@
 //! `GpuHashJoin` along the dimensions the corpus varies and task 9 held constant: a
-//! projection on every type the device reaches, the key's type on the three code paths,
-//! the residual's combinations. The builders here are this file's; the sides, scripts and
+//! projection on every type, the key's type under three answer shapes, the residual's
+//! combinations. The builders here are this file's; the sides, scripts and
 //! `hash_join` are `join_cases.rs`'s. Every case is green or a `bug_` test with its ticket
 //! above it; nothing here repairs.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, AsArray, Int32Array};
+use datafusion::arrow::array::Int32Array;
 use datafusion::arrow::compute::kernels::numeric::rem;
 use datafusion::arrow::compute::{cast, concat_batches};
-use datafusion::arrow::datatypes::{DataType, Field, Int64Type, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{JoinType, ScalarValue};
 
 use super::join_cases::{
-    BUILD_COPY, build_batch, empty_build, gpu_refuses_with, hash_join, hash_join_with, one_probe,
-    padded, probe_batch, residual, script, side, two_probes,
+    build_batch, empty_build, hash_join, hash_join_with, one_probe, output_over, probe_batch,
+    residual, script, side, two_probes,
 };
-use super::script::{Script, run_both};
-use crate::executor::BackendError;
+use super::script::{Script, run_both, run_both_with_join_scratch};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNode, JoinFilterColumn, JoinSide, Schema,
 };
-use crate::tests::compare::{Order, Slot};
+use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -108,14 +106,13 @@ fn decimal_residual() -> (Option<Expr>, Vec<JoinFilterColumn>) {
 pub(crate) fn crossing_projection(join_type: JoinType) -> Vec<u32> {
     match join_type {
         // both sides: probe's s, build's f64, probe's id, build's d
-        JoinType::Inner | JoinType::Right => vec![13, 4, 8, 6],
+        JoinType::Inner | JoinType::Left | JoinType::Right | JoinType::Full => vec![13, 4, 8, 6],
         // build side only: d, f64, id
         JoinType::LeftSemi | JoinType::LeftAnti => vec![6, 4, 0],
         // build side and the mark: mark, s, id
         JoinType::LeftMark => vec![8, 5, 0],
         // probe side only: b, i64, id
         JoinType::RightSemi | JoinType::RightAnti => vec![7, 3, 0],
-        JoinType::Left | JoinType::Full => unreachable!("#152 refuses the first probe batch"),
     }
 }
 
@@ -192,18 +189,15 @@ fn keyed_side(prefix: &str, key: Key) -> Vec<Field> {
         .collect()
 }
 
-/// `hash_join` over keyed leaves, on the three types whose code paths differ: the
-/// per-batch join, the side swap, the accumulated-keys finish. Same output rules as
-/// `output_of`, over the keyed fields.
-pub(crate) fn hash_join_keyed(join_type: JoinType, key: Key, projection: Option<Vec<u32>>) -> GpuHashJoin {
+/// `hash_join` over keyed leaves, of any type: `output_of`'s rules over the keyed fields.
+pub(crate) fn hash_join_keyed(
+    join_type: JoinType,
+    key: Key,
+    projection: Option<Vec<u32>>,
+) -> GpuHashJoin {
     let b = keyed_side("b_", key);
     let p = keyed_side("p_", key);
-    let fields: Vec<Field> = match join_type {
-        JoinType::Inner => [b.clone(), p.clone()].concat(),
-        JoinType::Right => [padded(b.clone()), p.clone()].concat(),
-        JoinType::LeftAnti => b.clone(),
-        other => unreachable!("{other:?} is not one of the three key-path types"),
-    };
+    let fields = output_over(join_type, b.clone(), p.clone());
     let fields = match &projection {
         None => fields,
         Some(keep) => keep.iter().map(|i| fields[*i as usize].clone()).collect(),
@@ -266,13 +260,26 @@ pub(crate) fn build_with_misses() -> Script {
     script(Some(build_batch(8)), vec![probe_batch(48, 21)])
 }
 
-// A crossing projection on every type the device reaches: reordered, every key dropped,
-// both sides where the type keeps both. Over two probe batches where the device streams,
-// so the per-batch join and the finish both run under it; the probe-side types whose
-// second batch is #152's refusal (pinned in `join_cases.rs`) take one. Left and Full are
-// that refusal before any projection. The anti and mark forms take a script with misses
-// and no null pair, so they have rows to project and #59 (pinned in `join_cases.rs`)
-// nothing to match.
+// A crossing projection on every type: reordered, every key dropped, both sides where the
+// type keeps both. Left and Full over two probe batches, so the probe calls and the finish's
+// pad both run under it. The anti and mark forms take a script with misses and no null pair,
+// so they have rows to project.
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_join_with_a_crossing_projection_over_two_probe_batches_agrees() {
+        let node = hash_join(JoinType::Left, false, false, Some(crossing_projection(JoinType::Left)));
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_with_a_crossing_projection_over_two_probe_batches_agrees() {
+        let node = hash_join(JoinType::Full, false, false, Some(crossing_projection(JoinType::Full)));
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
 
 operator_case! {
     GpuHashJoin,
@@ -282,13 +289,11 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it; the projection is
-// proved over one batch above.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_right_join_with_a_crossing_projection_refuses_its_second_probe_batch_on_the_device() {
+    fn a_right_join_with_a_crossing_projection_over_two_probe_batches_agrees() {
         let node = hash_join(JoinType::Right, false, false, Some(crossing_projection(JoinType::Right)));
-        gpu_refuses_with(&run_both(&node, two_probes()), BUILD_COPY);
+        run_both(&node, two_probes()).same(Order::Any);
     }
 }
 
@@ -351,10 +356,10 @@ operator_case! {
     }
 }
 
-// The key's type on each of the three code paths: Inner is the per-batch join, Right has
-// cuDF swap the sides and the indices swapped back, LeftAnti is the accumulated-keys
-// finish. The anti cases take the probe with misses, so there are rows to keep and no
-// null pair for #59. String keys are `Utf8`, the type the spec declares.
+// The key's type under three answer shapes: Inner's pairs, Right's probe rows kept through
+// cuDF's left join, LeftAnti's build rows read off the matched column at finish. The anti
+// cases take the probe with misses, so there are rows to keep. String keys are `Utf8`, the
+// type the spec declares. `join_key_type_cases.rs` has every `key_types` column.
 
 operator_case! {
     GpuHashJoin,
@@ -428,36 +433,17 @@ operator_case! {
     }
 }
 
-// #59 — the anti join's hardcoded `EQUAL` reaches the second column of a composite key: a
-// null `i32` on the probe matches the build rows of its `key` whose `i32` is null too, and
-// the device drops them where SQL keeps them. The cpu keeps 30 of 32 build rows, the
-// device 27, and every row the device alone dropped carries the null.
+// A null `i32` in the probe's second key column matches nothing under the SQL default, so
+// the anti join keeps every build row no probe pair equals: 30 of 32, by hand.
 operator_case! {
     GpuHashJoin,
-    fn bug_a_left_anti_join_on_a_composite_key_matches_a_null_in_the_second_column_on_the_device() {
+    fn a_left_anti_join_on_a_composite_key_with_a_null_second_column_keeps_its_rows() {
         let node = hash_join_keyed(JoinType::LeftAnti, Key::Composite, None);
         let outcome = run_both(&node, composite_anti_script_with_a_null_second_key());
-        let kept = |side: &Result<Vec<Slot>, BackendError>| -> RecordBatch {
-            let batches: Vec<RecordBatch> = side.as_ref().expect("answers").concat();
-            concat_batches(&batches[0].schema(), &batches).expect("one schema")
-        };
-        let (cpu, gpu) = (kept(&outcome.cpu), kept(&outcome.gpu));
-        assert_eq!(cpu.num_rows(), 30, "the cpu keeps every build row no probe pair equals");
-        assert_eq!(gpu.num_rows(), 27, "the device matches the null pair too");
-        let device_kept: HashSet<i64> =
-            gpu.column(0).as_primitive::<Int64Type>().values().iter().copied().collect();
-        let ids = cpu.column(0).as_primitive::<Int64Type>();
-        let dropped_beyond_the_cpu: Vec<usize> = (0..cpu.num_rows())
-            .filter(|r| !device_kept.contains(&ids.value(*r)))
-            .collect();
-        assert_eq!(dropped_beyond_the_cpu.len(), 3);
-        for row in dropped_beyond_the_cpu {
-            assert!(
-                cpu.column(2).is_null(row),
-                "build row {} was dropped over a non-null second key",
-                ids.value(row)
-            );
-        }
+        outcome.same(Order::Any);
+        let kept = outcome.gpu.as_ref().expect("the device answers").concat();
+        let kept = concat_batches(&kept[0].schema(), &kept).expect("one schema");
+        assert_eq!(kept.num_rows(), 30, "every build row no probe pair equals");
     }
 }
 
@@ -482,6 +468,25 @@ operator_case! {
     fn a_left_anti_join_on_a_date32_key_agrees() {
         let node = hash_join_keyed(JoinType::LeftAnti, Key::Date32, None);
         run_both(&node, keyed_anti_script(Key::Date32)).same(Order::Any);
+    }
+}
+
+// pbench's `NOT IN` rewrite joins on two keys, and its semi forms answer per probe row:
+// `not-in-correlated` a RightAnti, `not-in-under-or` a LeftMark.
+
+operator_case! {
+    GpuHashJoin,
+    fn a_right_anti_join_on_a_composite_key_agrees() {
+        let node = hash_join_keyed(JoinType::RightAnti, Key::Composite, None);
+        run_both(&node, keyed_script(Key::Composite)).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_left_mark_join_on_a_composite_key_agrees() {
+        let node = hash_join_keyed(JoinType::LeftMark, Key::Composite, None);
+        run_both(&node, keyed_script(Key::Composite)).same(Order::Any);
     }
 }
 
@@ -516,12 +521,11 @@ operator_case! {
     }
 }
 
-// #152 — the first call erased the build side and nothing copies it, residual or not.
 operator_case! {
     GpuHashJoin,
-    fn bug_an_inner_join_with_a_residual_refuses_its_second_probe_batch_on_the_device() {
+    fn an_inner_join_with_a_residual_over_two_probe_batches_agrees() {
         let node = hash_join_with(JoinType::Inner, false, residual(), None);
-        gpu_refuses_with(&run_both(&node, two_probes()), BUILD_COPY);
+        run_both(&node, two_probes()).same(Order::Any);
     }
 }
 
@@ -544,5 +548,34 @@ operator_case! {
     GpuHashJoin,
     fn an_inner_join_with_a_decimal_residual_agrees() {
         run_both(&hash_join_with(JoinType::Inner, false, decimal_residual(), None), one_probe()).same(Order::Any);
+    }
+}
+
+// The decimal residual takes the pairs path, the one keyed path that chunks: a semi type
+// over it (the non-AST cross residual), and Inner and Full with 64 bytes of pairs a call,
+// which cuts every probe row into a chunk of its own — so a Full's matched column folds
+// across chunks before its finish pads what none of them matched.
+
+operator_case! {
+    GpuHashJoin,
+    fn a_keyed_left_semi_join_with_a_decimal_residual_agrees() {
+        let node = hash_join_with(JoinType::LeftSemi, false, decimal_residual(), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn an_inner_join_with_a_decimal_residual_in_chunks_of_one_probe_row_agrees() {
+        let node = hash_join_with(JoinType::Inner, false, decimal_residual(), None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuHashJoin,
+    fn a_full_join_with_a_decimal_residual_in_chunks_of_one_probe_row_agrees() {
+        let node = hash_join_with(JoinType::Full, false, decimal_residual(), None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
     }
 }

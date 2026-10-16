@@ -155,7 +155,6 @@ add_library(peacock_gpu SHARED
   src/operators/filter.cpp
   src/operators/project.cpp
   src/operators/aggregate.cpp
-  src/operators/join.cpp
   src/operators/join_session.cpp
   src/operators/join_columns.cpp
   src/operators/join_residual.cpp

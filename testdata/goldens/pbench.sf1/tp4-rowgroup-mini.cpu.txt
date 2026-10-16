@@ -1,5 +1,25 @@
 == anti-null-preserved-condition
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=1091, output_bytes=8866
+  in_rows=[[255,277,308,251]] batch_rows=[[255],[277],[308],[251]] batch_bytes=[[2072],[2251],[2503],[2040]]
+  GpuHashJoin: join_type=LeftAnti, on=[(d_k@1, f_k@0)], filter=d_kb@build:2, projection=[d_id@0], lanes=4, batches=multiple, output_rows=1091, output_bytes=8866
+    in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[255],[277],[308],[251]] batch_bytes=[[2072],[2251],[2503],[2040]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=25004
+      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5976],[6540],[6688],[5800]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=25004
+        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5976],[6540],[6688],[5800]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
+          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[25000]]
+          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_kb@3], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=25000
+            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[25000],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@0], lanes=4, batches=multiple, hashed_on=[f_k@0], output_rows=18966, output_bytes=78252
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[974,904,900,863,867,867,957,900,978,706],[1011,1089,986,912,957,1028,1077,1023,1085,788],[2286,2232,2409,2360,2290,2438,2282,2331,2286,1795],[3696,3795,3738,3923,3911,3721,3672,3738,3630,2847]]
+      GpuFilter: predicate=f_k@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=78239
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[7966,8019,8032,8057,8024,8052,7986,7991,7978,6134]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
+          GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == bool-key-group
 early_exit=none
 GpuUnload: output_rows=3, output_bytes=30
@@ -25,15 +45,15 @@ skipped: not enabled at this mode
 == cross-projection
 early_exit=none
 GpuUnload: output_rows=160000, output_bytes=1300000
-  in_rows=[[160000]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,1568,1568,1568,1568,1568,1568,1568,1568]] batch_bytes=[[16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,12740,12740,12740,12740,12740,12740,12740,12740]]
-  GpuCrossJoin: lanes=1, batches=multiple, output_rows=160000, output_bytes=1300000
-    in_rows=[[8],[20000]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,2048,1568,1568,1568,1568,1568,1568,1568,1568]] batch_bytes=[[16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,16640,12740,12740,12740,12740,12740,12740,12740,12740]]
-    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=0
-      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[0]]
-      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=0
-        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[0]]
-        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=0
-          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[0],[],[],[]]
+  in_rows=[[160000]] batch_rows=[[16384,16384,16384,16384,16384,16384,16384,16384,16384,12544]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,101920]]
+  GpuCrossJoin: projection=[f_id@1], lanes=1, batches=multiple, output_rows=160000, output_bytes=1300000
+    in_rows=[[8],[20000]] batch_rows=[[16384,16384,16384,16384,16384,16384,16384,16384,16384,12544]] batch_bytes=[[133120,133120,133120,133120,133120,133120,133120,133120,133120,101920]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=9
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[9]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=9
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[9]]
+        GpuLoadParquet: table=tiny, projections=[], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=9
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[9],[],[],[]]
     GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=162500
       in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[16640,16640,16640,16640,16640,16640,16640,16640,16640,12740]]
       GpuLoadParquet: table=fact, projections=[f_id@0], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=162500
@@ -65,7 +85,7 @@ GpuUnload: output_rows=132216, output_bytes=2148534
   GpuProject: exprs=[f_id@1, d_id@0], lanes=4, batches=multiple, output_rows=132216, output_bytes=2148534
     in_rows=[[32156,29016,34530,36514]] batch_rows=[[3280,3296,3264,3308,3302,3340,3272,3324,3268,2502],[2968,2976,2974,2934,2952,3016,2996,2980,2952,2268],[3562,3548,3486,3560,3556,3524,3542,3516,3548,2688],[3750,3748,3762,3768,3756,3674,3756,3742,3696,2862]] batch_bytes=[[53300,53560,53040,53756,53658,54276,53170,54016,53106,40658],[48230,48360,48328,47678,47970,49010,48686,48426,47970,36856],[57884,57656,56648,57850,57786,57266,57558,57136,57656,43680],[60938,60906,61134,61230,61036,59704,61036,60808,60060,46508]]
     GpuHashJoin: join_type=Inner, on=[(d_kdec15@1, f_kdec15@1)], projection=[d_id@0, f_id@2], lanes=4, batches=multiple, output_rows=132216, output_bytes=2148534
-      in_rows=[[486,440,522,552],[4761,4416,5335,5488]] batch_rows=[[3280,3296,3264,3308,3302,3340,3272,3324,3268,2502],[2968,2976,2974,2934,2952,3016,2996,2980,2952,2268],[3562,3548,3486,3560,3556,3524,3542,3516,3548,2688],[3750,3748,3762,3768,3756,3674,3756,3742,3696,2862]] batch_bytes=[[53300,53560,53040,53756,53658,54276,53170,54016,53106,40658],[48230,48360,48328,47678,47970,49010,48686,48426,47970,36856],[57884,57656,56648,57850,57786,57266,57558,57136,57656,43680],[60938,60906,61134,61230,61036,59704,61036,60808,60060,46508]]
+      in_rows=[[486,440,522,552],[4761,4416,5158,5488]] batch_rows=[[3280,3296,3264,3308,3302,3340,3272,3324,3268,2502],[2968,2976,2974,2934,2952,3016,2996,2980,2952,2268],[3562,3548,3486,3560,3556,3524,3542,3516,3548,2688],[3750,3748,3762,3768,3756,3674,3756,3742,3696,2862]] batch_bytes=[[53300,53560,53040,53756,53658,54276,53170,54016,53106,40658],[48230,48360,48328,47678,47970,49010,48686,48426,47970,36856],[57884,57656,56648,57850,57786,57266,57558,57136,57656,43680],[60938,60906,61134,61230,61036,59704,61036,60808,60060,46508]]
       GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_kdec15@1], output_rows=2000, output_bytes=48502
         in_rows=[[486,440,522,552]] batch_rows=[[486],[440],[522],[552]] batch_bytes=[[11786],[10670],[12660],[13386]]
         GpuEmitPartitions: hash=[d_kdec15@1], lanes=4, batches=multiple, hashed_on=[d_kdec15@1], output_rows=2000, output_bytes=48502
@@ -74,12 +94,14 @@ GpuUnload: output_rows=132216, output_bytes=2148534
             in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[48500]]
             GpuLoadParquet: table=dim, projections=[d_id@0, d_kdec15@6], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=48500
               in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[48500],[],[],[]]
-      GpuEmitPartitions: hash=[f_kdec15@1], lanes=4, batches=multiple, hashed_on=[f_kdec15@1], output_rows=20000, output_bytes=485032
-        in_rows=[[20000]] batch_rows=[[484,487,486,489,488,494,483,491,487,372],[451,452,454,445,448,459,455,453,452,347],[550,547,541,549,548,544,546,543,550,417],[563,562,567,565,564,551,564,561,559,432]] batch_bytes=[[11738,11810,11786,11860,11834,11980,11714,11908,11810,9022],[10938,10962,11010,10792,10864,11132,11034,10986,10962,8416],[13338,13266,13120,13314,13290,13192,13242,13168,13338,10114],[13654,13630,13750,13702,13678,13362,13678,13606,13556,10476]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=485000
-          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[49664,49664,49664,49664,49664,49664,49664,49664,49664,38024]]
-          GpuLoadParquet: table=fact, projections=[f_id@0, f_kdec15@6], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=485000
-            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[49664,49664],[49664,49664,49664],[49664,49664],[49664,49664,38024]]
+      GpuEmitPartitions: hash=[f_kdec15@1], lanes=4, batches=multiple, hashed_on=[f_kdec15@1], output_rows=19823, output_bytes=480742
+        in_rows=[[19823]] batch_rows=[[484,487,486,489,488,494,483,491,487,372],[451,452,454,445,448,459,455,453,452,347],[531,529,523,531,530,526,528,524,532,404],[563,562,567,565,564,551,564,561,559,432]] batch_bytes=[[11738,11810,11786,11860,11834,11980,11714,11908,11810,9022],[10938,10962,11010,10792,10864,11132,11034,10986,10962,8416],[12878,12830,12684,12878,12854,12756,12804,12708,12902,9798],[13654,13630,13750,13702,13678,13362,13678,13606,13556,10476]]
+        GpuFilter: predicate=f_kdec15@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=19823, output_bytes=480714
+          in_rows=[[20000]] batch_rows=[[2029,2030,2030,2030,2030,2030,2030,2029,2030,1555]] batch_bytes=[[49204,49228,49228,49228,49228,49228,49228,49204,49228,37710]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=485000
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[49664,49664,49664,49664,49664,49664,49664,49664,49664,38024]]
+            GpuLoadParquet: table=fact, projections=[f_id@0, f_kdec15@6], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=485000
+              in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[49664,49664],[49664,49664,49664],[49664,49664],[49664,49664,38024]]
 == decimal38-key-group
 early_exit=none
 GpuUnload: output_rows=301, output_bytes=7304
@@ -101,37 +123,77 @@ GpuUnload: output_rows=301, output_bytes=7304
                 GpuLoadParquet: table=fact, projections=[f_kdec38@7], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=322500
                   in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33024,33024],[33024,33024,33024],[33024,33024],[33024,33024,25284]]
 == empty-side-left-join
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=8, output_bytes=98
+  in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[98]]
+  GpuProject: exprs=[t_id@1, d_id@0], lanes=1, batches=multiple, output_rows=8, output_bytes=98
+    in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[98]]
+    GpuHashJoin: join_type=Right, on=[(d_k@1, t_k@1)], projection=[d_id@0, t_id@2], lanes=1, batches=multiple, output_rows=8, output_bytes=98
+      in_rows=[[0],[8]] batch_rows=[[8]] batch_bytes=[[98]]
+      GpuEmpty: lanes=1, batches=single, output_rows=0, output_bytes=0
+        in_rows=[] batch_rows=[[]] batch_bytes=[[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
 == exists-null-keys
 early_exit=none
 GpuUnload: output_rows=1950, output_bytes=15845
-  in_rows=[[478,523,485,464]] batch_rows=[[0,478],[0,523],[0,0,0,0,0,0,0,0,485],[0,0,464]] batch_bytes=[[0,3884],[0,4250],[0,0,0,0,0,0,0,0,3941],[0,0,3770]]
+  in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3884],[4250],[3941],[3770]]
   GpuHashJoin: join_type=LeftSemi, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=4, batches=multiple, output_rows=1950, output_bytes=15845
-    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[0,478],[0,523],[0,0,0,0,0,0,0,0,485],[0,0,464]] batch_bytes=[[0,3884],[0,4250],[0,0,0,0,0,0,0,0,3941],[0,0,3770]]
-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
-          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
-          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
-            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
-    GpuEmitPartitions: hash=[f_k@0], lanes=4, batches=multiple, hashed_on=[f_k@0], output_rows=20000, output_bytes=82517
-      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[974,904,900,863,867,867,957,900,978,706],[1011,1089,986,912,957,1028,1077,1023,1085,788],[2768,2661,2826,2752,2715,2834,2744,2789,2756,2129],[3696,3795,3738,3923,3911,3721,3672,3738,3630,2847]]
-      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
-        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
-        GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
-          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
+    in_rows=[[478,523,485,464],[2160,2413,5504,8889]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3884],[4250],[3941],[3770]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+      in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+        in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+        GpuFilter: predicate=d_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=23888
+          in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[23888]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
+            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@0], lanes=4, batches=multiple, hashed_on=[f_k@0], output_rows=18966, output_bytes=78252
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[974,904,900,863,867,867,957,900,978,706],[1011,1089,986,912,957,1028,1077,1023,1085,788],[2286,2232,2409,2360,2290,2438,2282,2331,2286,1795],[3696,3795,3738,3923,3911,3721,3672,3738,3630,2847]]
+      GpuFilter: predicate=f_k@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=78239
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[7966,8019,8032,8057,8024,8052,7986,7991,7978,6134]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
+          GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == exists-or-mark
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=2000, output_bytes=16251
+  in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[3884],[4250],[4347],[3770]]
+  GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=4, batches=multiple, output_rows=2000, output_bytes=16251
+    in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[3884],[4250],[4347],[3770]]
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=4, batches=multiple, output_rows=2000, output_bytes=25004
+      in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5976],[6540],[6688],[5800]]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+        in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+        GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+          in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[32750]]
+            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=32750
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[32750],[],[],[]]
+      GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=232368
+        in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[6788,6628,7154,7008,6800,7240,6776,6922,6788,5330],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
+        GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=232342
+          in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[23656,23814,23852,23926,23828,23912,23716,23730,23692,18216]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+            GpuProject: exprs=[1 as Int64(1), f_k@0], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+              in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+              GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+                in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == finish-without-probe
 early_exit=none
 GpuUnload: output_rows=53, output_bytes=431
-  in_rows=[[53]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
+  in_rows=[[53]] batch_rows=[[53]] batch_bytes=[[431]]
   GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=1, batches=multiple, output_rows=53, output_bytes=431
-    in_rows=[[2000]] batch_rows=[[0,53]] batch_bytes=[[0,431]]
+    in_rows=[[2000]] batch_rows=[[53]] batch_bytes=[[431]]
     GpuHashJoin: join_type=LeftMark, on=[(d_k@1, t_k@1)], projection=[d_id@0, d_w@2, mark@3], lanes=1, batches=multiple, output_rows=2000, output_bytes=25000
-      in_rows=[[2000],[8]] batch_rows=[[0,2000]] batch_bytes=[[0,25000]]
+      in_rows=[[2000],[8]] batch_rows=[[2000]] batch_bytes=[[25000]]
       GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2000, output_bytes=32750
         in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[32750]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
@@ -147,9 +209,9 @@ GpuUnload: output_rows=53, output_bytes=431
 == full-join-null-keys
 early_exit=none
 GpuUnload: output_rows=35158, output_bytes=716411
-  in_rows=[[4186,4716,12016,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0,0],[478,521,470,434,449,491,501,485,511,376,0,0],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945,0,0,0,0,0,0,0,0,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0,0,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0,0],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661,0,0],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257,0,0,0,0,0,0,0,0,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0,0,0]]
+  in_rows=[[4186,4716,12016,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0],[478,521,470,434,449,491,501,485,511,376,0],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661,0],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0]]
   GpuHashJoin: join_type=Full, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=4, batches=multiple, output_rows=35158, output_bytes=716411
-    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0,0],[478,521,470,434,449,491,501,485,511,376,0,0],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945,0,0,0,0,0,0,0,0,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0,0,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0,0],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661,0,0],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257,0,0,0,0,0,0,0,0,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0,0,0]]
+    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0],[478,521,470,434,449,491,501,485,511,376,0],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661,0],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
       in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
       GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
@@ -165,11 +227,45 @@ GpuUnload: output_rows=35158, output_bytes=716411
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
           in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == full-join-residual
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=30884, output_bytes=501898
+  in_rows=[[3353,3704,10717,13110]] batch_rows=[[362,335,332,323,329,319,355,343,372,269,14],[376,420,367,341,341,375,397,368,412,283,24],[1084,1048,1120,1110,1054,1136,1076,1113,1066,855,55],[1345,1371,1333,1403,1387,1317,1301,1325,1311,1005,12]] batch_bytes=[[5884,5444,5396,5250,5348,5184,5770,5574,6046,4372,228],[6110,6826,5964,5542,5542,6094,6452,5980,6696,4600,390],[17616,17030,18200,18038,17128,18460,17486,18088,17324,13894,894],[21858,22280,21662,22800,22540,21402,21142,21532,21304,16332,196]]
+  GpuHashJoin: join_type=Full, on=[(d_k@1, f_k@1)], filter=f_qty@probe:2 > d_w@build:2, projection=[d_id@0, f_id@3], lanes=4, batches=multiple, output_rows=30884, output_bytes=501898
+    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[362,335,332,323,329,319,355,343,372,269,14],[376,420,367,341,341,375,397,368,412,283,24],[1084,1048,1120,1110,1054,1136,1076,1113,1066,855,55],[1345,1371,1333,1403,1387,1317,1301,1325,1311,1005,12]] batch_bytes=[[5884,5444,5396,5250,5348,5184,5770,5574,6046,4372,228],[6110,6826,5964,5542,5542,6094,6452,5980,6696,4600,390],[17616,17030,18200,18038,17128,18460,17486,18088,17324,13894,894],[21858,22280,21662,22800,22540,21402,21142,21532,21304,16332,196]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[32750]]
+          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=32750
+            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[32750],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=327551
+      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[10988,10563,11218,10924,10777,11250,10892,11071,10940,8451],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == in-is-null
 skipped: not enabled at this mode
 == indf-full-join
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=2009, output_bytes=24612
+  in_rows=[[2009]] batch_rows=[[2009,0]] batch_bytes=[[24612,0]]
+  GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, output_rows=2009, output_bytes=24612
+    in_rows=[[2009]] batch_rows=[[2009,0]] batch_bytes=[[24612,0]]
+    GpuHashJoin: join_type=Full, on=[(t_k@1, d_k@1)], null_equals_null=true, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, output_rows=2009, output_bytes=24612
+      in_rows=[[8],[2000]] batch_rows=[[2009,0]] batch_bytes=[[24612,0]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+        in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
+          in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
 == inner-join-hot-keys
 early_exit=none
 GpuUnload: output_rows=34070, output_bytes=553676
@@ -177,21 +273,25 @@ GpuUnload: output_rows=34070, output_bytes=553676
   GpuProject: exprs=[f_id@1, d_id@0], lanes=4, batches=multiple, output_rows=34070, output_bytes=553676
     in_rows=[[4186,4712,10932,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[477,520,470,434,449,491,500,485,510,376],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[7476,6924,6794,6550,6534,6550,7298,6972,7508,5428],[7752,8450,7638,7054,7298,7980,8126,7882,8288,6110],[17892,17438,18868,18460,17908,19014,17810,18282,17940,14040],[23498,23986,23678,24864,24604,23418,23044,23352,23158,17810]]
     GpuHashJoin: join_type=Inner, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2], lanes=4, batches=multiple, output_rows=34070, output_bytes=553676
-      in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[477,520,470,434,449,491,500,485,510,376],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[7476,6924,6794,6550,6534,6550,7298,6972,7508,5428],[7752,8450,7638,7054,7298,7980,8126,7882,8288,6110],[17892,17438,18868,18460,17908,19014,17810,18282,17940,14040],[23498,23986,23678,24864,24604,23418,23044,23352,23158,17810]]
-      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-        in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-        GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-          in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
-            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
-            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
-              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
-      GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=245034
-        in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
-          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
-          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
-            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+      in_rows=[[478,523,485,464],[2160,2413,5504,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[477,520,470,434,449,491,500,485,510,376],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[7476,6924,6794,6550,6534,6550,7298,6972,7508,5428],[7752,8450,7638,7054,7298,7980,8126,7882,8288,6110],[17892,17438,18868,18460,17908,19014,17810,18282,17940,14040],[23498,23986,23678,24864,24604,23418,23044,23352,23158,17810]]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+        in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+        GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+          in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+          GpuFilter: predicate=d_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=23888
+            in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[23888]]
+            GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+              in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
+              GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
+                in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
+      GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=232368
+        in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[6788,6628,7154,7008,6800,7240,6776,6922,6788,5330],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
+        GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=232342
+          in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[23656,23814,23852,23926,23828,23912,23716,23730,23692,18216]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+            GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+              in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == int8-key-group
 early_exit=none
 GpuUnload: output_rows=200, output_bytes=1856
@@ -215,9 +315,9 @@ GpuUnload: output_rows=200, output_bytes=1856
 == left-join-null-keys
 early_exit=none
 GpuUnload: output_rows=34120, output_bytes=695255
-  in_rows=[[4186,4712,10982,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0,0],[477,520,470,434,449,491,500,485,510,376,0,0],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864,0,0,0,0,0,0,0,0,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0,0,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0,0],[9720,10595,9577,8845,9151,10006,10189,9883,10392,7661,0,0],[22434,21865,23658,23146,22454,23841,22331,22923,22494,17604,0,0,0,0,0,0,0,0,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0,0,0]]
+  in_rows=[[4186,4712,10982,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0],[477,520,470,434,449,491,500,485,510,376,0],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0],[9720,10595,9577,8845,9151,10006,10189,9883,10392,7661,0],[22434,21865,23658,23146,22454,23841,22331,22923,22494,17604,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0]]
   GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=34120, output_bytes=695255
-    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0,0],[477,520,470,434,449,491,500,485,510,376,0,0],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864,0,0,0,0,0,0,0,0,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0,0,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0,0],[9720,10595,9577,8845,9151,10006,10189,9883,10392,7661,0,0],[22434,21865,23658,23146,22454,23841,22331,22923,22494,17604,0,0,0,0,0,0,0,0,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0,0,0]]
+    in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334,0],[477,520,470,434,449,491,500,485,510,376,0],[1101,1073,1161,1136,1102,1170,1096,1125,1104,864,50],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096,0]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806,0],[9720,10595,9577,8845,9151,10006,10189,9883,10392,7661,0],[22434,21865,23658,23146,22454,23841,22331,22923,22494,17604,1021],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331,0]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
       in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
       GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
@@ -226,110 +326,518 @@ GpuUnload: output_rows=34120, output_bytes=695255
           in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
           GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
             in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
-    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=245034
-      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=232368
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[6788,6628,7154,7008,6800,7240,6776,6922,6788,5330],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
+      GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=232342
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[23656,23814,23852,23926,23828,23912,23716,23730,23692,18216]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+== left-join-residual
+early_exit=none
+GpuUnload: output_rows=25639, output_bytes=416670
+  in_rows=[[2542,2705,8485,11907]] batch_rows=[[267,248,252,248,260,237,265,259,285,207,14],[281,322,266,251,237,262,294,258,316,194,24],[845,826,890,902,814,917,842,887,815,692,55],[1232,1261,1203,1269,1256,1186,1176,1206,1199,907,12]] batch_bytes=[[4340,4030,4096,4030,4226,3852,4308,4210,4632,3364,228],[4568,5234,4324,4080,3852,4258,4778,4194,5136,3154,390],[13732,13424,14464,14658,13228,14902,13684,14414,13244,11246,894],[20020,20492,19550,20622,20410,19274,19110,19598,19484,14740,196]]
+  GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], filter=f_qty@probe:2 > d_w@build:2, projection=[d_id@0, f_id@3], lanes=4, batches=multiple, output_rows=25639, output_bytes=416670
+    in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[267,248,252,248,260,237,265,259,285,207,14],[281,322,266,251,237,262,294,258,316,194,24],[845,826,890,902,814,917,842,887,815,692,55],[1232,1261,1203,1269,1256,1186,1176,1206,1199,907,12]] batch_bytes=[[4340,4030,4096,4030,4226,3852,4308,4210,4632,3364,228],[4568,5234,4324,4080,3852,4258,4778,4194,5136,3154,390],[13732,13424,14464,14658,13228,14902,13684,14414,13244,11246,894],[20020,20492,19550,20622,20410,19274,19110,19598,19484,14740,196]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[32750]]
+          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=32750
+            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[32750],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=310620
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[9074,8860,9563,9368,9090,9678,9058,9253,9074,7125],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+      GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=310581
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[31622,31833,31884,31983,31852,31964,31702,31721,31670,24350]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
+== like-column-pattern
+early_exit=none
+GpuUnload: output_rows=3722, output_bytes=45596
+  in_rows=[[3722]] batch_rows=[[3722]] batch_bytes=[[45596]]
+  GpuProject: exprs=[d_id@1, t_id@0], lanes=1, batches=multiple, output_rows=3722, output_bytes=45596
+    in_rows=[[3722]] batch_rows=[[3722]] batch_bytes=[[45596]]
+    GpuNestedLoopJoin: join_type=Inner, filter=d_name@probe:1 LIKE t_pat@build:1, projection=[t_id@0, d_id@2], lanes=1, batches=multiple, output_rows=3722, output_bytes=45596
+      in_rows=[[8],[2000]] batch_rows=[[3722]] batch_bytes=[[45596]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=103
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[103]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=103
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[103]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_pat@3], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=103
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[103],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=39394
+        in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[39394]]
+        GpuLoadParquet: table=dim, projections=[d_id@0, d_name@17], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=39394
+          in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[39394],[],[],[]]
+== mark-cross-residual
+early_exit=none
+GpuUnload: output_rows=1945, output_bytes=15805
+  in_rows=[[464,499,530,452]] batch_rows=[[464],[499],[530],[452]] batch_bytes=[[3770],[4055],[4307],[3673]]
+  GpuFilter: predicate=(d_w@1 = 0) OR mark@2, projection=[d_id@0], lanes=4, batches=multiple, output_rows=1945, output_bytes=15805
+    in_rows=[[478,523,535,464]] batch_rows=[[464],[499],[530],[452]] batch_bytes=[[3770],[4055],[4307],[3673]]
+    GpuHashJoin: join_type=LeftMark, on=[(d_k@1, f_k@1)], filter=f_qty@probe:2 > d_w@build:2, projection=[d_id@0, d_w@2, mark@3], lanes=4, batches=multiple, output_rows=2000, output_bytes=25004
+      in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5976],[6540],[6688],[5800]]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+        in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+        GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=32753
+          in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[7828],[8566],[8761],[7598]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[32750]]
+            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=32750
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[32750],[],[],[]]
+      GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=310620
+        in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[9074,8860,9563,9368,9090,9678,9058,9253,9074,7125],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+        GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=310581
+          in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[31622,31833,31884,31983,31852,31964,31702,31721,31670,24350]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+            GpuProject: exprs=[1 as Int64(1), f_k@0, f_qty@1], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+              in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
+              GpuLoadParquet: table=fact, projections=[f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=165000
+                in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[16896,16896],[16896,16896,16896],[16896,16896],[16896,16896,12936]]
+== nl-full
+early_exit=none
+GpuUnload: output_rows=62001, output_bytes=759530
+  in_rows=[[62001]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823,1]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082,14]]
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, output_rows=62001, output_bytes=759530
+    in_rows=[[62001]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823,1]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082,14]]
+    GpuNestedLoopJoin: join_type=Full, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=62001, output_bytes=759530
+      in_rows=[[8],[20000]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823,1]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082,14]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
       GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
         in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
-        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
           in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
-== left-join-residual
-skipped: not enabled at this mode
-== like-column-pattern
-skipped: not enabled at this mode
-== mark-cross-residual
-skipped: not enabled at this mode
-== nl-full
-skipped: not enabled at this mode
 == nl-inner
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=56000, output_bytes=686010
+  in_rows=[[56000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202]]
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, output_rows=56000, output_bytes=686010
+    in_rows=[[56000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202]]
+    GpuNestedLoopJoin: join_type=Inner, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=56000, output_bytes=686010
+      in_rows=[[8],[20000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-left
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=56001, output_bytes=686024
+  in_rows=[[56001]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, output_rows=56001, output_bytes=686024
+    in_rows=[[56001]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+    GpuNestedLoopJoin: join_type=Left, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=56001, output_bytes=686024
+      in_rows=[[8],[20000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-left-anti
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=1, output_bytes=5
+  in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[5]]
+  GpuNestedLoopJoin: join_type=LeftAnti, filter=t_v@build:1 > f_qty@probe:0, projection=[t_id@0], lanes=1, batches=multiple, output_rows=1, output_bytes=5
+    in_rows=[[8],[20000]] batch_rows=[[1]] batch_bytes=[[5]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+    GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+      in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
+      GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+        in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == nl-left-decimal
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=56001, output_bytes=686024
+  in_rows=[[56001]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, output_rows=56001, output_bytes=686024
+    in_rows=[[56001]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+    GpuNestedLoopJoin: join_type=Left, filter=CAST(t_v@build:1 AS Decimal128(20,0)) > CAST(f_qty@probe:1 AS Decimal128(20,0)), projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=56001, output_bytes=686024
+      in_rows=[[8],[20000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343,1]] batch_bytes=[[70316,70316,70316,70304,70316,70316,70316,70292,70316,53202,14]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-left-semi
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=7, output_bytes=29
+  in_rows=[[7]] batch_rows=[[7]] batch_bytes=[[29]]
+  GpuNestedLoopJoin: join_type=LeftSemi, filter=t_v@build:1 > f_qty@probe:0, projection=[t_id@0], lanes=1, batches=multiple, output_rows=7, output_bytes=29
+    in_rows=[[8],[20000]] batch_rows=[[7]] batch_bytes=[[29]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+    GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+      in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
+      GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+        in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == nl-mark
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=8, output_bytes=33
+  in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+  GpuFilter: predicate=(t_k@1 = 0) OR mark@2, projection=[t_id@0], lanes=1, batches=multiple, output_rows=8, output_bytes=33
+    in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+    GpuNestedLoopJoin: join_type=LeftMark, filter=t_v@build:2 > f_qty@probe:1, projection=[t_id@0, t_k@1, mark@3], lanes=1, batches=multiple, output_rows=8, output_bytes=68
+      in_rows=[[8],[20000]] batch_rows=[[8]] batch_bytes=[[68]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=99
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[99]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=99
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[99]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=99
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[99],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+        GpuProject: exprs=[1 as Int64(1), f_qty@0], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+          GpuLoadParquet: table=fact, projections=[f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == nl-projection
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=56000, output_bytes=455005
+  in_rows=[[56000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343]] batch_bytes=[[46638,46638,46638,46630,46638,46638,46638,46622,46638,35287]]
+  GpuNestedLoopJoin: join_type=Inner, filter=f_qty@probe:1 < t_v@build:0, projection=[f_id@1], lanes=1, batches=multiple, output_rows=56000, output_bytes=455005
+    in_rows=[[8],[20000]] batch_rows=[[5740,5740,5740,5739,5740,5740,5740,5738,5740,4343]] batch_bytes=[[46638,46638,46638,46630,46638,46638,46638,46622,46638,35287]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
+        GpuLoadParquet: table=tiny, projections=[t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=33
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[33],[],[],[]]
+    GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-right
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=62000, output_bytes=759516
+  in_rows=[[62000]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082]]
+  GpuProject: exprs=[f_id@1, t_id@0], lanes=1, batches=multiple, output_rows=62000, output_bytes=759516
+    in_rows=[[62000]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082]]
+    GpuNestedLoopJoin: join_type=Right, filter=f_qty@probe:1 < t_v@build:1, projection=[t_id@0, f_id@2], lanes=1, batches=multiple, output_rows=62000, output_bytes=759516
+      in_rows=[[8],[20000]] batch_rows=[[6353,6353,6353,6353,6353,6353,6353,6353,6353,4823]] batch_bytes=[[77826,77826,77826,77826,77826,77826,77826,77826,77826,59082]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=66
+        in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[66]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+          in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+          GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+            in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-right-anti
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=6000, output_bytes=48753
+  in_rows=[[6000]] batch_rows=[[613,613,613,614,613,613,613,615,613,480]] batch_bytes=[[4981,4981,4981,4989,4981,4981,4981,4997,4981,3900]]
+  GpuNestedLoopJoin: join_type=RightAnti, filter=t_v@build:0 > f_qty@probe:1, projection=[f_id@0], lanes=1, batches=multiple, output_rows=6000, output_bytes=48753
+    in_rows=[[8],[20000]] batch_rows=[[613,613,613,614,613,613,613,615,613,480]] batch_bytes=[[4981,4981,4981,4989,4981,4981,4981,4997,4981,3900]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
+        GpuLoadParquet: table=tiny, projections=[t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=33
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[33],[],[],[]]
+    GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == nl-right-semi
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=14000, output_bytes=113756
+  in_rows=[[14000]] batch_rows=[[1435,1435,1435,1434,1435,1435,1435,1433,1435,1088]] batch_bytes=[[11660,11660,11660,11652,11660,11660,11660,11644,11660,8840]]
+  GpuNestedLoopJoin: join_type=RightSemi, filter=t_v@build:0 > f_qty@probe:1, projection=[f_id@0], lanes=1, batches=multiple, output_rows=14000, output_bytes=113756
+    in_rows=[[8],[20000]] batch_rows=[[1435,1435,1435,1434,1435,1435,1435,1433,1435,1088]] batch_bytes=[[11660,11660,11660,11652,11660,11660,11660,11644,11660,8840]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=8, output_bytes=33
+      in_rows=[[8]] batch_rows=[[8]] batch_bytes=[[33]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
+        in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
+        GpuLoadParquet: table=tiny, projections=[t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=33
+          in_rows=[] batch_rows=[[8],[],[],[]] batch_bytes=[[33],[],[],[]]
+    GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+      in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+      GpuLoadParquet: table=fact, projections=[f_id@0, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+        in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == not-exists-null-keys
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=50, output_bytes=407
+  in_rows=[[0,0,50,0]] batch_rows=[[0],[0],[50],[0]] batch_bytes=[[0],[0],[407],[0]]
+  GpuHashJoin: join_type=LeftAnti, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=4, batches=multiple, output_rows=50, output_bytes=407
+    in_rows=[[478,523,535,464],[2160,2413,5504,8889]] batch_rows=[[0],[0],[50],[0]] batch_bytes=[[0],[0],[407],[0]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
+      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
+        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
+          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
+            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@0], lanes=4, batches=multiple, hashed_on=[f_k@0], output_rows=18966, output_bytes=78252
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[974,904,900,863,867,867,957,900,978,706],[1011,1089,986,912,957,1028,1077,1023,1085,788],[2286,2232,2409,2360,2290,2438,2282,2331,2286,1795],[3696,3795,3738,3923,3911,3721,3672,3738,3630,2847]]
+      GpuFilter: predicate=f_k@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=78239
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[7966,8019,8032,8057,8024,8052,7986,7991,7978,6134]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=82500
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[8448,8448,8448,8448,8448,8448,8448,8448,8448,6468]]
+          GpuLoadParquet: table=fact, projections=[f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=82500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[8448,8448],[8448,8448,8448],[8448,8448],[8448,8448,6468]]
 == not-in-correlated
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=17986, output_bytes=146210
+  in_rows=[[3108,5894,3551,5433]] batch_rows=[[87,68,69,98,84,71,63,102,82,66,73,98,87,55,72,103,79,66,69,102,95,75,69,82,73,70,73,103,94,55,67,97,94,72,61,90,72,43,52,77],[159,111,174,156,175,118,177,137,173,112,174,145,180,116,170,134,171,110,175,148,181,105,184,132,157,144,159,149,175,107,173,147,164,106,180,152,133,89,139,103],[82,102,111,65,82,96,118,66,78,100,116,73,83,106,113,62,86,101,107,66,91,88,106,81,81,94,117,71,83,91,124,65,90,93,106,76,67,85,76,53],[123,174,110,147,119,178,105,154,113,177,114,153,123,185,116,134,119,167,106,168,109,193,99,155,113,185,107,153,124,184,92,157,112,163,109,167,83,143,72,128]] batch_bytes=[[707,553,561,797,683,577,512,829,667,537,594,797,707,447,585,837,642,537,561,829,772,610,561,667,594,569,594,837,764,447,545,789,764,585,496,732,585,350,423,626],[1292,902,1414,1268,1422,959,1439,1114,1406,910,1414,1179,1463,943,1382,1089,1390,894,1422,1203,1471,854,1495,1073,1276,1170,1292,1211,1422,870,1406,1195,1333,862,1463,1235,1081,724,1130,837],[667,829,902,529,667,780,959,537,634,813,943,594,675,862,919,504,699,821,870,537,740,715,862,659,659,764,951,577,675,740,1008,529,732,756,862,618,545,691,618,431],[1000,1414,894,1195,967,1447,854,1252,919,1439,927,1244,1000,1504,943,1089,967,1357,862,1365,886,1569,805,1260,919,1504,870,1244,1008,1495,748,1276,910,1325,886,1357,675,1162,585,1040]]
+  GpuHashJoin: join_type=RightAnti, on=[(s_z@0, f_qty@2)], filter=f_k@probe:1 IS NULL, projection=[f_id@0], lanes=4, batches=multiple, output_rows=17986, output_bytes=146210
+    in_rows=[[40,60,40,60],[3194,5990,3593,5529]] batch_rows=[[87,68,69,98,84,71,63,102,82,66,73,98,87,55,72,103,79,66,69,102,95,75,69,82,73,70,73,103,94,55,67,97,94,72,61,90,72,43,52,77],[159,111,174,156,175,118,177,137,173,112,174,145,180,116,170,134,171,110,175,148,181,105,184,132,157,144,159,149,175,107,173,147,164,106,180,152,133,89,139,103],[82,102,111,65,82,96,118,66,78,100,116,73,83,106,113,62,86,101,107,66,91,88,106,81,81,94,117,71,83,91,124,65,90,93,106,76,67,85,76,53],[123,174,110,147,119,178,105,154,113,177,114,153,123,185,116,134,119,167,106,168,109,193,99,155,113,185,107,153,124,184,92,157,112,163,109,167,83,143,72,128]] batch_bytes=[[707,553,561,797,683,577,512,829,667,537,594,797,707,447,585,837,642,537,561,829,772,610,561,667,594,569,594,837,764,447,545,789,764,585,496,732,585,350,423,626],[1292,902,1414,1268,1422,959,1439,1114,1406,910,1414,1179,1463,943,1382,1089,1390,894,1422,1203,1471,854,1495,1073,1276,1170,1292,1211,1422,870,1406,1195,1333,862,1463,1235,1081,724,1130,837],[667,829,902,529,667,780,959,537,634,813,943,594,675,862,919,504,699,821,870,537,740,715,862,659,659,764,951,577,675,740,1008,529,732,756,862,618,545,691,618,431],[1000,1414,894,1195,967,1447,854,1252,919,1439,927,1244,1000,1504,943,1089,967,1357,862,1365,886,1569,805,1260,919,1504,870,1244,1008,1495,748,1276,910,1325,886,1357,675,1162,585,1040]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_z@0], output_rows=200, output_bytes=826
+      in_rows=[[40,60,40,60]] batch_rows=[[40],[60],[40],[60]] batch_bytes=[[165],[248],[165],[248]]
+      GpuEmitPartitions: hash=[s_z@0], lanes=4, batches=multiple, hashed_on=[s_z@0], output_rows=200, output_bytes=826
+        in_rows=[[200]] batch_rows=[[40],[60],[40],[60]] batch_bytes=[[165],[248],[165],[248]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=825
+          in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[825]]
+          GpuLoadParquet: table=sub, projections=[s_z@0], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=825
+            in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[825],[],[],[]]
+    GpuHashJoin: join_type=RightAnti, on=[(s_z@0, f_qty@2)], lanes=4, batches=multiple, hashed_on=[f_qty@2], output_rows=18306, output_bytes=299982
+      in_rows=[[0,2,4,2],[3194,6389,4389,5928]] batch_rows=[[93,68,69,98,92,71,63,102,90,66,73,98,96,55,72,103,89,66,69,102,101,75,69,82,81,70,73,103,108,55,67,97,105,72,61,90,78,43,52,77],[159,123,174,156,175,125,177,137,173,119,174,145,180,131,170,134,171,118,175,148,181,116,184,132,157,150,159,149,175,118,173,147,164,118,180,152,133,96,139,103],[82,102,117,65,82,96,124,66,78,100,118,73,83,106,118,62,86,101,115,66,91,88,107,81,81,94,122,71,83,91,129,65,90,93,109,76,67,85,77,53],[123,174,110,164,119,178,105,165,113,177,114,160,123,185,116,142,119,167,106,172,109,193,99,164,113,185,107,164,124,184,92,165,112,163,109,180,83,143,72,136]] batch_bytes=[[1524,1115,1131,1607,1508,1163,1032,1671,1476,1083,1198,1607,1572,901,1179,1687,1460,1083,1131,1671,1655,1230,1131,1345,1329,1147,1198,1687,1770,901,1099,1591,1722,1179,1000,1476,1278,706,853,1262],[2604,2016,2850,2556,2866,2048,2901,2246,2834,1949,2850,2377,2949,2147,2786,2195,2802,1933,2866,2425,2965,1901,3013,2163,2572,2457,2604,2441,2866,1933,2834,2409,2687,1933,2949,2489,2179,1572,2278,1687],[1345,1671,1917,1067,1345,1572,2032,1083,1278,1639,1933,1198,1361,1738,1933,1016,1409,1655,1885,1083,1492,1441,1754,1329,1329,1540,2000,1163,1361,1492,2115,1067,1476,1524,1786,1246,1099,1393,1262,869],[2016,2850,1802,2687,1949,2917,1722,2703,1853,2901,1869,2620,2016,3032,1901,2326,1949,2735,1738,2818,1786,3163,1623,2687,1853,3032,1754,2687,2032,3013,1508,2703,1834,2671,1786,2949,1361,2342,1179,2227]]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_z@0], output_rows=8, output_bytes=35
+        in_rows=[[0,2,4,2]] batch_rows=[[],[2],[4],[2]] batch_bytes=[[],[9],[17],[9]]
+        GpuEmitPartitions: hash=[s_z@0], lanes=4, batches=multiple, hashed_on=[s_z@0], output_rows=8, output_bytes=35
+          in_rows=[[8]] batch_rows=[[],[2],[4],[2]] batch_bytes=[[],[9],[17],[9]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
+            in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
+            GpuFilter: predicate=s_y@1 IS NULL, projection=[s_z@0], lanes=4, batches=multiple, output_rows=8, output_bytes=33
+              in_rows=[[200,0,0,0]] batch_rows=[[8],[],[],[]] batch_bytes=[[33],[],[],[]]
+              GpuLoadParquet: table=sub, projections=[s_z@0, s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+      GpuEmitPartitions: hash=[f_qty@2], lanes=4, batches=multiple, hashed_on=[f_qty@2], output_rows=19900, output_bytes=326074
+        in_rows=[[19900]] batch_rows=[[93,68,69,98,92,71,63,102,90,66,73,98,96,55,72,103,89,66,69,102,101,75,69,82,81,70,73,103,108,55,67,97,105,72,61,90,78,43,52,77],[164,130,179,180,181,130,182,162,179,126,181,165,186,135,173,162,176,125,180,172,184,117,191,162,162,158,163,173,182,127,174,171,170,122,183,180,135,101,141,125],[84,133,130,100,89,124,139,97,83,127,132,109,90,136,134,91,92,134,132,92,102,115,120,112,87,128,139,95,95,115,147,93,102,121,123,103,75,107,90,72],[127,186,127,172,124,185,125,174,116,183,136,169,129,194,135,149,124,180,123,178,113,205,119,169,116,194,127,173,130,195,108,173,120,175,126,184,86,152,84,143]] batch_bytes=[[1524,1115,1131,1607,1508,1163,1032,1671,1476,1083,1198,1607,1572,901,1179,1687,1460,1083,1131,1671,1655,1230,1131,1345,1329,1147,1198,1687,1770,901,1099,1591,1722,1179,1000,1476,1278,706,853,1262],[2687,2131,2933,2949,2965,2131,2981,2655,2933,2064,2965,2703,3048,2211,2834,2655,2882,2048,2949,2818,3013,1917,3128,2655,2655,2588,2671,2834,2981,2080,2850,2802,2786,2000,2997,2949,2211,1655,2310,2048],[1377,2179,2131,1639,1460,2032,2278,1591,1361,2080,2163,1786,1476,2227,2195,1492,1508,2195,2163,1508,1671,1885,1965,1834,1425,2096,2278,1556,1556,1885,2409,1524,1671,1984,2016,1687,1230,1754,1476,1179],[2080,3048,2080,2818,2032,3032,2048,2850,1901,2997,2227,2770,2115,3179,2211,2441,2032,2949,2016,2917,1853,3358,1949,2770,1901,3179,2080,2834,2131,3195,1770,2834,1965,2866,2064,3013,1409,2489,1377,2342]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=19900, output_bytes=325912
+          in_rows=[[4736,5001,4911,5252]] batch_rows=[[468,517,505,550,486,510,509,535,468,502,522,541,501,520,514,505,481,505,504,544,500,512,499,525,446,550,502,544,515,492,496,534,497,490,493,557,374,403,367,417]] batch_bytes=[[7665,8467,8272,9007,7959,8352,8336,8761,7665,8221,8550,8860,8205,8515,8419,8272,7879,8272,8253,8908,8189,8384,8173,8598,7304,9007,8221,8908,8435,8058,8122,8745,8141,8026,8074,9122,6125,6601,6010,6831]]
+          GpuHashJoin: join_type=RightAnti, on=[(s_z@1, f_qty@2), (s_y@0, f_k@1)], lanes=4, batches=multiple, hashed_on=[f_qty@2, f_k@1], output_rows=19900, output_bytes=325912
+            in_rows=[[58,35,45,54],[4746,5006,4986,5262]] batch_rows=[[468,486,468,501,481,500,446,515,497,374],[517,510,502,520,505,512,550,492,490,403],[505,509,522,514,504,499,502,496,493,367],[550,535,541,505,544,525,544,534,557,417]] batch_bytes=[[7665,7959,7665,8205,7879,8189,7304,8435,8141,6125],[8467,8352,8221,8515,8272,8384,9007,8058,8026,6601],[8272,8336,8550,8419,8253,8173,8221,8122,8074,6010],[9007,8761,8860,8272,8908,8598,8908,8745,9122,6831]]
+            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_z@1, s_y@0], output_rows=192, output_bytes=1588
+              in_rows=[[58,35,45,54]] batch_rows=[[58],[35],[45],[54]] batch_bytes=[[480],[290],[372],[446]]
+              GpuEmitPartitions: hash=[s_z@1, s_y@0], lanes=4, batches=multiple, hashed_on=[s_z@1, s_y@0], output_rows=192, output_bytes=1588
+                in_rows=[[192]] batch_rows=[[58],[35],[45],[54]] batch_bytes=[[480],[290],[372],[446]]
+                GpuFilter: predicate=s_y@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=192, output_bytes=1584
+                  in_rows=[[200]] batch_rows=[[192]] batch_bytes=[[1584]]
+                  GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=1650
+                    in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[1650]]
+                    GpuProject: exprs=[s_y@1, s_z@0], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                      in_rows=[[200,0,0,0]] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+                      GpuLoadParquet: table=sub, projections=[s_z@0, s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                        in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+            GpuEmitPartitions: hash=[f_qty@2, f_k@1], lanes=4, batches=multiple, hashed_on=[f_qty@2, f_k@1], output_rows=20000, output_bytes=327554
+              in_rows=[[20000]] batch_rows=[[469,486,470,501,484,501,447,515,498,375],[517,510,503,520,505,514,550,493,490,404],[509,516,533,521,514,507,507,505,502,372],[553,536,542,506,545,526,544,535,558,417]] batch_bytes=[[7681,7959,7697,8205,7927,8205,7320,8435,8157,6141],[8467,8352,8237,8515,8272,8419,9007,8074,8026,6617],[8336,8451,8729,8534,8419,8304,8304,8272,8221,6093],[9058,8777,8876,8288,8927,8614,8908,8761,9138,6831]]
+              GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+                in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+                GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+                  in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == not-in-uncorrelated
 skipped: not enabled at this mode
 == not-in-under-or
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=18386, output_bytes=149388
+  in_rows=[[3108,5894,3551,5833]] batch_rows=[[3108],[5894],[3551],[5833]] batch_bytes=[[25253],[47889],[28852],[47394]]
+  GpuFilter: predicate=(f_qty@1 = 0) OR ((NOT mark@2 AND NOT mark@3) AND NOT mark@4), projection=[f_id@0], lanes=4, batches=multiple, output_rows=18386, output_bytes=149388
+    in_rows=[[3194,5990,3593,5929]] batch_rows=[[3108],[5894],[3551],[5833]] batch_bytes=[[25253],[47889],[28852],[47394]]
+    GpuHashJoin: join_type=LeftMark, on=[(f_qty@2, s_z@1)], filter=f_k@build:1 IS NULL, projection=[f_id@0, f_qty@2, mark@3, mark@4, mark@5], lanes=4, batches=multiple, hashed_on=[f_qty@1], output_rows=18706, output_bytes=243200
+      in_rows=[[3194,5990,3593,5929],[40,60,40,60]] batch_rows=[[3194],[5990],[3593],[5929]] batch_bytes=[[41528],[77872],[46716],[77084]]
+      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[f_qty@2], output_rows=18706, output_bytes=315683
+        in_rows=[[3194,5990,3593,5929]] batch_rows=[[3194],[5990],[3593],[5929]] batch_bytes=[[53904],[101083],[60638],[100058]]
+        GpuFilter: predicate=(f_qty@2 = 0) OR (NOT mark@3 AND NOT mark@4), lanes=4, batches=multiple, hashed_on=[f_qty@2], output_rows=18706, output_bytes=315683
+          in_rows=[[3194,6389,4389,5929]] batch_rows=[[3194],[5990],[3593],[5929]] batch_bytes=[[53904],[101083],[60638],[100058]]
+          GpuHashJoin: join_type=LeftMark, on=[(f_qty@2, s_z@1)], lanes=4, batches=multiple, hashed_on=[f_qty@2], output_rows=19901, output_bytes=335846
+            in_rows=[[3194,6389,4389,5929],[0,2,4,2]] batch_rows=[[3194],[6389],[4389],[5929]] batch_bytes=[[53904],[107817],[74067],[100058]]
+            GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[f_qty@2], output_rows=19901, output_bytes=330866
+              in_rows=[[3194,6389,4389,5929]] batch_rows=[[3194],[6389],[4389],[5929]] batch_bytes=[[53104],[106219],[72969],[98574]]
+              GpuEmitPartitions: hash=[f_qty@2], lanes=4, batches=multiple, hashed_on=[f_qty@2], output_rows=19901, output_bytes=330891
+                in_rows=[[19901]] batch_rows=[[933,641,668,952],[1719,1271,1747,1652],[899,1240,1286,964],[1185,1849,1210,1685]] batch_bytes=[[15513,10661,11108,15827],[28579,21131,29047,27467],[14949,20615,21381,16029],[19705,30744,20120,28015]]
+                GpuMergePartitions: lanes=1, batches=multiple, output_rows=19901, output_bytes=330861
+                  in_rows=[[4736,5001,4911,5253]] batch_rows=[[4736,5001,4911,5253]] batch_bytes=[[78736,83146,81646,87333]]
+                  GpuFilter: predicate=(f_qty@2 = 0) OR NOT mark@3, lanes=4, batches=multiple, hashed_on=[f_qty@2, f_k@1], output_rows=19901, output_bytes=330861
+                    in_rows=[[4746,5006,4986,5262]] batch_rows=[[4736],[5001],[4911],[5253]] batch_bytes=[[78736],[83146],[81646],[87333]]
+                    GpuHashJoin: join_type=LeftMark, on=[(f_qty@2, s_z@1), (f_k@1, s_y@0)], lanes=4, batches=multiple, hashed_on=[f_qty@2, f_k@1], output_rows=20000, output_bytes=332510
+                      in_rows=[[4746,5006,4986,5262],[58,35,45,54]] batch_rows=[[4746],[5006],[4986],[5262]] batch_bytes=[[78906],[83226],[82896],[87482]]
+                      GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[f_qty@2, f_k@1], output_rows=20000, output_bytes=327506
+                        in_rows=[[4746,5006,4986,5262]] batch_rows=[[4746],[5006],[4986],[5262]] batch_bytes=[[77718],[81974],[81648],[86166]]
+                        GpuEmitPartitions: hash=[f_qty@2, f_k@1], lanes=4, batches=multiple, hashed_on=[f_qty@2, f_k@1], output_rows=20000, output_bytes=327554
+                          in_rows=[[20000]] batch_rows=[[469,486,470,501,484,501,447,515,498,375],[517,510,503,520,505,514,550,493,490,404],[509,516,533,521,514,507,507,505,502,372],[553,536,542,506,545,526,544,535,558,417]] batch_bytes=[[7681,7959,7697,8205,7927,8205,7320,8435,8157,6141],[8467,8352,8237,8515,8272,8419,9007,8074,8026,6617],[8336,8451,8729,8534,8419,8304,8304,8272,8221,6093],[9058,8777,8876,8288,8927,8614,8908,8761,9138,6831]]
+                          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+                            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+                            GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+                              in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
+                      GpuEmitPartitions: hash=[s_z@1, s_y@0], lanes=4, batches=multiple, hashed_on=[s_z@1, s_y@0], output_rows=192, output_bytes=1588
+                        in_rows=[[192]] batch_rows=[[58],[35],[45],[54]] batch_bytes=[[480],[290],[372],[446]]
+                        GpuFilter: predicate=s_y@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=192, output_bytes=1584
+                          in_rows=[[200]] batch_rows=[[192]] batch_bytes=[[1584]]
+                          GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=1650
+                            in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[1650]]
+                            GpuProject: exprs=[s_y@1, s_z@0], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                              in_rows=[[200,0,0,0]] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+                              GpuLoadParquet: table=sub, projections=[s_z@0, s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                                in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+            GpuEmitPartitions: hash=[s_z@1], lanes=4, batches=multiple, hashed_on=[s_z@1], output_rows=8, output_bytes=70
+              in_rows=[[8]] batch_rows=[[],[2],[4],[2]] batch_bytes=[[],[18],[34],[18]]
+              GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
+                in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
+                GpuProject: exprs=[s_y@1, s_z@0], lanes=4, batches=multiple, output_rows=8, output_bytes=66
+                  in_rows=[[8,0,0,0]] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+                  GpuFilter: predicate=s_y@1 IS NULL, lanes=4, batches=multiple, output_rows=8, output_bytes=66
+                    in_rows=[[200,0,0,0]] batch_rows=[[8],[],[],[]] batch_bytes=[[66],[],[],[]]
+                    GpuLoadParquet: table=sub, projections=[s_z@0, s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+                      in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+      GpuEmitPartitions: hash=[s_z@1], lanes=4, batches=multiple, hashed_on=[s_z@1], output_rows=200, output_bytes=1652
+        in_rows=[[200]] batch_rows=[[40],[60],[40],[60]] batch_bytes=[[330],[496],[330],[496]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=1650
+          in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[1650]]
+          GpuProject: exprs=[s_y@1, s_z@0], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+            in_rows=[[200,0,0,0]] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
+            GpuLoadParquet: table=sub, projections=[s_z@0, s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=1650
+              in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[1650],[],[],[]]
 == not-not-in
 early_exit=none
 GpuUnload: output_rows=5002, output_bytes=40657
   in_rows=[[388,374,495,3745]] batch_rows=[[32,32,39,35,43,50,43,44,39,31],[42,44,33,24,40,39,42,34,45,31],[64,43,44,62,51,49,54,41,48,39],[380,399,372,396,379,390,374,374,388,293]] batch_bytes=[[260,260,317,285,350,407,350,358,317,252],[342,358,269,195,325,317,342,277,366,252],[520,350,358,504,415,399,439,334,390,317],[3088,3242,3023,3218,3080,3169,3039,3039,3153,2381]]
   GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=5002, output_bytes=40657
-    in_rows=[[45,46,64,45],[2160,2413,6538,8889]] batch_rows=[[32,32,39,35,43,50,43,44,39,31],[42,44,33,24,40,39,42,34,45,31],[64,43,44,62,51,49,54,41,48,39],[380,399,372,396,379,390,374,374,388,293]] batch_bytes=[[260,260,317,285,350,407,350,358,317,252],[342,358,269,195,325,317,342,277,366,252],[520,350,358,504,415,399,439,334,390,317],[3088,3242,3023,3218,3080,3169,3039,3039,3153,2381]]
-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=200, output_bytes=826
-      in_rows=[[45,46,64,45]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
-      GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], output_rows=200, output_bytes=826
-        in_rows=[[200]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=825
-          in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[825]]
-          GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=825
-            in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[825],[],[],[]]
-    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=245034
-      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
-      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
-        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
-        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
-          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+    in_rows=[[45,46,56,45],[2160,2413,5504,8889]] batch_rows=[[32,32,39,35,43,50,43,44,39,31],[42,44,33,24,40,39,42,34,45,31],[64,43,44,62,51,49,54,41,48,39],[380,399,372,396,379,390,374,374,388,293]] batch_bytes=[[260,260,317,285,350,407,350,358,317,252],[342,358,269,195,325,317,342,277,366,252],[520,350,358,504,415,399,439,334,390,317],[3088,3242,3023,3218,3080,3169,3039,3039,3153,2381]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=192, output_bytes=793
+      in_rows=[[45,46,56,45]] batch_rows=[[45],[46],[56],[45]] batch_bytes=[[186],[190],[231],[186]]
+      GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], output_rows=192, output_bytes=793
+        in_rows=[[192]] batch_rows=[[45],[46],[56],[45]] batch_bytes=[[186],[190],[231],[186]]
+        GpuFilter: predicate=s_y@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=192, output_bytes=792
+          in_rows=[[200]] batch_rows=[[192]] batch_bytes=[[792]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=825
+            in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[825]]
+            GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=825
+              in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[825],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=232368
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[6788,6628,7154,7008,6800,7240,6776,6922,6788,5330],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
+      GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=232342
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[23656,23814,23852,23926,23828,23912,23716,23730,23692,18216]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == not-or-not-in
 early_exit=none
 GpuUnload: output_rows=4915, output_bytes=39953
   in_rows=[[383,368,488,3676]] batch_rows=[[32,30,39,34,42,50,43,43,39,31],[41,44,33,24,38,38,42,33,44,31],[64,42,43,61,50,49,53,40,47,39],[371,393,366,389,371,380,369,369,382,286]] batch_bytes=[[260,244,317,277,342,407,350,350,317,252],[334,358,269,195,309,309,342,269,358,252],[520,342,350,496,407,399,431,325,382,317],[3015,3194,2974,3161,3015,3088,2999,2999,3104,2324]]
   GpuHashJoin: join_type=RightSemi, on=[(s_y@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=4915, output_bytes=39953
-    in_rows=[[45,46,64,45],[2115,2369,6412,8704]] batch_rows=[[32,30,39,34,42,50,43,43,39,31],[41,44,33,24,38,38,42,33,44,31],[64,42,43,61,50,49,53,40,47,39],[371,393,366,389,371,380,369,369,382,286]] batch_bytes=[[260,244,317,277,342,407,350,350,317,252],[334,358,269,195,309,309,342,269,358,252],[520,342,350,496,407,399,431,325,382,317],[3015,3194,2974,3161,3015,3088,2999,2999,3104,2324]]
-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=200, output_bytes=826
-      in_rows=[[45,46,64,45]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
-      GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], output_rows=200, output_bytes=826
-        in_rows=[[200]] batch_rows=[[45],[46],[64],[45]] batch_bytes=[[186],[190],[264],[186]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=825
-          in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[825]]
-          GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=825
-            in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[825],[],[],[]]
-    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=19600, output_bytes=240132
-      in_rows=[[19600]] batch_rows=[[229,215,216,204,205,206,228,213,229,170],[242,259,236,218,228,245,257,238,261,185],[661,630,669,654,646,672,650,666,653,511],[875,903,886,931,928,884,872,890,864,671]] batch_bytes=[[2806,2634,2646,2500,2512,2524,2794,2610,2806,2084],[2966,3174,2892,2672,2794,3002,3150,2916,3198,2268],[8098,7718,8196,8012,7914,8232,7964,8160,8000,6260],[10720,11062,10854,11406,11368,10830,10682,10904,10584,8220]]
-      GpuMergePartitions: lanes=1, batches=multiple, output_rows=19600, output_bytes=240104
-        in_rows=[[4014,6021,4014,5551]] batch_rows=[[2007,2007,2007,2007,2007,2007,2007,2007,2007,1537]] batch_bytes=[[24586,24586,24586,24586,24586,24586,24586,24586,24586,18830]]
-        GpuFilter: predicate=f_qty@2 != 0, projection=[f_id@0, f_k@1], lanes=4, batches=multiple, output_rows=19600, output_bytes=240104
-          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2007,2007],[2007,2007,2007],[2007,2007],[2007,2007,1537]] batch_bytes=[[24586,24586],[24586,24586,24586],[24586,24586],[24586,24586,18830]]
-          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
-            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
+    in_rows=[[45,46,56,45],[2115,2369,5408,8704]] batch_rows=[[32,30,39,34,42,50,43,43,39,31],[41,44,33,24,38,38,42,33,44,31],[64,42,43,61,50,49,53,40,47,39],[371,393,366,389,371,380,369,369,382,286]] batch_bytes=[[260,244,317,277,342,407,350,350,317,252],[334,358,269,195,309,309,342,269,358,252],[520,342,350,496,407,399,431,325,382,317],[3015,3194,2974,3161,3015,3088,2999,2999,3104,2324]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[s_y@0], output_rows=192, output_bytes=793
+      in_rows=[[45,46,56,45]] batch_rows=[[45],[46],[56],[45]] batch_bytes=[[186],[190],[231],[186]]
+      GpuEmitPartitions: hash=[s_y@0], lanes=4, batches=multiple, hashed_on=[s_y@0], output_rows=192, output_bytes=793
+        in_rows=[[192]] batch_rows=[[45],[46],[56],[45]] batch_bytes=[[186],[190],[231],[186]]
+        GpuFilter: predicate=s_y@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=192, output_bytes=792
+          in_rows=[[200]] batch_rows=[[192]] batch_bytes=[[792]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=200, output_bytes=825
+            in_rows=[[200,0,0,0]] batch_rows=[[200]] batch_bytes=[[825]]
+            GpuLoadParquet: table=sub, projections=[s_y@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=200, output_bytes=825
+              in_rows=[] batch_rows=[[200],[],[],[]] batch_bytes=[[825],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18596, output_bytes=227838
+      in_rows=[[18596]] batch_rows=[[229,215,216,204,205,206,228,213,229,170],[242,259,236,218,228,245,257,238,261,185],[546,530,573,562,545,579,543,556,541,433],[875,903,886,931,928,884,872,890,864,671]] batch_bytes=[[2806,2634,2646,2500,2512,2524,2794,2610,2806,2084],[2966,3174,2892,2672,2794,3002,3150,2916,3198,2268],[6690,6494,7020,6886,6678,7094,6652,6812,6628,5306],[10720,11062,10854,11406,11368,10830,10682,10904,10584,8220]]
+      GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18596, output_bytes=227812
+        in_rows=[[19600]] batch_rows=[[1892,1907,1911,1915,1906,1914,1900,1897,1895,1459]] batch_bytes=[[23178,23362,23410,23460,23350,23448,23276,23240,23214,17874]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=19600, output_bytes=240104
+          in_rows=[[4014,6021,4014,5551]] batch_rows=[[2007,2007,2007,2007,2007,2007,2007,2007,2007,1537]] batch_bytes=[[24586,24586,24586,24586,24586,24586,24586,24586,24586,18830]]
+          GpuFilter: predicate=f_qty@2 != 0, projection=[f_id@0, f_k@1], lanes=4, batches=multiple, output_rows=19600, output_bytes=240104
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2007,2007],[2007,2007,2007],[2007,2007],[2007,2007,1537]] batch_bytes=[[24586,24586],[24586,24586,24586],[24586,24586],[24586,24586,18830]]
+            GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+              in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == outer-on-true-empty
 skipped: not enabled at this mode
 == probe-exists-residual
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=14755, output_bytes=119900
+  in_rows=[[1349,1414,4306,7686]] batch_rows=[[141,132,138,134,141,128,142,134,150,109],[150,166,138,131,128,136,158,138,167,102],[432,423,455,459,418,468,431,450,417,353],[783,810,776,817,817,771,765,787,768,592]] batch_bytes=[[1146,1073,1122,1089,1146,1040,1154,1089,1219,886],[1219,1349,1122,1065,1040,1105,1284,1122,1357,829],[3510,3437,3697,3730,3397,3803,3502,3657,3389,2869],[6362,6582,6305,6639,6639,6265,6216,6395,6240,4810]]
+  GpuHashJoin: join_type=RightSemi, on=[(d_k@0, f_k@1)], filter=d_w@build:1 < f_qty@probe:2, projection=[f_id@0], lanes=4, batches=multiple, output_rows=14755, output_bytes=119900
+    in_rows=[[478,523,485,464],[2160,2413,5504,8889]] batch_rows=[[141,132,138,134,141,128,142,134,150,109],[150,166,138,131,128,136,158,138,167,102],[432,423,455,459,418,468,431,450,417,353],[783,810,776,817,817,771,765,787,768,592]] batch_bytes=[[1146,1073,1122,1089,1146,1040,1154,1089,1219,886],[1219,1349,1122,1065,1040,1105,1284,1122,1357,829],[3510,3437,3697,3730,3397,3803,3502,3657,3389,2869],[6362,6582,6305,6639,6639,6265,6216,6395,6240,4810]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@0], output_rows=1950, output_bytes=16090
+      in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3944],[4316],[4002],[3828]]
+      GpuEmitPartitions: hash=[d_k@0], lanes=4, batches=multiple, hashed_on=[d_k@0], output_rows=1950, output_bytes=16090
+        in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3944],[4316],[4002],[3828]]
+        GpuFilter: predicate=d_k@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=16088
+          in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[16088]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=16500
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[16500]]
+            GpuLoadParquet: table=dim, projections=[d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=16500
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[16500],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=18966, output_bytes=310620
+      in_rows=[[18966]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[554,541,584,572,555,591,553,565,554,435],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[9074,8860,9563,9368,9090,9678,9058,9253,9074,7125],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+      GpuFilter: predicate=f_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=18966, output_bytes=310581
+        in_rows=[[20000]] batch_rows=[[1931,1944,1947,1953,1945,1952,1936,1937,1934,1487]] batch_bytes=[[31622,31833,31884,31983,31852,31964,31702,31721,31670,24350]]
+        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == probe-not-exists-residual
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=5245, output_bytes=42632
+  in_rows=[[811,999,2232,1203]] batch_rows=[[95,87,80,75,69,82,90,84,87,62],[95,98,101,90,104,113,103,110,96,89],[239,222,230,208,240,219,234,226,251,163],[113,110,130,134,131,131,125,119,112,98]] batch_bytes=[[772,707,650,610,561,667,732,683,707,504],[772,797,821,732,845,919,837,894,780,724],[1942,1804,1869,1690,1950,1780,1902,1837,2040,1325],[919,894,1057,1089,1065,1065,1016,967,910,797]]
+  GpuHashJoin: join_type=RightAnti, on=[(d_k@0, f_k@1)], filter=d_w@build:1 < f_qty@probe:2, projection=[f_id@0], lanes=4, batches=multiple, output_rows=5245, output_bytes=42632
+    in_rows=[[478,523,485,464],[2160,2413,6538,8889]] batch_rows=[[95,87,80,75,69,82,90,84,87,62],[95,98,101,90,104,113,103,110,96,89],[239,222,230,208,240,219,234,226,251,163],[113,110,130,134,131,131,125,119,112,98]] batch_bytes=[[772,707,650,610,561,667,732,683,707,504],[772,797,821,732,845,919,837,894,780,724],[1942,1804,1869,1690,1950,1780,1902,1837,2040,1325],[919,894,1057,1089,1065,1065,1016,967,910,797]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@0], output_rows=1950, output_bytes=16090
+      in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3944],[4316],[4002],[3828]]
+      GpuEmitPartitions: hash=[d_k@0], lanes=4, batches=multiple, hashed_on=[d_k@0], output_rows=1950, output_bytes=16090
+        in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[3944],[4316],[4002],[3828]]
+        GpuFilter: predicate=d_k@0 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=16088
+          in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[16088]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=16500
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[16500]]
+            GpuLoadParquet: table=dim, projections=[d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=16500
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[16500],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=327551
+      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[10988,10563,11218,10924,10777,11250,10892,11071,10940,8451],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == right-join-null-keys
 early_exit=none
 GpuUnload: output_rows=35108, output_bytes=715390
   in_rows=[[4186,4716,11966,14240]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[478,521,470,434,449,491,501,485,511,376],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331]]
   GpuHashJoin: join_type=Right, on=[(d_k@1, f_k@1)], projection=[d_id@0, f_id@2, f_k@3], lanes=4, batches=multiple, hashed_on=[f_k@2], output_rows=35108, output_bytes=715390
-    in_rows=[[478,523,535,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[478,521,470,434,449,491,501,485,511,376],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331]]
-    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-      in_rows=[[478,523,535,464]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=2000, output_bytes=24502
-        in_rows=[[2000]] batch_rows=[[478],[523],[535],[464]] batch_bytes=[[5856],[6408],[6554],[5684]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
-          in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
-          GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
-            in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
+    in_rows=[[478,523,485,464],[2160,2413,6538,8889]] batch_rows=[[460,426,418,403,402,403,449,429,462,334],[478,521,470,434,449,491,501,485,511,376],[1218,1177,1262,1231,1205,1266,1208,1236,1218,945],[1446,1476,1457,1530,1514,1441,1418,1437,1425,1096]] batch_bytes=[[9374,8682,8519,8213,8193,8213,9151,8742,9414,6806],[9740,10618,9577,8845,9151,10006,10209,9883,10412,7661],[24819,23984,25714,25082,24553,25797,24613,25185,24819,19257],[29463,30075,29689,31176,30850,29363,28894,29280,29037,22331]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+      in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=1950, output_bytes=23890
+        in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[5856],[6408],[5942],[5684]]
+        GpuFilter: predicate=d_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=23888
+          in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[23888]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=24500
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
+            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
     GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=245034
       in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[10976,11270,11100,11650,11614,11050,10904,11100,10780,8454]]
       GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
@@ -337,7 +845,27 @@ GpuUnload: output_rows=35108, output_bytes=715390
         GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
           in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
 == right-join-residual
-skipped: not enabled at this mode
+early_exit=none
+GpuUnload: output_rows=30779, output_bytes=500190
+  in_rows=[[3339,3680,10662,13098]] batch_rows=[[362,335,332,323,329,319,355,343,372,269],[376,420,367,341,341,375,397,368,412,283],[1084,1048,1120,1110,1054,1136,1076,1113,1066,855],[1345,1371,1333,1403,1387,1317,1301,1325,1311,1005]] batch_bytes=[[5884,5444,5396,5250,5348,5184,5770,5574,6046,4372],[6110,6826,5964,5542,5542,6094,6452,5980,6696,4600],[17616,17030,18200,18038,17128,18460,17486,18088,17324,13894],[21858,22280,21662,22800,22540,21402,21142,21532,21304,16332]]
+  GpuHashJoin: join_type=Right, on=[(d_k@1, f_k@1)], filter=f_qty@probe:2 > d_w@build:2, projection=[d_id@0, f_id@3], lanes=4, batches=multiple, output_rows=30779, output_bytes=500190
+    in_rows=[[478,523,485,464],[2160,2413,6538,8889]] batch_rows=[[362,335,332,323,329,319,355,343,372,269],[376,420,367,341,341,375,397,368,412,283],[1084,1048,1120,1110,1054,1136,1076,1113,1066,855],[1345,1371,1333,1403,1387,1317,1301,1325,1311,1005]] batch_bytes=[[5884,5444,5396,5250,5348,5184,5770,5574,6046,4372],[6110,6826,5964,5542,5542,6094,6452,5980,6696,4600],[17616,17030,18200,18038,17128,18460,17486,18088,17324,13894],[21858,22280,21662,22800,22540,21402,21142,21532,21304,16332]]
+    GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@1], output_rows=1950, output_bytes=31935
+      in_rows=[[478,523,485,464]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[7828],[8566],[7943],[7598]]
+      GpuEmitPartitions: hash=[d_k@1], lanes=4, batches=multiple, hashed_on=[d_k@1], output_rows=1950, output_bytes=31935
+        in_rows=[[1950]] batch_rows=[[478],[523],[485],[464]] batch_bytes=[[7828],[8566],[7943],[7598]]
+        GpuFilter: predicate=d_k@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=1950, output_bytes=31932
+          in_rows=[[2000]] batch_rows=[[1950]] batch_bytes=[[31932]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=2000, output_bytes=32750
+            in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[32750]]
+            GpuLoadParquet: table=dim, projections=[d_id@0, d_k@1, d_w@16], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=32750
+              in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[32750],[],[],[]]
+    GpuEmitPartitions: hash=[f_k@1], lanes=4, batches=multiple, hashed_on=[f_k@1], output_rows=20000, output_bytes=327551
+      in_rows=[[20000]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[896,920,906,951,948,902,890,906,880,690]] batch_bytes=[[3866,3588,3572,3425,3441,3441,3799,3572,3882,2802],[4013,4323,3914,3620,3799,4080,4275,4061,4307,3128],[10988,10563,11218,10924,10777,11250,10892,11071,10940,8451],[14672,15065,14838,15573,15525,14771,14576,14838,14410,11301]]
+      GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=327500
+        in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[33536,33536,33536,33536,33536,33536,33536,33536,33536,25676]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_qty@16], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=327500
+          in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[33536,33536],[33536,33536,33536],[33536,33536],[33536,33536,25676]]
 == rollup-small-keys
 early_exit=none
 GpuUnload: output_rows=601, output_bytes=5713
@@ -367,9 +895,9 @@ GpuUnload: output_rows=13257, output_bytes=107731
   GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, output_rows=13257, output_bytes=107731
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[221,205,233,235,246,219,213,215,205,154]] batch_bytes=[[1918,1780,1772,1699,1707,1707,1885,1772,1926,1390],[1991,2145,1942,1796,1885,2024,2121,2015,2137,1552],[5452,5241,5566,5420,5347,5582,5404,5493,5428,4193],[1796,1666,1894,1910,1999,1780,1731,1747,1666,1252]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@0], output_rows=8, output_bytes=33
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[33]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[33]]
       GpuEmitPartitions: hash=[t_k@0], lanes=4, batches=multiple, hashed_on=[t_k@0], output_rows=8, output_bytes=33
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[33]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[33]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=33
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[33]]
           GpuLoadParquet: table=tiny, projections=[t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=33
@@ -383,13 +911,13 @@ GpuUnload: output_rows=13257, output_bytes=107731
 == sparse-build-full
 early_exit=none
 GpuUnload: output_rows=40229, output_bytes=492844
-  in_rows=[[2160,2413,6538,29118]] batch_rows=[[236,219,218,209,210,210,232,218,237,171,0,0],[245,264,239,221,232,249,261,248,263,191,0,0],[671,645,685,667,658,687,665,676,668,516,0,0],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298,0,0,0,0,0]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096,0,0],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340,0,0],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322,0,0],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152,0,0,0,0,0]]
+  in_rows=[[2160,2413,6538,29118]] batch_rows=[[236,219,218,209,210,210,232,218,237,171,0],[245,264,239,221,232,249,261,248,263,191,0],[671,645,685,667,658,687,665,676,668,516,0],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298,0]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096,0],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340,0],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322,0],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152,0]]
   GpuHashJoin: join_type=Full, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=4, batches=multiple, output_rows=40229, output_bytes=492844
-    in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171,0,0],[245,264,239,221,232,249,261,248,263,191,0,0],[671,645,685,667,658,687,665,676,668,516,0,0],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298,0,0,0,0,0]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096,0,0],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340,0,0],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322,0,0],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152,0,0,0,0,0]]
+    in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171,0],[245,264,239,221,232,249,261,248,263,191,0],[671,645,685,667,658,687,665,676,668,516,0],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298,0]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096,0],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340,0],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322,0],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152,0]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
       GpuEmitPartitions: hash=[t_k@1], lanes=4, batches=multiple, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
           GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
@@ -407,9 +935,9 @@ GpuUnload: output_rows=40229, output_bytes=492844
   GpuHashJoin: join_type=Right, on=[(t_k@1, f_k@1)], projection=[t_id@0, f_id@2], lanes=4, batches=multiple, output_rows=40229, output_bytes=492844
     in_rows=[[0,0,0,8],[2160,2413,6538,8889]] batch_rows=[[236,219,218,209,210,210,232,218,237,171],[245,264,239,221,232,249,261,248,263,191],[671,645,685,667,658,687,665,676,668,516],[2921,3065,2925,3099,3054,2951,2921,2979,2905,2298]] batch_bytes=[[2892,2684,2672,2562,2574,2574,2842,2672,2904,2096],[3002,3234,2928,2708,2842,3052,3198,3038,3222,2340],[8220,7902,8392,8172,8062,8416,8148,8282,8184,6322],[35784,37548,35832,37964,37412,36150,35784,36494,35588,28152]]
     GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-      in_rows=[[0,0,0,8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+      in_rows=[[0,0,0,8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
       GpuEmitPartitions: hash=[t_k@1], lanes=4, batches=multiple, hashed_on=[t_k@1], output_rows=8, output_bytes=66
-        in_rows=[[8]] batch_rows=[[0],[0],[0],[8]] batch_bytes=[[0],[0],[0],[66]]
+        in_rows=[[8]] batch_rows=[[],[],[],[8]] batch_bytes=[[],[],[],[66]]
         GpuMergePartitions: lanes=1, batches=multiple, output_rows=8, output_bytes=66
           in_rows=[[8,0,0,0]] batch_rows=[[8]] batch_bytes=[[66]]
           GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=8, output_bytes=66
@@ -583,7 +1111,7 @@ GpuUnload: output_rows=1984, output_bytes=32246
   GpuProject: exprs=[f_id@1, d_id@0], lanes=4, batches=multiple, output_rows=1984, output_bytes=32246
     in_rows=[[490,499,497,498]] batch_rows=[[490,0,0,0,0,0,0,0,0,0],[499,0,0,0,0,0,0,0,0,0],[497,0,0,0,0,0,0,0,0,0],[498,0,0,0,0,0,0,0,0,0]] batch_bytes=[[7964,0,0,0,0,0,0,0,0,0],[8110,0,0,0,0,0,0,0,0,0],[8078,0,0,0,0,0,0,0,0,0],[8094,0,0,0,0,0,0,0,0,0]]
     GpuHashJoin: join_type=Inner, on=[(d_ku32@1, f_ku32@1)], projection=[d_id@0, f_id@2], lanes=4, batches=multiple, output_rows=1984, output_bytes=32246
-      in_rows=[[494,506,498,502],[4855,4993,5117,5035]] batch_rows=[[490,0,0,0,0,0,0,0,0,0],[499,0,0,0,0,0,0,0,0,0],[497,0,0,0,0,0,0,0,0,0],[498,0,0,0,0,0,0,0,0,0]] batch_bytes=[[7964,0,0,0,0,0,0,0,0,0],[8110,0,0,0,0,0,0,0,0,0],[8078,0,0,0,0,0,0,0,0,0],[8094,0,0,0,0,0,0,0,0,0]]
+      in_rows=[[494,506,498,502],[4855,4993,4964,5035]] batch_rows=[[490,0,0,0,0,0,0,0,0,0],[499,0,0,0,0,0,0,0,0,0],[497,0,0,0,0,0,0,0,0,0],[498,0,0,0,0,0,0,0,0,0]] batch_bytes=[[7964,0,0,0,0,0,0,0,0,0],[8110,0,0,0,0,0,0,0,0,0],[8078,0,0,0,0,0,0,0,0,0],[8094,0,0,0,0,0,0,0,0,0]]
       GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_ku32@1], output_rows=2000, output_bytes=24504
         in_rows=[[494,506,498,502]] batch_rows=[[494],[506],[498],[502]] batch_bytes=[[6052],[6200],[6102],[6150]]
         GpuEmitPartitions: hash=[d_ku32@1], lanes=4, batches=multiple, hashed_on=[d_ku32@1], output_rows=2000, output_bytes=24504
@@ -592,9 +1120,11 @@ GpuUnload: output_rows=1984, output_bytes=32246
             in_rows=[[2000,0,0,0]] batch_rows=[[2000]] batch_bytes=[[24500]]
             GpuLoadParquet: table=dim, projections=[d_id@0, d_ku32@14], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, output_rows=2000, output_bytes=24500
               in_rows=[] batch_rows=[[2000],[],[],[]] batch_bytes=[[24500],[],[],[]]
-      GpuEmitPartitions: hash=[f_ku32@1], lanes=4, batches=multiple, hashed_on=[f_ku32@1], output_rows=20000, output_bytes=245038
-        in_rows=[[20000]] batch_rows=[[508,524,472,519,491,497,507,474,490,373],[509,488,514,508,500,526,525,510,527,386],[523,548,530,505,523,503,509,535,517,424],[508,488,532,516,534,522,507,529,514,385]] batch_bytes=[[6224,6420,5782,6358,6016,6090,6212,5808,6004,4570],[6236,5978,6298,6224,6126,6444,6432,6248,6456,4730],[6408,6714,6494,6188,6408,6162,6236,6554,6334,5194],[6224,5978,6518,6322,6542,6396,6212,6482,6298,4718]]
-        GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
-          in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
-          GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
-            in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]
+      GpuEmitPartitions: hash=[f_ku32@1], lanes=4, batches=multiple, hashed_on=[f_ku32@1], output_rows=19847, output_bytes=243164
+        in_rows=[[19847]] batch_rows=[[508,524,472,519,491,497,507,474,490,373],[509,488,514,508,500,526,525,510,527,386],[507,533,515,489,507,487,493,520,501,412],[508,488,532,516,534,522,507,529,514,385]] batch_bytes=[[6224,6420,5782,6358,6016,6090,6212,5808,6004,4570],[6236,5978,6298,6224,6126,6444,6432,6248,6456,4730],[6212,6530,6310,5992,6212,5966,6040,6370,6138,5048],[6224,5978,6518,6322,6542,6396,6212,6482,6298,4718]]
+        GpuFilter: predicate=f_ku32@1 IS NOT NULL, lanes=1, batches=multiple, output_rows=19847, output_bytes=243132
+          in_rows=[[20000]] batch_rows=[[2032,2033,2033,2032,2032,2032,2032,2033,2032,1556]] batch_bytes=[[24892,24906,24906,24892,24892,24892,24892,24906,24892,19062]]
+          GpuMergePartitions: lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+            in_rows=[[4096,6144,4096,5664]] batch_rows=[[2048,2048,2048,2048,2048,2048,2048,2048,2048,1568]] batch_bytes=[[25088,25088,25088,25088,25088,25088,25088,25088,25088,19208]]
+            GpuLoadParquet: table=fact, projections=[f_id@0, f_ku32@14], partition_groups=[[[0],[1]],[[2],[3],[4]],[[5],[6]],[[7],[8],[9]]], lanes=4, batches=multiple, output_rows=20000, output_bytes=245000
+              in_rows=[] batch_rows=[[2048,2048],[2048,2048,2048],[2048,2048],[2048,2048,1568]] batch_bytes=[[25088,25088],[25088,25088,25088],[25088,25088],[25088,25088,19208]]

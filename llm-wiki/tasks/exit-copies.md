@@ -2,7 +2,7 @@
 
 Kind: production
 
-**This task closes [#154](../tickets/corpus-coverage.md#t154)** (every operator exit path
+**This task closes [#154](../archive/archived-tickets.md#t154)** (every operator exit path
 deep-copies its output into a fresh table) for the 11 sites outside `join.cpp`; join-session-cpp
 rewrites `join.cpp` and takes its 10. Sixth of the join-rewrite chain, after refcounted-scatter,
 whose `TableResult` (one owner per column, final shape) it uses without changing it.

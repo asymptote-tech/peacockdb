@@ -19,9 +19,6 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
     case fb::PlanNodeKind_CudfFilter:              return "CudfFilter";
     case fb::PlanNodeKind_CudfProject:             return "CudfProject";
     case fb::PlanNodeKind_CudfAggregate:           return "CudfAggregate";
-    case fb::PlanNodeKind_CudfHashJoin:            return "CudfHashJoin";
-    case fb::PlanNodeKind_CudfCrossJoin:           return "CudfCrossJoin";
-    case fb::PlanNodeKind_CudfNestedLoopJoin:      return "CudfNestedLoopJoin";
     case fb::PlanNodeKind_CudfSort:                return "CudfSort";
     case fb::PlanNodeKind_CudfCoalesceBatches:     return "CudfCoalesceBatches";
     case fb::PlanNodeKind_CudfCoalescePartitions:  return "CudfCoalescePartitions";
@@ -55,12 +52,6 @@ static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
         result = execute_project(node->node_as_CudfProject(), in); break;
       case fb::PlanNodeKind_CudfAggregate:
         result = execute_aggregate(node->node_as_CudfAggregate(), in); break;
-      case fb::PlanNodeKind_CudfHashJoin:
-        result = execute_hash_join(node->node_as_CudfHashJoin(), in); break;
-      case fb::PlanNodeKind_CudfCrossJoin:
-        result = execute_cross_join(node->node_as_CudfCrossJoin(), in); break;
-      case fb::PlanNodeKind_CudfNestedLoopJoin:
-        result = execute_nested_loop_join(node->node_as_CudfNestedLoopJoin(), in); break;
       case fb::PlanNodeKind_CudfSort:
         result = execute_sort(node->node_as_CudfSort(), in); break;
       case fb::PlanNodeKind_CudfCoalesceBatches:

@@ -1,20 +1,23 @@
 //! `GpuCrossJoin` and `GpuNestedLoopJoin` through the harness: a build batch first and
-//! once, the probe streamed where the matrix lets it — the cross join and the Inner
-//! nested loop stream, the Left nested loop takes one probe batch — over the same two
-//! prefixed synthetic sides the hash join uses. Every case is green or a `bug_` test with
-//! its ticket above it; nothing here repairs.
+//! once, the probe streamed — the finishing types answer what they owe at finish — over
+//! the same two prefixed synthetic sides the hash join uses, a nested loop of every type.
+//! Every case is green or a `bug_` test with its ticket above it; nothing here repairs.
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
-use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::arrow::array::{AsArray, RecordBatch};
+use datafusion::arrow::compute::concat_batches;
+use datafusion::arrow::datatypes::{DataType, Field, Int64Type, Schema as ArrowSchema};
+use datafusion::common::{JoinType, ScalarValue};
 
-use super::script::{Outcome, Script, each_answers, run_both};
+use super::aggregate_cases::rows;
+use super::join_cases::output_of;
+use super::script::{Outcome, Script, run_both, run_both_with_join_scratch};
 use crate::plan::{
     BatchLayout, BinaryOp, Expr, GpuCrossJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
-    JoinSide, NestedLoopJoinType, Schema,
+    JoinSide, Schema,
 };
-use crate::tests::compare::{Order, assert_same};
+use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{prefixed, synthetic};
 
@@ -35,16 +38,6 @@ fn side(prefix: &str) -> Vec<Field> {
         .collect()
 }
 
-/// `[build columns…, probe columns…]`, the probe side nullable where a Left form pads it,
-/// as DataFusion's join schema declares it and so as the planner would.
-fn joined(pads_probe: bool) -> Vec<Field> {
-    let probe = side("p_").into_iter().map(|f| {
-        let nullable = pads_probe || f.is_nullable();
-        f.with_nullable(nullable)
-    });
-    side("b_").into_iter().chain(probe).collect()
-}
-
 fn output(fields: Vec<Field>, projection: &Option<Vec<u32>>) -> Schema {
     let fields = match projection {
         None => fields,
@@ -61,7 +54,7 @@ fn leaf(prefix: &str, batches: BatchLayout) -> Box<dyn GpuNode> {
 }
 
 pub(crate) fn cross(projection: Option<Vec<u32>>) -> GpuCrossJoin {
-    let output = output(joined(false), &projection);
+    let output = output(output_of(JoinType::Inner), &projection);
     GpuCrossJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
         leaf("p_", BatchLayout::MultipleBatches),
@@ -120,22 +113,74 @@ fn decimal_residual() -> (Expr, Vec<JoinFilterColumn>) {
     )
 }
 
-/// Inner streams its probe; Left takes one batch, since a predicate join has no keys for
-/// the finish trick to accumulate.
+/// `b_s LIKE p_s`: each build string matched against the probe row's string as a pattern —
+/// a pattern that is a column, which the device's `LIKE` does not take.
+fn like_column_residual() -> (Expr, Vec<JoinFilterColumn>) {
+    (
+        Expr::Like {
+            expr: Box::new(Expr::column(0, "b_s")),
+            pattern: Box::new(Expr::column(1, "p_s")),
+            negated: false,
+            case_insensitive: false,
+        },
+        vec![
+            JoinFilterColumn {
+                side: JoinSide::Build,
+                index: 5,
+            },
+            JoinFilterColumn {
+                side: JoinSide::Probe,
+                index: 5,
+            },
+        ],
+    )
+}
+
+/// `b_key <op> p_key`, where `key` is NULL on every eleventh row of either side, so all four
+/// arms of `IS [NOT] DISTINCT FROM` occur. `cast` puts both operands under a decimal, which
+/// sends the device down the cross-then-mask path instead of the AST.
+fn distinct_residual(op: BinaryOp, cast: bool) -> (Expr, Vec<JoinFilterColumn>) {
+    let operand = |i: u32, name: &str| {
+        let column = Expr::column(i, name);
+        if !cast {
+            return column;
+        }
+        Expr::Cast {
+            expr: Box::new(column),
+            target: DataType::Decimal128(20, 0),
+        }
+    };
+    (
+        Expr::binary(
+            operand(0, "b_key"),
+            op,
+            operand(1, "p_key"),
+            DataType::Boolean,
+        ),
+        vec![
+            JoinFilterColumn {
+                side: JoinSide::Build,
+                index: 1,
+            },
+            JoinFilterColumn {
+                side: JoinSide::Probe,
+                index: 1,
+            },
+        ],
+    )
+}
+
+/// A nested loop of any type, its probe streamed.
 fn nested_with(
-    join_type: NestedLoopJoinType,
+    join_type: JoinType,
     predicate: (Expr, Vec<JoinFilterColumn>),
     projection: Option<Vec<u32>>,
 ) -> GpuNestedLoopJoin {
     let (filter, filter_columns) = predicate;
-    let (pads_probe, probe_batches) = match join_type {
-        NestedLoopJoinType::Inner => (false, BatchLayout::MultipleBatches),
-        NestedLoopJoinType::Left => (true, BatchLayout::SingleBatch),
-    };
-    let output = output(joined(pads_probe), &projection);
+    let output = output(output_of(join_type), &projection);
     GpuNestedLoopJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
-        leaf("p_", probe_batches),
+        leaf("p_", BatchLayout::MultipleBatches),
         join_type,
         filter,
         filter_columns,
@@ -144,16 +189,16 @@ fn nested_with(
     )
 }
 
-fn nested(join_type: NestedLoopJoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
+pub(crate) fn nested(join_type: JoinType, projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
     nested_with(join_type, residual(), projection)
 }
 
 pub(crate) fn inner(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
-    nested(NestedLoopJoinType::Inner, projection)
+    nested(JoinType::Inner, projection)
 }
 
 pub(crate) fn left(projection: Option<Vec<u32>>) -> GpuNestedLoopJoin {
-    nested(NestedLoopJoinType::Left, projection)
+    nested(JoinType::Left, projection)
 }
 
 fn script(build: Option<RecordBatch>, probe: Vec<RecordBatch>) -> Script {
@@ -189,47 +234,26 @@ fn no_build() -> Script {
     script(None, Vec::new())
 }
 
-/// A zero-row table under the crossed schema, which is what the device emits over an
-/// empty side.
-fn crossed_nothing() -> RecordBatch {
-    RecordBatch::new_empty(Arc::new(ArrowSchema::new(joined(false))))
+fn no_build_then_a_probe() -> Script {
+    script(None, vec![probe_batch(16, 21)])
 }
 
-// The `bug_` assertions: a refusal pinned by the stable part of its message, both sides
-// pinned to hand-written slots, and a dropped projection pinned as "the answer is the
-// unprojected one".
+/// No condition at all: what DataFusion plans a scalar subquery as, and the `NOT IN`
+/// rewrite's count side — every type but Inner, which plans as a cross join.
+fn predicate_free(join_type: JoinType) -> GpuNestedLoopJoin {
+    nested_with(
+        join_type,
+        (Expr::Literal(ScalarValue::Boolean(Some(true))), Vec::new()),
+        None,
+    )
+}
+
+// The `bug_` assertion: a refusal pinned by the stable part of its message.
 
 fn gpu_refuses_with(outcome: &Outcome, message: &str) {
     let why = outcome.gpu_refuses();
     assert!(why.contains(message), "{why}");
 }
-
-fn cpu_refuses_with(outcome: &Outcome, message: &str) {
-    let why = outcome.cpu_refuses();
-    assert!(why.contains(message), "{why}");
-}
-
-/// The cpu's answer to `node` with every column, projected to `keep` after the fact —
-/// what a join that applied its projection would have emitted.
-fn cpu_projected(node: &dyn GpuNode, script: Script, keep: &[usize]) -> Vec<Vec<RecordBatch>> {
-    let every_column = run_both(node, script);
-    every_column
-        .cpu
-        .expect("the cpu answers")
-        .iter()
-        .map(|slot| {
-            slot.iter()
-                .map(|b| b.project(keep).expect("ordinals in range"))
-                .collect()
-        })
-        .collect()
-}
-
-const BUILD_COPY: &str =
-    "probe batch 2 has no build side left, since the call for batch 1 erased it (#152)";
-const TWO_OF_SIXTEEN: &str = "number of columns(16) must match number of fields(2) in schema";
-const THREE_OF_SIXTEEN: &str = "number of columns(16) must match number of fields(3) in schema";
-const INNER_ONLY: &str = "non-AST-able NestedLoopJoin filter is only supported for Inner joins";
 
 // The cross join: the product of the two sides, every column of both.
 
@@ -240,36 +264,45 @@ operator_case! {
     }
 }
 
-// #152 — the recipe copies the build side per probe batch, and the first call erased it.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&cross(None), two_probes()), BUILD_COPY);
+    fn a_cross_join_over_two_probe_batches_agrees() {
+        run_both(&cross(None), two_probes()).same(Order::Any);
     }
 }
 
-// #207 — neither backend applies a cross join's projection: the cpu refuses the sixteen
-// columns it declared two of, and the device hands all sixteen to an export told two.
+// `tpch/nested-limits` keeps rows 4 to 23 of a cross join's product with no sort between, so
+// its answer is the order the join emits: on both engines each build row against the whole
+// probe batch in turn, the build row outer. Compared as emitted, and held to that by hand.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_projection_is_dropped_on_both() {
-        let outcome = run_both(&cross(Some(vec![0, 8])), one_probe());
-        let (cpu, gpu) = outcome.both_refuse();
-        assert!(cpu.contains(TWO_OF_SIXTEEN), "{cpu}");
-        assert!(
-            gpu.contains("2 declared precisions for a table of 16 columns"),
-            "{gpu}"
-        );
+    fn a_cross_join_emits_each_build_row_against_the_whole_probe_batch_in_turn() {
+        let outcome = run_both(&cross(None), two_probes());
+        outcome.same(Order::AsEmitted);
+        let first = &outcome.gpu.as_ref().expect("the device answers")[0];
+        let first = concat_batches(&first[0].schema(), first).expect("one schema");
+        let ids = |name: &str| first.column_by_name(name).expect("an id").as_primitive::<Int64Type>().clone();
+        let (build, probe) = (ids("b_id"), ids("p_id"));
+        assert_eq!(first.num_rows(), 16 * 12);
+        for row in 0..first.num_rows() {
+            assert_eq!((build.value(row), probe.value(row)), ((row / 12) as i64, (row % 12) as i64));
+        }
     }
 }
 
-// #208 — DataFusion's cross join over an empty left side ends without a batch; the
-// device's is a zero-row table.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_over_a_zero_row_build_is_nothing_on_the_cpu() {
-        let outcome = run_both(&cross(None), empty_build());
-        each_answers(&outcome, &[vec![], vec![]], &[vec![crossed_nothing()], vec![]]);
+    fn a_cross_join_with_a_projection_agrees() {
+        run_both(&cross(Some(vec![0, 8])), one_probe()).same(Order::Any);
+    }
+}
+
+// #208 — over a zero-row build both engines owe nothing and drain; the executor's own
+// answer, one zero-row batch, is `cpu_backend::tests::join`'s.
+operator_case! {
+    GpuCrossJoin,
+    fn a_cross_join_over_a_zero_row_build_agrees() {
+        run_both(&cross(None), empty_build()).same(Order::Any);
     }
 }
 
@@ -280,12 +313,10 @@ operator_case! {
     }
 }
 
-// #208 — the same with the probe side empty too.
 operator_case! {
     GpuCrossJoin,
-    fn bug_a_cross_join_over_both_sides_empty_is_nothing_on_the_cpu() {
-        let outcome = run_both(&cross(None), both_empty());
-        each_answers(&outcome, &[vec![], vec![]], &[vec![crossed_nothing()], vec![]]);
+    fn a_cross_join_over_both_sides_empty_agrees() {
+        run_both(&cross(None), both_empty()).same(Order::Any);
     }
 }
 
@@ -305,27 +336,17 @@ operator_case! {
     }
 }
 
-// #152 — the Inner recipe copies the build side per probe batch, and the first call
-// erased it.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_an_inner_nested_loop_join_refuses_its_second_probe_batch_on_the_device() {
-        gpu_refuses_with(&run_both(&inner(None), two_probes()), BUILD_COPY);
+    fn an_inner_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&inner(None), two_probes()).same(Order::Any);
     }
 }
 
-// #190 — the cpu passes `NestedLoopJoinExec` no projection and refuses its own sixteen
-// columns; the device applies the node's.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_an_inner_nested_loop_join_projection_is_dropped_on_the_cpu() {
-        let outcome = run_both(&inner(Some(vec![0, 8])), one_probe());
-        cpu_refuses_with(&outcome, TWO_OF_SIXTEEN);
-        assert_same(
-            &cpu_projected(&inner(None), one_probe(), &[0, 8]),
-            outcome.gpu.as_ref().expect("the device answers"),
-            Order::Any,
-        );
+    fn an_inner_nested_loop_join_with_a_projection_agrees() {
+        run_both(&inner(Some(vec![0, 8])), one_probe()).same(Order::Any);
     }
 }
 
@@ -350,32 +371,32 @@ operator_case! {
     }
 }
 
-// The Left nested loop: one probe batch, the unmatched build rows padded.
+// The Left nested loop: one probe batch, the unmatched build rows padded at finish.
 
 operator_case! {
     GpuNestedLoopJoin,
-    fn a_left_nested_loop_join_pads_the_unmatched() {
+    fn a_left_nested_loop_join_agrees() {
         run_both(&left(None), one_probe()).same(Order::Any);
     }
 }
 
-// #190 — the Left form the same way.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_a_left_nested_loop_join_projection_is_dropped_on_the_cpu() {
-        let outcome = run_both(&left(Some(vec![0, 8])), one_probe());
-        cpu_refuses_with(&outcome, TWO_OF_SIXTEEN);
-        assert_same(
-            &cpu_projected(&left(None), one_probe(), &[0, 8]),
-            outcome.gpu.as_ref().expect("the device answers"),
-            Order::Any,
-        );
+    fn a_left_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&left(None), two_probes()).same(Order::Any);
     }
 }
 
 operator_case! {
     GpuNestedLoopJoin,
-    fn a_left_nested_loop_join_over_a_zero_row_build_is_zero_rows() {
+    fn a_left_nested_loop_join_with_a_projection_agrees() {
+        run_both(&left(Some(vec![0, 8])), one_probe()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_nested_loop_join_over_a_zero_row_build_agrees() {
         run_both(&left(None), empty_build()).same(Order::Any);
     }
 }
@@ -394,63 +415,233 @@ operator_case! {
     }
 }
 
+// The seven types beyond Inner and Left (#160), each over two probe batches: the build-side
+// semi family and Full answer the build rows at finish, Right, RightSemi and RightAnti each
+// probe row in its own call.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::Right, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::Full, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_semi_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftSemi, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_anti_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftAnti, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_mark_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::LeftMark, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_semi_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::RightSemi, None), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_right_anti_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&nested(JoinType::RightAnti, None), two_probes()).same(Order::Any);
+    }
+}
+
+// No condition: the three outer types over rows, and over the empty side each pads from.
+// Hand counts: sixteen rows on the side the type keeps.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_left_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Left), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Right), two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_join_over_two_probe_batches_agrees() {
+        run_both(&predicate_free(JoinType::Full), two_probes()).same(Order::Any);
+    }
+}
+
+fn pads_sixteen(join_type: JoinType, script: Script) {
+    let outcome = run_both(&predicate_free(join_type), script);
+    outcome.same(Order::Any);
+    assert_eq!(rows(outcome.gpu.as_ref().expect("the device answers")), 16);
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_left_nested_loop_over_an_empty_probe_pads_every_build_row() {
+        pads_sixteen(JoinType::Left, empty_probe());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_over_an_empty_build_pads_every_probe_row() {
+        pads_sixteen(JoinType::Right, empty_build());
+    }
+}
+
+// pbench's `outer-on-true-empty`, once its empty side plans (#282): no build batch at all.
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_right_nested_loop_with_no_build_batch_pads_every_probe_row() {
+        pads_sixteen(JoinType::Right, no_build_then_a_probe());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_over_an_empty_build_pads_every_probe_row() {
+        pads_sixteen(JoinType::Full, empty_build());
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_predicate_free_full_nested_loop_over_an_empty_probe_pads_every_build_row() {
+        pads_sixteen(JoinType::Full, empty_probe());
+    }
+}
+
+// 64 bytes of candidate pairs a call cuts every probe row into a chunk of its own, on the
+// AST's path and on the cross-then-mask path. Full, since it keeps every probe row and folds
+// its matched column across the chunks before the finish pads the build's.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_in_chunks_of_one_probe_row_agrees() {
+        let node = nested(JoinType::Full, None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_full_nested_loop_join_with_a_decimal_predicate_in_chunks_of_one_probe_row_agrees() {
+        let node = nested_with(JoinType::Full, decimal_residual(), None);
+        run_both_with_join_scratch(&node, two_probes(), 64).same(Order::Any);
+    }
+}
+
 // The predicate the AST cannot take: a decimal operand sends the device down the
 // cross-then-mask path, whose mask columns are read in `filter_columns` order.
 
 operator_case! {
     GpuNestedLoopJoin,
     fn an_inner_nested_loop_join_with_a_decimal_predicate_agrees() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, one_probe()).same(Order::Any);
     }
 }
 
-// #190 — the cpu passes `NestedLoopJoinExec` no projection on this path too; the device
-// applies the node's after the mask.
+// The device applies the node's projection after the mask.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_dropped_on_the_cpu() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), Some(vec![13, 4, 8]));
-        let outcome = run_both(&node, one_probe());
-        cpu_refuses_with(&outcome, THREE_OF_SIXTEEN);
-        let unprojected = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
-        assert_same(
-            &cpu_projected(&unprojected, one_probe(), &[13, 4, 8]),
-            outcome.gpu.as_ref().expect("the device answers"),
-            Order::Any,
-        );
+    fn an_inner_nested_loop_join_with_a_decimal_predicate_and_a_projection_agrees() {
+        let node = nested_with(JoinType::Inner, decimal_residual(), Some(vec![13, 4, 8]));
+        run_both(&node, one_probe()).same(Order::Any);
     }
 }
 
-// #215 — the planner admits a Left nested loop over any predicate; the device's
-// cross-then-mask path is written for Inner alone and throws at its guard.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_is_refused_on_the_device() {
-        let node = nested_with(NestedLoopJoinType::Left, decimal_residual(), None);
-        gpu_refuses_with(&run_both(&node, one_probe()), INNER_ONLY);
+    fn a_left_nested_loop_join_with_a_decimal_predicate_agrees() {
+        let node = nested_with(JoinType::Left, decimal_residual(), None);
+        run_both(&node, one_probe()).same(Order::Any);
     }
 }
 
-// #215 on the device and #190 on the cpu: with a projection neither side answers.
 operator_case! {
     GpuNestedLoopJoin,
-    fn bug_a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_is_refused_on_both() {
-        let node = nested_with(NestedLoopJoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
-        let outcome = run_both(&node, one_probe());
-        let cpu = &outcome.cpu.as_ref().expect_err("the cpu drops the projection").message;
-        assert!(cpu.contains(THREE_OF_SIXTEEN), "{cpu}");
-        let gpu = &outcome.gpu.as_ref().expect_err("the device has no Left mask path").message;
-        assert!(gpu.contains(INNER_ONLY), "{gpu}");
+    fn a_left_nested_loop_join_with_a_decimal_predicate_and_a_projection_agrees() {
+        let node = nested_with(JoinType::Left, decimal_residual(), Some(vec![13, 4, 8]));
+        run_both(&node, one_probe()).same(Order::Any);
     }
 }
 
-// The path's empty shapes, Inner only: Left is a refusal whatever the input.
+// IS [NOT] DISTINCT FROM as the whole condition (review row 9), on either path. The planner
+// makes a pair of bare columns a hash key; an expression operand or IS DISTINCT FROM stays a
+// loop like these.
 
 operator_case! {
     GpuNestedLoopJoin,
-    fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_build_answers_nothing() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+    fn a_full_nested_loop_join_on_is_not_distinct_from_agrees() {
+        let node = nested_with(JoinType::Full, distinct_residual(BinaryOp::IsNotDistinctFrom, false), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_left_nested_loop_join_on_is_distinct_from_agrees() {
+        let node = nested_with(JoinType::Left, distinct_residual(BinaryOp::IsDistinctFrom, false), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn an_inner_nested_loop_join_on_is_not_distinct_from_over_decimals_agrees() {
+        let node = nested_with(JoinType::Inner, distinct_residual(BinaryOp::IsNotDistinctFrom, true), None);
+        run_both(&node, two_probes()).same(Order::Any);
+    }
+}
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn an_inner_nested_loop_join_on_is_distinct_from_over_decimals_agrees() {
+        let node = nested_with(JoinType::Inner, distinct_residual(BinaryOp::IsDistinctFrom, true), None);
+        run_both(&node, one_probe()).same(Order::Any);
+    }
+}
+
+// #246 — a LIKE whose pattern is a column: the cpu answers, the device refuses at
+// `expr.cpp`'s guard.
+operator_case! {
+    GpuNestedLoopJoin,
+    fn bug_a_like_against_a_column_pattern_is_refused_on_the_device() {
+        let node = nested_with(JoinType::Inner, like_column_residual(), None);
+        gpu_refuses_with(&run_both(&node, one_probe()), "LIKE pattern must be a string literal");
+    }
+}
+
+// The path's empty shapes, Inner only.
+
+operator_case! {
+    GpuNestedLoopJoin,
+    fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_build_owes_nothing() {
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, empty_build()).same(Order::Any);
     }
 }
@@ -458,7 +649,45 @@ operator_case! {
 operator_case! {
     GpuNestedLoopJoin,
     fn an_inner_nested_loop_join_with_a_decimal_predicate_over_an_empty_probe_answers_nothing() {
-        let node = nested_with(NestedLoopJoinType::Inner, decimal_residual(), None);
+        let node = nested_with(JoinType::Inner, decimal_residual(), None);
         run_both(&node, empty_probe()).same(Order::Any);
+    }
+}
+
+// #63 — a side of rows and no column is `[__rowmarker__]`, and a cross join of two such sides
+// keeps one marker: its projection names one, since it would otherwise keep nothing.
+
+fn rowmarkers(rows: usize) -> RecordBatch {
+    let zeros: datafusion::arrow::array::ArrayRef =
+        Arc::new(datafusion::arrow::array::Int8Array::from(vec![0i8; rows]));
+    RecordBatch::try_new(Schema::rowmarker().fields.clone(), vec![zeros]).expect("one Int8 column")
+}
+
+operator_case! {
+    GpuCrossJoin,
+    fn a_cross_join_of_two_rowmarker_sides_keeps_one_placeholder() {
+        let join = GpuCrossJoin::new(
+            Given::of(Schema::rowmarker(), BatchLayout::SingleBatch),
+            Given::of(Schema::rowmarker(), BatchLayout::MultipleBatches),
+            Some(vec![0]),
+            Schema::rowmarker(),
+        );
+        let outcome = run_both(
+            &join,
+            script(Some(rowmarkers(3)), vec![rowmarkers(4), rowmarkers(5)]),
+        );
+        outcome.same(Order::Any);
+        let rows: usize = outcome
+            .cpu
+            .as_ref()
+            .expect("the cpu answers")
+            .iter()
+            .flatten()
+            .map(|batch| {
+                assert_eq!(batch.schema().fields(), Schema::rowmarker().fields.fields());
+                batch.num_rows()
+            })
+            .sum();
+        assert_eq!(rows, 3 * 4 + 3 * 5);
     }
 }

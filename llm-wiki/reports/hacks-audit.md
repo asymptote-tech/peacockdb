@@ -248,17 +248,9 @@ Ordered by what a fix has to undo, worst first. Items 4, 8, 9, 10 and 13 are und
 
 ### 1. The driver still drops an empty scatter output under a join that owes nothing
 
-`driver/partitioned.rs` drops a zero-row scatter output unless the node above feeds a join that
-owes rows over an empty build (`feeds_owing_build`), which is what closed #175. For every other
-consumer the drop stands, for a cost reason (hash skew), and it is one route to a lane with no
-batch at all: the arrival #199 (a keyless aggregate answers nothing), #212 and #214 turn on.
-
-It is not the only route — a source whose mapping gives a lane no row groups, or a limit that
-releases every batch, leaves a lane with nothing too — so every consumer has to answer that case
-anyway, and the drop adds none. What it saves is the calls a zero-row batch would cost down the
-chain under skew. So the drop stays, and becomes unconditional: `feeds_owing_build` goes with the
-join rewrite (see Joins), once joins answer a missing build side themselves, and #199's fix gives
-a keyless aggregate its identity row over a lane that received nothing.
+**Resolved by join-backend.** The drop is unconditional: `feeds_owing_build` and its exception
+are gone, and a join answers a lane with no build batch through `set_build(None)`. #199's half,
+a keyless aggregate's identity row over a lane that received nothing, is still open.
 
 ### What I did not read
 
@@ -279,148 +271,22 @@ a keyless aggregate its identity row over a lane that received nothing.
 
 ## Joins
 
-Every join finding from the passes above, gathered here. **All of them are expected to be fixed
-by a complete rewrite of the GPU backend's join nodes, with accompanying minor fixes in the CPU
-backend. The tickets in [`tickets/joins.md`](../tickets/joins.md) are expected to be fixed in bulk
-with that rewrite**, not one at a time. Numbers are the original ones: plain numbers from the
-shape problems, "Propping-up" ones from the second pass.
+Every join finding from the passes above, gathered here. **All are resolved by join-backend**,
+which put both engines' joins on the session. Numbers are the original ones, since tickets cite
+them: plain numbers from the shape problems, "Propping-up" ones from the second pass.
 
-### 5. A Rust model of which joins the C++ hardcodes NULL equality for
-
-`planner/nulls.rs:49`:
-
-    fn hardcodes_null_equality(join_type: JoinType) -> bool {
-        matches!(join_type, JoinType::LeftAnti | JoinType::RightAnti | JoinType::LeftMark)
-    }
-
-This is a copy of a decision that lives in `cpp/src/operators/join.cpp:135-245`, where
-LeftAnti, RightAnti and LeftMark pass `cudf::null_equality::EQUAL` literally while every
-other type passes `join_nulls`. The list is right today. Nothing compares them, and the
-whole refusal — a user-visible plan-time refusal — rests on the list being right.
-
-Antipattern: a model of what another component does where the answer could be read directly.
-
-Fix: make the flat buffer carry a per-join `null_equality` the C++ reads and the planner
-writes, so the refusal becomes unnecessary.
-
-### 11. A finish that answers with nothing where it means to answer with the build side
-
-`gpu_backend/join.rs:207`:
-
-    Some(JoinType::LeftAnti) => {
-        return Ok((self.build.take().into_iter().collect(), CallStats::default()));
-    }
-
-The doc above says an anti join with no probe keys "hands its build side up, which is the
-answer". If `self.build` is `None` — consumed by an earlier call — this returns an empty
-vector and calls it the answer. It is unreachable today, because `accumulated.is_empty()`
-implies no probe batch ran and so nothing consumed the build. That is a two-step argument
-about two other functions, and it is not written down.
-
-Fix: `self.build.take().ok_or_else(...)` with a message saying the build side was already
-consumed. One line, and the invariant stops being an argument. Part of
-[#173](../tickets/joins.md#t173)'s fix, which also applies LeftAnti's projection here.
-
-### 12 (join bullet). A panic where the function already returns an error
-
-- `wire/join.rs:34` — `node.capability().expect(...)` where `?` would do, in a function that
-  already returns `Result<_, PlanError>`.
-
-### Propping-up 4. The CPU backend refuses a join DataFusion can answer
-
-`cpu_backend/join.rs:184`:
-
-    pub fn without_build(self) -> Result<(), BackendError> {
-        if self.calls.empty_build_answers_nothing {
-            return Ok(());
-        }
-        Err(BackendError::new(
-            "this lane's build side is empty, and what this join owes is its probe side — \
-             which takes a call over a build table that does not exist (#212)",
-        ))
-    }
-
-Now [#212](../tickets/joins.md#t212)'s. Nothing on this backend cannot make that answer. The per-call path is a `HashJoinExec`, and a
-Right outer over an empty build side is a shape DataFusion answers every day. The refusal is here
-so the oracle does not answer a query the device refuses — which the ticket states plainly and
-which is a real reason. It is still scaffolding, and it is the largest piece: the `Calls` struct
-carries a `empty_build_answers_nothing` field (`:43`) set at three construction sites (`:79`,
-`:99`, `:163`) for no other purpose.
-
-At close: the field, its three initializers, the refusal arm and the message go, and
-`without_build` becomes `Ok(())` or disappears. The device half at `gpu_backend/join.rs:103`
-follows the same shape and goes with it. `empty_build_answers_nothing` in `plan/join.rs:452`
-survives — for the six types that owe nothing it is a genuine shortcut, not a workaround.
-
-### Propping-up 8. A mock knob that exists to fake a refusal
-
-`driver/mock.rs:90`, `JoinRule.empty_build_owes_its_probe`, read once at `:521` to return an error
-whose text is a paraphrase of the production one. The mock join has no join type, so the script
-supplies the verdict directly.
-
-The field, its default at `:149` and the arm at `:521` are now [#212](../tickets/joins.md#t212)'s.
-They go when it closes.
-
-### Propping-up 9. Two functions in the device join whose whole body is a refusal
-
-`gpu_backend/join.rs:293` and `:304`:
-
-    fn copy_of(&self, _batch: &mut Option<GpuBatch>) -> Result<u64, BackendError> {
-        Err(BackendError::new(
-            "this join's recipe copies its probe batch — ... the ABI has no copy ... (#152)",
-        ))
-    }
-
-`copy_of` takes a `&mut Option<GpuBatch>` it never touches — the underscore is the tell — and
-exists only so the `Input::BatchCopy` arm at `:251` has somewhere to go. `build_copy` is worse
-than a refusal: it hands the first probe batch the original handle and refuses the second, so a
-single-batch probe silently succeeds at a call that asked for a copy. That is why the build-side
-semi family runs on a device at all today.
-
-Both are #152. At close, `copy_of` becomes one refcount call and `build_copy` becomes the same
-call with no special case for the first batch — and the "first one gets the original" trick has
-to be deleted deliberately, because leaving it is a handle released once and used twice.
-
-### Propping-up 10. The recipe walk models an unavailable copy as the same handle
-
-`wire/gpu_tests/mod.rs` (`resolve`; the walk moved from `tests/test_gpu_recipe_walk.rs`):
-
-    match input {
-        Input::Batch | Input::BatchCopy => held(at.batch),
-        Input::BuildSide | Input::BuildSideCopy => held(at.build),
-
-A copy and the thing copied resolve to one handle. The doc at `:206` says why: every shape the
-walk drives plans one probe batch, so the handle is used once. Two more pieces hold that up — an
-assert at `:441` that each lane's probe is exactly one batch, and a refusal table at `:770` where
-`CrossJoin` and `NestedLoopJoin` are `Refused("both copy their build side, and the ABI has no
-copy (#152)")`.
-
-The walk is the only thing in the tree that drives a whole plan against a real device. Its
-coverage is bounded by the bug, and the bound is written in three places rather than one.
-
-When #152 closes: `resolve` must stop conflating the two inputs or it will double-consume a
-handle and report a working recipe for a plan that cannot run. The one-probe-batch assert and two
-arms of the refusal table go. This is the one item here where leaving the scaffolding in place is
-actively unsafe rather than merely confusing.
-
-Less certain, stated both ways: the walk plans everything at `OneBatchPerLane`
-(the walk's header). The header gives a good reason — no driver, so the recipe's call
-order has to be the schedule. But it is also exactly the sizing at which #152 never fires, and
-the two reasons are indistinguishable from the file. If the first reason is the real one, the
-knob stays after the fix; if the second is, the walk should gain a multi-batch mode with it.
-
-### Propping-up 13. Goldens and a cost model that encode the missing copy
-
-Two records of #152 that a fix has to decide about rather than discover:
-
-- The plan goldens spell the input names. `build copy` appears 3,639 times and `batch copy` 69
-  across `testdata/goldens/*/*.plans.txt` and `recipe-payloads.txt`. Whether those move depends on
-  the fix: if refcounted handles keep `BuildSide` and `BuildSideCopy` as distinct recipe inputs —
-  and they probably should, since the last probe batch can still hand over — nothing moves. If the
-  two collapse into one, every one of those lines does. Worth knowing before the branch starts,
-  not after.
-- `scripts/exec_model/operators/recipe.py:392`, `copy_handle`, whose docstring opens "**Not on the
-  frozen surface.**" It tallies `copies` and `copied_bytes` per reason (`:363`), and
-  `tests/test_join_capability.py:439` asserts the counts. That apparatus exists to quantify the
-  ticket. It is the evidence for #152 rather than a workaround of it, which is a good reason to
-  keep it until the ticket closes and none to keep it after.
+- **5.** The Rust copy of the C++'s hardcoded `EQUAL` list is gone with `planner/nulls.rs`. Every
+  join type honours `null_equals_null` on both engines.
+- **11.** `finish_without_keys` is gone. A finish over no probe batch is the session's ordinary
+  finish.
+- **12 (join bullet).** `wire/join.rs` reads no capability, so the `expect` is gone.
+- **Propping-up 4.** `without_build` and the cpu's `Calls` are gone. A lane with no build batch
+  calls `set_build(None)` on both engines (#212).
+- **Propping-up 8.** The mock's `empty_build_owes_its_probe` is gone. The mock reads its type.
+- **Propping-up 9.** `copy_of` and `build_copy` are gone. A session keeps its build table, so no
+  handle is copied (#152).
+- **Propping-up 10.** The recipe walk has no copy inputs left to conflate, no one-probe-batch
+  assert and no join refusals. It still plans at `OneBatchPerLane`, for the reason its header
+  gives.
+- **Propping-up 13.** No golden spells `build copy` or `batch copy`, and exec_model's
+  `copy_handle` is gone with `recipe.py`.

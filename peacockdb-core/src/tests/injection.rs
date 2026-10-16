@@ -27,7 +27,7 @@ use crate::executor::{
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::Schema;
-use crate::plan::empty_build_answers_nothing;
+use crate::plan::empty_build_owes_nothing;
 use crate::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuLoadParquet, GpuMergeSortedPartitions, GpuUnload,
     NodeRef, as_node_ref,
@@ -307,22 +307,22 @@ impl PartitionAccumulatorExecutor<Injected> for CpuPartitionAccumulator {
 impl JoinExecutor<Injected> for CpuJoin {
     type Probing = CpuProbingJoin;
 
-    fn set_build(self, batch: CpuBatch) -> CallResult<CpuProbingJoin> {
+    fn set_build(self, batch: Option<CpuBatch>) -> CallResult<CpuProbingJoin> {
         JoinExecutor::<CpuBackend>::set_build(self, batch)
-    }
-
-    fn without_build(self) -> Result<(), BackendError> {
-        JoinExecutor::<CpuBackend>::without_build(self)
     }
 }
 
 impl ProbingJoin<Injected> for CpuProbingJoin {
-    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+    fn probe_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Option<CpuBatch>> {
         ProbingJoin::<CpuBackend>::probe_and_fetch(self, batch)
     }
 
-    fn finish_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
+    fn finish_and_fetch(self) -> CallResult<Option<CpuBatch>> {
         ProbingJoin::<CpuBackend>::finish_and_fetch(self)
+    }
+
+    fn owes_nothing(&self) -> bool {
+        ProbingJoin::<CpuBackend>::owes_nothing(self)
     }
 }
 
@@ -602,7 +602,7 @@ pub(crate) fn planned_mode(name: &'static str, root: &dyn GpuNode) -> PlannedMod
         match as_node_ref(node) {
             NodeRef::LoadParquet(load) => mode.lanes = mode.lanes.max(load.partition_groups.len()),
             NodeRef::EmitPartitions(_) => mode.shuffles = true,
-            NodeRef::Join(join) if !empty_build_answers_nothing(join.join_type) => {
+            NodeRef::Join(join) if !empty_build_owes_nothing(join.join_type) => {
                 mode.owes_probe_when_empty = true
             }
             _ => {}

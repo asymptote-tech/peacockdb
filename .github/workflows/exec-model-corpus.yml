@@ -11,11 +11,6 @@ name: Exec-model corpus (manual)
 # keep running on every push — the whole suite in cost-report, and test_tpch.py's plan
 # shapes in dataset-matrix, which is now a separate file rather than a `-corpus` exclusion.
 #
-# `backend` chooses what the joins run on. `pandas` is the default sweep; `recipe` routes
-# every join through the FlatBuffers emulation (operators/recipe_join.py), which is the
-# claim PR #121 made — that the frozen fbs and C++ surface executes these queries' joins —
-# checked here against the same oracles rather than against a synthetic matrix.
-#
 # Sharded across processes: the queries are independent, so PCK_SHARD=k/n gives process k
 # every n-th test (scripts/exec_model/tests/harness.py). A shard that selects nothing is an
 # error rather than a green no-op, so SHARDS must not exceed the smallest file's test
@@ -27,14 +22,10 @@ on:
         description: 'Run only tests whose name contains this (empty = all corpus tests)'
         required: false
         default: ''
-      backend:
-        description: 'Join backend: pandas, or recipe for the FlatBuffers emulation'
-        required: false
-        default: 'pandas' 
 
 jobs:
   corpus:
-    name: Corpus queries (${{ inputs.backend }}, shard ${{ matrix.shard }})
+    name: Corpus queries (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -66,7 +57,6 @@ jobs:
       - name: Run corpus queries
         env:
           PCK_SHARD: ${{ matrix.shard }}/3
-          PCK_BACKEND: ${{ inputs.backend }}
           FILTER: ${{ inputs.filter }}
           DUCKDB: /tmp/duckdb-bin/duckdb
         run: |
@@ -76,7 +66,7 @@ jobs:
           # run, statuses are OR'd, so one failure cannot hide the other file's.
           status=0
           for f in scripts/exec_model/tests/test_tpch_corpus.py scripts/exec_model/tests/test_tpcds.py; do
-            echo "== $f (shard $PCK_SHARD, backend $PCK_BACKEND)"
+            echo "== $f (shard $PCK_SHARD)"
             python3 "$f" ${FILTER:+"$FILTER"} || status=1
           done
           exit $status

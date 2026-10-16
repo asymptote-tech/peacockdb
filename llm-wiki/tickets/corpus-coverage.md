@@ -17,6 +17,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
   - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
   - [#264 — the device refuses a group key that is not a bare column](#t264)
+  - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -33,8 +34,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Source](#source)
   - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 — a scan with no surviving row groups is refused at planning](#t282)
-- [Performance](#performance)
-  - [#154 — join.cpp's exit paths deep-copy their output into a fresh table](#t154)
 - [Testing](#testing)
   - [#227 Check schema nullability in tests](#t227)
   - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
@@ -68,7 +67,8 @@ them now, `stale-cells` having turned on the four device modes that a closed #18
 Validation was off for all five, so that run says nothing about the names and the refusal still
 stands at every mode; the row keeps no `225` only because no cell of it is off.
 
-**Corpus queries:** `tpch/shuffle-stddev` (schema validation only).
+**Corpus queries:** `tpch/shuffle-stddev` (schema validation only). `tpcds/q39` at every mode and
+`tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off here.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -174,9 +174,11 @@ one: a keyless aggregate answers one row whatever arrived.
 
 **Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
 `tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
-behind them. An empty lane comes from
-tp4-single cutting a one-row-group table into four, or from an Inner join with no build rows in a
-lane. Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
+behind them. And seven device cells whose cpu cells answer: `tpch/q11` and `tpcds/q32` at the three
+tp4 modes and `tpch/q22` at `tp4-single`. There the cpu's identity rows reach the `.cpu.txt` section the device
+is held to, and the device answers the same rows as DuckDB. An empty lane comes from
+tp4-single cutting a table of fewer row groups than lanes into four (q22's customer), or from an
+Inner join with no build rows in a lane (q11's one nation, q32's one-lane build). Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
 where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
 site have no corpus query.
 
@@ -207,9 +209,9 @@ reads state columns by reference. q66's five cpu cells, which run the same trans
 are green. What is missing is a device run: nothing has put a summed quotient on a device.
 
 **Corpus queries:** `tpcds/q66` — twelve `sum(<month>_sales / w_warehouse_sq_ft)` over a two-branch
-union. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`). Closing #55 enables none
-of them: the four multi-batch modes are held by #152, and tp1-single by #220, the cpu's join
-batching. Registry row 67 tags `55 152 220`.
+union. Its five gpu cells are on since join-backend's task 14, which ran them on an L40S under
+cuDF 25.02: each matched the cpu's sections and its answer met DuckDB, so registry row 67 tags
+nothing. That is the corpus half of the proof; the walk test below is still owed.
 
 **Fix proposed:** no code change — a proof, then archive. Add a walk test beside
 `each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
@@ -240,10 +242,10 @@ type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mo
 55's duplicate ordinal is #228.
 
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`, tpcds q5,
-q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`, the one that reaches it on a device — all
-five of its device cells off here, the validator refusing the width. The rest are off first on #152,
-#212 or #220, and no longer on #189 or #206: the shuffle stopped hashing the id and the kernel has
-its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
+q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
+device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
+meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
+id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
 window queries that never run.
 
 **Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
@@ -329,6 +331,21 @@ smallest fix is a planner one, and the device needs no new arm.
 three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
 until this ticket had a number.
 
+<a id="t267"></a>
+### #267 — a Single-mode aggregate over a scan split into lanes is refused at tp4
+DataFusion plans an aggregate `mode=Single` where its input is one partition. The planner can map
+that input to several lanes, and `aggregate_sequence` (`translator/aggregate.rs`) then finalizes
+on every lane with no merge below it. Validation refuses the plan: "a finalizing merge over several
+lanes needs its input hashed on a subset of its group columns". The Final arm merges first; the
+Single arm passes `Shuffle::None` and does not.
+
+The small-table rule hides it: a source under 5 MB plans one lane, so a larger one is needed.
+
+**Corpus queries:** `pbench/not-in-uncorrelated` at the three tp4 modes, where the `NOT IN`
+rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
+`sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
+which refused first.
+
 ## Sort / Limit
 
 <a id="t202"></a>
@@ -401,30 +418,18 @@ both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` t
 <a id="t214"></a>
 ### #214 — a limit drops a zero-row batch on both backends
 
-A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and on the device alike.
+A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
+Both `LimitStream`s cut with `RowInterval::range_of` (`plan/interval.rs`), which answers `None`
+when `start < stop` is false — always, at `n_rows == 0` — so the batch is released as if outside
+the interval. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two
+neighbours (`gpu_tests/harness_cases.rs`). Joins read no batch as an empty side, so what still
+sees the difference is #199's keyless aggregate: `limit → global aggregate` over zero survivors
+loses its identity row.
 
-Both `LimitStream`s take their cut from the one `RowInterval::range_of` (`plan/interval.rs`),
-which answers `None` when `start < stop` is false — and it is false for `n_rows == 0` whatever
-the interval — so the batch is released as if it lay outside the interval. Nothing and a zero-row
-batch are different arrivals downstream, as #205 says: a build side of `filter → limit → coalesce`
-with zero survivors reaches `without_build` and #212's refusal for Right, Full and RightAnti,
-where the same filter without the limit pads and answers. Symmetric, so the harness's cpu-vs-device
-comparison is green by construction. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both`
-and its two neighbours (`gpu_tests/harness_cases.rs`), which want the zero-row batch under the
-schema. Numbered past #213, which the branches above this one have taken.
+**Corpus query:** none.
 
-**Corpus query:** none; the only full joins, tpcds q51 and q97, have their `LIMIT` at the top.
-Simplest shape: `select n_name, r_name from (select * from region where r_regionkey < 0 limit 1)
-r right join nation on n_regionkey = r_regionkey;` (tpch) — refused where the same query without
-the `limit` answers. Unconfirmed that the filter hands the limit a zero-row batch.
-
-**Fix proposed:** in the joins, not the limit — a join reads no batch on either side as an empty
-side. Build: `without_build` pads Right, Full and RightAnti rather than refusing (#212). Probe:
-the finish answers over zero keys (#173, the device's unfiltered LeftSemi/LeftMark), and the
-one-call forms make their call over zero rows — a hash LeftAnti/LeftMark with a residual filter
-(every build row, or every row marked false) and a nested-loop Left (the build rows padded); both
-answer nothing today, on both backends, unticketed. The keyless aggregate's same gap, both
-its sites, is #199's and deferred. Then this ticket drops with its three `bug_` pins.
+**Fix proposed:** a zero-row batch inside the interval is forwarded as it is; the three pins go
+green as `same` cases.
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -442,9 +447,12 @@ zero-row batch are different arrivals: a global merge over nothing is #199's sit
 (`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
 which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
 
-**Corpus queries:** `tpcds/q17` at `tp1-single`, the only enabled corpus query that answers zero
-rows (`mini.result.txt`). Its device cell is off on this ticket (`corpus_cases.inc`); the device
-never ran its other four modes. The 12 bytes are the device's one zero-row batch: three `Utf8`
+**Corpus queries:** `tpcds/q17` at `tp1-single`, the first enabled corpus query that answers zero
+rows (`mini.result.txt`). `pbench/not-in-uncorrelated` at the two tp1 modes is the second, and it
+reaches the no-batch half without a sort: its cross join's build is empty, so the lane ends with
+no call, and the root receives nothing on both engines. Its line is `duckdb_divergent(205)`, as
+q17's is, and its tp1 device cells are on. q17's device cells are all off: its tp1 cells meet
+[#225](#t225) first, and its tp4 cells, which pass, stay off until this fix moves the row's answer. The 12 bytes are the device's one zero-row batch: three `Utf8`
 columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
 `select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
 
@@ -509,7 +517,8 @@ than answering it, the AST path still computing a double. Same class as
 through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
-`Decimal128` row. The likely fix is `cudf_ast_can_evaluate` refusing a bare decimal literal as it already
+`Decimal128` row. **Corpus queries:** `tpcds/q5`, whose `0.00 as return_amt` and `net_loss` the
+schema hook refuses as FLOAT64 at every mode, ahead of #65. The likely fix is `cudf_ast_can_evaluate` refusing a bare decimal literal as it already
 refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t57"></a>
@@ -527,9 +536,8 @@ run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
 
 **Corpus queries:** `tpcds/q39` — `CASE mean WHEN 0 THEN NULL ELSE stdev/mean END` in a project
 and `CASE mean WHEN 0 THEN 0 ELSE stdev/mean END > 1` in a filter, each twice per plan (the CTE is
-read twice). All five gpu cells are off and registry row 40 tags `57` alone. At tp1-single this
-is the refusal (`corpus_cases.inc:284`); the other four modes have not run on a device and may
-meet [#152](joins.md#t152) next.
+read twice). All five gpu cells are off, and registry row 40 tags `57 225`: since the join
+session, every mode meets [#225](#t225)'s Welford names at the aggregate below the filter first.
 
 **Fix proposed:** [fix 7 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix7), about 20 lines in `build_column_case`.
 Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
@@ -554,8 +562,9 @@ Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `cudf
 which compares strings, and a merge reads state columns by reference.
 
 **Corpus queries:** `tpcds/q2`, whose `sum(CASE WHEN d_day_name = 'Sunday' …)` repeats the shape
-per weekday. Its five gpu cells are off (`corpus_cases.inc` gpu modes `none`), also held by #152 at
-every mode; registry row 3 tags `56 152`. The harness test's comment counts the shape 48 times
+per weekday. Its five gpu cells are off, on [#60](#t60)'s `round` as measured: every per-node
+section matches the cpu's and the answer's sums agree, so nothing of this shape showed; registry row
+3 tags `56 60`. The harness test's comment counts the shape 48 times
 in the corpus.
 
 **Fix proposed:** likely fixed already. `a_grouped_sum_of_a_case_over_a_string_equality_agrees`
@@ -577,9 +586,10 @@ Re-emulated over q78's committed answer, exactly five `ratio` cells split under 
 q2 takes the same kernel seven times per row. This ticket used to describe an anti join and memory
 pressure on q78 ([`reports/corpus-fixes.md` fix 6](../reports/corpus-fixes.md#fix6) found neither), and called `round` proven by q54.
 
-**Corpus queries:** tpcds q78 and q2, both off first on #152. After #152, q78 at `gpu_tp1_single`
-must differ from the golden in exactly the five `ratio` cells before this fix and in nothing
-after. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
+**Corpus queries:** tpcds q78 and q2, every gpu cell off on this ticket. Measured on an L40S
+(join-backend's task 14): q78 differs from the golden in exactly the five `ratio` cells at all
+five modes, `2.7800000000000002` among them, and DuckDB says `2.78`; q2 matches every per-node
+section and differs in its answer, its row count and column sums agreeing to the printed digit. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
 from nation;` (tpch): two rows differ on the device today.
 
 **Fix proposed:** [fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6), in `expr.cpp`. `places == 0` keeps
@@ -627,8 +637,8 @@ lineitem), and nothing validates it. On the cpu, `CpuSource` never reads `node.l
 reader has no `with_limit`. At tp1 the limit sits in the scan alone; at tp4 the unload's interval
 hides it, though the loader still reads everything. On the device, `scan.cpp` sets
 `set_num_rows(limit)` and then the call's row groups, which cuDF refuses together, even for one
-row group. Pinned by the four `bug_` cases in `gpu_tests/source_cases.rs`: sixty-four rows for ten
-on the cpu, a refused read on the device. #188 filed the device half and is merged here.
+row group and for a scan of no column. Pinned by the six `bug_` cases in `gpu_tests/source_cases.rs`:
+sixty-four rows for ten on the cpu, a refused read on the device. #188 is merged here.
 
 **Corpus queries:** `tpch/scan-limit`, cpu off at the two tp1 modes and device off at all five.
 `tpch/nested-limits`, device off at all five. Simplest: `select n_nationkey from nation limit 3;`
@@ -683,49 +693,21 @@ No caller decides, so the plan fails. Found 2026-10-08 planning keyless-identity
 works around it (`ss_quantity + ss_item_sk < 0` rather than `ss_quantity < 0`). Filed twice: chain
 J's pbench branch filed it again as #256, now archived as a duplicate of this one.
 
-Not [#208](joins.md#t208), which is this shape at run time: the cpu's cross join emitting nothing
-where the device emits a zero-row batch. The corpus cannot reach #208 until this closes, because
-the plan is refused before either backend sees it.
+Not [#208](../archive/archived-tickets.md#t208), which was this shape at run time: the cpu's cross
+join emitting nothing where the device emitted a zero-row batch. That one is fixed, and the corpus
+shows the fix only once this closes, because the plan is refused before either backend sees it.
 
 **Corpus queries:** none on tpch or tpcds: no corpus filter prunes every row group. pbench's `empty`
 table has none to begin with, so `cross-empty-build` and `outer-on-true-empty` are refused here
-before the joins they test. `cross-empty-build`'s plan cells are off on this ticket; its row also
-carries `208`, the ticket it was written for, which shows once this lifts. Simplest:
+before the joins they test. Both rows' plan cells are off on this ticket alone; `cross-empty-build`
+was written for #208 and shows that fix once this lifts. Simplest:
 `select count(*) from nation where n_nationkey < 0;` (tpch).
 
 **Fix proposed:** a scan with no survivors plans one lane that holds no batch, so its executors
 make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain L) makes
 every node answer right. In keyless-identity. The mapping has no way to say "no partitions", so
-the fix is a representation for an empty scan, not a laxer check; a `GpuEmpty` leaf, the shape
-[#155](joins.md#t155)'s `EmptyExec` arm needs, is the other one.
-
-## Performance
-
-Tickets pulled ahead from the performance path to fix earlier
-
-<a id="t154"></a>
-### #154 — join.cpp's exit paths deep-copy their output into a fresh table
-`std::make_unique<cudf::column>(view)` deep-copies the device buffer, and ten sites in
-`join.cpp` still do it, mostly to a table the same function just produced. An engine running
-a node once per query would pay that once; this one pays it once per node per *batch*.
-
-`execute_hash_join` is worst per exit: `cudf::gather` returns an owning table, the code copies
-each column into `all_cols` (~L337, ~L342), then copies the kept ones again if the node projects
-(~L376). Three kinds: whole table freshly produced (202, 337, 342, 512, 515), which
-`release()` moves instead; ordinal subset (211, 270, 376, 525), which `TableResult::select`
-shares; and a column of an **input** table kept in the output (259), which shares the input's
-owner. Traps: a view taken before the release dangles (`ftv` ~L372), and a repeated projection
-ordinal moved twice leaves a hole — a wrong answer, not a throw. [`join-session-cpp`](../tasks/join-session-cpp.md)
-built the session beside this file, carrying none of these copies, and one allocation bound in
-`test_join_session.cpp` holds it to that. `join-backend` deletes `join.cpp` with the three old
-nodes and closes this; land before [#155](joins.md#t155).
-
-The other eleven sites are gone or justified, by [`exit-copies`](../tasks/exit-copies.md): six
-lost their copy — `expr.cpp`'s `ColumnRef` arm (now `evaluate_column`, a view of the input's own
-column), `filter.cpp`'s fused projection, `project.cpp`'s and `window.cpp`'s input columns, and
-`aggregate.cpp`'s two groupby key tables — and five keep it, the four Welford struct members
-because `cudf::make_structs_column` owns its children, and the merged-state child because up to
-three builds read one struct, a child each.
+the fix is a representation for an empty scan, not a laxer check; a `GpuEmpty` leaf, which
+join-backend added for an `EmptyExec` ([#155](../archive/archived-tickets.md#t155)), is the other one.
 
 ## Testing
 

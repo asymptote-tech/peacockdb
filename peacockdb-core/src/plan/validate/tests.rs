@@ -579,3 +579,51 @@ fn an_aggregate_whose_intermediate_names_a_view_type_is_refused() {
         "GpuAggregate: intermediate column 0 k: Utf8View is a view type the device cannot hold",
     );
 }
+
+// #63 — a device table of no columns reads as no rows, so no node may declare one.
+
+#[test]
+fn a_project_of_no_expression_is_refused() {
+    let project = Box::new(GpuProject::new(
+        plain_source(),
+        Vec::new(),
+        Schema::new(Arc::new(ArrowSchema::empty())),
+    ));
+    invalid(
+        validate(rooted(project).as_ref()),
+        "GpuProject: it declares no column",
+    );
+}
+
+/// A scan of row group 0 projecting no column, declaring `schema`.
+fn scan_of_no_column(schema: Schema) -> Box<dyn GpuNode> {
+    let scan = ScanMetadata {
+        file: "/nowhere.parquet".to_string(),
+        groups: vec![RowGroupMeta {
+            index: 0,
+            rows: 5,
+            bytes: 0,
+        }],
+        can_be_null: Vec::new(),
+    };
+    Box::new(GpuLoadParquet::new(
+        "t".to_string(),
+        Vec::new(),
+        vec![vec![vec![0]]],
+        &scan,
+        None,
+        schema,
+    ))
+}
+
+#[test]
+fn a_scan_of_no_column_declares_the_rowmarker() {
+    assert_eq!(
+        validate(rooted(scan_of_no_column(Schema::rowmarker())).as_ref()),
+        Ok(())
+    );
+    invalid(
+        validate(rooted(scan_of_no_column(one_column("a", DataType::Int64))).as_ref()),
+        "reads no column, so it declares __rowmarker__",
+    );
+}

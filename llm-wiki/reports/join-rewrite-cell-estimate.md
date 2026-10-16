@@ -76,7 +76,7 @@ Today (verified, registry = inc, 0 mismatches): cpu 551 on / 49 off; gpu 26 on /
 **One figure moved after this estimate was taken (2026-10-08).** pbench added five rows carrying
 `190` — `nl-inner`, `nl-left`, `nl-projection`, `nl-left-decimal` and `like-column-pattern` — so
 #190 is nine registry rows and 45 cpu cells rather than four rows and 20, and join-backend flips 48
-rather than 23. [#190](../tickets/joins.md#t190) carries the live list; the estimate's own numbers
+rather than 23. [#190](../archive/archived-tickets.md#t190) carries the live list; the estimate's own numbers
 are left as they were taken, since an estimate rewritten after the fact records nothing.
 
 ## 3. NEXT ISSUE — evidence

@@ -198,8 +198,8 @@ Q9_KEYS = ["nation", "o_year"]
 
 def plan_q9(t):
     """Product type profit measure: the only corpus query joining on **two** columns at
-    once — partsupp is matched on (l_partkey, l_suppkey), which is one `CudfHashJoin` with
-    two key pairs rather than a join plus a filter."""
+    once — partsupp is matched on (l_partkey, l_suppkey), which is one hash join with two
+    key pairs rather than a join plus a filter."""
     part = t("part", ["p_partkey", "p_name"])
     supplier = t("supplier", ["s_suppkey", "s_nationkey"])
     lineitem = t("lineitem", ["l_orderkey", "l_partkey", "l_suppkey", "l_quantity",
@@ -600,10 +600,9 @@ def plan_q21(t):
     """Suppliers who kept orders waiting: an EXISTS and a NOT EXISTS, both correlated on
     the order key **and** carrying an inequality on the supplier key.
 
-    That inequality is a residual filter on a semi and an anti join, which is the one case
-    the capability matrix refuses to stream: #136's finish pass accumulates keys, and a
-    keys-only table cannot evaluate a predicate over both sides. So both probe sides are
-    collected first — the shape the matrix predicted, on the query it was predicted for."""
+    That inequality is a residual on a semi and an anti join. It is part of each pair's
+    match, so both probe sides stream like any other, and the finish reads which build rows
+    a passing pair matched."""
     supplier = t("supplier", ["s_suppkey", "s_name", "s_nationkey"])
     nation = t("nation", ["n_nationkey", "n_name"])
     orders = t("orders", ["o_orderkey", "o_orderstatus"])
@@ -635,20 +634,17 @@ def plan_q21(t):
         [Alias(Col("l_orderkey"), "l_orderkey"), Alias(Col("l_suppkey"), "l_suppkey"),
          Alias(Col("s_name"), "s_name")],
     )
-    # A filtered semi/anti takes a single-batch probe, so the planner collects each probe
-    # side. Both are projected to two key columns first, which is what keeps that
-    # affordable: 6M rows of two integers rather than of the whole lineitem.
     # Built with `hash_join` directly rather than through `corpus.build_join`: the build
     # side here is a subplan, not a table, so there is no frame to take a schema from.
     exists = N.hash_join(
         "exists", N.coalesce_all("base_all", base),
-        N.coalesce_all("l2_all", _other_suppliers("l2", lineitem, late_only=False)),
+        _other_suppliers("l2", lineitem, late_only=False),
         JoinType.LEFT_SEMI, ["l_orderkey"], ["l2_orderkey"],
         residual=Binary("!=", Col("l_suppkey"), Col("l2_suppkey")),
     )
     not_exists = N.hash_join(
         "not_exists", N.coalesce_all("exists_all", exists),
-        N.coalesce_all("l3_all", _other_suppliers("l3", lineitem, late_only=True)),
+        _other_suppliers("l3", lineitem, late_only=True),
         JoinType.LEFT_ANTI, ["l_orderkey"], ["l3_orderkey"],
         residual=Binary("!=", Col("l_suppkey"), Col("l3_suppkey")),
     )

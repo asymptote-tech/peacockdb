@@ -85,10 +85,10 @@ pub(crate) enum EmitRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JoinRule {
-    /// Whether a lane with no build batch owes its probe side rather than nothing — the
-    /// three join types that preserve unmatched probe rows, which no executor can answer
-    /// without a build table.
-    pub empty_build_owes_its_probe: bool,
+    /// What a lane with an empty build side owes, which a mock join has no type to derive: the
+    /// six types every row of which is built from a build row owe nothing, and the three
+    /// that preserve unmatched probe rows owe their probe side (#212).
+    pub owes_nothing_when_empty: bool,
     /// Rows the finish pass emits. Zero is a join that needs no finish.
     pub finish_rows: usize,
     /// Bytes the build side keeps resident until the join is done.
@@ -147,7 +147,7 @@ impl Default for Script {
             accumulate: AccRule::CoalesceAll,
             emit: EmitRule::RoundRobin,
             join: JoinRule {
-                empty_build_owes_its_probe: false,
+                owes_nothing_when_empty: true,
                 finish_rows: 0,
                 build_residency: 0,
             },
@@ -281,6 +281,7 @@ pub(crate) struct MockJoin {
 
 pub(crate) struct MockProbing {
     script: Script,
+    /// What decides `owes_nothing`, with the rule: no batch and a batch of no rows alike.
     build_rows: usize,
 }
 
@@ -513,52 +514,50 @@ impl PartitionEmitterExecutor<Mock> for MockEmitter {
 impl JoinExecutor<Mock> for MockJoin {
     type Probing = MockProbing;
 
-    fn set_build(self, batch: MockBatch) -> CallResult<MockProbing> {
+    fn set_build(self, batch: Option<MockBatch>) -> CallResult<MockProbing> {
         let stats = self.script.stats();
         Ok((
             MockProbing {
                 script: self.script,
-                build_rows: batch.rows,
+                build_rows: batch.map_or(0, |batch| batch.rows),
             },
             stats,
         ))
     }
-
-    /// A script says what a join owes with no build side, since a mock join has no type.
-    fn without_build(self) -> Result<(), BackendError> {
-        match self.script.join.empty_build_owes_its_probe {
-            false => Ok(()),
-            true => Err(BackendError::new("this lane's build side is empty")),
-        }
-    }
 }
 
 impl ProbingJoin<Mock> for MockProbing {
-    fn probe_and_fetch(&mut self, batch: MockBatch) -> CallResult<Vec<MockBatch>> {
+    fn probe_and_fetch(&mut self, batch: MockBatch) -> CallResult<Option<MockBatch>> {
         self.script.check(FailAt::Probe)?;
         let stats = self.script.stats();
         Ok((
-            vec![MockBatch {
+            Some(MockBatch {
                 rows: batch.rows.min(self.build_rows),
                 bytes: batch.bytes,
-            }],
+            }),
             stats,
         ))
     }
 
-    fn finish_and_fetch(self) -> CallResult<Vec<MockBatch>> {
+    fn finish_and_fetch(self) -> CallResult<Option<MockBatch>> {
         self.script.check(FailAt::Finish)?;
         let stats = self.script.stats();
         if self.script.join.finish_rows == 0 {
-            return Ok((Vec::new(), stats));
+            return Ok((None, stats));
         }
         Ok((
-            vec![MockBatch {
+            Some(MockBatch {
                 rows: self.script.join.finish_rows,
                 bytes: self.script.join.finish_rows * 8,
-            }],
+            }),
             stats,
         ))
+    }
+
+    /// A script says what a join owes over an empty build side, since a mock join has no
+    /// type. A lane whose build side holds a row owes its probe side whatever the rule says.
+    fn owes_nothing(&self) -> bool {
+        self.build_rows == 0 && self.script.join.owes_nothing_when_empty
     }
 }
 

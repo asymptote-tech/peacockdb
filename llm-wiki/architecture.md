@@ -188,6 +188,7 @@ Four limits on the number it produces.
 | Node | Category | Semantics |
 |---|---|---|
 | `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`; declares a pushed-down limit, which the cpu ignores and the device refuses beside row groups ([#186](tickets/corpus-coverage.md#t186)) |
+| `GpuEmpty` | Source | one lane, no batch, no call: what DataFusion folded to an `EmptyExec` |
 | `GpuFilter`, `GpuProject` | Exec | 1:1 per batch. A filter also projects, and carries that projection |
 | `GpuSort` | Exec | sorts each batch independently, optional per-batch `fetch`; output `BatchSorted` |
 | `GpuAccumulateBatchesAndSort` | BatchAccumulator | accumulates sorted batches, one `cudf::merge` at done, `fetch` applied — except that the device's merge skips the slice when handed one batch ([#204](tickets/corpus-coverage.md#t204)); one batch out, stream-sorted. Ranged emission is [#138](tickets/optimizer.md#t138) |
@@ -197,8 +198,8 @@ Four limits on the number it produces.
 | `GpuEmitPartitions` | PartitionEmitter | 1 → N per batch by hash scatter; one call per input batch |
 | `GpuAggregate` | Exec | aggregates one batch: init aggregators, plus the finalize where it is also the single-node shortcut |
 | `GpuAggregateBatches` | BatchAccumulator | merges pre-aggregated batches; compacts on a doubling threshold; emits at done |
-| `GpuHashJoin` | Join | the capability matrix below |
-| `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | two inputs, both one lane; broadcast variants are [#140](tickets/optimizer.md#t140) |
+| `GpuHashJoin` | Join | a session per lane: the build side once, the probe streamed, a finish for five types ([Joins](#joins)) |
+| `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | the same session, keyless, both inputs one lane; broadcast variants are [#140](tickets/optimizer.md#t140) |
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
 | `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing |
 | `GpuUnload` | Unload | `GpuBatch` in, `CpuBatch` out, over a row range the driver supplies; carries a root-adjacent limit's interval |
@@ -310,7 +311,7 @@ return more than one batch per call per output lane, which is the queue bound th
 flow-control argument rests on.
 
 A rollup's last set masks every key, so those rows hash on nothing and land in the single lane
-`pmod(seed, N)` — [#137](tickets/joins.md#t137)'s shape, and one row, the grand total.
+`pmod(seed, N)` — #137's shape, and one row, the grand total.
 
 ### DISTINCT lowers to grouping
 
@@ -427,29 +428,95 @@ a join, or a limit at the root, reaches this layer as two intervals.
 
 ## Joins
 
-Everything below is `join.cpp` and the recipe choreography, which still serve every plan.
-`operators/join_session.cpp` is a second implementation — all nine types, no hardcoded
-`EQUAL`, no finish join — that nothing reaches until join-backend.
+A join is a **session** on both engines: built once from the build side, probed once per probe
+batch, finished once. On the device that is the four `peacock_join_*` symbols over a `CudfJoin`
+leaf ([Interfaces](#interfaces)). On the cpu it is one DataFusion join stream per lane, fed
+through a channel and alive from `set_build` to `finish_and_fetch` (`cpu_backend/join.rs`). The
+session keeps the build table, the join object and the build-matched column between calls, so
+nothing is copied per batch. One case rebuilds: a RightSemi or RightAnti whose residual the AST
+takes whole holds no join object, and each probe's `mixed_left_semi_join` hashes the build again. Every call answers at most one batch: the
+`ProbingJoin` trait returns `Option`, which is the driver's one-batch rule in the type.
 
 The build side is DataFusion's left input and one batch per lane (the planner inserts a
-`GpuCoalesceAllBatches`); the streamable side is its right input. Translation never swaps them
-(`translator/nodes.rs`): which table is left is DataFusion's choice. Its `JoinSelection` swaps
-by size where `JoinType::supports_swap` allows, so `big LEFT JOIN small` can arrive as a Right
-join with `small` on the left, and it never swaps a `LeftMark`.
+`GpuCoalesceAllBatches`); the probe side is its right input and is never coalesced. Translation
+never swaps them (`translator/nodes.rs`): which table is left is DataFusion's choice. Its
+`JoinSelection` swaps by size where `JoinType::supports_swap` allows, so `big LEFT JOIN small`
+can arrive as a Right join with `small` on the left, and it never swaps a `LeftMark`.
 
-### Capability matrix
+Three plan nodes, so plan text reads by shape, and all three write one `CudfJoin`. A cross join
+is an Inner join with no key and no condition. A predicate-free nested loop of any other type
+stays a `GpuNestedLoopJoin` over the literal `true`, because it owes its preserved side rows a
+cross join never emits.
 
-| Mode | Also covers | What it becomes |
-|---|---|---|
-| **Inner** | multi-key and composite keys; `null_equals_null=true`; a residual filter, which still streams since every emitted row is decided by (build, this batch) | `GpuHashJoin{Inner}`, probe streams, no finish |
-| **Right outer** (probe side preserved) | DataFusion's Right, which includes a Left that `JoinSelection` swapped | `GpuHashJoin{Right}`, probe streams, no finish — a probe row unmatched in this batch is unmatched everywhere, because the build side is complete before the first call |
-| **Left outer** (build side preserved) | DataFusion's Left, which includes a Right that `JoinSelection` swapped | `GpuHashJoin{Left}`, probe streams **with finish**; the accumulated probe keys are resident until it runs |
-| **Full outer** | — | `GpuHashJoin{Full}` — Left's finish, Right's per-call emission |
-| **Build-side semi family** — `LeftSemi` | `LeftAnti`, `LeftMark`; the filtered forms, which take a single-batch probe | probe streams with finish, and **the per-call join disappears**: a probe call is only the key project, so the build side is untouched until the finish consumes it |
-| **Probe-side semi family** — `RightSemi` | `RightAnti` | probe streams, no finish — membership in a complete build side is a per-row question |
-| **Cross join** | — | `GpuCrossJoin`, both inputs one lane |
-| **Nested-loop Inner** | a predicate that is not AST-able, which takes the cross-then-mask path | `GpuNestedLoopJoin{Inner}`, probe streams |
-| **Nested-loop Left** | — | `GpuNestedLoopJoin{Left}` with a **single-batch probe**: the finish trick accumulates keys and a predicate join has none |
+### What each type answers
+
+The capability is two facts per type (`plan/join.rs`): every probe streams, and `needs_finish`
+holds for Left, Full, LeftSemi, LeftAnti and LeftMark.
+
+| Type | a probe call answers | the session keeps | the finish answers |
+|---|---|---|---|
+| Inner | the matched pairs | — | — |
+| Left | the matched pairs | which build rows matched | the unmatched build rows, probe columns NULL |
+| Right | the pairs, then the unmatched probe rows with build columns NULL | — | — |
+| Full | as Right | as Left | as Left |
+| LeftSemi, LeftAnti | nothing | as Left | the matched, or the unmatched, build rows |
+| LeftMark | nothing | as Left | every build row and its `mark` |
+| RightSemi, RightAnti | the matched, or the unmatched, probe rows | — | — |
+
+The build side is complete before the first probe call, so a probe row unmatched in its batch
+is unmatched everywhere. Only "which build rows matched" waits for the last batch, which is why
+exactly those five finish. A lane that owes rows is finished whether or not a probe batch came.
+
+**The matchers** (`join_session.cpp`) find rows rather than pairs wherever the answer is a
+yes or no per row.
+
+- Inner, Left, Right, Full: one `cudf::hash_join` over the build keys. Right and Full probe it
+  as cuDF's left side, so each probe row comes back once.
+- RightSemi, RightAnti: a `distinct_hash_join` over the build's distinct keys.
+- LeftSemi, LeftAnti, LeftMark: the `hash_join`, probed with the batch's distinct keys.
+- A residual over both sides: one `mixed_left_semi_join` per batch for a semi type whose
+  conjuncts are all AST-able. Otherwise the pairs path — the key matches, only the filter's
+  columns gathered over them, the mask, then the type's own answer — chunked so the pairs fit
+  `CudfJoin.chunk_bytes`. In the semi family a conjunct over one side alone filters that
+  side's rows first.
+- No key: a `conditional_*` join over the AST-able conjuncts, the rest masked over its pairs.
+  One-side pieces the AST refuses are hoisted into columns first. Only when no conjunct is
+  AST-able is it a cross product, of index columns, chunked the same way.
+
+Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called.
+
+**NULL keys.** Every type honours `null_equals_null` on both engines. `false` is SQL's
+equality: a NULL key matches nothing. `true` is NULL = NULL, which a set operation lowered to a
+join needs, and so does a key made of `IS NOT DISTINCT FROM`: the translator promotes a keyless
+nested loop to a hash join under `true` when every key pair would be such a conjunct, since the
+flag is one for all keys. `NOT IN` is neither, and is the planner's (below).
+
+**An empty build side.** No build batch is `set_build(None)`, which both engines answer as a
+build of no rows. Under Inner, Left, LeftSemi, LeftAnti, LeftMark and RightSemi every output row
+comes from a build row, so `owes_nothing()` holds and the driver drops the lane's probe batches
+without a call. Right, Full and RightAnti owe their probe rows, padded with the types of the
+plan's `build_schema`. `plan::empty_build_owes_nothing` is the one rule both engines read.
+
+**Pricing.** One function, `plan::session_bytes`, prices what a session holds, for the planner's
+resident model and the device's accountant alike. It is the build bytes, plus three terms:
+- about 16 bytes a build row for a keyed join's hash table;
+- for RightSemi and RightAnti, the build's key bytes again, for the distinct keys the table is
+  built over;
+- for the five finishing types, hash or nested loop, one byte a row for `matched`.
+
+The distinct keys are charged only where no residual conjunct reads both sides
+(`GpuHashJoin::distinct_key_width`). Where one does, the session holds no distinct keys. It runs
+`mixed_left_semi_join`, which hashes the build per call into about 8 bytes a row, or the pairs
+path over a hash table. Either way the 16 bytes a row already charged covers it.
+
+A probe call's scratch is the batch, an output as long, and each pair at 8 bytes plus the
+residual's per-row width, chunked at `chunk_bytes`. A LeftSemi, LeftAnti or LeftMark probe
+without a crossing conjunct also pays the batch's key bytes, for its distinct keys
+(`gpu_backend/join.rs`). At `tp4-sized` the planner writes
+`chunk_bytes` as a sixteenth of the budget, capped at 1 GiB, so the accountant and the session
+bound one call alike; the unbudgeted modes write 0, which the session reads as 1 GiB.
+
+### Where the sides run
 
 **A merge is not something a join asks for; it is what a shuffle needs.** `GpuEmitPartitions`
 takes a one-lane input, so any plan that hash-partitions a side puts a `GpuMergePartitions`
@@ -462,7 +529,8 @@ tables and emits no repartition, while both loaders still produce N lanes — so
 side holds nothing that must match lane p of the other, and joining lane-wise would silently
 drop matches. Translation therefore checks the hash and not the count: unless both sides are
 scattered on their own join keys, in key order, both merge to one lane. That is the broadcast
-shape [#140](tickets/optimizer.md#t140) removes.
+shape [#140](tickets/optimizer.md#t140) removes. A session is not tied to a lane, which is the
+foundation a broadcast would stand on.
 
 **An interleave needs its branches to agree on lane count**, and they may not: output lane p
 comes from lane p of each input, so branches with different lane counts have no such
@@ -470,59 +538,56 @@ correspondence and the node becomes a `GpuUnion` instead. tpcds q77 is the case 
 web branches stay four lanes hashed on their channel key while the catalog branch is a cross
 join, which asks both its inputs onto one lane, so the union declares 4+1+4.
 
-**Four shapes are refused at plan time.** Left, Right or Full with a residual filter, because
-`execute_hash_join` applies the filter after the outer gather and so demotes the ON condition to
-a WHERE ([#153](tickets/joins.md#t153)) — a live defect in the C++ executor, not a limitation of the
-planner.
-RightSemi or RightAnti with a residual filter, because no swapped `mixed_*` variant exists; the
-fix is orientation rather than code. A nested-loop join that is neither Inner nor Left,
-which the C++ rejects outright. And a LeftAnti, RightAnti or LeftMark under
-`null_equals_null=false` whose key can be NULL on both sides (`planner/nulls.rs`, [#59](tickets/joins.md#t59),
-[#80](tickets/joins.md#t80)): the C++ hardcodes NULL = NULL for those three, so a NULL key would match.
-Two narrower refusals sit beside them: a join filter that reads the mark column, and a join key
-that is not a bare column.
+**A NULL key is dropped before a shuffle it cannot match through**
+(#137). Under `null_equals_null = false`, a side whose
+unmatched rows are never emitted gets `GpuFilter(<key> IS NOT NULL)` below its
+`GpuEmitPartitions`, wherever the data can hold a NULL. Otherwise every NULL hashes to one lane
+and matches nothing there. The sides: Inner both, Left the probe, Right the build, Full neither,
+LeftSemi and RightSemi both, LeftAnti and LeftMark the probe, RightAnti the build. It is decided
+on the translated side, a side whose top node is an emit, because DataFusion wraps every
+`RepartitionExec` in a `CoalesceBatchesExec` that translation drops.
 
-### What a streamed probe costs
+### What the planner rewrites
 
-`execute_node` erases every handle it reads, and no node duplicates one. So a build side probed
-by B batches is needed B times and exists once, which is [#152](tickets/joins.md#t152). Per probe
-batch: the probe-local types (Inner, Right, RightSemi, RightAnti) need **one build-side copy**;
-Left and Full that plus a copy of the probe batch, since the join consumes the batch and the
-key accumulation needs it too; the build-side semi family **none at all**, its probe calls
-never touching the build side. None of those copies can be taken — the surface has no symbol
-for one, and `slice_handle` moves rather than copies — so the count predicts where a device
-refuses: the probe-local types after one batch, Left and Full outright.
+**`NOT IN`** (`planner/not_in.rs`). DataFusion plans `x NOT IN (S)` as `NOT EXISTS (S AND y =
+x)`, which is wrong wherever `x` or `y` is NULL. A logical rule, registered ahead of
+`decorrelate_predicate_subquery`, puts each filter's predicate in negation normal form. It then
+rewrites a `NOT IN` on the filter's AND/OR spine whose operands can be NULL in the data. On the
+spine a NULL and a `false` drop a row alike, so a two-valued form is exact there: three anti
+joins when correlated, one anti join and two one-row counts when not. The counts put the outer
+side in one lane, and are `count(lit(1i32))` so that `AggregateStatistics` cannot fold them into
+a `PlaceholderRowExec` ([#158](tickets/optimizer.md#t158)). At four lanes their aggregate is
+refused today ([#267](tickets/corpus-coverage.md#t267)). Where neither side can be NULL, `NOT
+IN` means `NOT EXISTS` and is left alone.
 
-**What the finish pass computes.** "Which build rows matched at least once" is the one fact a
-streamed probe loses, and it cannot cross the ABI, which returns a table and row counts. So the
-lane keeps the probe keys and, at done, one `left_anti_join` (or `left_semi_join`) against them
-answers the question in a single call. The build side is therefore built once more at finish, a
-cost recorded with the ABI-change alternatives in [#136](tickets/joins.md#t136).
+Off the spine — under `IS NULL`, a comparison, a function — a nullable `IN` or `NOT IN` is
+refused ([#250](tickets/joins.md#t250)): SQL reads its NULL answer there, and a mark join yields
+none. Nullability is read from the data, not the declared types, since every corpus column is
+declared nullable. `planner/nullability.rs` traces a column to its scan and reads the parquet
+footers' null counts; a column it cannot trace counts as possibly NULL.
 
-Keys rather than probe rows, because the alternative is not a smaller concat — it is the
-single-batch probe, which changes the join rather than its inputs. One probe batch means one
-call, and one call means the whole join *result* materializes as one table; on a fan-out join
-that result is the biggest thing in the lane. Accumulating keys keeps the output leaving a batch
-at a time and holds only the key columns between calls.
+**`__rowmarker__`.** Where DataFusion has a node of no column — `count(*)` over a join, tpcds q9's
+pairs of one-row aggregates — the translator plans a project of `Int8 0 AS __rowmarker__`. A scan
+that reads no column declares the marker itself, and both engines build it from the row count
+(`CudfScan.rows_only`). A keyless join above drops the marker through its projection, or keeps
+one where it would otherwise keep no column. Validation refuses a zero-column schema anywhere,
+and the device refuses a project of no expression.
 
-**The finish computes it with the same semantics as a single call**, not a variant:
-`null_equals_null` rides on the node and reaches the finish join too, three-valued `NOT IN` trap
-and all (#80). On the device that means the hardcoded `EQUAL` for anti and mark; the cpu's call
-and finish honour the flag for every type, which is the divergence #59 names. A lowering that
-quietly fixed the null semantics would not be a substitute for the join it replaces.
+**`GpuEmpty`.** A side DataFusion folds to an `EmptyExec` becomes a one-lane leaf that emits no
+batch and calls nothing. A join over it meets the empty build or the probe of no batch above.
 
-**A lane whose probe produced no keys is the executor's problem, not the concat's.** A concat of
-nothing throws ([#173](tickets/joins.md#t173)), so the finish has to answer from the build side alone.
-LeftAnti does: every build row, on both engines. Left, Full, LeftSemi and LeftMark owe a table
-the frozen surface cannot make and refuse by name on the device.
+Two refusals stand, both unreachable from SQL: a join key that is not a bare column, since
+DataFusion projects `ON t.k + 1 = b.k` below the join, and a join filter that reads the mark
+column.
 
 ### Cross join vs nested-loop join
 
-Both are a join with no equality to hash, and which one DataFusion plans — and so which node
-the translator meets — is decided by whether there is a predicate at all.
+Both are a join with no equality to hash. Which one DataFusion plans is decided by whether there
+is a predicate at all; which node the translator makes is decided by that and the join type.
 
-- **No join predicate ⇒ `CrossJoinExec`.** `SELECT * FROM region, nation` — a full cartesian
-  product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
+- **No join predicate ⇒ `CrossJoinExec`** for an Inner join, which becomes `GpuCrossJoin`;
+  any other type keeps a `GpuNestedLoopJoin` over `true` (tpcds q9's predicate-free Left joins).
+  `SELECT * FROM region, nation` — a full cartesian product. In tpch and tpcds every case pairs a one-row aggregate result with another under no
   condition, e.g. tpcds q61 putting `sum(ss_ext_sales_price) as promotions` beside `total` so
   it can divide them; pbench's `cross-projection` is the plain cartesian of two base tables.
 - **A predicate that is not an equijoin ⇒ `NestedLoopJoinExec`**, carrying that predicate as
@@ -646,11 +711,10 @@ Livelock has the same answer: the one thing that can block a batch is a join wai
 other side, and orienting the tree so the build side is the left child removes the wait, because
 at equal heights the leftmost node wins and the build subtree drains first.
 
-Hash skew needs one decision and no mechanism. A lane that receives nothing is never runnable,
-and empty scatter outputs are dropped at the emitter, so nothing empty traverses a chain. One
-exception: a scatter feeding the build side of a Right, Full or RightAnti join keeps its
-zero-row table, because that join owes its probe rows and needs a build table to make them
-([#175](archive/archived-tickets.md#t175)). The index decides it once per node, from the tree.
+Hash skew needs one decision and no mechanism. Empty scatter outputs are dropped at the
+emitter, so nothing empty traverses a chain, and a lane that receives nothing runs only to learn
+its inputs are finished. A join
+whose build lane got nothing still answers it, through `set_build(None)` ([Joins](#joins)).
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
 ready bitset over it, per-node ready-lane counters, and hold counters — counters rather than
@@ -732,19 +796,16 @@ join and assumed selectivity for a filter, so it will sometimes come in low. The
 contract is "fail cleanly when an accounted total at a check point exceeds budget", not "the
 budget is never exceeded" and not "the peak stays under it".
 
-Four rules were measured rather than designed, over the whole corpus under a 2 GiB accountant;
+Three rules were measured rather than designed, over the whole corpus under a 2 GiB accountant;
 the cases are in [`archive/designs.md`](archive/designs.md).
 
 - **`resident_bytes()` is a total for the accountant to check, never a numerator for a per-row
   cost** — only the executor knows which part scales with build rows. Dividing it mispriced one
   call at 2.0 TB and declined a query whose whole run peaked at 11.5 MB.
-- **A build-preserving join's residency grows with the probe side**, since it holds key columns
-  for every probe row seen, per lane. The CPU backend never pays it, so it cannot price it.
-- **A memory bound asserted at one partitioning asserts about one shape of arrival**: only a
-  streamed probe accumulates, and two corpus queries passed at one layout and failed at two.
+- **A memory bound asserted at one partitioning asserts about one shape of arrival**: two
+  corpus queries passed at one layout and failed at two.
 - **Zero rows is not zero bytes, and a zero peak is a defect.** A batch of no rows still costs
-  its schema; an empty lane emits no batch at all, which is a different thing — except the
-  scatter lane under a join that owes its probe rows, which keeps its zero-row table.
+  its schema; an empty lane emits no batch at all, which is a different thing.
 
 ### Determinism rules
 
@@ -773,9 +834,14 @@ pinned.
 **These rules pin execution for a given plan, not across plans.** Two plans for one query may
 legitimately return different rows where the SQL does not determine them, which is what an
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
-contract; what must hold is that one plan run twice gives one answer, byte for byte — except a
-float reduction on the device, which cuDF does not make reproducible, and which is what
-`golden_approx_std` and `duckdb_approx` exist for.
+contract. What must hold is that one plan run twice gives the same rows in the same batches.
+Not in the same order: a device hash or nested-loop join writes its pairs through an atomic
+cursor, so its row order varies run to run. A float reduction above one, or any on the device,
+can then move in its low bits, which is what `golden_approx_std` and `duckdb_approx` exist for.
+A selection by position above such a join — a limit with no sort between, or a sorted cut
+between tied rows that differ — would keep different rows per run, so no device cell is enabled
+over one (`test_support/order_hazard.rs`). A cross join emits build-row-major on both engines and
+is not such a join.
 
 ### Zero-row batches change no answer
 
@@ -787,11 +853,7 @@ The rule is not met yet. Known breaks:
 
 - A keyless aggregate owes one row over any input, and emits none over no batch
   ([#199](tickets/corpus-coverage.md#t199)).
-- Right, Full and RightAnti refuse when the build side sends no batch
-  ([#212](tickets/joins.md#t212)); a finish over no probe keys refuses on the device
-  ([#173](tickets/joins.md#t173)). A hash LeftAnti or LeftMark with a residual filter and a
-  nested-loop Left make no call over no probe batch, and answer nothing (no ticket yet).
-- Producers that drop a zero-row batch expose the breaks above: the limit
+- Producers that drop a zero-row batch expose the break above: the limit
   ([#214](tickets/corpus-coverage.md#t214)) and the cpu's accumulating sort and merge
   ([#205](tickets/corpus-coverage.md#t205)).
 
@@ -808,17 +870,17 @@ What crosses is not the plan tree. It is a menu of parameterized kernels whose n
 to be addressed: the recipe writer (`wire/`) emits one node per call a driver will make, and
 each node's recipe publishes the post-order sequence numbers its calls name. The vocabulary
 is frozen: a kernel takes a whole input and answers with a whole table, and a driver that
-wants less asks for it by calling more often rather than by changing the
-node. [What the frozen surface costs](#what-the-frozen-surface-costs) is the bill.
+wants less asks for it by calling more often rather than by changing the node. A join is the
+exception: one `CudfJoin` node read by a session that lives across calls ([Joins](#joins)).
+[What the frozen surface costs](#what-the-frozen-surface-costs) is the bill.
 
 Two spellings, and the prefix is the tell: `Cudf*` is a flat-buffer node table, the thing
 the C++ dispatches on, with `GpuPlan` as the root table wrapping them. A `Gpu` name with no
 `Cudf` is one of the engine's own plan nodes and never crosses.
 
-Four of the sixteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
-own and needs no node), `CudfLimit` (a limit is a row range on the export), `CudfWindow` (no
-window function here yet, #143) and `CudfJoin`, whose writer lands with the join backend. They
-stay because the kernels behind them do.
+Three of the thirteen wire kinds have no writer: `CudfCoalesceBatches` (batching is the engine's
+own and needs no node), `CudfLimit` (a limit is a row range on the export) and `CudfWindow` (no
+window function here yet, #143). They stay because the kernels behind them do.
 
 **Statement order is the wire format**: FlatBufferBuilder is a no-interning bump arena, so
 reordering writes changes bytes even with identical values, and
@@ -832,6 +894,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | Node | seqs emitted | driven as |
 |---|---|---|
 | `GpuLoadParquet` | `CudfScan` | `execute_scan_rowgroups(seq, row_groups…)` once per batch, overriding the node's own list |
+| `GpuEmpty` | a `CudfScan` stub, never called | none: a source that answers no batch, so no FFI call |
 | `GpuFilter`, `GpuProject`, `GpuAggregate` | the same-kind node | generic map arm, one call per batch |
 | `GpuSort` | `CudfSort` | map arm per batch; per-batch `fetch` for a top-N |
 | `GpuAccumulateBatchesAndSort` | `CudfSort` + `CudfSortPreservingMerge` | per-batch sorts, then one merge call at done |
@@ -839,8 +902,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuCoalesceAllBatches` | `CudfCoalescePartitions` | one collapse call over the lane's batch handles |
 | `GpuAggregateBatches` | `CudfCoalescePartitions` + `CudfAggregate{Merge}`, plus a `CudfProject` where it finalizes | one concat and one aggregate per compaction and again at done; the project runs once, at done |
 | `GpuEmitPartitions` | `CudfRepartition(Hash, 1→N)` | repartition arm, one call per batch → N handles |
-| `GpuHashJoin` | `CudfHashJoin`, plus the finish seqs — key project, concat, anti/semi join, pad project | map arm per (lane, probe batch); the build handle would need copying before each, since the call consumes it (#152) |
-| `GpuCrossJoin`, `GpuNestedLoopJoin` | the same-kind node | one map-arm call per probe batch, and the build side is consumed by the first ([#152](tickets/joins.md#t152)) |
+| `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin` | `CudfJoin`, a leaf | `join_build(seq, build)` once per lane, `join_probe` per probe batch, and `join_finish` at done for the five finishing types |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's cast projects | routing in the driver, zero FFI calls |
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
@@ -882,20 +944,17 @@ The two limit symbols are not interchangeable: one produces a result, the other 
 
 One row per wire node kind: what the plan hands the C++ side, and the cuDF it turns into.
 
-The middle column is the fields that change what the call does — `input` / `left` / `right`
-are the tree and are not repeated, and a field nothing reads is called out, because a wire
+The middle column is the fields that change what the call does — `input` / `inputs` are the
+tree and are not repeated, and a field nothing reads is called out, because a wire
 field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `.columns(projected)`, `set_row_groups(...)` and `set_num_rows(limit)` set on `opts` first |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_num_rows(limit)`, `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Under `rows_only` it decodes nothing: `opts` takes the limit and the row groups all the same, so cuDF refuses the pair there too (#186); it reads the row groups' counts from the footer, capped by the limit only when the call names no row group, and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
-| [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead |
+| [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale and `distinct`), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
-| [`CudfHashJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::inner_join` / `left_join` / `full_join(left_keys, right_keys, kJoinNulls)`; semi/anti take [`left_semi_join` / `left_anti_join`](../cpp/src/operators/join.cpp), or their `mixed_*` forms when a residual filter must be evaluated during the join |
-| [`CudfCrossJoin`](../flatbuffers/gpu_plan.fbs) | nothing — the node is its two inputs | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::cross_join(ltv, rtv)` |
-| [`CudfNestedLoopJoin`](../flatbuffers/gpu_plan.fbs) | `join_type`, `filter` + `filter_columns`, `projection` | [`join.cpp`](../cpp/src/operators/join.cpp) — `cudf::conditional_inner_join` / `conditional_left_join` over the predicate as an AST; a predicate the AST cannot take is `cudf::cross_join`, then [`apply_boolean_mask`](../cpp/src/operators/join.cpp) over the filter evaluated on the crossed table, for Inner alone ([#215](tickets/joins.md#t215)) |
-| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
+| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
@@ -910,39 +969,27 @@ the layout rows sit in — one table has no layout to change — and **two nodes
 one call**, because cuDF has no fused form for filter's mask-then-apply or sort's
 order-gather-slice.
 
-The nested-loop join is the one to read separately rather than filing beside filter. With a
-predicate the AST takes it is one conditional join. With one it cannot — a decimal operand, a
-string literal — it materialises the **full cartesian product** first and only then evaluates
-its predicate over it, on the column path, so it is three calls whose first is the expensive
-one — which is why broadcast joins ([#140](tickets/optimizer.md#t140)) would change the shape rather than
-the constant. That path is written for Inner alone ([#215](tickets/joins.md#t215)).
+The nested loop is the join to read separately. With a condition the AST takes it is one
+conditional join. With none it can — a decimal operand, a string literal — it crosses index
+columns rather than rows, in chunks the session's budget bounds, and evaluates the condition
+over each chunk on the column path. The work is still the cartesian product, which is why
+broadcast joins ([#140](tickets/optimizer.md#t140)) would change the shape rather than the
+constant.
 
 ### What the frozen surface costs
 
-The wire vocabulary and the C++ operator set are kept as they are, which has a price. Each cost
-below has a smallest unfreeze that removes it; deciding them together is
-[#155](tickets/joins.md#t155), because three of them are removed by more than one change.
+The wire vocabulary and the C++ operator set are kept as they are, which has a price.
 
-| Cost | Why the surface causes it | The unfreeze | What that costs |
-|---|---|---|---|
-| **A build-side copy per probe batch** (#152) | `execute_node` erases the handles it reads and nothing duplicates one | a handle that can be read twice: `TableResult` already shares its columns, so a retained build side is a second handle over the same owners | no ABI change — a handle stays a `u64` |
-| **A probe-batch copy on Left/Full** (#152) | two consumers, one handle: the join needs the batch and the key project needs it too | the same refcount, or a node allowed to return its input beside its output | the second form is an fbs *semantics* change with no ABI change |
-| **The build side re-hashed per probe batch** (#136) | `CudfHashJoin` is stateless per call, so B batches means B builds; sharing removes the copy and not this | a join session: begin, probe, finish, holding one `cudf::hash_join` | the four `peacock_join_*` symbols and a session map keyed by id, which the C++ side now carries (Interfaces above); the cost stands until a writer emits `CudfJoin` instead of the three join nodes |
-| **Probe keys held resident, plus an extra join at finish** (#136) | "which build rows matched" cannot cross an ABI that returns a table and row counts | a match bitmap out-param, or the join session above | the bitmap is a one-argument delta; either deletes the key accumulation and the finish join |
-| **A new symbol per runtime-varying parameter** | an fb node's fields are plan constants, so anything decided per call cannot ride the node | per-call overrides: one `execute_node` variant taking an override struct | one symbol instead of three, and the next such field costs nothing |
+**A new symbol per runtime-varying parameter.** An fb node's fields are plan constants, so
+anything decided per call cannot ride the node, and each such field has cost a symbol of its
+own. The unfreeze is per-call overrides: one `execute_node` variant taking an override struct,
+one symbol instead of three, after which the next such field costs nothing.
 
-**Three refusals are a different kind of cost**: nothing on the surface makes a table out of
-nothing. A finish whose probe produced no keys refuses by name for Left, Full, LeftSemi and
-LeftMark ([#173](tickets/joins.md#t173)) — a collapse of no handles and a merge of no runs never reach
-the C++, since the Rust side answers nothing before asking; a Right, Full or RightAnti lane whose
-build side emitted no batch at all owes its probe rows padded and cannot make them, and both
-engines refuse it ([#212](tickets/joins.md#t212)) — a scatter's empty lane is kept as a zero-row
-table instead ([#175](archive/archived-tickets.md#t175)); and `PlaceholderRowExec` is a table of literals with
-no input at all ([#158](tickets/optimizer.md#t158)).
-
-The unfreeze is one call — a table of a schema and a literal row count. What makes it worth
-deciding rather than deferring is that the CPU answers the first and the third, so each is a
-shape where the oracle disagrees with the engine it is checking.
+**Nothing on the surface makes a table out of nothing.** `PlaceholderRowExec` is a table of
+literals with no input at all, and is refused ([#158](tickets/optimizer.md#t158)). The unfreeze
+is one call — a table of a schema and a literal row count — and the CPU answers the shape, so
+it is one where the oracle disagrees with the engine it checks. A join over an absent side
+needs no such call: the session answers it from the plan's side schemas.
 
 **The ABI is already more general than the node semantics.** `execute_node` writes into
 `out_handles` with an `out_cap` and an `out_count`, so k outputs are expressible today and the
@@ -950,14 +997,13 @@ repartition arm uses that. What forbids a node from emitting two things is the f
 where every node kind means one output — so "return the input beside the output" is an fbs
 semantics change with no ABI change at all.
 
-**One cost is not about the surface.** `join.cpp`'s exit paths deep-copy their columns into a
-fresh table where a move would do ([#154](tickets/corpus-coverage.md#t154)) — for a join with a projection,
-twice over. An engine running a node once per query would pay that once per node; this one pays
-it once per node per *batch*, which is what makes it worth a ticket. Every other operator hands
-its columns over, bar five copies in `aggregate.cpp` that give their reason at the site: project
-and window share their input's owners through `TableResult`, a filter's fused projection selects
-from the table it just filtered, the aggregate releases groupby's key tables, and a bare
-`ColumnRef` evaluates to a view of the input's own column rather than a copy of it.
+**Operators hand their columns over.** An engine running a node once per query would pay a
+deep copy once per node; this one pays it once per node per *batch*. So no operator copies
+where a move would do, bar five copies in `aggregate.cpp` that give their reason at the site:
+project and window share their input's owners through `TableResult`, a filter's fused
+projection selects from the table it just filtered, the aggregate releases groupby's key tables,
+a join session moves its gathered columns into its output, and a bare `ColumnRef` evaluates to a
+view of the input's own column rather than a copy of it.
 
 ## Interfaces
 
@@ -990,8 +1036,9 @@ side — and answers a join id from its own map in `NodeSession::Impl`, freed by
 distinct-key table a `distinct_hash_join` views, the cuDF join object and the build-matched
 column; it is not tied to a lane, so any lane may probe it. `peacock_join_probe` consumes one
 batch and answers exactly one table, possibly of zero rows — or handle 0 for LeftSemi, LeftAnti
-and LeftMark, which answer only at `peacock_join_finish`. `finish` is called once, after the
-last probe, and answers handle 0 for the types that have none. Two refusals leave the session
+and LeftMark, which answer only at `peacock_join_finish`. The executor calls `finish` once,
+after the last probe, and only for the five finishing types, as the recipe names it. Called for
+any other type, it answers handle 0. Two refusals leave the session
 standing, an unknown join id and a probe after finish; anything else ends the query, as
 `execute_node` does. Each call opens one region, `(seq, partition 0, call_index)`.
 
@@ -1002,8 +1049,8 @@ Three conventions the signatures do not carry:
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
 - **Instrumentation is process-global and off by default; the benchmark harness and the
-  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, one
-  `gpu_tests` case in the GPU backend, and the gtest fixtures on both C++ tiers. Without
+  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, two
+  `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
   the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
   ([#148](tickets/performance.md#t148)); the gtest binaries install it from their own `main()`, and this
   symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output
@@ -1050,7 +1097,7 @@ collapse, to the cost of a CUDA event pair: between a `p > 0` region's two event
 only a `slice`, which is host-side bookkeeping. p0 still carries the scatter itself.
 
 **[`NodeInputs` and the operator dispatch](../cpp/src/peacock/operators.h)** — the contract
-every operator translation unit shares: one `execute_*` per wire node kind, plus `take_input`
+every operator translation unit shares: one `execute_*` per wire node kind `execute_node` runs, plus `take_input`
 to resolve a child and `execute_one` to run a node over inputs given by value. `NodeInputs`
 is a parameter rather than a thread-local, and that is deliberate: an anonymous-namespace
 thread-local forks when the file is split, so one half would read the other's inputs
@@ -1158,12 +1205,12 @@ Where the ordinals come from and where they land:
 | Reference | Written by | Read by |
 |---|---|---|
 | `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`evaluate_column`](../cpp/src/expr.cpp) for the column path, which borrows the input's column rather than copying it |
-| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join.cpp`](../cpp/src/operators/join.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
-| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join.cpp`](../cpp/src/operators/join.cpp), [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — ColumnRef only, anything else throws |
+| `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
+| join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — ColumnRef only, anything else throws |
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp), [`join_residual.cpp`](../cpp/src/operators/join_residual.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
 | sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
 
-`cpp/src/` holds 27 `->index()` reads and 49 `.column(…)` calls, so this is the engine's most
+`cpp/src/` holds 19 `->index()` reads and 32 `.column(…)` calls, so this is the engine's most
 common operation and the one with the least ceremony around it.
 
 ### What guards it, and what does not
@@ -1206,8 +1253,8 @@ precisely so cuDF cannot infer something the CPU side did not.
 |---|---|---|---|
 | `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)`, `set_num_rows(limit)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
 | `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first` — both sites map `nulls_first` to `BEFORE` regardless of direction, and cuDF flips a descending key after applying it, so a descending key's nulls land on the wrong end ([#202](tickets/corpus-coverage.md#t202)) | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
-| `cudf::null_equality` | [`join.cpp`](../cpp/src/operators/join.cpp) ×9, [`join_session.cpp`](../cpp/src/operators/join_session.cpp) and [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | see the table below | `EQUAL` — NULL keys match, inventing rows SQL excludes |
-| `cudf::out_of_bounds_policy` | [`join.cpp`](../cpp/src/operators/join.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
+| `cudf::null_equality` | [`join_session.cpp`](../cpp/src/operators/join_session.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `CudfJoin.null_equals_null`, for every type ([Joins](#joins)) | `EQUAL` — NULL keys match, inventing rows SQL excludes |
+| `cudf::out_of_bounds_policy` | [`join_session.cpp`](../cpp/src/operators/join_session.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
 | decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
@@ -1227,14 +1274,15 @@ to it.
 
 | Flat-buffer field | Written by | Taken from | Becomes |
 |---|---|---|---|
-| `CudfHashJoin.null_equals_null` | `join.rs` | the node's own flag, which the planner set from `HashJoinExec::null_equals_null()` | `cudf::null_equality` (except anti/mark, below) |
+| `CudfJoin.null_equals_null` | `join.rs` | the node's own flag: `HashJoinExec::null_equals_null()`, or `true` for keys the planner made of `IS NOT DISTINCT FROM` | `cudf::null_equality`, for every type |
 | `JoinFilterColumn{side, index}` | `join.rs` | the join filter's `ColumnIndex` list | `cudf::ast::`<br>`table_reference::LEFT` / `RIGHT`,<br>plus an ordinal |
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from values, `Merge` merges state into state. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
-| `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows` |
+| `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows`, or the cap on a rows-only read's count |
+| `CudfJoin.chunk_bytes` | `join.rs` | the planner's scratch budget for one call | how many pairs the session materializes at once |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
 | `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
@@ -1245,45 +1293,6 @@ the result is compared against. The last three rows are different: a field left 
 default on purpose; a pair no writer sets and no reader reads, which is the wire-format
 surface #132 is about; and a pair the C++ still reads that no plan fills, because the row
 groups a batch loads are a per-call value and ride the call instead.
-
-### Join types and NULL key equality
-
-`null_equals_null` travels in the flat buffers per join, mirroring DataFusion: `false` (the SQL default)
-means a NULL key matches nothing, `true` means NULL = NULL, which is what a set operation
-lowered to a join needs. Whether a join type actually honours it is the interesting part.
-
-| Join type | cuDF call | `null_equality` |
-|---|---|---|
-| Inner | `inner_join` | from the flat buffers |
-| Left | `left_join` | from the flat buffers |
-| Full | `full_join` | from the flat buffers |
-| Right | `left_join` with sides swapped, indices swapped back | from the flat buffers |
-| LeftSemi | `left_semi_join`, `filtered_join::semi_join`, or `mixed_left_semi_join` with a residual filter | from the flat buffers |
-| RightSemi | the same, sides swapped; a residual filter is rejected | from the flat buffers |
-| LeftAnti | `left_anti_join`, `filtered_join::anti_join`, or `mixed_left_anti_join` | **hardcoded `EQUAL`** |
-| RightAnti | the same, sides swapped | **hardcoded `EQUAL`** |
-| LeftMark | `left_semi_join`-shaped, emitting one row per left row plus a boolean mark | **hardcoded `EQUAL`** |
-| Inner / Left, non-equi | `conditional_inner_join` / `conditional_left_join`; a predicate the AST cannot take is a cross join masked on the column path, Inner alone ([#215](tickets/joins.md#t215)) | n/a — the predicate decides |
-
-Three things that table is worth reading for.
-
-**On the device, semi honours the flag and anti does not**, deliberately; the cpu honours it for
-both, so an anti or mark join with null keys answers differently per engine under the SQL
-default ([#59](tickets/joins.md#t59)). `x IN (…)` and `EXISTS` are ordinary
-three-valued predicates, so `UNEQUAL` is right and tpcds q33 needs it; a set operation lowered
-to a semi join asks for `EQUAL` and gets it (q14). Anti is not symmetric: `x NOT IN (…, NULL)`
-is never true for any x, which is neither `EQUAL` nor `UNEQUAL` — no cuDF setting implements
-it, so anti and mark stay `EQUAL` until the planner distinguishes `NOT IN` from `NOT EXISTS`
-(#80, #59).
-
-**The equi-join default is the one that bites silently.** cuDF's `EQUAL` invents rows the SQL
-oracle excludes, and the symptom is not an error but a count or sum one too large — tpcds q50,
-q6 and q81 each inflated a downstream aggregate before `join_nulls` was threaded through.
-
-**A residual filter is not optional on semi/anti.** The key-only cuDF calls ignore it, so a
-LeftAnti on the key alone collapses to zero rows; those joins must take the `mixed_*` variants
-that evaluate the AST during the join (TPC-H q21 is the case). RightSemi and RightAnti reject
-a filter outright, because no swapped `mixed_*` variant exists.
 
 ## Node display
 

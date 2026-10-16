@@ -190,6 +190,23 @@ pub(crate) fn project_over(input: Arc<ArrowSchema>, exprs: Vec<(Expr, &str, Data
     )
 }
 
+// #63 — what the plan declares where DataFusion projects rows and no column: one literal
+// zero a row, `compute_column` over a bare literal on the device.
+operator_case! {
+    GpuProject,
+    fn the_rowmarker_project_answers_a_zero_a_row_on_both() {
+        let node = GpuProject::new(
+            given(),
+            vec![NamedExpr::new(
+                Expr::Literal(ScalarValue::Int8(Some(0))),
+                crate::plan::ROWMARKER,
+            )],
+            Schema::rowmarker(),
+        );
+        run_both(&node, Script::Exec(vec![input(), synthetic(0, 1)])).same(Order::AsEmitted);
+    }
+}
+
 /// DataFusion 45's result types for `SELECT dec + dec, dec / 2.00 FROM t` over
 /// `dec DECIMAL(18, 2)`: arrow-arith's `decimal_op` rules, which `get_result_type` applies
 /// to the two operand types — add is `max(p - s) + max(s) + 1` at the wider scale, divide

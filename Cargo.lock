@@ -2155,6 +2155,7 @@ dependencies = [
  "peacockdb-ffi",
  "sha2",
  "tokio",
+ "url",
 ]
 
 [[package]]

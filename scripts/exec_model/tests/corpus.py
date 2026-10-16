@@ -54,7 +54,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..partitioned_driver import partitioned_driver
-from ..node import CpuBackendSelector, RecipeJoinBackendSelector
+from ..node import CpuBackendSelector
 from ..operators import aggregates as A
 from ..operators.frame import concatenate
 from ..plan import Plan
@@ -458,30 +458,8 @@ def agg_schemas(df, keys, aggs):
     return dict(state.dtypes), dict(A.final(state, list(keys), aggs).dtypes)
 
 
-def backend_selector():
-    """Which backend the corpus runs its joins on.
-
-    `PCK_BACKEND=recipe` routes every join through the FlatBuffers emulation
-    (`operators/recipe_join.py`): the builders emit the same `Cudf*` node sequence the C++
-    reads off the wire, and a python model of the cuDF calls interprets it. Running the whole
-    corpus that way is the claim under test — that the frozen fbs and C++ surface executes
-    these queries' joins without bending over backwards — checked against the same DuckDB
-    answers as the pandas backend, so the two backends cannot agree on a wrong answer by
-    sharing an implementation.
-
-    Unset it and joins run on plain pandas, which is faster and is what the default sweep
-    uses.
-    """
-    chosen = os.environ.get("PCK_BACKEND", "pandas")
-    if chosen == "pandas":
-        return CpuBackendSelector()
-    if chosen == "recipe":
-        return RecipeJoinBackendSelector()
-    raise SystemExit(f"PCK_BACKEND={chosen} is not one of pandas, recipe")
-
-
 def execute(root, budget: int | None = BUDGET):
-    driver = partitioned_driver(Plan.build(root), backend_selector(), budget)
+    driver = partitioned_driver(Plan.build(root), CpuBackendSelector(), budget)
     driver.run()
     # The plan's own concatenate, not pandas': it keeps the first batch's schema when every
     # batch is empty, and a query whose answer is the empty set still has to report its

@@ -1777,7 +1777,7 @@ mod tests {
         let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
         let index = TicketIndex::load(&wiki);
         assert_eq!(index.path_for("205"), Some("llm-wiki/tickets/corpus-coverage.md"));
-        assert_eq!(index.path_for("152"), Some("llm-wiki/tickets/joins.md"));
+        assert_eq!(index.path_for("243"), Some("llm-wiki/tickets/joins.md"));
         assert_eq!(
             index.path_for("103"),
             Some("llm-wiki/archive/archived-tickets.md")

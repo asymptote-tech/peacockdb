@@ -34,21 +34,21 @@ detail file, and one that cannot be resolved here is a ticket naming both engine
    device's join order; reword it to what does hold (the same rows, the same batch structure).
    Float sums reordered across a join (q39) already compare with a tolerance.
 
-**This task closes** [#155](../tickets/joins.md#t155) (umbrella: join execution through a wider C
-and FlatBuffers API), [#152](../tickets/joins.md#t152) (the build handle does not survive a
-streamed probe), [#173](../tickets/joins.md#t173) (a finish whose probe produced no keys refuses
-what it could answer from the build side), [#212](../tickets/joins.md#t212) (a build side that
-emits no batch at all still refuses Right, Full and RightAnti), [#159](../tickets/joins.md#t159)
-(RightSemi/RightAnti with a residual filter has no cuDF path), [#59](../tickets/joins.md#t59)
-(nullable-key semantics for semi/anti/mark joins), [#80](../tickets/joins.md#t80) (anti-join
-`NOT IN` three-valued logic), [#137](../tickets/joins.md#t137) (the planner does not drop null
-join keys before the shuffle), [#220](../tickets/joins.md#t220) (the cpu's joins answer several
-batches per call), [#190](../tickets/joins.md#t190) (the cpu drops a nested-loop join's
-projection), [#207](../tickets/joins.md#t207) (both backends drop a cross join's projection),
-[#208](../tickets/joins.md#t208) (the cpu's cross join answers nothing over a zero-row build), and
-the tickets join-session-cpp built the C++ half of: [#136](../tickets/joins.md#t136),
-[#153](../tickets/joins.md#t153), [#160](../tickets/joins.md#t160), [#215](../tickets/joins.md#t215),
-[#63](../tickets/joins.md#t63), and #154's `join.cpp` sites (so #154 closes whole). Eighth of the
+**This task closes** [#155](../archive/archived-tickets.md#t155) (umbrella: join execution through a wider C
+and FlatBuffers API), [#152](../archive/archived-tickets.md#t152) (the build handle does not survive a
+streamed probe), [#173](../archive/archived-tickets.md#t173) (a finish whose probe produced no keys refuses
+what it could answer from the build side), [#212](../archive/archived-tickets.md#t212) (a build side that
+emits no batch at all still refuses Right, Full and RightAnti), [#159](../archive/archived-tickets.md#t159)
+(RightSemi/RightAnti with a residual filter has no cuDF path), [#59](../archive/archived-tickets.md#t59)
+(nullable-key semantics for semi/anti/mark joins), [#80](../archive/archived-tickets.md#t80) (anti-join
+`NOT IN` three-valued logic), [#137](../archive/archived-tickets.md#t137) (the planner does not drop null
+join keys before the shuffle), [#220](../archive/archived-tickets.md#t220) (the cpu's joins answer several
+batches per call), [#190](../archive/archived-tickets.md#t190) (the cpu drops a nested-loop join's
+projection), [#207](../archive/archived-tickets.md#t207) (both backends drop a cross join's projection),
+[#208](../archive/archived-tickets.md#t208) (the cpu's cross join answers nothing over a zero-row build), and
+the tickets join-session-cpp built the C++ half of: [#136](../archive/archived-tickets.md#t136),
+[#153](../archive/archived-tickets.md#t153), [#160](../archive/archived-tickets.md#t160), [#215](../archive/archived-tickets.md#t215),
+[#63](../archive/archived-tickets.md#t63), and #154's `join.cpp` sites (so #154 closes whole). Eighth of the
 join-rewrite chain.
 
 The design is [`join-rewrite-design.md`](join-rewrite-design.md): §1.3 (validation), §3.5 (the
@@ -185,3 +185,14 @@ them. Each cell enabled with its DuckDB case green.
 
 `build-test-shadgpu.sh`: a cycle for the harness, then the corpus in batches by dataset and mode
 (about five queries per round where cells are new).
+
+## Signoff — 2026-10-14
+
+Solved under its constraints: both engines run every join on the session; every refusal but #250's
+is lifted; the 18 tickets are archived; cpu +150 and device +670 cells, each held to DuckDB. Shortcuts:
+the cost gate is red (251 rises, 173 past 10%, `reports/join-backend-cost-rises.md`), pre-accepted by
+the board; the dead-code bar is read as "no new warning" (26 at base and head); exec_model's cuDF-call
+guard is retired rather than moved (§4.6), its model gone; `IS NOT DISTINCT FROM` keys merge to one
+lane rather than shuffle (§4.1); a rows-only scan beside row groups now refuses on #186; `IntoAnyBox`
+joins the crate's public surface; q66's cells are on with #55 open. Device runs were on nebius-gpu
+under the board's override; shad-gpu's `gpu-tests` job and the sf40 tier are deferred.

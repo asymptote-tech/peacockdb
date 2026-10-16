@@ -11,17 +11,72 @@ use datafusion::physical_plan::coalesce_batches::CoalesceBatchesExec;
 use datafusion::physical_plan::joins::utils::JoinFilter;
 use datafusion::physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
 
+use datafusion::common::JoinType;
+
 use crate::plan::Expr;
 use crate::plan::PlanError;
+use crate::plan::Schema;
 use crate::plan::{BatchLayout, ColumnOrder, KeyDistribution};
 use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{JoinFilterColumn, JoinSide};
+use crate::plan::{emitted_columns, emitted_sides};
 
 /// DataFusion's projection as this layer numbers ordinals. A join whose projection is
 /// dropped declares the projected columns and emits every one it crossed, which shifts
 /// every reference above it.
 pub(crate) fn projected(projection: Option<&Vec<usize>>) -> Option<Vec<u32>> {
     projection.map(|columns| columns.iter().map(|c| *c as u32).collect())
+}
+
+/// A keyless join's projection and schema once each side DataFusion plans with no column is
+/// `[__rowmarker__]` here (#63): DataFusion's ordinals do not count the marker, so they are
+/// renumbered past it and the marker is dropped — or, where the join would keep no column,
+/// kept alone. A hash join needs no such pass: a side with a key has a column.
+pub(crate) fn past_rowmarkers(
+    join: &dyn ExecutionPlan,
+    join_type: JoinType,
+    projection: Option<Vec<u32>>,
+) -> (Option<Vec<u32>>, Schema) {
+    let widths: Vec<usize> = join
+        .children()
+        .iter()
+        .map(|side| side.schema().fields().len())
+        .collect();
+    let [build, probe] = widths[..] else {
+        unreachable!("a join has two sides")
+    };
+    let (with_build, with_probe) = emitted_sides(join_type);
+    // Where each of the columns this node emits came from: DataFusion's ordinal, or the marker.
+    let mut ours: Vec<Option<u32>> = Vec::new();
+    let mut next = 0;
+    for (emitted, width) in [(with_build, build), (with_probe, probe)] {
+        match (emitted, width) {
+            (false, _) => {}
+            (true, 0) => ours.push(None),
+            (true, _) => {
+                ours.extend((next..next + width as u32).map(Some));
+                next += width as u32;
+            }
+        }
+    }
+    let theirs = emitted_columns(join_type, build, probe) as u32;
+    ours.extend((next..theirs).map(Some));
+    let Some(marker) = ours.iter().position(Option::is_none) else {
+        return (projection, Schema::new(join.schema()));
+    };
+    let kept: Vec<u32> = projection
+        .unwrap_or_else(|| (0..theirs).collect())
+        .iter()
+        .map(|ordinal| {
+            ours.iter()
+                .position(|from| *from == Some(*ordinal))
+                .expect("DataFusion projects a column its join emits") as u32
+        })
+        .collect();
+    if kept.is_empty() {
+        return (Some(vec![marker as u32]), Schema::rowmarker());
+    }
+    (Some(kept), Schema::new(join.schema()))
 }
 
 /// Lane p of one side holds what can match lane p of the other only if both were scattered

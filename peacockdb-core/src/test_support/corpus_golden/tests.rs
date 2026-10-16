@@ -102,7 +102,7 @@ fn a_mode_keyed_merge_drops_a_cell_the_registry_no_longer_enables() {
     std::fs::write(
         &path,
         "cudf=25.02\n== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
-         == q12 mode=tp1-single\nan answer from before the cell was turned off\n",
+         == mixed-join mode=tp1-single\nan answer from before the cell was turned off\n",
     )
     .expect("the file");
     merge_mode_section(
@@ -119,7 +119,7 @@ fn a_mode_keyed_merge_drops_a_cell_the_registry_no_longer_enables() {
         text,
         "cudf=25.02\n== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
          == q6 mode=tp1-single\nq6's answer\n",
-        "tpch q12 has no enabled device cell and tpch q1 at tp4-sized has one"
+        "tpch mixed-join has no enabled device cell (#168) and tpch q1 at tp4-sized has one"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

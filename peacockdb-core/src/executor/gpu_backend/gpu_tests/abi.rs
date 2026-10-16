@@ -11,7 +11,7 @@ use datafusion::arrow::ipc::reader::StreamReader;
 use crate::executor::GpuBatch;
 use crate::planner;
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
-use crate::wire::{AbiSymbol, Seq, attach_recipes};
+use crate::wire::{AbiSymbol, Seq, attach_recipes, join_scratch_bytes};
 use crate::{build_session_state, register_tables_for};
 use peacockdb_ffi::raw::{
     PeacockExecutor, PeacockNodeStats, peacock_executor_begin_plan, peacock_executor_create,
@@ -58,7 +58,8 @@ impl LoadedPlan {
             .await
             .unwrap();
         let (tree, _memory) = planner::plan(&plan, KNOBS).expect("this mode plans it");
-        let recipes = attach_recipes(tree.as_ref()).expect("a planned tree has recipes");
+        let recipes = attach_recipes(tree.as_ref(), join_scratch_bytes(&KNOBS))
+            .expect("a planned tree has recipes");
         let scan_seq = recipes
             .get(0)
             .and_then(|recipe| {
