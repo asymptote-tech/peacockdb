@@ -653,3 +653,9 @@ ran: changes, both dataset-matrix legs, the GPU build, cost-report and **GPU Tes
 all green; S3 and deploy-pages skipped. The GPU job's L40S list includes `peacock_cpu_tests`,
 so `ci-ship.sh` shipped `testdata/fixtures` and the shared clamp table was read on the VM.
 Back to `done`.
+
+### 2026-10-16 — rebased onto master ca4dedeb, documentation only
+
+The control file said `rebase` again. master gained one commit, ca4dedeb, which folds chain L
+into chain K as four tasks after empty-sorts. It touches only `llm-wiki/`, so nothing a test
+reads moved, and the task stays `done` without a re-run. The replay was clean.
