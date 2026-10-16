@@ -1,0 +1,1 @@
+SELECT d_id FROM dim WHERE NOT EXISTS (SELECT 1 FROM fact WHERE f_k = d_k AND d_kb)

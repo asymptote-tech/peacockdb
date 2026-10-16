@@ -34,6 +34,8 @@ mod registry;
 mod result_text;
 mod schema_validation;
 mod testdata;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -165,6 +167,36 @@ impl Mode {
             budget: BUDGET,
             small_table_bytes: SMALL_TABLE_BYTES,
         }
+    }
+
+    /// [`Mode::knobs`] with the one knob a dataset moves. Every corpus call site that knows
+    /// its dataset uses this; `knobs()` stays for the callers that have none.
+    pub(crate) fn knobs_for(&self, dataset: &str) -> PlanKnobs {
+        PlanKnobs {
+            small_table_bytes: small_table_bytes_for(dataset),
+            ..self.knobs()
+        }
+    }
+}
+
+/// The datasets the corpus covers, each at the one scale factor its goldens are written for.
+///
+/// The one list: every dataset loop in `plan_goldens.rs`, `test_corpus_goldens.rs` and
+/// `test_cost_model.rs` reads this, so a fourth dataset arrives in one edit rather than in a
+/// dozen a reader has to find — and a loop someone forgot cannot quietly cover two datasets
+/// while its neighbours cover three.
+pub const CORPUS_DATASETS: &[(&str, &str)] = &[("tpch", "1"), ("tpcds", "1"), ("pbench", "1")];
+
+/// The byte count below which a source stops being worth splitting, per dataset.
+///
+/// pbench's five tables are all under the 5 MB threshold, which would plan every pbench scan
+/// as one lane — and pbench exists to show the multi-lane shapes the two benchmarks cannot
+/// reach: a four-lane `fact`, and one-row-group tables that leave three lanes empty. tpch and
+/// tpcds keep the threshold, so none of their plan goldens moves.
+pub(crate) fn small_table_bytes_for(dataset: &str) -> u64 {
+    match dataset {
+        "pbench" => 0,
+        _ => SMALL_TABLE_BYTES,
     }
 }
 

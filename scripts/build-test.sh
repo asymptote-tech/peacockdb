@@ -193,11 +193,11 @@ sync_goldens() {
 # Map a testdata KIND to its repo-relative dir(s) under testdata/.
 testdata_dirs_for_kind() {
   case "$1" in
-    parquet)          echo "tpch.sf1 tpcds.sf1 tpch.minimal" ;;
+    parquet)          echo "tpch.sf1 tpcds.sf1 tpch.minimal pbench.sf1" ;;
     goldens)          echo "goldens" ;;
     duckdb-profiles)  echo "duckdb-profiles" ;;
     duckdb-dynfilters) echo "duckdb-dynfilters" ;;
-    queries)          echo "tpch-queries tpcds-queries tpch-vec-queries" ;;
+    queries)          echo "tpch-queries tpcds-queries tpch-vec-queries pbench-queries" ;;
     *) echo "error: unknown testdata kind '$1' (parquet|goldens|duckdb-profiles|duckdb-dynfilters|queries)" >&2; exit 1 ;;
   esac
 }

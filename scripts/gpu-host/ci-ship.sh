@@ -46,7 +46,8 @@ trap 'rm -rf "$logs"' EXIT
 # registry test reads cost-registry.csv. Named by hand, so a new committed fixture has to be added
 # here, as in every provisioning path.
 TESTDATA=(testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal testdata/goldens
-          testdata/tpch-vec-queries testdata/generate_testdata.sh testdata/cost-registry.csv)
+          testdata/tpch-vec-queries testdata/pbench-queries testdata/pbench.sf1
+          testdata/generate_testdata.sh testdata/cost-registry.csv)
 
 send() {  # <label> <rsync source and dest args…>; retried, and resumed from --partial-dir
   local label=$1 attempt=1; shift

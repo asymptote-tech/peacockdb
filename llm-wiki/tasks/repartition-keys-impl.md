@@ -618,10 +618,15 @@ fn data_type(data_type: &DataType) -> Result<fb::DataType, PlanError> {
     convert_data_type(data_type).map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))
 }
 ```
-- [ ] **Step 4:** pbench's three queries whose plans now hold a type the wire cannot name go into
-  `NOT_RUNNABLE` with `"249"`: `interval-through-join`, `struct-through-join` and
-  `struct-key-join` (its scan schema holds the struct key). Each line cites `(#249)`. `the_payload_golden_carries_what_each_call_hands_the_executor`
-  and every plan golden of tpch and tpcds stay byte-identical (no such type in either).
+- [ ] **Step 4 — deferred on [#255](../tickets/complete-coverage.md#t255); do not attempt it.**
+  It would put pbench's `interval-through-join`, `struct-through-join` and `struct-key-join` into
+  `NOT_RUNNABLE` with `"249"`, each citing `(#249)`. **All three `.sql` files are absent from the
+  tree** and cannot land until #255 closes — `testdata/test_duckdb_result.py:165` asserts their
+  absence, and `NOT_RUNNABLE` is checked in both directions (`plan_goldens.rs:456`, and the
+  `uncrossable == declared` assert at `:421-434`), so the step goes red on contact rather than
+  failing to find them. #249 and #255 both already say these queries arrive with #255's fix. When
+  they do, this step is the work; until then skip it and the goldens stay byte-identical for the
+  reason the next sentence gives anyway.
 - [ ] **Step 5: Run green**: `cargo test --features rust-only -p peacockdb-core --lib wire::tests plan_goldens`.
   **Commit:** `git commit -m "#249: a type the wire cannot name is refused at plan time, in every schema"`.
 

@@ -28,6 +28,46 @@ one that goes nowhere.
 
 ## Done
 
+<a id="t259"></a>
+### #259 — pbench landed with every device cell off, and nothing owns running them
+
+[`pbench`](../tasks/pbench.md) committed a third dataset and 56 corpus lines with **no gpu cell
+enabled and not one run** — correct at the time, because shad-gpu was off the network for the whole
+task and the plan isolated the device work into a step that never happened. What is missing is an
+owner for that step. The recipe lives in `pbench-impl.md` and `pbench-detail.md`, and the archive
+rule deletes both at merge, so without this ticket it goes with them.
+
+Three pieces, and the first is the one that otherwise never lands:
+
+- **`int8-key-group` does not exist at all** — no `.sql`, no registry row, no corpus line, no
+  ticket. It was held back because it is the one row the table expects to pass, so landing it with
+  its cells off would have had to name a ticket that does not exist (the registry requires one for
+  an off cell). It arrives with the cycle that proves it.
+- **16 tp1 gpu cells nobody turns on.** [`repartition-keys`](../tasks/repartition-keys.md) says
+  "pbench's key-type rows' **tp4** device cells turn on where they pass", so the tp1 cells of
+  `bool-key-group`, `decimal15-key-group`, `decimal38-key-group`, the three `timestamp-*-key-group`
+  rows, `rollup-small-keys` and `uint-key-group` sit off under a tag that task will leave in place.
+  That is exactly the condition [`stale-cells`](../tasks/stale-cells.md) exists to clear, recreated
+  behind it.
+- **The rest of the gpu cells**, which the later tasks do own: `join-backend` for the join rows,
+  `repartition-keys` for the key-type rows at tp4.
+
+**Fix proposed:** one `build-test-shadgpu.sh` cycle filtered to `gpu_pbench_`, plus
+`PCK_WRITE_GPU_RESULT=1` so the answers reach `gpu-result.txt` and meet DuckDB. Each cell is then
+enabled if it passes, or carries the ticket it fails on. The same card closes
+[#235](#t235)'s last step and [`stale-cells`](../tasks/stale-cells.md)'s 16 cells, so one visit
+settles three things. The record that nothing was run is durable in the section comment at the head
+of pbench's block in `corpus_cases.inc`; this ticket is the part that says whose job it is.
+
+**Closed 2026-10-08.** One cycle on nebius-gpu's L40S under cuDF 25.02 ran every runnable pbench
+gpu cell with `PCK_WRITE_GPU_RESULT=1` and settled each on what it measured: 30 on, 98 off with
+the ticket each failed on, 157 never runnable because a gpu cell needs a cpu cell at its mode.
+`int8-key-group` landed and passes at all five. Fourteen of the sixteen tp1 cells are on; the two
+of `rollup-small-keys` are off on [#65](../tickets/corpus-coverage.md#t65), the first corpus cell to reach
+that ticket on a device. `gpu-result.txt` is golden 18 of 18 and every section of it agrees with
+DuckDB. The rest belong to `join-backend` (#152, #220, #63) and `repartition-keys` (#95, #206,
+#240, #189), as this ticket said.
+
 <a id="t237"></a>
 ### #237 — a mark or right-semi join's projection prints under the wrong names
 `projection_field` (`plan_text/node_text.rs`) names each ordinal from build++probe, but a join
@@ -626,6 +666,35 @@ adds `tpch.minimal`, `tpch-vec-queries`, `generate_testdata.sh`), so the two alr
 No clean verification run is on record.
 
 ## Stale or obsolete
+
+<a id="t256"></a>
+### #256 — a scan whose row groups all prune is refused as an invalid plan
+`scan_mapping::partition` returns `PlanError::Invalid` when the survivor list is empty
+(`partition.rs:27`): "no surviving row groups: what an empty scan means is the caller's decision,
+not an empty map". Nothing ever made that decision, so the caller gets a refusal where SQL has an
+answer — zero rows.
+
+Two ways in, and the second is the common one. A genuinely empty table: pbench's `empty.parquet`
+holds `tiny`'s schema and no rows, so DuckDB writes a file with zero row groups and
+`SELECT e.t_id, t.t_id FROM empty e, tiny t` is refused at plan time. And a filter that prunes
+every row group: `WHERE f_id > 1000000` over any parquet table reaches the same line, which is a
+selective query over real data rather than a corner.
+
+DataFusion plans both: `CrossJoinExec` over a `ParquetExec` of the empty file, answering zero rows.
+What the mapping cannot express is "no partitions", because the wire reads an empty map as one
+unmapped partition — so the fix is a representation for an empty scan (a lane with an empty batch
+list, or a `GpuEmpty` the way [#155](../tickets/joins.md#t155)'s `EmptyExec` arm will need one), not a laxer check.
+
+Not [#208](../tickets/joins.md#t208), which is this shape at run time: the cpu's cross join emitting nothing where the
+device emits a zero-row batch. #208 cannot be reached from the corpus until this closes, because
+the plan is refused before either backend sees it.
+
+**Corpus queries:** pbench's `cross-empty-build`, its plan cells disabled on this ticket. The row
+carries `208` as well, the ticket it is written for and will show once this lifts.
+
+**Stale 2026-10-15.** A duplicate of [#282](../tickets/corpus-coverage.md#t282), filed on chain J's
+pbench branch after #282 already existed: the same refusal in `partition.rs`. Its two ways in, the
+#208 cross-reference and the `GpuEmpty` fix option moved there, and its registry rows carry `282`.
 
 <a id="t188"></a>
 ### #188 — the device refuses a read with row groups and a limit together
