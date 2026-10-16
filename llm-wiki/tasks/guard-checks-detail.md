@@ -644,3 +644,12 @@ master's, as recorded in the second rebase. Not fixed: it is outside this task's
   matches the 4 + 3 measured.
 - The non-engine Rust rows match their targets: golden format 43, CI wiring 11, module layout
   18, cost-report 41.
+
+#### CI on the rebased head, and `done`
+
+Dispatched run [38949168978](https://github.com/asymptote-tech/peacockdb/actions/runs/38949168978)
+on `99fee3ac` (`gh workflow run pipeline.yml --ref ENS-guard-checks`), so `GPU Tests (nebius-gpu)`
+ran: changes, both dataset-matrix legs, the GPU build, cost-report and **GPU Tests (nebius-gpu)**
+all green; S3 and deploy-pages skipped. The GPU job's L40S list includes `peacock_cpu_tests`,
+so `ci-ship.sh` shipped `testdata/fixtures` and the shared clamp table was read on the VM.
+Back to `done`.
