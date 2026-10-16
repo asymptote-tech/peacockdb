@@ -355,7 +355,8 @@ DataFusion casts `sum`'s and `avg`'s argument and not `count`'s, so
 - The **inner stage** groups by `(x, keys)` and runs the companions' inits, emitting state. `x`
   is always its own column, `__distinct_arg`, first and never masked — even where it is also a
   group key, since a grouping set can mask a key to NULL. It is shuffled as DataFusion shuffles
-  the aggregate, one column right.
+  the aggregate, one column right, and under grouping sets without the id, as every grouping-set
+  shuffle is.
 - The **outer stage** groups by `keys` and takes no shuffle of its own: the inner's hash is on a
   subset of these keys. Its first node is an init. Each DISTINCT aggregate runs there as its
   non-distinct twin over the deduplicated `x`; each companion's state columns run that

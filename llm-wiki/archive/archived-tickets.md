@@ -48,9 +48,9 @@ own merge rule. Grouping sets lower too. Two shapes stay refused by name:
 [#261](../tickets/complete-coverage.md#t261) for a Welford companion, whose state has no init-form
 merge, and [#144](../tickets/complete-coverage.md#t144) for a DISTINCT over two different
 arguments. The wire's `AggregateFuncNode.distinct` went with it, marked `(deprecated)` so no field
-slot moved. tpcds q28 runs on the cpu at five modes and `tpch/rollup-distinct` and
-`tpch/distinct-functions` joined the corpus; distinct-functions runs on the device at five modes
-too, and q28's and rollup-distinct's device cells wait on #152, #65 and #189.
+slot moved. tpcds q28 runs at five modes and `tpch/rollup-distinct` and
+`tpch/distinct-functions` joined the corpus. q28 and distinct-functions run on the device at five
+modes too, and rollup-distinct's device cells wait on #65.
 [#262](../tickets/corpus-coverage.md#t262) records that those are the lowering's last unrun ones.
 
 <a id="t155"></a>

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 4940 test cases — Rust 4373, C++ 170, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5002 test cases — Rust 4435, C++ 170, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,50 +23,55 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2767 cases: `--lib` 775, `test_cpu_corpus` 1960, `test_corpus_goldens` 29, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 2819 cases: `--lib` 797, `test_cpu_corpus` 1991, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1959 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1990 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
 DuckDB's, the cpu's, the device's — and whether its device run is schema-validated, expanded
 to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 177 lines, 174 of them running at
+checked against plain DataFusion at `target_partitions = 1` — except under
+`data_fusion_disabled`, for a query DataFusion 45 answers wrong or refuses. Such a line checks no
+answer against DataFusion, so it must compare its whole answer with DuckDB. `tpch/distinct-functions`
+is the one: DataFusion refuses `stddev(DISTINCT)` and answers a grouped decimal `avg(DISTINCT)`
+as the plain average, and `end_to_end.rs` holds it against a hand-lowered oracle as well. 180
+lines, 177 of them running at
 the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpch/scan-limit` two by [#186](tickets/corpus-coverage.md#t186), and two of
 pbench's run at the two tp1 modes only: `scalar-subquery-cross` (#199 at tp4) and
 `not-in-uncorrelated`, which tp4 refuses at plan time on [#267](tickets/corpus-coverage.md#t267).
 **3 lines are out entirely**, and they are exactly the 3 `duckdb_none` lines, all pbench's and all
 refused at plan time: `cross-empty-build` and `outer-on-true-empty` on [#282](tickets/corpus-coverage.md#t282),
-`in-is-null` on [#250](tickets/joins.md#t250). 853 cells,
-plus six checks
+`in-is-null` on [#250](tickets/joins.md#t250). 868 cells,
+plus seven checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that a hyphenated query resolves its authority and has its result section, that an
 undetermined line's rows are compared only against committed files, that `duckdb-result.txt`'s
-sections are the registry's rows in both directions, and `all_modes` expanding to the same cells as
-the five spelled out
+sections are the registry's rows in both directions, `all_modes` expanding to the same cells as
+the five spelled out, and every `data_fusion_disabled` line comparing its whole answer with DuckDB
 
-Then the DuckDB tier, 943 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 956 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
-for `gpu-result.txt`. Today 129 lines are `duckdb_exact`, 16 `duckdb_approx`, 24
+for `gpu-result.txt`. Today 129 lines are `duckdb_exact`, 19 `duckdb_approx`, 24
 `duckdb_fingerprint` (the over-cap sections), 3 `duckdb_none` (one side does not answer) and
 5 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 157 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 159 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
 the cell flap. Read off DataFusion's plan at one partition; a sorted cut is re-run one row wider
 to read the rows either side of it. A cross join keeps its order, and a keyless aggregate
 answers one row, so neither is a hazard. Run once over every line DataFusion plans, all pass: 34 lines cut a
-sorted answer over a join, 28 of them among the 157 with a device cell, and no cut falls on a
+sorted answer over a join, 28 of them among the 157 lines that had a device cell then, and no cut falls on a
 tie
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -75,7 +80,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 29 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 28 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -87,11 +92,10 @@ the record get the same reading: every `total_us` is the sum of the `time_us` be
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, a row that lost a cell is refused, a bare `calls` row names the seq it was
 handed, and the record's preamble is what `record_header()` writes. That device check reads
-`corpus_cases.inc` as text, and two more read it with the same reader: every schema-validation
-mask entry is one of its own line's device modes — the decoder is asked only about a mode a run
-reached, so an entry for a cell that is off is never decoded and arms itself when that cell is
-enabled — and one case holds the reader to the two bracket shapes a declaration line carries, a
-mode mask on the last argument and a trailing comment with a parenthesis in it
+`corpus_cases.inc` through `macro_invocations`, and so do two more: every schema-validation mask
+entry is one of its own line's device modes, and a mask entry for a cell its line never runs is
+refused as dead. The decoder is asked only about a mode a run reached, so an entry for a cell that
+is off is never decoded and would arm itself when that cell is enabled
 
 | Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
 |---|---|--:|
@@ -100,12 +104,12 @@ mode mask on the last argument and a trailing comment with a parenthesis in it
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 32 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 37 |
 |---|---|--:|
 
 SQL in, rows out: 18 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and twelve cases no query list can
+to zero and holds equal releases at the end of every run — and seventeen cases no query list can
 carry: that DataFusion's partial aggregate does not skip grouping here, that a relation
 DataFusion proved empty, planned alone, answers no batch at every mode, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
@@ -117,9 +121,13 @@ RightAnti answering like the oracle from the empty build lanes it leaves
 hook — `tpch/q6` at every mode passing under it, an index over the same tree with one
 project's field retyped refused naming the field, and the same tree with a field declared
 non-nullable over a column holding NULLs refused naming the nulls and their count
-([#227](tickets/corpus-coverage.md#t227)). Two of the 30 are `#[ignore]`d against
+([#227](tickets/corpus-coverage.md#t227)); and five on the DISTINCT lowering — a
+`count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
+companions, a DISTINCT argument holding NULLs, an empty keyless input answering `0, 0`, and
+`tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`.
+Two of the 37 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 28 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 35 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -207,11 +215,15 @@ the tpch case is what proves the footer reader is consulted at all. Three answer
 and two over the hand-built fixture for what no corpus SQL reaches: the `null_equals_null` flag,
 and whether the filter landed below the shuffle
 
-| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 10 |
+| Planner join refusals | [planner::tests::join_refusals](../peacockdb-core/src/planner/tests/join_refusals.rs) | 12 |
 |---|---|--:|
 
 every shape the planner refuses, from the SQL that provokes it; each asserts its ticket is in
-the message a user sees. Five once refused, each now run on the cpu against DataFusion's own
+the message a user sees. Three are `bug_` tests rather than refusals the engine means to keep:
+two DISTINCT arguments ([#144](tickets/complete-coverage.md#t144)), a `stddev` companion beside
+a DISTINCT ([#261](tickets/complete-coverage.md#t261)), and one `Float32` argument that reaches
+#144's refusal because `keeps_distinct` admits `Float64` from an integer and not from a
+`Float32`, so widening that list turns the test red. Five once refused, each now run on the cpu against DataFusion's own
 answer: a residual on Left, Right and Full joins and on the right-handed semi pair, anti and
 mark joins over NULL keys, and a nested loop of each of seven types
 
@@ -366,7 +378,7 @@ fetch, coalesce, a merge with and without its finalize, a merge over state whose
 grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
-| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 40 |
+| Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 47 |
 |---|---|--:|
 
 one test per node kind, per expression kind and per planner rule, each from the smallest plan
@@ -389,13 +401,16 @@ and per-lane slots; the scheduler's corners
 enumerated and then a differential test against a naive rescan on randomized shapes; the lane
 state machine one call at a time with no tree around it
 
-| Rollup's shuffle keys | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 3 |
+| Rollup's shuffle keys, and DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 4 |
 |---|---|--:|
 
 a grouping-set aggregate's shuffle hashes the user keys and not the id, which is
 [#189](archive/archived-tickets.md#t189): the id is a `UInt8` comet's murmur3 has no arm for, and
 the device's id differs from the cpu's in type and bits ([#65](tickets/corpus-coverage.md#t65)), so
-hashing it would put a subtotal row in a different lane on each engine
+hashing it would put a subtotal row in a different lane on each engine. Plus `decompose` handed a
+distinct `AggregateFunctionExpr` directly: no SQL reaches it, since the classifier lowers or
+refuses every DISTINCT it is shown, so this is the net under it for a shape it is not shown, which
+would otherwise run as non-distinct on both engines where the cpu-vs-device comparison cannot see it
 
 | Arrow to the wire enum | [wire::serialize::tests](../peacockdb-core/src/wire/serialize/tests.rs) | 3 |
 |---|---|--:|
@@ -490,12 +505,13 @@ dataset would demonstrate nothing. Then pbench's data itself, read off the commi
 that drops one or writes a timestamp at the wrong unit goes red here rather than at the query
 somebody writes a year later
 
-| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 6 |
+| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 7 |
 |---|---|--:|
 
 the cpu helper shown failing, which is what keeps the corpus honest: a wrong row, a missing row,
 a digit past the tolerance, and a section another mode wrote; plus every `CpuOracle` variant
-being named by some corpus line
+being named by some corpus line, and the declaration reader held to the two bracket shapes a line
+carries, a mode mask on the last argument and a trailing comment with a parenthesis in it
 
 | Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 15 |
 |---|---|--:|
@@ -611,26 +627,28 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1486 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1496 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 775, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 764 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 774 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
 device with every batch held to its node's declared schema through the driver's output hook
-(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` and `tpch/distinct-functions`
-say `disabled` against [#225](tickets/corpus-coverage.md#t225), their Welford state columns
-named for the alias), and asserts,
+(the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` and
+`tpch/distinct-functions` `disabled(tp4_single | tp4_rowgroup | tp4_sized)` against
+[#225](tickets/corpus-coverage.md#t225), whose Welford columns named for the alias sit in a node
+only the tp4 modes emit for distinct-functions, so the mask keeps the hook at its two tp1 cells),
+and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-763 cells today. From tpch, 171: every line at every mode, but for six. `q11` is off at the
+773 cells today. From tpch, 176: every line at every mode, but for seven. `q11` is off at the
 three tp4 modes and `q22` at `tp4-single`, on [#199](tickets/corpus-coverage.md#t199): a keyless
 merge over a lane that got nothing, whose identity row the cpu's section carries and the device
-does not. `rollup-over-join` is off on [#65](tickets/corpus-coverage.md#t65), `mixed-join` on
+does not. `rollup-over-join` and `rollup-distinct` are off on [#65](tickets/corpus-coverage.md#t65), `mixed-join` on
 [#168](tickets/corpus-coverage.md#t168), `nested-limits` and `scan-limit` on #186. From tpcds,
-343: every line wherever it runs on the cpu, but for eleven. `q32` is off at the three tp4 modes
+348: every line wherever it runs on the cpu, but for eleven. `q32` is off at the three tp4 modes
 on #199, its keyless sum over an Inner join whose build lands in one lane of four. `q78` and `q2`
 are off on [#60](tickets/corpus-coverage.md#t60), a float `round(x, 2)` one ulp from
 DataFusion's. `q14`, `q18`, `q22`, `q77` and `q80` are off on #65, the schema hook refusing the
@@ -641,7 +659,7 @@ three. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` w
 column; `rollup-small-keys` on #65; `timestamp-s-key-group` on
 [#264](tickets/corpus-coverage.md#t264), a cast group key. pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 764th case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 774th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |

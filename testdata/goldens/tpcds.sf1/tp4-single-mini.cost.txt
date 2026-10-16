@@ -383,7 +383,7 @@ cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
 peacockdb_cost=589758168
 == q28
-storage_read_bytes=976456968 # GpuLoadParquet
+storage_read_bytes=976456968 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=3207243 # GpuFilter
 cuda_hash_join_bytes=0 # GpuHashJoin
 cuda_aggregate_bytes=13315006 # GpuAggregate, GpuAggregateBatches

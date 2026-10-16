@@ -39,7 +39,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#174 — two clamps for one rule, and nothing compares them](#t174)
   - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
-  - [#262 — the DISTINCT lowering's device cells have never run](#t262)
+  - [#262 — a DISTINCT under a grouping set has no device cell](#t262)
   - [#281 — limits' and empty-sorts' device cells have never run](#t281)
   - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 — `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
@@ -66,8 +66,12 @@ them now, `stale-cells` having turned on the four device modes that a closed #18
 Validation was off for all five, so that run says nothing about the names and the refusal still
 stands at every mode; the row keeps no `225` only because no cell of it is off.
 
-**Corpus queries:** `tpch/shuffle-stddev` (schema validation only). `tpcds/q39` at every mode and
-`tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off here.
+**Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
+only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
+three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
+its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
+mode and `tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off
+here.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -780,27 +784,26 @@ the range each call was handed, and the backends' `LimitStream` tests take a ran
 a running count.
 
 <a id="t262"></a>
-### #262 — two DISTINCT corpus queries have no device cell
+### #262 — a DISTINCT under a grouping set has no device cell
 
-No device has run a DISTINCT under a grouping set, or a keyless one feeding a cross join: the
-two corpus queries carrying those shapes are off at every device mode, each on a ticket of its
-own.
+No device has run a DISTINCT under a grouping set: `tpch/rollup-distinct`, the corpus query of
+that shape, is off at every device mode.
 
-The lowering itself is proven on a device. `tpch/distinct-functions` was enabled at all five
-modes on nebius-gpu on 2026-10-09 (distinct-companions, chain K, which closed
+The rest of the lowering is proven on a device. `tpch/distinct-functions` runs at all five modes
+on nebius-gpu (distinct-companions, chain K, which closed
 [#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
-match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. So an outer
-init running merge aggregators over state and a `__distinct_arg` key work on a device, and the
-widened `avg(…)$sum` state reached it under the type id and scale the plan declares. Its
-*precision* is not part of that: a device holds `{type_id, scale}`, so the widening stays pinned
-by a plan test, which is the only reading of it there is.
+match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. tpcds q28, six
+keyless DISTINCT blocks cross-joined, joined it at all five modes on 2026-10-16, once #152 had
+closed. So an outer init running merge aggregators over state and a `__distinct_arg` key work on
+a device, and the widened `avg(…)$sum` state reached it under the type id and scale the plan
+declares. Its *precision* is not part of that: a device holds `{type_id, scale}`, so the
+widening stays pinned by a plan test, which is the only reading of it there is.
 
-**Corpus queries:** tpcds q28 (off on #152) and `tpch/rollup-distinct` (off on #65 and #189).
-Both rows name this ticket beside those, since it is the record that their device cells are the
-lowering's last unrun ones.
+**Corpus queries:** `tpch/rollup-distinct`, off on #65. Its row names this ticket beside #65,
+since it is the record that its device cells are the lowering's last unrun ones.
 
-**Fix proposed:** when #152, #65 and #189 have closed, run those cells and enable each one that
-passes. Then this ticket is archived. Chain L's grouping-id takes the rollup half.
+**Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
+ticket is archived. Chain L's grouping-id takes it.
 
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run

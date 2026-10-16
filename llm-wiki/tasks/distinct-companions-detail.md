@@ -1671,3 +1671,102 @@ Owed before the task returns to `done`: regenerate every generated file (plan go
 `mini.result.txt`, all `*-mini.{cost,cpu}.txt`, `tpch.sf1/duckdb-result.txt` without `--only`),
 the cpu tiers, and a device cycle on nebius-gpu that re-proves distinct-functions' cells and
 records their five `gpu-result.txt` sections. Then a dispatched CI.
+
+#### Re-proved on master 8701463f
+
+2026-10-16, on `e5fd07c5` plus the working-tree changes below. CPU work ran locally (verda is
+down) and GPU work on nebius-gpu in `~/peacockdb-K`. Green throughout.
+
+**Cell change made for this cycle (the coordinator's instruction).** #152 is closed, so tpcds q28
+was off on #262 alone. Its five device cells were turned on: `corpus_cases.inc` gpu column
+`all_modes`, and its registry row's gpu cells `enabled` with the ticket column empty. The tpcds
+device-column comment goes from twelve exceptions to eleven. All five passed on the device, so
+they stay on. rollup-distinct stays off on #65.
+
+| step | command | result |
+|---|---|---|
+| plan goldens | `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens --test-threads=2` | 26 passed on the second pass (see note 1) |
+| cpu regen | `UPDATE_CANONICAL=1 … --test test_cpu_corpus -- --test-threads=2` | 1980 passed, 11 failed: the 10 `duckdb_gpu_*` cells of q28 and distinct-functions and the coverage check, every one "holds no section", cleared by the device record |
+| DuckDB oracle | `python3 testdata/duckdb_result.py --dataset tpch` | +2 sections, 0 lines removed; tpcds q28's committed section re-derived and identical, so tpcds not regenerated |
+| `--lib` | `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2` | 795 passed, 0 failed, 2 ignored (#182) |
+| `test_cpu_corpus` (after the device record) | same, `--test test_cpu_corpus` | 1991 passed, 0 failed |
+| `test_corpus_goldens` | | 28 passed (master's 26 plus the two mask tests) |
+| `test_cost_model` | | 3 passed |
+| `test_golden_format` | | 43 passed |
+| `test_ci_coverage` | | 11 passed |
+| `test_module_layout` | | 18 passed; the new facade fn `macro_invocations_in` needed no register |
+| device-gated targets under rust-only | `test_gpu_corpus`, `test_node_timing`, `peacock_gpu_benchmarks` | each `running 0 tests` |
+| ffi rung | `CUDF_ROOT=… LD_LIBRARY_PATH=<ffi out/lib>:<cuDF lib> scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::`; `… -p peacockdb-ffi --test test_ffi` | 4 passed; 3 passed |
+| cost-report | `cargo test -p cost-report` | 41 passed |
+| warnings | `cargo build --features rust-only -p peacockdb-core` after `touch lib.rs`, and `--all-targets` | 0 |
+| C++ 25.02 | `scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build` | rc 0, incremental (21 units), 0 warnings; `peacock_cpu_tests` 12 passed; `ctest -L cpu` 1/1 |
+| cost gate | `cargo run -q -p cost-report -- --cost-diff --base 28f957f3` (ENS-guard-checks) | `853 compared, 0 changed, 0 regression(s)`; rc 0. The three new queries have no base section and are not compared |
+| device build | `build-test-shadgpu.sh --build` on nebius-gpu | rc 0. 2 warnings, both `-Wstringop-overflow` in the vendored `_deps/flatbuffers-src/src/reflection.cpp`, none in project code |
+| device run | `PCK_WRITE_GPU_RESULT=1 gpu-host-test.sh run ~/peacockdb-K` | `ALL rc=0` |
+
+Device results, per binary: `peacock_cpu_tests` 12, `peacock_gpu_tests` 2,
+`peacock_join_session_tests` 53, `peacock_plan_tests` 81, `peacock_gpu_benchmarks` 8 (3
+filtered), `peacockdb_core_gpu_lib` 709, `test_gpu_corpus` 775 (master's 765 plus q28 ×5 and
+distinct-functions ×5), `test_node_timing` 1. All passed, no segfault.
+
+- q28 on the device: tp1-single, tp1-rowgroup, tp4-single, tp4-rowgroup and tp4-sized all ok.
+- distinct-functions on the device: all five ok. The tp1 cells kept the schema hook, under the
+  tp4-only mask.
+
+**Regenerated, and why each moved.** A section-by-section comparison (content per `== ` name,
+order ignored) found nothing outside this task:
+
+- the five `tpcds.sf1/*.plans.txt`: q28 only, 9 lines each. Its cross joins now plan as master's
+  join session, `join_build(CudfJoin); per probe batch: join_probe` instead of `CudfCrossJoin,
+  build copy`, and the recipe ordinals shift.
+- the three tpch tp4 `*.plans.txt`: rollup-distinct only. Its inner shuffle hashes
+  `[l_returnflag, l_linestatus]` without `__grouping_id`: the grouping-id drop, now in `sequence`.
+- the three tpch tp4 `*-mini.cpu.txt`: rollup-distinct's sections go from `skipped` to a run,
+  its tp4 cells being on now that #189 is closed.
+- every `*-mini.cost.txt` that holds one of the task's sections: q28, rollup-distinct and
+  distinct-functions. The only content change is the comment `# GpuLoadParquet` →
+  `# GpuLoadParquet, GpuEmpty`, master's cost mapping. The tp4 rollup-distinct sections are new.
+- `tpch.sf1/mini.result.txt`: rollup-distinct's author is now `mode=tp4-sized`, its last mode.
+- the tp1 tpch `.cpu.txt`/`.cost.txt` diffs otherwise only reorder sections to canonical order.
+  The rebase's section merge had placed them by hand.
+- `tpch.sf1/duckdb-result.txt`: rollup-distinct and distinct-functions added.
+- `gpu-result.txt`, home over `gpu-host.sh rsh` and rsync:
+  - tpcds gains q28 ×5;
+  - tpch gains distinct-functions ×5, and shuffle-stddev's three sections at tp1-single,
+    tp4-single and tp4-sized move in the last digits (about 1e-15 relative). That is the
+    run-to-run float drift of a device reduction: not this task's code, and nothing compares the
+    file with its predecessor;
+  - pbench is byte-identical;
+  - every file keeps `cudf=25.02`.
+- `recipe-payloads.txt` did not move.
+
+Note 1: the first plan-golden regen failed
+`the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce`. That test reads the
+`.plans.txt` files the same run rewrites, so it saw q28's stale pre-join-session trees. It
+passed alone and on the second regen pass. It is not a code fault.
+
+Note 2: nebius-gpu's disk went from 26 GB free to 9.7 GB during the build. Nothing was
+removable under the disk rules: no finished `~/peacockdb-ci/run-*`, an empty conda cache, and
+this tree's target dir in use. Nothing was removed. The next build there starts below the 10 GB
+floor unless someone frees space. The VM was soft-stopped afterwards: STOPPED.
+
+Deferred, as the chain note says: sf40 and the benchmarks.
+
+#### Coordinator, after the re-prove
+
+- **q28 is on the device.** With #152 closed, its five device cells were tried in the same cycle
+  and all pass, so they stay on, and its registry ticket column is empty. **#262 stays open,
+  narrowed** to `tpch/rollup-distinct`, which is off on #65. Chain L's grouping-id closes #262,
+  so archiving it here would leave that task closing a ticket that no longer exists. The registry
+  keeps `65 262` on rollup-distinct. The archived #62 entry says the same.
+- **Wiki reconciled** against the task's own final text (`git diff ef41d37c 58500891`), with
+  the developer's measured counts: build-test.md's cpu block 2819 (`--lib` 797,
+  `test_cpu_corpus` 1991, `test_corpus_goldens` 28), gpu block 1496 (`test_gpu_corpus` 775),
+  grand total 5002. The Corpus-goldens 29 was already drift on master; 28 is measured. #225
+  gains distinct-functions at tp4 only. architecture.md's inner-stage bullet says the id is
+  dropped from the hash under grouping sets.
+- **Left as recorded:** shuffle-stddev's three `gpu-result.txt` sections moved in their last
+  digits (about 1e-15 relative), the device float drift build-test.md describes. Not this
+  task's, and not reverted by hand.
+- **nebius-gpu's disk is at 9.7 GB free**, below the 10 GB build floor. The rules left nothing
+  to remove. The next build there has to free space first, or stop as an obstacle.
