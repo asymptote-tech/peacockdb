@@ -372,7 +372,7 @@ int peacock_result_from_handle(peacock_executor_t* executor, uint64_t handle, ui
   }
   try {
     const auto& result = executor->session->table_for(handle);
-    auto view = result.table->view();
+    auto view = result.view();
     if (n_columns != 0 && n_columns != static_cast<uint64_t>(view.num_columns())) {
       executor->last_error = "result_from_handle: " + std::to_string(n_columns) +
                              " declared precisions for a table of " +
@@ -416,7 +416,7 @@ int peacock_handle_schema(peacock_executor_t* executor, uint64_t handle, uint8_t
   }
   try {
     const auto& result = executor->session->table_for(handle);
-    auto schema = arrow_schema_of(result.table->view(), result.column_names);
+    auto schema = arrow_schema_of(result.view(), result.column_names);
     auto sink = arrow::io::BufferOutputStream::Create().ValueOrDie();
     auto writer = arrow::ipc::MakeStreamWriter(sink.get(), schema).ValueOrDie();
     auto st = writer->Close();
@@ -494,7 +494,7 @@ int peacock_handle_from_arrow(peacock_executor_t* executor, const void* schema, 
       names.emplace_back(c_schema->children[i]->name);
     }
     *out_handle =
-        executor->session->adopt(peacock::TableResult{std::move(table), std::move(names)});
+        executor->session->adopt(peacock::TableResult::owning(std::move(table), std::move(names)));
     return 0;
   } catch (const std::exception& e) {
     // Nothing was consumed, so the session stays usable — unlike execute_node's reset.

@@ -133,7 +133,7 @@ static std::unique_ptr<cudf::reduce_aggregation> make_reduce_agg(
 
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
   auto input = take_input(in);
-  auto tv = input.table->view();
+  auto tv = input.view();
 
   bool is_final = (agg->mode() == fb::AggregateMode_Final ||
                    agg->mode() == fb::AggregateMode_FinalPartitioned);
@@ -323,7 +323,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
           out_names.push_back(name);
       }
     }
-    return {std::make_unique<cudf::table>(std::move(out_cols)), std::move(out_names)};
+    return TableResult::owning(std::make_unique<cudf::table>(std::move(out_cols)),
+                               std::move(out_names));
   }
 
   // ---- ROLLUP / CUBE / GROUPING SETS ----
@@ -430,7 +431,7 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
     std::vector<std::string> names = key_names;
     names.push_back("__grouping_id");
     for (auto& n : gs_agg_names) names.push_back(n);
-    return {std::move(out), std::move(names)};
+    return TableResult::owning(std::move(out), std::move(names));
   }
 
   cudf::table_view keys_view{key_cols};
@@ -826,7 +827,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
     out_names.push_back(b.name);
   }
 
-  return {std::make_unique<cudf::table>(std::move(out_cols)), std::move(out_names)};
+  return TableResult::owning(std::make_unique<cudf::table>(std::move(out_cols)),
+                             std::move(out_names));
 }
 
 

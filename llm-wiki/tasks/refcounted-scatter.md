@@ -107,3 +107,18 @@ refused. No golden moves.
 ## Device workflow
 
 `build-test-shadgpu.sh`, two cycles (gtests, then the tiers).
+
+## Completeness signoff (2026-10-09)
+
+Solved under its constraints: all six items of The work, the Restriction held, no golden moved,
+and the handle is the listing above plus two additive accessors (`num_rows`, `num_columns`).
+
+Two deliberate deviations. The Tests section's peak bound under-counts cuDF's strings gather by
+about three times, so a string scatter's peak never moved and a formula from that wording would
+have failed a correct arm; the test compares peak and requested total against partitioning the
+same input alone, which discriminated on both shapes. And the name-count check sits at
+`register_handle`, not in a constructor, because the fields are public and task 6's plan
+assembles handles through them.
+
+Deferred by the human host override, not by this task: the before-and-after benchmark timings,
+`--run-benchmarks`, Nsight, the sf40 pair. No bandaid applied.

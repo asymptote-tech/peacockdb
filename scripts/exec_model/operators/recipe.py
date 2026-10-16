@@ -396,7 +396,8 @@ class NodeSession:
         B batches is needed B times and exists once. There is no node that duplicates a
         handle: a nominal candidate — passing one handle twice to a concat — fails on the
         second read, because the first erased it. So this is the device copy #152 weighs,
-        or the refcounted handle #145 proposes, and it is counted rather than assumed.
+        and it is counted rather than assumed. #145's shared handle landed without removing it:
+        sharing is not a second read.
         """
         table = self.table_for(handle)
         self.copies[reason] = self.copies.get(reason, 0) + 1
