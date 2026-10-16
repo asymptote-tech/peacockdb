@@ -884,3 +884,139 @@ Owed before `done`:
 - the cpu tiers, the cost-report Python suites and the cost diff;
 - a GPU cycle on nebius-gpu that proves or reverts the ten cells and records their sections;
 - a dispatched CI.
+
+#### Re-proved on master ca4dedeb
+
+Branch head `5745609c`, against `ENS-distinct-companions` `5dd0abf7`. CPU work local (verda down);
+the device on nebius-gpu in `~/peacockdb-K`. Everything green, and all ten new device cells pass.
+
+**Disk.** `df -h /` on the VM read 42 GB free before the build (55 GB used of 96), and 41 GB
+after. Above the 20 GB line, so nothing was removed.
+
+| step | command | result |
+|---|---|---|
+| plan goldens | `UPDATE_CANONICAL=1 PEACOCK_REWRITE_RECIPE_BYTES=1 cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens --test-threads=2` | 26 passed, first pass |
+| cpu regen | `UPDATE_CANONICAL=1 … --test test_cpu_corpus -- --test-threads=2` | 1994 passed, 11 failed: the 10 `duckdb_gpu_*` cells of scan-limit and nested-limits and the coverage check, each "holds no section for this cell" |
+| `--lib` | `cargo test --features rust-only -p peacockdb-core --lib -- --test-threads=2` | 805 passed, 0 failed, 2 ignored (#182): 807 |
+| `test_cpu_corpus`, after the device record | same, `--test test_cpu_corpus` | 2005 passed, 0 failed |
+| `test_corpus_goldens` | | 28 passed (again after the record: 28) |
+| `test_cost_model` | | 3 passed |
+| `test_golden_format` | | 43 passed (again after the record: 43) |
+| `test_ci_coverage` | | 11 passed |
+| `test_module_layout` | | 18 passed |
+| device-gated targets under rust-only | `test_gpu_corpus`, `test_node_timing`, `peacock_gpu_benchmarks` | each `running 0 tests` |
+| ffi rung | `CUDF_ROOT=… LD_LIBRARY_PATH=<ffi out/lib>:<cuDF lib> scripts/cargo-cudf.sh test -p peacockdb-core --lib -- ffi_tests::`; `… -p peacockdb-ffi --test test_ffi` | 4 passed; 3 passed |
+| cost-report | `cargo test -p cost-report` | 41 passed |
+| warnings | `cargo build --features rust-only -p peacockdb-core` after `touch lib.rs`, then `--all-targets` | 0 and 0. The gpu-feature build's one warning, an unused `AsArray` in `aggregate_dimension_cases.rs:9`, is master's |
+| C++ 25.02 | `scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build` | rc 0, 28 steps incremental (`scan.cpp` and `test_plan_executor.cpp` among them), 0 warnings; `peacock_cpu_tests` 12 passed; `ctest -L cpu` 1/1 |
+| Python, as the cost-report job runs them | `testdata/test_*.py`, `scripts/exec_model/tests/test_*.py` (less the three the job names as run elsewhere), `scripts/calibration/tests/test_*.py`, `scripts/gpu-host/tests/test_*.py`, and the job's `shellcheck` line | all rc 0: duckdb_cost 41, duckdb_result 20; exec-model 212 over ten files; calibration 12 (calls 5, hbm 4, plot 3); gpu-host 104 (check 19, check_actor 7, ci_ship 8, gpu_host 29, gpu_host_test 11, idle_watch 30); shellcheck clean |
+| cost gate | `cargo run -q -p cost-report -- --cost-diff --base ENS-distinct-companions` | `868 compared, 7 changed, 2 regression(s), 0 over 10%`; rc 0 |
+| device build | `build-test-shadgpu.sh --build` on nebius-gpu | rc 0, no warning in the log |
+| device run | `PCK_WRITE_GPU_RESULT=1 gpu-host-test.sh run ~/peacockdb-K` | `ALL rc=0`, no segfault in any log |
+
+This host had neither `matplotlib` nor `shellcheck`, which the job self-heals with `pip`.
+`test_plot.py` failed its import before they were installed. Both went into a scratch
+`pip install --target` directory outside the tree and were put on `PYTHONPATH` for that run
+only: no dependency of the repo changed.
+
+**Device results, per binary.** `peacock_cpu_tests` 12, `peacock_gpu_tests` 2,
+`peacock_join_session_tests` 53, `peacock_plan_tests` 81, `peacock_gpu_benchmarks` 8 (3
+filtered), `peacockdb_core_gpu_lib` 708, `test_gpu_corpus` 785, `test_node_timing` 1. All passed.
+`test_gpu_corpus` is master's 775 plus the ten cells. The gpu lib is one fewer than master's
+709: `source_cases` has 11 cases where master had 12. The task's four converted cases,
+master's rows-only case and the new `a_limit_over_a_rows_only_scan_keeps_its_first_marker_rows_on_both`
+all passed. `ScanRowsOnlyAnswersTheRowCount` passed in `peacock_plan_tests`.
+
+**The ten cells, all kept.** scan-limit: tp1-single, tp1-rowgroup, tp4-single, tp4-rowgroup and
+tp4-sized all ok. Its five recorded sections are byte-identical to each other, `lineitem`'s first
+ten rows in file order, which is the claim `golden_exact` makes on a `data_fusion_subset` line.
+nested-limits: all five ok, 20 rows at every mode, the five sections identical. So the
+`__rowmarker__` region scan under its `GpuLimit 0..+23` answers on the device.
+
+**Regenerated, and why each moved.** A section-by-section comparison found nothing outside this
+task. Nothing moved out of order: the stop-1 resolution took master's side wholesale.
+
+- `recipe-payloads.txt`: `tpch nested-limits` only. A `GpuLimit` over each scan, the two
+  `limit:` lines gone, and a new digest.
+- the five `tpch.sf1/*.plans.txt`: scan-limit and nested-limits only. scan-limit is
+  byte-identical to the pre-rebase tip `3e306482` at every mode. nested-limits differs from it
+  only by master: the `__rowmarker__` schema, `projection=[k@1]`, `CudfJoin`'s recipe, and the
+  memory figures that follow.
+- the ten `tpch.sf1/*-mini.{cpu,cost}.txt`: the same two queries. tp4-rowgroup's cost file has
+  nested-limits only, since scan-limit's cost there does not change. scan-limit's `.cpu.txt`
+  sections equal the pre-rebase tip; its `.cost.txt` differs only in master's
+  `# GpuLoadParquet, GpuEmpty` comment.
+- `tpch.sf1/mini.result.txt`, `duckdb-result.txt`, and every tpcds and pbench golden did not move.
+- `gpu-result.txt`, home over `gpu-host.sh rsh` and rsync:
+  - tpch gains the ten sections;
+  - shuffle-stddev moves in the last digits at tp1-single, tp4-single and tp4-sized (about 1e-15
+    relative). That is the device-reduction drift build-test.md describes, as at
+    distinct-companions' re-prove;
+  - tpcds and pbench are byte-identical;
+  - all three files keep `cudf=25.02`.
+
+**The cost delta.**
+
+| section | base | branch | Δ |
+|---|--:|--:|--:|
+| nested-limits, tp1-single | 1,626,484 | 1,000,118 | −626,366 |
+| nested-limits, tp1-rowgroup | 999,884 | 1,000,118 | **+234** |
+| nested-limits, tp4-single | 1,626,484 | 1,000,118 | −626,366 |
+| nested-limits, tp4-rowgroup | 999,884 | 1,000,118 | **+234** |
+| nested-limits, tp4-sized | 1,626,484 | 1,000,118 | −626,366 |
+| scan-limit, tp4-single | 1,048,882,882 | 21,476,312 | −1,027,406,570 |
+| scan-limit, tp4-sized | 1,048,882,882 | 21,476,312 | −1,027,406,570 |
+
+scan-limit's tp1 sections are new against a `skipped` base and the gate omits them; both read
+21,476,312. Its tp4-rowgroup section is unchanged.
+
+**The two regressions are +234 bytes, not the pre-accepted +228.** Both are in the two sections
+the chain note names. The 228 is the `GpuLimit 0..+28` over the part scan, 28 Int64 rows, as
+before. The other 6 bytes are the new `GpuLimit 0..+23` over the region scan. On master that scan
+emits five `__rowmarker__` rows of 6 bytes, where on the old base it declared no column and
+emitted 0, so its limit's output now counts. The gate's own rule is 10%, and this is +0.02%.
+
+**Counts, measured, for build-test.md's rows this branch changes.**
+
+| row | master | now |
+|---|--:|--:|
+| cpu block header | 2819 | 2843 |
+| `--lib` | 797 | 807 |
+| `test_cpu_corpus` (header) | 1991 | 2005 |
+| Corpus, cpu (row: the binary less its registry test) | 1990 | 2004 |
+| End to end (`tests::end_to_end`, with its four children) | 37 | 40 |
+| Drivers over a mock backend (`executor::driver::tests`) | 110 | 114 |
+| Translator, one rule at a time (`planner::translator::tests`) | 47 | 50 |
+| gpu block header | 1496 | 1505 |
+| `--lib -- gpu_tests::` | 709 | 708 |
+| `test_gpu_corpus` (header) | 775 | 785 |
+| Corpus, device (row) | 774 | 784 |
+| Operator harness (the non-schema `tests::gpu_tests` modules) | 457 | 456 |
+| Rust total | 4435 | 4468 |
+| grand total | 5002 | 5035 |
+
+The corpus: 180 lines (tpch 41, tpcds 82, pbench 57), unchanged; cpu cells 868 → 870 (tpch
+205); device cells 773 → 783 (tpch 176 → 186; tpcds 348 and pbench 249 unchanged); the DuckDB
+tier 956 → 966 (180 lines + 783 device cells + 3 checks); the order tier 159 → 161 (tpch 38).
+C++ (170) and Python (397) are unchanged by the branch. The rows whose files this branch only
+touched without moving a case (null analysis, plan types, recipes per join type, order hazard,
+plan-executor 81, and CPU backend executors 80, which with its contract row's 1 is the 81
+`executor::cpu_backend::tests` lists) keep their counts.
+
+The VM was soft-stopped after the pull: STOPPED. Deferred, as the chain note says: sf40 and the
+benchmarks.
+
+#### Coordinator, after the re-prove
+
+- **All ten device cells stay on**: scan-limit and nested-limits at five modes. #285 is not needed
+  on master, so #281's limits half is closed outright.
+- **The cost rise is +234 bytes, not the pre-accepted +228.** Both are nested-limits at
+  tp1-rowgroup and tp4-rowgroup, the sections the chain note names. The 228 is the `GpuLimit`
+  over the part scan, as before. The other 6 bytes are master's: the region scan now emits five
+  `__rowmarker__` rows of 6 bytes through its own new `GpuLimit`, where on the old base it
+  emitted nothing. Under the 10% gate, so the job is green. The sections are the accepted
+  ones, and the extra bytes come from master.
+- **build-test.md reconciled** with the measured counts: cpu block 2843 (`--lib` 807,
+  `test_cpu_corpus` 2005), gpu block 1505 (`gpu_tests::` 708, `test_gpu_corpus` 785), grand
+  total 5035. The device prose has 783 cells and drops scan-limit and nested-limits from
+  tpch's exceptions.

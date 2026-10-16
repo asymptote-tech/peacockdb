@@ -735,14 +735,15 @@ cpu's, and nothing would say so.
 limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
 `set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
 against the result golden. `tpch/nested-limits`' five failed then: its region scan declares no
-column, and the device read it as zero rows. master's `CudfScan.rows_only` now builds such a
-scan's rows from the footer, so those cells are re-run on the rebased branch.
+column, and the device read it as zero rows. master's `CudfScan.rows_only` builds such a scan's
+rows from the footer, and on the rebased branch all five pass (nebius-gpu, 2026-10-16).
 
 **Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
 
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
+
 <a id="t253"></a>
 ### #253 — the DuckDB oracle cannot record a divergence it finds on two of its paths
 
