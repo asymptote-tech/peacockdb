@@ -52,7 +52,7 @@ fixes #236 and #237):
 - Task 12: four named tpch queries with a non-inner join are registered. Non-inner joins enter
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
-  at every mode (Task 12 below). Tasks 15–18 are not started.
+  at every mode (Task 12 below). Tasks 17 and 18 are not started.
 - #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
   join that reads a share ran again at every mode into the committed outputs; no other query's
   output can move (#239 below).
@@ -62,9 +62,13 @@ fixes #236 and #237):
   differs from HEAD; tpcds q84 is the one ratio above HEAD, +0.2–0.5 % (Task 13 below).
 - Task 14: every named tpch query has a DuckDB cost, and `cost-report` prices the named rows on
   both sides (Task 14 below).
+- Tasks 15 and 16: `.optimizer.txt` reads without the code, its plan diff in `<mode>.plandiff.txt`,
+  and `run.py` writes `<mode>.optimizer.md` beside it. The full `run.py` regenerated every
+  committed prototype output; every `.cpu.txt` and `.costs.txt` section and `cost_report.html` are
+  HEAD's byte for byte (Tasks 15 and 16 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (46 files, 452 cases), and q64 in the corpus answer,
+- Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 480 cases), and q64 in the corpus answer,
   reassembled and optimized suites at every mode.
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
@@ -2073,3 +2077,230 @@ DuckDB a full scan its default run avoids (#241).
 - The aggregates are their scan alone; DuckDB counts its aggregate's input as materialized.
   cross-join and the nested-loop joins are region × nation, 5–49 KB, where fixed overhead sets the
   ratio.
+
+## Task 15
+
+Tasks 15 and 16 are one commit: the log and the page are two renderings of one report, and both
+moved its data.
+
+### What the log says
+
+- A section with a DPhyp call opens with an `estimates:` line — rows by selectivity, |L| × |R|
+  over the larger key NDV or the shared domain, 0.2 a residual, a non-inner join by its type;
+  C_out each join's rows × the bytes per row of the columns read above it, summed; a relation's
+  B/row its whole row — and any section with a call or a filter with a `names:` line: `(f)`,
+  `agg(X)`, `t#2`, `p0`, `m0`. Once a section, not once a call (588 calls in tpcds tp4-single).
+- A call is headed `MJ<n>: K relations, ordered before the run` (`ordered again` in a replan).
+  Each `rN` is named as the page names it (`names.py`): `region#1 (f)`, `agg(MJ2)`, `p0`. It lists
+  `rows N exact|est|measured`, B/row of its whole output, and the NDV of each key-edge column. A
+  filter's predicate is not printed: the plan diff holds it.
+- An aggregate's output column is bracketed and marked, `r5.[min(partsupp.ps_supplycost)]
+  (aggregate output)`, also when a memory source holds it (`EngineNode.aggregates`); any
+  non-identifier name is bracketed. A non-inner edge says which side it keeps; a side of several
+  relations, `applies once r0+r1 are joined`; a residual beside keys, `then a residual on …
+  keeping 0.2`; a residual alone is its own line.
+- `plan's order <tree>, build first` (`previous order` in a replan), `DPhyp priced N sets, chose
+  <tree>` (`: the plan's order` for the same shape), each join `R rows x W B = C B`, and `C_out X
+  B; the plan's order, priced by the same estimates, Y B`.
+- Filters: a candidate names its scan by alias, `p_partkey -> partsupp#1.ps_partkey: row group
+  ranges sum to 1.00x the column's range, ordered (under 1.5)`; a scan by its alias, `partsupp#1: row groups 7 -> 7`, each key with its build, `ps_partkey by p0.p_partkey in
+  [249, 199723]`; `build p0 = part (f), run first: 747 rows, 22504 B; the plan reads it from
+  memory`. A replan: `the build of MJ2's join on cs_item_sk = i_item_sk came out 7739 rows, est
+  469.3 (q-error 16.49)`, then `kept as memory sources: m3 (7739 rows) = [p0] join catalog_sales`.
+- The plan diff is unchanged, byte for byte, in a file of its own: `run.py` writes
+  `<mode>.plandiff.txt`, a `== <query>` section each, `plan diff` and its lines or `plan unchanged`
+  (`report_text.plan_diff`). The log ends with `plan unchanged` or `plan diff: this query's section
+  of <mode>.plandiff.txt`. GitHub did not display the pushed 2.57 MB tpcds tp4-single log, and the
+  diffs were 2.26 MB of it.
+
+### The data behind it
+
+- `JoinOrder` holds `RelationEstimate`s (name, rows, `Certainty`, width, key NDVs, the memory
+  sources its name shows), `EdgeReport`s, `planned` (`disassembly.baseline`) and `types`, the
+  non-inner joins of both trees with the build on the left; `changed` is `oriented != planned`.
+- `cardinality.certainty`: a scan's rows are counted, a memory source's measured, a node passing
+  its input's rows on as known as the input, a union as its least known branch, the rest estimated.
+- `disassembly.join_type_of` is the one rule for a join's type from its two sides. `report.mask`
+  is the one tree mask; `join_order` and `disassembly` read it.
+- `BuildMiss` carries `names.join_words` of the join and its cluster's id, and `q_error`.
+  `Kept` and `Probed` carry `holds` (`names.described`) and the sources it names
+  (`described_sources`). `Pruned` carries the scan's alias, and per filter a `PrunedBy`: column,
+  keys, build and build key.
+- A table the plan reads more than once is numbered on every scan of it, `EngineNode.alias`, in
+  plan order, by `names.aliased` before `named`: one name in every cluster, build and pruned scan
+  (q64's two `store_sales` reads are `#1` and `#2`). A memory source made by `names.sourced`
+  keeps which of its columns are an aggregate's. Neither is in the plan text.
+- `fired` is unchanged; `test_cost_report`'s count moved because the fixture's flip moved to
+  `PAIR`, which it holds twice.
+
+### Red first
+
+- `test_names` on `ModuleNotFoundError`, later on `described_sources` missing; `test_report_text`
+  on `ImportError: Certainty`, later on `shape` renamed `unordered`; `test_report` on `JoinOrder`'s
+  new fields; `test_dynamic_filters` on `PrunedBy` missing; `test_cardinality`'s certainty test,
+  green on arrival, then red with the memory-source case taken out. A near-integer NDV (`49.99` →
+  `50`) and the residual's aggregate mark each red against the code before them. The plan-wide
+  numbering's test goes red with the number given only past a second read.
+
+### Sample
+
+`run.py` at tp1-single and tp4-single, locally, Python 3.13, the committed pandas and pyarrow:
+tpch q2, q5, q18, left-join-reorder; tpcds q5, q58, q64, q84. 16 runs, none failed, about 7 min.
+
+- Every `.cpu.txt` and `.costs.txt` section is the committed one byte for byte, and so is every
+  `.optimizer.txt` section from `plan diff` on.
+- Bytes before the plan diff, committed → now: tpch q2 1,803 → 3,324, q5 816 → 1,785, q18
+  1,239–1,293 → 2,448–2,509, left-join-reorder 403 → 1,173; tpcds q5 3,293 → 5,340, q58 ~8,000 →
+  14,500, q64 ~25,500 → 39,000, q84 1,589 → 2,923.
+- tpcds tp4-single's log was projected at about 669,000 B with the diffs out; the full run wrote
+  669,960 (below).
+- q2 and q58 again at tp1-single after the split: `.cpu.txt` and `.costs.txt` the committed ones,
+  each `.plandiff.txt` section the committed log's text from `plan diff` on, byte for byte.
+
+The committed q2 section at tp1-single:
+
+    == q2
+    estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+    names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+    dynamic filters on the plan as written
+      candidate p_partkey -> partsupp#1.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+      partsupp#1: row groups 7 -> 7 (0-6)
+        ps_partkey by p0.p_partkey in [249, 199723]
+      build p0 = part (f), run first: 747 rows, 22504 B; the plan reads it from memory
+    MJ1: 6 relations, ordered before the run
+      r0 region#1 (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+      r1 nation#1: rows 25 exact, 19.5 B/row; NDV n_nationkey 25, n_regionkey 5
+      r2 supplier#1: rows 10000 exact, 165.4 B/row; NDV s_suppkey 10000, s_nationkey 25
+      r3 p0: rows 747 measured, 26.2 B/row; NDV p_partkey 747
+      r4 partsupp#1: rows 800000 exact, 32.4 B/row; NDV ps_partkey 200000, ps_suppkey 10000, ps_supplycost 99865
+      r5 agg(MJ2): rows 160000 est, 24.2 B/row; NDV ps_partkey 160000, [min(partsupp.ps_supplycost)] 160000
+      edge r3-r4: r3.p_partkey = r4.ps_partkey
+      edge r2-r4: r2.s_suppkey = r4.ps_suppkey
+      edge r1-r2: r1.n_nationkey = r2.s_nationkey
+      edge r0-r1: r0.r_regionkey = r1.n_regionkey
+      edge r3-r5: r3.p_partkey = r5.ps_partkey
+      edge r4-r5: r4.ps_supplycost = r5.[min(partsupp.ps_supplycost)] (aggregate output)
+      plan's order ((r0 (r1 (r2 (r3 r4)))) r5), build first
+      DPhyp priced 19 sets, chose (((r0 r1) r2) ((r3 r5) r4))
+      oriented (((r3 r5) r4) ((r0 r1) r2)), build first
+      join r3 x r5: 747.0 rows x 42.4 B = 31654 B
+      join r3+r5 x r4: 2988.0 rows x 34.4 B = 102712 B
+      join r0 x r1: 5.0 rows x 15.3 B = 77 B
+      join r0+r1 x r2: 2000.0 rows x 172.5 B = 345002 B
+      join r3+r4+r5 x r0+r1+r2: 597.6 rows x 190.6 B = 113918 B
+      C_out 593363 B; the plan's order, priced by the same estimates, 1615081 B
+    MJ2: 4 relations, ordered before the run
+      r0 region#2 (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+      r1 nation#2: rows 25 exact, 8.2 B/row; NDV n_nationkey 25, n_regionkey 5
+      r2 supplier#2: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+      r3 partsupp#2: rows 800000 exact, 32.4 B/row; NDV ps_suppkey 10000
+      edge r2-r3: r2.s_suppkey = r3.ps_suppkey
+      edge r1-r2: r1.n_nationkey = r2.s_nationkey
+      edge r0-r1: r0.r_regionkey = r1.n_regionkey
+      plan's order (r0 (r1 (r2 r3))), build first
+      DPhyp priced 6 sets, chose (((r0 r1) r2) r3)
+      oriented (((r0 r1) r2) r3), build first
+      join r0 x r1: 5.0 rows x 4.1 B = 21 B
+      join r0+r1 x r2: 2000.0 rows x 8.1 B = 16250 B
+      join r0+r1+r2 x r3: 160000.0 rows x 24.2 B = 3880000 B
+      C_out 3896271 B; the plan's order, priced by the same estimates, 49280000 B
+    dynamic filters after join order
+      candidate p_partkey -> partsupp#1.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+      partsupp#1: row groups 7 -> 7 (0-6)
+        ps_partkey by p1.p_partkey in [249, 199478]
+      build p1 = [p0] join agg(MJ2), run first: 460 rows, 17538 B, holding MJ1, MJ2; the plan reads it from memory
+    plan diff: this query's section of <mode>.plandiff.txt
+
+## Task 16
+
+### The page
+
+- `run.py` writes `<mode>.optimizer.md` from the same `OptimizerReport` as `.optimizer.txt`
+  (`report_md.section`), never from the text. A run's files are `Layout`s: the three text files
+  cut at `== `, the page at `## ` with its preamble, written again on every run.
+  `goldens.sections` takes the heading, and what precedes the first is no section's. A skipped or
+  failed run is its line as a section, so every query has a heading; a report a renderer cannot
+  write fails its query, not the run.
+- Per cluster, the DPhyp calls in the order they ran: a probe plan's replans in pass 1, the call
+  before the run, a probe plan's replans in pass 2, the main run's replans. A cluster some call
+  left other than planned (`JoinOrder.changed`) is a table: a column for the plan's order, then
+  one per call that changed it; rows the tree, what changed it (the miss, `reordered by DPhyp`,
+  `DPhyp at its budget…`, each `flip: X now builds`) and C_out beside the order before it. The
+  calls that left it unchanged are a line under it, `Calls that left the order unchanged: replan
+  1 (MJ2's build came out 7739 rows, est 469.3); replan 2.`, a replan this cluster's own miss set
+  off naming that miss, which otherwise shows only in the table of the cluster it stopped. A
+  probe's column, `inside p2, replan 1`, orders the part of the cluster inside that
+  build. Then the memory sources the columns' relations show, and those their own words name,
+  until none is new. Any other cluster is one line, ahead of the tables.
+- A tree is `names.joined` over the call's relation names and its `types`: the build bracketed,
+  a join on the probe side parenthesised; inner and full joins build first; an outer, semi or
+  anti join writes the side it keeps first, so the engine's `Right` reads `left join` and no tree
+  holds a right join. A mark join is never in a cluster. left-join-reorder reads `[[nation (f)]
+  join customer] left join orders`: the left join keeps its plan build side.
+- `### <query> dynamic filters`: a row per filter on a scan either pass reached — pass, the scan
+  by its alias, column, the build and key (`p0.d_date_sk`), the keys (up to ten values listed,
+  past that a count and a range), row groups before → after with those kept; the builds run first;
+  each probe plan's replans and refusals.
+- Headings are `<query>`, `<query> MJ<n>`, `<query> dynamic filters`; GitHub's anchors are
+  `#q2`, `#q2-mj1`, `#q2-dynamic-filters`, `#left-join-reorder-mj1`. `report_md.anchor` gives
+  them; `cluster_heading` and `filters_heading` are the names other pages link by.
+
+### Red first
+
+- `test_report_md` on `ModuleNotFoundError`; `test_run`'s page test on `sections()` taking one
+  argument, its failed-run test on the page missing, and its renderer test on `generate` taking no
+  `worker`; the legend tests on `RelationEstimate`, then `Kept`, taking no sources; the column
+  test while every call had a column.
+
+### Sample
+
+The same 16 runs; pages of 3.7–3.9 KB (tpch) and 15–17 KB (tpcds) for the four queries. tpch q18
+at tp1-single:
+
+    | | plan | DPhyp before the run | replan 1 |
+    |---|---|---|---|
+    | join tree | `([[customer] join orders] join lineitem#2) semi join [agg(lineitem#1) (f)]` | `[[customer] join (orders semi join [agg(lineitem#1) (f)])] join lineitem#2` | `[[orders semi join [m1]] join m0] join lineitem#2` |
+
+### The full run
+
+`run.py` in one invocation, both benches, every mode, `--jobs 1`, into the committed outputs,
+locally, Python 3.13.0, pandas 3.0.6, pyarrow 25.0.1: 620 runs, none failed, 5 h 5 min, at most
+9.4 GiB resident (`time -v`, the worker in tpcds tp1-single), the host's available memory never
+under 2.9 GB.
+
+- Against HEAD: every `.cpu.txt` and `.costs.txt` section byte for byte, the same sections in the
+  same order; every `.plandiff.txt` section HEAD's `.optimizer.txt` from `plan diff` on, or `plan
+  unchanged` where HEAD had none, and the log's pointer exactly where HEAD had a diff (tpch 20
+  queries, tpcds 80, at every mode); `cost_report.py` wrote HEAD's page byte for byte. The logs
+  differ in every section where a rule fired (tpch 31, tpcds 80 a mode); the pages are new.
+- Sizes. `.optimizer.txt`: tpch 50.8–51.6 KB, tpcds 659.6–670.7 KB (tp4-single 669,960 B, from
+  2,648,744). `.optimizer.md`: tpch 11.1–11.9 KB, tpcds 133.5–136.3 KB. `.plandiff.txt`: tpch
+  116.7–203.1 KB, tpcds 1.32 MB at the tp1 modes and 2.15–2.26 MB at the tp4 ones. GitHub's blob
+  view showed a 1.87 MB file and refused a 2.55 MB one, so its limit lies between: the tp4
+  `.plandiff.txt` files fall in that gap, the tpcds tp4 `.cpu.txt` (1.41–1.87 MB) at or under the
+  size shown. Nothing links into `.plandiff.txt`.
+- Every page: a `## ` heading per query (43 tpch, 99 tpcds), no heading repeated, none with a
+  character GitHub drops from an anchor; 17 tpch and 133–141 tpcds cluster tables a mode.
+
+### The pages after the full run
+
+Six nits on the pages and this record, after the full run:
+
+- The `.txt` pointer names `<mode>` literally (`render` knows no mode). Left: changing it means a
+  full run.
+- A table's legend left out a build its `inside pN` column or its unchanged-calls line names
+  (tpch q9 MJ1, tpcds q16 MJ2, tpcds q5 MJ1). The legend is now seeded with every probe column's
+  build, changed or not; red first in `test_report_md` on `p0` missing, two tests.
+- A bare `MJ2` as a relation (`union(web_sales#1, MJ4)` in tpcds q5) was explained nowhere. The
+  preamble says it is a cluster read whole. The `.txt` `names:` line is left: a full run.
+- The over-1-MB sentence above was wrong about the threshold; corrected.
+- `report_md.py` and the README's log bullet rewrapped.
+- An unchanged call's own miss reads `MJ1's missed build came out …`.
+
+Only pages moved: the 182 (query, mode) sections with a probe column or an own-miss unchanged
+line, and every preamble, regenerated by two `run.py --query` runs (tpch q9, q18, q21; 39 tpcds
+queries; every mode, 210 runs, none failed, 2 h 41 min). Every `.cpu.txt`, `.costs.txt`,
+`.optimizer.txt`, `.plandiff.txt` and `cost_report.html` stayed byte for byte.
+
+Proving: cheap tier 48 files, 480 cases; `test_cardinality_corpus`, `test_ordered_corpus` and
+`test_run_corpus` over the sf1 tables; the samples; the full run above.

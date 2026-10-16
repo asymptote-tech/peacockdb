@@ -20,6 +20,7 @@ from ..plans.engine_ir import join_type_name
 from ..plans.engine_plan import EngineNode
 from .conflicts import MIRRORED
 from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, is_reorderable, replaced, sided_columns
+from .report import mask
 
 JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
 
@@ -80,7 +81,7 @@ class _Disassembly:
         if isinstance(tree, int):
             return self._relation(tree)
         build_tree, probe_tree = tree
-        build_mask, probe_mask = _mask(build_tree), _mask(probe_tree)
+        build_mask, probe_mask = mask(build_tree), mask(probe_tree)
         join_type, keys, residuals, null_equals_null = self._predicates(build_mask, probe_mask)
         if not keys:
             raise ValueError(f"no key joins relations {build_mask:#b} and {probe_mask:#b}: a hash join needs one")
@@ -105,26 +106,20 @@ class _Disassembly:
     def _predicates(self, build_mask: int, probe_mask: int):
         """The join's type, the key pairs (build column, probe column) and residuals it applies,
         and whether its keys hold NULL equal to NULL."""
-        both, keys, residuals = build_mask | probe_mask, [], []
-        join_type, null_equal = JoinType.INNER, set()
-        for edge in self.cluster.edges:
-            span = edge.left | edge.right
-            if span & ~both or not span & build_mask or not span & probe_mask:
-                continue
+        keys, residuals, null_equal = [], [], set()
+        for edge in _across(self.cluster, build_mask, probe_mask):
             if edge.residual is not None:
                 residuals.append(edge.residual)
             if edge.left & build_mask:
                 keys += list(edge.keys)
             else:
                 keys += [(right, left) for left, right in edge.keys]
-            if edge.kind is not JoinType.INNER:
-                join_type = edge.kind if edge.left & build_mask else MIRRORED[edge.kind]
             if edge.keys:
                 null_equal.add(edge.null_equals_null)
         if len(null_equal) > 1:
             raise ValueError(f"keys joining {build_mask:#b} and {probe_mask:#b} disagree on whether NULL "
                              "equals NULL: one join holds one rule")
-        return join_type, keys, residuals, null_equal == {True}
+        return join_type_of(self.cluster, build_mask, probe_mask), keys, residuals, null_equal == {True}
 
     def _wired(self, side: _Part, keys: list[int], lanes: int) -> _Part:
         """The side as `co_partitioned` wants it: on the join's lanes, and at more than one
@@ -209,6 +204,24 @@ _HASHED_BY = {JoinType.INNER: (0, 1), JoinType.LEFT: (0,), JoinType.LEFT_SEMI: (
               JoinType.RIGHT: (1,), JoinType.RIGHT_SEMI: (1,), JoinType.RIGHT_ANTI: (1,)}
 
 
+def join_type_of(cluster: MultiJoin, build_mask: int, probe_mask: int) -> JoinType:
+    """The type of the join of `build_mask` and `probe_mask`, its build on the left as the engine
+    names it: its non-inner edge's, mirrored where the side the edge keeps probes."""
+    for edge in _across(cluster, build_mask, probe_mask):
+        if edge.kind is not JoinType.INNER:
+            return edge.kind if edge.left & build_mask else MIRRORED[edge.kind]
+    return JoinType.INNER
+
+
+def _across(cluster: MultiJoin, build_mask: int, probe_mask: int):
+    """The cluster's edges a join of the two sets applies: within both, reaching into each."""
+    both = build_mask | probe_mask
+    for edge in cluster.edges:
+        span = edge.left | edge.right
+        if not (span & ~both or not span & build_mask or not span & probe_mask):
+            yield edge
+
+
 def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
     """The lanes of each join the plan had, by the mask of the relations below it."""
     found = {}
@@ -217,7 +230,7 @@ def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
         while not is_reorderable(node) and id(node) not in roots:
             node = node.children[0]
         if isinstance(tree, tuple):
-            found[_mask(tree)] = int(node.fields["lanes"])
+            found[mask(tree)] = int(node.fields["lanes"])
             walk(tree[0], node.children[0])
             walk(tree[1], node.children[1])
 
@@ -225,9 +238,6 @@ def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
     walk(baseline(cluster), cluster.root)
     return found
 
-
-def _mask(tree: JoinTree) -> int:
-    return 1 << tree if isinstance(tree, int) else _mask(tree[0]) | _mask(tree[1])
 
 
 def _unique(columns):

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, replace
+from enum import Enum
 
 import pandas as pd
 
@@ -50,6 +51,33 @@ class Column:
 class Estimate:
     rows: float
     columns: tuple[Column, ...]
+
+
+class Certainty(Enum):
+    """How a node's rows are known: a footer's count, a materialization's, or an estimate."""
+
+    EXACT = "exact"
+    MEASURED = "measured"
+    ESTIMATED = "est"
+
+
+_KEEPS_ROWS = _PASS | {"GpuProject"}
+
+
+def certainty(node: EngineNode) -> Certainty:
+    """How `node`'s rows are known: a scan's and a memory source's are counted, a node that passes
+    its input's rows on knows them as well as its input, a union as well as its least known branch,
+    and everything else is estimated."""
+    while node.kind in _KEEPS_ROWS:
+        node = node.children[0]
+    if node.kind == "GpuLoadParquet":
+        return Certainty.EXACT
+    if node.kind == "GpuMemorySource":
+        return Certainty.MEASURED
+    if node.kind in ("GpuUnion", "GpuInterleave"):
+        branches = {certainty(child) for child in node.children}
+        return max(branches, key=list(Certainty).index)
+    return Certainty.ESTIMATED
 
 
 def estimate(plan: EngineNode, stats: Statistics,

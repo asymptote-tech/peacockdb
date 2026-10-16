@@ -32,8 +32,9 @@ import pandas as pd
 
 from ..plans import engine_ir
 from ..plans.engine_expr import ColumnRef, parse_columns, parse_join_keys, parse_named_exprs
-from ..plans.engine_plan import EngineNode, memory_source
+from ..plans.engine_plan import EngineNode
 from .multijoin import replaced
+from .names import sourced
 from ..operators.join_types import JoinType, equates_nulls
 from ..operators.joins import own_output
 
@@ -73,6 +74,11 @@ class Candidate:
     column: str
     row_groups: tuple[int, ...]
     clustering: float
+
+    @property
+    def scan_name(self) -> str:
+        """The scan as the report names it: its alias where the plan reads its table twice."""
+        return self.scan.alias or self.scan.fields["table"]
 
 
 @dataclass(frozen=True)
@@ -238,16 +244,28 @@ def row_group_survives(footer_range, summary: KeySummary) -> bool:
 
 
 @dataclass(frozen=True)
+class PrunedBy:
+    """A dynamic filter that reached a scan: the scan's column, the keys it pruned by, and the build
+    that made them — its memory source's name and its key column."""
+
+    column: str
+    keys: KeySummary
+    build: str
+    build_key: str
+
+
+@dataclass(frozen=True)
 class Pruned:
     """One probed scan: its row groups before and after the dynamic filters that reached it,
-    and per filter the column and the keys it pruned by. `after == before` is a scan the
-    keys could not narrow."""
+    each filter in `by`, and the scan's alias where the plan reads its table more than once.
+    `after == before` is a scan the keys could not narrow."""
 
     table: str
     column: str
     before: tuple[int, ...]
     after: tuple[int, ...]
-    keys: tuple[tuple[str, KeySummary], ...] = ()
+    by: tuple[PrunedBy, ...] = ()
+    alias: str | None = None
 
 
 def apply(plan: EngineNode, tables, batching: Batching, run, builds: Builds, kept: dict | None = None
@@ -301,17 +319,18 @@ def _round(plan, found: list[Candidate], tables, batching: Batching, run, built:
         key = id(candidate.scan)
         survivors[key] = survivors.get(key, set(candidate.row_groups)) & kept
         scans[key] = candidate.scan
-        summaries.setdefault(key, []).append((candidate.column, summary))
+        summaries.setdefault(key, []).append(PrunedBy(candidate.column, summary, name, candidate.build_key.name))
     report, mappings = [], {}
     for key, kept in survivors.items():
         scan = scans[key]
         before = tuple(sorted({g for lane in _groups(scan) for batch in lane for g in batch}))
         if len(kept) < len(before):
             mappings[key] = remap(_groups(scan), sorted(kept), tables.row_counts(scan.fields["table"]), batching)
-        columns = ",".join(column for column, _ in summaries[key])
-        report.append(Pruned(scan.fields["table"], columns, before, tuple(sorted(kept)), tuple(summaries[key])))
+        columns = ",".join(by.column for by in summaries[key])
+        report.append(Pruned(scan.fields["table"], columns, before, tuple(sorted(kept)), tuple(summaries[key]),
+                             scan.alias))
     for name, side in sides.values():
-        plan = replaced(plan, side, memory_source(name, side))
+        plan = replaced(plan, side, sourced(name, side))
     return (_with_mappings(plan, mappings) if mappings else plan), report
 
 

@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..harness import main
-from ...optimizer.cardinality import estimate
+from ...optimizer.cardinality import Certainty, certainty, estimate
 from ...plans.engine_plan import parse_plans
 from ...optimizer.stats import FORMAT, Statistics, fingerprint
 
@@ -169,6 +169,21 @@ def test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is
     # The probe side's share, which Right, RightSemi, RightAnti and Full read.
     estimates, anti, _ = wide_domain_join("RightAnti")
     assert abs(estimates[id(anti)].rows - 86) < 2
+
+
+def test_rows_are_counted_at_a_scan_and_a_memory_source_and_estimated_past_a_filter_or_a_join():
+    def known(text):
+        return certainty(parse_plans(f"== q\n{text}\n", "test")["q"])
+
+    source = "GpuMemorySource: name=p0, lanes=1, batches=single, schema=[sk:Int64]"
+    assert known(f"GpuCoalesceAllBatches: lanes=1, batches=single, schema=[sk:Int64]\n  {scan('sales', ['sk'])}") \
+        is Certainty.EXACT
+    assert known(source) is Certainty.MEASURED
+    assert known(f"GpuFilter: predicate=sk@0 = 5, lanes=1, batches=multiple, schema=[sk:Int64]\n  {scan('sales', ['sk'])}") \
+        is Certainty.ESTIMATED
+    union = "GpuUnion: lanes=1, batches=multiple, schema=[sk:Int64]\n  {}\n  {}"
+    assert known(union.format(scan("sales", ["sk"]), source)) is Certainty.MEASURED
+    assert known(union.format(scan("sales", ["sk"]), scan("spread", ["sk"]))) is Certainty.EXACT
 
 
 if __name__ == "__main__":

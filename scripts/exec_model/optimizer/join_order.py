@@ -13,16 +13,17 @@ from __future__ import annotations
 import json
 
 from . import dphyp
-from .cardinality import Estimate, Estimator, estimator, shaped, typed
+from .cardinality import Estimate, Estimator, certainty, estimator, shaped, typed
 from .conflicts import joining
 from .cost import row_width
 from .estimator import DEFAULT
-from .disassembly import baseline, planned_lanes, reassembled
+from .disassembly import baseline, join_type_of, planned_lanes, reassembled
+from .names import is_aggregate_output, memory_sources, relation_name
 from ..plans.engine_expr import parse_columns
 from ..plans.engine_plan import EngineNode
-from .multijoin import MultiJoin, RelColumn, named, sided_columns
+from .multijoin import Edge, MultiJoin, RelColumn, named, sided_columns
 from ..operators.join_types import JoinType
-from .report import ChosenJoin, JoinOrder, PricedSet
+from .report import ChosenJoin, EdgeColumn, EdgeReport, JoinOrder, PricedSet, RelationEstimate, mask
 from .stats import Statistics
 
 #: DuckDB's budget of connected pairs, past which it stops enumerating exactly
@@ -287,35 +288,52 @@ def ordered(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
         # The chosen joins' and the plan order's sets are estimated after DPhyp has returned, so
         # those it did not ask decide nothing.
         orders.append(JoinOrder(
-            cluster.mj, tuple(_label(r.root) for r in cluster.relations),
-            tuple((e.left, e.right, _keys_text(cluster, e)) for e in edges), tuple(priced), max_pairs,
-            tree, unsolved, oriented,
+            cluster.mj, _relations(cluster, planned), tuple(_edge(cluster, e) for e in cluster.edges),
+            tuple(priced), max_pairs, tree, unsolved, plan_order, oriented,
             tuple(ChosenJoin(b, p, sets.rows(b | p), sets.cost(b | p)) for b, p in _joins(oriented)),
-            sum(sets.cost(b | p) for b, p in _joins(plan_order)), _flipped(oriented, plan_order)))
+            sum(sets.cost(b | p) for b, p in _joins(plan_order)), _flipped(oriented, plan_order),
+            _types(cluster, plan_order, oriented)))
         return oriented
 
     return reassembled(plan, lanes, order), orders
 
 
-def _label(root: EngineNode) -> str:
-    """A relation as its root's kind and the tables and memory sources under it."""
-    names, stack = [], [root]
-    while stack:
-        node = stack.pop()
-        if node.kind == "GpuLoadParquet":
-            names.append(node.fields["table"])
-        elif node.kind == "GpuMemorySource":
-            names.append(node.fields["name"])
-        stack.extend(reversed(node.children))
-    return f"{root.kind.removeprefix('Gpu')} {','.join(dict.fromkeys(names))}"
+def _relations(cluster: MultiJoin, planned: Estimator) -> tuple[RelationEstimate, ...]:
+    """Each relation's name, rows, width, the NDV of the columns key edges join it on and the
+    memory sources its name shows."""
+    keyed: dict[int, dict[int, None]] = {}
+    for edge in cluster.edges:
+        for c in (c for pair in edge.keys for c in pair):
+            keyed.setdefault(c.relation, {})[c.ordinal] = None
+    found = []
+    for index, relation in enumerate(cluster.relations):
+        estimate = planned.estimates[id(relation.root)]
+        found.append(RelationEstimate(
+            relation_name(relation.root), estimate.rows, certainty(relation.root),
+            row_width(relation.root.schema, estimate.columns),
+            tuple((relation.names[k], estimate.columns[k].ndv) for k in keyed.get(index, ())),
+            memory_sources(relation.root)))
+    return tuple(found)
 
 
-def _keys_text(cluster: MultiJoin, edge) -> str:
-    def name(c: RelColumn) -> str:
-        return f"r{c.relation}.{cluster.relations[c.relation].names[c.ordinal]}"
+def _edge(cluster: MultiJoin, edge: Edge) -> EdgeReport:
+    def column(c: RelColumn) -> EdgeColumn:
+        relation = cluster.relations[c.relation]
+        return EdgeColumn(c.relation, relation.names[c.ordinal], is_aggregate_output(relation.root, c.ordinal))
 
-    keys = " and ".join(f"{name(a)} = {name(b)}" for a, b in edge.keys)
-    return keys if edge.kind is JoinType.INNER else f"{keys}, {edge.kind.name.lower()}"
+    residual = dict.fromkeys(column(s.column) for s in sided_columns(edge.residual))
+    return EdgeReport(edge.left, edge.right, tuple((column(a), column(b)) for a, b in edge.keys), tuple(residual),
+                      edge.kind)
+
+
+def _types(cluster: MultiJoin, *trees) -> tuple[tuple[int, int, JoinType], ...]:
+    found = {}
+    for tree in trees:
+        for build, probe in _joins(tree):
+            join_type = join_type_of(cluster, build, probe)
+            if join_type is not JoinType.INNER:
+                found[build, probe] = join_type
+    return tuple((build, probe, join_type) for (build, probe), join_type in found.items())
 
 
 def _flipped(oriented, planned) -> tuple[tuple[int, int], ...]:
@@ -330,8 +348,4 @@ def _joins(tree) -> list[tuple[int, int]]:
     """Each join of `tree` as its (build, probe) relation masks, bottom up."""
     if isinstance(tree, int):
         return []
-    return _joins(tree[0]) + _joins(tree[1]) + [(_mask(tree[0]), _mask(tree[1]))]
-
-
-def _mask(tree) -> int:
-    return 1 << tree if isinstance(tree, int) else _mask(tree[0]) | _mask(tree[1])
+    return _joins(tree[0]) + _joins(tree[1]) + [(mask(tree[0]), mask(tree[1]))]

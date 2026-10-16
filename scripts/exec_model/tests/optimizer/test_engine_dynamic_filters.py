@@ -75,8 +75,8 @@ def _pruning_test(bench: str, query: str, plan: EngineNode):
                                   [want.columns[at] for at in positions])
         duckdb = _duckdb_bounds(bench, query)
         for scan in stages.before_order.pruned + stages.after_order.pruned:
-            ranges = tables.column_ranges(scan.table, scan.keys[0][0])
-            for column, summary in scan.keys:
+            ranges = tables.column_ranges(scan.table, scan.by[0].column)
+            for column, summary in ((by.column, by.keys) for by in scan.by):
                 bounds = [(d[column]["lo"], d[column]["hi"]) for d in duckdb if column in d]
                 if not bounds or summary.low is None:
                     continue

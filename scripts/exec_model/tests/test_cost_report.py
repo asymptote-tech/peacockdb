@@ -35,11 +35,11 @@ def query_cost(planned: int, final: int, probes: int = 0, stopped: int = 0, rule
 
 def test_a_report_counts_each_rule_that_fired():
     # Two scans narrowed by one probe plan, and one by a probe plan after join order; STAR solved
-    # below the plan order's C_out with one flip, PAIR in the main run's replan and in the probe's
-    # stopped at its budget, the plan's order kept; a replan and a refused one in the main run, and
-    # one of each in a probe plan.
+    # below the plan order's C_out, PAIR in the main run's replan and in the probe's stopped at its
+    # budget, the plan's order kept and its join flipped; a replan and a refused one in the main
+    # run, and one of each in a probe plan.
     assert fired(EVERY_RULE) == Fired(probes=1, narrowed=2, probes_after_order=1, narrowed_after_order=1, dphyp=3,
-                                      reordered=1, budget=2, flips=1, replans=2, refused=2)
+                                      reordered=1, budget=2, flips=2, replans=2, refused=2)
 
 
 def test_a_query_s_costs_are_a_section_that_reads_back_the_same():

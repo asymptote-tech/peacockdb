@@ -70,15 +70,15 @@ Every other cross-folder import points the way the diagram does.
                                                clusters with those sizes known
 
 `optimizer/pipeline.run_optimized` composes the steps in that order — `pipeline.filtered` is
-everything before the run, the order `run_adaptive`'s `kept` parameter is shaped for — and
-returns what each did as an `OptimizerReport` (`optimizer/report.py`, rendered by
-`report_text.py`). Each step also has a corpus suite of its own. The mechanics are in each
-module's docstring; what follows is why each step has its shape.
+everything before the run, the order `run_adaptive`'s `kept` parameter is shaped for — and returns
+what each did as an `OptimizerReport` (`optimizer/report.py`, rendered by `report_text.py` as the
+log and by `report_md.py` as the page). Each step also has a corpus suite of its own. The mechanics
+are in each module's docstring; what follows is why each step has its shape.
 
 - **The planner's own plans** (`plans/`), not a lowering of the SQL written for the prototype: a
   second lowering is a second reading of the planner, and the optimizer would then be tuned to a
   plan the engine never makes. Reading the golden back and printing a rewritten tree in the same
-  text (`engine_plan.plan_text`, `engine_expr`) also makes the plan diff in `.optimizer.txt` the
+  text (`engine_plan.plan_text`, `engine_expr`) also makes the plan diff in `.plandiff.txt` the
   engine's own format.
 - **Estimates** (`cardinality.py`, `estimator.py`) follow DuckDB's model — uniform values over
   [min, max], independence, containment over the domain two keys share, 0.2 where statistics are
@@ -162,8 +162,9 @@ module's docstring; what follows is why each step has its shape.
   are `(relation, ordinal)` identities rather than positions, since a reordered tree renumbers
   every position.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
-  (`multijoin.named`, the first thing the pipeline does and `join_order.ordered` does for a plan
-  given unnamed), and every join it holds carries the id. It lives on the join node
+  (`multijoin.named`, which the pipeline does right after `names.aliased` numbers the tables read
+  twice, and `join_order.ordered` does for a plan given unnamed), and every join it holds carries
+  the id. It lives on the join node
   (`EngineNode.mj`), not in the plan text and not in a table keyed by node identity: every
   rewrite copies nodes and the copy carries it, and disassembly gives the joins it makes their
   cluster's. A replan's plan is named already and keeps its ids; a cluster read from memory
@@ -219,7 +220,13 @@ reached it.
   the engine's cost counts.
 - **What is reported.** Every set DPhyp priced is kept in the report (`JoinOrder.priced`) and not
   printed: printed, they would be 97 % of q64's section, most from calls the budget stopped, and
-  they move by thousands of lines on any estimator change.
+  they move by thousands of lines on any estimator change. Relations are named as well as
+  numbered (`names.py`): a relation's index `rN` shifts from call to call as a replan turns builds
+  into memory sources, while its name stays until the relation itself is one (tpch q18's customer
+  becomes `m0`), so the page's columns of one cluster compare. A table the plan reads twice is
+  numbered on its scan node (`EngineNode.alias`), as the cluster id is on its joins, because every
+  rewrite copies nodes and the copy carries it; a memory source keeps which of its columns are an
+  aggregate's (`EngineNode.aggregate_columns`) for the same reason.
 
 ### Orientation after DPhyp
 

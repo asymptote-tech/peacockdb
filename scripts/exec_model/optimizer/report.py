@@ -8,10 +8,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..operators.join_types import JoinType
+from .cardinality import Certainty
 from .dynamic_filters import Pruned
 
 #: a relation's index, or a pair of trees — `(build, probe)` once oriented
 JoinTree = int | tuple
+
+
+def mask(tree: JoinTree) -> int:
+    """The relations a tree joins, as a bit mask."""
+    return 1 << tree if isinstance(tree, int) else mask(tree[0]) | mask(tree[1])
+
+
+def unordered(tree: JoinTree):
+    """A tree with its sides unordered: two orders equal so differ only in which side builds."""
+    return tree if isinstance(tree, int) else frozenset((unordered(tree[0]), unordered(tree[1])))
+
+
+def subtree(tree: JoinTree, relations: int) -> JoinTree:
+    """The part of `tree` that joins exactly `relations`, one of its joins' sides."""
+    while mask(tree) != relations:
+        tree = next(side for side in tree if mask(side) & relations == relations)
+    return tree
 
 
 @dataclass(frozen=True)
@@ -25,14 +44,27 @@ class FilterCandidate:
 
 
 @dataclass(frozen=True)
+class Probed:
+    """A build a probe plan made, which the main plan reads from memory: its name, rows, bytes, the
+    clusters it holds, what it is (`names.described`) and the memory sources that names."""
+
+    name: str
+    rows: int
+    size: int
+    clusters: tuple[str, ...]
+    holds: str
+    sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class FilterPass:
     """One pass of dynamic filters: the candidates it found, the scans its probes reached, the
-    builds they made, read from memory by the main plan — name, rows, bytes and the clusters it
-    holds — and the replans and refused replans inside each probe plan, by its build's name."""
+    builds they made, and the replans and refused replans inside each probe plan, by its build's
+    name."""
 
     candidates: tuple[FilterCandidate, ...] = ()
     pruned: tuple[Pruned, ...] = ()
-    probed: tuple[tuple[str, int, int, tuple[str, ...]], ...] = ()
+    probed: tuple[Probed, ...] = ()
     replans: tuple[tuple[str, Replan], ...] = ()
     refused: tuple[tuple[str, BuildMiss], ...] = ()
 
@@ -58,44 +90,110 @@ class ChosenJoin:
 
 
 @dataclass(frozen=True)
+class RelationEstimate:
+    """A relation of a DPhyp call as the estimates see it: its name (`names.relation_name`), its
+    rows and how they are known, its bytes per row, the NDV of each column a key edge joins it on,
+    by name, and the memory sources its name shows."""
+
+    name: str
+    rows: float
+    known: Certainty
+    width: float
+    ndv: tuple[tuple[str, float], ...]
+    sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EdgeColumn:
+    """A column an edge reads: its relation's index, its name, and whether it is an aggregate's
+    output rather than a column with statistics."""
+
+    relation: int
+    name: str
+    aggregate: bool = False
+
+
+@dataclass(frozen=True)
+class EdgeReport:
+    """A predicate between the relations in `left` and those in `right`: its key pairs, the
+    columns of its residual, and its join's logical type, the side it keeps on the left. Only an
+    edge with keys is DPhyp's."""
+
+    left: int
+    right: int
+    keys: tuple[tuple[EdgeColumn, EdgeColumn], ...] = ()
+    residual: tuple[EdgeColumn, ...] = ()
+    kind: JoinType = JoinType.INNER
+
+
+@dataclass(frozen=True)
 class JoinOrder:
-    """One DPhyp call over the cluster `mj` names. `edges` are its input — (left mask,
-    right mask, keys) — and `priced` every set it asked, in the order asked, within `max_pairs`.
-    `tree` is the order it returned, or the plan's own where it ran out of pairs (`unsolved`);
-    `oriented` is that tree with each join's build first, `joins` its joins bottom up, and
-    `plan_cost` the plan's own order's C_out. `flipped` is the (build, probe) of each join whose
-    build is the other side from the plan's join over the same two sides."""
+    """One DPhyp call over the cluster `mj` names. `edges` are the cluster's predicates, those
+    with keys DPhyp's input, and `priced` every set it asked, in the order asked, within
+    `max_pairs`. `tree` is the order it returned, or the plan's own where it ran out of pairs
+    (`unsolved`); `planned` is the plan's own order and `oriented` the tree with each join's build
+    first, `joins` its joins bottom up, and `plan_cost` the plan's order's C_out. `flipped` is the
+    (build, probe) of each join whose build is the other side from the plan's join over the same
+    two sides; `types` the (build, probe, type) of each join of `planned` and `oriented` that is
+    not inner, its build on the left as the engine names it."""
 
     mj: str
-    relations: tuple[str, ...]
-    edges: tuple[tuple[int, int, str], ...]
+    relations: tuple[RelationEstimate, ...]
+    edges: tuple[EdgeReport, ...]
     priced: tuple[PricedSet, ...]
     max_pairs: int
     tree: JoinTree
     unsolved: str | None
+    planned: JoinTree
     oriented: JoinTree
     joins: tuple[ChosenJoin, ...]
     plan_cost: float
     flipped: tuple[tuple[int, int], ...]
+    types: tuple[tuple[int, int, JoinType], ...] = ()
+
+    def join_type(self, build: int, probe: int) -> JoinType:
+        return next((t for b, p, t in self.types if (b, p) == (build, probe)), JoinType.INNER)
+
+    @property
+    def changed(self) -> bool:
+        """Whether the call left the cluster other than as planned: reordered, or a join flipped."""
+        return self.oriented != self.planned
 
 
 @dataclass(frozen=True)
 class BuildMiss:
     """A build that came out further from its estimate than the replan's threshold; `join` is
-    its join's kind and keys."""
+    its join's kind and keys in words, `mj` its cluster's id where it is in one."""
 
     join: str
     rows: int
     estimate: float
+    mj: str | None = None
+
+    @property
+    def q_error(self) -> float:
+        rows, estimate = max(self.rows, 1.0), max(self.estimate, 1.0)
+        return max(rows / estimate, estimate / rows)
+
+
+@dataclass(frozen=True)
+class Kept:
+    """A build a stopped run had made, kept as a memory source: its name, rows, what it is
+    (`names.described`) and the memory sources that names."""
+
+    name: str
+    rows: int
+    holds: str
+    sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Replan:
-    """A run stopped at `miss`: the builds `kept` as memory sources (name, rows), and the DPhyp
-    calls of the plan optimized again."""
+    """A run stopped at `miss`: the builds `kept` as memory sources, and the DPhyp calls of the
+    plan optimized again."""
 
     miss: BuildMiss
-    kept: tuple[tuple[str, int], ...]
+    kept: tuple[Kept, ...]
     orders: tuple[JoinOrder, ...]
 
 

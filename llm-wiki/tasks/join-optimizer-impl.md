@@ -273,18 +273,19 @@ tests, goldens.
 
 **Files:** `scripts/exec_model/optimizer/{report,report_text}.py`, tests, goldens.
 
-- [ ] Headings by multi-join id; per relation estimated rows, row width, edge-column NDV; an
+- [x] Headings by multi-join id; per relation estimated rows, row width, edge-column NDV; an
   aggregate output column marked as one; the ordering score and the memory-read build worded as
   what they are; `C_out` with units and the plan's order named as such.
-- [ ] Proving: cheap tier, `run.py` full; the q2 section quoted in the detail file.
+- [x] Proving: cheap tier, `run.py` full; the q2 section quoted in the detail file.
 
 ### Task 16: a markdown page per mode
 
-**Files:** new `scripts/exec_model/optimizer/report_md.py`, `run.py`, tests, goldens.
+**Files:** new `scripts/exec_model/optimizer/report_md.py`, `run.py`, tests, goldens. One commit
+with Task 15: the page and the log share the report data both changed.
 
-- [ ] `<mode>.optimizer.md` from the report data: per query, per multi-join the evolution table
+- [x] `<mode>.optimizer.md` from the report data: per query, per multi-join the evolution table
   (tree / what changed it / cost, the plan's order first); the dynamic filters applied.
-- [ ] A test over a report with a reorder, a flip and a replan in one cluster.
+- [x] A test over a report with a reorder, a flip and a replan in one cluster.
 - [ ] Proving: cheap tier, `run.py` full; the page renders on GitHub.
 
 ### Task 17: the report links to its evidence

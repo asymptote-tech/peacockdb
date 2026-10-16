@@ -66,7 +66,7 @@ filterable by `--bench`, `--query` and `--mode`, parallel by `--jobs`. It writes
   that changed the plan: dynamic filters (candidate, key bounds, row groups before and after);
   each DPhyp call (relations, edges, the estimated sets it priced, the tree it returned);
   orientation (which joins flipped); replans (the event, estimate against truth, what was kept);
-  and the plan's diff before and after.
+  and the plan's diff before and after, which `<mode>.plandiff.txt` holds, a section each.
 - `cost_report.html` — one row per query: per mode, non-optimized cost | optimized cost | ratio;
   DuckDB cost; final ratio, min over modes of the peacockdb cost / DuckDB cost; the rules that
   fired. Cost is the engine's own function (`.cost.txt`: bytes per node kind, summed to
@@ -179,19 +179,25 @@ into the detail file.
 ## `.optimizer.txt` that reads without the code
 
 Each section says what it measures. A DPhyp call is headed by its multi-join id; each relation
-`rN` lists its estimated rows, row width and the NDV of its edge columns; an edge whose column
+`rN` lists its rows (exact, estimated or measured), row width and the NDV of its edge columns; an edge whose column
 is an aggregate's output says so rather than printing the aggregate's name as if it were a
 function; the dynamic filter's ordering score and the build read from memory are worded as
 what they are; `C_out` names its units and that the second figure is the plan's own order under
-the same estimates. The plan diff stays as it is.
+the same estimates. The plan diff stays as it is, in a file of its own, `<mode>.plandiff.txt`,
+which `.optimizer.txt` points to: with it the tpcds log was too large for GitHub to display.
 
 ## A markdown page per mode
 
 `run.py` writes `<mode>.optimizer.md` beside `<mode>.optimizer.txt`, from the same report data:
-a `## <query>` section each; per multi-join a table whose columns are its successive orders, the
-plan's first, and whose rows are the join tree drawn, what changed it (empty in the first
-column: DPhyp, a flip, a replan with its q-error) and its cost; and the dynamic filters applied,
-each as table, column, key range or values, and row groups before and after.
+a `## <query>` section each; per multi-join that changed order a table whose columns are the
+plan's order and then each call that changed it, and whose rows are the join tree drawn, what
+changed it (empty in the first column: DPhyp, a flip, a replan with its q-error) and its cost, the
+calls that kept the order named under it; a multi-join that kept its order is one line. A tree is
+written in words with the build side in brackets and a filtered relation marked:
+`[[nation (f)] join customer] left join orders`, the join kinds as SQL names them (join, left
+join, full join, semi join, anti join), the side a non-inner join keeps written first. The dynamic
+filters applied follow, each as scan, column, the build and key that pruned it, key range or
+values, and row groups before and after.
 
 ## The report links to its evidence
 

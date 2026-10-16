@@ -17,7 +17,8 @@ from .harness import main, raises
 from ..optimizer.dynamic_filters import Batching
 from ..optimizer.pipeline import MODES, ModeShape, mode_shape
 from .optimizer.test_report_text import EVERY_RULE
-from ..optimizer.report import fired
+from ..optimizer.report import FilterPass, OptimizerReport, fired
+from ..optimizer.report_md import preamble
 from ..plans.cost_model import parse
 from ..run import (
     QueryRun, Regeneration, Selection, Task, corpus_order, generate, merged, preflight, priced, sections, tasks,
@@ -38,6 +39,13 @@ def test_a_whole_run_drops_the_sections_no_query_accounts_for():
 
 def test_sections_are_read_whole_whatever_their_bodies_hold():
     assert sections("== a\n--- before\n+++ after\n== b\n\n") == [("a", "--- before\n+++ after\n"), ("b", "\n")]
+
+
+def test_a_page_keeps_its_preamble_and_is_cut_at_its_own_headings_alone():
+    page = "# tpch tp1-single\n\nintro\n## a\n\nold a\n\n### a MJ1\n\n## b\n\nold b\n\n"
+    assert sections(page, "## ") == [("a", "\nold a\n\n### a MJ1\n\n"), ("b", "\nold b\n\n")]
+    text = merged(page, ["a", "b"], {"b": "\nnew b\n\n"}, Regeneration.SECTIONS, "## ", "# tpch tp1-single\n\nnew\n")
+    assert text == "# tpch tp1-single\n\nnew\n## a\n\nold a\n\n### a MJ1\n\n## b\n\nnew b\n\n", text
 
 
 def test_the_corpus_order_is_the_engine_s_with_its_missing_queries_where_they_sort():
@@ -85,11 +93,31 @@ def test_a_query_that_raises_is_a_failed_section_in_every_file_and_the_run_exits
     with tempfile.TemporaryDirectory() as scratch:
         out = pathlib.Path(scratch)
         assert generate(selection, 1, out, Regeneration.WHOLE) == 1
-        for kind in ("cpu", "optimizer", "costs"):
+        for kind in ("cpu", "optimizer", "costs", "plandiff"):
             text = (out / "tpcds" / f"tp4-single.{kind}.txt").read_text()
             assert text == "== q27\nskipped: refused\n== nope\nfailed: KeyError: 'nope'\n", text
+        page = (out / "tpcds" / "tp4-single.optimizer.md").read_text()
+        assert page == preamble("tpcds", "tp4-single") + "## q27\n\nskipped: refused\n\n## nope\n\nfailed: KeyError: 'nope'\n\n", page
         page = (out / "cost_report.html").read_text()
         assert "skipped: refused" in page and "failed: KeyError: &#x27;nope&#x27;" in page
+
+
+def unrenderable(task: Task) -> QueryRun:
+    """A worker whose run went through and whose report no renderer can write: its plan text is
+    missing."""
+    report = OptimizerReport(FilterPass(), (), FilterPass(), (), (), None, "GpuUnload\n")
+    return QueryRun(task, (0.0, 0.0), "", "", (), (), report)
+
+
+def test_a_report_a_renderer_cannot_write_is_a_failed_section_and_the_run_exits_1():
+    key = ("tpch", "tp4-single")
+    selection = Selection([Task(*key, "q1")], {key: ["q1"]}, {key: {}})
+    with tempfile.TemporaryDirectory() as scratch:
+        out = pathlib.Path(scratch)
+        assert generate(selection, 1, out, Regeneration.WHOLE, worker=unrenderable) == 1
+        for kind in ("cpu", "optimizer", "costs", "plandiff"):
+            text = (out / "tpch" / f"tp4-single.{kind}.txt").read_text()
+            assert text.startswith("== q1\nfailed: AttributeError: "), text
 
 
 def test_the_optimized_cost_is_the_final_run_s_and_every_probe_plan_s_and_stopped_run_s():

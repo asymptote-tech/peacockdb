@@ -1,13 +1,12 @@
-"""The corpus through the optimizer: each engine plan run by the prototype over the sf1 tables,
-as planned and optimized (`optimizer/pipeline.py`), one task per (query, mode) over `--jobs`
-processes, the optimized answer held to the planned one.
+"""The corpus through the optimizer: each engine plan run over the sf1 tables as planned and
+optimized (`optimizer/pipeline.py`), one task per (query, mode) over `--jobs` processes, the
+optimized answer held to the planned one.
 
     python3 scripts/exec_model/run.py [--bench B ...] [--query Q ...] [--mode M ...] [--jobs N]
 
-Writes under `testdata/goldens/<bench>/` here `<mode>.cpu.txt`, the optimized run as the engine
-renders its own, `<mode>.optimizer.txt`, what each rule did, and `<mode>.costs.txt`, both runs
-priced; a `== <query>` section each. Then `cost_report.html` from every costs file there.
-README.md, "run.py", has the rest."""
+Writes under `testdata/goldens/<bench>/` here `<mode>.cpu.txt`, `.optimizer.txt`, `.plandiff.txt`
+and `.costs.txt`, a `== <query>` section each, and `<mode>.optimizer.md`, a `## <query>` section
+each; then `cost_report.html` from every costs file there. README.md, "run.py", has the rest."""
 
 from __future__ import annotations
 
@@ -23,6 +22,7 @@ import pathlib
 import re
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
@@ -30,8 +30,9 @@ from enum import Enum
 from .cost_report import QueryCost, section as cost_section, write as write_cost_report
 from .optimizer import dphyp
 from .optimizer.pipeline import MODES, mode_shape, run_optimized
+from .optimizer import report_md
 from .optimizer.report import OptimizerReport, fired
-from .optimizer.report_text import render
+from .optimizer.report_text import plan_diff, render
 from .optimizer.stats import Statistics
 from .plans.answers import same_answer
 from .plans.cost_model import CostModel, load as load_cost_model
@@ -145,14 +146,32 @@ def run_query(task: Task) -> QueryRun:
                     run.report)
 
 
-def merged(text: str, order: list[str], made: dict[str, str], regeneration: Regeneration) -> str:
+@dataclass(frozen=True)
+class Layout:
+    """How a file is cut into sections: the prefix of their headings, what comes before the first,
+    and how a run's one line — skipped or failed — reads as a section."""
+
+    heading: str
+    preamble: Callable[[str, str], str]
+    note: Callable[[str], str]
+
+
+TEXT = Layout("== ", lambda bench, mode: "", lambda text: text)
+PAGE = Layout("## ", report_md.preamble, report_md.note)
+#: each file a run writes per (bench, mode), by suffix
+LAYOUTS = {"cpu.txt": TEXT, "optimizer.txt": TEXT, "plandiff.txt": TEXT, "costs.txt": TEXT, "optimizer.md": PAGE}
+
+
+def merged(text: str, order: list[str], made: dict[str, str], regeneration: Regeneration, heading: str = "== ",
+           preamble: str = "") -> str:
     """`text` with the sections this run `made` put in: each query of `order` that has a section,
-    in that order, then — where the run owns only its sections — those `order` does not name."""
-    held = dict(sections(text)) | made
+    in that order, then — where the run owns only its sections — those `order` does not name; a
+    page's `preamble` before them."""
+    held = dict(sections(text, heading)) | made
     kept = [(query, held[query]) for query in order if query in held]
     if regeneration is Regeneration.SECTIONS:
         kept += [(query, body) for query, body in held.items() if query not in order]
-    return "".join(f"== {query}\n{body}" for query, body in kept)
+    return preamble + "".join(f"{heading}{query}\n{body}" for query, body in kept)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -183,37 +202,43 @@ def preflight(benches, root: pathlib.Path) -> None:
     dphyp.load()
 
 
-def generate(selection: Selection, jobs: int, out: pathlib.Path, regeneration: Regeneration) -> int:
-    """The selection's runs over `jobs` processes, then its files and the cost report written; 1
-    where a run failed."""
-    files = {suffix: {key: dict(made) for key, made in selection.skipped.items()}
-             for suffix in ("cpu.txt", "optimizer.txt", "costs.txt")}
+def generate(selection: Selection, jobs: int, out: pathlib.Path, regeneration: Regeneration,
+             worker: Callable[[Task], QueryRun] = run_query) -> int:
+    """The selection's runs over `jobs` processes, each by `worker`, then its files and the cost
+    report written; 1 where a run failed."""
+    files = {suffix: {key: {query: layout.note(text) for query, text in made.items()}
+                      for key, made in selection.skipped.items()}
+             for suffix, layout in LAYOUTS.items()}
     model, failed, start = load_cost_model(), [], time.monotonic()
     with ProcessPoolExecutor(jobs) as pool:
-        futures = {pool.submit(run_query, task): task for task in selection.work}
+        futures = {pool.submit(worker, task): task for task in selection.work}
         for future in as_completed(futures):
             task = futures[future]
             key = (task.bench, task.mode)
-            # One query failing must not cost the rest of a long run: its sections say so, and
-            # the run exits non-zero.
+            # One query failing — its run or the writing of its sections — must not cost the rest
+            # of a long run: its sections say so, and the run exits non-zero.
             try:
                 done = future.result()
                 cost = priced(done, model)
+                bodies = {"cpu.txt": done.optimized, "optimizer.txt": render(done.report),
+                          "plandiff.txt": plan_diff(done.report), "costs.txt": cost_section(cost, model),
+                          "optimizer.md": report_md.section(task.query, done.report)}
             except Exception as error:
                 failed.append(task)
-                for made in files.values():
-                    made[key][task.query] = f"failed: {type(error).__name__}: {error}\n"
+                for suffix, made in files.items():
+                    made[key][task.query] = LAYOUTS[suffix].note(f"failed: {type(error).__name__}: {error}\n")
                 print(f"{task.bench} {task.mode} {task.query}: FAILED {error!r}", flush=True)
                 continue
-            files["cpu.txt"][key][task.query] = done.optimized
-            files["optimizer.txt"][key][task.query] = render(done.report)
-            files["costs.txt"][key][task.query] = cost_section(cost, model)
+            for suffix, body in bodies.items():
+                files[suffix][key][task.query] = body
             print(f"{task.bench} {task.mode} {task.query}: planned {done.seconds[0]:.1f} s, "
                   f"optimized {done.seconds[1]:.1f} s, cost ratio {cost.ratio:.2f}", flush=True)
     for (bench, mode), order in selection.order.items():
         for suffix, made in files.items():
             if made[bench, mode]:
-                _write(out / bench / f"{mode}.{suffix}", order, made[bench, mode], regeneration)
+                layout = LAYOUTS[suffix]
+                _write(out / bench / f"{mode}.{suffix}", order, made[bench, mode], regeneration, layout.heading,
+                       layout.preamble(bench, mode))
     write_cost_report(out)
     print(f"{len(selection.work)} runs in {time.monotonic() - start:.1f} s, {len(failed)} failed", flush=True)
     return 1 if failed else 0
@@ -229,11 +254,12 @@ def priced(done: QueryRun, model: CostModel) -> QueryCost:
                      probes, stopped, fired(done.report))
 
 
-def _write(path: pathlib.Path, order: list[str], made: dict[str, str], regeneration: Regeneration) -> None:
+def _write(path: pathlib.Path, order: list[str], made: dict[str, str], regeneration: Regeneration,
+           heading: str, preamble: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = path.read_text() if path.exists() else ""
     staged = path.with_name(path.name + ".tmp")
-    staged.write_text(merged(text, order, made, regeneration))
+    staged.write_text(merged(text, order, made, regeneration, heading, preamble))
     os.replace(staged, path)
 
 

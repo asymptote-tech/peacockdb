@@ -115,7 +115,7 @@ def test_runs_that_share_their_taken_names_never_give_one_twice():
     taken = set()
     runs = [run_adaptive(plan, stats, tables, lanes=1, selector=CpuBackendSelector(), taken=taken)
             for _ in range(2)]
-    names = [[name for name, _ in replan.kept] for run in runs for replan in run.replans]
+    names = [[kept.name for kept in replan.kept] for run in runs for replan in run.replans]
     assert names == [["m0", "m1"], ["m2", "m3"]] and taken == {"m0", "m1", "m2", "m3"}
 
 

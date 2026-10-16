@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from .dynamic_filters import Batching, Builds, apply, candidates
 from .join_order import ordered
 from .multijoin import named
+from .names import aliased, described, described_sources
 from .replan import AdaptiveRun, kept_estimates, run_adaptive
-from .report import FilterCandidate, FilterPass, JoinOrder, OptimizerReport
+from .report import FilterCandidate, FilterPass, JoinOrder, OptimizerReport, Probed
 from .stats import Statistics
 from ..engine.node import CpuBackendSelector
 from ..engine.partitioned_driver import PartitionedDriver
@@ -64,12 +65,13 @@ class Filtered:
 
 def filtered(plan: EngineNode, stats: Statistics, tables, shape: ModeShape, budget: int | None = None,
              taken: set[str] | None = None) -> Filtered:
-    """`plan` named, pruned by the builds a filter and no join make, ordered with those builds
-    known, then pruned by the builds a filter or a join make on that order. Each probe plan runs
-    adaptively, so a build that misses inside it replans as in the main run; its memory sources'
-    names join `taken`. Nothing is ordered again after the second pass: a source keeps its side's
-    schema, lanes and hash, so the plan stays valid, and a build of the main run off its estimate
-    still replans. `design.md`, "Two passes of dynamic filters"."""
+    """`plan` with its tables read twice numbered for the report and its clusters named, pruned by
+    the builds a filter and no join make, ordered with those builds known, then pruned by the
+    builds a filter or a join make on that order. Each probe plan runs adaptively, so a build that
+    misses inside it replans as in the main run; its memory sources' names join `taken`. Nothing is
+    ordered again after the second pass: a source keeps its side's schema, lanes and hash, so the
+    plan stays valid, and a build of the main run off its estimate still replans. `design.md`, "Two
+    passes of dynamic filters"."""
     taken = set() if taken is None else taken
     runs: dict[int, AdaptiveRun] = {}
 
@@ -78,7 +80,7 @@ def filtered(plan: EngineNode, stats: Statistics, tables, shape: ModeShape, budg
         runs[id(side)] = run
         return by_lane(run.drivers[-1])
 
-    first, before_order, kept = _pass(named(plan), tables, shape.batching, probe, Builds.FILTERED, {}, runs)
+    first, before_order, kept = _pass(named(aliased(plan)), tables, shape.batching, probe, Builds.FILTERED, {}, runs)
     reordered, orders = ordered(first, stats, shape.lanes, known=kept_estimates(kept, stats))
     second, after_order, more = _pass(reordered, tables, shape.batching, probe, Builds.FILTERED_OR_JOINED, kept,
                                       runs)
@@ -86,11 +88,13 @@ def filtered(plan: EngineNode, stats: Statistics, tables, shape: ModeShape, budg
 
 
 def _pass(plan, tables, batching, probe, builds, kept, runs) -> tuple[EngineNode, FilterPass, dict]:
-    found = [FilterCandidate(c.build_key.name, c.scan.fields["table"], c.column, c.clustering)
+    found = [FilterCandidate(c.build_key.name, c.scan_name, c.column, c.clustering)
              for c in candidates(plan, tables, builds)]
     pruned, scans, made = apply(plan, tables, batching, probe, builds, kept)
-    probed = tuple((name, sum(len(frame) for frame in lanes), sum(PandasBatch(frame).byte_size() for frame in lanes),
-                    _cluster_ids(side)) for name, (side, lanes) in made.items())
+    probed = tuple(Probed(name, sum(len(frame) for frame in lanes),
+                          sum(PandasBatch(frame).byte_size() for frame in lanes), _cluster_ids(side), described(side),
+                          described_sources(side))
+                   for name, (side, lanes) in made.items())
     replans = tuple((name, replan) for name, (side, _) in made.items() for replan in runs[id(side)].replans)
     refused = tuple((name, miss) for name, (side, _) in made.items() for miss in runs[id(side)].refused)
     return pruned, FilterPass(tuple(found), tuple(scans), probed, replans, refused), made

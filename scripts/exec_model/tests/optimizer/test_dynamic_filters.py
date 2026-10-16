@@ -8,6 +8,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
+import dataclasses
 import functools
 
 import pandas as pd
@@ -17,7 +18,7 @@ from ..corpus import ParquetTables, execute, execute_lanes
 from .test_cardinality import dataset
 from ..harness import main
 from ...optimizer.dynamic_filters import (
-    IN_LIMIT, Batching, Builds, KeySummary, Pruned, apply, candidates, probe_plan, remap,
+    IN_LIMIT, Batching, Builds, KeySummary, Pruned, PrunedBy, apply, candidates, probe_plan, remap,
     row_group_survives, summarize,
 )
 from ...plans.engine_nodes import build
@@ -321,6 +322,17 @@ def test_survivors_are_laid_out_as_the_engines_partitioner_lays_them():
     assert remap([[[0, 1], [2]], [[3]]], [1, 3], [3, 3, 3, 1], Batching.KEEP_BATCHES) == [[[1]], [[3]]]
 
 
+def test_a_candidate_and_its_pruned_scan_carry_the_name_the_report_gives_the_scan():
+    numbered = plan()
+    join = numbered.children[0]
+    join.children[1] = dataclasses.replace(join.children[1], alias="f#2")
+    t = tables()
+    [found] = candidates(numbered, t, Builds.FILTERED)
+    assert found.scan_name == "f#2" and candidates(plan(), t, Builds.FILTERED)[0].scan_name == "f"
+    _, [scanned], _ = apply(numbered, t, Batching.ONE_PER_LANE, probe_on(t), Builds.FILTERED)
+    assert (scanned.table, scanned.alias) == ("f", "f#2")
+
+
 def run_on(tables_, kept=None):
     frames = {name: lanes for name, (_, lanes) in (kept or {}).items()}
     return lambda engine_plan: execute(build(engine_plan, WithMaterialized(tables_, frames)))[0]
@@ -337,7 +349,8 @@ def probe_on(tables_):
 def test_apply_reads_only_the_row_groups_the_keys_can_reach_and_answers_the_same():
     t = tables()
     pruned, report, kept = apply(plan(), t, Batching.ONE_PER_LANE, probe_on(t), Builds.FILTERED)
-    assert report == [Pruned("f", "d", (0, 1, 2, 3), (1,), (("d", KeySummary(3, 5, (3, 4, 5))),))]
+    # Pruned by the dimension's keys `dk`, read from the build p0.
+    assert report == [Pruned("f", "d", (0, 1, 2, 3), (1,), (PrunedBy("d", KeySummary(3, 5, (3, 4, 5)), "p0", "dk"),))]
     assert "partition_groups=[[[1]]]" in "".join(f"{k}={v}" for k, v in pruned.children[0].children[1].fields.items())
     before, after = run_on(t)(plan()), run_on(t, kept)(pruned)
     assert sorted(after["v"]) == sorted(before["v"]) == [30, 40, 50]

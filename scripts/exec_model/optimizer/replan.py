@@ -17,10 +17,11 @@ import pandas as pd
 from ..engine.adaptive import AdaptiveDriver, BuildDone, Extraction, hashed_names
 from .cardinality import Estimate, Estimator, estimator, measured
 from ..plans.engine_nodes import build
-from ..plans.engine_plan import EngineNode, memory_source
+from ..plans.engine_plan import EngineNode
 from .join_order import ordered
 from .multijoin import replaced
-from .report import BuildMiss, Replan
+from .names import described, described_sources, join_words, sourced
+from .report import BuildMiss, Kept, Replan
 from ..engine.node import BackendSelector
 from ..engine.single_partition_driver import BUILD_SLOT
 from .stats import Statistics
@@ -72,7 +73,7 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
             if not isinstance(event, BuildDone):
                 return False
             miss = _miss(event, planned)
-            if _q_error(miss.rows, miss.estimate) <= threshold:
+            if miss.q_error <= threshold:
                 return False
             if driver.extraction() is None:
                 run.refused.append(miss)
@@ -86,13 +87,13 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
         run.results = driver.run()
         if driver.stopped is None:
             return run
-        had = set(frames)
+        made = {}
         plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames,
-                                    set() if taken is None else taken)
+                                    set() if taken is None else taken, made)
         plan, orders = ordered(plan, stats, lanes, known=known)
-        made = tuple((name, sum(len(frame) for frame in by_lane)) for name, by_lane in frames.items()
-                     if name not in had)
-        run.replans.append(Replan(_miss(driver.stopped, planned), made, tuple(orders)))
+        kept = tuple(Kept(name, sum(len(frame) for frame in frames[name]), described(side), described_sources(side))
+                     for name, side in made.items())
+        run.replans.append(Replan(_miss(driver.stopped, planned), kept, tuple(orders)))
 
 
 def kept_estimates(kept: dict, stats: Statistics) -> dict[str, Estimate]:
@@ -106,9 +107,11 @@ def kept_estimates(kept: dict, stats: Statistics) -> dict[str, Estimate]:
 
 
 def _with_memory_sources(plan: EngineNode, extraction: Extraction, planned: Estimator,
-                         known: dict[str, Estimate], frames: dict, taken: set[str]) -> EngineNode:
+                         known: dict[str, Estimate], frames: dict, taken: set[str], made: dict[str, EngineNode]
+                         ) -> EngineNode:
     """`plan` with each extracted build's side a memory source over its frames, laid out as the
-    side was; `known`, `frames` and `taken` gain them by name. A side that is one already stays."""
+    side was; `known`, `frames` and `taken` gain them by name, and `made` each side. A side that is
+    one already stays."""
     for join, lanes in extraction.builds.values():
         side = join.children[BUILD_SLOT]
         if side.kind == "GpuMemorySource":
@@ -117,16 +120,11 @@ def _with_memory_sources(plan: EngineNode, extraction: Extraction, planned: Esti
         taken.add(name)
         known[name] = measured(planned.estimates[id(side)], lanes, hashed_names(side))
         frames[name] = lanes
-        plan = replaced(plan, side, memory_source(name, side))
+        made[name] = side
+        plan = replaced(plan, side, sourced(name, side))
     return plan
 
 
 def _miss(event: BuildDone, planned: Estimator) -> BuildMiss:
     join = event.join
-    described = join.kind + (f" on={join.fields['on']}" if "on" in join.fields else "")
-    return BuildMiss(described, event.rows, planned.estimates[id(join.children[BUILD_SLOT])].rows)
-
-
-def _q_error(true: float, guess: float) -> float:
-    true, guess = max(true, 1.0), max(guess, 1.0)
-    return max(true / guess, guess / true)
+    return BuildMiss(join_words(join), event.rows, planned.estimates[id(join.children[BUILD_SLOT])].rows, join.mj)

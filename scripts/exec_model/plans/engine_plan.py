@@ -53,6 +53,12 @@ class EngineNode:
     #: the id of the join cluster this join is in, `MJ<n>` (`optimizer/multijoin.named`): the
     #: optimizer's mark, not a field of the engine's plan, so the plan text leaves it out
     mj: str | None = None
+    #: a scan's name in the optimizer's report where the plan reads its table more than once,
+    #: `<table>#<n>` (`optimizer/names.aliased`); like `mj`, not in the plan text
+    alias: str | None = None
+    #: a memory source's columns that are an aggregate's values in the side it holds
+    #: (`optimizer/names.sourced`), which the report marks as such; not in the plan text either
+    aggregate_columns: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
