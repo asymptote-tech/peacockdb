@@ -42,12 +42,12 @@ corpus_query!(tpch, 1, q10, all_modes, none, duckdb_exact, data_fusion_exact, go
 // anyway — `an_undetermined_lines_rows_are_compared_only_against_committed_files` holds both.
 // scan-limit runs at the tp4 modes only: at the two tp1 modes the planner puts the limit in
 // the scan alone and the cpu backend's reader does not apply it — six million rows for ten.
-// The other four run at tp1-single, bar cross-join, off on #220's join batching.
+// filter-project, aggregate-groupby and shuffle-additive run everywhere; cross-join is off on #220.
 corpus_query!(tpch, 1, scan_limit, tp4_single | tp4_rowgroup | tp4_sized, none, duckdb_exact, data_fusion_subset, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, filter_project, all_modes, tp1_single, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, aggregate_groupby, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, filter_project, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, aggregate_groupby, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, cross_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, shuffle_additive, all_modes, tp1_single, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, shuffle_additive, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 2, the five smallest joins. semi-join and anti-join return whole `orders` rows,
 // which is over the result cap, so the device compares against a live cpu run.
@@ -67,11 +67,11 @@ corpus_query!(tpch, 1, nested_loop_join, all_modes, tp1_single, duckdb_exact, da
 // mode is exact: tp1-single matches DataFusion to the digit, and it is the mode with a single
 // lane and so nothing to reassociate. The other four differ by ~3e-15 — the association order
 // of the Welford merge rather than its arithmetic, since a wrong merge would not come right at
-// one lane. shuffle-stddev runs at tp1-single on the device; nested-loop-left-join is off on
+// one lane. shuffle-stddev runs everywhere on both engines; nested-loop-left-join is off on
 // #220's join batching, nested-limits on #186 (two intervals on one path, scan-limit's refusal),
 // and mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
 corpus_query!(tpch, 1, shuffle_additive_avg, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, shuffle_stddev, all_modes, tp1_single, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225
+corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225
 corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_loop_left_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_limits, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

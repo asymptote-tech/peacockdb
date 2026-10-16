@@ -817,8 +817,11 @@ Executors and driver:
 
 Corpus: of the 87 rows whose only tickets are in this chain, every cell turns on as its last
 ticket closes — up to 23 cpu and 428 gpu cells — each run on shad-gpu at its mode and compared
-with DuckDB. The 21 rows that also carry an out-of-chain ticket (#55, #56, #57, #65, #183, #191,
-#199) keep those cells off and drop the in-chain tickets from their tags. pbench's join cells
+with DuckDB. The 20 rows that also carry an out-of-chain ticket (#55, #56, #57, #65, #191, #199)
+keep those cells off and drop the in-chain tickets from their tags. **#183 is not one of them**:
+`stale-cells` ran the sixteen cells it still held off and every one passed, so a row carrying
+`183` alone has no live blocker and its cells are join-backend's to run — which is what
+`join-backend.md`'s own Registry section already says. pbench's join cells
 turn on with them.
 
 ### 5.8 verify-26.02
