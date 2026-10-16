@@ -1770,3 +1770,13 @@ Deferred, as the chain note says: sf40 and the benchmarks.
   task's, and not reverted by hand.
 - **nebius-gpu's disk is at 9.7 GB free**, below the 10 GB build floor. The rules left nothing
   to remove. The next build there has to free space first, or stop as an obstacle.
+
+#### CI on the rebased head, and `done`
+
+The first dispatch, on `f3666c5a`, went red in cost-report: `test_duckdb_result.py` pinned tpch
+at 39 query files, and this task adds two. The re-prove had not run the Python suites. The
+developer fixed the count to 41 and ran every cost-report Python step locally, all green. That
+run was cancelled. Dispatched run
+[38964818149](https://github.com/asymptote-tech/peacockdb/actions/runs/38964818149) on `97ff10ed`:
+changes, both dataset-matrix legs, the GPU build, cost-report and **GPU Tests (nebius-gpu)** all
+green. Back to `done`.
