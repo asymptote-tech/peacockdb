@@ -840,3 +840,47 @@ instead for a recorded nebius-gpu pass, which is the section above.
 
 The four commits after `dbfc4079` are documentation-only and skipped every job behind the
 `changes` gate, so their green asserts nothing. Read the SHA before the conclusion.
+
+### 2026-10-16 — third rebase, onto ENS-distinct-companions on master ca4dedeb
+
+master brought chain J's eight tasks, gpu-host, and the fold of chain L into chain K.
+guard-checks and distinct-companions are `done` again on it. This branch was replayed with
+`git rebase --onto ENS-distinct-companions 8a831978`. One developer resolved every code stop.
+In short:
+
+- **5f70fe64, the main commit, against master's `rows_only`.** master's `__rowmarker__` scans
+  (`CudfScan.rows_only`) read the scan's limit, both to cap the count and in the #186 refusal.
+  The decision: a rows-only scan carries no limit, like any other scan. The `GpuLimit` above it,
+  or the unload's interval, cuts the marker rows, and the covering-prefix trim still applies.
+  `scan.cpp`'s `rows_of(paths, rgs)` takes no limit. flatc writes no accessor for a deprecated
+  field, so master's `scan->limit()` could not have compiled. Two of master's #186 `bug_`
+  rows-only cases became one green case,
+  `a_limit_over_a_rows_only_scan_keeps_its_first_marker_rows_on_both`.
+  `ScanRowsOnlyAnswersTheRowCount` lost its limit assertion. `generated.rs`'s line count was
+  recounted with the vendored flatc; master's figure was already stale.
+- **a47aff90, the device half: #285 is not filed on this branch.** On the old base, nested-limits'
+  region scan declared no column and the device read zero rows. master's `rows_only` builds such
+  a scan's rows from the footer, which is #285's own proposed fix. So the pin was dropped as a
+  duplicate of master's `a_rows_only_scan_agrees_on_both_backends`. nested-limits' five device
+  cells are on, beside scan-limit's five, **to be proven** in the GPU cycle, which also records
+  their `gpu-result.txt` sections. Until then 11 rust-only `test_cpu_corpus` cases are red by
+  design.
+- **A design call on master's test, recorded for review.**
+  `an_undetermined_lines_rows_are_compared_only_against_committed_files` refused any device cell
+  on a `data_fusion_subset` line. scan-limit is such a line. The rule is now that such a cell must
+  be `golden_exact`, which holds the recorded rows to the committed section at every mode. The
+  `order_hazard.rs` comment that pointed at the old rule was reworded.
+- **dbfc4079.** The schema's `projection` comment ended on #285. It now says that a scan of no
+  column sets `rows_only` (#63).
+
+Markdown, resolved by the coordinator. `tasks.md` by ownership; this task's state on the branch
+board is `rebase needed(done)`. #186 and #234 are archived in master's format, with the index at
+104 open. #284 keeps its number: master skipped 284 and 285, and its next free number is 287.
+`architecture.md` was reconciled against the task's own final text, without #285, and with
+`CudfScan`'s `limit` gone from both of its rows. `build-test.md` waits for the measured counts.
+
+Owed before `done`:
+- regenerate the 15 tpch plan and mini goldens and `recipe-payloads.txt`;
+- the cpu tiers, the cost-report Python suites and the cost diff;
+- a GPU cycle on nebius-gpu that proves or reverts the ten cells and records their sections;
+- a dispatched CI.

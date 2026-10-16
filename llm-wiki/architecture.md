@@ -187,7 +187,7 @@ Four limits on the number it produces.
 
 | Node | Category | Semantics |
 |---|---|---|
-| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`; declares a pushed-down limit, which the cpu ignores and the device refuses beside row groups ([#186](tickets/corpus-coverage.md#t186)) |
+| `GpuLoadParquet` | Source | reads survivor row groups per the mapping; `next_batch()`. Carries no limit: one DataFusion pushed into the scan is a `GpuLimit` above it, or the unload's interval, and the survivors are cut to the row groups it needs |
 | `GpuEmpty` | Source | one lane, no batch, no call: what DataFusion folded to an `EmptyExec` |
 | `GpuFilter`, `GpuProject` | Exec | 1:1 per batch. A filter also projects, and carries that projection |
 | `GpuSort` | Exec | sorts each batch independently, optional per-batch `fetch`; output `BatchSorted` |
@@ -465,7 +465,7 @@ aggregate shape, at the row-group modes it stops a 49-group scan after one batch
 single-batch modes a lane's one batch is already the whole mapping, so the table is read before
 the limit can be satisfied. A filter between them is the third shape and has no hold above one
 lane, because it has no plan: the limit feeds only the sink and the validator refuses it
-([#284](tickets/corpus-coverage.md#t284)).
+([#284](tickets/complete-coverage.md#t284)).
 
 **Root-adjacent** — feeding only `GpuUnload`, the common case — **there is no limit node**: the
 interval becomes the unload's, which is where it belongs, since a limit over a stream about to
@@ -1023,7 +1023,7 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `limit`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_num_rows(limit)`, `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Under `rows_only` it decodes nothing: `opts` takes the limit and the row groups all the same, so cuDF refuses the pair there too (#186); it reads the row groups' counts from the footer, capped by the limit only when the call names no row group, and builds `__rowmarker__` |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
@@ -1354,20 +1354,19 @@ to it.
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
-| `CudfScan.limit` | `node_writer.rs` | the source's pushed-down limit | `parquet_reader_options::set_num_rows`, or the cap on a rows-only read's count |
 | `CudfJoin.chunk_bytes` | `join.rs` | the planner's scratch budget for one call | how many pairs the session materializes at once |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
 | `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
-| `CudfScan.projection` | nobody | — | every column of `file_schema`, which is the node's projected schema — so a node declaring none selects none ([#285](tickets/corpus-coverage.md#t285)) |
+| `CudfScan.projection` | nobody | — | every column of `file_schema`, which is the node's projected schema; a scan of no column sets `rows_only` and never reads it |
 
 Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
-the result is compared against. The last three rows are different: a field left at its
+the result is compared against. The last four rows are different: a field left at its
 default on purpose; a pair no writer sets and no reader reads, which is the wire-format
-surface #132 is about; and three the C++ still reads that no plan fills — the row groups a batch
+surface #132 is about; and two rows the C++ still reads that no plan fills — the row groups a batch
 loads are a per-call value and ride the call instead, and an empty `projection` means the whole
-declared schema, which is #285.
+declared schema.
 
 ## Node display
 
