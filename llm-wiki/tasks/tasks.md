@@ -131,3 +131,13 @@ name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
 
 A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
 Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.
+
+## Chain C (base: master)
+
+### 1. [`join-optimizer.md`](join-optimizer.md) — state: building — PR #165
+
+The prototype's join-order optimizer, finished: the engine's plans only, one folder per
+component, one stats sidecar for both embedding modes, `run.py` with its goldens,
+`.optimizer.txt` and cost report, the record in S3, every device-enabled benchmark, cardinality
+per join, three documents. The branch and its PR exist, so the coordinator picks the branch up
+rather than branching afresh; `join-optimizer-detail.md` says what is on it.
