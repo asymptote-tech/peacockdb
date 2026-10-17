@@ -30,7 +30,8 @@ from ..operators.joins import own_output
 
 class Kind(Enum):
     """A type as far as the prototype tells types apart: decimals are float64 here
-    (`plans/tables.typed`), and one integer width is as good as another."""
+    (`plans/tables.typed`), one integer or float width is as good as another, and a date and a
+    zoneless timestamp of any unit are one datetime64."""
 
     BOOLEAN = "boolean"
     INTEGER = "integer"
@@ -47,15 +48,23 @@ _KINDS = {
     "Int32": Kind.INTEGER,
     "Int64": Kind.INTEGER,
     "UInt8": Kind.INTEGER,
+    "UInt32": Kind.INTEGER,
+    "Float32": Kind.FLOAT,
     "Float64": Kind.FLOAT,
     "Utf8": Kind.STRING,
     "Date32": Kind.DATE,
 }
 
 
+#: a zoneless timestamp, its unit the group
+_TIMESTAMP = re.compile(r"Timestamp\((Second|Millisecond|Microsecond|Nanosecond), None\)")
+
+
 def kind_of(type_text: str) -> Kind:
     if type_text.startswith("Decimal128("):
         return Kind.FLOAT
+    if _TIMESTAMP.fullmatch(type_text):
+        return Kind.DATE
     if type_text not in _KINDS:
         raise EnginePlanFormatError(f"type `{type_text}` has no kind here")
     return _KINDS[type_text]
@@ -284,6 +293,7 @@ _NULLS = {
     Kind.STRING: None, Kind.DATE: pd.NaT, Kind.INTERVAL: pd.NaT,
 }
 _CAST_DTYPES = {Kind.INTEGER: "int64", Kind.FLOAT: "float64"}
+_TIME_UNITS = {"Second": "s", "Millisecond": "ms", "Microsecond": "us", "Nanosecond": "ns"}
 _RETURNS = {
     "substr": Kind.STRING, "upper": Kind.STRING, "lower": Kind.STRING, "concat": Kind.STRING,
     "round": Kind.FLOAT, "sqrt": Kind.FLOAT, "date_part": Kind.INTEGER,
@@ -447,14 +457,23 @@ class _Lowering:
 
     def cast(self, expr: E.Cast):
         target = kind_of(expr.target)
+        unit = _TIMESTAMP.fullmatch(expr.target)
+        if unit is not None:
+            source = self.kind(expr.expr)
+            if source not in (Kind.DATE, None):
+                self.fail(f"a cast from {source.value} to {expr.target}, which the IR is not taught")
+            return X.TimestampCast(self.lower(expr.expr, Kind.DATE), _TIME_UNITS[unit.group(1)])
         if target not in _CAST_DTYPES:
             self.fail(f"a cast to {expr.target}, which the IR is not taught")
         return X.Cast(self.lower(expr.expr, self.kind(expr.expr)), _CAST_DTYPES[target])
 
     def like(self, expr: E.Like):
-        if expr.case_insensitive or not isinstance(expr.pattern, E.Literal):
-            self.fail("ILIKE, or LIKE against a computed pattern, has no IR counterpart")
-        return X.Like(self.lower(expr.expr, Kind.STRING), expr.pattern.text, expr.negated)
+        if expr.case_insensitive:
+            self.fail("ILIKE has no IR counterpart")
+        if isinstance(expr.pattern, E.Literal):
+            return X.Like(self.lower(expr.expr, Kind.STRING), expr.pattern.text, expr.negated)
+        return X.LikeColumn(self.lower(expr.expr, Kind.STRING), self.lower(expr.pattern, Kind.STRING),
+                            expr.negated)
 
     def case(self, expr: E.Case, expected):
         kind = self.kind(expr) or expected

@@ -12,7 +12,7 @@ import pandas as pd
 
 from ..harness import main, raises
 from ...plans.engine_expr import AggCall
-from ...plans.engine_ir import Kind, columns, frame_names, lower_field
+from ...plans.engine_ir import Kind, columns, frame_names, kind_of, lower_field
 from ...plans.engine_plan import EngineNode, read_plans
 from ...plans.goldens import engine_plan_paths
 from ...errors import EnginePlanFormatError
@@ -29,7 +29,7 @@ def walk(node):
 
 def corpus_nodes():
     paths = engine_plan_paths()
-    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1"}, paths
+    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1", "pbench.sf1"}, paths
     for path in paths:
         for name, plan in read_plans(path).items():
             if isinstance(plan, EngineNode):
@@ -159,6 +159,8 @@ def test_what_the_ir_cannot_say_is_refused_naming_the_field():
         ("a@0 IS DISTINCT FROM b@1", ("a", "Int64"), ("b", "Int64")): r"`IS DISTINCT FROM` has no IR",
         ("a@0 = 1", ("a", "Time64(ns)")): r"type `Time64\(ns\)` has no kind here",
         ("a@0 ILIKE x", ("a", "Utf8")): r"ILIKE",
+        ("CAST(a@0 AS Timestamp(Second, None)) > 1970-01-01", ("a", "Int64")):
+            r"a cast from integer to Timestamp\(Second, None\)",
     }
     for (text, *schema), message in cases.items():
         with raises(EnginePlanFormatError, match=message):
@@ -169,6 +171,29 @@ def test_what_the_ir_cannot_say_is_refused_naming_the_field():
     project = node("GpuProject", [scan(("a", "Utf8"))], schema=[("a", "Int64")], exprs="[a@0]")
     with raises(EnginePlanFormatError, match=r"`a` is string, its column integer"):
         lower_field(project, "exprs")
+
+
+def test_pbench_s_types_have_kinds_and_a_zoned_timestamp_has_none():
+    assert kind_of("Float32") is Kind.FLOAT
+    assert kind_of("UInt32") is Kind.INTEGER
+    for unit in ("Second", "Millisecond", "Microsecond", "Nanosecond"):
+        assert kind_of(f"Timestamp({unit}, None)") is Kind.DATE, unit
+    with raises(EnginePlanFormatError, match=r"has no kind here"):
+        kind_of('Timestamp(Second, Some("UTC"))')
+
+
+def test_a_like_against_a_column_lowers_to_a_pattern_per_row():
+    join = node(
+        "GpuNestedLoopJoin", [scan(("id", "Int32"), ("pat", "Utf8")), scan(("name", "Utf8"))],
+        filter="name@probe:0 LIKE pat@build:1",
+    )
+    assert lower_field(join, "filter") == X.LikeColumn(X.Col("name"), X.Col("pat"))
+
+
+def test_a_cast_between_timestamp_units_lowers_to_a_timestamp_cast():
+    project = node("GpuProject", [scan(("t", "Timestamp(Microsecond, None)"))],
+                   schema=[("s", "Timestamp(Second, None)")], exprs="[CAST(t@0 AS Timestamp(Second, None)) as s]")
+    assert lower_field(project, "exprs") == [X.Alias(X.TimestampCast(X.Col("t"), "s"), "s")]
 
 
 def test_the_frame_names_of_a_schema_are_its_columns():

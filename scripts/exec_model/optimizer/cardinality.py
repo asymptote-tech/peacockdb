@@ -65,12 +65,12 @@ _KEEPS_ROWS = _PASS | {"GpuProject"}
 
 
 def certainty(node: EngineNode) -> Certainty:
-    """How `node`'s rows are known: a scan's and a memory source's are counted, a node that passes
-    its input's rows on knows them as well as its input, a union as well as its least known branch,
-    and everything else is estimated."""
+    """How `node`'s rows are known: a scan's, an empty relation's and a memory source's are
+    counted, a node that passes its input's rows on knows them as well as its input, a union as
+    well as its least known branch, and everything else is estimated."""
     while node.kind in _KEEPS_ROWS:
         node = node.children[0]
-    if node.kind == "GpuLoadParquet":
+    if node.kind in ("GpuLoadParquet", "GpuEmpty"):
         return Certainty.EXACT
     if node.kind == "GpuMemorySource":
         return Certainty.MEASURED
@@ -149,6 +149,8 @@ class Estimator:
             found = self._scan(node)
         elif node.kind == "GpuMemorySource":
             found = self.known[node.fields["name"]]
+        elif node.kind == "GpuEmpty":
+            found = shaped(0.0, [None] * len(node.schema))
         elif node.kind == "GpuFilter":
             found = self._filter(node, children[0])
         elif node.kind == "GpuProject":

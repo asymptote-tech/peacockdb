@@ -17,10 +17,9 @@ MODES = ("tp1-single", "tp1-rowgroup", "tp4-single", "tp4-rowgroup", "tp4-sized"
 
 
 def engine_plan_paths() -> list[pathlib.Path]:
-    """The engine's `<mode>.plans.txt` of every bench the prototype runs, `BENCHES`. pbench's are out
-    until the reader covers its types (`engine_ir.kind_of`) and the estimator its `GpuEmpty`; till
-    then only the plan reader's own tests read them."""
-    return sorted(path for bench in BENCHES for path in (ROOT / "goldens" / f"{bench}.sf1").glob("*.plans.txt"))
+    """The engine's `<mode>.plans.txt` of every sf1 dataset, pbench's beside `BENCHES`: the reader
+    lowers and builds all of them, though `run.py` runs `BENCHES` alone."""
+    return sorted((ROOT / "goldens").glob("*.sf1/*.plans.txt"))
 
 
 def sections(text: str, heading: str = "== ") -> list[tuple[str, str]]:

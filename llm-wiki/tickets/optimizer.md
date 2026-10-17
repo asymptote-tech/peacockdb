@@ -21,6 +21,7 @@
 - [#138 (ranged sorted merge) add ranged sorted merge](#t138)
 - [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
 - [#290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not](#t290)
+- [#291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins](#t291)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -275,3 +276,16 @@ is 990 rows, NDV 10. The rows are right since #289; the NDV is not. tpch q13 gro
 over `customer ⟕ orders`: the final aggregate is estimated at 99,996 groups, orders' customer
 count, against 150,000. Only an inner or semi join's output holds just the matched values; a
 preserved side keeps its own NDV, and an anti join's is at most its own less the matched ones.
+
+<a id="t291"></a>
+### #291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins
+pandas has one missing value for a float column, so the prototype reads a NaN as a NULL
+(`operators/frame.py`, "Known divergences"). DuckDB and the device equate NaN with NaN as a key; the
+prototype folds the NaN group into the NULL one and drops NaN keys from a join. pbench's
+`float32-key-group` and `float64-key-group` answer 51 groups against DuckDB's 52, and
+`float64-key-join` 772,357 rows against 779,611, at all five modes; the other 53 or 54 of pbench's
+queries match. The engine's lines for the three are commented out on #243.
+
+Fix: hold NULL apart from NaN in the prototype's frames — a nullable float dtype whose `<NA>` is the
+NULL and whose NaN is a value — from `tables.typed` through the group keys and the hash join's null
+hold-out.

@@ -40,11 +40,13 @@ from ...operators.expressions import (
     DatePart,
     IsNotNull,
     Like,
+    LikeColumn,
     Lit,
     Lower,
     Not,
     Round,
     Substring,
+    TimestampCast,
     Upper,
     project,
 )
@@ -186,6 +188,59 @@ def test_null_propagation_survives_and_or_and_not():
     assert list(Binary("and", null, Lit(False)).evaluate(frame)) == [False]
     assert list(Binary("or", null, Lit(True)).evaluate(frame)) == [True]
     assert list(Not(null).evaluate(frame)) == [pd.NA]
+
+
+def test_a_like_against_a_column_reads_a_pattern_repeated_across_rows_and_a_leading_percent():
+    frame = pd.DataFrame({"s": ["xab", "ab", "zabz", "q", "abz"], "p": ["%ab", "%ab", "%ab%", "%ab%", "%ab"]})
+    assert list(LikeColumn(Col("s"), Col("p")).evaluate(frame)) == [True, True, True, False, False]
+
+
+def test_a_like_against_a_column_matches_each_row_by_its_own_pattern():
+    frame = pd.DataFrame({"s": ["abc", "a.c", "abc", None, "x"], "p": ["a_c", "a.c", "b%", "a%", None]})
+    assert list(LikeColumn(Col("s"), Col("p")).evaluate(frame)) == [True, True, False, pd.NA, pd.NA]
+    assert list(LikeColumn(Col("s"), Col("p"), negated=True).evaluate(frame)) == [
+        False, False, True, pd.NA, pd.NA
+    ]
+
+
+def test_a_timestamp_cast_to_a_coarser_unit_floors_as_the_device_and_duckdb_do():
+    # cuDF's cast floors (`cuda::std::chrono::floor`), as DuckDB does: a time before 1970 moves
+    # down. The engine's cpu truncates toward zero instead (#292).
+    frame = pd.DataFrame({"t": pd.to_datetime(
+        ["2024-03-01 10:20:30.999999999", "1969-12-31 23:59:59.123456789", None])})
+    for unit, want in (
+        ("s", ["2024-03-01 10:20:30", "1969-12-31 23:59:59"]),
+        ("ms", ["2024-03-01 10:20:30.999", "1969-12-31 23:59:59.123"]),
+        ("us", ["2024-03-01 10:20:30.999999", "1969-12-31 23:59:59.123456"]),
+    ):
+        got = TimestampCast(Col("t"), unit).evaluate(frame)
+        assert list(got[:2]) == [pd.Timestamp(w) for w in want], unit
+        assert pd.isna(got[2]), unit
+
+
+def test_not_like_over_a_null_is_null():
+    frame = pd.DataFrame({"s": [None, "y"]})
+    assert list(Like(Col("s"), "x%", negated=True).evaluate(frame)) == [pd.NA, True]
+
+
+def test_like_metacharacters_match_a_newline_and_the_pattern_ends_at_the_value_s_end():
+    for dtype in (object, "string", "str"):
+        frame = pd.DataFrame({"s": pd.array(["a\nb", "ab\n", "ab"], dtype=dtype)})
+        if dtype is object:  # pandas 3 infers `str` for a list of strings
+            frame["s"] = frame["s"].astype(object)
+        assert list(Like(Col("s"), "a%").evaluate(frame)) == [True, True, True], dtype
+        assert list(Like(Col("s"), "a_b").evaluate(frame)) == [True, False, False], dtype
+        assert list(Like(Col("s"), "ab").evaluate(frame)) == [False, False, True], dtype
+        patterns = frame.assign(p=["a_b", "ab", "ab"])
+        assert list(LikeColumn(Col("s"), Col("p")).evaluate(patterns)) == [True, False, True], dtype
+
+
+def test_a_float32_column_compares_with_a_literal_in_float32():
+    # A literal beside a bare Float32 column is a Float32 one (`= CAST(0.1 AS REAL)`), so it compares
+    # in float32 and 0.1 matches; against a Float64 literal DataFusion casts the column instead.
+    frame = pd.DataFrame({"f": np.array([0.1, 0.2], dtype="float32")})
+    assert list(Binary("==", Col("f"), Lit(0.1)).evaluate(frame)) == [True, False]
+    assert list(Binary("<", Lit(0.1), Col("f")).evaluate(frame)) == [False, True]
 
 
 def test_like_has_two_metacharacters_and_nothing_else():
@@ -379,6 +434,9 @@ def test_each_key_dtype_digests_to_its_pinned_value():
         [2671126803, 3977929669, 2628975997, 2583555064], [243197796, 2038028274, 243197796, 2038028274],
         [3708629189, 42, 2538144622, 3337479593], [269853996, 42, 2055651698, 1954418156],
         [1240868104, 42, 198386293, 3539153113], [2057668062, 228767048, 42, 2494293234]]
+    # A float32 zero digests as one value whatever its sign, as the engine folds -0.0.
+    zeros = pd.DataFrame({"z": np.array([-0.0, 0.0], dtype="float32")})
+    assert row_digests(zeros, ["z"])[0] == row_digests(zeros, ["z"])[1]
 
 
 # -- joins ------------------------------------------------------------------------

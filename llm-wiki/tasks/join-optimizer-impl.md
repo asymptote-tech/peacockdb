@@ -328,22 +328,26 @@ with Task 15: the page and the log share the report data both changed.
 **Files:** `scripts/exec_model/plans/`, `scripts/exec_model/operators/`,
 `optimizer/dynamic_filters.py`, tests.
 
-- [ ] The plan reader reads `GpuEmpty`, `Int8`, a scan with no columns, and a nested-loop join's
+- [x] The plan reader reads `GpuEmpty`, `Int8`, a scan with no columns, and a nested-loop join's
   `filter=true`; every plan golden of every dataset parses.
-- [ ] `joins.py` is master's with the optimizer's additions (own output, positional columns,
+- [x] `joins.py` is master's with the optimizer's additions (own output, positional columns,
   probe taking); `IGNORES_NULL_EQUALS_NULL` and `equates_nulls` go, NULL equality is the flag.
-- [ ] Proving: cheap tier; the answer suites over a sample at every mode against DuckDB.
+- [x] Proving: cheap tier; the answer suites over a sample at every mode against DuckDB.
 
 ### Task 21: the optimizer's rules under the closed tickets
 
-**Files:** `optimizer/join_order.py`, `optimizer/multijoin.py`, `optimizer/conflicts.py`, docs,
-tests.
+**Files:** `optimizer/join_order.py`, `optimizer/multijoin.py`, `optimizer/conflicts.py`,
+`operators/joins.py`, `engine/accounting.py`, docs, tests.
 
 - [ ] Orientation prices a build as the session holds it; what that moves is measured on a sample
   before it is kept.
 - [ ] A residual on a non-inner join walls a cluster only where the engine still refuses it.
 - [ ] A key's `IS NOT NULL` filter under an exchange is wiring the cluster reads through; tp1 and
   tp4 order the same clusters.
+- [ ] A join's residency is its build plus what `plan::session_bytes` prices beside it; a probe's
+  scratch is its output estimate and transients (design §4.3) — the build's per-call hash only for
+  RightSemi/RightAnti with a cross residual — and the probe batch, already in flight, is not counted
+  twice.
 - [ ] `optimizer.md`, `design.md` and README cite no closed ticket as a rule.
 - [ ] Proving: cheap tier; a sample at every mode before and after each rule.
 

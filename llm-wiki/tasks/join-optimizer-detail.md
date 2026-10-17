@@ -36,7 +36,11 @@ fixes #236 and #237):
 - Task 19: the branch is five commits on master (`8e0a7d40`), each green on rust-only, the
   cost-report crate and the cheap tier; NULL equality is the plan's flag alone, and the plan reader
   takes master's `GpuEmpty`, `Int8` and scans of no column. Red until Task 23: the prototype's
-  committed outputs and the cardinality golden (Task 19 below). Tasks 20–23 are not started.
+  committed outputs and the cardinality golden (Task 19 below).
+- Task 20: every plan golden of all three datasets parses, lowers, builds and disassembles in the
+  prototype, pbench's included; the answer suites pass a sample of fifteen queries at every mode
+  against DuckDB, and pbench's all but its three NaN-keyed queries (#291) at every mode (Task 20
+  below). Tasks 21–23 are not started.
 - `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
   shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
   record fetched, 174,690 rows, sha256 as pinned).
@@ -2624,3 +2628,106 @@ case, 43, all green. At commit 4 the dataset tier ran over the generated sf1: th
 (4), the ordered corpus (2) and `run.py` over two queries (1) pass; the cardinality corpus fails as
 above. A sample of the answers suite at `tp4-single` against DuckDB passes: the four named
 queries, tpch's anti, left and nested-loop joins, q3 and q22, and tpcds q9, eleven in all.
+
+## Task 20
+
+What Task 19 had left: pbench's plans were parsed and not lowered. Measured over every pbench
+plan golden, through the stages the corpus-wide tests run (lower each expression field, build,
+validate each node's layout against the engine's, disassemble each cluster), the gaps were:
+
+- types: `Float32`, `UInt32`, `Timestamp(Second|Millisecond|Microsecond|Nanosecond, None)`. Each
+  has a kind now; a date and a zoneless timestamp are one datetime64, a zoned one is still
+  refused;
+- a nested loop's `filter` holding `LIKE` against a column (`like-column-pattern`):
+  `expressions.LikeColumn`, each distinct pattern matched over its rows as `Like` matches, NULL
+  where either side is. `ILIKE` stays refused: no golden holds one;
+- a cast between timestamp units (`timestamp-s-key-group`'s `arrow_cast` to seconds):
+  `expressions.TimestampCast`, `astype` to the unit, which floors as cuDF's cast and DuckDB's do.
+  The engine's cpu truncates toward zero, as arrow divides the integer; only a time before 1970
+  can differ, and that is #292. A cast to a timestamp from anything but a date or a timestamp is
+  refused, since it would read integers as nanoseconds;
+- `cardinality.Estimator.node` had no `GpuEmpty` case: zero rows, one unknown column per schema
+  column, its certainty exact.
+
+No layout differed and nothing failed to build once those were in. `goldens.engine_plan_paths()`
+now reads every `*.sf1/*.plans.txt`; `test_engine_ir` and `test_engine_corpus` assert the three
+datasets, and `test_disassembly_corpus` iterates them. `run.py` still runs `BENCHES`, tpch and
+tpcds, and `test_ordered_corpus` orders theirs alone: pbench has no statistics sidecar.
+
+Beside the new forms, what the prototype answered differently from the engine's device and DuckDB:
+
+- `Like` read `na=False` and negated it, so `NULL NOT LIKE 'x'` was true; it is NULL now. Its `%`
+  and `_` did not match a newline and `$` matched before a trailing one: the pattern is a
+  `(?s)` fullmatch now, under pandas' object and `str` dtypes alike. A backslash is literal, as in
+  cuDF and DuckDB; the engine's cpu reads it as an escape (#293).
+- A `Float32` column compared with a literal compared in float64. A literal beside a bare Float32
+  column is a Float32 one in the plan (`= 1`, `= CAST(0.1 AS REAL)`), so the literal is cast to
+  float32 first; against a Float64 literal DataFusion casts the column instead.
+- A float32 key hashed `-0.0` and `0.0` apart (`partition_ops._hash_value`'s string arm); it folds
+  the zero as the engine does.
+- A float NaN is held as a NULL (`frame.py`, "Known divergences"): #291.
+
+### Red first
+
+Each was watched failing before its code. In `test_engine_ir`:
+`test_pbench_s_types_have_kinds_and_a_zoned_timestamp_has_none` (`Float32` has no kind),
+`test_a_like_against_a_column_lowers_to_a_pattern_per_row` (the refusal),
+`test_a_cast_between_timestamp_units_lowers_to_a_timestamp_cast` (a cast the IR is not taught), and
+the integer-to-timestamp case of `test_what_the_ir_cannot_say_is_refused_naming_the_field` (no
+refusal). In `test_operators`: `test_a_like_against_a_column_matches_each_row_by_its_own_pattern`
+(no such class); `test_a_timestamp_cast_to_a_coarser_unit_floors_as_the_device_and_duckdb_do` at
+`s`, `ms` and `us` (the truncation moved 1969's time up); `test_not_like_over_a_null_is_null`;
+`test_like_metacharacters_match_a_newline_and_the_pattern_ends_at_the_value_s_end`;
+`test_a_float32_column_compares_with_a_literal_in_float32`; and the float32 zero in
+`test_each_key_dtype_digests_to_its_pinned_value`. In `test_cardinality`:
+`test_an_empty_relation_is_known_to_hold_no_row` (no estimate for `GpuEmpty`).
+`test_a_like_against_a_column_reads_a_pattern_repeated_across_rows_and_a_leading_percent` closes a
+gap and passed when written.
+
+### pbench's answers
+
+The answer suite's loop names tpch and tpcds, so pbench ran through the same compare outside it,
+DuckDB's text spelled as `duckdb_result.py` spells it, at every mode: 54 of 57 match at the two tp1
+modes and 53 of 56 at the three tp4 ones, where `not-in-uncorrelated` is refused at plan time (#267).
+The three that do not, at every mode, are `float32-key-group`, `float64-key-group` and
+`float64-key-join`, whose engine lines are commented out on #243: the prototype merges the NaN group
+into the NULL one (51 groups against 52) and drops NaN keys from the join, #291. Folding pbench
+into the suite needs those three declared and its dataset found by a table it has; it is not done.
+
+### The recipe architecture's remains
+
+Grepped for `recipe_join`, `cudf_calls`, `capability(`, the four removed sets, `single-batch`
+and "on both backends". What was left: `expressions.columns_of`, which only the recipe backend
+called, is deleted; `merged_scratch`'s docstring no longer says the build is rebuilt per probe
+call (#136). Its formula still charges the build in a probe's scratch, which `resident()` already
+holds: Task 21 makes the join's residency the session's (`plan::session_bytes`) and a probe's
+scratch the batch, the output estimate and the transients. The rest of the `single-batch` hits are
+batch layouts.
+
+Left for Task 21, which owns them:
+
+- #152, orientation's copies: `optimizer.md` (the inner-join rule and the `copies` constant),
+  `design.md` (the orientation paragraph), the README's `join_order.py` row, and
+  `join_order.orient`'s docstring and `copies = 1` default through `optimize` and `ordered`;
+- #159, the residual wall: `optimizer.md`'s cluster rule, `design.md`'s, `multijoin.py`'s
+  docstring;
+- #153: `design.md`'s "a non-inner join never takes another join's predicate as a residual";
+- #137: `partition_ops.py`'s module docstring and `expressions.IsNotNull`'s ("the predicate #137
+  wants the planner to insert under a shuffle"), which master's planner now inserts;
+- the join's scratch, above.
+
+### Tickets
+
+#291 (the prototype's NaN, `optimizer.md`), #292 (a timestamp cast's rounding, cpu against device)
+and #293 (a LIKE backslash, cpu against device), both in `scalars.md`. The next free number is 294.
+
+### Proving
+
+- Cheap tier as `pipeline.yml` runs it, the extracted step checked non-empty: 48 files, 498
+  passed, none failed (488 at Task 19, ten new).
+- Dataset tier: the sidecar recount (4), the ordered corpus (2) and `run.py` (1) pass; the
+  cardinality corpus fails its two golden comparisons as Task 19 left them.
+- The answer suite against DuckDB at all five modes over the four named queries, tpch q2, q5,
+  q13, q21, `nested-loop-left-join` and `nested-limits`, and tpcds q9, q16, q38, q58 and q94:
+  15 passed at each mode, 75 in all. q9 carries fifteen nested loops of `filter=true`; tpch q2
+  and q13 a LIKE.

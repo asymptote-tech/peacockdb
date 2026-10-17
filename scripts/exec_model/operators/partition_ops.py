@@ -43,6 +43,8 @@ def _hash_value(value) -> bytes:
         return b"i" + int(value).to_bytes(8, "little", signed=True)
     if isinstance(value, float):
         return b"f" + repr(float(value)).encode()
+    if isinstance(value, np.floating) and value == 0:
+        value = abs(value)  # the engine folds -0.0 into 0.0 before it hashes a float key
     return b"s" + str(value).encode()
 
 

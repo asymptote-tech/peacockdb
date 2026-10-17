@@ -284,7 +284,7 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
 
 - **Only two prototype runs compare.** The prototype's rows match the engine's where no rule
   changed the plan, but its bytes are pandas' `memory_usage(deep=True)`: decimals are float64,
-  dates `datetime64[ns]`, integers holding NULLs float64, and another pandas version moves every
+  dates datetime64, integers holding NULLs float64, and another pandas version moves every
   cost line. Its planned cost over the engine's figure has median 0.80 (tpch) and 0.85 (tpcds).
 - **Optimized is all the work.** The final plan's run, every dynamic filter's probe plan and
   every run a replan stopped. q64's optimized `storage_read_bytes` equals its planned run's at
@@ -437,10 +437,13 @@ test still drive.
 - **Real row groups.** `parquet_scan` reads a file's own row groups as the planner mapped lanes
   to batches (`source.row_group_ranges`, `TableSource`, with fetch-ahead). A scan limit sits on
   one lane. `MemorySource` is a materialized build, one batch per lane.
-- **Expression and hash details.** Comparisons are three-valued; LIKE becomes a regex over its
-  two metacharacters; literals broadcast; cast, round, substring and date_part follow the C++. A
-  shuffle key hashes as its SQL value — 5.0 in an integer column holding a NULL lands where 5
-  does — and NULL key columns are skipped, so all-NULL keys share one lane, as comet's hash does.
+- **Expression and hash details.** Comparisons are three-valued, a Float32 column against its
+  literal in float32; LIKE becomes a regex over its two metacharacters, a pattern per distinct
+  value where the pattern is a column (which the device refuses, #246); literals broadcast;
+  cast, round, substring and date_part follow the C++, and a cast between timestamp units floors
+  as cuDF's does (the engine's cpu truncates, #292). A shuffle key hashes as its SQL value — 5.0
+  in an integer column holding a NULL lands where 5 does, a float32 -0.0 where 0.0 does — and
+  NULL key columns are skipped, so all-NULL keys share one lane, as comet's hash does.
   crc32 stands in for murmur3: co-location needs a deterministic hash, not comet's bits.
 
 **pandas inside cuDF's vocabulary.** The operators are written against what pandas and cuDF

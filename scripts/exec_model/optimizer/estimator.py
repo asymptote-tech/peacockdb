@@ -78,7 +78,7 @@ class _Estimate:
             if nulls is None:
                 return DEFAULT
             return nulls if isinstance(expr, E.IsNull) else 1 - nulls
-        if isinstance(expr, E.Like):
+        if isinstance(expr, (E.Like, E.LikeColumn)):
             return 1 - DEFAULT if expr.negated else DEFAULT
         atom = _comparison(expr)
         if atom is None:

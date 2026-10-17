@@ -1,7 +1,8 @@
 """A small typed expression IR, evaluated with pandas' vectorized operators only.
 
-Mirrors what `cudf::ast` accepts: column references, literals, and a fixed set of binary
-and unary operations over whole columns. There is deliberately no escape hatch — no
+Mirrors the engine's expressions: column references, literals, a fixed set of binary and unary
+operations over whole columns, the functions `cudf::strings` and `cudf::cast` answer, and a
+LIKE against a column, which the device refuses. There is deliberately no escape hatch — no
 `apply`, no lambda — because anything reachable only through one has no C++ counterpart
 (subset rule 2 in `frame.py`).
 
@@ -106,10 +107,15 @@ class Binary(Expr):
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
         left, right = self.left.evaluate(frame), self.right.evaluate(frame)
-        result = _BINARY[self.op](left, right)
         if self.op in _COMPARISONS:
-            return three_valued(result, left, right)
-        return result
+            # Beside a bare Float32 column the plan's literal is a Float32 (`= 1`, `= CAST(0.1 AS
+            # REAL)`); against a Float64 one DataFusion casts the column instead.
+            if isinstance(self.right, Lit) and left.dtype == "float32":
+                right = right.astype("float32")
+            if isinstance(self.left, Lit) and right.dtype == "float32":
+                left = left.astype("float32")
+            return three_valued(_BINARY[self.op](left, right), left, right)
+        return _BINARY[self.op](left, right)
 
 
 @dataclass(frozen=True)
@@ -155,9 +161,11 @@ class Like(Expr):
     """SQL `LIKE`, as `LikeExprNode` carries it — `%` any run, `_` one character.
 
     cuDF's AST has no LIKE, so the C++ evaluates it on the column-producing path with
-    `cudf::strings::like` (`expr.cpp` ~L382). pandas' `str.match` takes a regex, so the
+    `cudf::strings::like` (`expr.cpp` ~L382). pandas' `str.fullmatch` takes a regex, so the
     pattern is translated rather than passed through: the point is to model what the
-    engine does, and what the engine does is a pattern language with two metacharacters.
+    engine does, and what the engine does is a pattern language with two metacharacters,
+    which match a newline as any other character does. A backslash is literal, as in cuDF
+    and DuckDB; arrow, the engine's cpu, reads it as an escape (#293). NULL where the value is.
     """
 
     inner: Expr
@@ -165,12 +173,36 @@ class Like(Expr):
     negated: bool = False
 
     def evaluate(self, frame: pd.DataFrame) -> pd.Series:
-        regex = "^" + "".join(
-            ".*" if char == "%" else "." if char == "_" else re.escape(char)
-            for char in self.pattern
-        ) + "$"
-        matched = self.inner.evaluate(frame).str.match(regex, na=False)
-        return ~matched if self.negated else matched
+        values = self.inner.evaluate(frame)
+        out = pd.Series(pd.NA, index=values.index, dtype="boolean")
+        _match(out, values, values.notna(), self.pattern, self.negated)
+        return out
+
+
+def _match(out: pd.Series, values: pd.Series, rows: pd.Series, pattern: str, negated: bool) -> None:
+    """`out[rows]` set to whether each of those values is `LIKE pattern`, or is not."""
+    body = "".join(".*" if char == "%" else "." if char == "_" else re.escape(char) for char in pattern)
+    matched = values[rows].astype(object).str.fullmatch("(?s)" + body).astype(bool)
+    out[rows] = ~matched if negated else matched
+
+
+@dataclass(frozen=True)
+class LikeColumn(Expr):
+    """SQL `LIKE` whose pattern is a column, each row matched by its own pattern; NULL where
+    either side is. The device refuses it (#246), DataFusion answers it. The rows are matched a
+    distinct pattern at a time, each as `Like` matches, a backslash literal as there (#293)."""
+
+    inner: Expr
+    pattern: Expr
+    negated: bool = False
+
+    def evaluate(self, frame: pd.DataFrame) -> pd.Series:
+        values, patterns = self.inner.evaluate(frame), self.pattern.evaluate(frame)
+        out = pd.Series(pd.NA, index=values.index, dtype="boolean")
+        known = values.notna() & patterns.notna()
+        for pattern in patterns[known].unique():
+            _match(out, values, known & (patterns == pattern), pattern, self.negated)
+        return out
 
 
 @dataclass(frozen=True)
@@ -239,6 +271,19 @@ class Cast(Expr):
             # truncates what it can and keeps the null, where `astype` would refuse the batch.
             return np.trunc(values.astype("float64"))
         return values.astype(self.dtype)
+
+
+@dataclass(frozen=True)
+class TimestampCast(Expr):
+    """A cast between zoneless timestamp units, to `unit` (`s`, `ms`, `us` or `ns`). cuDF's
+    cast floors, as DuckDB's does, so a time before 1970 moves down to its second; arrow, the
+    engine's cpu, truncates toward zero (#292)."""
+
+    inner: Expr
+    unit: str
+
+    def evaluate(self, frame: pd.DataFrame) -> pd.Series:
+        return self.inner.evaluate(frame).astype(f"datetime64[{self.unit}]")
 
 
 @dataclass(frozen=True)
@@ -329,32 +374,6 @@ class Alias(Expr):
 
     def name(self) -> str:
         return self.as_name
-
-
-def columns_of(expr: Expr) -> list[str]:
-    """Every column the expression reads, in first-seen order.
-
-    What the wire calls a filter's intermediate schema: `filter_columns[i]` is the origin
-    of `ColumnRef(i)`, and this is the list that map is built from (`recipe.JoinFilter`).
-    """
-    found: list[str] = []
-
-    def walk(node):
-        if isinstance(node, Col):
-            if node.column not in found:
-                found.append(node.column)
-            return
-        for value in vars(node).values():
-            for item in value if isinstance(value, (list, tuple)) else (value,):
-                if isinstance(item, Expr):
-                    walk(item)
-                elif isinstance(item, (list, tuple)):
-                    for inner in item:
-                        if isinstance(inner, Expr):
-                            walk(inner)
-
-    walk(expr)
-    return found
 
 
 def project(frame: pd.DataFrame, exprs: list[Expr]) -> pd.DataFrame:
