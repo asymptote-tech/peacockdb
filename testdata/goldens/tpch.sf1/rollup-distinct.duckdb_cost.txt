@@ -1,0 +1,15 @@
+HASH_GROUP_BY: groups=[#0, #1], aggregates=[count(DISTINCT #2), avg(#3), count_star()], output_bytes=448, output_rows=8, materialized=288058320
+  PROJECTION: projections=[l_returnflag, l_linestatus, l_suppkey, l_quantity], output_bytes=288058320, output_rows=6001215, materialized=0
+    TABLE_SCAN: table=lineitem, projections=[l_returnflag, l_linestatus, l_suppkey, l_quantity], output_bytes=288058320, output_rows=6001215, materialized=288058320, bytes_read=204791462, rows_read=6001215
+duckdb_cost=780908102
+materialization_total=576116640
+storage_read_total=204791462
+
+--- row-group pruning (storage reduction) ---
+lineitem  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=17799256/17799256 (100.0%)
+pruning_bytes_fetched=17799256/17799256 (100.0%)
+
+--- cost breakdown ---
+HASH_GROUP_BY                         288058320  50.0%
+TABLE_SCAN(lineitem)                  288058320  50.0%
+total=576116640

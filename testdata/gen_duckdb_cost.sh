@@ -67,12 +67,16 @@ if [ -n "$EXPECTED_PYARROW" ]; then
   fi
 fi
 
+# Raw profiles and DuckDB's stderr; private, so concurrent runs do not share scratch files.
+SCRATCH=$(mktemp -d)
+trap 'rm -rf "$SCRATCH"' EXIT
+
 # Run one query under JSON profiling. jfp=off disables join_filter_pushdown.
 profile() {  # db sqlfile jfp(on|off) out
   local db="$1" sqlfile="$2" jfp="$3" out="$4" dis=""
   [ "$jfp" = off ] && dis="SET disabled_optimizers='join_filter_pushdown';"
   rm -f "$out"
-  "$DUCKDB" "$db" >/dev/null 2>/tmp/peacock_duckdb_err <<SQL
+  "$DUCKDB" "$db" >/dev/null 2>"$SCRATCH/duckdb_err" <<SQL
 PRAGMA threads=1;
 $dis
 SET enable_profiling='json';
@@ -97,19 +101,23 @@ extract_dataset() {
   [ -d "$profiles" ] || { echo "[$label] skip: no profiles $profiles" >&2; return; }
   mkdir -p "$canon"
   local ok=0
-  for pj in "$profiles"/q*.json; do
+  for pj in "$profiles"/*.json; do
     [ -f "$pj" ] || continue
     local q; q=$(basename "$pj" .json)
     extract_one "$pj" "$dynf" "$canon" "$data" "$q" "$label"
     ok=$((ok + 1))
   done
   echo "[$label] extracted=$ok"
+  [ "$ok" -gt 0 ] || { echo "error: [$label] no profiles in $profiles" >&2; exit 1; }
 }
 
 # GEN: two profiling passes per query -> pass-1 profile + pass-2 bounds, then extract.
+# Every query file is profiled, q<n> and the named ones alike.
 gen_dataset() {
-  local label=$1 data=$2 queries=$3 canon=$4 profiles=$5 dynf=$6 lo=$7 hi=$8
+  local label=$1 data=$2 queries=$3 canon=$4 profiles=$5 dynf=$6
   [ -d "$data" ] || { echo "[$label] skip: no data dir $data" >&2; return; }
+  local sqls=("$queries"/*.sql)
+  [ -f "${sqls[0]}" ] || { echo "error: [$label] no queries in $queries" >&2; exit 1; }
   local db="$data/.duckdb_cache/$label.db"
   mkdir -p "$data/.duckdb_cache" "$canon" "$profiles" "$dynf"
 
@@ -125,14 +133,13 @@ gen_dataset() {
   fi
 
   local ok=0 fail=0
-  for n in $(seq "$lo" "$hi"); do
-    local q="q$n" sql="$queries/q$n.sql"
-    [ -f "$sql" ] || continue
-    local pon="/tmp/pk_${label}_${q}_on.json" poff="/tmp/pk_${label}_${q}_off.json"
+  for sql in "${sqls[@]}"; do
+    local q; q=$(basename "$sql" .sql)
+    local pon="$SCRATCH/${label}_${q}_on.json" poff="$SCRATCH/${label}_${q}_off.json"
     profile "$db" "$sql" on  "$pon"   || true
     profile "$db" "$sql" off "$poff"  || true
     if [ ! -s "$poff" ]; then
-      echo "[$label] $q: FAILED -- $(tail -1 /tmp/peacock_duckdb_err 2>/dev/null)" >&2
+      echo "[$label] $q: FAILED -- $(tail -1 "$SCRATCH/duckdb_err" 2>/dev/null)" >&2
       fail=$((fail + 1)); continue
     fi
     # pass 2 -> bounds-only (deterministic dynamic-filter ranges)
@@ -143,17 +150,21 @@ gen_dataset() {
     ok=$((ok + 1))
   done
   echo "[$label] generated=$ok failed=$fail"
+  FAILED=$((FAILED + fail))
 }
 
 TPCH_PROFILES="$TESTDATA/duckdb-profiles/tpch";   TPCDS_PROFILES="$TESTDATA/duckdb-profiles/tpcds"
 TPCH_DYNF="$TESTDATA/duckdb-dynfilters/tpch";      TPCDS_DYNF="$TESTDATA/duckdb-dynfilters/tpcds"
 TPCH_GOLD="$TESTDATA/goldens/tpch.sf1";            TPCDS_GOLD="$TESTDATA/goldens/tpcds.sf1"
 
+# A failed query does not stop the rest, so one run reports them all; the run still fails.
+FAILED=0
 if [ "$GEN" = 1 ]; then
-  gen_dataset tpch  "$TESTDATA/tpch.sf1"  "$TESTDATA/tpch-queries"  "$TPCH_GOLD"  "$TPCH_PROFILES"  "$TPCH_DYNF"  1 22
-  gen_dataset tpcds "$TESTDATA/tpcds.sf1" "$TESTDATA/tpcds-queries" "$TPCDS_GOLD" "$TPCDS_PROFILES" "$TPCDS_DYNF" 1 99
+  gen_dataset tpch  "$TESTDATA/tpch.sf1"  "$TESTDATA/tpch-queries"  "$TPCH_GOLD"  "$TPCH_PROFILES"  "$TPCH_DYNF"
+  gen_dataset tpcds "$TESTDATA/tpcds.sf1" "$TESTDATA/tpcds-queries" "$TPCDS_GOLD" "$TPCDS_PROFILES" "$TPCDS_DYNF"
 else
   extract_dataset tpch  "$TPCH_PROFILES"  "$TPCH_DYNF"  "$TPCH_GOLD"  "$TESTDATA/tpch.sf1"
   extract_dataset tpcds "$TPCDS_PROFILES" "$TPCDS_DYNF" "$TPCDS_GOLD" "$TESTDATA/tpcds.sf1"
 fi
+[ "$FAILED" = 0 ] || { echo "error: $FAILED queries failed" >&2; exit 1; }
 echo "done."

@@ -1,0 +1,16 @@
+PROJECTION: projections=[n_regionkey, n_nationkey, g, count_star()], output_bytes=744, output_rows=31, materialized=0
+  HASH_GROUP_BY: groups=[#0, #1], aggregates=[count_star()], output_bytes=744, output_rows=31, materialized=200
+    PROJECTION: projections=[n_regionkey, n_nationkey], output_bytes=200, output_rows=25, materialized=0
+      TABLE_SCAN: table=nation, projections=[n_regionkey, n_nationkey], output_bytes=200, output_rows=25, materialized=200, bytes_read=208, rows_read=25
+duckdb_cost=608
+materialization_total=400
+storage_read_total=208
+
+--- row-group pruning (storage reduction) ---
+nation  row_groups=1/1  rows=25/25 (100.0%)  bytes_fetched=205/205 (100.0%)
+pruning_bytes_fetched=205/205 (100.0%)
+
+--- cost breakdown ---
+HASH_GROUP_BY                               200  50.0%
+TABLE_SCAN(nation)                          200  50.0%
+total=400

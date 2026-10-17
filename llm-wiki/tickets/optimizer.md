@@ -19,6 +19,7 @@
 - [#158 (stats-answered aggregate) an aggregate DataFusion answers from statistics reaches no executor](#t158)
 - [#142 (split large batches) split large batches](#t142)
 - [#138 (ranged sorted merge) add ranged sorted merge](#t138)
+- [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -248,3 +249,18 @@ node that orders a whole stream emits one batch, so "stream sorted" is `BatchSor
 `SingleBatch` and is derived rather than declared. Ranged emission produces the one shape that
 breaks that — a stream ordered across several batches — so it must add `PartitionSorted` back
 and teach the limit-after-sort validation to accept it alongside the derived form.
+
+<a id="t298"></a>
+### #298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early
+`duckdb_cost.py`'s `scan_cost` reads a scan's rows as every surviving row group's (`rows_fetched`),
+so a scan a `STREAMING_LIMIT` stops is charged as read in full. tpch `scan-limit` profiles 2,048
+rows scanned of lineitem's 6,001,215, and its golden charges all 49 row groups, 1.04 GB of
+`storage_read_total`: the engine's 1.05 GB reads as a ratio of 1.01, where DuckDB read one row
+group. tpch `nested-limits` is the same through pass 1: DuckDB's default plan reads `part` by
+`rowid>=5 AND rowid<=44` (pass 2's bounds, a late-materialization semi join), pass 1 turns that
+off, and the golden charges the full 200,000-row scan, 4.83 MB of its 4.85 MB.
+
+Fix: under a `STREAMING_LIMIT`, charge the lesser of the pruned row groups and those covering
+`operator_rows_scanned`; a `rowid` range from pass 2 bounds the scan the same way. tpcds q28, q32,
+q38 and q97 hold scans under a limit too, each scanning its whole table: check their goldens
+hold, and the two tpch ratios become comparable.

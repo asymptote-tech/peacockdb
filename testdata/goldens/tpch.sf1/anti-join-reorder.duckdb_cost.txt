@@ -1,0 +1,23 @@
+PROJECTION: projections=[c_custkey, c_name], output_bytes=46824, output_rows=1951, materialized=0
+  HASH_JOIN: join_type=INNER, conditions=[c_nationkey = n_nationkey], output_bytes=54628, output_rows=1951, materialized=54628
+    HASH_JOIN: join_type=RIGHT_ANTI, conditions=[c_custkey IS NOT DISTINCT FROM c_custkey], output_bytes=1400112, output_rows=50004, materialized=1400112
+      TABLE_SCAN: table=orders, projections=[o_custkey], output_bytes=12000000, output_rows=1500000, materialized=12000000, bytes_read=12187500, rows_read=1500000
+      TABLE_SCAN: table=customer, projections=[c_custkey, c_name, c_nationkey], output_bytes=4200000, output_rows=150000, materialized=4200000, bytes_read=5137500, rows_read=150000
+    TABLE_SCAN: table=nation, projections=[n_nationkey], filters="n_name='FRANCE'", output_bytes=4, output_rows=1, materialized=4, bytes_read=381, rows_read=25
+duckdb_cost=34980125
+materialization_total=17654744
+storage_read_total=17325381
+
+--- row-group pruning (storage reduction) ---
+orders  row_groups=13/13  rows=1500000/1500000 (100.0%)  bytes_fetched=6904039/6904039 (100.0%)
+customer  row_groups=2/2  rows=150000/150000 (100.0%)  bytes_fetched=1441507/1441507 (100.0%)
+nation  filter=[n_name='FRANCE']  row_groups=1/1  rows=25/25 (100.0%)  bytes_fetched=398/398 (100.0%)
+pruning_bytes_fetched=8345944/8345944 (100.0%)
+
+--- cost breakdown ---
+TABLE_SCAN(orders)                     12000000  68.0%
+TABLE_SCAN(customer)                    4200000  23.8%
+HASH_JOIN                               1400112   7.9%
+HASH_JOIN                                 54628   0.3%
+TABLE_SCAN(nation)                            4   0.0%
+total=17654744
