@@ -698,6 +698,11 @@ jobs:
       - name: cost-report unit tests (Rust)
         run: cargo test -p cost-report --bin cost-report
 
+      # Dependency-free, so it builds in seconds beside cost-report rather than in the jobs that
+      # carry the DataFusion stack.
+      - name: DPhyp unit tests (Rust)
+        run: cargo test -p peacockdb-dphyp
+
       # The tests whose subject is the source tree: every rust test target wired into CI (CI
       # does not sweep them as a set, so a new tests/*.rs is invisible here until someone adds
       # it), the module layout rules nothing in rustc checks, a doc block a split left behind,
