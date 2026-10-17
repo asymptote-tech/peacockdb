@@ -12,7 +12,7 @@ import pandas as pd
 
 from ..harness import main, raises
 from ...plans.engine_expr import AggCall
-from ...plans.engine_ir import Kind, columns, frame_names, lower_field
+from ...plans.engine_ir import Kind, columns, frame_names, kind_of, lower_field
 from ...plans.engine_plan import EngineNode, read_plans
 from ...plans.goldens import engine_plan_paths
 from ...errors import EnginePlanFormatError
@@ -29,7 +29,7 @@ def walk(node):
 
 def corpus_nodes():
     paths = engine_plan_paths()
-    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1"}, paths
+    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1", "pbench.sf1"}, paths
     for path in paths:
         for name, plan in read_plans(path).items():
             if isinstance(plan, EngineNode):
@@ -71,6 +71,52 @@ def test_a_literal_takes_the_kind_of_the_operand_across_from_it():
     assert day.right == X.Lit(pd.Timestamp("1996-01-01"))
     shifted = predicate("(d_date@0 + `90 days`) > d_date@0", ("d_date", "Date32"))
     assert shifted.left.right == X.Lit(pd.Timedelta(days=90))
+
+
+def test_an_interval_with_months_is_calendar_months_clamped_at_the_month_end():
+    # pbench's interval queries: a month has no fixed length, so it cannot be a Timedelta.
+    month = predicate("(d_date@0 + `1 mons`) > d_date@0", ("d_date", "Date32")).left.right
+    assert month == X.Lit(pd.DateOffset(months=1))
+    dates = pd.Series(pd.to_datetime(["2024-01-31", "2024-03-31"]))
+    assert list(dates + month.value) == list(pd.to_datetime(["2024-02-29", "2024-04-30"]))
+    mixed = predicate(
+        "(ts@0 + `1 mons 2 days 10800000000000 nanos`) > ts@0", ("ts", "Timestamp(Millisecond, None)"),
+    ).left.right
+    assert mixed == X.Lit(pd.DateOffset(months=1, days=2, microseconds=10800000000))
+
+
+def test_a_date_takes_an_interval_s_whole_days_toward_zero_and_a_timestamp_the_rest_too():
+    # Arrow adds a Date32's interval as months, days, then a Duration of its nanoseconds, of which
+    # a date keeps whole days toward zero: interval-mixed-units answers 2024-02-03 for 2024-01-01.
+    # A timestamp takes all of it, floored by arrow to its unit; 3 hours is whole milliseconds.
+    day = pd.DataFrame({"d": pd.to_datetime(["2024-01-01"])})
+    for interval, want in (("`1 mons 2 days 10800000000000 nanos`", "2024-02-03"),
+                           ("`-1 days -10800000000000 nanos`", "2023-12-31")):
+        on_date = predicate(f"(d@0 + {interval}) > d@0", ("d", "Date32")).left
+        assert list(on_date.evaluate(day)) == [pd.Timestamp(want)], interval
+    interval = "`1 mons 2 days 10800000000000 nanos`"
+    on_date = predicate(f"(d@0 - {interval}) > d@0", ("d", "Date32")).left
+    assert list(on_date.evaluate(day)) == [pd.Timestamp("2023-11-29")]
+    on_stamp = predicate(f"(d@0 + {interval}) > d@0", ("d", "Timestamp(Millisecond, None)")).left
+    assert list(on_stamp.evaluate(day)) == [pd.Timestamp("2024-02-03 03:00")]
+
+
+def test_a_sub_day_interval_beside_a_date_the_reader_cannot_classify_is_refused():
+    # Only a bare column says Date32 or timestamp; past one arithmetic it is a DATE of unknown
+    # type, and a sub-day part would be kept or dropped by guess. Whole days need no answer.
+    with raises(EnginePlanFormatError, match="sub-day"):
+        predicate("((d@0 + `1 days`) + `10800000000000 nanos`) > d@0", ("d", "Date32"))
+    nested = predicate("((d@0 + `1 days`) + `2 days`) > d@0", ("d", "Date32")).left
+    assert list(nested.evaluate(pd.DataFrame({"d": pd.to_datetime(["2024-01-01"])}))) \
+        == [pd.Timestamp("2024-01-04")]
+
+
+def test_a_remainder_takes_the_sign_of_its_dividend():
+    # cuDF's MOD and SQL's `%` truncate; Python's `%` floors, and -7 % 20 would be 13.
+    remainder = predicate("(f_id@0 % 20) = 13", ("f_id", "Int64")).left
+    assert remainder == X.Binary("%", X.Col("f_id"), X.Lit(20))
+    values = remainder.evaluate(pd.DataFrame({"f_id": [-7, 7, 40]}))
+    assert list(values) == [-7, 7, 0]
 
 
 def test_a_literal_with_only_literals_beside_it_takes_its_output_column():
@@ -159,6 +205,8 @@ def test_what_the_ir_cannot_say_is_refused_naming_the_field():
         ("a@0 IS DISTINCT FROM b@1", ("a", "Int64"), ("b", "Int64")): r"`IS DISTINCT FROM` has no IR",
         ("a@0 = 1", ("a", "Time64(ns)")): r"type `Time64\(ns\)` has no kind here",
         ("a@0 ILIKE x", ("a", "Utf8")): r"ILIKE",
+        ("CAST(a@0 AS Timestamp(Second, None)) > 1970-01-01", ("a", "Int64")):
+            r"a cast from integer to Timestamp\(Second, None\)",
     }
     for (text, *schema), message in cases.items():
         with raises(EnginePlanFormatError, match=message):
@@ -169,6 +217,29 @@ def test_what_the_ir_cannot_say_is_refused_naming_the_field():
     project = node("GpuProject", [scan(("a", "Utf8"))], schema=[("a", "Int64")], exprs="[a@0]")
     with raises(EnginePlanFormatError, match=r"`a` is string, its column integer"):
         lower_field(project, "exprs")
+
+
+def test_pbench_s_types_have_kinds_and_a_zoned_timestamp_has_none():
+    assert kind_of("Float32") is Kind.FLOAT
+    assert kind_of("UInt32") is Kind.INTEGER
+    for unit in ("Second", "Millisecond", "Microsecond", "Nanosecond"):
+        assert kind_of(f"Timestamp({unit}, None)") is Kind.DATE, unit
+    with raises(EnginePlanFormatError, match=r"has no kind here"):
+        kind_of('Timestamp(Second, Some("UTC"))')
+
+
+def test_a_like_against_a_column_lowers_to_a_pattern_per_row():
+    join = node(
+        "GpuNestedLoopJoin", [scan(("id", "Int32"), ("pat", "Utf8")), scan(("name", "Utf8"))],
+        filter="name@probe:0 LIKE pat@build:1",
+    )
+    assert lower_field(join, "filter") == X.LikeColumn(X.Col("name"), X.Col("pat"))
+
+
+def test_a_cast_between_timestamp_units_lowers_to_a_timestamp_cast():
+    project = node("GpuProject", [scan(("t", "Timestamp(Microsecond, None)"))],
+                   schema=[("s", "Timestamp(Second, None)")], exprs="[CAST(t@0 AS Timestamp(Second, None)) as s]")
+    assert lower_field(project, "exprs") == [X.Alias(X.TimestampCast(X.Col("t"), "s"), "s")]
 
 
 def test_the_frame_names_of_a_schema_are_its_columns():

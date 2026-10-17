@@ -30,7 +30,8 @@ from ..operators.joins import own_output
 
 class Kind(Enum):
     """A type as far as the prototype tells types apart: decimals are float64 here
-    (`plans/tables.typed`), and one integer width is as good as another."""
+    (`plans/tables.typed`), one integer or float width is as good as another, and a date and a
+    zoneless timestamp of any unit are one datetime64."""
 
     BOOLEAN = "boolean"
     INTEGER = "integer"
@@ -47,15 +48,23 @@ _KINDS = {
     "Int32": Kind.INTEGER,
     "Int64": Kind.INTEGER,
     "UInt8": Kind.INTEGER,
+    "UInt32": Kind.INTEGER,
+    "Float32": Kind.FLOAT,
     "Float64": Kind.FLOAT,
     "Utf8": Kind.STRING,
     "Date32": Kind.DATE,
 }
 
 
+#: a zoneless timestamp, its unit the group
+_TIMESTAMP = re.compile(r"Timestamp\((Second|Millisecond|Microsecond|Nanosecond), None\)")
+
+
 def kind_of(type_text: str) -> Kind:
     if type_text.startswith("Decimal128("):
         return Kind.FLOAT
+    if _TIMESTAMP.fullmatch(type_text):
+        return Kind.DATE
     if type_text not in _KINDS:
         raise EnginePlanFormatError(f"type `{type_text}` has no kind here")
     return _KINDS[type_text]
@@ -76,12 +85,15 @@ class Column:
     name: str  # the engine's
     kind: Kind | None  # None only for a state column whose aggregate nothing typed
     frame: str  # the prototype frame's
+    #: a date, not a timestamp: it takes an interval's whole days only; None where unknown
+    date32: bool | None = False
 
 
 def columns(schema) -> tuple[Column, ...]:
     """An engine schema's (name, type) pairs as columns, framed together."""
     frames = frame_names([name for name, _ in schema])
-    return tuple(Column(name, kind_of(type_text), frame) for (name, type_text), frame in zip(schema, frames))
+    return tuple(Column(name, kind_of(type_text), frame, type_text == "Date32")
+                 for (name, type_text), frame in zip(schema, frames))
 
 
 #: The pandas dtype of a kind, as `plans/tables.typed` reads parquet into it.
@@ -154,11 +166,14 @@ def state_columns(node) -> tuple[Column, ...]:
         return columns(node.schema)
     keys = _state_prefix(node)
     child = _child(node)
-    state = [(name, kind_of(type_text)) for name, type_text in node.schema[:keys]]
+    state = [(name, kind_of(type_text), type_text == "Date32")
+             for name, type_text in node.schema[:keys]]
     for call in E.parse_agg_calls(node.fields["aggs"]):
-        state += zip(call.outputs, _agg_kinds(call.func, [child.kind(arg) for arg in call.args]))
-    frames = frame_names([name for name, _ in state])
-    return tuple(Column(n, k, f) for (n, k), f in zip(state, frames))
+        kinds = _agg_kinds(call.func, [child.kind(arg) for arg in call.args])
+        state += [(name, kind, None if kind is Kind.DATE else False)
+                  for name, kind in zip(call.outputs, kinds)]
+    frames = frame_names([name for name, _, _ in state])
+    return tuple(Column(n, k, f, d) for (n, k, d), f in zip(state, frames))
 
 
 def _finalized(node, text):
@@ -277,25 +292,39 @@ _FIELDS = {
 
 _COMPARISONS = {"=": "==", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">="}
 _CONNECTIVES = {"AND": "and", "OR": "or"}
-_ARITHMETIC = ("+", "-", "*", "/")
+_ARITHMETIC = ("+", "-", "*", "/", "%")
 #: An integer column holding a null is float64 in pandas (`operators/frame.py`).
 _NULLS = {
     Kind.BOOLEAN: None, Kind.INTEGER: float("nan"), Kind.FLOAT: float("nan"),
     Kind.STRING: None, Kind.DATE: pd.NaT, Kind.INTERVAL: pd.NaT,
 }
 _CAST_DTYPES = {Kind.INTEGER: "int64", Kind.FLOAT: "float64"}
+_TIME_UNITS = {"Second": "s", "Millisecond": "ms", "Microsecond": "us", "Nanosecond": "ns"}
 _RETURNS = {
     "substr": Kind.STRING, "upper": Kind.STRING, "lower": Kind.STRING, "concat": Kind.STRING,
     "round": Kind.FLOAT, "sqrt": Kind.FLOAT, "date_part": Kind.INTEGER,
 }
 
 
-def _interval(text):
-    # `interval_text` prints `N mons`, `N days`, `N nanos`; only days are a fixed length.
-    match = re.fullmatch(r"(-?\d+) days", text)
-    if match is None:
+_DAY_NANOS = 86_400_000_000_000
+
+
+def _interval(text, whole_days=False):
+    # `interval_text` prints `N mons`, `N days`, `N nanos`, or several. A month has no fixed
+    # length: it is a calendar month, clamped at the month's end, as DataFusion adds it. A date
+    # takes the nanoseconds as arrow's Duration does, in whole days toward zero.
+    match = re.fullmatch(r"(?:(-?\d+) mons)? ?(?:(-?\d+) days)? ?(?:(-?\d+) nanos)?", text)
+    if match is None or not any(match.groups()):
         raise ValueError(text)
-    return pd.Timedelta(days=int(match.group(1)))
+    months, days, nanos = (int(part) if part else 0 for part in match.groups())
+    if whole_days:
+        days, nanos = days + (abs(nanos) // _DAY_NANOS) * (1 if nanos >= 0 else -1), 0
+    if months:
+        # pandas applies an offset carrying nanoseconds element by element, microseconds at once.
+        sub_day = {"microseconds": nanos // 1000} if nanos % 1000 == 0 else {"nanoseconds": nanos}
+        parts = {"months": months, "days": days, **sub_day}
+        return pd.DateOffset(**{unit: n for unit, n in parts.items() if n})
+    return pd.Timedelta(days=days, nanoseconds=nanos)
 
 
 _VALUES = {
@@ -417,9 +446,27 @@ class _Lowering:
             self.fail("integer division, which the IR's `/` does not do")
         return X.Binary(
             expr.op,
-            self.lower(expr.left, _operand_kind(left, right, expected)),
-            self.lower(expr.right, _operand_kind(right, left, expected)),
+            self.operand(expr.left, _operand_kind(left, right, expected), expr.right),
+            self.operand(expr.right, _operand_kind(right, left, expected), expr.left),
         )
+
+    def operand(self, expr, kind, other):
+        """One side of an arithmetic: an interval literal beside a date takes whole days."""
+        if kind is not Kind.INTERVAL or not isinstance(expr, E.Literal) or expr.text == "NULL":
+            return self.lower(expr, kind)
+        try:
+            whole, full = _interval(expr.text, whole_days=True), _interval(expr.text)
+        except ValueError:
+            self.fail(f"literal `{expr.text}` does not read as {kind.value}")
+        date32 = self.date32(other)
+        if date32 is None and whole != full:
+            self.fail(f"a sub-day interval `{expr.text}` beside `{other}`, "
+                      "not known to be a date or a timestamp")
+        return X.Lit(whole if date32 else full)
+
+    def date32(self, expr) -> bool | None:
+        """Whether a DATE-kind operand is a Date32; only a column's type says, else None."""
+        return self.column(expr).date32 if isinstance(expr, E.ColumnRef) else None
 
     def connective(self, expr: E.Binary):
         # An IN list is a chain of hundreds (tpcds q8), past Python's recursion limit when
@@ -447,14 +494,23 @@ class _Lowering:
 
     def cast(self, expr: E.Cast):
         target = kind_of(expr.target)
+        unit = _TIMESTAMP.fullmatch(expr.target)
+        if unit is not None:
+            source = self.kind(expr.expr)
+            if source not in (Kind.DATE, None):
+                self.fail(f"a cast from {source.value} to {expr.target}, which the IR is not taught")
+            return X.TimestampCast(self.lower(expr.expr, Kind.DATE), _TIME_UNITS[unit.group(1)])
         if target not in _CAST_DTYPES:
             self.fail(f"a cast to {expr.target}, which the IR is not taught")
         return X.Cast(self.lower(expr.expr, self.kind(expr.expr)), _CAST_DTYPES[target])
 
     def like(self, expr: E.Like):
-        if expr.case_insensitive or not isinstance(expr.pattern, E.Literal):
-            self.fail("ILIKE, or LIKE against a computed pattern, has no IR counterpart")
-        return X.Like(self.lower(expr.expr, Kind.STRING), expr.pattern.text, expr.negated)
+        if expr.case_insensitive:
+            self.fail("ILIKE has no IR counterpart")
+        if isinstance(expr.pattern, E.Literal):
+            return X.Like(self.lower(expr.expr, Kind.STRING), expr.pattern.text, expr.negated)
+        return X.LikeColumn(self.lower(expr.expr, Kind.STRING), self.lower(expr.pattern, Kind.STRING),
+                            expr.negated)
 
     def case(self, expr: E.Case, expected):
         kind = self.kind(expr) or expected

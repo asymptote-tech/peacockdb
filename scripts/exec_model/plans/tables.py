@@ -1,7 +1,7 @@
 """The generated parquet tables an engine plan's scans read, as `engine_nodes.build` asks for
 them: a table's columns, its row-group sizes, its footer ranges. Decimals are read as float64
-and dates as `datetime64[ns]` (`typed`), standing in for the precision, scale and
-`TIMESTAMP_DAYS` typing the prototype does not have.
+and dates as datetime64 at the unit pandas reads them in (`typed`), standing in for the
+precision, scale and `TIMESTAMP_DAYS` typing the prototype does not have.
 """
 
 from __future__ import annotations

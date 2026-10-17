@@ -91,6 +91,15 @@ def test_a_scan_of_no_column_carries_its_row_marker_through_a_cross_join():
     {scan("orders", ["ok"])}""") == 10 * 40
 
 
+def test_an_empty_relation_is_known_to_hold_no_row():
+    plan = parse_plans("""== q
+GpuUnload
+  GpuEmpty: lanes=1, batches=single, schema=[k:Int64]
+""", "test")["q"]
+    assert estimate(plan, dataset())[id(plan)].rows == 0
+    assert certainty(plan.children[0]) is Certainty.EXACT
+
+
 def test_a_dimension_wider_than_the_fact_does_not_dilute_the_match():
     # Year 5 is the fact's own 100 keys: every sale matches. The whole dimension's 1000 keys
     # as the domain (DuckDB's tdom) would say a tenth of them.

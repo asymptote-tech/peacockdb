@@ -86,9 +86,10 @@ python3 -m pytest scripts/exec_model/tests/engine/test_plan.py::test_height_is_d
 **Dataset.** Seconds to a minute or two each. `test_stats_sidecar` recounts the committed sidecars
 (`testdata/stats/`) with `gen_stats.py` and compares byte for byte; `test_cardinality_corpus`
 compares every join's estimate with the golden `testdata/goldens/<bench>/tp1-single.cardinality.txt`
-here, and `UPDATE_CANONICAL=1` rewrites it; `test_ordered_corpus` orders every golden plan at
-every mode without running it, the plan built and no final aggregate's groups split across lanes;
-`test_run_corpus` runs `run.py` over three queries into a temp directory.
+here, and `UPDATE_CANONICAL=1` rewrites it; `test_ordered_corpus` orders every tpch and tpcds golden
+plan at every mode without running it (pbench has no sidecar), the plan built and no final
+aggregate's groups split across lanes; `test_run_corpus` runs `run.py` over three queries into a
+temp directory.
 
 ```
 python3 scripts/exec_model/tests/optimizer/test_stats_sidecar.py
@@ -251,7 +252,7 @@ driver tests' mock executors.
 | `engine/adaptive.py` | the adaptive loop's events: a driver that reports each join's `BuildDone` before it sets a build (true rows, bytes, key NDV) — and `BuildExceeds` where a build passes its cap — to a hook that may stop the run with the build left queued; a stopped run's `extraction` — the build just done and those set but not probed, where nothing else has started |
 | `errors.py` | `PlanError`, `DriverError`, `ResidentBudgetExceeded`, `EnginePlanFormatError`, `StatsError` — what each failure class means |
 | `operators/frame.py` | the pandas batch, and the rules that keep pandas inside cuDF's vocabulary |
-| `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, nothing more |
+| `operators/expressions.py` | the expression IR — what `cudf::ast` accepts, plus a LIKE against a column, which DataFusion answers and the device refuses |
 | `operators/aggregates.py` | an engine plan's aggregates run as the plan decomposed them (`PlanAggregate`): its init and merge calls over expressions — Welford's `m2` and `merge_m2` among them — grouping sets with DataFusion's id, and its `final` expressions |
 | `operators/source.py` | the loader and the row-group → (partition, batch) policy; an engine scan's real row groups as row ranges, a batch's bytes fetchable ahead of its decode (read once either way); a memory source's lane, its one kept batch |
 | `operators/exec_ops.py` | filter, project, sort, an engine plan's aggregate, unload |
@@ -264,11 +265,11 @@ driver tests' mock executors.
 | `operators/injection.py` | `LayoutInjector` — rewrite a plan's partitioning, batching and hash placement |
 | `plans/engine_plan.py` | the engine planner's `<mode>.plans.txt` goldens read back into trees, and `plan_text` writing one back — node lines and refusals, field values verbatim, the schema as (name, type) pairs with names unquoted; `GpuMemorySource`, the prototype's own kind the engine does not have yet, is read too |
 | `plans/engine_expr.py` | the engine's expression text parsed back into a syntax tree and rendered again (`expr_text`) — `plan_text/expr_text.rs` both ways; a literal stays text, since the rendering does not print its type |
-| `plans/engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets |
+| `plans/engine_ir.py` | a node's expression fields in the expression IR — ordinals resolved to frame names (`name@ordinal` where a schema repeats a name), each literal typed by what it meets; a zoneless timestamp of any unit is one datetime64 |
 | `plans/engine_nodes.py` | an engine plan tree built as a prototype plan, one engine node to one prototype node; each output named by its node's schema; a hash join's fanout from the estimate, where one is given; a `GpuMemorySource` from the frames `tables.materialized` holds, laid out as they were made |
 | `plans/engine_run.py` | a prototype run of an engine plan — `run_plan`, read as one answer or by lane, under `CORPUS_BUDGET` for a corpus query — rendered as the engine renders its own (`cpu.txt`): node lines, a clustered join's `mj=`, `output_rows`, per-lane `in_rows`/`batch_rows` |
-| `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as `datetime64[ns]`; a scan's columns read once per `ParquetTables`, since a replan builds every scan again |
-| `plans/goldens.py` | where the engine's goldens and this prototype's live, the five modes they are named by, the plan goldens of the benches the prototype runs (tpch and tpcds; pbench's are read by the reader's tests alone), the `== <query>` sections every golden is cut into, and the anchor GitHub gives a page's heading |
+| `plans/tables.py` | the generated parquet tables as an engine plan's scans read them, decimals as float64 and dates as datetime64; a scan's columns read once per `ParquetTables`, since a replan builds every scan again |
+| `plans/goldens.py` | where the engine's goldens and this prototype's live, the five modes they are named by, the engine's plan goldens of every sf1 dataset, pbench's included, the `== <query>` sections every golden is cut into, and the anchor GitHub gives a page's heading |
 | `plans/cost_model.py` | the engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format, by `testdata/cost_model.conf`, read, summed and rounded as the Rust is; `GpuMemorySource` free, outside the conf |
 | `plans/answers.py` | two answers to one query compared as strictly as SQL allows — a multiset, the ORDER BY columns by position, money within a tolerance — and the queries whose LIMIT leaves which rows open |
 | `optimizer.md` | every rule the optimizer applies and when — dynamic filters, clusters and TES, the cost DPhyp is given and the selectivities in it, orientation, disassembly, replanning — each with the function that applies it, and its constants |

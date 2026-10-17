@@ -59,7 +59,7 @@ _PROBE_KEY = "__probe_row__"
 
 
 def merged_scratch(resident: int, build_rows: int, fanout: float, n_rows: int, n_bytes: int) -> int:
-    """Build side (rebuilt per probe call, #136) plus the merged frame.
+    """Build side plus the merged frame.
 
     The merged frame is sized by the *output* cardinality, which the signature cannot
     derive — but it does not have to. `fanout` is a node property the optimizer supplies at

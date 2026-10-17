@@ -53,7 +53,7 @@ def prototype_layout(node):
 
 def test_every_golden_plan_validates_and_declares_the_engines_layout():
     paths = engine_plan_paths()
-    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1"}, paths
+    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1", "pbench.sf1"}, paths
     wrong = []
     for path in paths:
         for name, plan in read_plans(path).items():

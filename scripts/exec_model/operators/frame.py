@@ -26,9 +26,10 @@ be ported:
    being reconciled by pandas' union-of-columns behaviour.
 
 **Known divergences that remain**, because pandas cannot express them: no decimal128 (the
-real engine's scale handling is the #55/#56 bug class and is out of scope here), and
+real engine's scale handling is the #55/#56 bug class and is out of scope here);
 integer columns holding nulls become float64 in pandas, which cuDF would keep as a
-nullable integer.
+nullable integer; and a float NaN is held as a NULL, so a NaN key groups with the NULLs and
+never joins, where DuckDB and the device equate NaN with NaN (#291).
 """
 
 from __future__ import annotations
