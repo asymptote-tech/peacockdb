@@ -1,0 +1,11 @@
+[package]
+name = "peacockdb-dphyp"
+version = "0.1.0"
+edition = "2024"
+
+# DPhyp join enumeration with no dependencies, so it builds in seconds: the Python prototype
+# loads the cdylib through ctypes, and the rlib is there for a Rust caller, which nothing is yet.
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
