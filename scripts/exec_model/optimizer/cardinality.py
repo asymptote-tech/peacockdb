@@ -247,11 +247,12 @@ class Estimator:
     def _domain(self, build: Estimate, probe: Estimate, pairs) -> float:
         """The key values the two sides can share, over which each spreads its own.
 
-        Per key, DuckDB's total domain — the larger base NDV — cut to where the two base ranges
-        overlap: a date dimension's 73 049 keys span two centuries and a fact's 1 823 dates two
-        per cent of them, so only the 1 827 inside the fact's range can match; a demographics
-        table's 1.92 million keys and a fact's 226 thousand share one range, so a filtered
-        subset of the first is spread over all of it. A key set that is one side's table key
+        Per key, each side's base NDV cut to the share of its own range the other's range
+        covers, the larger of the two — DuckDB's total domain where the ranges coincide: a date
+        dimension's 73 049 keys span two centuries and a fact's 1 823 dates two per cent of
+        them, so only the 1 827 inside the fact's range can match; a demographics table's 1.92
+        million keys and a fact's 226 thousand share one range, so a filtered subset of the
+        first is spread over all of it. A key set that is one side's table key
         (PK–FK) is that table's keys, over which a filtered subset of it and the references meet
         independently; one that is neither's (fact to fact, many to many) is every combination, the
         product of its keys' domains. 0 where a key has no base."""

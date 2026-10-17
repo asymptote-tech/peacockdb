@@ -1,8 +1,9 @@
 # exec_model — the Python prototype
 
 A model of the engine's execution model and a join-order optimizer over the engine's own plans,
-run on pandas. Not production code. Why it has the shape it has is [`design.md`](design.md);
-this page is how to work with it.
+run on pandas. Not production code. Why it has the shape it has is [`design.md`](design.md),
+every rule the optimizer applies is [`optimizer.md`](optimizer.md); this page is how to work with
+it.
 
 ## Environment
 
@@ -273,6 +274,7 @@ driver tests' mock executors.
 | `plans/goldens.py` | where the engine's goldens and this prototype's live, the five modes they are named by, the `== <query>` sections every golden is cut into, and the anchor GitHub gives a page's heading |
 | `plans/cost_model.py` | the engine's cost function (`test_support/cost_model.rs`) over a run in the `cpu.txt` format, by `testdata/cost_model.conf`, read, summed and rounded as the Rust is; `GpuMemorySource` free, outside the conf |
 | `plans/answers.py` | two answers to one query compared as strictly as SQL allows — a multiset, the ORDER BY columns by position, money within a tolerance — and the queries whose LIMIT leaves which rows open |
+| `optimizer.md` | every rule the optimizer applies and when — dynamic filters, clusters and TES, the cost DPhyp is given and the selectivities in it, orientation, disassembly, replanning — each with the function that applies it, and its constants |
 | `optimizer/dynamic_filters.py` | dynamic filters: which joins can prune a fact scan's row groups (on the engine's plan a build with a filter and no join, on DPhyp's order one with a filter, a join or both; the key lifted through hash joins of any type and every branch of a union to an ordered scan column; a join that equates NULLs pruning nothing by a build key holding one), the probe plan — the build side itself, whose lanes the main plan then reads as a memory source, so the side is read once — nested builds probed innermost first, the host reducer, and the replan that re-maps each pruned scan as the engine's partitioner would |
 | `optimizer/stats.py` | table statistics for the estimator — NDV and strings' mean length from the committed sidecar (`testdata/gen_stats.py`), rows, min/max and nulls from the footer over the row groups a scan reads; a sidecar that is missing or no longer matches its file is refused |
 | `optimizer/observed.py` | the NDV of an intermediate result: a materialized build side's from per-lane counts — exact where the lanes are hashed on the counted columns, bounds otherwise — and a stream's cap |

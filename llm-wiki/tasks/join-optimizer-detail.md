@@ -52,7 +52,7 @@ fixes #236 and #237):
 - Task 12: four named tpch queries with a non-inner join are registered. Non-inner joins enter
   clusters on CD-A's TES and keep their plan type; a rebuilt root keeps a hash something above
   reads. The full `run.py` regenerated every committed prototype output, and the corpus tier ran
-  at every mode (Task 12 below). Task 18 is not started.
+  at every mode (Task 12 below).
 - #239: `equi_join`'s matched shares are over the key domain. The 39 queries whose plans hold a
   join that reads a share ran again at every mode into the committed outputs; no other query's
   output can move (#239 below).
@@ -71,6 +71,9 @@ fixes #236 and #237):
   committed and with `--sha` at a commit; the cost-report job renders it so and publishes it at
   `join-optimizer/` on master. Whether the published links resolve is checked after a push
   (Task 17 below).
+- Task 18: `scripts/exec_model/optimizer.md`, 285 lines, holds every rule and constant with the
+  function that applies it; `design.md` keeps the why and points there, and the README lists it.
+  Every constant in its table is checked against the code (Task 18 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
 - Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 488 cases), and q64 in the corpus answer,
@@ -2403,3 +2406,63 @@ engine's page lists its pages in the nav `render_html` writes (`latest · all re
   the page at `report/join-optimizer/index.html`, its links at the sha. The YAML parsed and the
   step's `run:` passed `bash -n`.
 - Open: the published page's links resolve, checked after a push and a CI run.
+
+## Task 18
+
+### The page
+
+`scripts/exec_model/optimizer.md`, 285 lines: the pipeline; when a dynamic filter fires (the join,
+the build side, the scan, values or a range, NULL keys); where a key lifts, a table per node kind;
+what a probe does and costs, and its rounds; clusters, edges and TES; the cost DPhyp is given (the
+callback, `cost(S) = rows(S) × width(needed(S))`, where rows come from); which selectivities enter
+it, a table; the budget; orientation; disassembly; when a run replans (event, trigger, refusal,
+scope, termination); constants. A rule cites its file and function, a constant its file and the
+functions that read it, never a line number.
+
+- **The callback.** `ordered`'s `cost(mask)` is `SetEstimates.cost`: estimated rows times the
+  width of what the joins above and the cluster's output read of the set. Rows are its only
+  estimate. Selectivities that enter it: filters below a relation by their predicate, through the
+  plan's estimate of the relation; containment over the key domain; the matched shares and the
+  per-type rules; a residual of a join inside the cluster as a flat 0.2 per residual edge, its
+  predicate not read.
+- **No line numbers.** The constants table names functions, so an edit that moves a line leaves it
+  right; a value or a reader that changes fails the check below.
+
+### Fixed in the same change
+
+- `design.md`, "Where a key lifts", said the key passes "projects that pick columns". `lift`
+  passes any `GpuProject` whose output at that position is a plain column reference, whatever the
+  others compute (`_picks_columns`, all of them plain, is the cluster's rule). It handles only
+  scans, unions and interleaves, the three wiring kinds, filters, projects and hash joins, and
+  stops at every other node, sorts and limits included, though they pass the column unchanged. The
+  bullet names those kinds and points to the table.
+- `design.md`, "It ends", and `replan.py`'s docstring claimed at most one replan per join and at
+  most as many replans as joins. A build of a filter and no join can miss and replan without
+  consuming a join, so nothing argues that bound. What holds: a memory source is estimated at its
+  true size, so a build that misses holds a scan or a join no source covers; the replan puts it
+  under one and a reorder adds no join, so a run replans at most once per scan or join that no
+  memory source covers when it starts. All three places state that, in that order.
+- `design.md`, "Why C_out in bytes", cited `optimizer/cost.py` for a set's cost; it is
+  `join_order.SetEstimates.cost`, over `cost.row_width`. `cost.py`'s docstring called itself the
+  enumerator's cost; it now says it gives a row's width and a whole plan's cost.
+- `Estimator._domain`'s docstring said the larger base NDV is cut to where the ranges overlap.
+  `_overlapping_domain` thins each side's NDV by the share of its own range the other's covers and
+  takes the larger: NDV 1,000 over [0, 10⁶] against 900 over [0, 1,000] is 900, not 1.
+- `design.md` repeated values that would drift: the ordered-scan threshold (1.5) and the replan
+  threshold (2.0, in the run diagram, the replan section and the probe bullet). Each now names the
+  rule and points to `optimizer.md`. The section intro points there for every rule.
+- Checked and unchanged: the two passes, adaptive probes, the q84 limit, the NULL rule, #239's
+  shares, the names (`names.aliased`, `named`, `sourced`: no rule reads them). The committed-run
+  figures were not re-derived.
+
+### Proving
+
+- Constants: a script outside git parses the table, greps each row's value in the file it names
+  (19 rows, 29 patterns), and finds each reader the row names — `func`, `Class.method`, or
+  `module.func` in a sibling module — holding the constant by name, or by its value's pattern where
+  the row names no identifier. All pass. It fails on a changed value (`ORDERED_BELOW = 1.6`), a row
+  with no pattern, a reader that does not read the constant (`MODES` by `filtered`), and a reader
+  that does not exist (`_reads_hashes`).
+- Comments and docstrings changed in `replan.py`, `cardinality.py` and `cost.py`: cheap tier 48
+  files, 488 passed, none failed.
+- No output moved: `git status` shows five `.md` files and those three `.py` files.

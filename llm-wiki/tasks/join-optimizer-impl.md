@@ -305,7 +305,7 @@ with Task 15: the page and the log share the report data both changed.
 
 **Files:** new `scripts/exec_model/optimizer.md`, `design.md`, `README.md`.
 
-- [ ] At most 300 lines: dynamic filters (trigger, lift nodes, values against range), clusters
+- [x] At most 300 lines: dynamic filters (trigger, lift nodes, values against range), clusters
   and TES, the DPhyp cost and its selectivities, orientation, replan trigger and scope. Every
   constant with its file. `design.md` points here for the rules.
-- [ ] Proving: every constant quoted checked against the code.
+- [x] Proving: every constant quoted checked against the code.

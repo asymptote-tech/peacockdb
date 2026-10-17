@@ -1,4 +1,5 @@
-"""The enumerator's cost: C_out in bytes — the bytes a plan's joins emit, summed.
+"""C_out in bytes: a row's width (`row_width`), which `join_order.SetEstimates.cost` multiplies by a
+set's rows for DPhyp, and a whole plan's cost (`plan_cost`), the bytes its joins emit, summed.
 
 A join emits the rows `cardinality.estimate` gives it, each as wide as the columns it passes on
 (its projection: what the plan needs above). A column is sized as `common.rs::

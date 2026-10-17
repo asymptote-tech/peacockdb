@@ -64,7 +64,7 @@ Every other cross-folder import points the way the diagram does.
       ▼                             on the ordered tree
     replan.run_adaptive ◄── the rewritten tree, both passes' builds kept
       │ engine/adaptive: BuildDone per join, before its build is set
-      ├── within 2× of the estimate ──► run on to the answer
+      ├── within the replan threshold ──► run on to the answer
       └── further off, nothing else started ──► stop; every build made so far
                                                becomes a GpuMemorySource; back to
                                                clusters with those sizes known
@@ -72,8 +72,9 @@ Every other cross-folder import points the way the diagram does.
 `optimizer/pipeline.run_optimized` composes the steps in that order — `pipeline.filtered` is
 everything before the run, the order `run_adaptive`'s `kept` parameter is shaped for — and returns
 what each did as an `OptimizerReport` (`optimizer/report.py`, rendered by `report_text.py` as the
-log and by `report_md.py` as the page). Each step also has a corpus suite of its own. The mechanics
-are in each module's docstring; what follows is why each step has its shape.
+log and by `report_md.py` as the page). Each step also has a corpus suite of its own. Every rule
+and constant, with the function that applies it, is in [`optimizer.md`](optimizer.md); what follows
+is why each step has its shape.
 
 - **The planner's own plans** (`plans/`), not a lowering of the SQL written for the prototype: a
   second lowering is a second reading of the planner, and the optimizer would then be tuned to a
@@ -92,8 +93,9 @@ are in each module's docstring; what follows is why each step has its shape.
   every plan here is a tree, which a build feeding both its join and a scan's mapping is not. The
   join hold already finishes the build before any probe batch moves, so running it first costs
   nothing, and its output is kept as a `GpuMemorySource` the main plan reads, so
-  the side is read once. Only a scan ordered on the key qualifies (Σ(max − min) / (MAX − MIN) under
-  1.5): on an unordered column every row group's range spans the keys and nothing prunes.
+  the side is read once. Only a scan ordered on the key qualifies (its score: `optimizer.md`,
+  "When a dynamic filter fires"): on an unordered column every row group's range spans the keys
+  and nothing prunes.
   Survivors are re-mapped by the planner's own policy, so the pruned plan is one the planner
   would have made.
 - **Two passes of dynamic filters.** The first runs on the engine's plan and takes a build that
@@ -112,10 +114,10 @@ are in each module's docstring; what follows is why each step has its shape.
   pruned. Clusters are named before the first pass, so a cluster a second-pass build holds keeps
   its id, and `.optimizer.txt` names it on that build's line.
 - **Probe plans run adaptively.** A probe plan is the build side, run first by
-  `replan.run_adaptive` as the main plan is: where a build inside it lands more than 2× off its
-  estimate, the probe stops, keeps what it made, and orders the rest again. A second-pass build
-  holds clusters DPhyp ordered on estimates, and run whole it would keep an order the main run
-  would have replanned: tpcds q16's probe joined customer_address first, 70 thousand rows where
+  `replan.run_adaptive` as the main plan is: where a build inside it misses its estimate past the
+  replan threshold, the probe stops, keeps what it made, and orders the rest again. A second-pass
+  build holds clusters DPhyp ordered on estimates, and run whole it would keep an order the main
+  run would have replanned: tpcds q16's probe joined customer_address first, 70 thousand rows where
   dates first make 50 thousand, and cost 0.8 % more than the plan without it. Its last run is
   priced as a probe plan, each run it stopped as a stopped run, and the main plan reads its
   build from memory for nothing; what a probe cannot replan is the rest of the cluster outside
@@ -131,13 +133,14 @@ are in each module's docstring; what follows is why each step has its shape.
   more. The probe's root keeps the hash it declares through a replan, since the join its build
   feeds reads it (`multijoin.clusters`), and the memory sources its replans make take names no
   other run of the query has given.
-- **Where a key lifts.** From the join's probe key down to a scan column, through wiring,
-  filters, projects that pick columns, hash joins of any type into the side the column comes
-  from, and every branch of a `GpuUnion` or `GpuInterleave`, whose output column k is each
-  branch's column k. Each scan reached is a candidate of its own, tested and pruned on its own
-  footers, and the branches share one probe. A branch where the column is computed — a cast the
-  planner put on a union branch included — adds nothing, and the others still prune: a pruned
-  row of one branch reaches the join and is dropped there, whatever the other branch does.
+- **Where a key lifts.** From the join's probe key down to a scan column, through wiring, filters,
+  a project's plain column, hash joins of any type into the side the column is from, and every
+  branch of a union or interleave; `optimizer.md`, "Where a key lifts", has the table and what
+  stops it. A union's or an interleave's output column k is each branch's column k, and each scan
+  reached is a candidate of its own, pruned on its own footers, the branches sharing one probe. A
+  branch where the column is computed — a cast the planner put on a union branch included — adds
+  nothing, and the others still prune: a pruned row of one branch reaches the join and is dropped
+  there, whatever the other branch does.
 - **Why a non-inner join passes the key.** The candidate join C matches no probe row whose key
   is outside its build's keys, as every type in `PRUNES_PROBE` does, and no NULL probe key:
   either it does not equate NULLs, or its build holds no NULL key. Anti and mark joins equate
@@ -214,8 +217,9 @@ reached it.
 - **The budget.** `MAX_PAIRS` is 10,000 connected pairs, DuckDB's. Past it the cluster keeps the
   plan's order and is only oriented again; the greedy fallback DuckDB has is not built.
 - **Why C_out in bytes.** A set's cost is its rows times the width of what the joins above and
-  the cluster's output need of it (`optimizer/cost.py`). Every term is a join's output, so
-  per-kind weights would cancel between two orders: the cost needs estimates and no calibration.
+  the cluster's output need of it (`join_order.SetEstimates.cost`, over `cost.row_width`). Every
+  term is a join's output, so per-kind weights would cancel between two orders: the cost needs
+  estimates and no calibration.
   Bytes rather than rows, because a reorder changes what each join carries, and bytes are what
   the engine's cost counts.
 - **What is reported.** Every set DPhyp priced is kept in the report (`JoinOrder.priced`) and not
@@ -249,9 +253,9 @@ the semi and anti pairs alike — and `orient`'s tree gives back the plan's.
 
 `engine/adaptive.AdaptiveDriver` reports `BuildDone` when a join's build side has emitted on
 every lane and before the join sets it: true rows, bytes and the key NDV. `optimizer/replan.py`
-stops the run where the build is more than `DEFAULT_THRESHOLD` (2.0) times off its estimate,
-turns every build made so far into a `GpuMemorySource`, optimizes again with their sizes known,
-and runs a new driver.
+stops the run where the build is more than `DEFAULT_THRESHOLD` times off its estimate, turns
+every build made so far into a `GpuMemorySource`, optimizes again with their sizes known, and runs
+a new driver. The trigger and the refusal, exactly: `optimizer.md`, "When a run replans".
 
 - **Why only on builds.** A build is the one point where a true size is known while nothing
   above has consumed it: it is materialized one batch per lane, its key NDV countable exactly
@@ -260,8 +264,10 @@ and runs a new driver.
 - **Nothing runs twice.** A stopped run's `extraction` is the build just done and those set but
   not probed. Where any other node has made a call, the replan is refused and the run goes on,
   recorded as a refusal: cutting below a started accumulator would run its input again.
-- **It ends.** Each replan turns at least one build into a source measured exactly, whose own
-  `BuildDone` then matches its estimate, so a plan replans at most once per join.
+- **It ends.** A memory source is estimated at its true size, so a build that misses holds a scan
+  or a join no source covers. The replan puts it under one, and a reorder adds no join, so those
+  fall with every replan: a run replans at most once per scan or join that no memory source covers
+  when it starts.
 
 ## run.py and the cost
 

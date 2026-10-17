@@ -3,8 +3,9 @@ times off its estimate, stop, turn every build the run has made into a `GpuMemor
 the plan again with those sizes known, and run it with a new driver. Nothing but the builds had
 started, so nothing runs twice; a replan that would repeat work is refused, and the run goes on.
 
-Each replan turns at least one build into a source measured exactly, whose own `BuildDone` then
-matches its estimate, so the loop ends within as many replans as the plan has joins.
+A memory source is estimated at its true size, so a build that misses holds a scan or a join no
+source covers. The replan puts it under one and a reorder adds no join, so a run replans at most
+once per scan or join that no memory source covers when it starts.
 """
 
 from __future__ import annotations
