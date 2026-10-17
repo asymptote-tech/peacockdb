@@ -173,3 +173,13 @@ directly (new-hosts has not landed), stops only VMs it started, and keeps to its
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
 three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, the alpha design.
+
+## Chain C (base: master)
+
+### 1. [`join-optimizer.md`](join-optimizer.md) — state: building — PR #165
+
+The prototype's join-order optimizer, finished: the engine's plans only, one folder per
+component, one stats sidecar for both embedding modes, `run.py` with its goldens,
+`.optimizer.txt` and cost report, the record in S3, every device-enabled benchmark, cardinality
+per join, three documents. The branch and its PR exist, so the coordinator picks the branch up
+rather than branching afresh; `join-optimizer-detail.md` says what is on it.
