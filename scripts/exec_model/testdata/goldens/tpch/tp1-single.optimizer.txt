@@ -1,0 +1,714 @@
+== q1
+nothing fired
+== q2
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+dynamic filters on the plan as written
+  candidate p_partkey -> partsupp#1.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  partsupp#1: row groups 7 -> 7 (0-6)
+    ps_partkey by p0.p_partkey in [249, 199723]
+  build p0 = part (f), run first: 747 rows, 22504 B; the plan reads it from memory
+MJ1: 6 relations, ordered before the run
+  r0 region#1 (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+  r1 nation#1: rows 25 exact, 19.5 B/row; NDV n_nationkey 25, n_regionkey 5
+  r2 supplier#1: rows 10000 exact, 165.4 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r3 p0: rows 747 measured, 26.2 B/row; NDV p_partkey 747
+  r4 partsupp#1: rows 800000 exact, 32.4 B/row; NDV ps_partkey 200000, ps_suppkey 10000, ps_supplycost 99865
+  r5 agg(MJ2): rows 160000 est, 24.2 B/row; NDV ps_partkey 160000, [min(partsupp.ps_supplycost)] 160000
+  edge r3-r4: r3.p_partkey = r4.ps_partkey
+  edge r2-r4: r2.s_suppkey = r4.ps_suppkey
+  edge r1-r2: r1.n_nationkey = r2.s_nationkey
+  edge r0-r1: r0.r_regionkey = r1.n_regionkey
+  edge r3-r5: r3.p_partkey = r5.ps_partkey
+  edge r4-r5: r4.ps_supplycost = r5.[min(partsupp.ps_supplycost)] (aggregate output)
+  plan's order ((r0 (r1 (r2 (r3 r4)))) r5), build first
+  DPhyp priced 19 sets, chose (((r0 r1) r2) ((r3 r5) r4))
+  oriented (((r3 r5) r4) ((r0 r1) r2)), build first
+  join r3 x r5: 747.0 rows x 42.4 B = 31654 B
+  join r3+r5 x r4: 2988.0 rows x 34.4 B = 102712 B
+  join r0 x r1: 5.0 rows x 15.3 B = 77 B
+  join r0+r1 x r2: 2000.0 rows x 172.5 B = 345002 B
+  join r3+r4+r5 x r0+r1+r2: 597.6 rows x 190.6 B = 113918 B
+  C_out 593363 B; the plan's order, priced by the same estimates, 1615081 B
+MJ2: 4 relations, ordered before the run
+  r0 region#2 (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+  r1 nation#2: rows 25 exact, 8.2 B/row; NDV n_nationkey 25, n_regionkey 5
+  r2 supplier#2: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r3 partsupp#2: rows 800000 exact, 32.4 B/row; NDV ps_suppkey 10000
+  edge r2-r3: r2.s_suppkey = r3.ps_suppkey
+  edge r1-r2: r1.n_nationkey = r2.s_nationkey
+  edge r0-r1: r0.r_regionkey = r1.n_regionkey
+  plan's order (r0 (r1 (r2 r3))), build first
+  DPhyp priced 6 sets, chose (((r0 r1) r2) r3)
+  oriented (((r0 r1) r2) r3), build first
+  join r0 x r1: 5.0 rows x 4.1 B = 21 B
+  join r0+r1 x r2: 2000.0 rows x 8.1 B = 16250 B
+  join r0+r1+r2 x r3: 160000.0 rows x 24.2 B = 3880000 B
+  C_out 3896271 B; the plan's order, priced by the same estimates, 49280000 B
+dynamic filters after join order
+  candidate p_partkey -> partsupp#1.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  partsupp#1: row groups 7 -> 7 (0-6)
+    ps_partkey by p1.p_partkey in [249, 199478]
+  build p1 = [p0] join agg(MJ2), run first: 460 rows, 17538 B, holding MJ1, MJ2; the plan reads it from memory
+plan diff: this query's section of <mode>.plandiff.txt
+== q3
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 customer (f): rows 30000 est, 8.1 B/row; NDV c_custkey 30000
+  r1 orders (f): rows 727022.9 est, 24.5 B/row; NDV o_custkey 99996, o_orderkey 727022.9
+  r2 lineitem (f): rows 3243957.6 est, 40.4 B/row; NDV l_orderkey 1499823
+  edge r0-r1: r0.c_custkey = r1.o_custkey
+  edge r1-r2: r1.o_orderkey = r2.l_orderkey
+  plan's order ((r0 r1) r2), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2): the plan's order
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 145405.5 rows x 16.4 B = 2381016 B
+  join r0+r1 x r2: 314459.6 rows x 48.6 B = 15290599 B
+  C_out 17671615 B; the plan's order, priced by the same estimates, 17671615 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q4
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 orders (f): rows 57072 est, 20.6 B/row; NDV o_orderkey 57072
+  r1 lineitem (f): rows 1200243 est, 8.1 B/row; NDV l_orderkey 885711
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey, a semi join keeping r0's matches
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 33699.5 rows x 12.5 B = 422087 B
+  C_out 422087 B; the plan's order, priced by the same estimates, 422087 B
+plan unchanged
+== q5
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 6 relations, ordered before the run
+  r0 region (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+  r1 nation: rows 25 exact, 19.5 B/row; NDV n_nationkey 25, n_regionkey 5
+  r2 supplier: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r3 customer: rows 150000 exact, 12.2 B/row; NDV c_custkey 150000, c_nationkey 25
+  r4 orders (f): rows 227576.4 est, 16.2 B/row; NDV o_custkey 97098.7, o_orderkey 227576.4
+  r5 lineitem: rows 6001215 exact, 48.5 B/row; NDV l_orderkey 1500000, l_suppkey 10000
+  edge r3-r4: r3.c_custkey = r4.o_custkey
+  edge r4-r5: r4.o_orderkey = r5.l_orderkey
+  edge r2-r5: r2.s_suppkey = r5.l_suppkey
+  edge r2-r3: r2.s_nationkey = r3.c_nationkey
+  edge r1-r2: r1.n_nationkey = r2.s_nationkey
+  edge r0-r1: r0.r_regionkey = r1.n_regionkey
+  plan's order (r0 (r1 (r2 ((r3 r4) r5)))), build first
+  DPhyp priced 24 sets, chose (((r0 r1) r2) ((r3 r4) r5))
+  oriented (((r0 r1) r2) ((r3 r4) r5)), build first
+  join r0 x r1: 5.0 rows x 15.3 B = 77 B
+  join r0+r1 x r2: 2000.0 rows x 23.5 B = 46910 B
+  join r3 x r4: 227576.4 rows x 12.2 B = 2787811 B
+  join r3+r4 x r5: 910490.1 rows x 44.5 B = 40516809 B
+  join r0+r1+r2 x r3+r4+r5: 7283.9 rows x 43.5 B = 316523 B
+  C_out 43668130 B; the plan's order, priced by the same estimates, 46678751 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q6
+nothing fired
+== q7
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 6 relations, ordered before the run
+  r0 nation#1 (f): rows 2 est, 15.3 B/row; NDV n_nationkey 2
+  r1 nation#2 (f): rows 2 est, 15.3 B/row; NDV n_nationkey 2
+  r2 customer: rows 150000 exact, 12.2 B/row; NDV c_custkey 150000, c_nationkey 25
+  r3 supplier: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r4 lineitem (f): rows 1823739.2 est, 52.6 B/row; NDV l_suppkey 10000, l_orderkey 1451969.8
+  r5 orders: rows 1500000 exact, 16.2 B/row; NDV o_orderkey 1500000, o_custkey 99996
+  edge r3-r4: r3.s_suppkey = r4.l_suppkey
+  edge r4-r5: r4.l_orderkey = r5.o_orderkey
+  edge r2-r5: r2.c_custkey = r5.o_custkey
+  edge r1-r3: r1.n_nationkey = r3.s_nationkey
+  edge r0-r2: r0.n_nationkey = r2.c_nationkey
+  residual r0-r1 on r1.n_name, r0.n_name: keeps 0.2 of the matches, not a DPhyp edge
+  plan's order (r0 (r1 (r2 ((r3 r4) r5)))), build first
+  DPhyp priced 15 sets, chose (((r0 r2) r5) ((r1 r3) r4))
+  oriented (((r0 r2) r5) ((r1 r3) r4)), build first
+  join r0 x r2: 12000.0 rows x 19.3 B = 231960 B
+  join r0+r2 x r5: 120000.8 rows x 19.3 B = 2319615 B
+  join r1 x r3: 800.0 rows x 19.3 B = 15464 B
+  join r1+r3 x r4: 145899.1 rows x 55.7 B = 8127311 B
+  join r0+r2+r5 x r1+r3+r4: 2334.4 rows x 58.8 B = 137227 B
+  C_out 10831578 B; the plan's order, priced by the same estimates, 266423943 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q8
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 8 relations, ordered before the run
+  r0 region (f): rows 1 est, 4.1 B/row; NDV r_regionkey 1
+  r1 nation#1: rows 25 exact, 15.3 B/row; NDV n_nationkey 25
+  r2 nation#2: rows 25 exact, 8.2 B/row; NDV n_nationkey 25, n_regionkey 5
+  r3 customer: rows 150000 exact, 12.2 B/row; NDV c_custkey 150000, c_nationkey 25
+  r4 orders (f): rows 456334.3 est, 20.4 B/row; NDV o_orderkey 456334.3, o_custkey 99972.2
+  r5 supplier: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r6 part (f): rows 1333.3 est, 8.1 B/row; NDV p_partkey 1333.3
+  r7 lineitem: rows 6001215 exact, 56.6 B/row; NDV l_partkey 200000, l_suppkey 10000, l_orderkey 1500000
+  edge r6-r7: r6.p_partkey = r7.l_partkey
+  edge r5-r7: r5.s_suppkey = r7.l_suppkey
+  edge r4-r7: r4.o_orderkey = r7.l_orderkey
+  edge r3-r4: r3.c_custkey = r4.o_custkey
+  edge r2-r3: r2.n_nationkey = r3.c_nationkey
+  edge r1-r5: r1.n_nationkey = r5.s_nationkey
+  edge r0-r2: r0.r_regionkey = r2.n_regionkey
+  plan's order (r0 (r1 (r2 (r3 (r4 (r5 (r6 r7))))))), build first
+  DPhyp priced 36 sets, chose (((((r0 r2) r3) (r4 (r6 r7))) r5) r1)
+  oriented (r1 ((((r0 r2) r3) ((r6 r7) r4)) r5)), build first
+  join r0 x r2: 5.0 rows x 4.1 B = 21 B
+  join r0+r2 x r3: 30000.0 rows x 8.1 B = 243750 B
+  join r6 x r7: 40008.1 rows x 48.5 B = 1940393 B
+  join r6+r7 x r4: 12171.4 rows x 52.6 B = 640519 B
+  join r0+r2+r3 x r4+r6+r7: 2434.3 rows x 44.5 B = 108326 B
+  join r0+r2+r3+r4+r6+r7 x r5: 2434.3 rows x 40.5 B = 98589 B
+  join r1 x r0+r2+r3+r4+r5+r6+r7: 2434.3 rows x 47.6 B = 115824 B
+  C_out 3147421 B; the plan's order, priced by the same estimates, 6144027 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q9
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 6 relations, ordered before the run
+  r0 nation: rows 25 exact, 15.3 B/row; NDV n_nationkey 25
+  r1 orders: rows 1500000 exact, 12.2 B/row; NDV o_orderkey 1500000
+  r2 partsupp: rows 800000 exact, 32.4 B/row; NDV ps_suppkey 10000, ps_partkey 200000
+  r3 supplier: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r4 part (f): rows 40000 est, 8.1 B/row; NDV p_partkey 40000
+  r5 lineitem: rows 6001215 exact, 72.8 B/row; NDV l_partkey 200000, l_suppkey 10000, l_orderkey 1500000
+  edge r4-r5: r4.p_partkey = r5.l_partkey
+  edge r3-r5: r3.s_suppkey = r5.l_suppkey
+  edge r2-r5: r2.ps_suppkey = r5.l_suppkey and r2.ps_partkey = r5.l_partkey
+  edge r1-r5: r1.o_orderkey = r5.l_orderkey
+  edge r0-r3: r0.n_nationkey = r3.s_nationkey
+  plan's order (r0 (r1 (r2 (r3 (r4 r5))))), build first
+  DPhyp priced 24 sets, chose ((r0 r3) ((r1 (r4 r5)) r2))
+  oriented ((r0 r3) (r2 (r1 (r4 r5)))), build first
+  join r0 x r3: 10000.0 rows x 19.3 B = 193300 B
+  join r4 x r5: 1200243.0 rows x 72.8 B = 87317678 B
+  join r1 x r4+r5: 1200243.0 rows x 68.8 B = 82516706 B
+  join r2 x r1+r4+r5: 1200243.0 rows x 76.8 B = 92118650 B
+  join r0+r3 x r1+r2+r4+r5: 1200243.0 rows x 79.8 B = 95815399 B
+  C_out 357961733 B; the plan's order, priced by the same estimates, 454838086 B
+replan 1: the build of MJ1's join on p_partkey = l_partkey came out 10664 rows, est 40000.0 (q-error 3.75)
+  kept as memory sources: m0 (10000 rows) = [nation] join supplier; m1 (800000 rows) = partsupp; m2 (1500000 rows) = orders; m3 (10664 rows) = part (f)
+  MJ1: 5 relations, ordered again
+    r0 m0: rows 10000 measured, 19.3 B/row; NDV s_suppkey 10000
+    r1 m1: rows 800000 measured, 32.4 B/row; NDV ps_suppkey 10000, ps_partkey 200000
+    r2 m2: rows 1500000 measured, 12.2 B/row; NDV o_orderkey 1500000
+    r3 m3: rows 10664 measured, 8.1 B/row; NDV p_partkey 10664
+    r4 lineitem: rows 6001215 exact, 72.8 B/row; NDV l_partkey 200000, l_orderkey 1500000, l_suppkey 10000
+    edge r3-r4: r3.p_partkey = r4.l_partkey
+    edge r2-r4: r2.o_orderkey = r4.l_orderkey
+    edge r1-r4: r1.ps_suppkey = r4.l_suppkey and r1.ps_partkey = r4.l_partkey
+    edge r0-r4: r0.s_suppkey = r4.l_suppkey
+    previous order (r0 (r1 (r2 (r3 r4)))), build first
+    DPhyp priced 15 sets, chose (r0 (r1 (r2 (r3 r4)))): the previous order
+    oriented (r0 ((r2 (r3 r4)) r1)), build first
+    join r3 x r4: 319984.8 rows x 72.8 B = 23278893 B
+    join r2 x r3+r4: 319984.8 rows x 68.8 B = 21998954 B
+    join r2+r3+r4 x r1: 319984.8 rows x 76.8 B = 24558832 B
+    join r0 x r1+r2+r3+r4: 319984.8 rows x 79.8 B = 25544385 B
+    C_out 95381064 B; the previous order, priced by the same estimates, 95381064 B
+    flipped: r2+r3+r4 builds, r1 probes
+plan diff: this query's section of <mode>.plandiff.txt
+== q10
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 4 relations, ordered before the run
+  r0 nation: rows 25 exact, 15.3 B/row; NDV n_nationkey 25
+  r1 customer: rows 150000 exact, 175.4 B/row; NDV c_custkey 150000, c_nationkey 25
+  r2 orders (f): rows 57361.7 est, 16.2 B/row; NDV o_custkey 53825.9, o_orderkey 57361.7
+  r3 lineitem (f): rows 1024000 est, 40.4 B/row; NDV l_orderkey 846182.8
+  edge r1-r2: r1.c_custkey = r2.o_custkey
+  edge r2-r3: r2.o_orderkey = r3.l_orderkey
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  plan's order (r0 ((r1 r2) r3)), build first
+  DPhyp priced 6 sets, chose (r0 (r1 (r2 r3)))
+  oriented (r0 ((r2 r3) r1)), build first
+  join r2 x r3: 39158.9 rows x 40.4 B = 1581042 B
+  join r2+r3 x r1: 39158.9 rows x 207.7 B = 8132764 B
+  join r0 x r1+r2+r3: 39158.9 rows x 214.8 B = 8410010 B
+  C_out 18123816 B; the plan's order, priced by the same estimates, 27072151 B
+dynamic filters after join order
+  candidate o_custkey -> customer.c_custkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  customer: row groups 2 -> 2 (0-1)
+    c_custkey by p0.o_custkey in [4, 149995]
+  build p0 = [orders (f)] join lineitem (f), run first: 114705 rows, 2752920 B, holding MJ1; the plan reads it from memory
+plan diff: this query's section of <mode>.plandiff.txt
+== q11
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 nation#1 (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 supplier#1: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r2 partsupp#1: rows 800000 exact, 32.4 B/row; NDV ps_suppkey 10000
+  edge r1-r2: r1.s_suppkey = r2.ps_suppkey
+  edge r0-r1: r0.n_nationkey = r1.s_nationkey
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 400.0 rows x 8.1 B = 3250 B
+  join r0+r1 x r2: 32000.0 rows x 24.2 B = 776000 B
+  C_out 779250 B; the plan's order, priced by the same estimates, 23476000 B
+MJ2: 3 relations, ordered before the run
+  r0 nation#2 (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 supplier#2: rows 10000 exact, 12.2 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r2 partsupp#2: rows 800000 exact, 40.5 B/row; NDV ps_suppkey 10000
+  edge r1-r2: r1.s_suppkey = r2.ps_suppkey
+  edge r0-r1: r0.n_nationkey = r1.s_nationkey
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 400.0 rows x 8.1 B = 3250 B
+  join r0+r1 x r2: 32000.0 rows x 32.4 B = 1036000 B
+  C_out 1039250 B; the plan's order, priced by the same estimates, 30236000 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q12
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 lineitem (f): rows 9749.4 est, 16.5 B/row; NDV l_orderkey 9749.4
+  r1 orders: rows 1500000 exact, 20.6 B/row; NDV o_orderkey 1500000
+  edge r0-r1: r0.l_orderkey = r1.o_orderkey
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 9749.4 rows x 20.9 B = 204103 B
+  C_out 204103 B; the plan's order, priced by the same estimates, 204103 B
+replan 1: the build of MJ1's join on l_orderkey = o_orderkey came out 30988 rows, est 9749.4 (q-error 3.18)
+  kept as memory sources: m0 (30988 rows) = lineitem (f)
+  MJ1: 2 relations, ordered again
+    r0 m0: rows 30988 measured, 16.5 B/row; NDV l_orderkey 29099
+    r1 orders: rows 1500000 exact, 20.6 B/row; NDV o_orderkey 1500000
+    edge r0-r1: r0.l_orderkey = r1.o_orderkey
+    previous order (r0 r1), build first
+    DPhyp priced 1 sets, chose (r0 r1): the previous order
+    oriented (r0 r1), build first
+    join r0 x r1: 30988.0 rows x 20.9 B = 648734 B
+    C_out 648734 B; the previous order, priced by the same estimates, 648734 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q13
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 customer: rows 150000 exact, 8.1 B/row; NDV c_custkey 150000
+  r1 orders (f): rows 1200000 est, 16.2 B/row; NDV o_custkey 99996
+  edge r0-r1: r0.c_custkey = r1.o_custkey, a left join keeping every row of r0
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 1250004.0 rows x 16.2 B = 20312565 B
+  C_out 20312565 B; the plan's order, priced by the same estimates, 20312565 B
+plan unchanged
+== q14
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 part: rows 200000 exact, 32.9 B/row; NDV p_partkey 200000
+  r1 lineitem (f): rows 75202.9 est, 40.4 B/row; NDV l_partkey 72329.2
+  edge r0-r1: r0.p_partkey = r1.l_partkey
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r1 r0), build first
+  join r1 x r0: 75202.9 rows x 57.0 B = 4284684 B
+  C_out 4284684 B; the plan's order, priced by the same estimates, 4284684 B
+  flipped: r1 builds, r0 probes
+dynamic filters after join order
+  candidate l_partkey -> part.p_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  part: row groups 2 -> 2 (0-1)
+    p_partkey by p0.l_partkey in [1, 199998]
+  build p0 = lineitem (f), run first: 75983 rows, 1823592 B; the plan reads it from memory
+plan diff: this query's section of <mode>.plandiff.txt
+== q15
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 supplier: rows 10000 exact, 78.5 B/row; NDV s_suppkey 10000
+  r1 agg(lineitem#1 (f)): rows 10000 est, 24.2 B/row; NDV l_suppkey 10000, [sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)] 10000
+  r2 agg(lineitem#2 (f)): rows 1 est, 16.1 B/row; NDV [max(revenue0.total_revenue)] 1
+  edge r0-r1: r0.s_suppkey = r1.l_suppkey
+  edge r1-r2: r1.[sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)] (aggregate output) = r2.[max(revenue0.total_revenue)] (aggregate output)
+  plan's order ((r0 r1) r2), build first
+  DPhyp priced 3 sets, chose (r0 (r1 r2))
+  oriented ((r2 r1) r0), build first
+  join r2 x r1: 1.0 rows x 24.2 B = 24 B
+  join r1+r2 x r0: 1.0 rows x 94.6 B = 95 B
+  C_out 119 B; the plan's order, priced by the same estimates, 946115 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q16
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+dynamic filters on the plan as written
+  candidate p_partkey -> partsupp.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  partsupp: row groups 7 -> 7 (0-6)
+    ps_partkey by p0.p_partkey in [4, 199998]
+  build p0 = part (f), run first: 29581 rows, 1681284 B; the plan reads it from memory
+MJ1: 3 relations, ordered before the run
+  r0 supplier (f): rows 2000 est, 8.1 B/row; NDV s_suppkey 2000
+  r1 p0: rows 29581 measured, 49.1 B/row; NDV p_partkey 29581
+  r2 partsupp: rows 800000 exact, 16.2 B/row; NDV ps_partkey 200000, ps_suppkey 10000
+  edge r1-r2: r1.p_partkey = r2.ps_partkey
+  edge r2-r0: r2.ps_suppkey = r0.s_suppkey, an anti join keeping r2's rows without a match
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose (r0 (r1 r2)): the plan's order
+  oriented (r0 (r1 r2)), build first
+  join r1 x r2: 118324.0 rows x 49.1 B = 5809708 B
+  join r0 x r1+r2: 94659.2 rows x 49.1 B = 4647767 B
+  C_out 10457475 B; the plan's order, priced by the same estimates, 10457475 B
+replan 1: the build of MJ1's anti join on s_suppkey = ps_suppkey came out 4 rows, est 2000.0 (q-error 500.00)
+  kept as memory sources: m1 (4 rows) = supplier (f)
+  MJ1: 3 relations, ordered again
+    r0 m1: rows 4 measured, 8.1 B/row; NDV s_suppkey 4
+    r1 p0: rows 29581 measured, 49.1 B/row; NDV p_partkey 29581
+    r2 partsupp: rows 800000 exact, 16.2 B/row; NDV ps_partkey 200000, ps_suppkey 10000
+    edge r1-r2: r1.p_partkey = r2.ps_partkey
+    edge r2-r0: r2.ps_suppkey = r0.s_suppkey, an anti join keeping r2's rows without a match
+    previous order (r0 (r1 r2)), build first
+    DPhyp priced 3 sets, chose (r0 (r1 r2)): the previous order
+    oriented (r0 (r1 r2)), build first
+    join r1 x r2: 118324.0 rows x 49.1 B = 5809708 B
+    join r0 x r1+r2: 118276.7 rows x 49.1 B = 5807385 B
+    C_out 11617093 B; the previous order, priced by the same estimates, 11617093 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q17
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 part (f): rows 200 est, 8.1 B/row; NDV p_partkey 200
+  r1 lineitem#1: rows 6001215 exact, 40.4 B/row; NDV l_partkey 200000
+  r2 agg(lineitem#2): rows 200000 est, 24.2 B/row; NDV l_partkey 200000
+  edge r0-r1: r0.p_partkey = r1.l_partkey
+  edge r0-r2: r0.p_partkey = r2.l_partkey
+  residual r1-r2 on r1.l_quantity, r2.[Float64(0.2) * avg(lineitem.l_quantity)]: keeps 0.2 of the matches, not a DPhyp edge
+  plan's order ((r0 r1) r2), build first
+  DPhyp priced 3 sets, chose ((r0 r2) r1)
+  oriented ((r0 r2) r1), build first
+  join r0 x r2: 200.0 rows x 24.2 B = 4850 B
+  join r0+r2 x r1: 1200.2 rows x 16.1 B = 19354 B
+  C_out 24204 B; the plan's order, priced by the same estimates, 261653 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q18
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 4 relations, ordered before the run
+  r0 agg(lineitem#1) (f): rows 300000 est, 8.1 B/row; NDV l_orderkey 300000
+  r1 customer: rows 150000 exact, 30.2 B/row; NDV c_custkey 150000
+  r2 orders: rows 1500000 exact, 36.5 B/row; NDV o_custkey 99996, o_orderkey 1500000
+  r3 lineitem#2: rows 6001215 exact, 24.2 B/row; NDV l_orderkey 1500000
+  edge r1-r2: r1.c_custkey = r2.o_custkey
+  edge r2-r3: r2.o_orderkey = r3.l_orderkey
+  edge r2-r0: r2.o_orderkey = r0.l_orderkey, a semi join keeping r2's matches
+  plan's order (r0 ((r1 r2) r3)), build first
+  DPhyp priced 7 sets, chose (((r0 r2) r1) r3)
+  oriented ((r1 (r0 r2)) r3), build first
+  join r0 x r2: 300000.0 rows x 36.5 B = 10950000 B
+  join r1 x r0+r2: 300000.0 rows x 58.6 B = 17587500 B
+  join r0+r1+r2 x r3: 1200243.0 rows x 74.8 B = 89718164 B
+  C_out 118255664 B; the plan's order, priced by the same estimates, 626246486 B
+replan 1: the build of MJ1's semi join on l_orderkey = o_orderkey came out 57 rows, est 300000.0 (q-error 5263.16)
+  kept as memory sources: m0 (150000 rows) = customer; m1 (57 rows) = agg(lineitem#1) (f)
+  MJ1: 4 relations, ordered again
+    r0 m0: rows 150000 measured, 30.2 B/row; NDV c_custkey 150000
+    r1 m1: rows 57 measured, 8.1 B/row; NDV l_orderkey 57
+    r2 orders: rows 1500000 exact, 36.5 B/row; NDV o_orderkey 1500000, o_custkey 99996
+    r3 lineitem#2: rows 6001215 exact, 24.2 B/row; NDV l_orderkey 1500000
+    edge r2-r1: r2.o_orderkey = r1.l_orderkey, a semi join keeping r2's matches
+    edge r0-r2: r0.c_custkey = r2.o_custkey
+    edge r2-r3: r2.o_orderkey = r3.l_orderkey
+    previous order ((r0 (r1 r2)) r3), build first
+    DPhyp priced 7 sets, chose ((r0 (r1 r2)) r3): the previous order
+    oriented (((r1 r2) r0) r3), build first
+    join r1 x r2: 57.0 rows x 36.5 B = 2080 B
+    join r1+r2 x r0: 57.0 rows x 58.6 B = 3342 B
+    join r0+r1+r2 x r3: 228.0 rows x 74.8 B = 17046 B
+    C_out 22469 B; the previous order, priced by the same estimates, 22469 B
+    flipped: r1+r2 builds, r0 probes
+plan diff: this query's section of <mode>.plandiff.txt
+== q19
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 part (f): rows 479.6 est, 36.1 B/row; NDV p_partkey 479.6
+  r1 lineitem (f): rows 225237.6 est, 56.5 B/row; NDV l_partkey 136537.4
+  edge r0-r1: r0.p_partkey = r1.l_partkey
+  residual r0-r1 on r0.p_brand, r0.p_container, r1.l_quantity, r0.p_size: keeps 0.2 of the matches, not a DPhyp edge
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 108.0 rows x 32.2 B = 3484 B
+  C_out 3484 B; the plan's order, priced by the same estimates, 3484 B
+plan unchanged
+== q20
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+dynamic filters on the plan as written
+  candidate p_partkey -> partsupp.ps_partkey: row group ranges sum to 1.00x the column's range, ordered (under 1.5)
+  partsupp: row groups 7 -> 7 (0-6)
+    ps_partkey by p0.p_partkey in [5, 199879]
+  build p0 = part (f), run first: 2127 rows, 17016 B; the plan reads it from memory
+MJ1: 5 relations, ordered before the run
+  r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 supplier: rows 10000 exact, 63.5 B/row; NDV s_nationkey 25, s_suppkey 10000
+  r2 p0: rows 2127 measured, 8.1 B/row; NDV p_partkey 2127
+  r3 partsupp: rows 800000 exact, 24.4 B/row; NDV ps_partkey 200000, ps_suppkey 10000
+  r4 agg(lineitem (f)): rows 908019.1 est, 24.4 B/row; NDV l_partkey 199999.4, l_suppkey 10000
+  edge r0-r1: r0.n_nationkey = r1.s_nationkey
+  edge r3-r2: r3.ps_partkey = r2.p_partkey, a semi join keeping r3's matches
+  edge r3-r4: r3.ps_partkey = r4.l_partkey and r3.ps_suppkey = r4.l_suppkey, then a residual on r3.ps_availqty, r4.[Float64(0.5) * sum(lineitem.l_quantity)] keeping 0.2
+  edge r1-r2+r3+r4: r1.s_suppkey = r3.ps_suppkey, a semi join keeping r1's matches; applies once r2+r3+r4 are joined
+  plan's order ((r0 r1) ((r2 r3) r4)), build first
+  DPhyp priced 6 sets, chose ((r0 r1) ((r2 r3) r4)): the plan's order
+  oriented ((r0 r1) ((r2 r3) r4)), build first
+  join r0 x r1: 400.0 rows x 59.4 B = 23741 B
+  join r2 x r3: 8508.0 rows x 24.4 B = 207382 B
+  join r2+r3 x r4: 1701.6 rows x 8.1 B = 13826 B
+  join r0+r1 x r2+r3+r4: 68.1 rows x 51.2 B = 3487 B
+  C_out 248436 B; the plan's order, priced by the same estimates, 248436 B
+plan diff: this query's section of <mode>.plandiff.txt
+== q21
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 4 relations, ordered before the run
+  r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 orders (f): rows 286720 est, 8.1 B/row; NDV o_orderkey 286720
+  r2 supplier: rows 10000 exact, 34.4 B/row; NDV s_suppkey 10000, s_nationkey 25
+  r3 lineitem#1 (f): rows 1200243 est, 16.2 B/row; NDV l_suppkey 10000, l_orderkey 885711
+  edge r2-r3: r2.s_suppkey = r3.l_suppkey
+  edge r1-r3: r1.o_orderkey = r3.l_orderkey
+  edge r0-r2: r0.n_nationkey = r2.s_nationkey
+  plan's order (r0 (r1 (r2 r3))), build first
+  DPhyp priced 6 sets, chose (((r0 r2) r3) r1)
+  oriented (((r0 r2) r3) r1), build first
+  join r0 x r2: 400.0 rows x 30.2 B = 12100 B
+  join r0+r2 x r3: 48009.7 rows x 38.4 B = 1842373 B
+  join r0+r2+r3 x r1: 9176.9 rows x 38.4 B = 352163 B
+  C_out 2206636 B; the plan's order, priced by the same estimates, 61112945 B
+replan 1: the build of MJ1's join on l_orderkey = o_orderkey came out 156739 rows, est 48009.7 (q-error 3.26)
+  kept as memory sources: m0 (156739 rows) = [[nation (f)] join supplier] join lineitem#1 (f)
+  MJ1: 2 relations, ordered again
+    r0 m0: rows 156739 measured, 38.4 B/row; NDV l_orderkey 148850
+    r1 orders (f): rows 286720 est, 8.1 B/row; NDV o_orderkey 286720
+    edge r0-r1: r0.l_orderkey = r1.o_orderkey
+    previous order (r0 r1), build first
+    DPhyp priced 1 sets, chose (r0 r1): the previous order
+    oriented (r1 r0), build first
+    join r1 x r0: 29960.1 rows x 38.4 B = 1149720 B
+    C_out 1149720 B; the previous order, priced by the same estimates, 1149720 B
+    flipped: r1 builds, r0 probes
+replan 2: the build of MJ1's join on o_orderkey = l_orderkey came out 729413 rows, est 286720.0 (q-error 2.54)
+  kept as memory sources: m1 (729413 rows) = orders (f)
+  MJ1: 2 relations, ordered again
+    r0 m1: rows 729413 measured, 8.1 B/row; NDV o_orderkey 729413
+    r1 m0: rows 156739 measured, 38.4 B/row; NDV l_orderkey 148850
+    edge r0-r1: r0.o_orderkey = r1.l_orderkey
+    previous order (r0 r1), build first
+    DPhyp priced 1 sets, chose (r0 r1): the previous order
+    oriented (r0 r1), build first
+    join r0 x r1: 76218.3 rows x 38.4 B = 2924878 B
+    C_out 2924878 B; the previous order, priced by the same estimates, 2924878 B
+replan 3: the build of a anti join on l_orderkey = l_orderkey came out 73089 rows, est 15243.7 (q-error 4.79)
+  kept as memory sources: m2 (73089 rows) = [[m1] join m0] semi join lineitem#2
+plan diff: this query's section of <mode>.plandiff.txt
+== q22
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 customer#2 (f): rows 30000 est, 43.4 B/row; NDV c_custkey 30000
+  r1 orders: rows 1500000 exact, 8.1 B/row; NDV o_custkey 99996
+  edge r0-r1: r0.c_custkey = r1.o_custkey, an anti join keeping r0's rows without a match
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 10000.7 rows x 35.2 B = 352524 B
+  C_out 352524 B; the plan's order, priced by the same estimates, 352524 B
+plan unchanged
+== aggregate-groupby
+nothing fired
+== anti-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 customer (f): rows 30000 est, 8.1 B/row; NDV c_custkey 30000
+  r1 orders: rows 1500000 exact, 130.0 B/row; NDV o_custkey 99996
+  edge r1-r0: r1.o_custkey = r0.c_custkey, an anti join keeping r1's rows without a match
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 1199998.0 rows x 130.0 B = 156046540 B
+  C_out 156046540 B; the plan's order, priced by the same estimates, 156046540 B
+plan unchanged
+== anti-join-reorder
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 customer: rows 150000 exact, 34.4 B/row; NDV c_custkey 150000, c_nationkey 25
+  r2 orders: rows 1500000 exact, 8.1 B/row; NDV o_custkey 99996
+  edge r1-r2: r1.c_custkey = r2.o_custkey, an anti join keeping r1's rows without a match
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows x 30.2 B = 181500 B
+  join r0+r1 x r2: 2000.1 rows x 30.2 B = 60504 B
+  C_out 242004 B; the plan's order, priced by the same estimates, 1779392 B
+plan diff: this query's section of <mode>.plandiff.txt
+== cross-join
+nothing fired
+== filter-project
+nothing fired
+== hash-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 orders: rows 1500000 exact, 24.2 B/row; NDV o_orderkey 1500000
+  r1 lineitem: rows 6001215 exact, 24.2 B/row; NDV l_orderkey 1500000
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 6001215.0 rows x 32.2 B = 193539184 B
+  C_out 193539184 B; the plan's order, priced by the same estimates, 193539184 B
+plan unchanged
+== join-int
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 customer: rows 150000 exact, 12.2 B/row; NDV c_custkey 150000
+  r1 orders: rows 1500000 exact, 8.1 B/row; NDV o_custkey 99996
+  edge r0-r1: r0.c_custkey = r1.o_custkey
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 1500000.0 rows x 4.1 B = 6187500 B
+  C_out 6187500 B; the plan's order, priced by the same estimates, 6187500 B
+plan unchanged
+== left-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 orders: rows 1500000 exact, 24.2 B/row; NDV o_orderkey 1500000
+  r1 lineitem: rows 6001215 exact, 24.2 B/row; NDV l_orderkey 1500000
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey, a left join keeping every row of r0
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 6001215.0 rows x 32.2 B = 193539184 B
+  C_out 193539184 B; the plan's order, priced by the same estimates, 193539184 B
+plan unchanged
+== left-join-fixed
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 lineitem (f): rows 48.6 est, 16.2 B/row; NDV l_orderkey 48.6
+  r1 customer: rows 150000 exact, 30.2 B/row; NDV c_custkey 150000
+  r2 orders: rows 1500000 exact, 16.2 B/row; NDV o_custkey 99996, o_orderkey 1500000
+  edge r1-r2: r1.c_custkey = r2.o_custkey, a left join keeping every row of r1
+  edge r0-r1+r2: r0.l_orderkey = r2.o_orderkey; applies once r1+r2 are joined
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 2 sets, chose (r0 (r1 r2)): the plan's order
+  oriented (r0 (r1 r2)), build first
+  join r1 x r2: 1550004.0 rows x 30.2 B = 46887621 B
+  join r0 x r1+r2: 50.3 rows x 38.4 B = 1929 B
+  C_out 46889550 B; the plan's order, priced by the same estimates, 46889550 B
+replan 1: the build of MJ1's join on l_orderkey = o_orderkey came out 2528 rows, est 48.6 (q-error 51.97)
+  kept as memory sources: m0 (2528 rows) = lineitem (f)
+  MJ1: 3 relations, ordered again
+    r0 m0: rows 2528 measured, 16.2 B/row; NDV l_orderkey 2488
+    r1 customer: rows 150000 exact, 30.2 B/row; NDV c_custkey 150000
+    r2 orders: rows 1500000 exact, 16.2 B/row; NDV o_custkey 99996, o_orderkey 1500000
+    edge r1-r2: r1.c_custkey = r2.o_custkey, a left join keeping every row of r1
+    edge r0-r1+r2: r0.l_orderkey = r2.o_orderkey; applies once r1+r2 are joined
+    previous order (r0 (r1 r2)), build first
+    DPhyp priced 2 sets, chose (r0 (r1 r2)): the previous order
+    oriented (r0 (r1 r2)), build first
+    join r1 x r2: 1550004.0 rows x 30.2 B = 46887621 B
+    join r0 x r1+r2: 2612.3 rows x 38.4 B = 100246 B
+    C_out 46987867 B; the previous order, priced by the same estimates, 46987867 B
+plan diff: this query's section of <mode>.plandiff.txt
+== left-join-reorder
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 customer: rows 150000 exact, 34.4 B/row; NDV c_custkey 150000, c_nationkey 25
+  r2 orders: rows 1500000 exact, 16.2 B/row; NDV o_custkey 99996
+  edge r1-r2: r1.c_custkey = r2.o_custkey, a left join keeping every row of r1
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows x 30.2 B = 181500 B
+  join r0+r1 x r2: 62000.5 rows x 30.2 B = 1875516 B
+  C_out 2057016 B; the plan's order, priced by the same estimates, 55156904 B
+plan diff: this query's section of <mode>.plandiff.txt
+== mixed-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 orders: rows 1500000 exact, 28.4 B/row; NDV o_orderkey 1500000
+  r1 lineitem: rows 6001215 exact, 28.4 B/row; NDV l_orderkey 1500000
+  edge r0-r1: r0.o_orderkey = r1.l_orderkey
+  residual r0-r1 on r1.l_shipdate, r0.o_orderdate: keeps 0.2 of the matches, not a DPhyp edge
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 1200243.0 rows x 32.2 B = 38707837 B
+  C_out 38707837 B; the plan's order, priced by the same estimates, 38707837 B
+plan unchanged
+== nested-limits
+nothing fired
+== nested-loop-join
+nothing fired
+== nested-loop-left-join
+nothing fired
+== rollup-over-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 nation: rows 25 exact, 4.1 B/row; NDV n_nationkey 25
+  r1 customer: rows 150000 exact, 17.2 B/row; NDV c_nationkey 25
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 150000.0 rows x 17.2 B = 2587050 B
+  C_out 2587050 B; the plan's order, priced by the same estimates, 2587050 B
+plan unchanged
+== scan-limit
+nothing fired
+== semi-join
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 2 relations, ordered before the run
+  r0 customer (f): rows 30000 est, 8.1 B/row; NDV c_custkey 30000
+  r1 orders: rows 1500000 exact, 130.0 B/row; NDV o_custkey 99996
+  edge r1-r0: r1.o_custkey = r0.c_custkey, a semi join keeping r1's matches
+  plan's order (r0 r1), build first
+  DPhyp priced 1 sets, chose (r0 r1): the plan's order
+  oriented (r0 r1), build first
+  join r0 x r1: 300002.0 rows x 130.0 B = 39011960 B
+  C_out 39011960 B; the plan's order, priced by the same estimates, 39011960 B
+plan unchanged
+== semi-join-reorder
+estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
+names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
+MJ1: 3 relations, ordered before the run
+  r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
+  r1 customer: rows 150000 exact, 34.4 B/row; NDV c_custkey 150000, c_nationkey 25
+  r2 orders: rows 1500000 exact, 8.1 B/row; NDV o_custkey 99996
+  edge r1-r2: r1.c_custkey = r2.o_custkey, a semi join keeping r1's matches
+  edge r0-r1: r0.n_nationkey = r1.c_nationkey
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 3 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 6000.0 rows x 30.2 B = 181500 B
+  join r0+r1 x r2: 3999.9 rows x 30.2 B = 120996 B
+  C_out 302496 B; the plan's order, priced by the same estimates, 3558358 B
+plan diff: this query's section of <mode>.plandiff.txt
+== shuffle-additive
+nothing fired
+== shuffle-additive-avg
+nothing fired
+== shuffle-stddev
+nothing fired

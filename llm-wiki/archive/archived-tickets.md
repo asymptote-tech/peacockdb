@@ -27,6 +27,32 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t289"></a>
+### #289 — a left or anti join's estimate ignores the key domain, and DPhyp orders on it
+`Estimator.equi_join` (`scripts/exec_model/optimizer/cardinality.py`) divides inner rows by the key
+domain but takes each matched share as `min(1, other NDV / own NDV)`: where the domain exceeds both
+key counts every preserved row counts as matched, so a left join comes out below its own preserved
+side and an anti join at 0. The cardinality golden shows it: tpcds q75's six left joins near a tenth
+of their rows (2,849.5 against 27,388), q69's two anti joins and q94's at 0.0 against 580, 611, 40.
+`SetEstimates` prices non-inner sets the same way, so it picks orders: in q75 at tp1-single the
+catalog returns' left join is priced at 14,372 rows against its preserved side's 143,810, and DPhyp
+joins the dates above it rather than below, 1–3 % dearer. Fix: both shares over the inner rows'
+domain, `other NDV / max(build NDV, probe NDV, domain)`; q75 then estimates 28,513 and keeps the
+plan's order in all three channels. It moves the cardinality golden and every non-inner estimate,
+so a full `run.py` comes with it. `bug_a_left_join_is_estimated_below_its_preserved_side`
+(`test_cardinality.py`) records it.
+
+**Done.** Both shares are the other side's key NDV over the inner rows' own divisor,
+`max(build NDV, probe NDV, domain)`, so on either side matched rows times fan-out are the inner
+rows; with no wider domain it is the old `min(1, …)`. q75's left joins estimate 28,512.8 (catalog),
+57,190.8 (store) and 14,283.5 (web), each within 9 % of its two years' true rows, and DPhyp
+keeps the plan's order, 3.6–6.5 % cheaper than with the defect; q69's anti joins are 949.2 and
+3,325.1, q94's 4.2. Only a plan holding a non-mark, non-inner hash join reads a share, so
+`run.py` re-ran those 39 queries. Pinned in `test_cardinality.py` by
+`test_a_left_join_keeps_its_preserved_side_where_the_domain_is_wider_than_both_keys`,
+`test_an_anti_join_keeps_the_unmatched_share_where_the_domain_is_wider_than_both_keys` and
+`test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is_wider`.
+
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
 **Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**

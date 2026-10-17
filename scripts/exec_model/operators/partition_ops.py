@@ -14,12 +14,14 @@ never emitted, rather than teach the kernel to scatter them.
 
 from __future__ import annotations
 
+import numbers
 import zlib
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
-from ..executors import PartitionEmitterExecutor
+from ..engine.executors import PartitionEmitterExecutor
 from .frame import PandasBatch, no_scratch
 
 SEED = 42
@@ -30,12 +32,17 @@ HashFn = Callable[[pd.DataFrame, "list[str]", int], "list[int]"]
 
 
 def _hash_value(value) -> bytes:
-    if isinstance(value, bool):
-        return b"b" + bytes([value])
-    if isinstance(value, int):
+    # Hashed as the SQL value, not as pandas holds it: an integer column holding a null is
+    # float64 here (`frame.py`), and its 5.0 must land where the other side's 5 does — a
+    # numpy int is no python `int` either, and fell through to the string arm.
+    if isinstance(value, (bool, np.bool_)):
+        return b"b" + bytes([bool(value)])
+    if isinstance(value, numbers.Integral) or (
+        isinstance(value, float) and value.is_integer() and abs(value) < 2**63
+    ):
         return b"i" + int(value).to_bytes(8, "little", signed=True)
     if isinstance(value, float):
-        return b"f" + repr(value).encode()
+        return b"f" + repr(float(value)).encode()
     return b"s" + str(value).encode()
 
 
@@ -47,11 +54,11 @@ def row_digests(frame: pd.DataFrame, keys: list[str]) -> list[int]:
     keys must still give equal digests, and that is what keeps co-location true.
     """
     digests = []
-    columns = [frame[key] for key in keys]
-    for position in range(len(frame)):
+    # A column's array yields what `.iloc` would — a float32 stays a numpy float32 — at a
+    # fraction of the cost per row, which the corpus pays tens of millions of times.
+    for row in zip(*(frame[key].array for key in keys)):
         digest = SEED
-        for column in columns:
-            value = column.iloc[position]
+        for value in row:
             if pd.isna(value):
                 continue  # comet skips null columns — all-null keys collapse to one lane
             digest = zlib.crc32(_hash_value(value), digest)

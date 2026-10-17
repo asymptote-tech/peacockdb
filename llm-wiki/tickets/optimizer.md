@@ -20,6 +20,7 @@
 - [#142 (split large batches) split large batches](#t142)
 - [#138 (ranged sorted merge) add ranged sorted merge](#t138)
 - [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
+- [#290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not](#t290)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -264,3 +265,13 @@ Fix: under a `STREAMING_LIMIT`, charge the lesser of the pruned row groups and t
 `operator_rows_scanned`; a `rowid` range from pass 2 bounds the scan the same way. tpcds q28, q32,
 q38 and q97 hold scans under a limit too, each scanning its whole table: check their goldens
 hold, and the two tpch ratios become comparable.
+
+<a id="t290"></a>
+### #290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not
+`_matched_keys` (`scripts/exec_model/optimizer/cardinality.py`) cuts both sides' key NDV to the
+smaller side's for every join type, so what reads the key above an outer or anti join undercounts.
+A left join of 1,000 keys against 10 is 1,000 rows with key NDV 10, true 1,000; a left anti join
+is 990 rows, NDV 10. The rows are right since #289; the NDV is not. tpch q13 groups by `c_custkey`
+over `customer ⟕ orders`: the final aggregate is estimated at 99,996 groups, orders' customer
+count, against 150,000. Only an inner or semi join's output holds just the matched values; a
+preserved side keeps its own NDV, and an anti join's is at most its own less the matched ones.
