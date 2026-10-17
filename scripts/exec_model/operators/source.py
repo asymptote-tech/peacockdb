@@ -1,9 +1,11 @@
 """The loader, and the row-group → (partition, batch) policy it executes.
 
-`partition_row_groups` is a prototype of the spec's `ParquetBatchPartitioner` (task T2):
-one pure function, computed once at plan time, whose output everything else consumes
-verbatim. Row groups stand in for parquet's, since there is no parquet here — the shape of
-the mapping is what matters, not where the rows came from.
+`partition_row_groups` is a prototype of the planner's row-group mapping
+(`planner/translator/scan_mapping/partition.rs`): one pure function, computed once at plan time,
+whose output everything else consumes verbatim. Its row groups stand in for parquet's — the
+shape of the mapping is what matters, not where the rows came from. An engine plan brings the
+real ones instead: its mapping numbers a file's own row groups, whose sizes `row_group_ranges`
+turns into rows.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import random
 
 import pandas as pd
 
-from ..executors import SourceExecutor
+from ..engine.executors import SourceExecutor
 from .frame import PandasBatch, no_scratch
 
 
@@ -24,6 +26,15 @@ def split_row_groups(total_rows: int, rows_per_group: int) -> list[tuple[int, in
         (start, min(rows_per_group, total_rows - start))
         for start in range(0, total_rows, rows_per_group)
     ]
+
+
+def row_group_ranges(row_counts: list[int]) -> list[tuple[int, int]]:
+    """A file's row groups as (start, length) pairs over its rows, file order."""
+    ranges, start = [], 0
+    for count in row_counts:
+        ranges.append((start, count))
+        start += count
+    return ranges
 
 
 def partition_row_groups(
@@ -118,6 +129,9 @@ class TableSource(SourceExecutor):
     the input every downstream operator is least likely to have been written for. The
     injections are bounded (one per real batch plus one tail) so the lane still terminates,
     and driven by a seeded generator so a failure reproduces.
+
+    `limit` is a scan's pushed-down row limit: the lane stops reading once it has emitted
+    that many rows, as cuDF's reader stops at its row count.
     """
 
     def __init__(
@@ -129,8 +143,11 @@ class TableSource(SourceExecutor):
         lane: int,
         empty_probability: float = 0.0,
         seed: int = 0,
+        limit: int | None = None,
     ):
         self.frame = frame
+        self.limit = limit
+        self.rows_out = 0
         self.row_groups = row_groups
         self.batches = list(batches)
         self.name = name
@@ -140,6 +157,10 @@ class TableSource(SourceExecutor):
         self.injected = 0
         self._budget = len(self.batches) + 1
         self._rng = random.Random(seed) if empty_probability > 0 else None
+        #: the next batch's rows, fetched ahead of its decode
+        self._fetched: pd.DataFrame | None = None
+        #: how many times a batch's row groups were read — once each, fetched ahead or not
+        self.reads = 0
 
     def resident_bytes(self) -> int:
         return 0  # the source holds no state between calls; the table is the input
@@ -155,20 +176,65 @@ class TableSource(SourceExecutor):
             self.injected += 1
             tag = f"{self.name}.p{self.lane}.empty{self.injected}"
             return PandasBatch(self.frame.iloc[0:0], tag), no_scratch()
-        if self.emitted >= len(self.batches):
+        if not self._remains():
             return None
+        piece = self._fetched if self._fetched is not None else self._piece()
+        self._fetched = None
+        self.rows_out += len(piece)
+        tag = f"{self.name}.p{self.lane}.b{self.emitted}"
+        self.emitted += 1
+        return PandasBatch(piece, tag), no_scratch()   # the slice is the output
+
+    def max_batches(self) -> int:
+        """Its batches, and the empty ones it may inject between and after them."""
+        return len(self.batches) + (self._budget if self._rng is not None else 0)
+
+    def can_prefetch(self) -> bool:
+        return self._fetched is None and self._remains()
+
+    def prefetch(self) -> int:
+        self._fetched = self._piece()
+        return int(self._fetched.memory_usage(index=False, deep=True).sum())
+
+    def _remains(self) -> bool:
+        return self.emitted < len(self.batches) and self.rows_out != self.limit
+
+    def _piece(self) -> pd.DataFrame:
+        self.reads += 1
         groups = self.batches[self.emitted]
         # Row groups within a batch are contiguous by construction, so one slice suffices —
         # the same reason cuDF's reader takes a row-group list rather than row ranges.
         start = self.row_groups[groups[0]][0]
         stop = self.row_groups[groups[-1]][0] + self.row_groups[groups[-1]][1]
         piece = self.frame.iloc[start:stop]
-        tag = f"{self.name}.p{self.lane}.b{self.emitted}"
-        self.emitted += 1
-        return PandasBatch(piece, tag), no_scratch()   # the slice is the output
+        return piece if self.limit is None else piece.iloc[: self.limit - self.rows_out]
 
     def _inject_empty(self) -> bool:
         """Bounded, so the lane still terminates however the generator falls."""
         if self._rng is None or self.injected >= self._budget:
             return False
         return self._rng.random() < self.empty_probability
+
+
+class MemorySource(SourceExecutor):
+    """One lane of a materialization kept from a stopped run: its one batch, emitted once. It
+    holds the batch until then — on the device that is the handle the replan was handed."""
+
+    def __init__(self, frame: pd.DataFrame, name: str, lane: int):
+        self.frame, self.name, self.lane = frame, name, lane
+        self.emitted = False
+
+    def resident_bytes(self) -> int:
+        return 0 if self.emitted else int(self.frame.memory_usage(index=False, deep=True).sum())
+
+    def scratch_bytes(self, n_rows: int, n_bytes: int) -> int:
+        return 0
+
+    def next_batch(self):
+        if self.emitted:
+            return None
+        self.emitted = True
+        return PandasBatch(self.frame, f"{self.name}.p{self.lane}"), no_scratch()
+
+    def max_batches(self) -> int:
+        return 1
