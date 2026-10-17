@@ -156,7 +156,7 @@ class QueryFiles(unittest.TestCase):
     def test_the_three_datasets_resolve_their_queries(self):
         """The two benchmarks are a fixed set; pbench grows as the join-rewrite chain lands its
         queries, so it gets a floor rather than a count nobody would remember to update."""
-        for dataset, count in [("tpch", 39), ("tpcds", 99)]:
+        for dataset, count in [("tpch", 43), ("tpcds", 99)]:
             self.assertEqual(len(dr.query_files(dataset, None)), count, dataset)
         pbench = [q.stem for q in dr.query_files("pbench", None)]
         self.assertGreater(len(pbench), 50)

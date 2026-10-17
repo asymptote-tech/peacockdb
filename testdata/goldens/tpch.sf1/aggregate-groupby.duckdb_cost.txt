@@ -1,0 +1,17 @@
+PROJECTION: projections=[__internal_decompress_string(#0), #1], output_bytes=96, output_rows=3, materialized=0
+  PERFECT_HASH_GROUP_BY: groups=[#0], aggregates=[sum_no_overflow(#1)], output_bytes=51, output_rows=3, materialized=54010935
+    PROJECTION: projections=[l_returnflag, l_quantity], output_bytes=54010935, output_rows=6001215, materialized=0
+      PROJECTION: projections=[__internal_compress_string_utinyint(#0), #1], output_bytes=54010935, output_rows=6001215, materialized=0
+        TABLE_SCAN: table=lineitem, projections=[l_returnflag, l_quantity], output_bytes=144029160, output_rows=6001215, materialized=144029160, bytes_read=126025515, rows_read=6001215
+duckdb_cost=324065610
+materialization_total=198040095
+storage_read_total=126025515
+
+--- row-group pruning (storage reduction) ---
+lineitem  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=5302991/5302991 (100.0%)
+pruning_bytes_fetched=5302991/5302991 (100.0%)
+
+--- cost breakdown ---
+TABLE_SCAN(lineitem)                  144029160  72.7%
+PERFECT_HASH_GROUP_BY                  54010935  27.3%
+total=198040095

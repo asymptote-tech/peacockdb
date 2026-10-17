@@ -19,10 +19,11 @@ corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb_approx, data_fusion_exac
 corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but six:
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but ten:
 // q11 and q22 at tp4 modes where a keyless merge meets a lane with no arrival (#199), the rollup
 // (#65), mixed-join (#168), nested-limits and scan-limit (#186). The joins' own blockers, #152's
-// side copies and #220's batch splits, went with the join session.
+// side copies and #220's batch splits, went with the join session. The other four are the
+// non-inner join queries at the end of this section.
 corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -98,6 +99,14 @@ corpus_query!(tpch, 1, q21, all_modes, all_modes, duckdb_exact, data_fusion_exac
 corpus_query!(tpch, 1, q7, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q8, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+
+// Non-inner joins written in the costly order: three that may move, and left-join-fixed, which
+// may not. Off the device on #288: no device has run them.
+// left-join-reorder is over the result cap.
+corpus_query!(tpch, 1, left_join_reorder, all_modes, none, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, semi_join_reorder, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, anti_join_reorder, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, left_join_fixed, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
