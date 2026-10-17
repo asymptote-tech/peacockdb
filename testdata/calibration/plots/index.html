@@ -12,17 +12,64 @@
 </style>
 <h1>peacockdb cost-model calibration</h1>
 <p class="note">Every picture here comes from one call to
-<code>scripts/calibration/plot.py</code>. Sources: testdata/calibration/records.tsv, testdata/calibration/hbm.tsv</p>
+<code>scripts/calibration/plot.py</code>, rendered with matplotlib 3.9.2. Sources:
+testdata/calibration/tpch.sf40/records.tsv, testdata/calibration/tpcds.sf40/records.tsv, testdata/calibration/hbm.tsv</p>
 <h2>Icicle: plan node → recipe step → cuDF call</h2>
 <p class="note">The record&#x27;s three-level tuple, drawn as three levels. Width is device time; a level&#x27;s children sum to it. One real execution — the one whose total is the median — because per-call medians give a picture belonging to no execution.</p>
+<figure><img src="icicle/tpcds.sf40_q37_tp1-single.png" alt="icicle/tpcds.sf40_q37_tp1-single.png"><figcaption>icicle/tpcds.sf40_q37_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpcds.sf40_q82_tp1-single.png" alt="icicle/tpcds.sf40_q82_tp1-single.png"><figcaption>icicle/tpcds.sf40_q82_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpcds.sf40_q84_tp1-single.png" alt="icicle/tpcds.sf40_q84_tp1-single.png"><figcaption>icicle/tpcds.sf40_q84_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpcds.sf40_q85_tp1-single.png" alt="icicle/tpcds.sf40_q85_tp1-single.png"><figcaption>icicle/tpcds.sf40_q85_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_aggregate-groupby_tp1-single.png" alt="icicle/tpch.sf40_aggregate-groupby_tp1-single.png"><figcaption>icicle/tpch.sf40_aggregate-groupby_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_filter-project_tp1-single.png" alt="icicle/tpch.sf40_filter-project_tp1-single.png"><figcaption>icicle/tpch.sf40_filter-project_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_nested-loop-join_tp1-single.png" alt="icicle/tpch.sf40_nested-loop-join_tp1-single.png"><figcaption>icicle/tpch.sf40_nested-loop-join_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q17_tp1-single.png" alt="icicle/tpch.sf40_q17_tp1-single.png"><figcaption>icicle/tpch.sf40_q17_tp1-single.png</figcaption></figure>
 <figure><img src="icicle/tpch.sf40_q19_tp1-single.png" alt="icicle/tpch.sf40_q19_tp1-single.png"><figcaption>icicle/tpch.sf40_q19_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q1_tp1-rowgroup.png" alt="icicle/tpch.sf40_q1_tp1-rowgroup.png"><figcaption>icicle/tpch.sf40_q1_tp1-rowgroup.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q1_tp1-single.png" alt="icicle/tpch.sf40_q1_tp1-single.png"><figcaption>icicle/tpch.sf40_q1_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q1_tp4-rowgroup.png" alt="icicle/tpch.sf40_q1_tp4-rowgroup.png"><figcaption>icicle/tpch.sf40_q1_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q1_tp4-single.png" alt="icicle/tpch.sf40_q1_tp4-single.png"><figcaption>icicle/tpch.sf40_q1_tp4-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q1_tp4-sized.png" alt="icicle/tpch.sf40_q1_tp4-sized.png"><figcaption>icicle/tpch.sf40_q1_tp4-sized.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q6_tp1-rowgroup.png" alt="icicle/tpch.sf40_q6_tp1-rowgroup.png"><figcaption>icicle/tpch.sf40_q6_tp1-rowgroup.png</figcaption></figure>
 <figure><img src="icicle/tpch.sf40_q6_tp1-single.png" alt="icicle/tpch.sf40_q6_tp1-single.png"><figcaption>icicle/tpch.sf40_q6_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q6_tp4-rowgroup.png" alt="icicle/tpch.sf40_q6_tp4-rowgroup.png"><figcaption>icicle/tpch.sf40_q6_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_q6_tp4-single.png" alt="icicle/tpch.sf40_q6_tp4-single.png"><figcaption>icicle/tpch.sf40_q6_tp4-single.png</figcaption></figure>
 <figure><img src="icicle/tpch.sf40_q6_tp4-sized.png" alt="icicle/tpch.sf40_q6_tp4-sized.png"><figcaption>icicle/tpch.sf40_q6_tp4-sized.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png" alt="icicle/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png"><figcaption>icicle/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive-avg_tp1-single.png" alt="icicle/tpch.sf40_shuffle-additive-avg_tp1-single.png"><figcaption>icicle/tpch.sf40_shuffle-additive-avg_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png" alt="icicle/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png"><figcaption>icicle/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive-avg_tp4-single.png" alt="icicle/tpch.sf40_shuffle-additive-avg_tp4-single.png"><figcaption>icicle/tpch.sf40_shuffle-additive-avg_tp4-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive-avg_tp4-sized.png" alt="icicle/tpch.sf40_shuffle-additive-avg_tp4-sized.png"><figcaption>icicle/tpch.sf40_shuffle-additive-avg_tp4-sized.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-additive_tp1-single.png" alt="icicle/tpch.sf40_shuffle-additive_tp1-single.png"><figcaption>icicle/tpch.sf40_shuffle-additive_tp1-single.png</figcaption></figure>
+<figure><img src="icicle/tpch.sf40_shuffle-stddev_tp1-single.png" alt="icicle/tpch.sf40_shuffle-stddev_tp1-single.png"><figcaption>icicle/tpch.sf40_shuffle-stddev_tp1-single.png</figcaption></figure>
 <h2>Where a case&#x27;s time went</h2>
 <p class="note">Left: device time per plan node. Right: the host and device terms side by side, never summed — under CUDA events the host interval contains the device one, so adding them describes no interval.</p>
+<figure><img src="query/tpcds.sf40_q37_tp1-single.png" alt="query/tpcds.sf40_q37_tp1-single.png"><figcaption>query/tpcds.sf40_q37_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpcds.sf40_q82_tp1-single.png" alt="query/tpcds.sf40_q82_tp1-single.png"><figcaption>query/tpcds.sf40_q82_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpcds.sf40_q84_tp1-single.png" alt="query/tpcds.sf40_q84_tp1-single.png"><figcaption>query/tpcds.sf40_q84_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpcds.sf40_q85_tp1-single.png" alt="query/tpcds.sf40_q85_tp1-single.png"><figcaption>query/tpcds.sf40_q85_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_aggregate-groupby_tp1-single.png" alt="query/tpch.sf40_aggregate-groupby_tp1-single.png"><figcaption>query/tpch.sf40_aggregate-groupby_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_filter-project_tp1-single.png" alt="query/tpch.sf40_filter-project_tp1-single.png"><figcaption>query/tpch.sf40_filter-project_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_nested-loop-join_tp1-single.png" alt="query/tpch.sf40_nested-loop-join_tp1-single.png"><figcaption>query/tpch.sf40_nested-loop-join_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q17_tp1-single.png" alt="query/tpch.sf40_q17_tp1-single.png"><figcaption>query/tpch.sf40_q17_tp1-single.png</figcaption></figure>
 <figure><img src="query/tpch.sf40_q19_tp1-single.png" alt="query/tpch.sf40_q19_tp1-single.png"><figcaption>query/tpch.sf40_q19_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q1_tp1-rowgroup.png" alt="query/tpch.sf40_q1_tp1-rowgroup.png"><figcaption>query/tpch.sf40_q1_tp1-rowgroup.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q1_tp1-single.png" alt="query/tpch.sf40_q1_tp1-single.png"><figcaption>query/tpch.sf40_q1_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q1_tp4-rowgroup.png" alt="query/tpch.sf40_q1_tp4-rowgroup.png"><figcaption>query/tpch.sf40_q1_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q1_tp4-single.png" alt="query/tpch.sf40_q1_tp4-single.png"><figcaption>query/tpch.sf40_q1_tp4-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q1_tp4-sized.png" alt="query/tpch.sf40_q1_tp4-sized.png"><figcaption>query/tpch.sf40_q1_tp4-sized.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q6_tp1-rowgroup.png" alt="query/tpch.sf40_q6_tp1-rowgroup.png"><figcaption>query/tpch.sf40_q6_tp1-rowgroup.png</figcaption></figure>
 <figure><img src="query/tpch.sf40_q6_tp1-single.png" alt="query/tpch.sf40_q6_tp1-single.png"><figcaption>query/tpch.sf40_q6_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q6_tp4-rowgroup.png" alt="query/tpch.sf40_q6_tp4-rowgroup.png"><figcaption>query/tpch.sf40_q6_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_q6_tp4-single.png" alt="query/tpch.sf40_q6_tp4-single.png"><figcaption>query/tpch.sf40_q6_tp4-single.png</figcaption></figure>
 <figure><img src="query/tpch.sf40_q6_tp4-sized.png" alt="query/tpch.sf40_q6_tp4-sized.png"><figcaption>query/tpch.sf40_q6_tp4-sized.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png" alt="query/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png"><figcaption>query/tpch.sf40_shuffle-additive-avg_tp1-rowgroup.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive-avg_tp1-single.png" alt="query/tpch.sf40_shuffle-additive-avg_tp1-single.png"><figcaption>query/tpch.sf40_shuffle-additive-avg_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png" alt="query/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png"><figcaption>query/tpch.sf40_shuffle-additive-avg_tp4-rowgroup.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive-avg_tp4-single.png" alt="query/tpch.sf40_shuffle-additive-avg_tp4-single.png"><figcaption>query/tpch.sf40_shuffle-additive-avg_tp4-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive-avg_tp4-sized.png" alt="query/tpch.sf40_shuffle-additive-avg_tp4-sized.png"><figcaption>query/tpch.sf40_shuffle-additive-avg_tp4-sized.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-additive_tp1-single.png" alt="query/tpch.sf40_shuffle-additive_tp1-single.png"><figcaption>query/tpch.sf40_shuffle-additive_tp1-single.png</figcaption></figure>
+<figure><img src="query/tpch.sf40_shuffle-stddev_tp1-single.png" alt="query/tpch.sf40_shuffle-stddev_tp1-single.png"><figcaption>query/tpch.sf40_shuffle-stddev_tp1-single.png</figcaption></figure>
 <h2>Load — the scan, alone</h2>
 <p class="note">read_parquet: decompression, page decode, PCIe. Kept apart from compute on purpose: one axis holding both draws a picture about two different machines.</p>
 <figure><img src="load/CudfScan.png" alt="load/CudfScan.png"><figcaption>load/CudfScan.png</figcaption></figure>
@@ -33,8 +80,12 @@
 <figure><img src="compute/CudfCoalescePartitions.png" alt="compute/CudfCoalescePartitions.png"><figcaption>compute/CudfCoalescePartitions.png</figcaption></figure>
 <figure><img src="compute/CudfFilter.png" alt="compute/CudfFilter.png"><figcaption>compute/CudfFilter.png</figcaption></figure>
 <figure><img src="compute/CudfHashJoin_Inner_.png" alt="compute/CudfHashJoin_Inner_.png"><figcaption>compute/CudfHashJoin_Inner_.png</figcaption></figure>
+<figure><img src="compute/CudfNestedLoopJoin.png" alt="compute/CudfNestedLoopJoin.png"><figcaption>compute/CudfNestedLoopJoin.png</figcaption></figure>
 <figure><img src="compute/CudfProject.png" alt="compute/CudfProject.png"><figcaption>compute/CudfProject.png</figcaption></figure>
 <figure><img src="compute/CudfProject_finalize_.png" alt="compute/CudfProject_finalize_.png"><figcaption>compute/CudfProject_finalize_.png</figcaption></figure>
+<figure><img src="compute/CudfRepartition_Hash__1_4_.png" alt="compute/CudfRepartition_Hash__1_4_.png"><figcaption>compute/CudfRepartition_Hash__1_4_.png</figcaption></figure>
+<figure><img src="compute/CudfSort.png" alt="compute/CudfSort.png"><figcaption>compute/CudfSort.png</figcaption></figure>
+<figure><img src="compute/CudfSortPreservingMerge.png" alt="compute/CudfSortPreservingMerge.png"><figcaption>compute/CudfSortPreservingMerge.png</figcaption></figure>
 <figure><img src="compute/result_from_handle.png" alt="compute/result_from_handle.png"><figcaption>compute/result_from_handle.png</figcaption></figure>
 <h2>What a median discards</h2>
 <p class="note">Each execution&#x27;s device_us as a ratio to its own call&#x27;s median. A kind with a long tail is one whose median stands for scheduling noise.</p>

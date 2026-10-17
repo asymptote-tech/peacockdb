@@ -33,7 +33,7 @@ run_all() {  # <tree>; every binary runs even after a failure; rc is the OR of a
     # The lib holds every rung; the device one is selected by path.
     rung=""; skip=""; filter=()
     [ "$name" = peacockdb_core_gpu_lib ] && rung=gpu_tests::
-    # The measurement binary's bench_ cases are the measurement, tens of minutes on a device.
+    # The measurement binary's bench_ cases are the measurement, about an hour on a device.
     case $name in peacock_gpu_benchmarks) skip="--skip bench_" ;; esac
     [ -n "${PCK_TEST_FILTER:-}" ] && [ "$name" != peacockdb_core_gpu_lib ] && filter=("$PCK_TEST_FILTER")
     echo "==> $name $rung$skip"

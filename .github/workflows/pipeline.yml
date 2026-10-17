@@ -384,7 +384,7 @@ jobs:
           #   Every number under testdata/benchmark-results/ assumes both.
           # peacock_gpu_benchmarks = the measurement harness, run below with --skip bench_:
           #   its own assertions about where a section goes and what a record row must hold.
-          #   The timed cases are tens of minutes of device time and are not a merge gate;
+          #   The timed cases are about an hour of device time and are not a merge gate;
           #   scripts/build-test-shadgpu.sh --run-benchmarks is what runs those.
           # One line on purpose: the coverage guard reads the array below with a single
           # `lines().find`, so a continuation hides every target after the backslash.

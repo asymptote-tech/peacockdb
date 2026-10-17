@@ -58,7 +58,10 @@ RUST_TESTS_STAGING="$INSTALL_DIR/rust-tests"
 # here is attached: keep the ssh session (or wrap the call in tmux/nohup yourself).
 BENCH_TARGET=peacock_gpu_benchmarks
 BENCH_STAGING="$INSTALL_DIR/rust-benchmarks"
-BENCH_RECORD_REL=calibration/records.tsv   # the calibration record, beside the results
+# The calibration record, beside the results. Pulled home and kept there, never published:
+# the bucket's key names no host, and the record it holds is shad-gpu's
+# (build-test-shadgpu.sh --pull-benchmarks).
+BENCH_RECORD_REL=calibration/records.tsv
 
 BUILD=0
 BUILD_BENCH=0    # --build-benchmarks: release build of BENCH_TARGET into rust-benchmarks/
