@@ -2,9 +2,17 @@
 """Draw the calibration record, before anything is derived from it.
 
     /usr/bin/python3 scripts/calibration/plot.py \
-        --record testdata/calibration/records.tsv \
+        --record testdata/calibration/tpch.sf40/records.tsv \
+        --record testdata/calibration/tpcds.sf40/records.tsv \
         --hbm testdata/calibration/hbm.tsv \
         --out-dir testdata/calibration/plots
+
+The record is not in git. `--record` names a run's own, as `--pull-benchmarks` brings it home,
+or the published ones, a file per dataset, as `scripts/calibration/fetch_record.sh tpch.sf40`
+fetches them into `testdata/calibration/tpch.sf40/records.tsv`. `hbm.tsv` joins by call, not by
+execution, so it may come from another run of the same cases; a call it holds that the record
+lacks is refused. The pooled panels — load/, compute/, spread/, hbm/ — draw each
+`<dataset>.sf<sf>` as its own series.
 
 The one script. Every picture under `plots/`, and the `index.html` that shows them on one
 page, comes from this call and from nothing else. That is the point rather than a tidiness
@@ -14,10 +22,11 @@ file disagree the first time a column moves.
 A number per call answers "how much"; it cannot answer "is this the right shape", because
 it comes out the same either way. These are the pictures that say whether a call's cost is
 describable at all, so nothing here reduces a call to one number before it is drawn --
-every measured execution is a point.
+every measured execution is a point. The one exception is hbm/: its traffic is a row per
+call, the median over the counters pass's executions, so it draws a point per call.
 
 Not matplotlib's default python: this repo's `python3` is a linuxbrew build with neither
-numpy nor matplotlib. The committed panels were rendered on verda-gpu with matplotlib 3.5.1
+numpy nor matplotlib. The committed panels were rendered on a dev box with matplotlib 3.9.2
 — the version is embedded in every PNG and printed into `index.html`, so a re-render under
 another one rewrites all of them with the data unchanged.
 
@@ -90,14 +99,15 @@ CALL = CASE + ("node_seq", "recipe_seq", "call_index")
 # kept in step by hand. `CALL` and `run_index` are every panel's, since a point is a call
 # in an execution before it is anything else.
 READS = {
-    "load/ and compute/": ("sf", "recipe_kind", "in_bytes", "out_bytes", "device_us"),
-    "spread/": ("recipe_kind", "device_us"),
+    "load/ and compute/": ("dataset", "sf", "recipe_kind", "in_bytes", "out_bytes",
+                           "device_us"),
+    "spread/": ("dataset", "sf", "recipe_kind", "device_us"),
     "query/": ("node_seq", "node_type", "host_us", "device_us"),
     "icicle/": ("node_seq", "node_type", "recipe_seq", "recipe_kind", "call_index",
                 "device_us"),
-    "hbm/": ("out_bytes",),
+    "hbm/": ("dataset", "sf", "out_bytes"),
 }
-HBM_READS = ("recipe_kind", "hbm_bytes", "samples", "device_busy_us")
+HBM_READS = record.HBM_CALL + record.HBM_VALUES
 
 
 def num(row, column):
@@ -117,6 +127,23 @@ def is_load(row):
 
 def case_label(row):
     return f"{row['dataset']}.sf{row['sf']} {row['query']} {row['mode']}"
+
+
+def series(row):
+    """The series a pooled panel draws a row in: `<dataset>.sf<sf>`.
+
+    Not sf alone: tpch and tpcds at one sf are different plans over different tables, and
+    one colour for both would draw two populations as one.
+    """
+    return f"{row['dataset']}.sf{row['sf']}"
+
+
+def colours(names):
+    """One colour per series, in sorted order. Built once, in `main`, from every series the
+    run holds, and handed to each panel: a map per panel would give the first colour to
+    whichever series a panel holds alone, so one colour would mean two datasets."""
+    cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    return {name: cycle[i % len(cycle)] for i, name in enumerate(sorted(names))}
 
 
 def executions(rows):
@@ -140,7 +167,7 @@ def executions(rows):
 # scatter panels: compute/ and load/
 # ---------------------------------------------------------------------------
 
-def scatter(ax, points, title, xlabel, ylabel):
+def scatter(ax, points, title, xlabel, ylabel, palette):
     """One log-log panel, one point per execution.
 
     Log-log because a cost proportional to bytes is a straight line of slope 1 here
@@ -151,17 +178,17 @@ def scatter(ax, points, title, xlabel, ylabel):
     if not points:
         ax.set_axis_off()
         return False
-    by_sf = collections.defaultdict(list)
-    for sf, x, y in points:
+    by_series = collections.defaultdict(list)
+    for name, x, y in points:
         if x > 0 and y > 0:
-            by_sf[sf].append((x, y))
-    if not by_sf:
+            by_series[name].append((x, y))
+    if not by_series:
         ax.set_axis_off()
         return False
-    for sf in sorted(by_sf, key=lambda s: int(s)):
-        xs = [p[0] for p in by_sf[sf]]
-        ys = [p[1] for p in by_sf[sf]]
-        ax.scatter(xs, ys, s=14, alpha=0.55, label=f"sf{sf}")
+    for name in sorted(by_series):
+        xs = [p[0] for p in by_series[name]]
+        ys = [p[1] for p in by_series[name]]
+        ax.scatter(xs, ys, s=14, alpha=0.55, label=name, color=palette[name])
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_title(title, fontsize=9)
@@ -169,12 +196,12 @@ def scatter(ax, points, title, xlabel, ylabel):
     ax.set_ylabel(ylabel, fontsize=8)
     ax.tick_params(labelsize=7)
     ax.grid(alpha=0.25, which="both")
-    if len(by_sf) > 1:
-        ax.legend(fontsize=7)
+    # A legend even for one series: which dataset a panel holds is not otherwise on it.
+    ax.legend(fontsize=7)
     return True
 
 
-def plot_kinds(rows, out_dir, which):
+def plot_kinds(rows, out_dir, which, palette):
     """One figure per cuDF step kind, for one side of the load/compute line.
 
     Per kind rather than per plan node: the record's `recipe_kind` is what the device was
@@ -194,12 +221,12 @@ def plot_kinds(rows, out_dir, which):
         drawn = False
         for ax, xcol in zip(axes, ("out_bytes", "in_bytes")):
             points = [
-                (r["sf"], num(r, xcol), num(r, "device_us"))
+                (series(r), num(r, xcol), num(r, "device_us"))
                 for r in of_kind
                 if num(r, xcol) is not None and num(r, "device_us") is not None
             ]
             drawn |= scatter(ax, points, f"{kind}: device_us vs {xcol}",
-                             xcol, "device_us")
+                             xcol, "device_us", palette)
         note = ("STORAGE — this is read_parquet: decompression, page decode, PCIe. "
                 "Never drawn beside compute; see the module docstring."
                 if which == "load" else
@@ -223,7 +250,33 @@ def safe(name):
 # spread/ — what collapsing executions to one number throws away
 # ---------------------------------------------------------------------------
 
-def plot_spread(by_call, out_dir):
+def grouped_boxes(ax, kinds, names, by_kind, palette, **style):
+    """One box per (kind, series), a kind's boxes side by side, and a legend naming them.
+
+    Ticks set after rather than through boxplot's own parameter: it was renamed `labels` ->
+    `tick_labels` in matplotlib 3.9, and this way the call works on both.
+    """
+    width = 0.8 / len(names)
+    for i, name in enumerate(names):
+        at = [k + 1 - 0.4 + width * (i + 0.5) for k in range(len(kinds))]
+        present = [(x, by_kind[kind][name]) for x, kind in zip(at, kinds)
+                   if by_kind[kind].get(name)]
+        if not present:
+            continue
+        boxes = ax.boxplot([values for _, values in present],
+                           positions=[x for x, _ in present], widths=width * 0.9,
+                           patch_artist=True, **style)
+        for box in boxes["boxes"]:
+            box.set_facecolor(palette[name])
+            box.set_alpha(0.6)
+        boxes["boxes"][0].set_label(name)
+    ax.set_xticks(range(1, len(kinds) + 1))
+    ax.set_xticklabels(kinds)
+    ax.set_xlim(0.5, len(kinds) + 0.5)
+    ax.legend(fontsize=7)
+
+
+def plot_spread(by_call, out_dir, palette):
     """Per step kind: each execution's device_us as a ratio to its own call's median.
 
     The question is not "how fast is this call" but "how repeatable is it". Any summary
@@ -234,7 +287,7 @@ def plot_spread(by_call, out_dir):
     Ratio to the call's own median, not to the kind's: calls of one kind differ by orders
     of magnitude in size, and a ratio across them would measure the query, not the noise.
     """
-    by_kind = collections.defaultdict(list)
+    by_kind = collections.defaultdict(lambda: collections.defaultdict(list))
     for group in by_call.values():
         times = [num(r, "device_us") for r in group]
         times = [t for t in times if t is not None and t > 0]
@@ -243,17 +296,14 @@ def plot_spread(by_call, out_dir):
         mid = statistics.median(times)
         if mid <= 0:
             continue
-        by_kind[group[0]["recipe_kind"]].extend(t / mid for t in times)
+        by_kind[group[0]["recipe_kind"]][series(group[0])].extend(t / mid for t in times)
     if not by_kind:
         return []
     kinds = sorted(by_kind)
-    fig, ax = plt.subplots(figsize=(max(6, 1.1 * len(kinds)), 4))
-    # Ticks set after rather than through boxplot's own parameter: it was renamed
-    # `labels` -> `tick_labels` in matplotlib 3.9, and this way the call works on both.
-    ax.boxplot([by_kind[k] for k in kinds], showfliers=True,
-               flierprops={"markersize": 2, "alpha": 0.4})
-    ax.set_xticks(range(1, len(kinds) + 1))
-    ax.set_xticklabels(kinds)
+    names = sorted({name for of_kind in by_kind.values() for name in of_kind})
+    fig, ax = plt.subplots(figsize=(max(6, (0.6 + 0.5 * len(names)) * len(kinds)), 4))
+    grouped_boxes(ax, kinds, names, by_kind, palette, showfliers=True,
+                  flierprops={"markersize": 2, "alpha": 0.4})
     ax.axhline(1.0, color="grey", lw=0.8, ls="--")
     ax.set_ylabel("device_us / this call's median", fontsize=8)
     ax.set_title("Spread across executions, per cuDF step kind — what a median discards",
@@ -505,31 +555,16 @@ def lighten(rgba, amount):
 # hbm/ — traffic against the bytes this side counted
 # ---------------------------------------------------------------------------
 
-def plot_hbm(hbm_rows, rows, out_dir):
-    """hbm_bytes against out_bytes, and the bandwidth that falls out of the pair.
+def hbm_points(hbm_rows, rows):
+    """One point per call — series, kind, `out_bytes`, `hbm_bytes`, thin, achieved GB/s —
+    joining a capture's traffic to a clean run's `out_bytes`, which no single file holds.
 
-    Two different runs meet here, and this function is where they meet: the traffic is a
-    capture's, `out_bytes` is a clean run's, and neither file holds both. That join is
-    the reason the record carries a tuple at all, so a panel drawing both is the one
-    picture that proves it works — see the key below for what the join may and may not
-    carry across the two runs.
-
-    An hbm row with no matching record row is not dropped quietly. The two files come
-    from different runs of the same cases, so a miss means they are not the same cases —
-    a filter that differed, a capture from before a rename — and a plot silently drawn
-    from the half that matched would look exactly like a complete one.
-
-    Calls under ten metric samples are drawn hollow. The integral over a call shorter
-    than the sampling period is an estimate from too few points, and a reader who cannot
-    see which points those are will fit a line through them.
+    Keyed by the call, not `run_index`: the files are different runs, and hbm rows a row per
+    execution are folded first (`record.hbm_per_call`). Only `out_bytes`, checked constant
+    across executions, crosses; no microsecond of one run meets a byte of the other. An hbm
+    call with no record row is refused, since a plot of the half that matched looks
+    complete. A call under ten metric samples is thin: too few points to integrate.
     """
-    if not hbm_rows:
-        return []
-
-    # Keyed by the call, deliberately without `run_index`: the two files are different
-    # runs, so execution 3 of each is not the same event. Only a per-call constant may
-    # cross — `out_bytes`, which the check below proves constant here while `device_us`
-    # moves 7% at the median. No microsecond of one run ever meets a byte of the other.
     key = lambda r: tuple(r[c] for c in CALL)
     logical = {}
     for r in rows:
@@ -541,43 +576,68 @@ def plot_hbm(hbm_rows, rows, out_dir):
                 "call; it is not, and every hbm point would be against whichever "
                 "execution happened to be read first."
             )
-    missed = [r for r in hbm_rows if key(r) not in logical]
+    calls = record.hbm_per_call(hbm_rows)
+    missed = [r for r in calls if key(r) not in logical]
     if missed:
         sys.exit(
-            f"{len(missed)} of {len(hbm_rows)} hbm rows join to no record row, the first "
+            f"{len(missed)} of {len(calls)} hbm calls join to no record row, the first "
             f"being {key(missed[0])}. The two files are not from the same cases; a plot "
             "drawn from the half that matched would look complete."
         )
-    for r in hbm_rows:
-        r["out_bytes"] = logical[key(r)]
-    thick = [r for r in hbm_rows if int(r["samples"]) >= 10]
-    thin = [r for r in hbm_rows if int(r["samples"]) < 10]
+    points = []
+    for r in calls:
+        busy = num(r, "device_busy_us")
+        points.append(dict(
+            series=series(r), kind=r["recipe_kind"], out_bytes=int(logical[key(r)]),
+            hbm_bytes=int(r["hbm_bytes"]),
+            thin=int(r["samples"]) < 10,
+            gbps=int(r["hbm_bytes"]) / 1e9 / (busy / 1e6) if busy else None,
+        ))
+    return points
+
+
+def plot_hbm(hbm_rows, rows, out_dir, palette):
+    """hbm_bytes against out_bytes, and the bandwidth that falls out of the pair: one point
+    per call, from `hbm_points`. Thin calls are drawn hollow and left out of the
+    bandwidth, since a reader who cannot see which points those are will fit a line through
+    them.
+    """
+    if not hbm_rows:
+        return []
+    points = hbm_points(hbm_rows, rows)
+    names = sorted({p["series"] for p in points})
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.8))
-    for group, style in ((thick, {"s": 18, "alpha": 0.7}),
-                         (thin, {"s": 18, "facecolors": "none", "edgecolors": "grey"})):
-        pts = [(num(r, "out_bytes"), int(r["hbm_bytes"])) for r in group]
-        pts = [(x, y) for x, y in pts if x and y]
-        if pts:
-            axes[0].scatter([p[0] for p in pts], [p[1] for p in pts], **style)
+    for name in names:
+        for hollow in (False, True):
+            pts = [(p["out_bytes"], p["hbm_bytes"]) for p in points
+                   if p["series"] == name and p["thin"] == hollow and p["out_bytes"]
+                   and p["hbm_bytes"]]
+            if not pts:
+                continue
+            style = ({"facecolors": "none", "edgecolors": palette[name]} if hollow
+                     else {"alpha": 0.7, "color": palette[name]})
+            # Labelled once per series, by whichever group draws it first.
+            labelled = name in {h.get_label() for h in axes[0].collections}
+            axes[0].scatter([x for x, _ in pts], [y for _, y in pts], s=18,
+                            label=None if labelled else name, **style)
+    axes[0].legend(fontsize=7)
     axes[0].set_xscale("log")
     axes[0].set_yscale("log")
     axes[0].set_xlabel("out_bytes (what this side counted)", fontsize=8)
     axes[0].set_ylabel("hbm_bytes (what the device moved)", fontsize=8)
-    axes[0].set_title("Traffic vs logical output — hollow: under 10 samples", fontsize=9)
+    axes[0].set_title("Traffic vs logical output, a point per call — hollow: under 10 samples",
+                      fontsize=9)
     axes[0].grid(alpha=0.25, which="both")
 
-    by_kind = collections.defaultdict(list)
-    for r in thick:
-        us = num(r, "device_busy_us")
-        if us:
-            by_kind[r["recipe_kind"]].append(int(r["hbm_bytes"]) / 1e9 / (us / 1e6))
+    by_kind = collections.defaultdict(lambda: collections.defaultdict(list))
+    for p in points:
+        if not p["thin"] and p["gbps"] is not None:
+            by_kind[p["kind"]][p["series"]].append(p["gbps"])
     if by_kind:
         kinds = sorted(by_kind)
-        axes[1].boxplot([by_kind[k] for k in kinds], showfliers=False)
-        axes[1].set_xticks(range(1, len(kinds) + 1))
-        axes[1].set_xticklabels(kinds)
+        grouped_boxes(axes[1], kinds, names, by_kind, palette, showfliers=False)
         axes[1].set_ylabel("GB/s while the device was busy", fontsize=8)
-        axes[1].set_title("Achieved bandwidth per step kind", fontsize=9)
+        axes[1].set_title("Achieved bandwidth per step kind, a call each", fontsize=9)
         axes[1].tick_params(axis="x", labelrotation=30, labelsize=7)
         for label in axes[1].get_xticklabels():
             label.set_horizontalalignment("right")
@@ -674,29 +734,19 @@ def write_index(out_dir, made, sources):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--record", action="append", required=True,
-                    help="a records.tsv; repeat for several (sf1 and sf40)")
+                    help="a records.tsv; repeat for several (a file per dataset, sf1 "
+                         "and sf40)")
     ap.add_argument("--hbm", action="append", default=[],
                     help="an hbm.tsv from nsys_hbm.py; optional")
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
 
     wanted = sorted({c for panel in READS.values() for c in panel})
-    rows, conditions, taken_from = [], None, None
-    for path in args.record:
-        run, got = record.read_record(path, *CALL, "run_index", *wanted)
-        if conditions is not None and run != conditions:
-            differ = sorted(k for k in set(run) | set(conditions)
-                            if run.get(k) != conditions.get(k))
-            sys.exit(
-                f"{path} and {taken_from} were taken under different conditions "
-                f"({', '.join(differ)}), so their microseconds do not mean the same thing. "
-                "Draw them separately."
-            )
-        conditions, taken_from = run, path
-        rows += got
+    _, rows = record.read_records(args.record, *CALL, "run_index", *wanted)
     hbm = []
     for path in args.hbm:
-        hbm += record.read_tsv(path, *CALL, "run_index", *HBM_READS)
+        hbm += record.hbm_per_call(record.read_tsv(path, *HBM_READS))
+    palette = colours({series(r) for r in rows} | {series(r) for r in hbm})
 
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -705,10 +755,10 @@ def main():
     made = []
     made += plot_icicle(rows, out_dir)
     made += plot_queries(rows, out_dir)
-    made += plot_kinds(rows, out_dir, "load")
-    made += plot_kinds(rows, out_dir, "compute")
-    made += plot_spread(by_call, out_dir)
-    made += plot_hbm(hbm, rows, out_dir)
+    made += plot_kinds(rows, out_dir, "load", palette)
+    made += plot_kinds(rows, out_dir, "compute", palette)
+    made += plot_spread(by_call, out_dir, palette)
+    made += plot_hbm(hbm, rows, out_dir, palette)
     index = write_index(out_dir, made, args.record + args.hbm)
 
     print(f"{len(rows)} rows, {len(by_call)} calls, {len(hbm)} hbm rows")

@@ -1,19 +1,20 @@
-//! The benchmark tree and the calibration record, read back against their own redundancy
-//! with no device and no run: the trailer's arithmetic, the release build, the record's
-//! preamble against what the writer produces today, the checker's refusals, and the timed
-//! set against the device-enabled set.
+//! The benchmark tree, read back against its own redundancy, and the calibration record's
+//! format, with no device and no run: the trailer's arithmetic, the release build, the
+//! record's preamble against what the writer produces today, the checker's refusals, and the
+//! timed set against the device-enabled set.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RunMeta, SKIPPED, ordered_sections,
-    record_header, rows_match_the_recipes, testdata_root,
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RECORD_PATH_ENV, RunMeta, SKIPPED,
+    append_records, ordered_sections, record_header, rows_match_the_recipes, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
 struct TimedDeclaration {
     dataset: &'static str,
+    sf: &'static str,
     query: &'static str,
     modes: &'static str,
 }
@@ -38,6 +39,7 @@ macro_rules! corpus_query_benchmark {
         inventory::submit! {
             TimedDeclaration {
                 dataset: stringify!($dataset),
+                sf: stringify!($sf),
                 query: stringify!($query),
                 modes: stringify!($($modes)+),
             }
@@ -232,21 +234,46 @@ fn every_committed_tree_reports_a_release_build() {
     }
 }
 
-/// The committed record's preamble is the one `record_header` writes today.
+/// A record's preamble, read as its readers read it, is the one `record_header` writes.
 ///
-/// The record is read by three Python scripts and by a person, none of whom can ask this
-/// source what a column means. So the preamble is the column documentation, and a preamble
-/// describing a record the writer no longer produces is worse than none: every line of it
-/// still reads as authoritative.
+/// Three Python scripts and a person read the record, and none can ask this source what a
+/// column means, so the preamble is the column documentation. They take every `#` line, then
+/// one column line: a note that lost its `#` ends the preamble early and fails here.
 ///
-/// `allocator=` is taken from the file, since it names the host that measured and no build
-/// can know it. `capture=none` is not: a captured run's rows are the distorted ones, and
-/// the committed record must not be one.
+/// Written by the harness's own writer into a temp dir, since the measured record is not in
+/// git. `allocator=` is read back, as it names the host that measured and no build can know
+/// it; its value carries `=` and spaces, as a pool's does. `capture=none` is not read back: a
+/// captured run's rows are the distorted ones, and a published record must not be one.
 #[test]
 fn the_records_preamble_is_what_record_header_writes() {
-    let path = testdata_root().join("calibration/records.tsv");
+    let dir = std::env::temp_dir().join(format!("peacock-corpus-{}-record", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("records.tsv");
+    let run = RunMeta {
+        dataset: "tpch",
+        sf: "40",
+        query: "q6",
+        mode: "tp1-single",
+        allocator: "rmm-pool initial=1.0GiB max=1.0GiB of 2.0GiB free on a discrete device",
+        capture: Capture::None,
+    };
+    let row = vec!["0"; COLUMNS.len()].join("\t");
+    let restore = std::env::var_os(RECORD_PATH_ENV);
+    // SAFETY: `append_records` is the variable's only reader, and this is the only case in
+    // this binary that calls it.
+    unsafe { std::env::set_var(RECORD_PATH_ENV, &path) };
+    let wrote = std::panic::catch_unwind(|| append_records(std::slice::from_ref(&row), &run));
+    match restore {
+        Some(value) => unsafe { std::env::set_var(RECORD_PATH_ENV, value) },
+        None => unsafe { std::env::remove_var(RECORD_PATH_ENV) },
+    }
+    if let Err(panic) = wrote {
+        std::panic::resume_unwind(panic);
+    }
     let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} — the record is committed", path.display()));
+        .unwrap_or_else(|e| panic!("{}: {e} — the writer wrote nothing", path.display()));
+    let _ = std::fs::remove_dir_all(&dir);
+
     let mut found: Vec<&str> = text.lines().take_while(|l| l.starts_with('#')).collect();
     let columns = text
         .lines()
@@ -258,6 +285,7 @@ fn the_records_preamble_is_what_record_header_writes() {
         .iter()
         .find_map(|l| l.strip_prefix("# run: allocator="))
         .unwrap_or_else(|| panic!("{}: no `# run: allocator=` line", path.display()));
+    assert_eq!(allocator, run.allocator, "the allocator line is the run's");
     let meta = RunMeta {
         dataset: "",
         sf: "",
@@ -364,6 +392,55 @@ fn every_timed_case_is_enabled_on_a_device() {
                  device at {on_device:?} — it would fail at plan time, having measured nothing"
             );
         }
+    }
+}
+
+/// Every case the list declares has its section in the committed tree.
+///
+/// The tree accumulates across runs and nothing else compares it with the list, so a case
+/// added and never measured would leave its file silently short. A query declared `none`
+/// is a marker section in every file of its dataset, as `declared_for` writes it.
+#[test]
+fn every_declared_case_has_a_section_in_the_tree() {
+    let cases: Vec<&TimedDeclaration> = inventory::iter::<TimedDeclaration>.into_iter().collect();
+    let mut files: BTreeMap<(&str, &str, String), BTreeSet<String>> = BTreeMap::new();
+    for case in &cases {
+        for mode in modes(case.modes) {
+            files
+                .entry((case.dataset, case.sf, mode))
+                .or_default()
+                .insert(case.query.replace('_', "-"));
+        }
+    }
+    for case in cases.iter().filter(|case| case.modes.trim() == "none") {
+        for ((dataset, sf, _), queries) in files.iter_mut() {
+            if (*dataset, *sf) == (case.dataset, case.sf) {
+                queries.insert(case.query.replace('_', "-"));
+            }
+        }
+    }
+    assert!(!files.is_empty(), "the benchmark list declares no mode");
+
+    for ((dataset, sf, mode), declared) in &files {
+        let path = testdata_root().join(format!(
+            "benchmark-results/{dataset}.sf{sf}/{mode}.benchmark.txt"
+        ));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured",
+                path.display()
+            )
+        });
+        let present: BTreeSet<String> = ordered_sections(&text)
+            .into_iter()
+            .map(|(query, _)| query)
+            .collect();
+        let missing: Vec<&String> = declared.difference(&present).collect();
+        assert!(
+            missing.is_empty(),
+            "{} has no section for {missing:?}, which the case list declares at {mode}",
+            path.display()
+        );
     }
 }
 

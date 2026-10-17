@@ -79,8 +79,8 @@ def test_a_bare_call_is_not_checked_against_the_kind_of_the_seq_it_was_handed():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         goldens = tmp / "goldens"
-        goldens.mkdir()
-        (goldens / "tp1-single.plans.txt").write_text(PLANS)
+        (goldens / "tpch.sf1").mkdir(parents=True)
+        (goldens / "tpch.sf1" / "tp1-single.plans.txt").write_text(PLANS)
         path = tmp / "capture.sqlite"
         cap = Capture(path)
         cap.case(Q6, [(0, 0, "CudfScan", ["read_parquet"]),
@@ -92,6 +92,50 @@ def test_a_bare_call_is_not_checked_against_the_kind_of_the_seq_it_was_handed():
     exported = [r for r in rows if r["recipe_kind"] == "result_from_handle"]
     assert exported, "the export's own region is not in the breakdown"
     assert {r["recipe_seq"] for r in exported} == {"1"}, exported
+
+
+Q37 = "tpcds.sf40 q37 tp1-single"
+
+TPCDS_PLANS = """peacockdb plan goldens
+
+== q37
+--- plan ---
+  (not read by this check)
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+"""
+
+
+def test_each_case_is_checked_against_its_own_datasets_goldens():
+    """One capture holds both benchmarks, and a mode's golden is per dataset.
+
+    q37 is in no tpch golden and q6 in no tpcds one, so a reader that takes one dataset's
+    directory for the whole capture refuses a capture that matches its plans. The tpcds
+    case is checked rather than skipped: a seq its golden declares and the run never drove
+    is refused, naming the query.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        goldens = tmp / "goldens"
+        for dataset, text in (("tpch", PLANS), ("tpcds", TPCDS_PLANS)):
+            (goldens / f"{dataset}.sf1").mkdir(parents=True)
+            (goldens / f"{dataset}.sf1" / "tp1-single.plans.txt").write_text(text)
+        path = tmp / "capture.sqlite"
+        cap = Capture(path)
+        cap.case(Q6, [(0, 0, "CudfScan", ["read_parquet"]),
+                      (1, 0, "CudfProject", ["compute_column"])])
+        cap.case(Q37, [(0, 0, "CudfScan", ["read_parquet"])])
+        cap.close()
+        rows = calls_of(path, tmp / "calls.tsv", "--plans-dir", str(goldens))
+        assert {(r["dataset"], r["query"]) for r in rows} == {("tpch", "q6"), ("tpcds", "q37")}
+
+        (goldens / "tpcds.sf1" / "tp1-single.plans.txt").write_text(TPCDS_PLANS.replace(
+            "  GpuLoadParquet", "  GpuProject: calling_lanes=1, per batch: "
+            "execute_node(#1 CudfProject, batch)\n    GpuLoadParquet"))
+        with raises(SystemExit, match="q37"):
+            calls_of(path, tmp / "calls2.tsv", "--plans-dir", str(goldens))
 
 
 def test_a_mode_with_no_golden_is_refused():

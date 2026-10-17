@@ -3,7 +3,7 @@
 
     PEACOCK_BENCHMARK_CAPTURE=trace, which scripts/create_nsys_profile.sh --trace sets:
     scripts/calibration/nsys_calls.py --capture testdata/calibration/capture.sqlite \
-        --plans-dir testdata/goldens/tpch.sf1 --out testdata/calibration/calls.tsv
+        --plans-dir testdata/goldens --out testdata/calibration/calls.tsv
 
 The record has one number per region and one input size for it. For a hash join that size
 is the sum over both children, and a join's cost does not depend on its two sides the same
@@ -130,12 +130,14 @@ def check_against_recipes(regs, plans_path):
     """Every seq the recipes name was driven, with the kind they name, and no others.
 
     Which query is read off the capture, not off the command line. A plans golden holds
-    every query of one mode, so the capture's own cases select their sections — and a case
-    from another mode is skipped rather than checked against a plan it never ran from.
+    every query of one dataset at one mode, so the capture's own cases select their
+    sections — and a case of another dataset or mode is skipped rather than checked against
+    a plan it never ran from.
     """
-    # `tp1-single.plans.txt` -> `tp1-single`. The mode is in the filename because
-    # that is how the goldens are laid out.
-    mode = pathlib.Path(plans_path).name.split(".plans.txt")[0]
+    # `tpcds.sf1/tp1-single.plans.txt` -> `tpcds`, `tp1-single`: the goldens' layout.
+    path = pathlib.Path(plans_path)
+    dataset = path.parent.name.split(".sf")[0]
+    mode = path.name.split(".plans.txt")[0]
     by_case = collections.defaultdict(dict)
     for case, seq, _, kind, _, _, _, _ in regs:
         # The export and the slice are left out: they publish no step, and the seq they
@@ -144,11 +146,11 @@ def check_against_recipes(regs, plans_path):
         # disagreeing about a node they agree on.
         if not nvtx_names.is_bare_call(kind):
             by_case[case][seq] = kind
-    checked = sorted(c for c in by_case if c[3] == mode)
+    checked = sorted(c for c in by_case if (c[0], c[3]) == (dataset, mode))
     if not checked:
         sys.exit(
-            f"{plans_path} is mode {mode!r} and the capture holds "
-            f"{sorted({c[3] for c in by_case})} -- nothing to check it against."
+            f"{plans_path} is {dataset} at {mode!r} and the capture holds "
+            f"{sorted({(c[0], c[3]) for c in by_case})} -- nothing to check it against."
         )
     for case in checked:
         _check_one(by_case[case], plans_path, case[2])
@@ -280,9 +282,9 @@ def main():
                          "default libcudf")
     ap.add_argument("--out", required=True)
     ap.add_argument("--plans-dir",
-                    help="a goldens directory; each case's <mode>.plans.txt is found in "
-                         "it, so a capture spanning several modes checks against all of "
-                         "them without the caller listing which")
+                    help="the goldens root; each case's <dataset>.sf1/<mode>.plans.txt is "
+                         "found under it, so a capture spanning several datasets and modes "
+                         "checks against all of them without the caller listing which")
     ap.add_argument("--top", type=int, default=12,
                     help="how many calls per node to print in the summary")
     args = ap.parse_args()
@@ -394,15 +396,15 @@ def main():
 
     runs_seen = set(executions.values())
     if args.plans_dir:
-        # One goldens file per mode, found rather than listed: the capture says which modes
-        # are in it, and a caller retyping that list is the mistake naming the query on the
-        # command line was. A mode with no golden is a refusal — this is the only thing
-        # that says the regions are the plan's, and a check covering less is not one.
-        for mode in sorted({case[3] for case, *_ in regs}):
-            path = pathlib.Path(args.plans_dir) / f"{mode}.plans.txt"
+        # One golden per (dataset, mode), found from the capture rather than listed by the
+        # caller. sf1 whatever the capture's sf: plan goldens live there, and recipes are
+        # the plan's shape. A missing golden is a refusal — this is the only thing that
+        # says the regions are the plan's.
+        for dataset, mode in sorted({(case[0], case[3]) for case, *_ in regs}):
+            path = pathlib.Path(args.plans_dir) / f"{dataset}.sf1" / f"{mode}.plans.txt"
             if not path.exists():
-                sys.exit(f"{path} does not exist, so the {mode} cases in this capture "
-                         "would go unchecked against the plan they claim to be.")
+                sys.exit(f"{path} does not exist, so the {dataset} {mode} cases in this "
+                         "capture would go unchecked against the plan they claim to be.")
             check_against_recipes(regs, str(path))
 
     calls_per_exec = {len(v) for v in by_call.values()}

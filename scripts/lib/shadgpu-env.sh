@@ -37,7 +37,9 @@ if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
 fi
 
 REMOTE=shad-gpu
-REMOTE_REPO=/home/info/peacockdb
+# The gate's checkout. A run that must leave it alone — a measurement beside it — names its
+# own directory on the host here; everything a phase writes is under it.
+REMOTE_REPO=${PEACOCK_REMOTE_REPO:-/home/info/peacockdb}
 
 # Validation belongs before a phase's first side effect: half a deploy followed by "you
 # cannot do that" is worse than either outcome alone.
@@ -57,8 +59,52 @@ PATCHED_LD="$REMOTE_REPO/cpp/install/lib:/usr/local/cuda-12.5/compat"
 PATCHED_LD="$PATCHED_LD:/home/info/glibc-$BUILD_GLIBC/lib"
 PATCHED_LD="$PATCHED_LD:\$HOME/miniforge3/envs/rapids-cuda-12.2/lib:\${LD_LIBRARY_PATH:-}"
 
-# sf40 lives outside the repo on the host and is read in place; 40 GB is not copied per run.
-SF40_DIR=/home/info/peacock-datasets/testdata/tpch.sf40
+# The large datasets live outside the repo on the host, `<dataset>.sf<sf>` under this, and
+# are read in place; tens of GB are not copied per run.
+DATASETS_DIR=/home/info/peacock-datasets/testdata
+SF40_DIR=$DATASETS_DIR/tpch.sf40
+
+# The benchmark's case list, which names the datasets a run reads.
+BENCH_CASES=peacockdb-core/tests/common/corpus_benchmark_cases.inc
+
+# Every corpus_query_benchmark! line of the case list as `<dataset> <sf> <query> <modes>`, the
+# modes `|`-separated with no spaces. Read as `read_cases` and split_record.py read it — one
+# invocation per line, leading space allowed — and refused (return 1, nothing on stdout) unless
+# every invocation line parsed: a line skipped here is a dataset no run links in and a case
+# no capture takes.
+bench_lines() {
+  local w='[[:space:]]*' ident='\([A-Za-z_][A-Za-z0-9_]*\)' sf='\([0-9][0-9]*\)' lines parsed
+  lines=$(grep -c "^${w}corpus_query_benchmark!" "$BENCH_CASES") || lines=0
+  parsed=$(sed -n "s/^${w}corpus_query_benchmark!$w($w$ident$w,$w$sf$w,$w$ident$w,\([^)]*\)).*/\1 \2 \3 \4/p" \
+    "$BENCH_CASES")
+  if [ "$lines" -eq 0 ] || [ "$(grep -c . <<< "$parsed")" -ne "$lines" ]; then
+    echo "$BENCH_CASES: $lines corpus_query_benchmark! lines, $(grep -c . <<< "$parsed") of" \
+      "them read as (dataset, sf, query, modes)" >&2
+    return 1
+  fi
+  awk '{ modes = ""; for (i = 4; i <= NF; i++) modes = modes $i; print $1, $2, $3, modes }' \
+    <<< "$parsed"
+}
+
+# Each `<dataset>.sf<sf>` the case list times, once, a line each.
+bench_datasets() {
+  local lines
+  lines=$(bench_lines) || return 1
+  awk '{ print $1 ".sf" $2 }' <<< "$lines" | LC_ALL=C sort -u
+}
+
+# Each timed case, a line each: `<dataset> <sf> <query> <mode>`, the macro's spellings.
+# `none` declares a query timed at no mode, so it gives no case.
+bench_cases() {
+  local lines
+  lines=$(bench_lines) || return 1
+  awk '$4 != "none" { n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }' \
+    <<< "$lines"
+}
+
+# The host's aws CLI, with the S3 credentials in its ~/.aws. Not on a non-interactive ssh's
+# PATH, so named in full; a workstation reaches the buckets through it.
+REMOTE_AWS=/home/info/bin/aws
 
 # The "N passed" libtest printed in a log, summed over its passes. That count is the only
 # honest answer to "did the filter match anything" — counting output files answers a
@@ -174,9 +220,10 @@ device_result_files() {
 
 # pull_one <path under testdata/> <what it is>
 #
-# Fetch one file from the host into the same place here, and return 1 when there is none.
-# Tested over ssh rather than by letting the transfer fail: resilient_rsync retries a
-# missing source a hundred times, and eight minutes of backoff reads as a hang.
+# Fetch one file from the host into the same place here: 1 when there is none, 2 when the
+# transfer failed, so a caller can tell a missing file from a broken copy of one. Tested over
+# ssh rather than by letting the transfer fail: resilient_rsync retries a missing source a
+# hundred times, and eight minutes of backoff reads as a hang.
 pull_one() {
   local rel=$1 what=$2
   if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
@@ -184,7 +231,8 @@ pull_one() {
     return 1
   fi
   mkdir -p "testdata/$(dirname "$rel")"
-  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel"
+  resilient_rsync "$REMOTE:$REMOTE_REPO/testdata/$rel" "testdata/$rel" \
+    || { echo "==> $what: the transfer failed" >&2; return 2; }
   case "$rel" in
     *.tsv) echo "==> $what: $(grep -vc '^#' "testdata/$rel") rows" ;;
     *)     echo "==> $what: $(du -h "testdata/$rel" | cut -f1)" ;;
