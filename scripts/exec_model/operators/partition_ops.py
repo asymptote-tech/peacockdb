@@ -7,9 +7,9 @@ with the same structural rules, not comet's bits.
 
 The structural rule that does matter is null handling. The kernel skips null columns, so a
 row whose key columns are all null hashes to the seed alone and every such row lands in the
-one partition `pmod(seed, N)`. That is comet-mandated and not a knob — it is why #137 wants
-the planner to filter null keys out ahead of the shuffle on sides whose unmatched rows are
-never emitted, rather than teach the kernel to scatter them.
+one partition `pmod(seed, N)`. That is comet-mandated and not a knob — it is why the planner
+filters null keys out ahead of the shuffle on sides whose unmatched rows are never emitted,
+rather than teach the kernel to scatter them.
 """
 
 from __future__ import annotations

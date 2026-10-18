@@ -22,6 +22,8 @@
 - [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
 - [#290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not](#t290)
 - [#291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins](#t291)
+- [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
+- [#295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate](#t295)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -289,3 +291,32 @@ queries match. The engine's lines for the three are commented out on #243.
 Fix: hold NULL apart from NaN in the prototype's frames — a nullable float dtype whose `<NA>` is the
 NULL and whose NaN is a value — from `tables.typed` through the group keys and the hash join's null
 hold-out.
+
+<a id="t294"></a>
+### #294 (orientation build term) orientation picks a build by a term that prices nothing the join session does
+Orientation picks a join's build by a term that prices nothing the session does. It builds the
+side with the lower `bytes(build) × (1 + copies × batches(probe))`, `copies` = 1, a term written
+for a build copied per probe batch. The session builds once and copies nothing, holding the build
+and its hash table (`plan::session_bytes`, 16 bytes a row); the cost model has no per-batch term
+for the probe either. The term no longer prices a copy; it stays because pricing the build as the
+session holds it measured worse.
+
+That pricing, bytes plus 16 bytes a row, won on tpch q18 at tp1-rowgroup (0.465 to 0.363) and
+tpcds q64 at tp4-rowgroup (0.549 to 0.499), but moved 23 of 130 sample runs (26 queries at five
+modes) for a net change near zero, and made tpch q9 dearer at every mode by 2–5 %. What the term
+should price — the probe's own per-batch cost beside the build's, or something else — is open.
+
+<a id="t295"></a>
+### #295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate
+DPhyp's cost model keeps DuckDB's default share, 0.2, of a join's rows for every residual edge
+(`join_order.py`, `estimator.DEFAULT`); the plan's cardinality estimate reads the same predicate
+through `estimator.selectivity` (`cardinality._joined_selectivity`). Since a non-inner join with a
+residual enters a cluster, the flat share decides orders.
+
+tpch q21: the semi join on `l_orderkey` with the residual `l_suppkey <> l_suppkey` is estimated at
+31,348 rows in the second replan and comes out at 151,237 (q-error 4.8). DPhyp runs it before the
+orders join on the estimate, and a third replan follows. q21 goes from 0.726 to 0.733 at tp1 and
+0.640 to 0.642 at tp4; tpcds q16 and q94, the sample's other residual semi joins, do not move.
+
+Fix: estimate a residual edge by its predicate, as the plan's estimator does, over the columns of
+the two relation sets it joins.

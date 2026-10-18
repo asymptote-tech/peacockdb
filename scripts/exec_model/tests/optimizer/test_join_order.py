@@ -101,10 +101,10 @@ def test_the_smaller_side_builds_where_the_probe_s_batches_cost_nothing_more():
     assert orient((1, 0), sets) == (1, 0)
 
 
-def test_a_build_copied_per_probe_batch_can_make_the_larger_side_the_cheaper_build():
-    # 30 order batches: building the customers copies them 30 times (#152); building the
-    # orders copies them once, per the customers' single batch. Without the copies the
-    # smaller side builds again.
+def test_the_probe_s_batches_can_make_the_larger_side_the_cheaper_build():
+    # 30 order batches: the customers' build is priced at 1 + 30 times its bytes, the orders' at
+    # 1 + 1, per the customers' single batch (`copies`, #294). Without the term the smaller side
+    # builds again.
     sets = pair(orders_batches=30)
     assert orient((1, 0), sets, copies=1) == (0, 1)
     assert orient((0, 1), sets, copies=0) == (1, 0)

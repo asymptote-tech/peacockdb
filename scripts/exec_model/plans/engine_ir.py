@@ -70,6 +70,57 @@ def kind_of(type_text: str) -> Kind:
     return _KINDS[type_text]
 
 
+def residual_crosses(join: EngineNode) -> bool:
+    """Whether a conjunct of `join`'s residual reads both sides, or neither: the conjunct a session
+    evaluates over its pairs, not one side alone (`plan::distinct_key_width`)."""
+    def conjuncts(expr):
+        if isinstance(expr, E.Binary) and expr.op == "AND":
+            return conjuncts(expr.left) + conjuncts(expr.right)
+        return [expr]
+
+    def sides(expr) -> set:
+        if isinstance(expr, E.ColumnRef):
+            return {expr.side}
+        if dataclasses.is_dataclass(expr):
+            return set().union(*(sides(getattr(expr, f.name)) for f in dataclasses.fields(expr)))
+        if isinstance(expr, tuple):
+            return set().union(*(sides(e) for e in expr))
+        return set()
+
+    if "filter" not in join.fields:
+        return False
+    return any(len(sides(c) & {"build", "probe"}) != 1 for c in conjuncts(E.parse_expr(join.fields["filter"])))
+
+
+#: Arrow's fixed widths of the types the goldens print; `width_on_device` takes the rest as 16.
+_FIXED_WIDTH = {"Int8": 1, "UInt8": 1, "Int32": 4, "UInt32": 4, "Int64": 8, "Float32": 4, "Float64": 8,
+                "Date32": 4}
+
+
+def width_on_device(type_text: str) -> int:
+    """A column's bytes a row as the join session counts them (`plan::width_on_device`): a byte
+    for a Boolean, the fixed width cuDF holds it at, and 16 for a variable-width one."""
+    if type_text == "Boolean":
+        return 1
+    if type_text.startswith("Decimal128("):
+        return 16
+    if _TIMESTAMP.fullmatch(type_text):
+        return 8
+    return _FIXED_WIDTH.get(type_text, 16)
+
+
+def distinct_key_width(join: EngineNode) -> int:
+    """The bytes a row of the keys a semi or anti session takes distinct (`plan::distinct_key_width`):
+    the probe's for LeftSemi, LeftAnti and LeftMark, the build's for RightSemi and RightAnti; none
+    for another type or under a residual that crosses."""
+    side = {JoinType.LEFT_SEMI: 1, JoinType.LEFT_ANTI: 1, JoinType.LEFT_MARK: 1,
+            JoinType.RIGHT_SEMI: 0, JoinType.RIGHT_ANTI: 0}.get(join_type(join))
+    if side is None or residual_crosses(join):
+        return 0
+    schema = join.children[side].schema
+    return sum(width_on_device(schema[pair[side].index][1]) for pair in E.parse_join_keys(join.fields["on"]))
+
+
 def frame_names(names: list[str]) -> list[str]:
     """The prototype frame's column names for an engine schema's: a name the schema holds
     once stays as it is, a repeated one becomes `name@ordinal`."""

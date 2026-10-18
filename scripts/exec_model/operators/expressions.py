@@ -128,7 +128,7 @@ class Not(Expr):
 
 @dataclass(frozen=True)
 class IsNotNull(Expr):
-    """The predicate #137 wants the planner to insert under a shuffle."""
+    """`IS NOT NULL`, the predicate the planner puts below a shuffle on a key that can hold a NULL."""
 
     inner: Expr
 

@@ -13,9 +13,9 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, replace
 
-from ..operators.join_types import JoinType
+from ..operators.join_types import NULL_KEY_DROPPABLE, JoinType
 from ..operators.joins import own_output
-from ..plans.engine_expr import Binary, ColumnRef, expr_text, parse_columns, quoted
+from ..plans.engine_expr import Binary, ColumnRef, Unary, expr_text, parse_columns, quoted
 from ..plans.engine_ir import join_type_name
 from ..plans.engine_plan import EngineNode
 from .conflicts import MIRRORED
@@ -91,7 +91,9 @@ class _Disassembly:
         build_keys = [build.columns.index(b) for b, _ in keys]
         probe_keys = [probe.columns.index(p) for _, p in keys]
         lanes = self.planned.get(build_mask | probe_mask, self.mode_lanes)
-        build, probe = self._wired(build, build_keys, lanes), self._wired(probe, probe_keys, lanes)
+        droppable = (False, False) if null_equals_null else NULL_KEY_DROPPABLE[join_type]
+        build = self._wired(build, build_keys, lanes, droppable[0])
+        probe = self._wired(probe, probe_keys, lanes, droppable[1])
         if not build.single:
             build = self._wrap("GpuCoalesceAllBatches", build, single=True)
         return self._join(_Applied(join_type, build_keys, probe_keys, residuals, null_equals_null),
@@ -121,9 +123,11 @@ class _Disassembly:
                              "equals NULL: one join holds one rule")
         return join_type_of(self.cluster, build_mask, probe_mask), keys, residuals, null_equal == {True}
 
-    def _wired(self, side: _Part, keys: list[int], lanes: int) -> _Part:
+    def _wired(self, side: _Part, keys: list[int], lanes: int, drop_null_keys: bool = False) -> _Part:
         """The side as `co_partitioned` wants it: on the join's lanes, and at more than one
-        hashed on `keys` — `merged` into one lane, or `shuffled` on the keys, where it is not."""
+        hashed on `keys` — `merged` into one lane, or `shuffled` on the keys, where it is not. A
+        side whose NULL keys can match nothing (`drop_null_keys`) is shuffled through the
+        planner's null-key filter."""
         if side.lanes == lanes and (lanes == 1 or side.hashed == tuple(keys)):
             return side
         if lanes == 1:
@@ -133,6 +137,15 @@ class _Disassembly:
             side = self._wrap("GpuMergePartitions", side, lanes=1, single=False, hashed=None)
         if was_single and not side.single:
             side = self._wrap("GpuCoalesceAllBatches", side, single=True)
+        nullable = [k for k in keys if side.columns[k] in self.cluster.nullable_keys] if drop_null_keys else []
+        if nullable:
+            # The planner's null-key filter below the shuffle, on the keys the plan's own filters
+            # showed can hold a NULL.
+            tests = [Unary("IS NOT NULL", ColumnRef(side.node.schema[k][0], k, None)) for k in nullable]
+            predicate = tests[0]
+            for test in tests[1:]:
+                predicate = Binary(predicate, "AND", test)
+            side = self._wrap("GpuFilter", side, first={"predicate": expr_text(predicate)}, hashed=None)
         return self._wrap("GpuEmitPartitions", side, lanes=lanes, single=False, hashed=tuple(keys),
                           first={"hash": _columns_text(side, keys)})
 

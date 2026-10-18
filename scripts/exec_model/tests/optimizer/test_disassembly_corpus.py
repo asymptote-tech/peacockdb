@@ -73,5 +73,25 @@ def test_every_cluster_disassembles_to_a_plan_the_engine_would_lay_out_the_same(
     assert not wrong, (len(wrong), wrong[:5])
 
 
+
+def test_tp1_and_tp4_hold_the_same_clusters():
+    # The null-key filters tp4 puts below its shuffles are wiring a cluster reads through, so
+    # each query's clusters, by their relation counts, are tp1's.
+    differ, compared = [], 0
+    for path in engine_plan_paths():
+        if not path.name.startswith("tp4-single"):
+            continue
+        tp1 = read_plans(path.with_name("tp1-single.plans.txt"))
+        for name, plan in read_plans(path).items():
+            if isinstance(plan, EngineNode) and isinstance(tp1.get(name), EngineNode):
+                sizes = lambda p: sorted(len(c.relations) for c in clusters(p))
+                compared += 1
+                if sizes(plan) != sizes(tp1[name]):
+                    differ.append((path.parent.name, name, sizes(tp1[name]), sizes(plan)))
+    # Every query both modes plan, over the three datasets: an empty sweep would pass.
+    assert compared > 150, compared
+    assert not differ, (len(differ), differ[:5])
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

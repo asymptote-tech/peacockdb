@@ -250,8 +250,9 @@ impl Executor for CpuProbingJoin {
     fn resident_bytes(&self) -> usize {
         self.build_bytes()
     }
-    /// The batch alone: no call re-reads the build side, which the residency already
-    /// counts, and charging it again would refuse a query that fits.
+    /// The answer, at the batch's size as an exec node prices its own. The batch is already
+    /// resident, and no call re-reads the build side, which the residency counts: charging
+    /// either again would refuse a query that fits.
     fn scratch_bytes(&self, _n_rows: u64, n_bytes: usize) -> usize {
         n_bytes
     }

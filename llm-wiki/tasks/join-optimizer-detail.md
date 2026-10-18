@@ -40,7 +40,11 @@ fixes #236 and #237):
 - Task 20: every plan golden of all three datasets parses, lowers, builds and disassembles in the
   prototype, pbench's included; the answer suites pass a sample of fifteen queries at every mode
   against DuckDB, and pbench's all but its three NaN-keyed queries (#291) at every mode (Task 20
-  below). Tasks 21–23 are not started.
+  below).
+- Task 21: a non-inner join with a residual joins its cluster, the null-key filter below a shuffle
+  is wiring so tp1 and tp4 hold the same clusters, and a join's residency and scratch are the
+  session's; orientation keeps its formula, #294, and a residual edge its flat estimate, #295.
+  Tasks 22 and 23 are not started.
 - `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
   shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
   record fetched, 174,690 rows, sha256 as pinned).
@@ -2731,3 +2735,143 @@ and #293 (a LIKE backslash, cpu against device), both in `scalars.md`. The next 
   q13, q21, `nested-loop-left-join` and `nested-limits`, and tpcds q9, q16, q38, q58 and q94:
   15 passed at each mode, 75 in all. q9 carries fifteen nested loops of `filter=true`; tpch q2
   and q13 a LIKE.
+
+## Task 21
+
+Four rules were measured each behind a switch, alone and together, over a sample of 26 queries
+(tpch q2, q5, q8, q9, q18, q21 and the four named queries; tpcds q5, q6, q10, q16, q35, q40, q58,
+q64, q69, q75, q78, q80, q83, q84, q85, q94) at every mode, 130 runs each, on master's plans. Each
+run is `run.py`'s: the planned run, then the optimized one, held to the planned answer. The
+committed prototype outputs are the old engine's and were not the baseline; the switches off were.
+
+| rule | tp1 geomean | tp4 geomean | total cost | better / worse | clusters | DPhyp calls | reordered | flips | replans |
+|---|---|---|---|---|--:|--:|--:|--:|--:|
+| baseline | 0.441 | 0.480 | 0.501 | — | 507 | 941 | 163 | 165 | 150 |
+| R1, the build as the session holds it | 0.440 | 0.479 | 0.500 | 10 / 13 | 507 | 969 | 163 | 151 | 148 |
+| R2, residuals inside clusters | 0.441 | 0.480 | 0.501 | 0 / 5 | 497 | 936 | 171 | 165 | 150 |
+| R3, the null-key filter as wiring | 0.441 | 0.416 | 0.481 | 36 / 0 | 300 | 569 | 191 | 134 | 153 |
+| R4, residency and scratch | 0.441 | 0.480 | 0.501 | 0 / 0 | 507 | 941 | 163 | 165 | 150 |
+| all four | 0.440 | 0.417 | 0.481 | 39 / 18 | 290 | 550 | 195 | 155 | 145 |
+
+Ratios are optimized cost over planned; a cell moved where it changed by 0.0005 or more (modes 1s,
+1r, 4s, 4r, 4z):
+
+- R1: tpch q18: 1r 0.465→0.363, 4s 0.440→0.445, 4r 0.452→0.456, 4z 0.440→0.445; tpch q5: 4z 0.991→0.987; tpch q8: 4z 0.967→0.966; tpch q9: 1s 0.916→0.946, 1r 0.909→0.946, 4s 0.932→0.953, 4r 0.902→0.948, 4z 0.905→0.952; tpcds q35: 1r 0.626→0.628; tpcds q58: 1s 0.071→0.072, 1r 0.027→0.028; tpcds q6: 4r 0.043→0.042; tpcds q64: 4s 0.759→0.756, 4r 0.549→0.499, 4z 0.502→0.499; tpcds q80: 1s 0.152→0.154, 1r 0.075→0.078, 4s 0.142→0.139, 4r 0.142→0.139, 4z 0.142→0.139
+- R2: tpch q21: 1s 0.726→0.733, 1r 0.726→0.733, 4s 0.640→0.642, 4r 0.640→0.642, 4z 0.640→0.642
+- R3: tpch q2: 4s 0.536→0.501, 4r 0.536→0.501, 4z 0.536→0.501; tpcds q35: 4s 0.600→0.582, 4r 0.581→0.562, 4z 0.600→0.582; tpcds q40: 4s 0.138→0.081, 4r 0.138→0.081, 4z 0.138→0.081; tpcds q58: 4s 0.067→0.033, 4r 0.067→0.033, 4z 0.067→0.033; tpcds q6: 4s 0.043→0.033, 4r 0.043→0.028, 4z 0.042→0.032; tpcds q64: 4s 0.759→0.693, 4r 0.549→0.476, 4z 0.502→0.454; tpcds q75: 4s 0.430→0.411, 4r 0.380→0.365, 4z 0.380→0.365; tpcds q80: 4s 0.142→0.082, 4r 0.142→0.082, 4z 0.142→0.082; tpcds q83: 4s 0.517→0.279, 4r 0.517→0.279, 4z 0.517→0.279; tpcds q84: 4s 0.996→0.993, 4r 0.996→0.993, 4z 0.996→0.993; tpcds q85: 4s 0.857→0.420, 4r 0.794→0.420, 4z 0.857→0.420; tpcds q94: 4s 1.000→0.993, 4r 1.000→0.993, 4z 1.000→0.993
+
+### Decisions
+
+- **R3, kept.** `GpuEmitPartitions` over a filter of `IS NOT NULL` conjuncts alone is wiring
+  where every column it tests is one the shuffle hashes and a key of the join above on that side,
+  the join drops a NULL key there (`NULL_KEY_DROPPABLE`) and does not equate NULLs
+  (`multijoin._is_null_key_shuffle`); anywhere else the filter roots a relation, since dropping its
+  rows can change an answer. Over the tp4-single goldens 444 such filters sit under a shuffle (tpch
+  4, tpcds 416, pbench 24) and none roots a relation. The cluster keeps the columns they tested
+  (`MultiJoin.nullable_keys`). Reassembly shuffles a side on such a key through the same filter, on
+  the sides `NULL_KEY_DROPPABLE` names — the engine's `null_key_droppable`, held equal by
+  `test_the_null_key_drop_table_is_the_engines`. Over every tpch and tpcds plan golden the tp4
+  modes held 502 clusters and tp1 256; now each holds 256, and every query's clusters at tp4 are
+  tp1's (`test_tp1_and_tp4_hold_the_same_clusters`). At the baseline order every cluster is
+  rebuilt node for node, filters included (`test_disassembly_corpus`). Reassembly filters only a
+  key the plan filtered. A NULL in a key the plan never filtered reaches a join that drops it, so
+  it only costs and never changes an answer; a key the plan filtered only because its order padded
+  it with NULLs can get a filter the planner would not add under the new order, which also only
+  costs.
+- **R4, kept.** A join's residency is its build and `plan::session_bytes` beside it: the hash table
+  at 16 bytes a row for a keyed join, RightSemi and RightAnti's distinct keys unless a residual
+  conjunct reads both sides (`plan::distinct_key_width`, `engine_ir.residual_crosses`), a byte a row
+  of `matched` for the five types that finish. A probe call's scratch is its output, with the build
+  and the probe batch no longer counted in it, and for LeftSemi, LeftAnti and LeftMark the batch's
+  keys taken distinct, `n_rows × distinct_key_width` at the device width (`plan::width_on_device`),
+  none under a crossing residual, as `call_bytes` prices them; the per-call hash RightSemi and
+  RightAnti make under a crossing residual is covered by the resident 16 bytes a row. The engine
+  still counts the probe batch twice, #296. No cost or answer moved; planned runs' peak resident
+  rose by the session's share (tpch q9 at tp1-single 334 to 369 MB, q18 at tp4-sized 257 to 280),
+  and tpcds q64 at tp4-single records 58 calls whose modelled scratch fell below the measured,
+  against 30. The left semi family's distinct keys move only modelled scratch and the pre-call
+  checks: tpch semi-join-reorder's one probe call at tp1-single from 105.0 to 117.0 MB (1.5 M rows
+  at 8 bytes), its highest pre-call check from 126.5 to 138.5 MB; tpcds q16's anti join on
+  `cr_order_number` by 1.15 MB (144,067 rows at 8 bytes), its semi join, whose residual crosses,
+  by nothing. Peaks and underestimates do not move.
+- **R2, kept.** The engine refuses no (type, residual) pair, so a hash join of any type but mark
+  enters a cluster; its residual is read as rejecting no NULL.
+- **R1, not kept.** Orientation keeps `bytes(build) × (1 + copies × batches(probe))`. It no
+  longer prices a copy; it stays because pricing the build as the session holds it, bytes plus 16
+  bytes a row, measured worse: it moved 23 of 130 runs for a net change near zero and made tpch q9
+  dearer at every mode by 2–5 %. What it should price is #294's question.
+
+### tpch q21 under R2
+
+q21's semi join on `l_orderkey` with the residual `l_suppkey <> l_suppkey` and its anti join of
+the same shape now sit in the cluster with the four inner joins. The semi join's TES is its two
+relations; the anti join's spans the four inner relations, CD-A's `assoc(semi, anti)` conflict
+adding the semi join's left side. That is conservative but costs nothing here, since the anti
+join comes last either way. The rise is the estimate: the residual's flat 0.2 put the semi join's
+output at 31,348 rows in the second replan, so DPhyp ran it before the orders join, and it came
+out 151,237 (q-error 4.8), forcing a third replan. Before, the semi join stood outside the cluster
+and ran after the orders join had cut its input. tp1 0.726 to 0.733, tp4 0.640 to 0.642; tpcds q16
+and q94 did not move. No defect in how the residual's columns enter the TES; the estimate is
+#295.
+
+### Tests, red first
+
+Each failed against the code before this change:
+`test_a_null_key_filter_under_a_shuffle_is_wiring_the_cluster_reads_through`,
+`test_a_non_inner_join_with_a_residual_joins_the_cluster_its_residual_on_its_edge` and
+`test_a_cross_join_a_nested_loop_join_and_a_mark_join_carry_no_id_and_a_filtered_semi_join_one`,
+`test_a_filter_below_a_shuffle_on_a_column_it_does_not_hash_roots_a_relation` and
+`test_a_key_filter_on_a_side_whose_unmatched_rows_are_emitted_roots_a_relation` in
+`test_multijoin`; `test_reassembly_puts_the_null_key_filter_below_each_shuffle_of_a_key_the_plan_filtered`,
+`test_a_side_whose_unmatched_rows_are_emitted_gets_no_null_key_filter` and
+`test_the_null_key_drop_table_is_the_engines` in `test_disassembly`;
+`test_tp1_and_tp4_hold_the_same_clusters` in `test_disassembly_corpus` (68 tp4 queries held
+other clusters than tp1); `test_a_join_s_residency_is_its_build_and_what_its_session_holds_beside_it`
+and `test_a_probe_s_scratch_holds_its_output_and_no_build` in `test_operators`;
+`test_a_residual_crosses_where_a_conjunct_reads_both_sides_or_neither`,
+`test_a_semi_join_s_distinct_key_width_is_its_keys_on_the_side_it_takes_distinct`,
+`test_a_column_s_device_width_is_its_fixed_width_and_16_for_a_variable_one` and
+`test_the_device_width_rule_is_the_engines` in `test_engine_ir`, the last also failing when either
+of the Rust literals it reads changes;
+`test_a_left_semi_family_probe_call_takes_its_batch_s_keys_distinct` and
+`test_a_named_column_hash_join_holds_no_distinct_keys_under_a_crossing_residual` in
+`test_operators`; `test_a_left_anti_join_takes_each_probe_batch_s_keys_distinct_unless_its_residual_crosses`
+in `test_engine_nodes`, a residual on one side against one that crosses;
+`test_a_null_key_filter_on_a_column_the_join_does_not_key_roots_a_relation` in `test_multijoin`,
+a filter under a shuffle further down that hashes a column the join does not key on. Three pass on
+that code and pin what the change relies on: `test_the_hash_table_s_bytes_a_row_are_the_engines`,
+`test_multijoin`'s `test_a_key_filter_under_a_join_that_equates_nulls_roots_a_relation`, which
+fails when the join's `null_equals_null` is ignored, and `test_conflicts`' every-order check over
+150 sampled trees, more than 100 of them with a residual.
+`test_tp1_and_tp4_hold_the_same_clusters` fails on a sweep that finds no plan. The residual-wall
+pin in `test_multijoin` now walls a mark join, and `test_engine_run`'s cluster-id case names the
+filtered semi join inside the cluster.
+
+### Documents
+
+`optimizer.md`, `design.md` and the README cite no closed ticket as a rule: the cluster rules say
+what enters and why, the orientation rule says what `copies` stands in for, and `optimizer.md`'s
+constants table gains `NULL_KEY_DROPPABLE`; every row's value and reader check against the code.
+The `IS NOT NULL` and comet-hash docstrings say what the planner does.
+
+### Proving
+
+- The sample once more on the final code, the switches gone: every run's ratio, planned and
+  optimized cost, clusters and their sizes, DPhyp calls, reorders, flips and replans equal the
+  measured R2, R3 and R4 together, 130 of 130.
+- The left semi family's per-call distinct keys and the null-key rule read against the join's own
+  keys, the sample before and after: every file `run.py` writes is the same byte for byte, 130 of
+  130 runs, so every ratio, planned and optimized cost, cluster, DPhyp call, flip and replan is
+  equal; `run.py` writes no accounting, which moves as R4 says. Over the tp4-single goldens the 444
+  null-key filters under a shuffle still root no relation.
+- `test_engine_optimized` over the 26 queries against DuckDB: 26 passed at each of the five modes.
+- pbench's residual and NULL-key shapes — `left-join-residual`, `right-join-residual`,
+  `full-join-residual`, `anti-null-preserved-condition`, `not-in-correlated`,
+  `probe-exists-residual` and `probe-not-exists-residual` — against DuckDB at every mode, ordered
+  once and through the adaptive pipeline: 70 of 70 match, each in one cluster.
+- Cheap tier as `pipeline.yml` runs it: 48 files, 519 passed, none failed (498 before,
+  twenty-one new).
+- Dataset tier: the sidecar recount (4), the ordered corpus (2) and `run.py` (1) pass; the
+  cardinality corpus fails its two golden comparisons as Task 19 left them, the diff unchanged.
+- `optimizer.md`'s constants: 19 rows, 31 value patterns and every named reader checked against
+  the code, `NULL_KEY_DROPPABLE` among them.

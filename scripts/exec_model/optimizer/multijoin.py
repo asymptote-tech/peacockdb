@@ -16,9 +16,11 @@ from dataclasses import dataclass
 
 from ..plans import engine_ir
 from .conflicts import MIRRORED, Operator, eligibility, logical
-from ..plans.engine_expr import ColumnRef, parse_columns, parse_expr, parse_join_keys, parse_named_exprs
+from ..plans.engine_expr import (
+    Binary, ColumnRef, Unary, parse_columns, parse_expr, parse_join_keys, parse_named_exprs,
+)
 from ..plans.engine_plan import EngineNode
-from ..operators.join_types import JoinType
+from ..operators.join_types import NULL_KEY_DROPPABLE, JoinType
 from ..operators.joins import own_output
 
 _WIRING = frozenset({"GpuCoalesceAllBatches", "GpuEmitPartitions", "GpuMergePartitions"})
@@ -74,6 +76,9 @@ class MultiJoin:
     #: whether a node above `root`, before the next exchange, needs its rows on `root`'s hash: a
     #: hash join, a final aggregate, or an enclosing cluster's join that may take its hash as keyed
     hash_read_above: bool = False
+    #: the relation columns a null-key filter below a shuffle tested: the keys the plan shows can
+    #: hold a NULL, which reassembly filters again where it shuffles them
+    nullable_keys: frozenset[RelColumn] = frozenset()
 
     @property
     def holds_non_inner(self) -> bool:
@@ -81,14 +86,43 @@ class MultiJoin:
         return any(edge.kind is not JoinType.INNER for edge in self.edges)
 
 
+def null_key_columns(node: EngineNode) -> list[int] | None:
+    """Where `node` is a filter of `<key> IS NOT NULL` conjuncts alone — what the planner puts
+    below a shuffle, so a NULL that can match nothing does not crowd one lane — the ordinals it
+    tests; else None. Below an emit it is wiring a cluster reads through."""
+    if node.kind != "GpuFilter" or "projection" in node.fields:
+        return None
+    found = []
+
+    def walk(expr) -> bool:
+        if isinstance(expr, Binary) and expr.op == "AND":
+            return walk(expr.left) and walk(expr.right)
+        if isinstance(expr, Unary) and expr.op == "IS NOT NULL" and isinstance(expr.arg, ColumnRef):
+            found.append(expr.arg.index)
+            return True
+        return False
+
+    return found if walk(parse_expr(node.fields["predicate"])) else None
+
+
+def _is_null_key_shuffle(node: EngineNode, dropped_keys: frozenset[int]) -> bool:
+    """A shuffle over the planner's null-key filter: a filter of `IS NOT NULL` alone on columns
+    the shuffle hashes and `dropped_keys` holds. A query's own `IS NOT NULL` can sit there too,
+    over a one-lane input, and stays a filter."""
+    if node.kind != "GpuEmitPartitions":
+        return False
+    tested = null_key_columns(node.children[0])
+    hashed = {c.index for c in parse_columns(node.fields["hash"])}
+    return tested is not None and set(tested) <= hashed & dropped_keys
+
+
 def is_reorderable(node: EngineNode) -> bool:
-    """An inner hash join, or a non-inner one without a residual. A mark join stays out: its mark
-    column is no relation's. So does a residual on a non-inner join, whose rejection of NULLs is
-    not read and whose semi and anti mirrors the engine refuses (#159)."""
+    """A hash join of any type but mark, residual or not, as the engine runs every one. A mark
+    join stays out: its mark column is no relation's. A residual on a non-inner join is read as
+    rejecting no NULL, which conflict detection takes conservatively."""
     if node.kind != "GpuHashJoin":
         return False
-    join_type = engine_ir.join_type(node)
-    return join_type is JoinType.INNER or join_type in MIRRORED and "filter" not in node.fields
+    return engine_ir.join_type(node) in MIRRORED
 
 
 def clusters(plan: EngineNode) -> list[MultiJoin]:
@@ -168,6 +202,7 @@ class _Assembly:
         self.joins: list[EngineNode] = []
         #: each join, bottom up, as conflict detection reads it, and its edges' keys and residual
         self.operators: list[tuple[Operator, Edge]] = []
+        self.nullable: set[RelColumn] = set()
         self._collect(root)
 
     def multijoin(self) -> MultiJoin:
@@ -179,15 +214,31 @@ class _Assembly:
             tes = eligibility([operator for operator, _ in self.operators])
             edges = tuple(dataclasses.replace(whole, left=left, right=right)
                           for (_, whole), (left, right) in zip(self.operators, tes))
-        return MultiJoin(self.root, tuple(self.relations), edges, output, tuple(self.joins), self.root.mj)
+        return MultiJoin(self.root, tuple(self.relations), edges, output, tuple(self.joins), self.root.mj,
+                         nullable_keys=frozenset(self.nullable))
 
-    def _collect(self, node: EngineNode) -> int:
-        """The relations under `node`, as a mask, `node`'s joins and relations collected."""
-        if node.kind in _WIRING or _picks_columns(node):
-            return self._collect(node.children[0])
+    def _collect(self, node: EngineNode, dropped_keys: frozenset[int] = frozenset()) -> int:
+        """The relations under `node`, as a mask, `node`'s joins and relations collected.
+        `dropped_keys`: `node`'s columns that key the join above it on a side whose NULL keys can
+        match nothing, the keys the planner filters below that side's shuffle."""
+        if _is_null_key_shuffle(node, dropped_keys):
+            filtered = node.children[0]
+            found = self._collect(filtered.children[0])
+            self.nullable.update(self.lift(filtered, k) for k in null_key_columns(filtered))
+            return found
+        if node.kind in _WIRING:
+            return self._collect(node.children[0], dropped_keys)
+        if _picks_columns(node):
+            exprs = parse_named_exprs(node.fields["exprs"])
+            return self._collect(node.children[0], frozenset(exprs[k][0].index for k in dropped_keys))
         if is_reorderable(node):
             self.joins.append(node)
-            build, probe = [self._collect(child) for child in node.children]
+            droppable = ((False, False) if node.fields.get("null_equals_null") == "true"
+                         else NULL_KEY_DROPPABLE[engine_ir.join_type(node)])
+            keys = parse_join_keys(node.fields["on"])
+            dropped = [frozenset(pair[side].index for pair in keys) if drops else frozenset()
+                       for side, drops in enumerate(droppable)]
+            build, probe = [self._collect(child, side) for child, side in zip(node.children, dropped)]
             edges = self._edges(node)
             self.edges += edges
             self.operators.append(_operator(node, build, probe, edges))
@@ -199,7 +250,8 @@ class _Assembly:
     def lift(self, node: EngineNode, ordinal: int) -> RelColumn:
         """Output `ordinal` of `node`, a node of this cluster, as the relation column it is."""
         while id(node) not in self.index:
-            if node.kind in _WIRING:
+            # A filter that roots a relation is indexed, so only the planner's is passed here.
+            if node.kind in _WIRING or null_key_columns(node) is not None:
                 node = node.children[0]
             elif node.kind == "GpuProject":
                 expr, _ = parse_named_exprs(node.fields["exprs"])[ordinal]

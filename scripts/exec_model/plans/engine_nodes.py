@@ -172,7 +172,8 @@ def _hash_join(builder, node, name, children):
         name, children[0], children[1], _join_columns(node), engine_ir.join_type(node),
         [build.column for build, _ in keys], [probe.column for _, probe in keys],
         node.fields.get("null_equals_null") == "true", residual,
-        builder.fanouts.get(id(node), TRIVIAL_FANOUT),
+        builder.fanouts.get(id(node), TRIVIAL_FANOUT), engine_ir.residual_crosses(node),
+        engine_ir.distinct_key_width(node),
     )
 
 

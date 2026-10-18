@@ -6,6 +6,7 @@
 - [#167 (failed query memory) nothing proves a failed query gives its device memory back](#t167)
 - [#229 (limit slice string bytes) a mid-plan limit's sliced device batch is priced without its string bytes](#t229)
 - [#265 (shared scatter memory) the driver's memory model under-reports a shared scatter's partitions](#t265)
+- [#296 (probe batch priced twice) a device probe call's pre-check counts the probe batch twice](#t296)
 
 <a id="t182"></a>
 ### #182 (accounting unreachable) two accounting properties are out of reach, and no budgeted run survives
@@ -148,3 +149,19 @@ and would read 0. Nothing in `peacock_gpu.h` reports the adaptor to Rust either.
 pool goes on everywhere, or the reader is the C++ handle registry instead, which can total the
 bytes whose owners it alone holds with no pool involved. A model that returns zero is not a cheap
 call, it is a guard switched off, so this has to be settled before the fix lands.
+
+<a id="t296"></a>
+### #296 (probe batch priced twice) a device probe call's pre-check counts the probe batch twice
+
+A probe call's batch is held from the moment it is handed in until the call's outputs are held
+(`LaneCall::Probe` in `driver/single_partition.rs`, released through `hold_all`), so
+`begin_call`'s `resident()` already holds it. `GpuProbingJoin::call_bytes`
+(`gpu_backend/join.rs`) adds it again as `n_bytes`, beside the output it prices separately. An exec
+node, an accumulator, a scatter and the CPU's probing join use `n_bytes` as the size of the table
+they build, not of the batch they read: `CpuProbingJoin::scratch_bytes` prices no output beside it.
+
+It over-reports, which refuses a probe that would fit by one batch's bytes. The prototype's
+scratch (`operators/joins.py`) no longer counts the batch, so the two disagree on every probe.
+
+Fix: drop `n_bytes` from `call_bytes`, and its doc's "the probe batch". Test: a budget of the
+resident total plus the output and pairs admits the probe call.

@@ -339,17 +339,16 @@ with Task 15: the page and the log share the report data both changed.
 **Files:** `optimizer/join_order.py`, `optimizer/multijoin.py`, `optimizer/conflicts.py`,
 `operators/joins.py`, `engine/accounting.py`, docs, tests.
 
-- [ ] Orientation prices a build as the session holds it; what that moves is measured on a sample
-  before it is kept.
-- [ ] A residual on a non-inner join walls a cluster only where the engine still refuses it.
-- [ ] A key's `IS NOT NULL` filter under an exchange is wiring the cluster reads through; tp1 and
+- [x] Orientation priced as the session holds it is measured on a sample before it is kept; it is
+  not kept, and #294 records why.
+- [x] A residual on a non-inner join walls a cluster only where the engine still refuses it.
+- [x] A key's `IS NOT NULL` filter under an exchange is wiring the cluster reads through; tp1 and
   tp4 order the same clusters.
-- [ ] A join's residency is its build plus what `plan::session_bytes` prices beside it; a probe's
-  scratch is its output estimate and transients (design §4.3) — the build's per-call hash only for
-  RightSemi/RightAnti with a cross residual — and the probe batch, already in flight, is not counted
-  twice.
-- [ ] `optimizer.md`, `design.md` and README cite no closed ticket as a rule.
-- [ ] Proving: cheap tier; a sample at every mode before and after each rule.
+- [x] A join's residency is its build plus what `plan::session_bytes` prices beside it; a probe's
+  scratch is its output estimate and transients (design §4.3) — the per-call hash is covered by the
+  resident 16 B a row — and the probe batch, already in flight, is not counted twice.
+- [x] `optimizer.md`, `design.md` and README cite no closed ticket as a rule.
+- [x] Proving: cheap tier; a sample at every mode before and after each rule.
 
 ### Task 22: the engine side
 

@@ -8,11 +8,16 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/plans/<f
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.plans"
 
+import pathlib
+import re
+
 import pandas as pd
 
 from ..harness import main, raises
 from ...plans.engine_expr import AggCall
-from ...plans.engine_ir import Kind, columns, frame_names, kind_of, lower_field
+from ...plans.engine_ir import (
+    Kind, columns, distinct_key_width, frame_names, kind_of, lower_field, residual_crosses, width_on_device,
+)
 from ...plans.engine_plan import EngineNode, read_plans
 from ...plans.goldens import engine_plan_paths
 from ...errors import EnginePlanFormatError
@@ -194,6 +199,51 @@ def test_a_cast_between_timestamp_units_lowers_to_a_timestamp_cast():
     project = node("GpuProject", [scan(("t", "Timestamp(Microsecond, None)"))],
                    schema=[("s", "Timestamp(Second, None)")], exprs="[CAST(t@0 AS Timestamp(Second, None)) as s]")
     assert lower_field(project, "exprs") == [X.Alias(X.TimestampCast(X.Col("t"), "s"), "s")]
+
+
+def test_a_residual_crosses_where_a_conjunct_reads_both_sides_or_neither():
+    # As `plan::distinct_key_width` decides it: pbench not-in-correlated's RightAnti holds
+    # `f_k@probe:1 IS NULL`, which reads one side and crosses nothing.
+    def join(text):
+        return node("GpuHashJoin", [scan(("a", "Int64")), scan(("b", "Int64"))], on="[(a@0, b@0)]", filter=text)
+
+    assert not residual_crosses(join("b@probe:0 IS NULL"))
+    assert not residual_crosses(join("(a@build:0 > 1) AND (b@probe:0 < 5)"))
+    assert residual_crosses(join("a@build:0 < b@probe:0"))
+    assert residual_crosses(join("(a@build:0 > 1) AND (a@build:0 < b@probe:0)"))
+
+
+def test_a_semi_join_s_distinct_key_width_is_its_keys_on_the_side_it_takes_distinct():
+    # As `plan::distinct_key_width`: the probe's keys for LeftSemi, LeftAnti and LeftMark, the
+    # build's for RightSemi and RightAnti, each at its device width; none for the other types or
+    # under a crossing residual.
+    build = scan(("a", "Int64"), ("s", "Utf8"))
+    probe = scan(("d", "Date32"), ("t", "Utf8"), ("f", "Boolean"))
+    def join(join_type, on, **fields):
+        return node("GpuHashJoin", [build, probe], join_type=join_type, on=on, **fields)
+
+    assert distinct_key_width(join("LeftSemi", "[(a@0, d@0), (s@1, t@1)]")) == 4 + 16
+    assert distinct_key_width(join("LeftMark", "[(a@0, f@2)]")) == 1
+    assert distinct_key_width(join("RightAnti", "[(a@0, d@0), (s@1, t@1)]")) == 8 + 16
+    assert distinct_key_width(join("LeftAnti", "[(a@0, d@0)]", filter="d@probe:0 IS NULL")) == 4
+    assert distinct_key_width(join("LeftAnti", "[(a@0, d@0)]", filter="a@build:0 < d@probe:0")) == 0
+    for join_type in ("Inner", "Left", "Right", "Full"):
+        assert distinct_key_width(join(join_type, "[(a@0, d@0)]")) == 0, join_type
+
+
+def test_a_column_s_device_width_is_its_fixed_width_and_16_for_a_variable_one():
+    widths = {"Boolean": 1, "Int8": 1, "UInt8": 1, "Int32": 4, "UInt32": 4, "Int64": 8, "Float32": 4,
+              "Float64": 8, "Date32": 4, "Decimal128(15,2)": 16, "Timestamp(Microsecond, None)": 8, "Utf8": 16}
+    assert {t: width_on_device(t) for t in widths} == widths
+
+
+def test_the_device_width_rule_is_the_engines():
+    # Boolean's byte and a variable-width column's 16 are the session's own; every other width
+    # is Arrow's.
+    source = (pathlib.Path(__file__).resolve().parents[4] / "peacockdb-core/src/plan/join.rs").read_text()
+    body = re.search(r"pub\(crate\) fn width_on_device\(.*?\n\}", source, re.S).group(0)
+    assert re.search(r"DataType::Boolean => (\d+),", body).group(1) == str(width_on_device("Boolean"))
+    assert re.search(r"primitive_width\(\)\.map_or\((\d+),", body).group(1) == str(width_on_device("Utf8"))
 
 
 def test_the_frame_names_of_a_schema_are_its_columns():

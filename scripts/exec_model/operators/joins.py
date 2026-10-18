@@ -58,8 +58,17 @@ _BUILD_KEY = "__build_row__"
 _PROBE_KEY = "__probe_row__"
 
 
-def merged_scratch(resident: int, build_rows: int, fanout: float, n_rows: int, n_bytes: int) -> int:
-    """Build side plus the merged frame.
+#: cuDF's hash table per build row, charged resident; it covers the per-call hash RightSemi and
+#: RightAnti make under a crossing residual (`HASH_TABLE_BYTES_PER_ROW` in
+#: `peacockdb-core/src/plan/join.rs`, join-rewrite-design.md §4.3)
+HASH_TABLE_BYTES_PER_ROW = 16
+
+
+def output_scratch(build_bytes: int, build_rows: int, fanout: float, n_rows: int, n_bytes: int,
+                   distinct_key_width: int) -> int:
+    """The frame a probe call makes: `n_rows × fanout` rows of a probe row, a build row and a
+    marker, and the batch's keys taken distinct at `distinct_key_width` bytes a row. The build is
+    resident and the probe batch in flight, so neither is counted here.
 
     The merged frame is sized by the *output* cardinality, which the signature cannot
     derive — but it does not have to. `fanout` is a node property the optimizer supplies at
@@ -68,18 +77,18 @@ def merged_scratch(resident: int, build_rows: int, fanout: float, n_rows: int, n
     stays correct.
     """
     if n_rows == 0:
-        return resident
-    probe_row_bytes = n_bytes / n_rows
-    build_row_bytes = resident / max(1, build_rows)
-    per_row = probe_row_bytes + build_row_bytes + _MARKER_BYTES_PER_ROW
-    return int(resident + n_rows * fanout * per_row)
+        return 0
+    per_row = n_bytes / n_rows + build_bytes / max(1, build_rows) + _MARKER_BYTES_PER_ROW
+    return int(n_rows * fanout * per_row) + n_rows * distinct_key_width
 
 
 class _PandasJoin(JoinExecutor):
     """What the three share: the build frame, the residency it is, and the call protocol.
 
     Every probe streams, so the protocol is one answer per `probe_and_fetch` and the
-    family's own rows at `finish_and_fetch`.
+    family's own rows at `finish_and_fetch`. Residency is the build and what the session holds
+    beside it (`plan::session_bytes`); a call's scratch is the output it makes and its own
+    transients (join-rewrite-design.md §4.3).
     """
 
     #: the column a LEFT_MARK finish appends to the build rows
@@ -92,14 +101,26 @@ class _PandasJoin(JoinExecutor):
         self.probe_calls = 0
         self._probe_columns: list[str] | None = None
 
+    def _build_bytes(self) -> int:
+        return 0 if self.build is None else int(self.build.memory_usage(index=False, deep=True).sum())
+
     def resident_bytes(self) -> int:
         if self.build is None:
             return 0
-        return int(self.build.memory_usage(index=False, deep=True).sum())
+        return self._build_bytes() + self._session_bytes(len(self.build))
+
+    def _session_bytes(self, rows: int) -> int:
+        """What the session holds beside a build of `rows` rows: nothing, for a cross join."""
+        return 0
+
+    def _per_call_key_width(self) -> int:
+        """The bytes a probe row's keys take distinct per call: none, unless a type says so."""
+        return 0
 
     def scratch_bytes(self, n_rows: int, n_bytes: int) -> int:
         build_rows = len(self.build) if self.build is not None else 0
-        return merged_scratch(self.resident_bytes(), build_rows, self.fanout, n_rows, n_bytes)
+        return output_scratch(self._build_bytes(), build_rows, self.fanout, n_rows, n_bytes,
+                              self._per_call_key_width())
 
     def set_build(self, batch: PandasBatch) -> CallStats:
         if self.build is not None:
@@ -157,6 +178,8 @@ class HashJoin(_PandasJoin):
         fanout: float = TRIVIAL_FANOUT,
         probe_schema: list[str] | None = None,
         residual=None,
+        residual_crosses: bool = False,
+        distinct_key_width: int = 0,
     ):
         super().__init__(name, fanout)
         if len(build_keys) != len(probe_keys):
@@ -170,6 +193,10 @@ class HashJoin(_PandasJoin):
         self.probe_schema = probe_schema
         #: a residual (non-equi) predicate over the joined row, as `CudfJoin.filter`
         self.residual = residual
+        #: whether a conjunct of the residual reads both sides or neither (`engine_ir.residual_crosses`)
+        self.residual_crosses = residual_crosses
+        #: `engine_ir.distinct_key_width`: the keys a semi or anti session takes distinct, a row
+        self.distinct_key_width = distinct_key_width
         self.matched: np.ndarray | None = None
 
     def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
@@ -177,6 +204,20 @@ class HashJoin(_PandasJoin):
         build[_BUILD_KEY] = np.arange(len(frame))
         self.matched = np.zeros(len(frame), dtype=bool)
         return build
+
+    def _session_bytes(self, rows: int) -> int:
+        """`plan::session_bytes` for a keyed join: the hash table; RightSemi and RightAnti's
+        distinct build keys where no residual conjunct reads both sides; a byte a row of `matched`
+        for the five types that finish."""
+        distinct = 0
+        if self.join_type in (JoinType.RIGHT_SEMI, JoinType.RIGHT_ANTI) and not self.residual_crosses:
+            distinct = int(self.build[self.build_keys].memory_usage(index=False, deep=True).sum())
+        return HASH_TABLE_BYTES_PER_ROW * rows + distinct + (rows if J.needs_finish(self.join_type) else 0)
+
+    def _per_call_key_width(self) -> int:
+        """`call_bytes`: a type that finishes takes each probe batch's keys distinct, the left
+        semi family's alone with a width."""
+        return self.distinct_key_width if J.needs_finish(self.join_type) else 0
 
     # -- probe -------------------------------------------------------------------
 
@@ -345,6 +386,10 @@ class NestedLoopJoin(_PandasJoin):
     def _take_build(self, frame: pd.DataFrame) -> pd.DataFrame:
         self.matched = np.zeros(len(frame), dtype=bool)
         return normalize(frame.copy())
+
+    def _session_bytes(self, rows: int) -> int:
+        """`plan::session_bytes` for a nested loop: no hash table, `matched` where the type finishes."""
+        return rows if J.needs_finish(self.join_type) else 0
 
     def _probe(self, probe: pd.DataFrame) -> list[pd.DataFrame]:
         probe = normalize(probe)
