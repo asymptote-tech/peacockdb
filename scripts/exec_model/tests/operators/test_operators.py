@@ -13,12 +13,15 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/operator
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.operators"
 
+import pathlib
+import re
+
 import numpy as np
 import pandas as pd
 
 from ..harness import main, raises
 from ...engine.executors import LaneEvent
-from ...operators import source
+from ...operators import nodes as N, source
 from ...engine.limit import RowRange
 from ...operators.accumulators import (
     AccumulateBatchesAndSort,
@@ -51,7 +54,7 @@ from ...operators.expressions import (
     project,
 )
 from ...operators.frame import PandasBatch, concatenate
-from ...operators.joins import HashJoin, JoinType
+from ...operators.joins import HASH_TABLE_BYTES_PER_ROW, HashJoin, JoinType, NestedLoopJoin
 from ...operators.partition_ops import (
     EmitPartitions,
     first_lane_ids,
@@ -440,6 +443,72 @@ def test_each_key_dtype_digests_to_its_pinned_value():
 
 
 # -- joins ------------------------------------------------------------------------
+
+
+def built(join, frame):
+    """`join` with `frame` as its build, and the bytes of the build frame it holds."""
+    join.set_build(batch(frame, "B"))
+    return join, int(join.build.memory_usage(index=False, deep=True).sum())
+
+
+def test_a_join_s_residency_is_its_build_and_what_its_session_holds_beside_it():
+    # `plan::session_bytes`: a keyed join's hash table at 16 bytes a row, RightSemi and RightAnti's
+    # distinct keys where no residual crosses, a byte a row of `matched` for the five that finish.
+    frame = pd.DataFrame({"k": [1, 2, 3, 4], "v": [5.0, 6.0, 7.0, 8.0]})
+    keys = int(frame[["k"]].memory_usage(index=False, deep=True).sum())
+    for join_type, beside in ((JoinType.INNER, 16 * 4), (JoinType.LEFT, 16 * 4 + 4),
+                              (JoinType.LEFT_MARK, 16 * 4 + 4), (JoinType.RIGHT_SEMI, 16 * 4 + keys)):
+        join, build = built(HashJoin(join_type, ["k"], ["k"]), frame)
+        assert join.resident_bytes() == build + beside, join_type
+    # A residual reading the build alone crosses nothing, so the distinct keys stay, as
+    # `plan::distinct_key_width` has them; one reading both sides leaves none.
+    residual = Binary(">", Col("v"), Lit(0.0))
+    join, build = built(HashJoin(JoinType.RIGHT_SEMI, ["k"], ["k"], residual=residual), frame)
+    assert join.resident_bytes() == build + 16 * 4 + keys
+    join, build = built(HashJoin(JoinType.RIGHT_SEMI, ["k"], ["k"], residual=residual, residual_crosses=True), frame)
+    assert join.resident_bytes() == build + 16 * 4
+    join, build = built(NestedLoopJoin(JoinType.LEFT, None), frame)
+    assert join.resident_bytes() == build + 4
+
+
+def test_a_named_column_hash_join_holds_no_distinct_keys_under_a_crossing_residual():
+    frame = pd.DataFrame({"k": [1, 2, 3, 4], "v": [5.0, 6.0, 7.0, 8.0]})
+    node = N.hash_join("join", N.scan("b", frame, 1, 4), N.scan("p", frame, 1, 4), JoinType.RIGHT_SEMI,
+                       ["k"], ["k"], residual=Binary(">", Col("v"), Col("k")), residual_crosses=True)
+    join, build = built(node.make_executors().backends.cpu(0), frame)
+    assert join.resident_bytes() == build + 16 * 4
+
+
+def test_the_hash_table_s_bytes_a_row_are_the_engines():
+    source = (pathlib.Path(__file__).resolve().parents[4] / "peacockdb-core/src/plan/join.rs").read_text()
+    [engine] = re.findall(r"^const HASH_TABLE_BYTES_PER_ROW: u64 = (\d+);$", source, re.M)
+    assert HASH_TABLE_BYTES_PER_ROW == int(engine)
+
+
+def test_a_probe_s_scratch_holds_its_output_and_no_build():
+    # The build is resident and the probe batch in flight: a call's scratch is the output it
+    # makes, rows x fanout at a probe row, a build row and a marker each. A RightSemi or RightAnti
+    # under a crossing residual hashes its build per call, covered by the 16 bytes a row it holds
+    # resident (join-rewrite-design.md §4.3).
+    frame = pd.DataFrame({"k": [1, 2, 3, 4], "v": [5.0, 6.0, 7.0, 8.0]})
+    join, build = built(HashJoin(JoinType.INNER, ["k"], ["k"], fanout=2.0), frame)
+    assert join.scratch_bytes(10, 80) == int(10 * 2.0 * (8 + build / 4 + 16))
+    assert join.scratch_bytes(0, 0) == 0
+    residual = Binary(">", Col("v"), Lit(0.0))
+    join, build = built(HashJoin(JoinType.RIGHT_ANTI, ["k"], ["k"], residual=residual, residual_crosses=True), frame)
+    assert join.scratch_bytes(10, 80) == int(10 * 1.0 * (8 + build / 4 + 16))
+
+
+def test_a_left_semi_family_probe_call_takes_its_batch_s_keys_distinct():
+    # `call_bytes`' per-call term: LeftSemi, LeftAnti and LeftMark take each probe batch's keys
+    # distinct, `n_rows × distinct_key_width`; a type that does not finish takes none per call.
+    frame = pd.DataFrame({"k": [1, 2, 3, 4], "v": [5.0, 6.0, 7.0, 8.0]})
+    for join_type in (JoinType.LEFT_SEMI, JoinType.LEFT_ANTI, JoinType.LEFT_MARK):
+        join, build = built(HashJoin(join_type, ["k"], ["k"], distinct_key_width=12), frame)
+        assert join.scratch_bytes(10, 80) == int(10 * 1.0 * (8 + build / 4 + 16)) + 10 * 12, join_type
+        assert join.scratch_bytes(0, 0) == 0, join_type
+    join, build = built(HashJoin(JoinType.RIGHT_SEMI, ["k"], ["k"], distinct_key_width=12), frame)
+    assert join.scratch_bytes(10, 80) == int(10 * 1.0 * (8 + build / 4 + 16))
 
 
 def build_probe(join_type, null_equals_null=False):

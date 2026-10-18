@@ -72,3 +72,13 @@ def joined_names(build_names, probe_names, key_pairs, join_type: JoinType) -> li
     """The column names `joined_projection` leaves, in order."""
     all_names = list(build_names) + list(probe_names)
     return [all_names[i] for i in joined_projection(build_names, probe_names, key_pairs, join_type)]
+
+
+#: The sides whose unmatched rows are never emitted, (build, probe): a NULL key there matches
+#: nothing, so the planner drops it below the side's shuffle. `null_key_droppable` in
+#: `peacockdb-core/src/plan/join.rs`; `test_the_null_key_drop_table_is_the_engines` holds the two equal.
+NULL_KEY_DROPPABLE = {
+    JoinType.INNER: (True, True), JoinType.LEFT_SEMI: (True, True), JoinType.RIGHT_SEMI: (True, True),
+    JoinType.LEFT: (False, True), JoinType.LEFT_ANTI: (False, True), JoinType.LEFT_MARK: (False, True),
+    JoinType.RIGHT: (True, False), JoinType.RIGHT_ANTI: (True, False), JoinType.FULL: (False, False),
+}

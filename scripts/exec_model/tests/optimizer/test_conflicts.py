@@ -98,7 +98,7 @@ def _columns(tree) -> list[str]:
     """The columns a plan tree outputs: a table's one column, or a join's own output."""
     if isinstance(tree, str):
         return [FRAMES[tree].columns[0]]
-    join_type, build_tree, probe_tree, _, _ = tree
+    join_type, build_tree, probe_tree = tree[:3]
     joined = _columns(build_tree) + _columns(probe_tree)
     return [joined[at] for at in own_output(_BY_NAME[join_type], len(_columns(build_tree)), len(_columns(probe_tree)))]
 
@@ -109,15 +109,36 @@ def _text(tree, indent: int) -> str:
         column = FRAMES[tree].columns[0]
         return (f"{pad}GpuLoadParquet: table={tree}, projections=[{column}@0], partition_groups=[[[0]]], "
                 f"lanes=1, batches=multiple, schema=[{column}:Int64]")
-    join_type, build_tree, probe_tree, (key_build, key_probe), null_equal = tree
+    join_type, build_tree, probe_tree, (key_build, key_probe), null_equal, *residual = tree
     build_columns, probe_columns = _columns(build_tree), _columns(probe_tree)
     schema = ", ".join(f"{c}:Int64" for c in _columns(tree))
     build_schema = ", ".join(f"{c}:Int64" for c in build_columns)
+    filter_text = f", filter={_residual(residual[0], build_columns, probe_columns)}" if residual else ""
     return (f"{pad}GpuHashJoin: join_type={join_type}, on=[({key_build}@{build_columns.index(key_build)}, "
-            f"{key_probe}@{probe_columns.index(key_probe)})]{', null_equals_null=true' if null_equal else ''}, "
+            f"{key_probe}@{probe_columns.index(key_probe)})]{filter_text}"
+            f"{', null_equals_null=true' if null_equal else ''}, "
             f"lanes=1, batches=multiple, schema=[{schema}]\n"
             f"{pad}  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[{build_schema}]\n"
             f"{_text(build_tree, indent + 4)}\n{_text(probe_tree, indent + 2)}")
+
+
+def _residual(reads: str, build_columns, probe_columns) -> str:
+    """A residual reading the last column of the sides `reads` names: both, the build or the probe."""
+    b, p = build_columns[-1], probe_columns[-1]
+    build, probe = f"{b}@build:{len(build_columns) - 1}", f"{p}@probe:{len(probe_columns) - 1}"
+    return {"both": f"{build} < {probe}", "build": f"{build} > 1", "probe": f"{probe} > 1"}[reads]
+
+
+def _with_residuals(tree, draw: random.Random):
+    """`tree` with a residual on each join drawn to carry one: one reading both sides, or for a
+    non-inner join one side alone, which an inner join's plan would have pushed below it."""
+    if isinstance(tree, str):
+        return tree
+    join_type, build_tree, probe_tree, keys, null_equal = tree
+    shaped = (join_type, _with_residuals(build_tree, draw), _with_residuals(probe_tree, draw), keys, null_equal)
+    if draw.random() < 0.5:
+        return shaped
+    return shaped + (draw.choice(["both"] if join_type == "Inner" else ["both", "build", "probe"]),)
 
 
 def _plan(tree):
@@ -183,7 +204,9 @@ def _check(tree, found: dict, sample: random.Random | None = None) -> None:
     plan = _plan(tree)
     [cluster] = clusters(plan)
     want = _answer(plan)
-    orders = list(_admitted(cluster.edges, (1 << len(cluster.relations)) - 1))
+    # DPhyp takes the edges with keys; a residual rides the first join holding what it reads.
+    keyed = tuple(edge for edge in cluster.edges if edge.keys)
+    orders = list(_admitted(keyed, (1 << len(cluster.relations)) - 1))
     found["orders"] += len(orders)
     for order in orders:
         oriented = list(_orientations(order))
@@ -207,6 +230,17 @@ def test_every_order_the_conflicts_admit_answers_as_the_plan_does_over_four_rela
     for tree in draw.sample(list(_plans(4)), 60):
         _check(tree, found, draw)
     assert found["orders"] > 60, found
+
+
+
+def test_every_order_the_conflicts_admit_answers_as_the_plan_does_with_residuals_sampled():
+    # The engine runs a residual on every join type, so such joins sit inside clusters.
+    found, draw = {"orders": 0}, random.Random(21)
+    trees = [_with_residuals(tree, draw) for tree in draw.sample(list(_plans(3)), 150)]
+    with_residual = [tree for tree in trees if "filter=" in _text(tree, 0)]
+    for tree in with_residual:
+        _check(tree, found, draw)
+    assert len(with_residual) > 100 and found["orders"] > len(with_residual), (len(with_residual), found)
 
 
 if __name__ == "__main__":

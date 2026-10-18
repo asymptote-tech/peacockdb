@@ -62,10 +62,11 @@ def test_a_join_in_a_cluster_names_it_and_no_other_join_does():
       GpuCoalesceAllBatches: lanes=1, batches=single, {U}
         {U_PROBE}""")
     joins = [(line.split(",")[0].strip(), "mj=" in line) for line in lines if "Join:" in line]
+    # The filtered semi join and the inner join under it are one cluster: a residual walls none.
     assert joins == [("GpuCrossJoin: lanes=1", False), ("GpuNestedLoopJoin: join_type=Inner", False),
-                     ("GpuHashJoin: join_type=LeftSemi", False), ("GpuHashJoin: join_type=Inner", True)]
-    [joined] = [line for line in lines if "mj=" in line]
-    assert ", batches=multiple, mj=MJ1, output_rows=" in joined
+                     ("GpuHashJoin: join_type=LeftSemi", True), ("GpuHashJoin: join_type=Inner", True)]
+    for joined in [line for line in lines if "mj=" in line]:
+        assert ", batches=multiple, mj=MJ1, output_rows=" in joined
 
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

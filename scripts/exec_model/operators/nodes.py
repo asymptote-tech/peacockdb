@@ -507,13 +507,13 @@ def interleave(name, children) -> PandasNode:
 @_records_its_recipe
 def hash_join(
     name, build, probe, join_type, build_keys, probe_keys, null_equals_null=False,
-    fanout=joins.TRIVIAL_FANOUT, probe_schema=None, residual=None,
+    fanout=joins.TRIVIAL_FANOUT, probe_schema=None, residual=None, residual_crosses=False,
 ) -> PandasNode:
     """`fanout` is the optimizer's cardinality estimate for this join, carried as a node
     property so the executor built from it can model its own scratch. `probe_schema` is
     the probe side's column list, consulted only when an outer finish saw no probe batch.
     `residual` is the non-equi predicate `CudfJoin.filter` carries, over the joined row's
-    own column names."""
+    own column names; `residual_crosses` as `engine_ir.residual_crosses`."""
     return PandasNode(
         name,
         NodeKind.INTERMEDIATE,
@@ -522,7 +522,7 @@ def hash_join(
         [build, probe],
         factory=lambda lane: joins.HashJoin(
             join_type, build_keys, probe_keys, null_equals_null, f"{name}.p{lane}", fanout,
-            probe_schema, residual,
+            probe_schema, residual, residual_crosses,
         ),
         validator=validation.co_partitioned_join(build_keys, probe_keys),
     )
@@ -572,16 +572,17 @@ def _positional_join(name, build, probe, executor, validator=None, distribution=
 @_records_its_recipe
 def positional_hash_join(
     name, build, probe, columns, join_type, build_keys, probe_keys, null_equals_null=False,
-    residual=None, fanout=joins.TRIVIAL_FANOUT,
+    residual=None, fanout=joins.TRIVIAL_FANOUT, residual_crosses=False, distinct_key_width=0,
 ) -> PandasNode:
     """An engine `GpuHashJoin`: keys and `residual` in `columns.joined` names, the output
     `columns.projection` of the join type's own, named `columns.output` (`joins.Positional`);
-    `fanout` as `hash_join` has it."""
+    `fanout` as `hash_join` has it; `residual_crosses` and `distinct_key_width` as `engine_ir`'s."""
     return _positional_join(
         name, build, probe,
         lambda lane: joins.PositionalHashJoin(
             columns, join_type, build_keys, probe_keys, null_equals_null, f"{name}.p{lane}",
-            fanout=fanout, residual=residual,
+            fanout=fanout, residual=residual, residual_crosses=residual_crosses,
+            distinct_key_width=distinct_key_width,
         ),
         validation.co_partitioned_join(build_keys, probe_keys),
         _join_distribution(columns, join_type, build_keys, probe_keys) if _lanes(build) > 1

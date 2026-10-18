@@ -156,14 +156,18 @@ is why each step has its shape.
   matches. J equating NULLs changes none of this: what it matches differently carries k NULL or
   outside C's keys. So C's output is unchanged. `test_dynamic_filters.py` holds it to the
   unpruned answer over every type, either side, NULL keys on both, J equating NULLs or not.
-- **Clusters** (`multijoin.py`) are maximal trees of hash joins: inner ones, and left, right,
-  full, semi and anti ones without a residual, which conflict detection places (below). Only
-  hash joins carry the key edges DPhyp takes. A mark join stays a wall, its mark column being no
-  relation's, and so does a non-inner join with a residual: whether its predicate rejects NULLs
-  is not read, and its semi and anti mirrors are refused (#159). A filter roots a relation even
-  between joins, because an `IS NULL` there is what turns a left join into an anti join. Columns
-  are `(relation, ordinal)` identities rather than positions, since a reordered tree renumbers
-  every position.
+- **Clusters** (`multijoin.py`) are maximal trees of hash joins of every type but mark, a
+  residual or not, which conflict detection places (below); a residual is read as rejecting no
+  NULL. Only hash joins carry the key edges DPhyp takes. A mark join stays a wall, its mark
+  column being no relation's. A filter roots a relation even between joins, because an `IS NULL`
+  there is what turns a left join into an anti join — but not the planner's `<key> IS NOT NULL`
+  below a shuffle, which drops a NULL that can match nothing: a filter on columns alone that the
+  shuffle hashes and the join keys on, on a side the engine's `null_key_droppable` names, of a join
+  not holding NULL equal. A query's own `IS NOT NULL` can sit below a shuffle over a one-lane
+  input, and stays a filter.
+  The planner's is wiring: tp1 and tp4 hold the same clusters, and reassembly puts it back below
+  each shuffle on a key the plan's filters tested, on those sides. Columns are `(relation,
+  ordinal)` identities rather than positions, since a reordered tree renumbers every position.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
   (`multijoin.named`, which the pipeline does right after `names.aliased` numbers the tables read
   twice, and `join_order.ordered` does for a plan given unnamed), and every join it holds carries
@@ -203,7 +207,7 @@ reached it.
   conflicts as rules tested per (left, right) pair and admit more orders; the crate prices sets,
   not pairs, so they would need a pair callback. One edge per join means a set S holds at most
   |S| − 1 edges, so each pair DPhyp joins has exactly one edge across it, its sides unsplit: a
-  non-inner join never takes another join's predicate as a residual (#153). An inner join is one
+  non-inner join never takes another join's predicate as a residual. An inner join is one
   edge too in such a cluster, its conjuncts together; a cluster of inner joins only keeps an
   edge per relation pair. `test_conflicts` runs every order the TES admits, over every
   three-relation plan of the eight join types with NULLs in every table and NULL held equal or
@@ -237,17 +241,19 @@ reached it.
 The crate decides no sides; `join_order.orient` does, bottom up, after DPhyp returns. For an
 inner join both orientations emit the same rows, so C_out is a function of the set and DPhyp can
 price sets alone. Which side builds is not: it depends on how many batches the probe arrives in
-— a function of the subtree's shape and lanes — because while #152 is open the build is copied
-once per probe batch, and a probe not hashed onto the join's lanes is shuffled first, cut once
-per lane. Folding that into DPhyp would give one set several costs. So each inner join builds
-its cheaper side: build bytes × (1 + copies × probe batches).
+— a function of the subtree's shape and lanes — and a probe not hashed onto the join's lanes is
+shuffled first, cut once per lane. Folding that into DPhyp would give one set several costs. So
+each inner join builds its cheaper side: build bytes × (1 + copies × probe batches). The term no
+longer prices a copy: the session builds once. It stays because pricing the build as the session
+holds it, bytes and its hash table, measured worse (tpch q9 at every mode); what it should price
+is #294's question.
 
-A non-inner join keeps the plan's type and build side: it builds the side holding the relations
-its TES has on the side the plan's join built. A `Left` join whose preserved side built still
-does, as one set or as a larger one after a reorder. The copy model charges a semi or anti join
-for copies it never makes, and the reorders gain from order, not flips. Disassembly reads the
-type off the tree it is given — `Left` where the preserved side builds, `Right` where it probes,
-the semi and anti pairs alike — and `orient`'s tree gives back the plan's.
+A non-inner join keeps the plan's type and build side: it builds the side holding the relations its
+TES has on the side the plan's join built. A `Left` join whose preserved side built still does, as
+one set or as a larger one after a reorder. Nothing prices a semi or anti join's flip as the session
+would run it (#294), and the reorders gain from order, not flips. Disassembly reads the type off the
+tree it is given — `Left` where the preserved side builds, `Right` where it probes, the semi and
+anti pairs alike — and `orient`'s tree gives back the plan's.
 
 ### The adaptive run and replan
 
@@ -364,7 +370,9 @@ What the model established, each pinned by the test named:
 - A join's scratch is sized by its output, which `scratch_bytes(n_rows, n_bytes)` cannot derive;
   the executor is built from the node, so a fanout attached at plan time reaches it and the trait
   is unchanged. Model ≥ measured is therefore not an invariant: the accountant's contract is to
-  fail cleanly when the accounted peak passes the budget.
+  fail cleanly when the accounted peak passes the budget. LeftSemi, LeftAnti and LeftMark also
+  take each probe batch's keys distinct, at the device width the plan's schema gives them
+  (`engine_ir.distinct_key_width`), as the engine's `call_bytes` prices them.
 - The executor total is cached and refreshed per call, not summed: summing forces the accountant
   to hold every executor, which the Rust driver cannot.
 
@@ -539,7 +547,7 @@ worsen most, 16.6 to 26.4, since they are under already.
   the sf40 calibration record, `fixed + slope × volume` per kind, which is what lanes and batch
   size would be chosen by where C_out sees no difference; no rule reads it yet.
 - **The plan-time resident estimate** (`estimated_max_resident_size`), which the engine derives
-  in Rust; and window functions, which the planner refuses (#143).
+  in Rust; and window functions, which the planner refuses.
 
 Device bytes, the replanning's own cost, and statistics past a finished build are above, where
 each matters.

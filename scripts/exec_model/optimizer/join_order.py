@@ -167,11 +167,13 @@ def orient(tree, sets: SetEstimates, copies: int = 1, lanes: int = 1,
     """`tree` — a relation's index or a pair of trees, sides unordered — with each inner join's
     cheaper side first, as its build, and each non-inner join building the side its plan join
     built, so it keeps the plan's type. Bottom up, since a join's probe batches are what the
-    join below it emits. For an inner join the two configurations differ only in what the build
-    costs: held whole, and copied once per probe batch while the build handle cannot outlive a
-    streamed probe (#152, `copies` = 1). A join runs on the lanes the plan had for its relations
-    (`planned`, by mask), or on `lanes`; a probe not already hashed onto them is shuffled first,
-    which cuts each of its batches once per lane."""
+    join below it emits. For an inner join the two configurations are priced on the build:
+    held whole, times 1 + `copies` × the probe's batches. The term no longer prices a copy, the
+    session building once; it stays because pricing the build as the session holds it measured
+    worse, and what it should price is #294's question. A
+    join runs on the lanes the plan had for its relations (`planned`, by mask), or on `lanes`; a
+    probe not already hashed onto them is shuffled first, which cuts each of its batches once per
+    lane."""
     return _orient(tree, sets, copies, lanes, planned or {})[0]
 
 
@@ -196,8 +198,9 @@ def _orient(tree, sets, copies, lanes, planned):
 
 def _plan_builder(cluster: MultiJoin, left: int, right: int) -> int | None:
     """Where the join of `left` and `right` is a non-inner one, the relations its plan join built
-    on — its TES side that the plan had build — else None. Its type is the plan's then: the copy
-    model would charge semi and anti joins for copies they never make, and gains come from order."""
+    on — its TES side that the plan had build — else None. Its type is the plan's then: nothing
+    prices a semi or anti join's flip as the session would run it (#294), and gains come from
+    order."""
     if not cluster.holds_non_inner:
         return None
     [edge] = joining(cluster.edges, left, right)

@@ -10,11 +10,15 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
+import pathlib
+import re
+
 import pandas as pd
 
 from ..corpus import execute
 from ..harness import main, raises
-from .test_multijoin import CHAIN, L, plan, scan
+from .test_multijoin import CHAIN, F, L, SHUFFLED, plan, scan
+from ...operators.join_types import NULL_KEY_DROPPABLE, JoinType
 from ...optimizer.disassembly import baseline, disassemble, reassembled
 from ...plans.engine_nodes import build
 from ...optimizer.multijoin import assemble, clusters, replaced
@@ -138,6 +142,54 @@ def test_edges_that_disagree_on_null_equality_are_not_joined_as_one():
     cluster = assemble(plan(text))
     with raises(ValueError, match="NULL"):
         disassemble(cluster, ((0, 2), 1), lanes=1)
+
+
+def test_reassembly_puts_the_null_key_filter_below_each_shuffle_of_a_key_the_plan_filtered():
+    [cluster] = clusters(plan(SHUFFLED))
+    assert list(kinds(disassemble(cluster, baseline(cluster), lanes=4))) == list(kinds(cluster.root))
+    # t3 builds and t1 ⋈ t2 probes on b: the probe is shuffled on b, nullable, so the filter
+    # goes below that shuffle; t3's c was never filtered, so its shuffle has none.
+    build, probe = disassemble(cluster, (2, (0, 1)), lanes=4).children
+    assert probe.kind == "GpuEmitPartitions" and probe.children[0].kind == "GpuFilter"
+    assert probe.children[0].fields["predicate"] == "b@1 IS NOT NULL"
+    assert "GpuFilter" not in "".join(kinds(build))
+
+
+def test_a_side_whose_unmatched_rows_are_emitted_gets_no_null_key_filter():
+    # As the planner lays a Left join out: its preserved build shuffled on b with no filter, though
+    # b can hold a NULL (t2's shuffle filters it); its probe through the filter on c.
+    left = plan(f"""GpuHashJoin: join_type=Left, on=[(b@1, c@0)], projection=[a@0, c@2], {F}, schema=[a:Int64, c:Int64]
+  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[b@1], schema=[a:Int64, b:Int64]
+    GpuEmitPartitions: hash=[b@1], {F}, hashed_on=[b@1], schema=[a:Int64, b:Int64]
+      GpuMergePartitions: {L}, schema=[a:Int64, b:Int64]
+        GpuHashJoin: join_type=Inner, on=[(a@0, b@0)], {F}, hashed_on=[a@0], schema=[a:Int64, b:Int64]
+          GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[a@0], schema=[a:Int64]
+            GpuEmitPartitions: hash=[a@0], {F}, hashed_on=[a@0], schema=[a:Int64]
+{scan("t1", "a", indent=14)}
+          GpuEmitPartitions: hash=[b@0], {F}, hashed_on=[b@0], schema=[b:Int64]
+            GpuFilter: predicate=b@0 IS NOT NULL, {L}, schema=[b:Int64]
+{scan("t2", "b", indent=14)}
+  GpuEmitPartitions: hash=[c@0], {F}, hashed_on=[c@0], schema=[c:Int64]
+    GpuFilter: predicate=c@0 IS NOT NULL, {L}, schema=[c:Int64]
+{scan("t3", "c", indent=6)}""")
+    [cluster] = clusters(left)
+    rebuilt = disassemble(cluster, baseline(cluster), lanes=4)
+    assert list(kinds(rebuilt)) == list(kinds(cluster.root))
+    build, probe = rebuilt.children
+    assert build.children[0].children[0].kind == "GpuMergePartitions"
+    assert probe.children[0].kind == "GpuFilter"
+
+
+def test_the_null_key_drop_table_is_the_engines():
+    source = (pathlib.Path(__file__).resolve().parents[4] / "peacockdb-core/src/plan/join.rs").read_text()
+    body = source[source.index("fn null_key_droppable"):]
+    body = body[:body.index("\n}\n")]
+    engine = {}
+    for arm, build, probe in re.findall(r"^\s*(JoinType::[\w| :]+?) => \((true|false), (true|false)\)", body, re.M):
+        for name in re.findall(r"JoinType::(\w+)", arm):
+            engine[name] = (build == "true", probe == "true")
+    names = {t: "".join(part.title() for part in t.name.split("_")) for t in JoinType}
+    assert {names[t]: v for t, v in NULL_KEY_DROPPABLE.items()} == engine, engine
 
 
 def test_a_full_join_s_output_is_hashed_on_neither_side():

@@ -129,9 +129,10 @@ def test_an_inner_residual_reading_both_sides_of_a_left_join_stays_on_the_inner_
     assert sides(after, ("Left", "Right")) == [({"cus"}, {"ord"})]
 
 
-def test_a_non_inner_join_keeps_its_plan_type_and_build_side_where_copies_would_flip_it():
-    # Orders in 30 batches: building the customers is copied once per batch (#152), which would
-    # make the orders the cheaper build of an inner join. A left or semi join keeps its build.
+def test_a_non_inner_join_keeps_its_plan_type_and_build_side_where_the_probe_s_batches_would_flip_it():
+    # Orders in 30 batches: the customers' build is priced at 1 + 30 times its bytes (`copies`),
+    # which would make the orders the cheaper build of an inner join. A left or semi join keeps its
+    # build.
     many = "partition_groups=[[" + ",".join(f"[{g}]" for g in range(30)) + "]]"  # 334 rows each
     for text, join_type in ((FIXED, "Left"), (LEFT, "Left"), (SEMI, "LeftSemi")):
         text = text.replace(f"{scan('ord', ['ok', 'oc'])}",

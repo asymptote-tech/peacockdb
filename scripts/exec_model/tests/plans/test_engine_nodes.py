@@ -17,6 +17,7 @@ import pyarrow.parquet as pq
 
 from ..corpus import ParquetTables, execute
 from ..harness import main, raises
+from ...operators.frame import PandasBatch
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
 
@@ -163,6 +164,23 @@ def test_a_mark_join_over_an_earlier_marks_output_keeps_both_marks():
 def test_a_right_semi_join_emits_the_probe_rows_that_matched():
     got = join("GpuHashJoin: join_type=RightSemi, on=[(k@0, k@0)], " + U, T_BUILD, U_PROBE)
     assert sorted(got["w"]) == [10, 20, 21]
+
+
+def test_a_left_anti_join_takes_each_probe_batch_s_keys_distinct_unless_its_residual_crosses():
+    # `call_bytes`: a probe call takes the batch's keys distinct, 8 bytes a row for one Int64 key,
+    # under a residual on one side; one conjunct reading both sides leaves none.
+    def scratch(residual):
+        plan = parse_plans(f"""== q
+GpuUnload
+  GpuHashJoin: join_type=LeftAnti, on=[(k@0, k@0)], filter={residual}, lanes=1, batches=multiple, {T}
+    {T_BUILD}
+    {U_PROBE}
+""", "test")["q"]
+        join = build(plan, tables()).children()[0].make_executors().backends.cpu(0)
+        join.set_build(PandasBatch(ROWS, "B"))
+        return join.scratch_bytes(10, 80)
+
+    assert scratch("w@probe:1 > 15") - scratch("w@probe:1 > k@build:0") == 10 * 8
 
 
 def test_a_left_join_pads_the_unmatched_build_rows():
