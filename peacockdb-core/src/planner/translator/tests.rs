@@ -907,8 +907,8 @@ async fn grouping_sets_expand_at_the_init_and_group_on_the_id_above_it() {
 
 #[tokio::test]
 async fn a_rollup_shuffle_hashes_its_keys_and_never_the_grouping_id() {
-    // #189: comet has no UInt8 arm, so the cpu cannot hash the id. The Final
-    // groups on keys plus the id; hashing the keys alone still lands each group in one lane.
+    // The Final groups on keys plus the id, and hashing the keys alone still lands each group
+    // in one lane (the subset rule), so the id is never hashed. #189 has the history.
     let tree = translated_at_tp4(
         "SELECT c_nationkey, c_mktsegment, count(*) FROM customer \
          GROUP BY ROLLUP(c_nationkey, c_mktsegment)",

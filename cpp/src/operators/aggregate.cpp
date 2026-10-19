@@ -336,18 +336,10 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
                                std::move(out_names));
   }
 
-  // ---- ROLLUP / CUBE / GROUPING SETS ----
-  // DataFusion's Partial expands these into N grouping sets and appends a
-  // `__grouping_id` column after the group columns; the Final then re-groups by
-  // [group cols..., __grouping_id] as a plain GROUP BY and the outer projection
-  // drops the id. cuDF has no native ROLLUP/CUBE, so per set we substitute the
-  // per-position NULL placeholder (null_exprs[i]) for masked group columns, run
-  // the same aggregations, tag each set's rows with DataFusion's grouping id, and
-  // concatenate.
-  //
-  // NON-EMPTY null_exprs is the discriminator, not grouping_sets: a plain GROUP BY
-  // — and the Final of a grouping-set agg — still serializes one all-false mask
-  // but leaves null_exprs EMPTY, and must take the single-groupby path below.
+  // ---- ROLLUP / CUBE / GROUPING SETS ---- (architecture.md, "Grouping sets")
+  // One groupby per set, masked keys swapped for their typed NULL placeholder, each set's
+  // rows tagged with DataFusion's grouping id, concatenated. A non-empty null_exprs selects
+  // this arm: a plain GROUP BY and a grouping set's merge carry one all-false mask and none.
   if (agg->null_exprs() && agg->null_exprs()->size() > 0 &&
       agg->grouping_sets() && agg->grouping_sets()->size() > 0) {
     auto* sets = agg->grouping_sets();

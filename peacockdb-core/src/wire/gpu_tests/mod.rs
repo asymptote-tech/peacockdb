@@ -723,6 +723,8 @@ const ROLLUP_GROUPING: &str = "SELECT n_regionkey, n_nationkey, \
      GROUP BY ROLLUP (n_regionkey, n_nationkey)";
 const DISTINCT_UNDER_A_WIDE_ROLLUP: &str = "SELECT l_orderkey, l_partkey, l_linenumber, \
      l_returnflag, l_linestatus, l_shipinstruct, l_shipmode, l_comment, \
+     grouping(l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, l_shipinstruct, \
+     l_shipmode, l_comment) AS g, \
      count(DISTINCT l_suppkey), count(*) FROM lineitem WHERE l_orderkey <= 7 \
      GROUP BY ROLLUP (l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, \
      l_shipinstruct, l_shipmode, l_comment)";
@@ -1001,7 +1003,9 @@ async fn a_rollup_partial_holds_the_uint8_grouping_id_the_plan_declares() {
 
 /// Eight keys and the DISTINCT argument make nine, so both stages carry a `UInt16` id where
 /// DataFusion's over the eight is `UInt8`, and a project narrows it above the outer stage.
-/// The argument is never masked, so its bit is 0 and the narrowed value is DataFusion's.
+/// The argument is the first key and never masked, so its bit, the highest, is 0 and the
+/// narrowed value is DataFusion's; `g`, `GROUPING()` over the eight, puts it in the answer
+/// `held` holds to the oracle.
 #[tokio::test]
 async fn a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions() {
     let held = held(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE).await;

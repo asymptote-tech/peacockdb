@@ -551,8 +551,8 @@ def test_a_rollup_expands_into_one_batch_carrying_every_set():
 
 
 def test_the_grouping_id_puts_the_first_key_highest():
-    # A rollup's masks agree with a bitmask numbered from the other end on (F,F) and (T,T);
-    # a mask no rollup makes is what tells the two apart.
+    # Only all-false and all-true masks read the same from either end, so a mixed mask is
+    # what tells the two numberings apart.
     assert A.grouping_set_id((False, True)) == 1
     assert A.grouping_set_id((True, False, False)) == 4
     assert A.grouping_set_id((False, False, True)) == 1

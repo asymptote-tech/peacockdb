@@ -140,10 +140,22 @@ TEST(GroupingId, NineKeysAreUInt16) {
   EXPECT_EQ(ids.values, (std::set<uint64_t>{256, 511}));
 }
 
+TEST(GroupingId, SixteenKeysStayUInt16) {
+  auto ids = id_column(16, {masked_at(16, 0), all_masked(16)});
+  EXPECT_EQ(ids.type, cudf::type_id::UINT16);
+  EXPECT_EQ(ids.values, (std::set<uint64_t>{32768, 65535}));
+}
+
 TEST(GroupingId, SeventeenKeysAreUInt32) {
   auto ids = id_column(17, {masked_at(17, 0), all_masked(17)});
   EXPECT_EQ(ids.type, cudf::type_id::UINT32);
   EXPECT_EQ(ids.values, (std::set<uint64_t>{65536, 131071}));
+}
+
+TEST(GroupingId, ThirtyTwoKeysStayUInt32) {
+  auto ids = id_column(32, {masked_at(32, 0), all_masked(32)});
+  EXPECT_EQ(ids.type, cudf::type_id::UINT32);
+  EXPECT_EQ(ids.values, (std::set<uint64_t>{uint64_t{1} << 31, UINT32_MAX}));
 }
 
 TEST(GroupingId, ThirtyThreeKeysAreUInt64) {
