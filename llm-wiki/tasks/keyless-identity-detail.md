@@ -119,3 +119,4 @@ Spec drift recorded, not fixed (frozen): pbench plans `tiny` four ways at every 
 lane at tp4-rowgroup and tp4-sized. Cost: 7 regressions, all `cuda_aggregate_bytes` from the
 identity rows (q32 and q11 at the three tp4 modes +51, q22 tp4-single +52), none over 10%.
 Review round 1 dispatched.
+- PR #182 → ENS-grouping-id.

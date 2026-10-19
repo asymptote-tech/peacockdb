@@ -116,7 +116,7 @@ The device's grouping-set id folds and widens as DataFusion's; walk tests prove 
 the two-stage DISTINCT on a device; `tpch/rollup-grouping` added; the rollup, q66 and DISTINCT
 device cells run and enabled where they pass.
 
-### 6. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../archive/archived-tickets.md#t199), [#282](../archive/archived-tickets.md#t282) — state: reviewing
+### 6. [`keyless-identity.md`](keyless-identity.md) — closes [#199](../archive/archived-tickets.md#t199), [#282](../archive/archived-tickets.md#t282) — state: reviewing — PR #182
 
 `empty_state` beside `state_type`; every aggregate init a batch accumulator that skips zero-row
 batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; a scan of no row
