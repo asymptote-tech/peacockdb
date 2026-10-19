@@ -86,20 +86,20 @@ GPU halves now run on nebius-gpu beside chain J. limits and empty-sorts were add
 started. grouping-id through welford-device came from chain L: the Welford and aggregate tickets,
 and the column references the device aggregate reads by counting.
 
-### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: rebase needed(done) — PR #170
+### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: done — PR #170
 
 The validator checks a pass-through node's column count; the Rust and C++ row-range clamps read
 one shared case table, `testdata/fixtures/row-range-clamp.txt`; the driver's mock calls the
 shipped clamp.
 
-### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../archive/archived-tickets.md#t62) — state: rebase needed(done) — PR #171
+### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../archive/archived-tickets.md#t62) — state: done — PR #171
 
 A DISTINCT aggregate lowers to two aggregate sequences beside any per-column companion, with or
 without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
 `tpch/rollup-distinct` and `tpch/distinct-functions` on the cpu corpus, and distinct-functions on
 the device at five modes.
 
-### 3. [`limits.md`](limits.md) — closes [#186](../archive/archived-tickets.md#t186), [#234](../archive/archived-tickets.md#t234) — state: rebase needed(done) — PR #172
+### 3. [`limits.md`](limits.md) — closes [#186](../archive/archived-tickets.md#t186), [#234](../archive/archived-tickets.md#t234) — state: done — PR #172
 
 A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the driver counts a
 limit's emitted rows rather than its input; scan-limit on at all five modes on both engines, and
