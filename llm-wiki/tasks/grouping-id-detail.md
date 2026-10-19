@@ -191,3 +191,5 @@ coordinator). Analyst: 1 blocking — cost-report red on `test_duckdb_result.py`
 by a developer, every cost-report step green locally) — the same important, and no
 `architecture.md` sentence falsified. Lesson: PR CI had been red since 911ad39d and nobody read
 it; read the PR's checks after each code push. Signoff written. GPU host hard-stopped.
+
+Dispatched CI: run 39330940474, dispatched 2026-10-19T21:53:10Z on a2e41a3d.
