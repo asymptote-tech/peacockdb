@@ -1390,3 +1390,8 @@ falsified. Its one note taken: #205's closing note narrowed — `end_to_end/dime
 hard-stopped; dispatched CI follows.
 
 Dispatched CI: run 39310127349, dispatched 2026-10-19T19:20:13Z on 34bec6c5.
+
+### 2026-10-19 — `done`
+
+Dispatched run 39310127349 green on 34bec6c5, `GPU Tests (nebius-gpu)` included; PR #174's own
+CI green on the same head. GPU host hard-stopped. Next: grouping-id.
