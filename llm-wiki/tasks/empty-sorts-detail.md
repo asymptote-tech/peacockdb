@@ -1299,3 +1299,72 @@ nebius-gpu started 18:22Z (RUNNING); verda not reachable (no `VERDA_CLIENT_ID`),
 Developer dispatched for: re-recording pbench `not-in-uncorrelated`'s two `gpu-result.txt`
 sections, q17's device cells against the new header (enable what passes, ticket what fails), the
 four accumulate cases, and the cpu re-prove green.
+
+### 2026-10-19 — developer: device half on nebius-gpu; q17 on at every mode; cpu re-prove green
+
+nebius-gpu was RUNNING (`~/peacockdb-K`, 41 GB free before each of the three builds, nothing
+removed; the card idle). Every build was `build-test-shadgpu.sh --build`, rc 0, 0 warnings.
+Soft stop at 18:48Z, rc 0, `STOPPED`.
+
+**Recording.** `gpu-host-test.sh` has no pull, and `--pull-results` is shad-gpu's
+(`build-test-shadgpu.sh`). So: `test_gpu_corpus` run directly on the VM with
+`PCK_WRITE_GPU_RESULT=1 --test-threads=1 gpu_tpcds_q17_ gpu_pbench_not_in_uncorrelated_` (two
+filters; `PCK_TEST_FILTER` takes one), then each dataset's `gpu-result.txt` fetched with
+`rsync -e "scripts/gpu-host.sh rsh" nebius-gpu:peacockdb-K/testdata/goldens/<ds>/gpu-result.txt`.
+A trap worth knowing: `gpu-host-sync.sh` mirrors the tracked file back over the VM's copy, so a
+recording is lost on the next sync unless pulled first. The first probe's was lost that way, and
+the run was repeated.
+
+What moved, and nothing else: pbench `not-in-uncorrelated` tp1-single and tp1-rowgroup, `++` →
+an `f_id` header (8+/4-); tpcds gains five q17 sections, `+25`, each byte-identical to
+`mini.result.txt`'s q17 rows. tpch's file is unchanged.
+
+**q17's device cells, measured on the new header:**
+
+| cell | hook on | hook off |
+|---|---|---|
+| tp1-single | refused: the output hook, `stddev(...)$count/$mean/$m2` vs `stddev(...)` at the first `GpuAggregate` — #225 | pass |
+| tp1-rowgroup | same refusal, #225 | pass |
+| tp4-single, tp4-rowgroup, tp4-sized | pass | — |
+
+The tp1 failure is #225's schema signature, nothing new; no ticket filed. `corpus_cases.inc`'s
+own rule for a cell red on schema alone applies: q17 is `all_modes` on the device with
+`schema_validation_disabled(tp1_single | tp1_rowgroup)); // #225`, the hook kept at tp4.
+`cost-registry.csv`: its five gpu cells `enabled` and its tickets `225` → empty, since no cell is
+off — #225's text says the same of shuffle-stddev's row, and distinct-functions' is likewise
+empty. The tpcds device-column comment drops q17 ("eleven" → "ten"), and the batch-19 comment
+says why tp1 runs without the hook.
+
+**Device tier, the whole L40S list** (`gpu-host-test.sh run`, `ALL rc=0`): `peacock_cpu_tests` 12,
+`peacock_gpu_tests` 2, `peacock_join_session_tests` 53, `peacock_plan_tests` 81,
+`peacockdb_core_gpu_lib` 709 (`gpu_tests::`), `test_gpu_corpus` 790 (785 + q17's five; the gpu
+registry test passes both ways), `peacock_gpu_benchmarks` 8 (`--skip bench_`), `test_node_timing`
+1. The run left the gpu-result files untouched (md5 equal to the local copies). The four accumulate
+cases pass by name: `one_zero_row_batch_sorts_to_zero_rows_on_both`,
+`a_fetch_over_zero_rows_is_zero_rows_on_both`, `every_lane_a_zero_row_batch_merges_to_zero_rows_on_both`,
+`one_lane_a_zero_row_batch_and_one_nothing_merges_to_zero_rows_on_both`.
+
+**cpu, local, after every edit:** `--lib` 818 passed, 2 ignored; `test_cpu_corpus` 2011 (both
+`duckdb_gpu_pbench_not_in_uncorrelated_*` green, five new `duckdb_gpu_tpcds_q17_*`, a new
+`device_order_tpcds_q17`); `test_corpus_goldens` 28; `test_cost_model` 3; `test_ci_coverage` 11;
+`test_module_layout` 18; `cargo test -p cost-report` 41. `--cost-diff --base d0005ebf`: `870
+compared, 2 changed, 2 regression(s), 0 over 10%`, rc 0 — q17 tp1-single 293555036 → 293555060
+and tp1-rowgroup 293556326 → 293556350, +24 each, as before.
+
+**Counts that move** (`scripts/case-inventory.sh rust-only`: `test_cpu_corpus` 2011, the rest as
+before):
+- `build-test.md` header: 5049 → 5060, Rust 4482 → 4493.
+- cpu tier: 2856 → 2862; `test_cpu_corpus` 2005 → 2011; "Corpus, cpu" row 2004 → 2010; the DuckDB
+  tier "966 of the count" → 971; the order tier 161 → 162.
+- gpu tier: 1506 → 1511; `test_gpu_corpus` 785 → 790; its row 784 → 789; "783 cells" → 788;
+  tpcds "348 … but for eleven" → 353, ten; "`q17` and `q39` on #225" → `q39` alone, and the
+  hook sentence gains q17's `disabled(tp1_single | tp1_rowgroup)`; "The 784th case" → 789th.
+- `tickets/corpus-coverage.md` #225 "Corpus queries": `tpcds/q17` at the two tp1 modes is no
+  longer "cells off here"; it runs there with the hook off.
+
+### 2026-10-19 — green on both engines; `reviewing`
+
+Coordinator applied the developer's wiki list: `build-test.md` counts (5060/4493; cpu 2862,
+corpus 2011/2010, DuckDB 971, order 162; gpu 1511, corpus 790/789, 788 cells, tpcds 353 but for
+ten, the 789th case), q17's sentence there and in #225's "Corpus queries", and a line on pulling
+`gpu-result.txt` home from nebius-gpu. Review round 3 dispatched over the rebased branch whole.

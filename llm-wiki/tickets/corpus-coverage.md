@@ -66,8 +66,8 @@ stands at every mode; the row keeps no `225` only because no cell of it is off.
 only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
 three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
 its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
-mode and `tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off
-here.
+mode, refused at its first `GpuAggregate`, its cells off here; `tpcds/q17` at the two tp1 modes,
+refused the same way, runs there with the hook masked.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
