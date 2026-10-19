@@ -293,9 +293,9 @@ merge groups on keys + gid and the shuffle still hashes the keys alone. The rule
 that is `hashKeys ⊆ group columns` — subset, not equality — and equal group keys always carry
 equal user keys, so co-location holds.
 
-The gid is a real column: the expansion materializes a constant per set — the plan declares the
-width `Aggregate::grouping_id_type` picks, `UInt8` up to 8 keys, and the cpu emits that; the
-device emits `Int32` ([#65](tickets/corpus-coverage.md#t65)) — and appends it after the group
+The gid is a real column: the expansion materializes a constant per set at the width DataFusion
+declares — `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to 32, `UInt64` to 64, refused past 64
+on both engines — and appends it after the group
 keys and before the aggregate outputs. One exception: an inner DISTINCT stage carries one more
 key than DataFusion's aggregate, so at exactly 8, 16 or 32 keys it declares the next width up,
 and a project above the outer stage casts the id back to DataFusion's. Not a cast in the
@@ -308,10 +308,10 @@ projection over the final drops it again, without which the query returns a colu
 asked for.
 
 A masked column is a typed NULL rather than an absent one, so every set shares a schema and sits
-in one `cudf::table` distinguished by the gid. The ids are the bitmask of each set's **masked**
-positions, distinct per set and not DataFusion's `GROUPING()` encoding — and the two engines
-number the bits from opposite ends, so a two-key rollup is 0, 1, 3 on the cpu and 0, 2, 3 on the
-device ([#65](tickets/corpus-coverage.md#t65)).
+in one `cudf::table` distinguished by the gid. The id is DataFusion's on both engines: the mask of
+**masked** positions folds in key order, the first key highest, so a two-key rollup is 0, 1, 3.
+The merge needs only one distinct id per set; `GROUPING()` over every key, which plans as a cast
+of the id, is why the value matters too.
 
 Not a Spark-style expand: the C++ runs k groupbys over the same input and concatenates the k
 results, so the peak is the input plus the sum of the per-set outputs rather than k times the

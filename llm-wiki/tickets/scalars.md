@@ -161,7 +161,7 @@ covered as a unit test rather than by a query.
 first call: `unsupported BinaryOp` or `unsupported scalar type`.
 
 DataFusion 45's `ResolveGroupingFunction` turns the full key list into
-`CAST(__grouping_id AS Int32)`, which the device runs (#65 fixes its value). Any other argument
+`CAST(__grouping_id AS Int32)`, which the device runs at DataFusion's value. Any other argument
 list becomes bit arithmetic: `__grouping_id & <unsigned literal>`, then a shift left or right. The
 wire carries all five bitwise operators (`BinaryOp`) and the translator writes them, but
 `expr.cpp` maps only AND, OR and XOR, on both the AST and the column path, and its scalar arm has
@@ -175,5 +175,5 @@ by g_flag, g_status, l_returnflag, l_linestatus;`.
 **Fix proposed:** in `expr.cpp`: `UInt8`/`UInt16`/`UInt32`/`UInt64` arms in the scalar switch,
 building `numeric_scalar<uintN_t>`, and `BitwiseShiftLeft`/`BitwiseShiftRight` mapped to
 `cudf::binary_operator::SHIFT_LEFT`/`SHIFT_RIGHT` on the column path. The AST has no shift
-operator, so a shift routes to the column path. After #65, whose id the arithmetic reads. Test:
+operator, so a shift routes to the column path. Test:
 the example query on both engines, and a gtest per operator.

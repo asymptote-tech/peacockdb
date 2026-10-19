@@ -7,6 +7,12 @@
 //! `INPUT` is the fixture for both, and the device writes its parquet from it — a table one
 //! side does not read is a table that proves the CPU twice.
 
+use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::{DataType, Field};
+use datafusion::common::ScalarValue;
+
+use crate::plan::{AggCall, AggregateBody, Expr, PlanAgg};
+
 /// The rows every case starts from, as `(k, v)`. Small enough to write an answer down, and
 /// split into three batches by the device fixture's row groups.
 pub(crate) const INPUT: [(&str, i64); 6] =
@@ -28,6 +34,9 @@ pub(crate) enum Shape {
     /// the state's key width is one wider than the group list and this branch's own
     /// `key_width` change is what decides which column is whose.
     SumByKeyAndGroupingId,
+    /// `sum(v) GROUP BY ROLLUP(k, v)`: an init expanding three sets and a merge folding them.
+    /// The grouping id is part of the answer, in DataFusion's value and in its type.
+    SumOverRollup,
     /// Every batch of the lane concatenated at done.
     CoalesceLane,
     /// The hash scatter: the answer is which lane each row landed in.
@@ -47,7 +56,8 @@ impl Shape {
 pub(crate) struct Case {
     pub name: &'static str,
     pub shape: Shape,
-    /// The answer as `k|v` rows, sorted — or `lane|k|v` where the shape is a scatter.
+    /// The answer as `k|v` rows, sorted — or `lane|k|v` where the shape is a scatter, or
+    /// `k|v|id:type|sum` where the shape is the rollup.
     pub expect: &'static [&'static str],
 }
 
@@ -113,4 +123,85 @@ pub(crate) const CASES: &[Case] = &[
         shape: Shape::ScatterLanes { lanes: 64 },
         expect: &["18|a|2", "18|a|4", "18|a|6", "1|b|1", "1|b|3", "1|b|5"],
     },
+    Case {
+        name: "a rollup's grouping id is DataFusion's, in value and in type",
+        shape: Shape::SumOverRollup,
+        expect: &[
+            "NULL|NULL|3:UInt8|21",
+            "a|2|0:UInt8|2",
+            "a|4|0:UInt8|4",
+            "a|6|0:UInt8|6",
+            "a|NULL|1:UInt8|12",
+            "b|1|0:UInt8|1",
+            "b|3|0:UInt8|3",
+            "b|5|0:UInt8|5",
+            "b|NULL|1:UInt8|9",
+        ],
+    },
 ];
+
+/// The rollup's state: the keys, the id the init appends, the sum.
+pub(crate) const ROLLUP_STATE: [(&str, DataType); 4] = [
+    ("k", DataType::Utf8),
+    ("v", DataType::Int64),
+    ("__grouping_id", DataType::UInt8),
+    ("sum(v)", DataType::Int64),
+];
+
+/// The init over `INPUT`'s `(k, v)` and the merge over `ROLLUP_STATE`, as the planner writes a
+/// two-key rollup: a mask entry is true where its key is masked.
+pub(crate) fn rollup_bodies() -> (AggregateBody, AggregateBody) {
+    let sum = |column: u32, name: &str| AggCall {
+        func: PlanAgg::Sum,
+        args: vec![Expr::column(column, name)],
+        outputs: vec![Field::new("sum(v)", DataType::Int64, true)],
+    };
+    let init = AggregateBody {
+        group_by: vec![Expr::column(0, "k"), Expr::column(1, "v")],
+        grouping_sets: vec![vec![false, false], vec![false, true], vec![true, true]],
+        null_exprs: vec![
+            Expr::Literal(ScalarValue::Utf8(None)),
+            Expr::Literal(ScalarValue::Int64(None)),
+        ],
+        aggs: vec![sum(1, "v")],
+        finalize: None,
+    };
+    let merge = AggregateBody {
+        group_by: vec![
+            Expr::column(0, "k"),
+            Expr::column(1, "v"),
+            Expr::column(2, "__grouping_id"),
+        ],
+        grouping_sets: Vec::new(),
+        null_exprs: Vec::new(),
+        aggs: vec![sum(3, "sum(v)")],
+        finalize: None,
+    };
+    (init, merge)
+}
+
+/// `k|v|id:type|sum(v)` per row. The id's type is in the cell: a device that numbers the sets
+/// alike in another width is refused at the sink, and the value alone would not say so.
+pub(crate) fn rollup_rows(batch: &RecordBatch) -> Vec<String> {
+    let id_type = batch.column(2).data_type().to_string();
+    (0..batch.num_rows())
+        .map(|row| {
+            (0..batch.num_columns())
+                .map(|column| {
+                    let cell = match ScalarValue::try_from_array(batch.column(column), row)
+                        .expect("a value at every position")
+                    {
+                        ScalarValue::Utf8(Some(text)) => text,
+                        other => other.to_string(),
+                    };
+                    if column == 2 {
+                        format!("{cell}:{id_type}")
+                    } else {
+                        cell
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .collect()
+}

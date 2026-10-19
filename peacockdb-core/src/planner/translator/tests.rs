@@ -869,8 +869,8 @@ async fn a_nested_loop_join_with_no_predicate_is_a_cross_join() {
 #[tokio::test]
 async fn grouping_sets_expand_at_the_init_and_group_on_the_id_above_it() {
     // No special operator: the init emits __grouping_id as an ordinary column, and every
-    // node above groups on the keys plus that column. #65 is about the id's ENCODING, which
-    // is execution-side and does not touch the shape pinned here.
+    // node above groups on the keys plus that column. The id's value and width are
+    // execution-side and not pinned here.
     let tree = translated_at_tp4(
         "SELECT c_nationkey, c_mktsegment, count(*) FROM customer \
          GROUP BY ROLLUP(c_nationkey, c_mktsegment)",
@@ -907,7 +907,7 @@ async fn grouping_sets_expand_at_the_init_and_group_on_the_id_above_it() {
 
 #[tokio::test]
 async fn a_rollup_shuffle_hashes_its_keys_and_never_the_grouping_id() {
-    // #189: comet has no UInt8 arm, and the id is #65's — the device holds INT32. The Final
+    // #189: comet has no UInt8 arm, so the cpu cannot hash the id. The Final
     // groups on keys plus the id; hashing the keys alone still lands each group in one lane.
     let tree = translated_at_tp4(
         "SELECT c_nationkey, c_mktsegment, count(*) FROM customer \

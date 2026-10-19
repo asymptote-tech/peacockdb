@@ -11,7 +11,7 @@ use crate::plan::{
     ColumnOrder, GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches,
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuProject,
 };
-use crate::tests::executor_cases::{CASES, INPUT, Shape};
+use crate::tests::executor_cases::{CASES, INPUT, ROLLUP_STATE, Shape, rollup_bodies, rollup_rows};
 use datafusion::arrow::array::UInt8Array;
 
 /// The input as the lane's three batches, which is how the device's row groups deliver it.
@@ -207,6 +207,14 @@ fn emitted(shape: Shape) -> Vec<String> {
                 })
                 .collect()
         }
+        Shape::SumOverRollup => {
+            let state = columns(&ROLLUP_STATE);
+            let (init, merge) = rollup_bodies();
+            merged_batches(input, state.clone(), init, merge, state)
+                .iter()
+                .flat_map(|batch| rollup_rows(batch.record_batch()))
+                .collect()
+        }
         Shape::ScatterLanes { lanes } => {
             let node = GpuEmitPartitions::new(
                 Given::of(input.clone(), BatchLayout::MultipleBatches),
@@ -254,6 +262,17 @@ fn merged(
     merge: AggregateBody,
     output: Schema,
 ) -> Vec<String> {
+    rendered(&merged_batches(input, state, init, merge, output))
+}
+
+/// The two nodes the planner stacks: an init per batch and a merge at done.
+fn merged_batches(
+    input: Schema,
+    state: Schema,
+    init: AggregateBody,
+    merge: AggregateBody,
+    output: Schema,
+) -> Vec<CpuBatch> {
     let init_node = GpuAggregate::new(
         Given::of(input.clone(), BatchLayout::MultipleBatches),
         init,
@@ -277,7 +296,7 @@ fn merged(
             .expect("the arrival is accepted");
     }
     let (emitted, _) = accumulator.mark_done_and_fetch().expect("done is accepted");
-    rendered(&emitted)
+    emitted
 }
 
 #[test]

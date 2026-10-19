@@ -588,7 +588,7 @@ fn sequence(stage: Stage, shuffle: Shuffle) -> Result<Box<dyn GpuNode>, PlanErro
 /// A grouping-set aggregate's shuffle hashes its user keys and not `__grouping_id`, which
 /// sits right after them (`id`). A subset of the Final's group columns still lands every row
 /// of a group in one lane (`plan/aggregate.rs`'s subset rule); the id itself is unhashable on
-/// the cpu (comet has no unsigned arm) and differs on the device (#65).
+/// the cpu (comet has no unsigned arm).
 fn drop_grouping_id(mut keys: Vec<u32>, id: u32) -> Result<Vec<u32>, PlanError> {
     keys.retain(|k| *k != id);
     if keys.is_empty() || keys.iter().any(|k| *k > id) {

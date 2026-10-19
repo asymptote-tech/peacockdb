@@ -268,16 +268,11 @@ operator_case! {
     }
 }
 
-// #65 — the plan declares `__grouping_id` `UInt8`, as DataFusion's partial does; the device
-// holds `INT32`. Wanted: `None`.
 operator_case! {
     GpuAggregate,
-    fn bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8() {
+    fn grouping_sets_hold_the_uint8_grouping_id_the_plan_declares() {
         let node = grouping_sets(vec![vec![false, false], vec![false, true], vec![true, true]]);
-        assert_eq!(
-            divergences_on_device(&node, Script::Exec(vec![input()])),
-            vec![Some("2 __grouping_id: UInt8 vs INT32".to_string())]
-        );
+        assert_holds_as_declared(&node, Script::Exec(vec![input()]));
     }
 }
 

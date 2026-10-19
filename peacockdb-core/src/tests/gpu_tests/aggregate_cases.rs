@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, ArrayRef, AsArray, Float64Array, Int32Array, Int64Array};
+use datafusion::arrow::array::{Array, ArrayRef, Float64Array, Int64Array};
 use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, UInt8Type};
+use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
@@ -112,15 +112,6 @@ pub(crate) fn welford_state_by(grouped: bool, func: AggFunc) -> Schema {
     }
 }
 
-/// A `bug_` test's assertion: the device answered, and with exactly this one batch.
-pub(crate) fn gpu_answered(outcome: &Outcome, expected: RecordBatch, order: Order) {
-    let gpu = outcome
-        .gpu
-        .as_ref()
-        .unwrap_or_else(|why| panic!("gpu refused: {}", why.message));
-    assert_same(&[vec![expected]], gpu, order);
-}
-
 pub(crate) fn cpu_slot(outcome: &Outcome, at: usize) -> &RecordBatch {
     &outcome.cpu.as_ref().expect("the cpu answers")[at][0]
 }
@@ -150,24 +141,6 @@ fn welford_answered(outcome: &Outcome, at: usize) {
         .map(|i| (names[i].as_str(), cpu.column(i).clone()))
         .collect();
     same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
-}
-
-/// The cpu's grouping-set state as the device answers it: `__grouping_id` Int32 with the
-/// device's bit order, which sets bit `i` for masked key `i` where DataFusion puts the
-/// first key highest — over two keys, 1 and 2 swap (#65).
-fn grouping_sets_as_exported(cpu: &RecordBatch) -> RecordBatch {
-    let gid: ArrayRef = Arc::new(Int32Array::from_iter(
-        cpu.column(2)
-            .as_primitive::<UInt8Type>()
-            .iter()
-            .map(|g| g.map(|g| (i32::from(g & 1) << 1) | i32::from(g >> 1))),
-    ));
-    batch_of(vec![
-        ("key", cpu.column(0).clone()),
-        ("b", cpu.column(1).clone()),
-        ("__grouping_id", gid),
-        ("sum(i64)", cpu.column(3).clone()),
-    ])
 }
 
 // `GpuAggregate`: aggregators over raw rows, state out — or, with a finalize, the
@@ -406,19 +379,17 @@ pub(crate) fn grouping_sets(sets: Vec<Vec<bool>>) -> GpuAggregate {
     GpuAggregate::new(given(), body, state.clone(), state)
 }
 
-// #65 — three sets, both keys, `key` alone, neither: the rows agree, and the id is the
-// device's own encoding in its own type.
+// Three sets, both keys, `key` alone, neither — over `synthetic`, whose NULL keys meet the
+// placeholders, so only the id keeps a natural-NULL group apart from a masked one.
 operator_case! {
     GpuAggregate,
-    fn bug_grouping_sets_carry_the_devices_own_id_and_type() {
+    fn grouping_sets_carry_datafusions_id_in_its_type() {
         let node = grouping_sets(vec![
             vec![false, false],
             vec![false, true],
             vec![true, true],
         ]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let expected = grouping_sets_as_exported(cpu_slot(&outcome, 0));
-        gpu_answered(&outcome, expected, Order::Any);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
     }
 }
 
@@ -449,15 +420,12 @@ operator_case! {
     }
 }
 
-// #65 — zero rows on both, under the device's Int32 id.
+// The id column is built from a scalar; at zero rows it still holds the declared type.
 operator_case! {
     GpuAggregate,
-    fn bug_grouping_sets_over_zero_rows_are_zero_rows_under_the_devices_id_type() {
+    fn grouping_sets_over_zero_rows_are_zero_rows_of_the_declared_id_type() {
         let node = grouping_sets(vec![vec![false, false], vec![true, true]]);
-        let outcome = run_both(&node, Script::Exec(vec![synthetic(0, 1)]));
-        let expected = grouping_sets_as_exported(cpu_slot(&outcome, 0));
-        assert_eq!(expected.num_rows(), 0);
-        gpu_answered(&outcome, expected, Order::Any);
+        run_both(&node, Script::Exec(vec![synthetic(0, 1)])).same(Order::Any);
     }
 }
 
