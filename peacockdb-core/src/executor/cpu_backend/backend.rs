@@ -78,9 +78,9 @@ impl Backend for CpuBackend {
             NodeRef::Sort(sort) => {
                 NodeExecutors::Exec(CpuExec::sort(sort, &input(0), ctx.clone())?)
             }
-            NodeRef::Aggregate(aggregate) => {
-                NodeExecutors::Exec(CpuExec::aggregate(aggregate, &input(0), ctx.clone())?)
-            }
+            NodeRef::Aggregate(aggregate) => NodeExecutors::BatchAccumulator(
+                CpuAccumulator::aggregate_init(aggregate, &input(0), ctx.clone())?,
+            ),
             NodeRef::CoalesceAllBatches(coalesce) => {
                 NodeExecutors::BatchAccumulator(CpuAccumulator::coalesce(coalesce, &input(0)))
             }
@@ -299,6 +299,8 @@ impl HeldBytes for CpuAccumulator {
             State::Aggregate(state) => state.held_bytes(),
             // A limit holds nothing, which is the whole point of the slice symbol.
             State::Limit(_) => 0,
+            // An init holds a flag.
+            State::Init(_) => 0,
         }
     }
 }

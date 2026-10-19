@@ -16,7 +16,7 @@ use peacockdb_ffi::raw::peacock_executor_slice_handle;
 use crate::common::logical_size_from_schema;
 
 use super::{
-    CallSite, Consumed, GpuAccumulator, GpuPartitionAccumulator, execute_node, hand_over,
+    CallSite, Consumed, GpuAccumulator, GpuExec, GpuPartitionAccumulator, execute_node, hand_over,
     last_error, no_abi_calls, one_call, priced,
 };
 use crate::executor::Batch;
@@ -35,6 +35,7 @@ pub(crate) enum State {
     Sorted(SortedRuns),
     Aggregate(AggregateBatches),
     Limit(LimitStream),
+    Init(AggregateInit),
 }
 
 impl GpuAccumulator {
@@ -157,6 +158,7 @@ impl GpuAccumulator {
             State::Sorted(state) => state.accumulate_and_fetch(batch),
             State::Aggregate(state) => state.accumulate_and_fetch(batch),
             State::Limit(state) => state.accumulate_and_fetch(batch),
+            State::Init(state) => state.accumulate_and_fetch(batch),
         }
     }
 
@@ -166,6 +168,7 @@ impl GpuAccumulator {
             State::Sorted(state) => state.mark_done_and_fetch(),
             State::Aggregate(state) => state.mark_done_and_fetch(),
             State::Limit(state) => state.mark_done_and_fetch(),
+            State::Init(state) => state.mark_done_and_fetch(),
         }
     }
 }
@@ -173,6 +176,43 @@ impl GpuAccumulator {
 /// The seq a call addresses, once the call is what this node's recipe should hold. A
 /// recipe that names a different pattern or a different input is one this executor would
 /// drive at the wrong moment, which is a wrong answer rather than a failed call.
+impl GpuAccumulator {
+    /// An aggregate's init: its calls per batch, and the same calls at done if nothing went
+    /// out, the first handed nothing. Anything else is a recipe this executor would drive at
+    /// the wrong moment.
+    pub(crate) fn aggregate_init(
+        site: CallSite,
+        recipe: &Recipe,
+        state: &ArrowSchema,
+        output: &ArrowSchema,
+    ) -> Result<Self, PlanError> {
+        let per_batch = recipe.calls_under(CallPattern::PerBatch);
+        let at_done = recipe.calls_under(CallPattern::AtDoneIfNothingOut);
+        let mirrors = per_batch.calls.len() + at_done.calls.len() == recipe.calls.len()
+            && per_batch.calls.len() == at_done.calls.len()
+            && per_batch.calls.iter().zip(&at_done.calls).enumerate().all(
+                |(position, (call, done))| {
+                    let handed = match position {
+                        0 => Vec::new(),
+                        _ => vec![Input::PriorOutput],
+                    };
+                    done.target == call.target && done.inputs == handed
+                },
+            );
+        if !mirrors {
+            return Err(shape(
+                "an init makes its calls per batch, and the same calls at done if nothing \
+                 went out, the first handed nothing",
+                recipe,
+            ));
+        }
+        Ok(Self::of(State::Init(AggregateInit {
+            chain: GpuExec::new(site, &per_batch, Some(state), output)?,
+            emitted: false,
+        })))
+    }
+}
+
 fn addressed(call: &Call, when: CallPattern, input: Input) -> Result<(Seq, FbKind), PlanError> {
     if call.when != when || call.inputs.as_slice() != [input] {
         return Err(PlanError::Invalid(format!(
@@ -440,6 +480,38 @@ impl GpuPartitionAccumulator {
                 calls,
             },
         ))
+    }
+}
+
+/// An aggregate's init on a device: one flag. A zero-row batch is released uncalled, as the
+/// limit releases a batch outside its interval; a batch with rows runs the chain; done runs it
+/// handed nothing where nothing went out, which the device answers over the zero-row table of
+/// the node's declared input.
+pub(crate) struct AggregateInit {
+    chain: GpuExec,
+    emitted: bool,
+}
+
+impl AggregateInit {
+    fn accumulate_and_fetch(&mut self, batch: GpuBatch) -> CallResult<Vec<GpuBatch>> {
+        if batch.num_rows() == 0 {
+            return Ok((Vec::new(), no_abi_calls()));
+        }
+        let (out, stats) = self.chain.exec(batch)?;
+        self.emitted |= out.num_rows() > 0;
+        Ok((vec![out], stats))
+    }
+
+    fn mark_done_and_fetch(mut self) -> CallResult<Vec<GpuBatch>> {
+        if self.emitted {
+            return Ok((Vec::new(), no_abi_calls()));
+        }
+        let (out, stats) = self.chain.exec_over_nothing()?;
+        match out.num_rows() {
+            // Dropped here, which releases the handle: no groups is nothing to emit.
+            0 => Ok((Vec::new(), stats)),
+            _ => Ok((vec![out], stats)),
+        }
     }
 }
 

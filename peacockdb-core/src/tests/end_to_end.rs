@@ -444,8 +444,8 @@ injected_queries!(
 
 /// Zero rows through an ordered query at every mode: the answer is one column named `n_name`,
 /// whether the sink received a zero-row batch or nothing at all. The predicate is one
-/// row-group statistics cannot rule out; `n_nationkey < 0` prunes the scan away, which is
-/// #282's refusal and not this case.
+/// row-group statistics cannot rule out; `n_nationkey < 0` prunes the scan to no batch, which
+/// is `a_count_over_a_scan_of_nothing_answers_0`'s case and not this one.
 #[tokio::test]
 async fn an_empty_ordered_answer_keeps_its_column() {
     let sql = "select n_name from nation where n_nationkey + n_regionkey < 0 order by n_name;";
@@ -559,6 +559,39 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
         "tpcds",
         "two-key group by",
         "SELECT count(*) FROM (SELECT ss_customer_sk, ss_item_sk FROM store_sales GROUP BY 1, 2)",
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+/// An aggregate on the side of a full outer join, over an input no row survives: its init
+/// emits nothing, so the join meets lanes with no build batch, and still owes every nation
+/// padded. A shape where the init's zero-row batch used to be what the join read.
+#[tokio::test]
+async fn an_outer_join_over_an_aggregate_of_nothing_answers_as_datafusion() {
+    let sql = "SELECT n_name, c.cnt FROM (SELECT c_nationkey, count(*) AS cnt FROM customer \
+               WHERE c_custkey + c_nationkey < 0 GROUP BY c_nationkey) c \
+               FULL JOIN nation ON c.c_nationkey = n_nationkey";
+    sql_answers_match_datafusion(
+        "tpch",
+        "outer-join-over-nothing",
+        sql,
+        None,
+        Coverage::ModesOnly,
+    )
+    .await;
+}
+
+/// #282: nation's one row group is pruned, so the scan is one lane with no batch, and the
+/// keyless count above it answers its identity row: `0` at every mode, as DataFusion does.
+#[tokio::test]
+async fn a_count_over_a_scan_of_nothing_answers_0() {
+    let sql = "select count(*) from nation where n_nationkey < 0";
+    sql_answers_match_datafusion(
+        "tpch",
+        "count-over-a-scan-of-nothing",
+        sql,
         None,
         Coverage::ModesOnly,
     )

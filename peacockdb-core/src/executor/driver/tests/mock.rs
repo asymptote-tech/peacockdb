@@ -15,6 +15,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use crate::executor::Batch;
 use crate::executor::CpuBatch;
 use crate::executor::forwarder_for;
+use crate::executor::{AbiCall, AbiTarget};
 use crate::executor::{
     AbiCalls, BackendError, BatchAccumulatorExecutor, CallResult, CallStats, ExecExecutor,
     Executor, JoinExecutor, LaneEvent, PartitionAccumulatorExecutor, PartitionEmitterExecutor,
@@ -24,6 +25,7 @@ use crate::executor::{Backend, NodeExecutors};
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{ExecutorCategory, NodeRef, as_node_ref, category_of};
+use crate::wire::{FbKind, Seq};
 
 /// Rows and bytes, which is all any assertion here reads off a batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +76,11 @@ pub(crate) enum AccRule {
     /// Emits this many batches at done, holding nothing. Zero and two are what a join's
     /// build side must never do.
     EmitAtDone(usize),
+    /// An aggregate's init. A batch with rows answers its groups — one row where `keyless` —
+    /// and a zero-row batch is released uncalled; at done, where nothing went out, one call
+    /// answers the identity row a keyless init owes and nothing for a grouped one. Its calls
+    /// are recorded, armed, so a lane case tells a skipped batch from an unmeasured run.
+    Init { keyless: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +280,8 @@ pub(crate) struct MockAcc {
     held_batches: usize,
     held_rows: usize,
     held_bytes: usize,
+    /// Whether an init has answered a row, which is what spares it the done call.
+    emitted: bool,
 }
 
 pub(crate) struct MockPartAcc {
@@ -420,10 +429,45 @@ impl ExecExecutor<Mock> for MockExec {
     }
 }
 
+/// The seq the mock's init calls are journalled under; nothing joins them to a region.
+const INIT_SEQ: Seq = 0;
+
+impl MockAcc {
+    /// What an init call reports: the one call it made, or none.
+    fn init_calls(&self, made: Option<(&MockBatch, &MockBatch)>) -> CallStats {
+        let mut calls = AbiCalls::armed(true);
+        if let Some((input, output)) = made {
+            calls.record(AbiCall {
+                seq: INIT_SEQ,
+                target: AbiTarget::Node(FbKind::Aggregate { merge: false }),
+                call_index: 0,
+                in_rows: input.rows as u64,
+                in_bytes: input.bytes as u64,
+                out_rows: output.rows as u64,
+                out_bytes: output.bytes as u64,
+            });
+        }
+        CallStats {
+            scratch_bytes: self.script.measured_scratch,
+            calls,
+        }
+    }
+}
+
 impl BatchAccumulatorExecutor<Mock> for MockAcc {
     fn accumulate_and_fetch(&mut self, batch: MockBatch) -> CallResult<Vec<MockBatch>> {
         let stats = self.script.stats();
         Ok(match self.script.accumulate {
+            AccRule::Init { .. } if batch.rows == 0 => (Vec::new(), self.init_calls(None)),
+            AccRule::Init { keyless } => {
+                let out = MockBatch {
+                    rows: if keyless { 1 } else { batch.rows },
+                    bytes: 8,
+                };
+                self.emitted = true;
+                let stats = self.init_calls(Some((&batch, &out)));
+                (vec![out], stats)
+            }
             AccRule::Streaming => (vec![batch], stats),
             AccRule::Trimming(most) => (
                 vec![MockBatch {
@@ -443,8 +487,21 @@ impl BatchAccumulatorExecutor<Mock> for MockAcc {
 
     fn mark_done_and_fetch(self) -> CallResult<Vec<MockBatch>> {
         self.script.check(FailAt::MarkDone)?;
+        if let AccRule::Init { keyless } = self.script.accumulate {
+            if self.emitted {
+                return Ok((Vec::new(), self.init_calls(None)));
+            }
+            let nothing = MockBatch { rows: 0, bytes: 0 };
+            let identity = MockBatch {
+                rows: usize::from(keyless),
+                bytes: 8,
+            };
+            let stats = self.init_calls(Some((&nothing, &identity)));
+            return Ok((if keyless { vec![identity] } else { Vec::new() }, stats));
+        }
         let stats = self.script.stats();
         let out = match self.script.accumulate {
+            AccRule::Init { .. } => unreachable!("answered above"),
             AccRule::Streaming | AccRule::Trimming(_) => Vec::new(),
             // Nothing at all where nothing arrived, as the backends answer: a lane the
             // scatter gave no batch is how a join comes to have no build side.
@@ -655,11 +712,18 @@ impl Backend for Mock {
                 if matches!(as_node_ref(node), NodeRef::Limit(_)) {
                     script.accumulate = script.limit;
                 }
+                // An aggregate's init follows its own rule, as the limit does.
+                if let NodeRef::Aggregate(aggregate) = as_node_ref(node) {
+                    script.accumulate = AccRule::Init {
+                        keyless: aggregate.body.group_by.is_empty(),
+                    };
+                }
                 NodeExecutors::BatchAccumulator(MockAcc {
                     script,
                     held_batches: 0,
                     held_rows: 0,
                     held_bytes: 0,
+                    emitted: false,
                 })
             }
             ExecutorCategory::PartitionAccumulator => {

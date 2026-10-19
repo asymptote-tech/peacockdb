@@ -27,6 +27,100 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t199"></a>
+### #199 — a global aggregate over no arrival drops its identity row
+**Done by [`keyless-identity`](../tasks/keyless-identity.md) (chain K); awaiting merge.**
+
+`gpu_backend/accumulate.rs:307` answers an empty lane with nothing. The CPU counterpart has a
+`!self.grouped` clause and answers with the identity row — `count` is 0, not absent.
+
+So a global aggregate whose lane received no rows disagrees between the engines: the CPU emits one
+row and the device emits none. On the device that is a wrong answer, and nothing refuses it.
+Shown on a device by `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device`
+(`gpu_tests/aggregate_cases.rs`), which also shows the CPU's row is sum's identity, not count's:
+a count merges by sum, so a merged count over nothing is NULL there where SQL says 0. Where the plan
+declares that count non-nullable, the cpu refuses the NULL (`cpu_backend/accumulate.rs`,
+`mark_done_and_fetch`'s `!self.grouped` clause): "Column 'count(\*)' is declared as non-nullable but
+contains null values", filed as #180. The init over a zero-row batch keeps its row on both.
+
+A second site, on both backends: the single-node shortcut (`translator/aggregate.rs:322-339`), a
+keyless `GpuAggregate` over a single-batch input. When no batch arrives the node is never called
+(`single_partition.rs:192,248-251`) and no row comes out — symmetric, so the cpu-vs-device
+comparison cannot see it. A `GpuLimit` keeps its input's single-batch layout, so a limit over a
+sort, merge or coalesce feeds it, and #214's dropped batch lands here. The rule for both sites is
+one: a keyless aggregate answers one row whatever arrived.
+
+**Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
+`tp4-rowgroup` and `tp4-sized`: twelve cpu cells refused on the NULL count, their device cells
+behind them. And seven device cells whose cpu cells answer: `tpch/q11` and `tpcds/q32` at the three
+tp4 modes and `tpch/q22` at `tp4-single`. There the cpu's identity rows reach the `.cpu.txt` section the device
+is held to, and the device answers the same rows as DuckDB. An empty lane comes from
+tp4-single cutting a table of fewer row groups than lanes into four (q22's customer), or from an
+Inner join with no build rows in a lane (q11's one nation, q32's one-lane build). Simplest, per the 2026-09-11 fix report and unconfirmed here: `select count(*) from store
+where s_store_name = 'ese';` (tpcds) at `tp4-single`. The device's dropped row and the shortcut
+site have no corpus query.
+
+**Fix proposed:** at the init, where both sites start. `GpuAggregate` moves from `Exec` to a new
+category, `ExecWithDone`: per-batch calls as now, plus a done call through which a keyless lane
+that received no batch emits its identity state row; a grouped one emits nothing. The row comes
+from `decomposition()` (`plan/aggregates.rs`), which gains an empty-input value per state column —
+`0` for `PlanAgg::Count`, NULL for the rest — so both backends build the same row. The shortcut
+finalizes it (count 0, the rest NULL); a merge never meets no arrival, and its count sums to 0,
+not NULL. Every aggregate sequence starts with a `GpuAggregate` (`aggregate_sequence`, its only
+builder), so the init covers them all. The driver owes the done call to every lane, one that saw
+no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
+limit and the joins; the cpu's sort and merge stopped being one with [#205](../archive/archived-tickets.md#t205))
+need no fix of their own for this; between init and merge a keyless sequence only collapses lanes,
+which keeps the one-row batch. The cpu's `!self.grouped` clause, which merges over nothing, goes,
+and the twelve #180 cells turn on at the tp4 modes.
+
+**Closed.** Every aggregate init is a batch accumulator: a zero-row batch is released uncalled,
+and at done, where nothing went out, the init's seqs run over no input (`AtDoneIfNothingOut`),
+the device aggregating `aggr_input_schema`'s zero-row table. The cpu merge's `!self.grouped`
+clause is gone, and `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device` is
+`a_global_merge_over_no_arrival_answers_nothing_on_both`. Cells on: q96, q88, q90 and
+`scalar-subquery-cross` at tp4 on both engines; q11 and q32 at tp4 and q22 at tp4-single on the
+device.
+
+<a id="t282"></a>
+### #282 — a scan with no surviving row groups is refused at planning
+**Done by [`keyless-identity`](../tasks/keyless-identity.md) (chain K); awaiting merge.**
+
+`SELECT count(*) FROM t WHERE <a predicate every row group's statistics rule out>` does not plan,
+on either backend; it should answer `0`. A parquet file with no row group at all does the same:
+DuckDB writes an empty table that way. Both ways in are ordinary. A selective filter over real data
+reaches it — `WHERE f_id > 1000000` over any parquet table — and so does pbench's `empty.parquet`,
+`tiny`'s schema with no rows, in `SELECT e.t_id, t.t_id FROM empty e, tiny t`. DataFusion plans
+both and answers zero rows: `CrossJoinExec` over a `ParquetExec` of the empty file.
+
+`partition()` (`planner/translator/scan_mapping/partition.rs:26`) refuses an empty survivor list
+("no surviving row groups: what an empty scan means is the caller's decision, not an empty map"),
+because the wire reads an empty mapping as one unmapped partition, which reads the whole file.
+No caller decides, so the plan fails. Found 2026-10-08 planning keyless-identity; distinct-companions
+works around it (`ss_quantity + ss_item_sk < 0` rather than `ss_quantity < 0`). Filed twice: chain
+J's pbench branch filed it again as #256, now archived as a duplicate of this one.
+
+Not [#208](../archive/archived-tickets.md#t208), which was this shape at run time: the cpu's cross
+join emitting nothing where the device emitted a zero-row batch. That one is fixed, and the corpus
+shows the fix only once this closes, because the plan is refused before either backend sees it.
+
+**Corpus queries:** none on tpch or tpcds: no corpus filter prunes every row group. pbench's `empty`
+table has none to begin with, so `cross-empty-build` and `outer-on-true-empty` are refused here
+before the joins they test. Both rows' plan cells are off on this ticket alone; `cross-empty-build`
+was written for #208 and shows that fix once this lifts. Simplest:
+`select count(*) from nation where n_nationkey < 0;` (tpch).
+
+**Fix proposed:** a scan with no survivors plans one lane that holds no batch, so its executors
+make no call and the lane ends with nothing, the no-arrival case keyless-identity (chain K) makes
+every node answer right. In keyless-identity. The mapping has no way to say "no partitions", so
+the fix is a representation for an empty scan, not a laxer check; a `GpuEmpty` leaf, which
+join-backend added for an `EmptyExec` ([#155](../archive/archived-tickets.md#t155)), is the other one.
+
+**Closed.** The translator maps a scan with no surviving row group to one lane holding no batch,
+`[[]]`; `partition()` keeps its refusal for every other caller. `cross-empty-build` and
+`outer-on-true-empty` run on both engines at all five modes; `empty-table-count` and
+`empty-pruned-count` added.
+
 <a id="t65"></a>
 ### #65 — the device's grouping-set id is not DataFusion's value or width
 **Done by [`grouping-id`](../tasks/grouping-id.md) (chain K); awaiting merge.**
@@ -271,7 +365,7 @@ type. pbench's `nl-left-decimal` answers as DuckDB on both engines at all five m
 `CrossJoinExec` ended its stream without a batch over an empty build, where the device answered
 a zero-row table. The cpu's join now answers one batch per call, a zero-row one where no chunk
 came, as the device does. The node pins flipped. `pbench/cross-empty-build` still meets
-[#282](../tickets/corpus-coverage.md#t282) at plan time.
+[#282](#t282) at plan time.
 
 <a id="t207"></a>
 ### #207 — both backends drop a cross join's projection
@@ -288,7 +382,7 @@ a projection. pbench's `cross-projection` answers on both engines at all five mo
 The cpu passed `None` for `NestedLoopJoinExec`'s projection. It passes the node's now. tpch q11
 and q22, tpcds q24 and q54, and pbench's `nl-inner`, `nl-left`, `nl-projection` and
 `nl-left-decimal` answer on both engines. q11's and q22's device cells off at tp4 are
-[#199](../tickets/corpus-coverage.md#t199)'s; `like-column-pattern`'s device cells are
+[#199](#t199)'s; `like-column-pattern`'s device cells are
 [#246](../tickets/joins.md#t246)'s.
 
 <a id="t63"></a>
@@ -300,7 +394,7 @@ it. The plan declares the marker now: a project of `Int8 0 AS __rowmarker__` whe
 no column, `CudfScan.rows_only` for a scan of none, and a keyless join drops it through its
 projection. Validation refuses a zero-column schema and the device an empty project. tpcds q9
 answers on the device at all five modes; `scalar-subquery-cross` at tp1, its tp4 cells on
-[#199](../tickets/corpus-coverage.md#t199).
+[#199](#t199).
 
 <a id="t212"></a>
 ### #212 — a build side that emits no batch at all still refuses Right, Full and RightAnti
@@ -1202,7 +1296,7 @@ the plan is refused before either backend sees it.
 **Corpus queries:** pbench's `cross-empty-build`, its plan cells disabled on this ticket. The row
 carries `208` as well, the ticket it is written for and will show once this lifts.
 
-**Stale 2026-10-15.** A duplicate of [#282](../tickets/corpus-coverage.md#t282), filed on chain J's
+**Stale 2026-10-15.** A duplicate of [#282](#t282), filed on chain J's
 pbench branch after #282 already existed: the same refusal in `partition.rs`. Its two ways in, the
 #208 cross-reference and the `GpuEmpty` fix option moved there, and its registry rows carry `282`.
 
@@ -1239,7 +1333,7 @@ Neighbour to [#163](../archive/archived-tickets.md#t163) rather than the same th
 was a declared type never derived from the expression producing it, this one is a declared
 *nullability* the merge contradicts at run time. Found by T18's stage-4 enablement, disabled at three of five modes.
 
-**Stale 2026-09-28.** A duplicate of [#199](../tickets/corpus-coverage.md#t199): the cpu's keyless
+**Stale 2026-09-28.** A duplicate of [#199](#t199): the cpu's keyless
 merge over an empty lane answers sum's NULL for a count, and the declaration refuses it. No shuffle
 is involved; tp4-single cuts a one-row-group table into empty lanes, and an Inner join with no build
 in a lane drains it. Its cells and registry rows moved to #199.

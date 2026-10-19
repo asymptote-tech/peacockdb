@@ -14,7 +14,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
         GpuMergePartitions: none
           GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=468094770, certain=0
@@ -101,13 +101,13 @@ GpuUnload
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=4, per batch: execute_node(#12 CudfProject, batch)
     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#9 CudfCoalescePartitions, lane batches), execute_node(#10 CudfAggregate{Merge}, prior output); at done: execute_node(#11 CudfProject{finalize}, prior output)
-      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch)
+      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#8 CudfAggregate{Partial})
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#6 CudfCoalescePartitions, lane batches), execute_node(#7 CudfAggregate{Merge}, prior output)
           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                     GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1620328050, certain=0
@@ -154,7 +154,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output); at done: execute_node(#12 CudfProject{finalize}, prior output)
     GpuMergePartitions: none
       GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output)
-        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
           GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
             GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
               GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
@@ -203,7 +203,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#10 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
                 GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
                   GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
                     GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
@@ -249,7 +249,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output); at done: execute_node(#12 CudfProject{finalize}, prior output)
     GpuMergePartitions: none
       GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output)
-        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
           GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe; at done: join_finish
             GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
               GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
@@ -409,7 +409,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#6 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#4 CudfCoalescePartitions, lane batches), execute_node(#5 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#3 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#3 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#3 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
                       GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
                         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
@@ -474,7 +474,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#23 CudfCoalescePartitions, lane batches), execute_node(#24 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#22 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#21 CudfProject, batch)
                       GpuHashJoin: calling_lanes=4, join_build(#19 CudfJoin); per probe batch: join_probe
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
@@ -599,7 +599,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#18 CudfCoalescePartitions, lane batches), execute_node(#19 CudfAggregate{Merge}, prior output); at done: execute_node(#20 CudfProject{finalize}, prior output)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#16 CudfCoalescePartitions, lane batches), execute_node(#17 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#15 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#15 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#15 CudfAggregate{Partial})
                     GpuHashJoin: calling_lanes=4, join_build(#13 CudfJoin); per probe batch: join_probe
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
@@ -623,7 +623,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                 GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#40 CudfCoalescePartitions, lane batches)
                   GpuMergePartitions: none
                     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#38 CudfCoalescePartitions, lane batches), execute_node(#39 CudfAggregate{Merge}, prior output)
-                      GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch)
+                      GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#37 CudfAggregate{Partial})
                         GpuHashJoin: calling_lanes=4, join_build(#35 CudfJoin); per probe batch: join_probe
                           GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
                             GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#24 CudfRepartition{Hash, 1→4}, batch)
@@ -725,7 +725,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#12 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#9 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
                       GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
@@ -789,10 +789,10 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#15 CudfRepartition{Hash, 1→4}, batch)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#13 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#13 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#13 CudfAggregate{Partial})
                   GpuProject: calling_lanes=4, per batch: execute_node(#12 CudfProject, batch)
                     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#9 CudfCoalescePartitions, lane batches), execute_node(#10 CudfAggregate{Merge}, prior output); at done: execute_node(#11 CudfProject{finalize}, prior output)
-                      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch)
+                      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#8 CudfAggregate{Partial})
                         GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe; at done: join_finish
                           GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
                             GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
@@ -848,7 +848,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#12 CudfCoalescePartitions, lane batches), execute_node(#13 CudfAggregate{Merge}, prior output); at done: execute_node(#14 CudfProject{finalize}, prior output)
       GpuMergePartitions: none
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output)
-          GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#9 CudfAggregate{Partial})
             GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
               GpuHashJoin: calling_lanes=4, join_build(#6 CudfJoin); per probe batch: join_probe
                 GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
@@ -934,21 +934,21 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#8 CudfCoalescePartitions, lane batches)
                           GpuMergePartitions: none
                             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#6 CudfCoalescePartitions, lane batches), execute_node(#7 CudfAggregate{Merge}, prior output)
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#5 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#5 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#5 CudfAggregate{Partial})
                                 GpuFilter: calling_lanes=4, per batch: execute_node(#4 CudfFilter, batch)
                                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#35 CudfRepartition{Hash, 1→4}, batch)
           GpuFilter: calling_lanes=1, per batch: execute_node(#34 CudfFilter, batch)
             GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#31 CudfCoalescePartitions, lane batches), execute_node(#32 CudfAggregate{Merge}, prior output); at done: execute_node(#33 CudfProject{finalize}, prior output)
               GpuMergePartitions: none
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#30 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#30 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#30 CudfAggregate{Partial})
                   GpuProject: calling_lanes=4, per batch: execute_node(#29 CudfProject, batch)
                     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#26 CudfCoalescePartitions, lane batches), execute_node(#27 CudfAggregate{Merge}, prior output); at done: execute_node(#28 CudfProject{finalize}, prior output)
                       GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#25 CudfRepartition{Hash, 1→4}, batch)
                         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#24 CudfCoalescePartitions, lane batches)
                           GpuMergePartitions: none
                             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#22 CudfCoalescePartitions, lane batches), execute_node(#23 CudfAggregate{Merge}, prior output)
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#21 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#21 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#21 CudfAggregate{Partial})
                                 GpuFilter: calling_lanes=4, per batch: execute_node(#20 CudfFilter, batch)
                                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#19 CudfScan, row groups)
 --- memory ---
@@ -1032,13 +1032,13 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#26 CudfRepartition{Hash, 1→4}, batch)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#24 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#24 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#24 CudfAggregate{Partial})
                   GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#21 CudfCoalescePartitions, lane batches), execute_node(#22 CudfAggregate{Merge}, prior output); at done: execute_node(#23 CudfProject{finalize}, prior output)
                     GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#20 CudfRepartition{Hash, 1→4}, batch)
                       GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#19 CudfCoalescePartitions, lane batches)
                         GpuMergePartitions: none
                           GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#17 CudfCoalescePartitions, lane batches), execute_node(#18 CudfAggregate{Merge}, prior output)
-                            GpuAggregate: calling_lanes=4, per batch: execute_node(#16 CudfAggregate{Partial}, batch)
+                            GpuAggregate: calling_lanes=4, per batch: execute_node(#16 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#16 CudfAggregate{Partial})
                               GpuHashJoin: calling_lanes=4, join_build(#14 CudfJoin); per probe batch: join_probe
                                 GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                                   GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
@@ -1125,7 +1125,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#25 CudfCoalescePartitions, lane batches), execute_node(#26 CudfAggregate{Merge}, prior output); at done: execute_node(#27 CudfProject{finalize}, prior output)
       GpuMergePartitions: none
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#23 CudfCoalescePartitions, lane batches), execute_node(#24 CudfAggregate{Merge}, prior output)
-          GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#22 CudfAggregate{Partial})
             GpuHashJoin: calling_lanes=4, join_build(#20 CudfJoin); per probe batch: join_probe
               GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#9 CudfCoalescePartitions, lane batches)
                 GpuProject: calling_lanes=4, per batch: execute_node(#8 CudfProject, batch)
@@ -1144,7 +1144,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
                       GpuMergePartitions: none
                         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#12 CudfCoalescePartitions, lane batches), execute_node(#13 CudfAggregate{Merge}, prior output)
-                          GpuAggregate: calling_lanes=4, per batch: execute_node(#11 CudfAggregate{Partial}, batch)
+                          GpuAggregate: calling_lanes=4, per batch: execute_node(#11 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#11 CudfAggregate{Partial})
                             GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#10 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1399081880, certain=0
@@ -1217,7 +1217,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#28 CudfCoalescePartitions, lane batches)
             GpuMergePartitions: none
               GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#26 CudfCoalescePartitions, lane batches), execute_node(#27 CudfAggregate{Merge}, prior output)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#25 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#25 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#25 CudfAggregate{Partial})
                   GpuHashJoin: calling_lanes=4, join_build(#23 CudfJoin); per probe batch: join_probe
                     GpuFilter: calling_lanes=4, per batch: execute_node(#9 CudfFilter, batch)
                       GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#6 CudfCoalescePartitions, lane batches), execute_node(#7 CudfAggregate{Merge}, prior output); at done: execute_node(#8 CudfProject{finalize}, prior output)
@@ -1225,7 +1225,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
                             GpuMergePartitions: none
                               GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-                                GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+                                GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
                     GpuHashJoin: calling_lanes=4, join_build(#21 CudfJoin); per probe batch: join_probe
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#18 CudfCoalescePartitions, lane batches)
@@ -1300,7 +1300,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#12 CudfCoalescePartitions, lane batches), execute_node(#13 CudfAggregate{Merge}, prior output); at done: execute_node(#14 CudfProject{finalize}, prior output)
       GpuMergePartitions: none
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output)
-          GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#9 CudfAggregate{Partial})
             GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe
               GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                 GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
@@ -1459,7 +1459,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#56 CudfCoalescePartitions, lane batches)
                           GpuMergePartitions: none
                             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#54 CudfCoalescePartitions, lane batches), execute_node(#55 CudfAggregate{Merge}, prior output)
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#53 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#53 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#53 CudfAggregate{Partial})
                                 GpuHashJoin: calling_lanes=4, join_build(#51 CudfJoin); per probe batch: join_probe
                                   GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#34 CudfCoalescePartitions, lane batches)
                                     GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#33 CudfRepartition{Hash, 1→4}, batch)
@@ -1643,7 +1643,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#25 CudfCoalescePartitions, lane batches)
                       GpuMergePartitions: none
                         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#23 CudfCoalescePartitions, lane batches), execute_node(#24 CudfAggregate{Merge}, prior output)
-                          GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch)
+                          GpuAggregate: calling_lanes=4, per batch: execute_node(#22 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#22 CudfAggregate{Partial})
                             GpuFilter: calling_lanes=4, per batch: execute_node(#21 CudfFilter, batch)
                               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#20 CudfScan, row groups)
 --- memory ---
@@ -1747,7 +1747,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#37 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#35 CudfCoalescePartitions, lane batches), execute_node(#36 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#34 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#34 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#34 CudfAggregate{Partial})
                     GpuHashJoin: calling_lanes=4, join_build(#32 CudfJoin); per probe batch: join_probe; at done: join_finish
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#28 CudfCoalescePartitions, lane batches)
                         GpuHashJoin: calling_lanes=4, join_build(#26 CudfJoin); per probe batch: join_probe; at done: join_finish
@@ -1867,13 +1867,13 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuSort: calling_lanes=1, per batch: execute_node(#24 CudfSort, batch)
       GpuProject: calling_lanes=1, per batch: execute_node(#23 CudfProject, batch)
         GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#20 CudfCoalescePartitions, lane batches), execute_node(#21 CudfAggregate{Merge}, prior output); at done: execute_node(#22 CudfProject{finalize}, prior output)
-          GpuAggregate: calling_lanes=1, per batch: execute_node(#19 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=1, per batch: execute_node(#19 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#19 CudfAggregate{Partial})
             GpuProject: calling_lanes=1, per batch: execute_node(#18 CudfProject, batch)
               GpuNestedLoopJoin: calling_lanes=1, join_build(#16 CudfJoin); per probe batch: join_probe
                 GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#5 CudfCoalescePartitions, lane batches), execute_node(#6 CudfAggregate{Merge}, prior output); at done: execute_node(#7 CudfProject{finalize}, prior output)
                   GpuMergePartitions: none
                     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
-                      GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch)
+                      GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
                         GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
                           GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
                 GpuMergePartitions: none
@@ -1951,7 +1951,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#19 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#17 CudfCoalescePartitions, lane batches), execute_node(#18 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#16 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#16 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#16 CudfAggregate{Partial})
                     GpuHashJoin: calling_lanes=4, join_build(#14 CudfJoin); per probe batch: join_probe
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#10 CudfCoalescePartitions, lane batches)
                         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#9 CudfRepartition{Hash, 1→4}, batch)
@@ -2031,7 +2031,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#12 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#9 CudfAggregate{Partial})
                     GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe; at done: join_finish
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
@@ -2125,7 +2125,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#38 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#36 CudfCoalescePartitions, lane batches), execute_node(#37 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#35 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#35 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#35 CudfAggregate{Partial})
                     GpuHashJoin: calling_lanes=4, join_build(#33 CudfJoin); per probe batch: join_probe
                       GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
                         GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
@@ -2233,7 +2233,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
     GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#5 CudfCoalescePartitions, lane batches), execute_node(#6 CudfAggregate{Merge}, prior output); at done: execute_node(#7 CudfProject{finalize}, prior output)
       GpuMergePartitions: none
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
-          GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
             GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
@@ -2309,7 +2309,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#40 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#38 CudfCoalescePartitions, lane batches), execute_node(#39 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#37 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#37 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#36 CudfProject, batch)
                       GpuHashJoin: calling_lanes=4, join_build(#34 CudfJoin); per probe batch: join_probe
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
@@ -2486,7 +2486,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#55 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#53 CudfCoalescePartitions, lane batches), execute_node(#54 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#52 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#52 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#52 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#51 CudfProject, batch)
                       GpuHashJoin: calling_lanes=4, join_build(#49 CudfJoin); per probe batch: join_probe
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
@@ -2679,7 +2679,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#39 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#37 CudfCoalescePartitions, lane batches), execute_node(#38 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#36 CudfAggregate{Partial})
                     GpuProject: calling_lanes=4, per batch: execute_node(#35 CudfProject, batch)
                       GpuHashJoin: calling_lanes=4, join_build(#33 CudfJoin); per probe batch: join_probe
                         GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
@@ -2790,13 +2790,13 @@ GpuUnload
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=4, per batch: execute_node(#12 CudfProject, batch)
     GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#9 CudfCoalescePartitions, lane batches), execute_node(#10 CudfAggregate{Merge}, prior output); at done: execute_node(#11 CudfProject{finalize}, prior output)
-      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch)
+      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#8 CudfAggregate{Partial})
         GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#6 CudfCoalescePartitions, lane batches), execute_node(#7 CudfAggregate{Merge}, prior output)
           GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#5 CudfRepartition{Hash, 1→4}, batch)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
               GpuMergePartitions: none
                 GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                     GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1482300105, certain=0
@@ -2829,7 +2829,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1575, certain=0
@@ -2867,7 +2867,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#10 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
                 GpuHashJoin: calling_lanes=4, join_build(#5 CudfJoin); per probe batch: join_probe
                   GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
                     GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#1 CudfRepartition{Hash, 1→4}, batch)
@@ -2956,7 +2956,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1098222345, certain=0
@@ -2987,7 +2987,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1206244215, certain=0
@@ -3018,7 +3018,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1836371790, certain=0

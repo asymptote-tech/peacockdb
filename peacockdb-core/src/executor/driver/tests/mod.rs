@@ -15,6 +15,7 @@ mod counts;
 mod failure;
 mod flow;
 mod hook;
+mod init;
 mod instrument;
 mod limit;
 mod memory;

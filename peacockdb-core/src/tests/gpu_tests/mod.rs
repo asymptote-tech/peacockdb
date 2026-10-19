@@ -7,6 +7,7 @@ mod accumulate_cases;
 mod accumulate_schema_cases;
 mod aggregate_cases;
 mod aggregate_dimension_cases;
+mod aggregate_identity_cases;
 mod aggregate_schema_cases;
 mod device;
 mod distinct_cases;

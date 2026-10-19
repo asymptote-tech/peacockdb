@@ -991,9 +991,9 @@ early_exit=none
 GpuUnload: output_rows=1, output_bytes=43
   in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[43]]
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(sum(l.l_quantity)@1) as sum(l.l_quantity), sum(sum(o.o_totalprice)@2) as sum(o.o_totalprice)], final=[count(*)@0, sum(l.l_quantity)@1, sum(o.o_totalprice)@2], lanes=1, batches=single, output_rows=1, output_bytes=43
-    in_rows=[[2]] batch_rows=[[1]] batch_bytes=[[43]]
-    GpuAggregate: group_by=[], aggs=[count(1) as count(*), sum(l_quantity@1) as sum(l.l_quantity), sum(o_totalprice@0) as sum(o.o_totalprice)], lanes=1, batches=multiple, output_rows=2, output_bytes=86
-      in_rows=[[6001215]] batch_rows=[[1,1]] batch_bytes=[[43,43]]
+    in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[43]]
+    GpuAggregate: group_by=[], aggs=[count(1) as count(*), sum(l_quantity@1) as sum(l.l_quantity), sum(o_totalprice@0) as sum(o.o_totalprice)], lanes=1, batches=multiple, output_rows=1, output_bytes=43
+      in_rows=[[6001215]] batch_rows=[[1]] batch_bytes=[[43]]
       GpuHashJoin: join_type=Left, on=[(o_orderkey@0, l_orderkey@0)], projection=[o_totalprice@1, l_quantity@3], lanes=1, batches=multiple, output_rows=6001215, output_bytes=193539184
         in_rows=[[1500000],[6001215]] batch_rows=[[6001215,0]] batch_bytes=[[193539184,0]]
         GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1500000, output_bytes=36375000

@@ -46,14 +46,14 @@ fn count_i32() -> crate::plan::AggCall {
 operator_case! {
     GpuAggregate,
     fn a_sum_over_int64_declares_the_int64_state_the_device_holds() {
-        assert_holds_as_declared(&init(true, vec![sum_i64()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(true, vec![sum_i64()]), Script::Accumulate(vec![input()]));
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_global_sum_over_int64_declares_the_int64_state_the_device_holds() {
-        assert_holds_as_declared(&init(false, vec![sum_i64()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(false, vec![sum_i64()]), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -62,7 +62,7 @@ operator_case! {
 operator_case! {
     GpuAggregate,
     fn a_global_sum_over_a_decimal_declares_the_scale_2_state_the_device_holds() {
-        assert_holds_as_declared(&decimal_sum(), Script::Exec(vec![decimals(64, 1)]));
+        assert_holds_as_declared(&decimal_sum(), Script::Accumulate(vec![decimals(64, 1)]));
     }
 }
 
@@ -82,21 +82,21 @@ operator_case! {
             state.clone(),
             state,
         );
-        assert_holds_as_declared(&node, Script::Exec(vec![decimals(64, 1)]));
+        assert_holds_as_declared(&node, Script::Accumulate(vec![decimals(64, 1)]));
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_count_declares_the_int64_state_the_device_holds() {
-        assert_holds_as_declared(&init(true, vec![count_i32()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(true, vec![count_i32()]), Script::Accumulate(vec![input()]));
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_global_count_declares_the_int64_state_the_device_holds() {
-        assert_holds_as_declared(&init(false, vec![count_i32()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(false, vec![count_i32()]), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -104,7 +104,7 @@ operator_case! {
     GpuAggregate,
     fn a_min_over_int32_declares_the_int32_state_the_device_holds() {
         let aggs = vec![call(PlanAgg::Min, Expr::column(2, "i32"), "min(i32)", DataType::Int32)];
-        assert_holds_as_declared(&init(true, aggs), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(true, aggs), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -112,7 +112,7 @@ operator_case! {
     GpuAggregate,
     fn a_max_over_utf8_declares_the_string_state_the_device_holds() {
         let aggs = vec![call(PlanAgg::Max, Expr::column(5, "s"), "max(s)", DataType::Utf8)];
-        assert_holds_as_declared(&init(true, aggs), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(true, aggs), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -120,7 +120,7 @@ operator_case! {
     GpuAggregate,
     fn a_global_min_over_date32_declares_the_timestamp_days_state_the_device_holds() {
         let aggs = vec![call(PlanAgg::Min, Expr::column(6, "d"), "min(d)", DataType::Date32)];
-        assert_holds_as_declared(&init(false, aggs), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(false, aggs), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -128,7 +128,7 @@ operator_case! {
     GpuAggregate,
     fn a_global_max_over_float64_declares_the_float64_state_the_device_holds() {
         let aggs = vec![call(PlanAgg::Max, Expr::column(4, "f64"), "max(f64)", DataType::Float64)];
-        assert_holds_as_declared(&init(false, aggs), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(false, aggs), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -153,7 +153,7 @@ fn avg_i64_state() -> Vec<crate::plan::AggCall> {
 operator_case! {
     GpuAggregate,
     fn an_avg_over_int64_declares_the_sum_and_count_state_the_device_holds() {
-        assert_holds_as_declared(&init(true, avg_i64_state()), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init(true, avg_i64_state()), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -174,7 +174,7 @@ operator_case! {
             state.clone(),
             state,
         );
-        assert_holds_as_declared(&node, Script::Exec(vec![decimals(64, 1)]));
+        assert_holds_as_declared(&node, Script::Accumulate(vec![decimals(64, 1)]));
     }
 }
 
@@ -189,7 +189,7 @@ operator_case! {
     GpuAggregate,
     fn bug_stddev_holds_three_identically_named_columns() {
         assert_eq!(
-            divergences_on_device(&welford_init(), Script::Exec(vec![input()])),
+            divergences_on_device(&welford_init(), Script::Accumulate(vec![input()])),
             vec![Some(WELFORD_RENAMED.to_string())]
         );
     }
@@ -201,7 +201,7 @@ operator_case! {
     GpuAggregate,
     fn bug_a_global_stddev_holds_one_finished_float64_where_the_plan_declares_the_welford_state() {
         assert_eq!(
-            divergences_on_device(&welford_init_global(), Script::Exec(vec![input()])),
+            divergences_on_device(&welford_init_global(), Script::Accumulate(vec![input()])),
             vec![Some(
                 "3 columns declared, 1 held; 0 stddev(f64)$count: Int64 vs stddev(f64) FLOAT64"
                     .to_string()
@@ -215,14 +215,14 @@ operator_case! {
 operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_utf8_declares_the_string_key_the_device_holds() {
-        assert_holds_as_declared(&init_by(&[STRING], vec![sum_i64()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init_by(&[STRING], vec![sum_i64()]), Script::Accumulate(vec![input()]));
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_date32_declares_the_timestamp_days_key_the_device_holds() {
-        assert_holds_as_declared(&init_by(&[DATE], vec![sum_i64()]), Script::Exec(vec![input()]));
+        assert_holds_as_declared(&init_by(&[DATE], vec![sum_i64()]), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -230,7 +230,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_two_keys_declares_both_keys_the_device_holds() {
         let node = init_by(&[KEY, STRING], vec![sum_i64()]);
-        assert_holds_as_declared(&node, Script::Exec(vec![input()]));
+        assert_holds_as_declared(&node, Script::Accumulate(vec![input()]));
     }
 }
 
@@ -264,7 +264,7 @@ operator_case! {
             intermediate,
             output,
         );
-        assert_holds_as_declared(&node, Script::Exec(vec![input()]));
+        assert_holds_as_declared(&node, Script::Accumulate(vec![input()]));
     }
 }
 
@@ -272,7 +272,7 @@ operator_case! {
     GpuAggregate,
     fn grouping_sets_hold_the_uint8_grouping_id_the_plan_declares() {
         let node = grouping_sets(vec![vec![false, false], vec![false, true], vec![true, true]]);
-        assert_holds_as_declared(&node, Script::Exec(vec![input()]));
+        assert_holds_as_declared(&node, Script::Accumulate(vec![input()]));
     }
 }
 

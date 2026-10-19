@@ -6,6 +6,7 @@
 //! than a subcomponent directly.
 
 mod distinct_from_keys;
+mod empty_scan;
 mod join_capability;
 mod join_projection_names;
 mod join_refusals;
@@ -14,3 +15,4 @@ mod not_in;
 mod null_analysis;
 mod null_key_filters;
 mod plan_goldens;
+mod recipe_patterns;

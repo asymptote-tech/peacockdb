@@ -1105,7 +1105,11 @@ mode=tp4-sized
 | true  | 9411 |
 +-------+------+
 == cross-empty-build
-skipped: not enabled at any mode
+mode=tp4-sized
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
 == cross-projection
 fingerprint: rows=160000
 col 0: nonnull=160000
@@ -1731,6 +1735,40 @@ mode=tp4-sized
 | 98765431209840.0080  | 66  |
 | 99999999099963.0081  | 67  |
 +----------------------+-----+
+== empty-all-null-aggregates
+mode=tp4-sized
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-count-aggregates
+mode=tp4-sized
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-dispersion-aggregates
+mode=tp4-sized
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
+== empty-grouped-count
+mode=tp4-sized
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-pruned-count
+mode=tp4-sized
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
 == empty-side-left-join
 mode=tp4-sized
 +------+------+
@@ -1745,6 +1783,13 @@ mode=tp4-sized
 | 6    |      |
 | 7    |      |
 +------+------+
+== empty-table-count
+mode=tp4-sized
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
 == exists-null-keys
 mode=tp4-sized
 +------+
@@ -80157,7 +80202,19 @@ mode=tp4-sized
 | 9991  |
 +-------+
 == outer-on-true-empty
-skipped: not enabled at any mode
+mode=tp4-sized
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
 == probe-exists-residual
 mode=tp4-sized
 +-------+
@@ -100791,7 +100848,7 @@ mode=tp4-sized
 | 99   | false | 4606   |
 +------+-------+--------+
 == scalar-subquery-cross
-mode=tp1-rowgroup
+mode=tp4-sized
 +-----------+------+
 | b1        | b2   |
 +-----------+------+

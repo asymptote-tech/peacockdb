@@ -9,6 +9,7 @@
 
 use super::{AggFunc, AggSpec, Decomposition, Merge, PlanAgg};
 use datafusion::arrow::datatypes::{DataType, Field};
+use datafusion::common::ScalarValue;
 
 use super::PlanError;
 use super::{BinaryOp, Expr, UnaryOp};
@@ -89,6 +90,34 @@ pub(crate) fn state_type(agg: PlanAgg, input: &DataType) -> Result<DataType, Pla
         PlanAgg::Min | PlanAgg::Max => input.clone(),
         PlanAgg::Count => Int64,
         PlanAgg::Mean | PlanAgg::M2 => Float64,
+        PlanAgg::MergeM2 => {
+            unreachable!("MergeM2 merges the Welford triple and declares no state")
+        }
+    })
+}
+
+/// What the state column `agg` produces over no rows, given its argument's type — the value
+/// a keyless init answers at done. Shaped as [`state_type`] and typed by it; no wildcard, so
+/// a new aggregator says its identity here or does not compile.
+///
+/// `Mean` is `0.0` and not NULL because it exists only inside the Welford triple, and
+/// DataFusion 45's `VarianceAccumulator::state` answers `(0, 0.0, 0.0)` over no rows. Neither
+/// backend builds a row from this: each engine computes its own identity, and the identity
+/// cases hold both to this table.
+#[allow(dead_code)] // the identity cases' reference: no backend builds a row from it
+pub(crate) fn empty_state(agg: PlanAgg, input: &DataType) -> Result<ScalarValue, PlanError> {
+    Ok(match agg {
+        PlanAgg::Count => ScalarValue::Int64(Some(0)),
+        PlanAgg::Mean | PlanAgg::M2 => ScalarValue::Float64(Some(0.0)),
+        PlanAgg::Sum | PlanAgg::Min | PlanAgg::Max => {
+            let state = state_type(agg, input)?;
+            ScalarValue::try_from(&state).map_err(|error| {
+                PlanError::Unsupported(format!(
+                    "{} over {input}: no typed NULL of {state}: {error}",
+                    agg.tag()
+                ))
+            })?
+        }
         PlanAgg::MergeM2 => {
             unreachable!("MergeM2 merges the Welford triple and declares no state")
         }

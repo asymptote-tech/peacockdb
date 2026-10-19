@@ -129,8 +129,9 @@ the next group would land further from its share than stopping does, rather than
 share is first reached, which overshoots by a whole group. Within a chunk, consecutive row
 groups pack greedily into batches while bytes stay under target; a single row group over target
 is still its own batch, so the minimum granularity is one row group, and the planner produces a
-plan for any non-empty survivor list. An empty one is refused as an invalid plan
-([#282](tickets/corpus-coverage.md#t282)): a zero-row-group file, or a filter that prunes every group.
+plan for any non-empty survivor list. An empty one — a file with no row group, or a filter that
+prunes every group — maps to one lane holding no batch, `[[]]`, never an empty mapping, which the
+wire would read as the whole file.
 
 **The balance bound holds for uniform row groups, and contiguity is why it is not universal.**
 Max−min lane rows ≤ one row group is true of what a parquet writer emits — one group size per
@@ -149,7 +150,8 @@ holds it. Type widths are for columns the plan creates rather than reads.
 size is how the planner spends it, so an estimator pass (`planner/memory_estimation.rs`)
 solves for it per source.
 
-The walk starts at each source and follows its batch upward to the nearest accumulator. Every
+The walk starts at each source and follows its batch upward to the nearest accumulator other than an
+aggregate's init, which the walk passes through as the per-batch transform it is. Every
 node in between is a per-batch transform, so what it holds is proportional to the source batch,
 and the **amplification** is a product along the path: filter selectivity, the width change
 across a project, a join's cardinality, and the lane count in force at that point. A source's
@@ -196,7 +198,7 @@ Four limits on the number it produces.
 | `GpuCoalesceAllBatches` | BatchAccumulator | concatenates a lane's batches into one at done |
 | `GpuMergePartitions` | BatchForwarder | N lane streams → 1, forwarding each batch as visited, round-robin; accumulates nothing, no backend calls |
 | `GpuEmitPartitions` | PartitionEmitter | 1 → N per batch by hash scatter; one call per input batch |
-| `GpuAggregate` | Exec | aggregates one batch: init aggregators, plus the finalize where it is also the single-node shortcut |
+| `GpuAggregate` | BatchAccumulator | init aggregators per batch with rows, plus the finalize where it is also the single-node shortcut; a zero-row batch is released uncalled; at done, where nothing went out, the same calls over no input — one row keyless, nothing grouped |
 | `GpuAggregateBatches` | BatchAccumulator | merges pre-aggregated batches; compacts on a doubling threshold; emits at done |
 | `GpuHashJoin` | Join | a session per lane: the build side once, the probe streamed, a finish for five types ([Joins](#joins)) |
 | `GpuCrossJoin`, `GpuNestedLoopJoin` | Join | the same session, keyless, both inputs one lane; broadcast variants are [#140](tickets/optimizer.md#t140) |
@@ -779,7 +781,8 @@ at equal heights the leftmost node wins and the build subtree drains first.
 
 Hash skew needs one decision and no mechanism. Empty scatter outputs are dropped at the
 emitter, so nothing empty traverses a chain, and a lane that receives nothing runs only to learn
-its inputs are finished. A join
+its inputs are finished and make its `MarkDone`, where only an aggregate's init answers anything:
+its identity row, keyless. A join
 whose build lane got nothing still answers it, through `set_build(None)` ([Joins](#joins)).
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
@@ -794,7 +797,8 @@ it runs. Two things differ at the empty case: its driver answers nothing where t
 nothing (`partitioned_driver.py`, `results`) and the engine's answers one zero-row batch under the
 sink's input columns (`Driver::answer`), and its accumulators emit one empty batch even over no
 arrival (`operators/accumulators.py`) where the engine keeps a lane that received nothing
-answering nothing. One rule differs: the model still judges a mid-plan limit by its input
+answering nothing but for a keyless init, which answers its identity row; the model runs the init
+as an `Exec`, per batch, a zero-row one included. One rule differs: the model still judges a mid-plan limit by its input
 (`partitioned_driver.py`), where the driver now reads what the limit emitted (#234).
 
 The unit that becomes ready is not always an output lane: a `PartitionAccumulator` has one
@@ -882,7 +886,8 @@ the cases are in [`archive/designs.md`](archive/designs.md).
 - **A memory bound asserted at one partitioning asserts about one shape of arrival**: two
   corpus queries passed at one layout and failed at two.
 - **Zero rows is not zero bytes, and a zero peak is a defect.** A batch of no rows still costs
-  its schema; an empty lane emits no batch at all, which is a different thing.
+  its schema; an empty lane emits no batch at all, which is a different thing — except a keyless
+  init's, which emits its identity row.
 
 ### Determinism rules
 
@@ -926,12 +931,10 @@ is not such a join.
 from any of its inputs, anywhere and in any number.** "No batch" and "a zero-row batch" are then
 the same arrival as far as rows go. Only the batch count and boundaries may differ.
 
-The rule is not met yet. Known breaks:
-
-- A keyless aggregate owes one row over any input, and emits none over no batch
-  ([#199](tickets/corpus-coverage.md#t199)).
-- Producers that drop a zero-row batch expose the break above: the limit
-  ([#214](tickets/corpus-coverage.md#t214)), symmetric on the two engines.
+Every node meets the rule. A keyless init answers its identity row at done where nothing went
+out, so a lane that got no batch answers as one that got only empty ones. The limit
+([#214](tickets/corpus-coverage.md#t214)) drops a zero-row batch on both engines, which changes
+the batch count and no row.
 
 A new node meets the rule by construction: what it owes over an empty input, it owes over no
 input.
@@ -975,7 +978,8 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 |---|---|---|
 | `GpuLoadParquet` | `CudfScan` | `execute_scan_rowgroups(seq, row_groups…)` once per batch, overriding the node's own list |
 | `GpuEmpty` | a `CudfScan` stub, never called | none: a source that answers no batch, so no FFI call |
-| `GpuFilter`, `GpuProject`, `GpuAggregate` | the same-kind node | generic map arm, one call per batch |
+| `GpuFilter`, `GpuProject` | the same-kind node | generic map arm, one call per batch |
+| `GpuAggregate` | `CudfAggregate{Partial}`, plus a `CudfProject{finalize}` for the single-node shortcut | per batch with rows; at done, if nothing went out (`AtDoneIfNothingOut`), the same seqs, the first handed no input |
 | `GpuSort` | `CudfSort` | map arm per batch; per-batch `fetch` for a top-N |
 | `GpuAccumulateBatchesAndSort` | `CudfSort` + `CudfSortPreservingMerge` | per-batch sorts, then one merge call at done |
 | `GpuMergeSortedPartitions` | `CudfSortPreservingMerge` | one merge call over all sorted handles, lane-major |
@@ -1033,7 +1037,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
-| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row |
+| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
 | [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
@@ -1065,7 +1069,8 @@ anything decided per call cannot ride the node, and each such field has cost a s
 own. The unfreeze is per-call overrides: one `execute_node` variant taking an override struct,
 one symbol instead of three, after which the next such field costs nothing.
 
-**Nothing on the surface makes a table out of nothing.** `PlaceholderRowExec` is a table of
+**Nothing on the surface makes a table out of nothing**, bar one: an aggregate handed no input
+aggregates the zero-row table its declared input describes. `PlaceholderRowExec` is a table of
 literals with no input at all, and is refused ([#158](tickets/optimizer.md#t158)). The unfreeze
 is one call — a table of a schema and a literal row count — and the CPU answers the shape, so
 it is one where the oracle disagrees with the engine it checks. A join over an absent side

@@ -10,6 +10,7 @@ use crate::plan::ColumnOrder;
 use crate::plan::RowGroupMeta;
 use crate::plan::ScanMetadata;
 use crate::plan::Schema;
+use crate::plan::{AggCall, AggregateBody, GpuAggregate, PlanAgg};
 use crate::plan::{Expr, NamedExpr};
 use crate::plan::{
     GpuCoalesceAllBatches, GpuEmitPartitions, GpuFilter, GpuHashJoin, GpuInterleave, GpuLimit,
@@ -139,4 +140,33 @@ fn key() -> ColumnOrder {
         ascending: true,
         nulls_first: false,
     }
+}
+
+/// An aggregate's init: `count(k)`, grouped on `k` unless `keyless`. The driver reads its
+/// category; what it emits is the mock's rule.
+pub(crate) fn init(input: Box<dyn GpuNode>, keyless: bool) -> Box<dyn GpuNode> {
+    let group_by = if keyless {
+        Vec::new()
+    } else {
+        vec![Expr::column(0, "k")]
+    };
+    let mut fields: Vec<Field> = group_by
+        .iter()
+        .map(|_| Field::new("k", DataType::Int64, true))
+        .collect();
+    fields.push(Field::new("n", DataType::Int64, true));
+    let mut state = Schema::new(Arc::new(ArrowSchema::new(fields)));
+    state.group_keys = (0..group_by.len() as u32).collect();
+    let body = AggregateBody {
+        group_by,
+        grouping_sets: Vec::new(),
+        null_exprs: Vec::new(),
+        aggs: vec![AggCall {
+            func: PlanAgg::Count,
+            args: vec![Expr::column(0, "k")],
+            outputs: vec![Field::new("n", DataType::Int64, true)],
+        }],
+        finalize: None,
+    };
+    Box::new(GpuAggregate::new(input, body, state.clone(), state))
 }

@@ -177,7 +177,7 @@ fn sort(
 
 /// State from raw values, per batch — and the finalize where the translation gave this
 /// node one, which it does only for a single-batch lane, where one batch is already the
-/// whole of every group.
+/// whole of every group. Then the same calls at done, for a lane where nothing went out.
 pub(crate) fn aggregate(
     aggregate_node: &GpuAggregate,
     inputs: &[&Schema],
@@ -210,6 +210,22 @@ pub(crate) fn aggregate(
             CallPattern::PerBatch,
         ));
     }
+    // The same calls once more at done, the first handed nothing, for a lane where no batch
+    // produced a row: each engine answers over no rows what it owes — the identity row
+    // keyless, no groups grouped. The seqs are the init's own; no node is added.
+    let at_done: Vec<Call> = calls
+        .iter()
+        .enumerate()
+        .map(|(position, call)| {
+            let (seq, kind) = call.target.expect("an aggregate's calls address seqs");
+            let inputs = match position {
+                0 => Vec::new(),
+                _ => vec![Input::PriorOutput],
+            };
+            Call::seq(seq, kind, inputs, CallPattern::AtDoneIfNothingOut)
+        })
+        .collect();
+    calls.extend(at_done);
     Ok(Some(Recipe::of(calls)))
 }
 
