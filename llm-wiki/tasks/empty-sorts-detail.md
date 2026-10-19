@@ -1388,3 +1388,5 @@ Reviewer: 0 blocking, 1 important — `partitioned.rs` at 1001 lines; `answer`'s
 falsified. Its one note taken: #205's closing note narrowed — `end_to_end/dimensions.rs` and
 `join_fixture.rs` still compare against DataFusion's raw answer. Signoff rewritten. GPU host
 hard-stopped; dispatched CI follows.
+
+Dispatched CI: run 39310127349, dispatched 2026-10-19T19:20:13Z on 34bec6c5.
