@@ -5,16 +5,16 @@ Tests, CI, hosts, testdata etc
 
 ## Contents
 
-- [#266 — the registry accepts an archived ticket as a reason to keep a cell off](#t266)
-- [#263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline](#t263)
-- [#258 — the PR comment has about seven corpus rows of headroom left](#t258)
-- [#252 — six corpus cases read the checkout, which a remote CPU run never ships](#t252)
-- [#178 — the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
-- [#176 — the CI coverage guard checks one direction only](#t176)
-- [#129 — The "26.02" CI leg builds against a 25.10a image](#t129)
+- [#266 (archived ticket accepted) the registry accepts an archived ticket as a reason to keep a cell off](#t266)
+- [#263 (tickets-only CI skip) a tickets-only commit can turn the rust tier red while CI skips the pipeline](#t263)
+- [#258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left](#t258)
+- [#252 (checkout reads remotely) six corpus cases read the checkout, which a remote CPU run never ships](#t252)
+- [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
+- [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
+- [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
 
 <a id="t266"></a>
-### #266 — the registry accepts an archived ticket as a reason to keep a cell off
+### #266 (archived ticket accepted) the registry accepts an archived ticket as a reason to keep a cell off
 **Priority: low** — no answer is wrong; the cost is coverage that silently stops being measured.
 
 `registry.rs`'s rule for a row with disabled cells is `off == 0 || !tickets.is_empty()`, which asks
@@ -37,7 +37,7 @@ answer first — an open capability ticket to point at, or an exemption the rule
 would go red on day one and their cells genuinely cannot run.
 
 <a id="t263"></a>
-### #263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
+### #263 (tickets-only CI skip) a tickets-only commit can turn the rust tier red while CI skips the pipeline
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so
 the open-ticket set is now a test input. `pipeline.yml`'s two skip layers both still class the
 whole of `llm-wiki/` and every `.md` as inert: `paths-ignore` at the top, and the `changes` job's
@@ -76,7 +76,7 @@ Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, whi
 that made the wiki an input.
 
 <a id="t258"></a>
-### #258 — the PR comment has about seven corpus rows of headroom left
+### #258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left
 `the_pr_comment_fits_under_the_body_cap` holds the cost widget's comment under GitHub's
 65,536-byte body limit. pbench's 60 rows took it to 79,352, and three cuts in the pbench task
 brought it back to **63,339** — the fully-enabled tick made one character wider, a 7-character sha
@@ -97,7 +97,7 @@ sees in every comment from then on, which is why it is filed for a human rather 
 the task that measured it.
 
 <a id="t252"></a>
-### #252 — six corpus cases read the checkout, which a remote CPU run never ships
+### #252 (checkout reads remotely) six corpus cases read the checkout, which a remote CPU run never ships
 `ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through
 `env!("CARGO_MANIFEST_DIR")` with no environment escape, so the four `duckdb_divergent` cases —
 `duckdb_tpcds_q17`, `q58`, `q61`, `q66` — look for the ticket files at the build host's path.
@@ -124,7 +124,7 @@ the duckdb-oracle branch; the four `duckdb_divergent` cases were found in that t
 3 and the other two in its completeness pass.
 
 <a id="t178"></a>
-### #178 — the GPU host is shared, and a pool that cannot be built is a neighbour's fault
+### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
 `build-test.md`). The GPU host is nebius-gpu now (`build-test.md`, "GPU host"). Our CI runs
 queue on the `nebius-gpu` concurrency group. The other chains and the developers share the VM
@@ -145,7 +145,7 @@ pool size exceeded` is ours: the budget is too small, and a re-run buys nothing.
   beside it. Nothing measured beside a neighbour is published; the gate ran green meanwhile.
 
 <a id="t176"></a>
-### #176 — the CI coverage guard checks one direction only
+### #176 (CI coverage one-way) the CI coverage guard checks one direction only
 Priority: low
 `every_rust_test_target_is_named_by_ci` fails when a target exists that no workflow runs. Nothing
 fails when a workflow names a target that does not exist.
@@ -160,7 +160,7 @@ so it is one assertion that every target pipeline.yml names is in the workspace 
 list already gets this treatment; the step lines do not.
 
 <a id="t129"></a>
-### #129 — The "26.02" CI leg builds against a 25.10a image
+### #129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image
 Two unrelated smells in `pipeline.yml`, both found auditing the CI section of
 build-test.md. (a) The dataset-matrix matrix leg labelled `cudf: "26.02"` runs
 `rapidsai/base:25.10a-cuda12-py3.12`, so the compile-only 26.02 coverage the wiki and
