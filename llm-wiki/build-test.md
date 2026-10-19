@@ -1142,8 +1142,9 @@ What the arrows are there to make checkable:
   set `corpus_benchmark_cases.inc` declares, under `capture=none`. Before that, the pull
   requires the host's record to be the one it pulled (no run started since) and the run to have
   exited 0, since a failing case appends its rows before it panics. A refused record leaves the
-  pin as it was, and the pull exits 1 with the tree home. Only shad-gpu publishes: the key names
-  no host (#226), and `build-test.sh` keeps what it pulls.
+  pin as it was, and the pull exits 1 with the tree home. Only shad-gpu publishes, through
+  `build-test-shadgpu.sh`: the key names no host (#226). `build-test.sh` keeps what it pulls, and
+  nebius-gpu runs no benchmark, so while shad-gpu is down no record is published.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 

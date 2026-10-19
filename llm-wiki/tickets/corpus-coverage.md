@@ -870,7 +870,8 @@ from the registry rows and is archived.
 `tpch/left-join-reorder`, `semi-join-reorder`, `anti-join-reorder` and `left-join-fixed` put a
 non-inner join where a reorder may move it. They are planned and answered on the cpu at every
 mode, and no device has run one, so a device answer could differ from the cpu's and nothing would
-say so. Their siblings `left-join`, `semi-join` and `anti-join` run everywhere on both engines.
+say so. Their siblings `left-join`, `semi-join` and `anti-join` run everywhere on both engines. The
+cells stay off until the join optimizer's final device check runs them on a GPU.
 
 **Corpus queries:** the four, gpu cells off at all five modes on this ticket alone.
 

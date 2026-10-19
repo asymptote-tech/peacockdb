@@ -44,7 +44,9 @@ fixes #236 and #237):
 - Task 21: a non-inner join with a residual joins its cluster, the null-key filter below a shuffle
   is wiring so tp1 and tp4 hold the same clusters, and a join's residency and scratch are the
   session's; orientation keeps its formula, #294, and a residual edge its flat estimate, #295.
-  Tasks 22 and 23 are not started.
+- Task 22: the engine side is master's with the branch's added and green on rust-only, the whole
+  `test_cpu_corpus`, the cost-report crate and DPhyp; the named queries' device cells stay off on
+  #288 until the final device check (Task 22 below). Task 23 is not started.
 - `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
   shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
   record fetched, 174,690 rows, sha256 as pinned).
@@ -2875,3 +2877,37 @@ The `IS NOT NULL` and comet-hash docstrings say what the planner does.
   cardinality corpus fails its two golden comparisons as Task 19 left them, the diff unchanged.
 - `optimizer.md`'s constants: 19 rows, 31 value patterns and every named reader checked against
   the code, `NULL_KEY_DROPPABLE` among them.
+
+## Task 22
+
+The rebase did the engine side (Task 19): the four named queries in master's case format, every
+`-mini.cost.txt` derived under the branch's conf, cost-report over master's three datasets, and
+build-test.md's counts. This pass checked each against the tree.
+
+- **The named queries.** `left_join_reorder`, `semi_join_reorder`, `anti_join_reorder` and
+  `left_join_fixed` are `all_modes` on the cpu and `none` on the device, DuckDB `exact` but for
+  left-join-reorder's `fingerprint`; their registry rows carry #288 alone. The device cells stay
+  off until the join optimizer's final device check runs them on a GPU; #288 now says so.
+- **Cost goldens.** `test_cost_model` without `UPDATE_CANONICAL` derives all fifteen
+  `-mini.cost.txt`, five modes over tpch, tpcds and pbench, and none moves. The cost-report
+  binary, rendered into a scratch directory, lists TPC-H 35/43, TPC-DS 71/99 and pbench 51/60
+  GPU-operational.
+- **build-test.md.** The tables sum to the header, 5637: Rust 4424, C++ 173, Python 1040, each
+  block to its own header. Against master's page every moved row is the branch's: the corpus +24,
+  the corpus goldens +1, the cost model +1, the benchmarks 34 against 11, cost-report +2, DPhyp 6,
+  and the prototype's Python rows. The hosts are master's: nebius-gpu for the device tier while
+  shad-gpu is down, verda for large CPU runs. One sentence of the branch's read as if a record
+  were published today: only `build-test-shadgpu.sh` publishes, so with shad-gpu down none is,
+  and it now says so.
+- **Formatting.** rustfmt is clean on every Rust file the branch touched but
+  `cost-report/src/main.rs`, which holds 78 unformatted hunks on master and the same 78 here. Two
+  touch lines the branch edited, and both statements are master's: a long `read_total` call beside
+  one, and the footer `write!` whose text the branch changed. The one
+  warning, cost-report's unused test helper `sha_links`, is master's.
+
+### Proving
+
+rust-only `--lib` 770 passed, 2 ignored; `test_corpus_goldens` 27, `test_cost_model` 4,
+`test_ci_coverage` 11, `test_golden_format` 43, `test_module_layout` 18; the whole
+`test_cpu_corpus`, 1984 passed; `cargo test -p cost-report` 43; `cargo test -p peacockdb-dphyp` 6.
+None failed. Every count is build-test.md's.
