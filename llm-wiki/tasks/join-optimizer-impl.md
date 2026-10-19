@@ -355,11 +355,11 @@ with Task 15: the page and the log share the report data both changed.
 **Files:** `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`,
 `testdata/goldens/**`, `cost-report/src/main.rs`, `llm-wiki/build-test.md`.
 
-- [ ] The named queries in master's case format; their device cells as master's siblings carry
+- [x] The named queries in master's case format; their device cells as master's siblings carry
   them, or off with the reason.
-- [ ] Every `.cost.txt` under the conf, pbench's included; cost-report over three datasets.
-- [ ] build-test.md's counts and hosts are master's with the branch's added.
-- [ ] Proving: rust-only, `test_cpu_corpus`, the cost-report crate, `test_ci_coverage`.
+- [x] Every `.cost.txt` under the conf, pbench's included; cost-report over three datasets.
+- [x] build-test.md's counts and hosts are master's with the branch's added.
+- [x] Proving: rust-only, `test_cpu_corpus`, the cost-report crate, `test_ci_coverage`.
 
 ### Task 23: made again and checked
 
