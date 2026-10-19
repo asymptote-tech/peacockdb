@@ -115,3 +115,4 @@ Coordinator applied the developer's wiki list: `build-test.md` counts and the de
 `architecture.md` "Grouping sets" (the id's width and fold), #65 and #262 archived under Done and
 #55 under Stale, `tickets.md` 99 open (corpus-coverage 24), and #65 references in #210, #228,
 #230 and #144 rewritten or relinked. Review round 1 dispatched.
+- PR #181 → ENS-empty-sorts.
