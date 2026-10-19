@@ -380,9 +380,9 @@ the types that owe no probe row
 one table of input, calls and expected answer
 ([`executor_cases.rs`](../peacockdb-core/src/tests/executor_cases.rs)) run by the CPU backend
 here and by the device in `gpu_backend::gpu_tests::contract`, because a table one side does not
-read proves that side twice. Eleven rows: filter, project, the lane sorted with and without a
+read proves that side twice. Twelve rows: filter, project, the lane sorted with and without a
 fetch, coalesce, a merge with and without its finalize, a merge over state whose keys carry a
-grouping id, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
+grouping id, a two-key rollup whose id is DataFusion's in value and type, and the scatter at 4 lanes and at 64 — the lane each key lands in is a golden,
 since co-partitioning is what every partitioned join rests on
 
 | Translator, one rule at a time | [planner::translator::tests](../peacockdb-core/src/planner/translator/tests.rs) | 50 |

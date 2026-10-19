@@ -172,3 +172,22 @@ All three important and three nits fixed by the developer, each new test shown r
 build; full L40S list green again (plan 91). Coordinator: `build-test.md` C++ 180, total 5180,
 plan-executor 91 and its prose, the walk's GROUPING() under the narrowing. Completeness pass
 dispatched: reviewer and analyst.
+
+### 2026-10-19 — CI cost-report red: the tpch query count
+
+`testdata/test_duckdb_result.py`'s `test_the_three_datasets_resolve_their_queries` pins the
+tpch query files at an exact count, and `rollup-grouping.sql` made it 42 (`42 != 41 : tpch`).
+The pin is now 42. No other test pins a count this branch moved. Every step of the
+cost-report job was run locally and passes: `testdata` 41 + 20; exec-model 213 over ten files;
+calibration 5 + 4 + 3; gpu-host 104 over six files plus shellcheck; `cargo test -p
+cost-report` 41; `test_ci_coverage` 11; `test_module_layout` 18; the report renders; the
+cost-diff against origin/master compares 853 rows, 0 over 10%. This host lacks matplotlib and
+shellcheck. Both went into a scratch `pip --target` directory, the way CI self-heals them.
+
+### 2026-10-19 — completeness pass closed; `completeness approved`
+
+Reviewer: 1 important (`build-test.md`'s contract table "Eleven rows" → twelve, fixed by the
+coordinator). Analyst: 1 blocking — cost-report red on `test_duckdb_result.py`'s tpch count (fixed
+by a developer, every cost-report step green locally) — the same important, and no
+`architecture.md` sentence falsified. Lesson: PR CI had been red since 911ad39d and nobody read
+it; read the PR's checks after each code push. Signoff written. GPU host hard-stopped.
