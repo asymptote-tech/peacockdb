@@ -190,10 +190,10 @@ finalizes it (count 0, the rest NULL); a merge never meets no arrival, and its c
 not NULL. Every aggregate sequence starts with a `GpuAggregate` (`aggregate_sequence`, its only
 builder), so the init covers them all. The driver owes the done call to every lane, one that saw
 no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
-limit and the joins; the cpu's sort and merge stopped being one with
-[#205](../archive/archived-tickets.md#t205)) need no fix of their own for this; between init and
-merge a keyless sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
-merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
+limit and the joins; the cpu's sort and merge stopped being one with [#205](../archive/archived-tickets.md#t205))
+need no fix of their own for this; between init and merge a keyless sequence only collapses lanes,
+which keeps the one-row batch. The cpu's `!self.grouped` clause, which merges over nothing, goes,
+and the twelve #180 cells turn on at the tp4 modes.
 
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast

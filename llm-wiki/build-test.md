@@ -646,7 +646,9 @@ device with every batch held to its node's declared schema through the driver's 
 (the line's `schema_validation_enabled`; `tpch/shuffle-stddev` says `disabled` and
 `tpch/distinct-functions` `disabled(tp4_single | tp4_rowgroup | tp4_sized)` against
 [#225](tickets/corpus-coverage.md#t225), whose Welford columns named for the alias sit in a node
-only the tp4 modes emit for distinct-functions, so the mask keeps the hook at its two tp1 cells),
+only the tp4 modes emit for distinct-functions, so the mask keeps the hook at its two tp1 cells;
+`tpcds/q17` says `disabled(tp1_single | tp1_rowgroup)`, the modes where its first `GpuAggregate`
+emits those columns),
 and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
@@ -660,7 +662,7 @@ on #199, its keyless sum over an Inner join whose build lands in one lane of fou
 are off on [#60](tickets/corpus-coverage.md#t60), a float `round(x, 2)` one ulp from
 DataFusion's. `q14`, `q18`, `q22`, `q77` and `q80` are off on #65, the schema hook refusing the
 grouping id; `q5` on [#210](tickets/corpus-coverage.md#t210), its bare decimal literal held as
-`FLOAT64`; `q39` on #225's Welford names; `q17` runs at the two tp1 modes with the schema hook masked. tpcds is where #137's NULL-key filters run on
+`FLOAT64`; `q39` on #225's Welford names. tpcds is where #137's NULL-key filters run on
 a device, at every tp4 cell. From pbench, 249: every line wherever it runs on the cpu, but for
 three. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` whose pattern is a
 column; `rollup-small-keys` on #65; `timestamp-s-key-group` on
@@ -1614,7 +1616,10 @@ transcript on 2026-10-14. Reach the cloud through `gpu-host.sh`. Learn the CLI f
   run has the device corpus tier write `gpu-result.txt` beside the cpu's goldens, before it
   asserts against them — so an answer the cpu rejects is still recorded for DuckDB to judge.
   `--pull-results` brings the file home afterwards — only one the gate run itself wrote, by
-  mtime against the run-id file — and it refuses while a detached gate run is still going. On nebius-gpu there is no pull: rsync the file home through `gpu-host.sh rsh`, and before the next `gpu-host-sync.sh`, which overwrites the VM's copy with the local one. Any other non-empty value (`PCK_WRITE_GPU_RESULT=26.02`) writes
+  mtime against the run-id file — and it refuses while a detached gate run is still going.
+  On nebius-gpu there is no pull: rsync the file home through `gpu-host.sh rsh`, and do it
+  before the next `gpu-host-sync.sh`, which overwrites the VM's copy with the local one.
+  Any other non-empty value (`PCK_WRITE_GPU_RESULT=26.02`) writes
   `gpu-result-<value>.txt` beside it, which `testdata/.gitignore` lists: one cuDF version per
   committed file. An empty value records nothing, and that is the ordinary case: the gate script
   exports the variable on every cycle, so empty is how a cycle that is not recording says so. The read side is a second knob: `PCK_GPU_RESULT_VERSION=<v>` points the

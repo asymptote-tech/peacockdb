@@ -154,8 +154,8 @@ fn a_negative_decimal_scale_does_not_buy_a_wider_tolerance() {
 }
 
 /// A zero-column answer has a header with no pipes in it, and `split_cells` reads a pipeless
-/// line as one cell. An answer that lost its columns renders `++`, as tpcds q17's did before
-/// #205, and the width it reports is in the message a width difference prints.
+/// line as one cell. An answer that lost its columns renders `++`, and the width it reports is
+/// in the message a width difference prints.
 #[test]
 fn a_zero_column_answer_reports_no_columns() {
     let none = "mode=tp4-sized\n++\n++\n";

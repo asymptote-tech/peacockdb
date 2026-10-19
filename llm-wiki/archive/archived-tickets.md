@@ -38,8 +38,8 @@ saying so.
 **Closed on nebius-gpu.** limits' four converted source cases and `tpch/scan-limit`'s five cells
 passed 2026-10-09; `tpch/nested-limits`' five pass on master's rows-only scan (2026-10-16).
 empty-sorts' four accumulate cases passed 2026-10-09, the mixed-lane merge among them.
-`tpcds/q17`'s device cells stay off: its tp1 cells on [#225](../tickets/corpus-coverage.md#t225),
-its tp4 cells untested against the answer's new header.
+`tpcds/q17`'s five device cells passed 2026-10-19 and are on, its two tp1 cells with the schema
+hook masked on [#225](../tickets/corpus-coverage.md#t225).
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -83,9 +83,8 @@ satisfying the limit stops the scan being scheduled but at tp1-single, tp4-singl
 lineitem is one batch of all 49 groups. `GpuLoadParquet.limit` is gone and `CudfScan.limit` is
 `(deprecated)` with no slot moved. The four `bug_` cases became agreement cases and passed on
 nebius-gpu 2026-10-09, and `tpch/scan-limit`'s five device cells are enabled against the result
-golden. `tpch/nested-limits`' five stay off on
-[#285](../tickets/corpus-coverage.md#t285), which is a zero-column scan rather than a limit
-defect.
+golden. `tpch/nested-limits`' five are on too: the zero-column scan that kept them off was
+fixed on master first, so #285 was never filed.
 
 <a id="t234"></a>
 ### #234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them

@@ -1368,3 +1368,15 @@ Coordinator applied the developer's wiki list: `build-test.md` counts (5060/4493
 corpus 2011/2010, DuckDB 971, order 162; gpu 1511, corpus 790/789, 788 cells, tpcds 353 but for
 ten, the 789th case), q17's sentence there and in #225's "Corpus queries", and a line on pulling
 `gpu-result.txt` home from nebius-gpu. Review round 3 dispatched over the rebased branch whole.
+
+### 2026-10-19 — review round 3: 0 blocking, 3 important, 4 nits; `completing`
+
+All three important were prose the tree contradicted, fixed by the coordinator: #281's closing
+note (q17's cells are on), the hook-mask sentence in `build-test.md` now names q17's tp1 mask, and
+the signoff, which is rewritten at this completeness pass (q17 on; #152/#220 archived; the
+cost-report swap is 205→214 only). Nits taken: two stale q17 comment phrases (comment-only), the
+#263 process sentence, #199's rewrap, the nebius pull line. Also limits' #186 note pointed at a
+#285 that was never filed; corrected. Nit dropped: `a_column_count_difference_fails_under_every_oracle`
+does not loop over a positional `divergent(…, vec![0])` line. Not ours to edit: the board's limits
+prose still says nested-limits is off under #285; it is on (master's prose, for the helper).
+Completeness pass dispatched: reviewer and analyst.
