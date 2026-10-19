@@ -1290,3 +1290,12 @@ and `_tp1_rowgroup` in `test_cpu_corpus` wait on `gpu-result.txt` being re-recor
 tp4 device cells against the new header (enable those that pass), the four accumulate cases, then
 push with `--force-with-lease`, restore `done` once dispatched CI is green (nebius-gpu job
 included). Then grouping-id.
+
+### 2026-10-19 — device half dispatched on the rebased branch
+
+New coordinator run. `origin/ENS-empty-sorts` already holds `5741b753`, so the push the last
+entry owed is done. Board: the three tasks below set `done` here, as their own branches say.
+nebius-gpu started 18:22Z (RUNNING); verda not reachable (no `VERDA_CLIENT_ID`), cpu runs local.
+Developer dispatched for: re-recording pbench `not-in-uncorrelated`'s two `gpu-result.txt`
+sections, q17's device cells against the new header (enable what passes, ticket what fails), the
+four accumulate cases, and the cpu re-prove green.
