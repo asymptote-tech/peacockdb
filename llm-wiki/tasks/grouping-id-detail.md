@@ -116,3 +116,18 @@ Coordinator applied the developer's wiki list: `build-test.md` counts and the de
 #55 under Stale, `tickets.md` 99 open (corpus-coverage 24), and #65 references in #210, #228,
 #230 and #144 rewritten or relinked. Review round 1 dispatched.
 - PR #181 → ENS-empty-sorts.
+
+### 2026-10-19 — review round 1: 0 blocking, 3 important, 5 nits
+
+1. Important: the 16 and 32 width boundaries are pinned only from above — add 16-key `UInt16`
+   and 32-key `UInt32` gtests.
+2. Important: the reason for not hashing the id is false in three places — the cpu hashes
+   unsigned keys since repartition-keys (`spark_partitioning.rs:90`). `build-test.md` fixed by the
+   coordinator (the subset rule makes hashing it unnecessary); the two translator comments
+   (`translator/tests.rs:910`, `translator/aggregate.rs:590-591`) go to the developer.
+3. Important: no test reads the id's value under the DISTINCT lowering — `grouping(<all keys>)`
+   in a DISTINCT rollup walk against DataFusion.
+Nits to the developer: `hand_tables.hpp:48` history clause and dead null branch;
+`test_operators.py:554-555` comment; `aggregate.cpp:339-350` comment over the cap. Coordinator:
+the stray space in `build-test.md`, and #262's link in the board note. nebius-gpu started
+21:01Z; developer resumed.

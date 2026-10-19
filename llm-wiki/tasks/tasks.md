@@ -70,7 +70,7 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 >   ticketing it.
 > - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
 >   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
->   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
+>   distinct-companions' device cells ([#262](../archive/archived-tickets.md#t262)), and limits'
 >   and empty-sorts' device changes and cases ([#281](../archive/archived-tickets.md#t281)). Each
 >   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
 >   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
