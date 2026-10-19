@@ -946,10 +946,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         }
     }
 
-    /// The batches the sink unloaded, in order, or one of zero rows under the columns the
-    /// sink's input declares where none reached it: an answer's schema never depends on how
-    /// its rows ran out. Here because the unload is never told that none came; outside
-    /// `emitted`, the trace and the accountant because no node made it.
+    /// The sink's batches, or one of zero rows under its input's columns where none reached it.
     fn answer(&mut self) -> Vec<CpuBatch> {
         if !self.results.is_empty() {
             return std::mem::take(&mut self.results);

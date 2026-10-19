@@ -100,12 +100,11 @@ run; #281 holds them.
 
 ## Completeness signoff
 
-Solved under its constraints. Both rules landed as written; every Tests line exists, the unpruned
-predicate included; q17's result section is byte-identical to DuckDB's. The device half ran on
-nebius-gpu under the board's superseding note: all four accumulate cases pass, and with
-`assert_one_empty_batch` pinning the cpu side they tell one empty batch from none. Final pass:
-reviewer and analyst each found nothing blocking. Deviations, three: q17's device cells stay off,
-all five measured on open #225, #220 and #152, though #205's fix proposed tp1-single on;
-`cost-report/src/main.rs`, outside Scope, swapped its example tickets (205→214, 152→246) because
-archiving broke it; two nits traded — `count_of`'s unreachable `expect`, and an end-to-end case
-running its query twice.
+Solved under its constraints, re-proved after the rebase onto limits on master ca4dedeb. Both
+rules landed as written; every Tests line exists, the unpruned predicate included. Item 3 took its
+first branch: q17 and pbench `not-in-uncorrelated` are `duckdb_exact`, and the oracle's
+column-count exemption is gone. The device half ran on nebius-gpu (2026-10-19): the four
+accumulate cases pass, and q17's five device cells are on. Final pass: reviewer and analyst each
+found nothing blocking. Deviations: q17's tp1 device cells run with the schema hook masked on
+open #225; `cost-report/src/main.rs`, outside Scope, swaps its example ticket 205→214 because
+archiving broke it; two DataFusion comparisons outside the corpus still take the raw empty answer.

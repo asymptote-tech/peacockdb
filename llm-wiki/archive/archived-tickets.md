@@ -54,8 +54,9 @@ result sections were a bare `++`/`++`, and both lines were `duckdb_divergent(205
 **Closed.** The sort and merge answer held batches with no row as one zero-row batch
 (`sorted_and_cut`, `cpu_backend/accumulate.rs`). A query whose sink received nothing answers one
 zero-row batch under the sink's input schema, made by the driver (`Driver::answer`) and recorded
-as no node's emission. DataFusion's empty answer gets its columns the same way in the corpus and
-end-to-end oracles. Both result sections carry their header and both lines are `duckdb_exact`;
+as no node's emission. DataFusion's empty answer gets its columns the same way through
+`oracle_answer`, in the corpus and `end_to_end.rs`; `end_to_end/dimensions.rs` and
+`join_fixture.rs` still compare against its raw answer, and no zero-row case reaches them. Both result sections carry their header and both lines are `duckdb_exact`;
 the oracle's row-level exemption for a differing column count is gone.
 
 <a id="t186"></a>

@@ -1380,3 +1380,11 @@ cost-report swap is 205→214 only). Nits taken: two stale q17 comment phrases (
 does not loop over a positional `divergent(…, vec![0])` line. Not ours to edit: the board's limits
 prose still says nested-limits is off under #285; it is on (master's prose, for the helper).
 Completeness pass dispatched: reviewer and analyst.
+
+### 2026-10-19 — completeness pass closed; `completeness approved`
+
+Reviewer: 0 blocking, 1 important — `partitioned.rs` at 1001 lines; `answer`'s doc cut to one line
+(998), comment-only, by the coordinator. Analyst: none, and no `architecture.md` sentence
+falsified. Its one note taken: #205's closing note narrowed — `end_to_end/dimensions.rs` and
+`join_fixture.rs` still compare against DataFusion's raw answer. Signoff rewritten. GPU host
+hard-stopped; dispatched CI follows.
