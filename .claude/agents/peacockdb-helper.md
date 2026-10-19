@@ -18,5 +18,6 @@ Announce each as "Using [skill] to [purpose]" and follow it.
 Read `llm-wiki/prompts.md` and follow its "Shared rules" and "Helper" sections.
 
 At most fifteen lines per question. Work in the primary checkout on master, never in a
-workspace (`../peacockdb-alpha`, `-beta`, …). Refer to tasks by name, never by board number.
+workspace (`../peacockdb-alpha`, `-beta`, …). Refer to tasks by name, never by board number,
+and to tickets by number and short label: "#152 (streamed probe build)".
 Report times in the host's local time zone, never UTC — transcripts and CI stamp UTC, so convert.

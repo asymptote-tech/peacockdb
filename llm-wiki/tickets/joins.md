@@ -6,12 +6,12 @@ own fix. The join rewrite's tickets are in [`archive/archived-tickets.md`](../ar
 
 ## Contents
 
-- [#243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys](#t243)
-- [#245 — a nested-type key cannot cross a shuffle](#t245)
-- [#246 — a `LIKE` whose pattern is a column is refused on the device](#t246)
-- [#250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs](#t250)
+- [#243 (float key equality) the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys](#t243)
+- [#245 (nested-type shuffle key) a nested-type key cannot cross a shuffle](#t245)
+- [#246 (LIKE column pattern) a `LIKE` whose pattern is a column is refused on the device](#t246)
+- [#250 (nullable IN subquery) an `IN` subquery whose NULL answer is read is refused when its data holds NULLs](#t250)
 <a id="t243"></a>
-### #243 — the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
+### #243 (float key equality) the cpu treats -0.0 and 0.0, and NaNs of different bits, as different keys
 A float join or group key equates `-0.0` with `0.0` and every NaN with every other NaN on the
 device and in DuckDB, and does not on the cpu, so the two engines answer a float-keyed join or
 `GROUP BY` differently wherever those values occur. DataFusion compares and hashes floats by their
@@ -36,7 +36,7 @@ normalization under every float join and group key, on both engines.
 float-keyed aggregate, cpu against device.
 
 <a id="t245"></a>
-### #245 — a nested-type key cannot cross a shuffle
+### #245 (nested-type shuffle key) a nested-type key cannot cross a shuffle
 A join or `GROUP BY` keyed on a struct or list column is refused at run time at the tp4 modes, on
 both engines: comet's hasher has no struct or list arm, and neither has the device kernel
 (`cpp/src/spark_hash_partition.cu`). The tp1 modes, which do not shuffle, answer.
@@ -51,7 +51,7 @@ could not land: the planner panics on a Struct column before it refuses, which i
 [#255](complete-coverage.md#t255). The query arrives with that ticket's fix.
 
 <a id="t246"></a>
-### #246 — a `LIKE` whose pattern is a column is refused on the device
+### #246 (LIKE column pattern) a `LIKE` whose pattern is a column is refused on the device
 `expr.cpp:873-877` takes a `LIKE` pattern only as a literal. A join condition that matches one
 side's strings against the other side's patterns — a nested loop, since it has no key — is
 refused on the device; the cpu answers. The same holds for any `LIKE` over two columns.
@@ -65,7 +65,7 @@ cpu cells answer as DuckDB at all five modes, and its device cells were run, mea
 at the nested loop's probe, `LIKE pattern must be a string literal`. The row carries `246` alone.
 
 <a id="t250"></a>
-### #250 — an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
+### #250 (nullable IN subquery) an `IN` subquery whose NULL answer is read is refused when its data holds NULLs
 `x IN (S)` is three-valued: NULL when `x` is NULL and `S` is non-empty, or when `S` holds a NULL
 and `x` matches nothing. Where a filter reads that NULL as a value — `IS [NOT] NULL`,
 `IS [NOT] TRUE/FALSE/UNKNOWN`, a comparison (`(x IN S) = false`), `COALESCE`, a function argument

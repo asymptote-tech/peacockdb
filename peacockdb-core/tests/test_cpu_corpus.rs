@@ -33,11 +33,11 @@ macro_rules! corpus_query {
             tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
     };
     ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
+        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle, $validation);
         device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
     };
     ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle);
+        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle, $validation);
         device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
         $(
             paste::paste! {
@@ -68,10 +68,11 @@ macro_rules! corpus_query {
 }
 
 /// The line itself and its DuckDB case, submitted by both arms — a query with no enabled
-/// mode still declares three oracles, the pairing between them is a property of the line
-/// rather than of a run, and DuckDB answers whether or not we do.
+/// mode still declares three oracles and a schema validation, the pairing between the
+/// oracles is a property of the line rather than of a run, and DuckDB answers whether or
+/// not we do.
 macro_rules! declare_corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $duck:expr, $cpu_oracle:ident, $gpu_oracle:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $duck:expr, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
         inventory::submit! {
             CorpusDeclaration {
                 dataset: stringify!($dataset),
@@ -80,6 +81,7 @@ macro_rules! declare_corpus_query {
                 duckdb_oracle: $duck,
                 cpu_oracle: stringify!($cpu_oracle),
                 gpu_oracle: stringify!($gpu_oracle),
+                schema_validation: stringify!($validation),
             }
         }
         paste::paste! {
@@ -293,6 +295,59 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
         );
     }
     assert_eq!(checked, 1, "tpch scan-limit is the only undetermined line");
+}
+
+/// The registry's last three columns are a copy of each `corpus_query!` line's oracles and
+/// schema validation, held to the lines in both directions: every line's row says what the
+/// line says, and every row that names an oracle has a line. The widget reads the copy, so a
+/// line edited without its row would show a reader an oracle no test uses.
+#[test]
+fn the_registry_carries_each_lines_oracles_and_schema_validation() {
+    let rows = load_csv();
+    let mut wrong: Vec<String> = Vec::new();
+    let mut declared = std::collections::BTreeSet::new();
+    for line in inventory::iter::<CorpusDeclaration> {
+        let key = (line.dataset, line.sf, line.query);
+        declared.insert(key);
+        let validation = line
+            .schema_validation
+            .trim_start_matches("schema_validation_");
+        match rows
+            .iter()
+            .find(|r| (r.dataset.as_str(), r.sf.as_str(), r.query.as_str()) == key)
+        {
+            None => wrong.push(format!(
+                "{}/{}: a line and no registry row",
+                line.dataset, line.query
+            )),
+            Some(row) => {
+                let got = (
+                    row.cpu_oracle.as_str(),
+                    row.gpu_oracle.as_str(),
+                    row.schema_validation.as_str(),
+                );
+                let want = (line.cpu_oracle, line.gpu_oracle, validation);
+                if got != want {
+                    wrong.push(format!(
+                        "{}/{}: the line says {want:?}, the row {got:?}",
+                        line.dataset, line.query
+                    ));
+                }
+            }
+        }
+    }
+    for row in &rows {
+        let named = row.cpu_oracle != "na";
+        if named && !declared.contains(&(row.dataset.as_str(), row.sf.as_str(), row.query.as_str()))
+        {
+            wrong.push(format!(
+                "{}/{}: the row names {} / {} and no corpus_query! line declares it",
+                row.dataset, row.query, row.cpu_oracle, row.gpu_oracle
+            ));
+        }
+    }
+    assert!(!declared.is_empty(), "no corpus_query! line was collected");
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// A hyphenated query resolves its authority, and that authority is what silence would cost.

@@ -7,48 +7,49 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 ## Contents
 
 - [Welford aggregation](#welford-aggregation)
-  - [#225 — the device names every Welford state column by the same alias](#t225)
-  - [#216 — the device's global aggregate has no Welford arm](#t216)
-  - [#94 — MERGE_M2 count-child type is cuDF-version-specific](#t94)
-  - [#280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three](#t280)
+  - [#225 (Welford column aliases) the device names every Welford state column by the same alias](#t225)
+  - [#216 (global Welford missing) the device's global aggregate has no Welford arm](#t216)
+  - [#94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific](#t94)
+  - [#280 (Welford grouping sets) a `stddev` or `var` under a grouping set answers one column where the plan declares three](#t280)
 - [Aggregates](#aggregates)
-  - [#199 — a global aggregate over no arrival drops its identity row](#t199)
-  - [#55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
-  - [#65 — the device's grouping-set id is not DataFusion's value or width](#t65)
-  - [#62 — a DISTINCT beside an avg or a count is refused at planning](#t62)
-  - [#264 — the device refuses a group key that is not a bare column](#t264)
-  - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
+  - [#199 (empty global aggregate) a global aggregate over no arrival drops its identity row](#t199)
+  - [#55 (q66 divisor cast) q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
+  - [#65 (grouping-set id format) the device's grouping-set id is not DataFusion's value or width](#t65)
+  - [#62 (DISTINCT + avg/count) a DISTINCT beside an avg or a count is refused at planning](#t62)
+  - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
+  - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 - [Sort / Limit](#sort--limit)
-  - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
-  - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
-  - [#204 — the device's sorted merge drops its fetch when it is handed one input](#t204)
-  - [#214 — a limit drops a zero-row batch on both backends](#t214)
-  - [#205 — the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
+  - [#202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device](#t202)
+  - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
+  - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
+  - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
+  - [#205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
 - [Scalars](#scalars)
-  - [#168 — interval type can not be represented in the fbs ScalarValue](#t168)
-  - [#210 — a bare decimal literal on the AST path comes back as a Float64 column](#t210)
-  - [#57 — the device refuses a value-form CASE](#t57)
-  - [#56 — q2: CASE-over-string-equality inside a partial-phase sum](#t56)
-  - [#60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
-  - [#251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
+  - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
+  - [#210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column](#t210)
+  - [#57 (value-form CASE) the device refuses a value-form CASE](#t57)
+  - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
+  - [#60 (round() off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
+  - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Source](#source)
-  - [#186 — a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
-  - [#282 — a scan with no surviving row groups is refused at planning](#t282)
+  - [#186 (scan limit pushdown) a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
+  - [#282 (scan with no row groups) a scan with no surviving row groups is refused at planning](#t282)
 - [Testing](#testing)
-  - [#227 Check schema nullability in tests](#t227)
-  - [#164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
-  - [#174 — two clamps for one rule, and nothing compares them](#t174)
-  - [#233 — the plan validator does not check that a pass-through node keeps its input's column count](#t233)
-  - [#234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
-  - [#262 — the DISTINCT lowering's device cells have never run](#t262)
-  - [#281 — limits' and empty-sorts' device cells have never run](#t281)
-  - [#253 — the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
-  - [#254 — `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
+  - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
+  - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
+  - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
+  - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
+  - [#234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
+  - [#262 (DISTINCT device cells) the DISTINCT lowering's device cells have never run](#t262)
+  - [#281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run](#t281)
+  - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
+  - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
+  - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
 
 ## Welford aggregation
 
 <a id="t225"></a>
-### #225 — the device names every Welford state column by the same alias
+### #225 (Welford column aliases) the device names every Welford state column by the same alias
 
 The plan declares a `stddev` or `var` state as `<out>$count`, `<out>$mean`, `<out>$m2`; the
 device holds all three under `<out>`, at the init and at the merge alike, the types as declared.
@@ -82,7 +83,7 @@ Not wrong today: every name the writer emits maps to the right ddof. It rides al
 is the wire change it needs (`reports/hacks-audit.md` §5, aggregate half).
 
 <a id="t216"></a>
-### #216 — the device's global aggregate has no Welford arm
+### #216 (global Welford missing) the device's global aggregate has no Welford arm
 
 A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
 `[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
@@ -108,7 +109,7 @@ per aggregator: a count 0, the rest NULL. The keyless `is_stddev_name` arm goes.
 its tests can assert `holds_as_declared`.
 
 <a id="t94"></a>
-### #94 — MERGE_M2 count-child type is cuDF-version-specific
+### #94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific
 The stddev/var Merge arm (`cpp/src/operators/aggregate.cpp`, the `AggPhase::Merge` Welford
 branch) casts `valid_count` to INT32 for the 25.02 GPU runtime; 25.06 and later (cuDF PR #18546) accept only
 INT64 or FLOAT64 (`group_merge_m2.cu`). The Final arm casts the same way but never runs. The
@@ -126,7 +127,7 @@ both versions, and each cuDF version is its own build, so no runtime probe. The 
 25.02 does.
 
 <a id="t280"></a>
-### #280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three
+### #280 (Welford grouping sets) a `stddev` or `var` under a grouping set answers one column where the plan declares three
 
 A `stddev` or `var` under `ROLLUP`, `CUBE` or `GROUPING SETS` is refused on the device; the cpu
 answers it.
@@ -151,7 +152,7 @@ grouping-set path builds the Welford triple the grouped one does; the query abov
 ## Aggregates
 
 <a id="t199"></a>
-### #199 — a global aggregate over no arrival drops its identity row
+### #199 (empty global aggregate) a global aggregate over no arrival drops its identity row
 
 `gpu_backend/accumulate.rs:307` answers an empty lane with nothing. The CPU counterpart has a
 `!self.grouped` clause and answers with the identity row — `count` is 0, not absent.
@@ -196,7 +197,7 @@ sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.g
 merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
 
 <a id="t55"></a>
-### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
+### #55 (q66 divisor cast) q66: two-phase decimal aggregate ignores the partial-phase divisor cast
 
 Filed against the old executor. DataFusion casts `sum(decimal / int)`'s divisor to Decimal128 in
 the Partial phase only. The device's Final aggregate evaluated the argument again, over the
@@ -224,7 +225,7 @@ shad-gpu closes #55: drop `55` from registry row 67 and archive the ticket as st
 the defect is live, and the throwing call names its phase.
 
 <a id="t65"></a>
-### #65 — the device's grouping-set id is not DataFusion's value or width
+### #65 (grouping-set id format) the device's grouping-set id is not DataFusion's value or width
 
 A ROLLUP, CUBE or GROUPING SETS init on the device numbers the id's bits from the other end, and
 holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to
@@ -261,7 +262,7 @@ and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which 
 id; independent of it.
 
 <a id="t62"></a>
-### #62 — a DISTINCT beside an avg or a count is refused at planning
+### #62 (DISTINCT + avg/count) a DISTINCT beside an avg or a count is refused at planning
 
 `avg(x), count(x), count(DISTINCT x)` does not plan: the translator refuses any aggregate that
 carries DataFusion's DISTINCT flag, on both backends.
@@ -317,7 +318,7 @@ the guard with a corrected comment (`hacks-audit.md` §10); deleting it is chose
 nothing can set the flag.
 
 <a id="t264"></a>
-### #264 — the device refuses a group key that is not a bare column
+### #264 (computed group key) the device refuses a group key that is not a bare column
 `CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
 (`cpp/src/operators/aggregate.cpp:163`) for any group expression that is not a `ColumnRef`, so
 `GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on the
@@ -332,7 +333,7 @@ three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This 
 until this ticket had a number.
 
 <a id="t267"></a>
-### #267 — a Single-mode aggregate over a scan split into lanes is refused at tp4
+### #267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4
 DataFusion plans an aggregate `mode=Single` where its input is one partition. The planner can map
 that input to several lanes, and `aggregate_sequence` (`translator/aggregate.rs`) then finalizes
 on every lane with no merge below it. Validation refuses the plan: "a finalizing merge over several
@@ -349,7 +350,7 @@ which refused first.
 ## Sort / Limit
 
 <a id="t202"></a>
-### #202 — a descending sort key puts its nulls on the wrong end on the device
+### #202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device
 
 On a descending key the device places nulls at the end the plan did not declare: `i32 DESC
 NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last.
@@ -369,7 +370,7 @@ and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_test
 
 
 <a id="t217"></a>
-### #217 — a sort with `fetch 0` keeps every row on the device
+### #217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device
 
 `GpuSort` with `fetch: Some(0)` answers zero rows on the cpu and the whole batch on the device.
 
@@ -388,7 +389,7 @@ Safe: every `CudfSort` writer sets `fetch` explicitly — `fetch_of`'s `-1` for 
 accumulating sort's `-1`, and the three C++ tests. The `bug_` pin flips to a green case.
 
 <a id="t204"></a>
-### #204 — the device's sorted merge drops its fetch when it is handed one input
+### #204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input
 
 `CudfSortPreservingMerge` with a `fetch` over a single input table answers every row: 16 where the
 plan asked for 5. A merge with no sort keys drops it the same way.
@@ -416,7 +417,7 @@ both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` t
 `architecture.md`'s three notes on this exception drop.
 
 <a id="t214"></a>
-### #214 — a limit drops a zero-row batch on both backends
+### #214 (limit drops empty batch) a limit drops a zero-row batch on both backends
 
 A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
 Both `LimitStream`s cut with `RowInterval::range_of` (`plan/interval.rs`), which answers `None`
@@ -432,7 +433,7 @@ loses its identity row.
 green as `same` cases.
 
 <a id="t205"></a>
-### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches
+### #205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches
 
 A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
 emits no batch on the cpu, where the device emits one of zero rows.
@@ -474,7 +475,7 @@ then regenerated with its header, and #235's empty-answer divergence goes.
 ## Scalars
 
 <a id="t168"></a>
-### #168 — interval type can not be represented in the fbs ScalarValue
+### #168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue
 
 The wire's `ScalarValue` (`flatbuffers/gpu_plan.fbs`) has no interval type, so a plan holding an
 interval literal cannot cross to the device.
@@ -505,7 +506,7 @@ and the uncrossable set go empty, the wire test takes a month interval, the gold
 a plan, and mixed-join's device cells turn on.
 
 <a id="t210"></a>
-### #210 — a bare decimal literal on the AST path comes back as a Float64 column
+### #210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column
 
 cuDF's AST has no fixed-point literal, so `ast_scalar` (`expr.cpp`) rewrites a `Decimal128`
 literal as a scaled double before the one scalar builder; under a `CAST(… AS Float64)` that is
@@ -522,7 +523,7 @@ schema hook refuses as FLOAT64 at every mode, ahead of #65. The likely fix is `c
 refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t57"></a>
-### #57 — the device refuses a value-form CASE
+### #57 (value-form CASE) the device refuses a value-form CASE
 `build_column_case` (`cpp/src/expr.cpp`) throws `value-form CASE not supported in column path`
 for any `CASE x WHEN v THEN …`. The search form, `CASE WHEN x = v THEN …`, folds through
 `copy_if_else` and works. `bug_a_value_case_is_refused_on_the_device`
@@ -550,7 +551,7 @@ a cpu-vs-device agreement; `tpcds/q39` enabled at tp1-single on shad-gpu. Drop t
 from `plan/mod.rs` and `57` from registry row 40 in the same change.
 
 <a id="t56"></a>
-### #56 — q2: CASE-over-string-equality inside a partial-phase sum
+### #56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum
 
 Filed against the old executor: the device built a cuDF AST for `sum(CASE WHEN <string equality>
 …)`, and cuDF refused with binaryop "Unsupported operator", since its AST cannot compare strings.
@@ -574,7 +575,7 @@ not a plan's merges across lanes. The complete proof is `tpcds/q2` enabled at ev
 #152 lands; green there, archive #56 and drop `56` from registry row 3.
 
 <a id="t60"></a>
-### #60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp
+### #60 (round() off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp
 
 The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
 one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
@@ -601,7 +602,7 @@ untouched; no golden moves. Test: a walk test `ROUND_PLACES` running the query a
 Registry: q78's row drops `60`. `round` over Float32 is #221.
 
 <a id="t251"></a>
-### #251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up
+### #251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up
 
 DataFusion cuts a decimal division at the scale it declared for the result rather than rounding,
 and we follow it. The truncated value then feeds the rest of the expression, so the answer is
@@ -624,7 +625,7 @@ so the decision comes before the code.
 ## Source
 
 <a id="t186"></a>
-### #186 — a limit pushed into the scan: the cpu ignores it, the device refuses it
+### #186 (scan limit pushdown) a limit pushed into the scan: the cpu ignores it, the device refuses it
 
 `SELECT * FROM lineitem LIMIT 10` answers 6,001,215 rows on the cpu at `tp1-single` and
 `tp1-rowgroup`, a wrong answer. On the device every mode fails the first read: `CUDF failure …
@@ -677,7 +678,7 @@ cpu tp1 cells turn on. Its device cells no longer meet the decimal export — #1
 zero-column scan and the cross join's batching (#220).
 
 <a id="t282"></a>
-### #282 — a scan with no surviving row groups is refused at planning
+### #282 (scan with no row groups) a scan with no surviving row groups is refused at planning
 
 `SELECT count(*) FROM t WHERE <a predicate every row group's statistics rule out>` does not plan,
 on either backend; it should answer `0`. A parquet file with no row group at all does the same:
@@ -712,7 +713,7 @@ join-backend added for an `EmptyExec` ([#155](../archive/archived-tickets.md#t15
 ## Testing
 
 <a id="t227"></a>
-### #227 Check schema nullability in tests
+### #227 (schema nullability tests) Check schema nullability in tests
 
 Column nullability is maintained tin node's output_schema, but not tested anywhere. Start testing
 it in the CPU engine, by adding this logic to declared_as() - if not null constraint is set in the
@@ -733,7 +734,7 @@ both arguments it would need. Either way the device flavour then passes `PerColu
 else changes. Not type-checkable without cuDF, so it wants a host with a card.
 
 <a id="t164"></a>
-### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
+### #164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
 
 The C++ half of [#135](../archive/archived-tickets.md#t135), which the planner
 closed on the Rust side by checking a reference's name against the field at its position.
@@ -748,7 +749,7 @@ half is closed — `register_handle`, the only path to a handle number, refuses 
 do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
 
 <a id="t174"></a>
-### #174 — two clamps for one rule, and nothing compares them
+### #174 (two clamps, one rule) two clamps for one rule, and nothing compares them
 A limit keeps a row range of each batch, and the two backends clamp that range in their own code.
 `RowRange::clamp` (`peacockdb-core/src/executor/row_range.rs`) returns `(offset, length)`; its one
 caller is `CpuUnload::unload`. C++ `clamp_row_range` (`cpp/src/node_session.cpp`) returns
@@ -780,7 +781,7 @@ either side fails that side's test on the shared line. And the mock's copy goes:
 production rule. One line; `driver/tests/limit.rs`'s counts stay as they are.
 
 <a id="t233"></a>
-### #233 — the plan validator does not check that a pass-through node keeps its input's column count
+### #233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count
 
 A node that carries its input's columns — Sort, CoalesceAllBatches, AccumulateBatchesAndSort,
 Limit, MergePartitions, EmitPartitions, MergeSortedPartitions — passes `validate` while declaring
@@ -804,7 +805,7 @@ message. Test, in `plan/validate/tests.rs`: a hand-built sort declaring one colu
 two-column source is refused, and the same sort declaring both columns passes.
 
 <a id="t234"></a>
-### #234 — a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
+### #234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
 
 For a mid-plan `GpuLimit`, the driver and the limit's executor each count the rows of the same
 stream against the same interval, for two decisions. Both counts are live, and both agree today.
@@ -830,7 +831,7 @@ the range each call was handed, and the backends' `LimitStream` tests take a ran
 a running count.
 
 <a id="t262"></a>
-### #262 — the DISTINCT lowering's device cells have never run
+### #262 (DISTINCT device cells) the DISTINCT lowering's device cells have never run
 
 The DISTINCT lowering (distinct-companions, chain K, closes [#62](#t62)) is built and proven on
 the cpu only: chain K runs without a GPU so as not to contend with chain J for one. Its plans
@@ -848,7 +849,7 @@ ticket it fails on. Then this ticket drops from the registry row and is archived
 takes q28's and rollup-distinct's cells when their own tickets have closed.
 
 <a id="t281"></a>
-### #281 — limits' and empty-sorts' device cells have never run
+### #281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run
 
 limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
 device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
@@ -863,7 +864,7 @@ from the cpu's, and nothing would say so.
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
 <a id="t253"></a>
-### #253 — the DuckDB oracle cannot record a divergence it finds on two of its paths
+### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths
 
 `duckdb_divergent(<ticket>, <positions>)` is how a corpus line records a difference the oracle
 found and a ticket explains. It reaches the per-line cpu comparison and nothing else, so two
@@ -939,7 +940,7 @@ needs no exception — it takes 1.5M rows of `o_totalprice` out of row-for-row c
 the thing the fingerprint exists to do.
 
 <a id="t254"></a>
-### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
+### #254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing
 
 [#235](../archive/archived-tickets.md#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
 and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
@@ -951,3 +952,22 @@ one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
 One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
 not determined — so the exposure is small and the fix is the same shape as the other two: split
 the comparison from the query, and hand the split a doctored answer that is not a subset.
+
+<a id="t287"></a>
+### #287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for
+
+Every corpus compare sorts both answers' rows before comparing them. `batches_to_sorted_str`
+(`test_support/result_text.rs`) pretty-prints a result and sorts its data lines, and the cpu
+oracles (`data_fusion_*`) and the device's (`golden_*`, `live_cpu`) all compare that text. So a
+query that ends in `ORDER BY` and answers the right rows in the wrong order passes on both
+engines. An ordering bug is caught only where it changes which rows survive, as under
+`ORDER BY … LIMIT n`. [#202](#t202), a descending key's nulls on the wrong end on the device, is
+one that an order-blind compare misses wherever no limit cuts the misplaced rows.
+
+**Corpus queries:** every query whose answer DataFusion orders at the root — most of TPC-H and
+TPC-DS end in `ORDER BY`.
+
+**Fix proposed:** where the oracle's physical plan has a sort at its root, keep the multiset
+compare and add an order check: our rows must be non-decreasing in the sort's keys, with their
+directions and null placement. Ties stay free, so a stable and an unstable sort both pass. The
+same check serves both engines, since the device compares against the cpu's answer.
