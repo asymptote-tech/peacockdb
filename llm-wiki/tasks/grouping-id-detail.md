@@ -193,3 +193,8 @@ by a developer, every cost-report step green locally) — the same important, an
 it; read the PR's checks after each code push. Signoff written. GPU host hard-stopped.
 
 Dispatched CI: run 39330940474, dispatched 2026-10-19T21:53:10Z on a2e41a3d.
+
+### 2026-10-19 — `done`
+
+Dispatched run 39330940474 green on a2e41a3d, `GPU Tests (nebius-gpu)` included; PR #181's CI
+green on the same head. GPU host hard-stopped. Next: keyless-identity.
