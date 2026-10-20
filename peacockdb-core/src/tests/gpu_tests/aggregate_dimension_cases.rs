@@ -280,24 +280,19 @@ operator_case! {
 }
 
 /// `welford_partial(func, seed)` with its key dropped: what a global init over one row emits.
-fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
+pub(crate) fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     welford_partial(func, seed)
         .project(&[1, 2, 3])
         .expect("the triple")
 }
 
-// #216 — the same arm at the merge: the `stddev` it reduces is over the state's first
-// column, the count, so the device answers one finished value where the cpu merges the
-// triple, and the export, told the triple's three declarations, refuses the one column.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device() {
+    fn a_keyless_welford_merge_agrees() {
         let partial = |seed| keyless_welford_partial(AggFunc::Stddev, seed);
         let node = welford_merge_by(false, AggFunc::Stddev, None);
         let outcome = run_both(&node, Script::Accumulate(vec![partial(1), partial(2)]));
-        let why = outcome.gpu_refuses();
-        assert!(why.contains("3 declared precisions for a table of 1 columns"), "{why}");
-        assert_eq!(cpu_slot(&outcome, 2).num_columns(), 3, "the cpu merges the triple");
+        same_within_welford(cpu_slot(&outcome, 2), gpu_slot(&outcome, 2), false, &[1, 2]);
     }
 }
 
@@ -395,8 +390,8 @@ operator_case! {
 
 // The Welford triple with no key, and the dispersion finalize as the planner writes it —
 // `plan::finalize` over the merged state: a `CASE` over the count, a typed NULL, and for
-// `stddev` a `Sqrt`. Grouped, both agree; keyless, the device has no triple to finalize
-// under `stddev` and no arm at all for `var`.
+// `stddev` a `Sqrt`. Keyless, the device runs the triple through the grouped request builder
+// on one constant key, and both agree.
 
 /// The global Welford init: the triple over `f64` with no group.
 pub(crate) fn welford_init_global() -> GpuAggregate {
@@ -409,17 +404,11 @@ pub(crate) fn welford_init_global() -> GpuAggregate {
     )
 }
 
-// #216 — the device's keyless path has no Welford arm: it reduces `stddev` to the one
-// finished `Float64` the SQL aggregate would answer, where the plan declares the
-// `[count, mean, m2]` state the cpu emits; the export, told three declarations, refuses
-// the one column, so the merge above it never sees the value.
 operator_case! {
     GpuAggregate,
-    fn bug_a_global_welford_init_answers_a_finished_stddev_on_the_device() {
+    fn a_global_welford_init_agrees() {
         let outcome = run_both(&welford_init_global(), Script::Accumulate(vec![input()]));
-        let why = outcome.gpu_refuses();
-        assert!(why.contains("3 declared precisions for a table of 1 columns"), "{why}");
-        assert_eq!(cpu_slot(&outcome, 0).num_columns(), 3, "the cpu emits the triple");
+        same_within_welford(cpu_slot(&outcome, 0), gpu_slot(&outcome, 0), false, &[1, 2]);
     }
 }
 
@@ -476,34 +465,24 @@ fn global_finalize_outcome(func: AggFunc) -> Outcome {
     run_both(&node, Script::Accumulate(arrivals))
 }
 
-// #216 — over the one column the keyless merge answers, the finalize's `m2` reference is
-// past the input's width; the cpu answers the finalized stddev.
+/// The keyless merge finalized, the `Float64` to `WELFORD_RELATIVE` for the reason
+/// `finalized_within_welford` gives.
+fn global_finalized_within_welford(func: AggFunc) {
+    let outcome = global_finalize_outcome(func);
+    same_within_welford(cpu_slot(&outcome, 2), gpu_slot(&outcome, 2), false, &[0]);
+}
+
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_global_stddev_finalize_is_refused_on_the_device() {
-        let outcome = global_finalize_outcome(AggFunc::Stddev);
-        assert!(
-            outcome.gpu_refuses().contains("is past the 1 columns its input has"),
-            "{}",
-            outcome.gpu_refuses()
-        );
+    fn a_global_stddev_finalize_agrees_within_welford() {
+        global_finalized_within_welford(AggFunc::Stddev);
     }
 }
 
-// #216 — the variance never reaches its finalize: the keyless path reduces a `stddev` name
-// alone, so a `var` name finds no reduction and the aggregate itself is refused; the cpu
-// answers the finalized variance.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device() {
-        let outcome = global_finalize_outcome(AggFunc::Var);
-        assert!(
-            outcome
-                .gpu_refuses()
-                .contains("[in CudfAggregate] unsupported aggregate function: var"),
-            "{}",
-            outcome.gpu_refuses()
-        );
+    fn a_global_var_finalize_agrees_within_welford() {
+        global_finalized_within_welford(AggFunc::Var);
     }
 }
 

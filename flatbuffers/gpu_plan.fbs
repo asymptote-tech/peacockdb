@@ -168,8 +168,8 @@ table AggregateFuncNode {
   /// (`<out>$count`, `<out>$mean`, `<out>$m2`) for a stddev or var. The executor names every
   /// column it emits from here.
   state_names: [string];
-  /// A stddev's or var's divisor offset: 1 for the sample forms, 0 for the population ones.
-  /// 0, and unread, for every other function.
+  /// A stddev's or var's divisor offset: 1 for the sample forms, 0 for the population ones; no
+  /// device code reads it, since the finalize project carries it. 0 for every other function.
   ddof: int8;
 }
 

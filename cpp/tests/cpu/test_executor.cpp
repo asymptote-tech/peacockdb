@@ -3,6 +3,7 @@
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
 
+#include <cudf/version_config.hpp>
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
@@ -451,6 +452,28 @@ TEST(ClampRowRange, AnswersEveryCaseInTheSharedTable) {
         std::make_pair(static_cast<cudf::size_type>(c.begin), static_cast<cudf::size_type>(c.end)))
         << "row-range-clamp.txt:" << c.line;
   }
+}
+
+// #94: MERGE_M2 takes its count child as INT32 before cuDF 25.06 and as INT64 from 25.06
+// (cuDF #18546).
+TEST(MergeM2CountType, Int32Before25_06AndInt64From25_06) {
+  EXPECT_EQ(peacock::merge_m2_count_type(25, 2), cudf::type_id::INT32) << "25.02, the GPU hosts'";
+  EXPECT_EQ(peacock::merge_m2_count_type(25, 4), cudf::type_id::INT32);
+  EXPECT_EQ(peacock::merge_m2_count_type(25, 6), cudf::type_id::INT64);
+  EXPECT_EQ(peacock::merge_m2_count_type(25, 10), cudf::type_id::INT64);
+  EXPECT_EQ(peacock::merge_m2_count_type(26, 2), cudf::type_id::INT64) << "26.02";
+}
+
+// The type the aggregate casts to, as this build's cuDF headers choose it. 25.02 is the GPU
+// hosts'. The INT64 branch is built and unit-tested by CI's cudf 26.02 leg (a 25.10a image,
+// #129).
+TEST(MergeM2CountType, TheLinkedCudfChoosesIt) {
+#if CUDF_VERSION_MAJOR == 25 && CUDF_VERSION_MINOR == 2
+  EXPECT_EQ(peacock::kMergeM2CountType, cudf::type_id::INT32) << "cuDF 25.02";
+#else
+  EXPECT_EQ(peacock::kMergeM2CountType, cudf::type_id::INT64)
+      << "cuDF " << CUDF_VERSION_MAJOR << "." << CUDF_VERSION_MINOR;
+#endif
 }
 
 int main(int argc, char** argv) {

@@ -141,6 +141,7 @@ tpch,1,shuffle_additive,enabled,enabled,enabled,enabled,enabled,enabled,enabled,
 tpch,1,shuffle_additive_avg,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg,,data_fusion_exact,golden_exact,enabled
 tpch,1,shuffle_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,stddev_var,,data_fusion_approximate,golden_approx_std,enabled
 tpch,1,rollup_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,rollup stddev_var,,data_fusion_approximate,golden_approx_std,enabled
+tpch,1,global_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,stddev_var,,data_fusion_approximate,golden_approx_std,enabled
 pbench,1,anti_null_preserved_condition,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,anti_join corr_subquery,,data_fusion_exact,golden_exact,enabled
 pbench,1,bool_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,,data_fusion_exact,golden_exact,enabled
 pbench,1,cross_empty_build,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,cross_join,,data_fusion_exact,golden_exact,enabled
@@ -150,7 +151,7 @@ pbench,1,decimal15_key_join,enabled,enabled,enabled,enabled,enabled,enabled,enab
 pbench,1,decimal38_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,,data_fusion_exact,golden_exact,enabled
 pbench,1,empty_all_null_aggregates,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,,data_fusion_exact,golden_exact,enabled
 pbench,1,empty_count_aggregates,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg,,data_fusion_exact,golden_exact,enabled
-pbench,1,empty_dispersion_aggregates,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,stddev_var,216,data_fusion_exact,golden_exact,enabled
+pbench,1,empty_dispersion_aggregates,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,stddev_var,,data_fusion_exact,golden_exact,enabled
 pbench,1,empty_grouped_count,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,,data_fusion_exact,golden_exact,enabled
 pbench,1,empty_pruned_count,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,,data_fusion_exact,golden_exact,enabled
 pbench,1,empty_side_left_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,outer_join,,data_fusion_exact,golden_exact,enabled

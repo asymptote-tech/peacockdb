@@ -238,11 +238,11 @@ each position needs. Every aggregate decomposes into three declared parts, each 
 - **finalize** — one expression per output column over the merged state: `avg` a divide,
   `stddev` a `CASE` over a `sqrt`, the rest a rename.
 
-A node with no finalize list emits state; a node with one emits finalized columns — on the cpu
-always, on the device except the keyless Welford path, which reduces a `stddev` name to one
-finished value at init and at merge and refuses a `var` name outright ([#216](tickets/corpus-coverage.md#t216)).
-Nothing else distinguishes the positions, so the single-node shortcut is not a third case — it
-is init aggregators and finalize expressions on the same node.
+A node with no finalize list emits state; a node with one emits finalized columns, on both
+engines. Nothing else distinguishes the positions, so the single-node shortcut is not a third case
+— it is init aggregators and finalize expressions on the same node. A keyless node holding a
+`stddev` or `var` runs on the device through the grouped request builder on one constant key,
+since cuDF has `M2` and `MERGE_M2` for groupby only; over zero rows it answers `empty_state`'s row.
 
 | Aggregate | init (over rows) | state | merge (over state) | finalize |
 |---|---|---|---|---|
@@ -267,7 +267,9 @@ for, and `PlanAgg`, what a node runs. State columns are typed by `PlanAgg::state
 a decimal sum gains ten digits of precision, capped at 38, the Welford moments are `Float64`. DataFusion's
 `state_fields()` supplies only the arity and nullability, since the accumulator it describes is
 not the one either engine runs. The one producer that disagrees is DataFusion's variance
-accumulator, whose count is `u64`; the cpu casts it to `Int64` at the init. Adding an aggregate
+accumulator, whose count is `u64`; the cpu casts it to `Int64` at the init. The Welford state is
+never NULL on either engine: a group with no valid value is `(0, 0.0, 0.0)`, DataFusion's own,
+which the device writes where cuDF answers NULL, at the init and after every `MERGE_M2`. Adding an aggregate
 is a row there rather than an arm in C++; an aggregate that cannot be decomposed at all (a true
 median) is an absent decomposition and a planner that declines to split the phase.
 
@@ -438,9 +440,10 @@ while DataFusion uses Decimal128 throughout. A count is the same shape one node 
 in INT32 and the aggregate casts to the INT64 the state declares; and `date_part` the same at
 the expression, cuDF extracting every component in INT16 and the arm casting to the
 `return_type` the wire names. A Welford init casts its argument to FLOAT64, the type cuDF's `M2`
-and `MEAN` work in, and the Welford merge casts the count to the type its cuDF's `MERGE_M2`
-accepts and back to INT64 (`kMergeM2CountType`, [#94](tickets/corpus-coverage.md#t94)); both are
-the state the plan already declares. Hash key normalization feeds the hash alone and never reaches a
+and `MEAN` work in. The Welford merge casts the count to the type the linked cuDF's `MERGE_M2`
+takes, `kMergeM2CountType` (`plan_executor_internal.h`): `INT32` before 25.06 and `INT64` from
+25.06, read from `<cudf/version_config.hpp>` at compile time. The aggregate widens the merged count back to INT64, a no-op
+from 25.06. Both are the state the plan already declares. Hash key normalization feeds the hash alone and never reaches a
 returned value — a cast that cannot change an answer is not one the plan needs to carry — and it
 is the one of the six that is not only C++: the cpu's `hash_keys` does the same widening, because
 the two engines must agree on a lane.
@@ -1013,10 +1016,7 @@ come back per output handle per call, so a per-node figure is this side's fold o
 
 **Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
 same expression and agree by construction rather than by two implementations happening to
-match. The device's keyless Welford path is the one exception: `stddev` comes back finished and
-the project above it refuses, `var` is refused at the aggregate ([#216](tickets/corpus-coverage.md#t216)). Two
-appended fbs values buy that: `UnaryOp.Sqrt`, so a
-finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
+match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
 stack two merges, per lane and then across lanes.
 
 Three additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields
@@ -1045,7 +1045,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
-| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args`, `state_names`, `ddof`), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys it is `cudf::reduce` to one row; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
+| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args` and `state_names`; its `ddof` is read by nobody, since the finalize is a project), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys and no `stddev` or `var` it is `cudf::reduce` to one row; a keyless node holding one runs the groupby on one constant key, dropped after; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
 | [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
@@ -1362,9 +1362,9 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
-| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which requests the builder makes: state from values at Partial, merged state at Merge; any other mode is refused by name — except the keyless path, which reduces a `stddev` name to a finished value and has no `var` arm ([#216](tickets/corpus-coverage.md#t216)) |
+| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which requests the builder makes: state from values at Partial, merged state at Merge; any other mode is refused by name |
 | `AggregateFuncNode.state_names` | `aggregate_writer.rs` | `state_funcs`: each function's calls' outputs, three for a Welford | the name of every column the device emits |
-| `AggregateFuncNode.ddof` | `aggregate_writer.rs` | `AggStateColumns.ddof` | the keyless `stddev` reduction's divisor offset |
+| `AggregateFuncNode.ddof` | `aggregate_writer.rs` | `AggStateColumns.ddof` | carried for the plan; no device code reads it, since the finalize is a project |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
 | `CudfJoin.chunk_bytes` | `join.rs` | the planner's scratch budget for one call | how many pairs the session materializes at once |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |

@@ -90,6 +90,25 @@ budget=2147483648, accumulators=0, certain=0
 GpuUnload: estimated_max_resident_size=52557643
   GpuFilter: estimated_max_resident_size=52557643
     GpuLoadParquet: estimated_max_resident_size=52557643, source_bytes=52557643, target_batch_bytes=52557643, amplification=1.0
+== global-stddev
+GpuUnload
+  GpuProject: exprs=[stddev(lineitem.l_quantity)@0 as sd, var(lineitem.l_quantity)@1 as v], lanes=1, batches=single, schema=[sd:Float64, v:Float64]
+    GpuAggregateBatches: group_by=[], aggs=[merge_m2(stddev(lineitem.l_quantity)$count@0, stddev(lineitem.l_quantity)$mean@1, stddev(lineitem.l_quantity)$m2@2) as [stddev(lineitem.l_quantity)$count, stddev(lineitem.l_quantity)$mean, stddev(lineitem.l_quantity)$m2], merge_m2(var(lineitem.l_quantity)$count@3, var(lineitem.l_quantity)$mean@4, var(lineitem.l_quantity)$m2@5) as [var(lineitem.l_quantity)$count, var(lineitem.l_quantity)$mean, var(lineitem.l_quantity)$m2]], final=[CASE WHEN (CAST(stddev(lineitem.l_quantity)$count@0 AS Float64) - 1) <= 0 THEN NULL ELSE sqrt(stddev(lineitem.l_quantity)$m2@2 / (CAST(stddev(lineitem.l_quantity)$count@0 AS Float64) - 1)) END as stddev(lineitem.l_quantity), CASE WHEN (CAST(var(lineitem.l_quantity)$count@3 AS Float64) - 1) <= 0 THEN NULL ELSE var(lineitem.l_quantity)$m2@5 / (CAST(var(lineitem.l_quantity)$count@3 AS Float64) - 1) END as var(lineitem.l_quantity)], lanes=1, batches=single, schema=[stddev(lineitem.l_quantity):Float64, var(lineitem.l_quantity):Float64]
+      GpuAggregate: group_by=[], aggs=[count(l_quantity@0) as stddev(lineitem.l_quantity)$count, mean(l_quantity@0) as stddev(lineitem.l_quantity)$mean, m2(l_quantity@0) as stddev(lineitem.l_quantity)$m2, count(l_quantity@0) as var(lineitem.l_quantity)$count, mean(l_quantity@0) as var(lineitem.l_quantity)$mean, m2(l_quantity@0) as var(lineitem.l_quantity)$m2], lanes=1, batches=multiple, schema=[stddev(lineitem.l_quantity)$count:Int64, stddev(lineitem.l_quantity)$mean:Float64, stddev(lineitem.l_quantity)$m2:Float64, var(lineitem.l_quantity)$count:Int64, var(lineitem.l_quantity)$mean:Float64, var(lineitem.l_quantity)$m2:Float64]
+        GpuLoadParquet: table=lineitem, projections=[l_quantity@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_quantity:Decimal128(15,2)]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=108021870, certain=0
+GpuUnload: estimated_max_resident_size=108021870
+  GpuProject: estimated_max_resident_size=108021870
+    GpuAggregateBatches: estimated_max_resident_size=108021870
+      GpuAggregate: estimated_max_resident_size=14441518
+        GpuLoadParquet: estimated_max_resident_size=4546404, source_bytes=4546404, target_batch_bytes=4546404, amplification=3.2
 == hash-join
 GpuUnload
   GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(sum(l.l_quantity)@1) as sum(l.l_quantity), sum(sum(o.o_totalprice)@2) as sum(o.o_totalprice)], final=[count(*)@0, sum(l.l_quantity)@1, sum(o.o_totalprice)@2], lanes=1, batches=single, schema=[count(*):Int64, sum(l.l_quantity):Decimal128(25,2), sum(o.o_totalprice):Decimal128(25,2)]

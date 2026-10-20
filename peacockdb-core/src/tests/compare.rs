@@ -136,13 +136,16 @@ pub(crate) fn same_within_welford(
     let exact: Vec<usize> = (0..expected.num_columns())
         .filter(|i| !approximate.contains(i))
         .collect();
-    assert_same(
-        &[vec![expected.project(&exact).expect("the exact columns")]],
-        &[vec![
-            gpu.project(&exact).expect("the device's exact columns"),
-        ]],
-        Order::Any,
-    );
+    // A keyless finalize of one Welford output has no exact column, and nothing to sort by.
+    if !exact.is_empty() {
+        assert_same(
+            &[vec![expected.project(&exact).expect("the exact columns")]],
+            &[vec![
+                gpu.project(&exact).expect("the device's exact columns"),
+            ]],
+            Order::Any,
+        );
+    }
     let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
         keyed.then(|| {
             b.column(0)
@@ -220,6 +223,26 @@ fn a_slot_whose_value_differs_is_named_with_the_slot() {
     let why = same(&cpu, &gpu, Order::Any).expect_err("the values differ");
     assert!(why.starts_with("slot 0:"), "{why}");
     assert!(why.contains("row"), "{why}");
+}
+
+/// A keyless finalize of one Welford output: its one column approximate, none exact.
+#[test]
+#[should_panic(expected = "stddev at key None: cpu 1e0, device 2e0")]
+fn a_keyless_lone_approximate_column_is_still_compared() {
+    let one = |sd: f64| {
+        RecordBatch::try_new(
+            Arc::new(ArrowSchema::new(vec![Field::new(
+                "stddev",
+                DataType::Float64,
+                true,
+            )])),
+            vec![Arc::new(datafusion::arrow::array::Float64Array::from(
+                vec![sd],
+            ))],
+        )
+        .unwrap()
+    };
+    same_within_welford(&one(1.0), &one(2.0), false, &[0]);
 }
 
 #[test]
