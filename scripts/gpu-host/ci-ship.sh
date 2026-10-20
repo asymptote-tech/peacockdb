@@ -41,13 +41,14 @@ done
 logs=$(mktemp -d)
 trap 'rm -rf "$logs"' EXIT
 
-# Query SQL, the minimal dataset, the generator, the committed goldens and the registry fixture.
+# Query SQL, the minimal dataset, the generator, the committed goldens and the fixtures.
 # testdata/goldens carries the per-mode `.cpu.txt` files the device tier reads read-only. The
-# registry test reads cost-registry.csv. Named by hand, so a new committed fixture has to be added
-# here, as in every provisioning path.
+# registry test reads cost-registry.csv, and peacock_cpu_tests (run here by glob) reads
+# testdata/fixtures. Named by hand, so a new committed fixture has to be added here, as in every
+# provisioning path.
 TESTDATA=(testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal testdata/goldens
           testdata/tpch-vec-queries testdata/pbench-queries testdata/pbench.sf1
-          testdata/generate_testdata.sh testdata/cost-registry.csv)
+          testdata/generate_testdata.sh testdata/cost-registry.csv testdata/fixtures)
 
 send() {  # <label> <rsync source and dest args…>; retried, and resumed from --partial-dir
   local label=$1 attempt=1; shift
