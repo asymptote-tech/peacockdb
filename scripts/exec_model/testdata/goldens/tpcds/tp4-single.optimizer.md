@@ -81,10 +81,10 @@ p0 = `date_dim (f)`, 6,000 rows.
 | | plan | DPhyp before the run | replan 1 | replan 2 | replan 3 | replan 6 | replan 7 |
 |---|---|---|---|---|---|---|---|
 | join tree | `[[[[[agg(MJ2) (f)] join agg(MJ3)] join agg(MJ4) (f)] join agg(MJ5)] join agg(MJ6) (f)] join agg(MJ7)` | `[[[[[agg(MJ6) (f)] join agg(MJ2) (f)] join agg(MJ4) (f)] join agg(MJ5)] join agg(MJ7)] join agg(MJ3)` | `[[[[[agg(MJ4) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ3)] join agg(MJ7)] join agg(MJ6) (f)` | `[[[[[agg(MJ2) (f)] join agg(MJ5)] join agg(MJ4) (f)] join agg(MJ3)] join agg(MJ7)] join agg(MJ6) (f)` | `[[[[[agg(MJ6) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ7)] join agg(MJ4) (f)] join agg(MJ3)` | `[[[[m10] join agg(MJ7)] join agg(MJ4) (f)] join agg(MJ5)] join agg(MJ3)` | `[[[[m10] join agg(MJ4) (f)] join agg(MJ7)] join agg(MJ5)] join agg(MJ3)` |
-| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_customer_sk = c_customer_sk came out 147024 rows, est 49124.4 (q-error 2.99); reordered by DPhyp | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 286690 rows, est 97873.6 (q-error 2.93); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); reordered by DPhyp | the build of MJ5's join on cs_bill_customer_sk = c_customer_sk came out 285317 rows, est 66831.7 (q-error 4.27); reordered by DPhyp | the build of MJ7's join on ws_bill_customer_sk = c_customer_sk came out 142500 rows, est 45547.2 (q-error 3.13); reordered by DPhyp |
-| C_out | 9,173,152 B | 2,290,130 B (plan's order 9,173,152 B) | 3,867,277 B (previous order 5,091,153 B) | 5,882,346 B (previous order 6,180,984 B) | 10,394,643 B (previous order 17,719,044 B) | 991,544 B (previous order 2,144,739 B) | 1,350,024 B (previous order 1,412,950 B) |
+| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_customer_sk = c_customer_sk came out 147010 rows, est 49119.4 (q-error 2.99); reordered by DPhyp | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 285994 rows, est 97635.1 (q-error 2.93); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); reordered by DPhyp | the build of MJ5's join on cs_bill_customer_sk = c_customer_sk came out 284628 rows, est 64538.9 (q-error 4.41); reordered by DPhyp | the build of MJ7's join on ws_bill_customer_sk = c_customer_sk came out 142487 rows, est 45487.5 (q-error 3.13); reordered by DPhyp |
+| C_out | 6,378,822 B | 2,231,138 B (plan's order 6,378,822 B) | 3,438,221 B (previous order 4,793,896 B) | 4,582,101 B (previous order 4,838,465 B) | 10,209,248 B (previous order 15,780,902 B) | 979,839 B (previous order 2,128,765 B) | 1,333,005 B (previous order 1,396,143 B) |
 
-Calls that left the order unchanged: replan 4 (MJ1's missed build came out 11349 rows, est 29404.8); replan 5 (MJ1's missed build came out 4340 rows, est 17601.6); replan 8 (MJ1's missed build came out 1162 rows, est 5265.9); replan 9 (MJ1's missed build came out 125 rows, est 1655.8); replan 10 (MJ1's missed build came out 22 rows, est 71.3); replan 11.
+Calls that left the order unchanged: replan 4 (MJ1's missed build came out 11349 rows, est 29402.0); replan 5 (MJ1's missed build came out 4340 rows, est 17399.3); replan 8 (MJ1's missed build came out 1162 rows, est 5262.2); replan 9 (MJ1's missed build came out 125 rows, est 1655.7); replan 10 (MJ1's missed build came out 22 rows, est 71.2); replan 11.
 
 m9 = `agg(MJ6) (f)`, 11,349 rows. m10 = `[m9] join agg(MJ2) (f)`, 4,340 rows.
 
@@ -93,72 +93,72 @@ m9 = `agg(MJ6) (f)`, 11,349 rows. m10 = `[m9] join agg(MJ2) (f)`, 4,340 rows.
 | | plan | DPhyp before the run | replan 3 |
 |---|---|---|---|
 | join tree | `[p0] join ([customer#1] join store_sales#1)` | `[[p0] join store_sales#1] join customer#1` | `[customer#1] join m8` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); flip: `customer#1` now builds |
-| C_out | 132,288,333 B | 32,828,989 B (plan's order 132,288,333 B) | 90,090,764 B (previous order 90,090,764 B) |
+| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); flip: `customer#1` now builds |
+| C_out | 132,288,333 B | 32,828,989 B (plan's order 132,288,333 B) | 87,965,613 B (previous order 87,965,613 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 4.
 
-m8 = `[p0] join store_sales#1`, 546,314 rows. p0 = `date_dim#1 (f)`, 365 rows.
+m8 = `[p0] join store_sales#1`, 533,427 rows. p0 = `date_dim#1 (f)`, 365 rows.
 
 ### q4 MJ3
 
 | | plan | DPhyp before the run | replan 11 |
 |---|---|---|---|
 | join tree | `[p1] join ([customer#2] join store_sales#2)` | `[[p1] join store_sales#2] join customer#2` | `[customer#2] join m16` |
-| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 549739 rows, est 158199.9 (q-error 3.47); flip: `customer#2` now builds |
-| C_out | 156,602,520 B | 38,862,856 B (plan's order 156,602,520 B) | 90,655,569 B (previous order 90,655,569 B) |
+| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 536691 rows, est 118806.9 (q-error 4.52); flip: `customer#2` now builds |
+| C_out | 156,602,520 B | 38,862,856 B (plan's order 156,602,520 B) | 88,503,868 B (previous order 88,503,868 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 6; replan 7; replan 8; replan 9; replan 10.
 
-m16 = `[p1] join store_sales#2`, 549,739 rows. p1 = `date_dim#2 (f)`, 365 rows.
+m16 = `[p1] join store_sales#2`, 536,691 rows. p1 = `date_dim#2 (f)`, 365 rows.
 
 ### q4 MJ4
 
 | | plan | DPhyp before the run | replan 2 |
 |---|---|---|---|
 | join tree | `[p2] join ([customer#3] join catalog_sales#1)` | `[[p2] join catalog_sales#1] join customer#3` | `[customer#3] join m7` |
-| changed by | | reordered by DPhyp | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 286690 rows, est 97873.6 (q-error 2.93); flip: `customer#3` now builds |
-| C_out | 97,194,876 B | 24,043,297 B (plan's order 97,194,876 B) | 47,277,063 B (previous order 47,277,063 B) |
+| changed by | | reordered by DPhyp | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 285994 rows, est 97635.1 (q-error 2.93); flip: `customer#3` now builds |
+| C_out | 97,194,876 B | 24,043,297 B (plan's order 97,194,876 B) | 47,162,288 B (previous order 47,162,288 B) |
 
 Calls that left the order unchanged: replan 1; replan 3; replan 4; replan 5; replan 6; replan 7.
 
-m7 = `[p2] join catalog_sales#1`, 286,690 rows. p2 = `date_dim#3 (f)`, 365 rows.
+m7 = `[p2] join catalog_sales#1`, 285,994 rows. p2 = `date_dim#3 (f)`, 365 rows.
 
 ### q4 MJ5
 
 | | plan | DPhyp before the run | replan 6 |
 |---|---|---|---|
 | join tree | `[p3] join ([customer#4] join catalog_sales#2)` | `[[p3] join catalog_sales#2] join customer#4` | `[customer#4] join m11` |
-| changed by | | reordered by DPhyp | the build of MJ5's join on cs_bill_customer_sk = c_customer_sk came out 285317 rows, est 66831.7 (q-error 4.27); flip: `customer#4` now builds |
-| C_out | 66,368,249 B | 16,417,651 B (plan's order 66,368,249 B) | 47,050,646 B (previous order 47,050,646 B) |
+| changed by | | reordered by DPhyp | the build of MJ5's join on cs_bill_customer_sk = c_customer_sk came out 284628 rows, est 64538.9 (q-error 4.41); flip: `customer#4` now builds |
+| C_out | 66,368,249 B | 16,417,651 B (plan's order 66,368,249 B) | 46,937,025 B (previous order 46,937,025 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 7; replan 8; replan 9.
 
-m11 = `[p3] join catalog_sales#2`, 285,317 rows. p3 = `date_dim#4 (f)`, 365 rows.
+m11 = `[p3] join catalog_sales#2`, 284,628 rows. p3 = `date_dim#4 (f)`, 365 rows.
 
 ### q4 MJ6
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `[p4] join ([customer#5] join web_sales#1)` | `[[p4] join web_sales#1] join customer#5` | `[customer#5] join m6` |
-| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_customer_sk = c_customer_sk came out 147024 rows, est 49124.4 (q-error 2.99); flip: `customer#5` now builds |
-| C_out | 48,628,375 B | 12,067,734 B (plan's order 48,628,375 B) | 24,245,223 B (previous order 24,245,223 B) |
+| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_customer_sk = c_customer_sk came out 147010 rows, est 49119.4 (q-error 2.99); flip: `customer#5` now builds |
+| C_out | 48,628,375 B | 12,067,734 B (plan's order 48,628,375 B) | 24,242,914 B (previous order 24,242,914 B) |
 
 Calls that left the order unchanged: replan 2; replan 3.
 
-m6 = `[p4] join web_sales#1`, 147,024 rows. p4 = `date_dim#5 (f)`, 365 rows.
+m6 = `[p4] join web_sales#1`, 147,010 rows. p4 = `date_dim#5 (f)`, 365 rows.
 
 ### q4 MJ7
 
 | | plan | DPhyp before the run | replan 7 |
 |---|---|---|---|
 | join tree | `[p5] join ([customer#6] join web_sales#2)` | `[[p5] join web_sales#2] join customer#6` | `[customer#6] join m12` |
-| changed by | | reordered by DPhyp | the build of MJ7's join on ws_bill_customer_sk = c_customer_sk came out 142500 rows, est 45547.2 (q-error 3.13); flip: `customer#6` now builds |
-| C_out | 45,087,304 B | 11,188,973 B (plan's order 45,087,304 B) | 23,499,185 B (previous order 23,499,185 B) |
+| changed by | | reordered by DPhyp | the build of MJ7's join on ws_bill_customer_sk = c_customer_sk came out 142487 rows, est 45487.5 (q-error 3.13); flip: `customer#6` now builds |
+| C_out | 45,087,304 B | 11,188,973 B (plan's order 45,087,304 B) | 23,497,042 B (previous order 23,497,042 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 6; replan 8.
 
-m12 = `[p5] join web_sales#2`, 142,500 rows. p5 = `date_dim#6 (f)`, 365 rows.
+m12 = `[p5] join web_sales#2`, 142,487 rows. p5 = `date_dim#6 (f)`, 365 rows.
 
 ### q4 dynamic filters
 
@@ -181,7 +181,7 @@ MJ3 kept the plan's order: `[web_site] join ([p2] join union(web_sales#1, MJ4))`
 
 MJ4 kept the plan's order: `[web_returns] left join web_sales#2`.
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on page_sk = cp_catalog_page_sk came out 16000 rows, est 948.9 (q-error 16.86).
+A replan was refused, work outside its builds having started: the build of MJ2's join on page_sk = cp_catalog_page_sk came out 15953 rows, est 38.0 (q-error 420.31).
 
 ### q5 MJ2
 
@@ -240,7 +240,7 @@ Probe p0, replan 1: the build of MJ1's join on d_month_seq = d_month_seq came ou
 | changed by | | reordered by DPhyp |
 | C_out | 1,444,947 B | 1,399,307 B (plan's order 1,444,947 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 7761 rows, est 2265.7).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 7761 rows, est 1881.1).
 
 p0 = `date_dim (f)`, 366 rows.
 
@@ -290,7 +290,7 @@ MJ3 kept the plan's order: `[p2] join catalog_sales`.
 
 Calls that left the order unchanged: inside p3, replan 1 (MJ1's missed build came out 459 rows, est 131.5).
 
-p0 = `date_dim#1 (f)`, 120 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 97 rows.
+p0 = `date_dim#1 (f)`, 120 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 92 rows.
 
 ### q10 dynamic filters
 
@@ -301,7 +301,7 @@ p0 = `date_dim#1 (f)`, 120 rows. p3 = `[[customer_address (f)] join customer] se
 | plan as written | catalog_sales | cs_sold_date_sk | p2.d_date_sk | 2452276 to 2452395 | 12 → 1 (9) |
 | after join order | customer_demographics | cd_demo_sk | p3.c_current_cdemo_sk | 21355 to 1909112 | 16 → 16 (0-15) |
 
-p0 = `date_dim#1 (f)`, 120 rows. p1 = `date_dim#2 (f)`, 120 rows. p2 = `date_dim#3 (f)`, 120 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 97 rows, holding MJ1.
+p0 = `date_dim#1 (f)`, 120 rows. p1 = `date_dim#2 (f)`, 120 rows. p2 = `date_dim#3 (f)`, 120 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 92 rows, holding MJ1.
 
 Probe p3, replan 1: the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 459 rows, est 131.5 (q-error 3.49); m3 = `customer_address (f)`, 459 rows.
 
@@ -312,34 +312,34 @@ Probe p3, replan 1: the build of MJ1's join on ca_address_sk = c_current_addr_sk
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `[[[agg(MJ2) (f)] join agg(MJ3)] join agg(MJ4) (f)] join agg(MJ5)` | `[[[agg(MJ4) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ3)` | `[[[agg(MJ2) (f)] join agg(MJ5)] join agg(MJ4) (f)] join agg(MJ3)` | `[[[agg(MJ4) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ3)` |
-| changed by | | reordered by DPhyp | the build of MJ4's join on ws_bill_customer_sk = c_customer_sk came out 147024 rows, est 49124.4 (q-error 2.99); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); reordered by DPhyp |
-| C_out | 6,091,633 B | 1,376,031 B (plan's order 6,091,633 B) | 3,724,859 B (previous order 3,796,718 B) | 6,162,012 B (previous order 7,473,269 B) |
+| changed by | | reordered by DPhyp | the build of MJ4's join on ws_bill_customer_sk = c_customer_sk came out 147010 rows, est 49119.4 (q-error 2.99); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); reordered by DPhyp |
+| C_out | 4,118,567 B | 1,313,714 B (plan's order 4,118,567 B) | 3,124,352 B (previous order 3,186,264 B) | 5,930,761 B (previous order 7,222,376 B) |
 
-Calls that left the order unchanged: replan 3 (MJ1's missed build came out 11552 rows, est 29404.8); replan 4 (MJ1's missed build came out 4414 rows, est 17916.5); replan 5; replan 6 (MJ1's missed build came out 485 rows, est 6289.9); replan 7.
+Calls that left the order unchanged: replan 3 (MJ1's missed build came out 11552 rows, est 29402.0); replan 4 (MJ1's missed build came out 4414 rows, est 17710.6); replan 5; replan 6 (MJ1's missed build came out 485 rows, est 6289.4); replan 7.
 
 ### q11 MJ2
 
 | | plan | DPhyp before the run | replan 2 |
 |---|---|---|---|
 | join tree | `[p0] join ([customer#1] join store_sales#1)` | `[[p0] join store_sales#1] join customer#1` | `[customer#1] join m5` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); flip: `customer#1` now builds |
-| C_out | 106,417,326 B | 24,209,354 B (plan's order 106,417,326 B) | 72,472,138 B (previous order 72,472,138 B) |
+| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); flip: `customer#1` now builds |
+| C_out | 106,417,326 B | 24,209,354 B (plan's order 106,417,326 B) | 70,762,593 B (previous order 70,762,593 B) |
 
 Calls that left the order unchanged: replan 1; replan 3.
 
-m5 = `[p0] join store_sales#1`, 546,314 rows. p0 = `date_dim#1 (f)`, 365 rows.
+m5 = `[p0] join store_sales#1`, 533,427 rows. p0 = `date_dim#1 (f)`, 365 rows.
 
 ### q11 MJ3
 
 | | plan | DPhyp before the run | replan 7 |
 |---|---|---|---|
 | join tree | `[p1] join ([customer#2] join store_sales#2)` | `[[p1] join store_sales#2] join customer#2` | `[customer#2] join m10` |
-| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 549739 rows, est 158199.9 (q-error 3.47); flip: `customer#2` now builds |
-| C_out | 125,976,503 B | 28,658,959 B (plan's order 125,976,503 B) | 72,926,487 B (previous order 72,926,487 B) |
+| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 536691 rows, est 118806.9 (q-error 4.52); flip: `customer#2` now builds |
+| C_out | 125,976,503 B | 28,658,959 B (plan's order 125,976,503 B) | 71,195,584 B (previous order 71,195,584 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 6.
 
-m10 = `[p1] join store_sales#2`, 549,739 rows. p1 = `date_dim#2 (f)`, 365 rows.
+m10 = `[p1] join store_sales#2`, 536,691 rows. p1 = `date_dim#2 (f)`, 365 rows.
 
 ### q11 MJ4
 
@@ -349,7 +349,7 @@ m10 = `[p1] join store_sales#2`, 549,739 rows. p1 = `date_dim#2 (f)`, 365 rows.
 | changed by | | reordered by DPhyp |
 | C_out | 39,118,352 B | 8,899,209 B (plan's order 39,118,352 B) |
 
-Calls that left the order unchanged: replan 1 (MJ4's missed build came out 147024 rows, est 49124.4); replan 2.
+Calls that left the order unchanged: replan 1 (MJ4's missed build came out 147010 rows, est 49119.4); replan 2.
 
 p2 = `date_dim#3 (f)`, 365 rows.
 
@@ -361,7 +361,7 @@ p2 = `date_dim#3 (f)`, 365 rows.
 | changed by | | reordered by DPhyp |
 | C_out | 36,269,793 B | 8,251,178 B (plan's order 36,269,793 B) |
 
-Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5 (MJ5's missed build came out 142500 rows, est 45547.2).
+Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5 (MJ5's missed build came out 142487 rows, est 45487.5).
 
 p3 = `date_dim#4 (f)`, 365 rows.
 
@@ -387,12 +387,12 @@ skipped: refused: unsupported: WindowAggExec: window functions (#143)
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `[p0] join ([customer_address (f)] join ([household_demographics (f)] join ([customer_demographics (f)] join ([store] join store_sales (f)))))` | `[[[[[store_sales (f)] join customer_demographics (f)] join customer_address (f)] join household_demographics (f)] join p0] join store` | `[[[[customer_address (f)] join m2] join household_demographics (f)] join p0] join store` | `[store] join ([[m3] join household_demographics (f)] join p0)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 1061 rows, est 66.9 (q-error 15.87); flip: `customer_address (f)` now builds | the build of MJ1's join on ss_hdemo_sk = hd_demo_sk came out 181 rows, est 1.7 (q-error 105.31); flip: `store` now builds |
-| C_out | 853,624 B | 16,807 B (plan's order 853,624 B) | 2,809 B (previous order 2,809 B) | 539 B (previous order 539 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 1041 rows, est 64.9 (q-error 16.04); flip: `customer_address (f)` now builds | the build of MJ1's join on ss_hdemo_sk = hd_demo_sk came out 181 rows, est 1.7 (q-error 105.67); flip: `store` now builds |
+| C_out | 853,624 B | 16,807 B (plan's order 853,624 B) | 2,756 B (previous order 2,756 B) | 539 B (previous order 539 B) |
 
 Calls that left the order unchanged: replan 3 (MJ1's missed build came out 7 rows, est 1.6).
 
-m2 = `[p1] join customer_demographics (f)`, 1,061 rows. m3 = `[customer_address (f)] join m2`, 181 rows. p0 = `date_dim (f)`, 365 rows. p1 = `store_sales (f)`, 37,869 rows.
+m2 = `[p1] join customer_demographics (f)`, 1,041 rows. m3 = `[customer_address (f)] join m2`, 181 rows. p0 = `date_dim (f)`, 365 rows. p1 = `store_sales (f)`, 37,096 rows.
 
 ### q13 dynamic filters
 
@@ -401,7 +401,7 @@ m2 = `[p1] join customer_demographics (f)`, 1,061 rows. m3 = `[customer_address 
 | plan as written | store_sales | ss_sold_date_sk | p0.d_date_sk | 2451911 to 2452275 | 24 → 6 (13-17,23) |
 | after join order | customer_demographics | cd_demo_sk | p1.ss_cdemo_sk | 15 to 1920767 | 16 → 16 (0-15) |
 
-p0 = `date_dim (f)`, 365 rows. p1 = `store_sales (f)`, 37,869 rows.
+p0 = `date_dim (f)`, 365 rows. p1 = `store_sales (f)`, 37,096 rows.
 
 ## q14
 
@@ -431,7 +431,7 @@ MJ15 kept the plan's order: `[p16] join web_sales#5`.
 | changed by | | reordered by DPhyp; flip: `agg(MJ5) semi join [[[p4] join web_sales#2] join item#3]` now builds |
 | C_out | 43,418,281 B | 10,422,733 B (plan's order 43,418,281 B) |
 
-Calls that left the order unchanged: replan 1 (MJ4's missed build came out 86880 rows, est 4927.5); replan 2; replan 3.
+Calls that left the order unchanged: replan 1 (MJ4's missed build came out 86880 rows, est 4037.6); replan 2; replan 3.
 
 p3 = `date_dim#4 (f)`, 30 rows. p4 = `date_dim#5 (f)`, 1,096 rows.
 
@@ -569,7 +569,7 @@ p0 = `date_dim#1 (f)`, 1,096 rows. p1 = `date_dim#2 (f)`, 1,096 rows. p2 = `date
 | changed by | | reordered by DPhyp |
 | C_out | 4,830,053 B | 331,238 B (plan's order 4,830,053 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 41341 rows, est 6100.3).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 41224 rows, est 6084.0).
 
 p0 = `date_dim (f)`, 91 rows.
 
@@ -583,17 +583,15 @@ p0 = `date_dim (f)`, 91 rows.
 
 ## q16
 
-MJ1 kept the plan's order: `[[MJ2] semi join catalog_sales#2] anti join catalog_returns`.
-
-### q16 MJ2
+### q16 MJ1
 
 | | plan | DPhyp before the run | inside p0, replan 1 |
 |---|---|---|---|
-| join tree | `[call_center (f)] join ([customer_address (f)] join ([date_dim (f)] join catalog_sales#1))` | `[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))` | `[m0] join ([m2] join ([m1] join catalog_sales#1))` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); reordered by DPhyp |
-| C_out | 3,055,384 B | 1,864,895 B (plan's order 3,055,384 B) | 3,199,363 B (previous order 4,801,614 B) |
+| join tree | `[[[call_center (f)] join ([customer_address (f)] join ([date_dim (f)] join catalog_sales#1))] semi join catalog_sales#2] anti join catalog_returns` | `[[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)] anti join catalog_returns` | `[m0] join ([[m2] join ([m1] join catalog_sales#1)] semi join catalog_sales#2)` |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); reordered by DPhyp |
+| C_out | 3,065,289 B | 1,841,055 B (plan's order 3,065,289 B) | 3,130,559 B (previous order 4,732,810 B) |
 
-m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_address (f)`, 2,446 rows. p0 = `[[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))] semi join catalog_sales#2`, 2,358 rows.
+m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_address (f)`, 2,446 rows. p0 = `[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)`, 2,358 rows.
 
 ### q16 dynamic filters
 
@@ -601,9 +599,9 @@ m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_add
 |---|---|---|---|---|---|
 | after join order | catalog_returns | cr_order_number | p0.cs_order_number | 117666 to 132148 | 2 → 2 (0-1) |
 
-p0 = `[[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))] semi join catalog_sales#2`, 2,358 rows, holding MJ2.
+p0 = `[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)`, 2,358 rows, holding MJ1.
 
-Probe p0, replan 1: the build of MJ2's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); m0 = `call_center (f)`, 6 rows; m1 = `date_dim (f)`, 61 rows; m2 = `customer_address (f)`, 2,446 rows.
+Probe p0, replan 1: the build of MJ1's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); m0 = `call_center (f)`, 6 rows; m1 = `date_dim (f)`, 61 rows; m2 = `customer_address (f)`, 2,446 rows.
 
 ## q17
 
@@ -615,7 +613,7 @@ Probe p0, replan 1: the build of MJ2's join on ca_address_sk = cs_ship_addr_sk c
 | changed by | | reordered by DPhyp; flip: `[[catalog_sales] join store_returns] join store_sales` now builds; flip: `[[[catalog_sales] join store_returns] join store_sales] join p2` now builds; flip: `[[[[catalog_sales] join store_returns] join store_sales] join p2] join p1` now builds; flip: `[[[[[catalog_sales] join store_returns] join store_sales] join p2] join p1] join p0` now builds; flip: `[[[[[[catalog_sales] join store_returns] join store_sales] join p2] join p1] join p0] join store` now builds |
 | C_out | 871,006 B | 1,862 B (plan's order 871,006 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 9 rows, est 3.2).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 8 rows, est 2.2).
 
 p0 = `date_dim#1 (f)`, 274 rows. p1 = `date_dim#2 (f)`, 274 rows. p2 = `date_dim#3 (f)`, 91 rows.
 
@@ -648,7 +646,7 @@ p0 = `date_dim (f)`, 365 rows.
 | plan as written | catalog_sales | cs_sold_date_sk | p0.d_date_sk | 2450815 to 2451179 | 12 → 3 (0-2) |
 | after join order | customer_demographics#2 | cd_demo_sk | p1.c_current_cdemo_sk | 6141 to 1919490 | 16 → 16 (0-15) |
 
-p0 = `date_dim (f)`, 365 rows. p1 = `[p0] join ([[customer_address (f)] join customer (f)] join ([customer_demographics#1 (f)] join catalog_sales))`, 1,326 rows, holding MJ1.
+p0 = `date_dim (f)`, 365 rows. p1 = `[p0] join ([[customer_address (f)] join customer (f)] join ([customer_demographics#1 (f)] join catalog_sales))`, 1,314 rows, holding MJ1.
 
 ## q19
 
@@ -718,21 +716,21 @@ MJ8 kept the plan's order: `[customer#6] join store_sales#6`.
 
 A replan was refused, work outside its builds having started: the build of MJ5's join on c_customer_sk = ws_bill_customer_sk came out 4703 rows, est 18171.6 (q-error 3.86).
 
-A replan was refused, work outside its builds having started: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 366 rows, est 6725.0 (q-error 18.37).
+A replan was refused, work outside its builds having started: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 366 rows, est 6724.0 (q-error 18.37).
 
-A replan was refused, work outside its builds having started: the build of MJ5's join on ws_item_sk = i_item_sk came out 366 rows, est 6725.0 (q-error 18.37).
+A replan was refused, work outside its builds having started: the build of MJ5's join on ws_item_sk = i_item_sk came out 366 rows, est 6724.0 (q-error 18.37).
 
 ### q23 MJ1
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `[[[p0] join ([customer#1] join catalog_sales)] join agg(MJ2) (f)] join agg([agg(MJ3)] cross join MJ4) (f)` | `[[[[p0] join catalog_sales] join agg([agg(MJ3)] cross join MJ4) (f)] join customer#1] join agg(MJ2) (f)` | `[[[agg([agg(MJ3)] cross join MJ4) (f)] join m6] join customer#1] join agg(MJ2) (f)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came out 13302 rows, est 1944.1 (q-error 6.84); flip: `agg([agg(MJ3)] cross join MJ4) (f)` now builds |
-| C_out | 11,679,883 B | 1,703,228 B (plan's order 11,679,883 B) | 11,115,376 B (previous order 11,115,376 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came out 13261 rows, est 1939.1 (q-error 6.84); flip: `agg([agg(MJ3)] cross join MJ4) (f)` now builds |
+| C_out | 11,463,957 B | 1,604,382 B (plan's order 11,463,957 B) | 10,406,860 B (previous order 10,406,860 B) |
 
-Calls that left the order unchanged: replan 2; replan 3 (MJ1's missed build came out 4703 rows, est 18171.6); replan 4 (MJ1's missed build came out 667 rows, est 13302.0).
+Calls that left the order unchanged: replan 2; replan 3 (MJ1's missed build came out 4703 rows, est 18171.6); replan 4 (MJ1's missed build came out 667 rows, est 13261.0).
 
-m6 = `[p0] join catalog_sales`, 13,302 rows. p0 = `date_dim#1 (f)`, 29 rows.
+m6 = `[p0] join catalog_sales`, 13,261 rows. p0 = `date_dim#1 (f)`, 29 rows.
 
 ### q23 MJ3
 
@@ -751,12 +749,12 @@ p2 = `date_dim#3 (f)`, 1,461 rows.
 | | plan | DPhyp before the run | replan 2 |
 |---|---|---|---|
 | join tree | `[[[p3] join ([customer#4] join web_sales)] join agg(MJ6) (f)] join agg([agg(MJ7)] cross join MJ8) (f)` | `[[[[p3] join web_sales] join agg([agg(MJ7)] cross join MJ8) (f)] join customer#4] join agg(MJ6) (f)` | `[[[agg([agg(MJ7)] cross join MJ8) (f)] join m7] join customer#4] join agg(MJ6) (f)` |
-| changed by | | reordered by DPhyp | the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 6725 rows, est 1951.5 (q-error 3.45); flip: `agg([agg(MJ7)] cross join MJ8) (f)` now builds |
-| C_out | 11,692,427 B | 1,709,758 B (plan's order 11,692,427 B) | 5,619,524 B (previous order 5,619,524 B) |
+| changed by | | reordered by DPhyp | the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 6724 rows, est 1951.3 (q-error 3.45); flip: `agg([agg(MJ7)] cross join MJ8) (f)` now builds |
+| C_out | 11,475,674 B | 1,610,533 B (plan's order 11,475,674 B) | 5,276,806 B (previous order 5,276,806 B) |
 
 Calls that left the order unchanged: replan 1; replan 3; replan 4.
 
-m7 = `[p3] join web_sales`, 6,725 rows. p3 = `date_dim#4 (f)`, 29 rows.
+m7 = `[p3] join web_sales`, 6,724 rows. p3 = `date_dim#4 (f)`, 29 rows.
 
 ### q23 MJ7
 
@@ -793,7 +791,7 @@ p0 = `date_dim#1 (f)`, 29 rows. p1 = `date_dim#2 (f)`, 1,461 rows. p2 = `date_di
 | changed by | | reordered by DPhyp |
 | C_out | 25,989,110 B | 4,396 B (plan's order 25,989,110 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 130 rows, est 23.2); replan 2 (MJ1's missed build came out 226 rows, est 52.0).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 130 rows, est 22.5); replan 2 (MJ1's missed build came out 226 rows, est 52.0).
 
 ### q24 MJ2
 
@@ -803,7 +801,7 @@ Calls that left the order unchanged: replan 1 (MJ1's missed build came out 130 r
 | changed by | | reordered by DPhyp |
 | C_out | 14,598,172 B | 3,809 B (plan's order 14,598,172 B) |
 
-Calls that left the order unchanged: replan 1; replan 2; replan 3 (MJ2's missed build came out 130 rows, est 23.2); replan 4 (MJ2's missed build came out 226 rows, est 52.0).
+Calls that left the order unchanged: replan 1; replan 2; replan 3 (MJ2's missed build came out 130 rows, est 22.5); replan 4 (MJ2's missed build came out 226 rows, est 52.0).
 
 ## q25
 
@@ -835,10 +833,10 @@ p0 = `date_dim#1 (f)`, 214 rows. p1 = `date_dim#2 (f)`, 214 rows. p2 = `date_dim
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `[promotion (f)] join ([item] join ([p0] join ([customer_demographics (f)] join catalog_sales)))` | `[[[p0] join ([customer_demographics (f)] join catalog_sales)] join promotion (f)] join item` | `[[promotion (f)] join m1] join item` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on cs_promo_sk = p_promo_sk came out 4050 rows, est 1051.5 (q-error 3.85); flip: `promotion (f)` now builds |
-| C_out | 672,093 B | 650,916 B (plan's order 672,093 B) | 571,935 B (previous order 571,935 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on cs_promo_sk = p_promo_sk came out 4045 rows, est 1046.5 (q-error 3.87); flip: `promotion (f)` now builds |
+| C_out | 672,093 B | 650,916 B (plan's order 672,093 B) | 571,229 B (previous order 571,229 B) |
 
-m1 = `[p0] join ([customer_demographics (f)] join catalog_sales)`, 4,050 rows. p0 = `date_dim (f)`, 366 rows.
+m1 = `[p0] join ([customer_demographics (f)] join catalog_sales)`, 4,045 rows. p0 = `date_dim (f)`, 366 rows.
 
 ### q26 dynamic filters
 
@@ -866,7 +864,7 @@ skipped: refused: unsupported: DISTINCT inside count(DISTINCT store_sales.ss_lis
 | changed by | | reordered by DPhyp; flip: `[[[[store_returns] join catalog_sales] join p1] join store_sales] join p2` now builds; flip: `[[[[[store_returns] join catalog_sales] join p1] join store_sales] join p2] join p0` now builds; flip: `[[[[[[store_returns] join catalog_sales] join p1] join store_sales] join p2] join p0] join store` now builds |
 | C_out | 514,352 B | 4,637 B (plan's order 514,352 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 3 rows, est 0.6).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 3 rows, est 0.4).
 
 p0 = `date_dim#1 (f)`, 1,096 rows. p1 = `date_dim#2 (f)`, 122 rows. p2 = `date_dim#3 (f)`, 30 rows.
 
@@ -893,7 +891,7 @@ MJ3 kept the plan's order: `[[date_dim#2 (f)] join web_returns#2] join customer_
 |---|---|---|---|
 | join tree | `[[[agg(MJ2)] join customer] join customer_address#2 (f)] join agg(MJ3)` | `[agg(MJ3)] join ([[customer_address#2 (f)] join customer] join agg(MJ2))` | `[m1] join ([[m0] join agg(MJ2)] join customer)` |
 | changed by | | reordered by DPhyp; flip: `agg(MJ3)` now builds | the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); reordered by DPhyp |
-| C_out | 1,956,405 B | 299,856 B (plan's order 1,956,405 B) | 452,814 B (previous order 1,418,400 B) |
+| C_out | 1,786,399 B | 296,281 B (plan's order 1,786,399 B) | 413,466 B (previous order 1,416,889 B) |
 
 m0 = `agg(MJ3)`, 52 rows. m1 = `customer_address#2 (f)`, 2,446 rows.
 
@@ -908,7 +906,7 @@ MJ6 kept the plan's order: `[[p4] join web_sales#2] join customer_address#5`.
 | | plan | DPhyp before the run | replan 2 | replan 4 | replan 5 | replan 6 | replan 7 |
 |---|---|---|---|---|---|---|---|
 | join tree | `[[[[[agg(MJ2)] join agg(MJ3)] join agg(MJ4)] join agg(MJ5)] join agg(MJ6)] join agg(MJ7)` | `[[[[agg(MJ5)] join agg(MJ6)] join ([agg(MJ2)] join agg(MJ3))] join agg(MJ4)] join agg(MJ7)` | `[[[[[agg(MJ6)] join m7] join agg(MJ2)] join agg(MJ3)] join agg(MJ7)] join agg(MJ4)` | `[[[agg(MJ3)] join m11] join agg(MJ7)] join agg(MJ4)` | `[[agg(MJ7)] join m13] join agg(MJ4)` | `[[m13] join agg(MJ4)] join agg(MJ7)` | `[[agg(MJ4)] join m15] join agg(MJ7)` |
-| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_addr_sk = ca_address_sk came out 20827 rows, est 6123.7 (q-error 3.40); reordered by DPhyp; flip: `agg(MJ6)` now builds | the build of MJ3's join on ss_addr_sk = ca_address_sk came out 79565 rows, est 14946.7 (q-error 5.32); flip: `agg(MJ3)` now builds | the build of MJ1's join on ca_county = ca_county came out 244 rows, est 97.2 (q-error 2.51); flip: `agg(MJ7)` now builds | the build of MJ7's join on ws_bill_addr_sk = ca_address_sk came out 37605 rows, est 6191.0 (q-error 6.07); reordered by DPhyp | the build of MJ4's join on ss_addr_sk = ca_address_sk came out 147221 rows, est 15111.0 (q-error 9.74); flip: `agg(MJ4)` now builds |
+| changed by | | reordered by DPhyp | the build of MJ6's join on ws_bill_addr_sk = ca_address_sk came out 20825 rows, est 6123.4 (q-error 3.40); reordered by DPhyp; flip: `agg(MJ6)` now builds | the build of MJ3's join on ss_addr_sk = ca_address_sk came out 77665 rows, est 10910.2 (q-error 7.12); flip: `agg(MJ3)` now builds | the build of MJ1's join on ca_county = ca_county came out 244 rows, est 97.2 (q-error 2.51); flip: `agg(MJ7)` now builds | the build of MJ7's join on ws_bill_addr_sk = ca_address_sk came out 37604 rows, est 6190.7 (q-error 6.07); reordered by DPhyp | the build of MJ4's join on ss_addr_sk = ca_address_sk came out 143778 rows, est 11026.7 (q-error 13.04); flip: `agg(MJ4)` now builds |
 | C_out | 530,917 B | 333,216 B (plan's order 530,917 B) | 186,044 B (previous order 239,015 B) | 26,786 B (previous order 26,786 B) | 36,481 B (previous order 36,481 B) | 36,481 B (previous order 36,481 B) | 36,481 B (previous order 36,481 B) |
 
 Calls that left the order unchanged: replan 1; replan 3.
@@ -920,48 +918,48 @@ m7 = `agg(MJ5)`, 942 rows. m9 = `[agg(MJ6)] join m7`, 514 rows. m11 = `[m9] join
 | | plan | DPhyp before the run | replan 3 |
 |---|---|---|---|
 | join tree | `[customer_address#1] join ([p0] join store_sales#1)` | `[[p0] join store_sales#1] join customer_address#1` | `[customer_address#1] join m10` |
-| changed by | | flip: `[p0] join store_sales#1` now builds | the build of MJ2's join on ss_addr_sk = ca_address_sk came out 84293 rows, est 14946.7 (q-error 5.64); flip: `customer_address#1` now builds |
-| C_out | 1,353,444 B | 1,353,444 B (plan's order 1,353,444 B) | 4,218,970 B (previous order 4,218,970 B) |
+| changed by | | flip: `[p0] join store_sales#1` now builds | the build of MJ2's join on ss_addr_sk = ca_address_sk came out 82426 rows, est 10907.9 (q-error 7.56); flip: `customer_address#1` now builds |
+| C_out | 1,353,444 B | 1,353,444 B (plan's order 1,353,444 B) | 4,125,524 B (previous order 4,125,524 B) |
 
 Calls that left the order unchanged: replan 1; replan 2.
 
-m10 = `[p0] join store_sales#1`, 84,293 rows. p0 = `date_dim#1 (f)`, 91 rows.
+m10 = `[p0] join store_sales#1`, 82,426 rows. p0 = `date_dim#1 (f)`, 91 rows.
 
 ### q31 MJ3
 
 | | plan | DPhyp before the run | replan 4 |
 |---|---|---|---|
 | join tree | `[customer_address#2] join ([p1] join store_sales#2)` | `[[p1] join store_sales#2] join customer_address#2` | `[customer_address#2] join m12` |
-| changed by | | flip: `[p1] join store_sales#2` now builds | the build of MJ3's join on ss_addr_sk = ca_address_sk came out 79565 rows, est 14946.7 (q-error 5.32); flip: `customer_address#2` now builds |
-| C_out | 1,353,444 B | 1,353,444 B (plan's order 1,353,444 B) | 3,982,328 B (previous order 3,982,328 B) |
+| changed by | | flip: `[p1] join store_sales#2` now builds | the build of MJ3's join on ss_addr_sk = ca_address_sk came out 77665 rows, est 10910.2 (q-error 7.12); flip: `customer_address#2` now builds |
+| C_out | 1,353,444 B | 1,353,444 B (plan's order 1,353,444 B) | 3,887,230 B (previous order 3,887,230 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3.
 
-m12 = `[p1] join store_sales#2`, 79,565 rows. p1 = `date_dim#2 (f)`, 91 rows.
+m12 = `[p1] join store_sales#2`, 77,665 rows. p1 = `date_dim#2 (f)`, 91 rows.
 
 ### q31 MJ4
 
 | | plan | DPhyp before the run | replan 7 |
 |---|---|---|---|
 | join tree | `[customer_address#3] join ([p2] join store_sales#3)` | `[[p2] join store_sales#3] join customer_address#3` | `[customer_address#3] join m16` |
-| changed by | | flip: `[p2] join store_sales#3` now builds | the build of MJ4's join on ss_addr_sk = ca_address_sk came out 147221 rows, est 15111.0 (q-error 9.74); flip: `customer_address#3` now builds |
-| C_out | 1,368,317 B | 1,368,317 B (plan's order 1,368,317 B) | 7,368,595 B (previous order 7,368,595 B) |
+| changed by | | flip: `[p2] join store_sales#3` now builds | the build of MJ4's join on ss_addr_sk = ca_address_sk came out 143778 rows, est 11026.7 (q-error 13.04); flip: `customer_address#3` now builds |
+| C_out | 1,368,317 B | 1,368,317 B (plan's order 1,368,317 B) | 7,196,269 B (previous order 7,196,269 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 6.
 
-m16 = `[p2] join store_sales#3`, 147,221 rows. p2 = `date_dim#3 (f)`, 92 rows.
+m16 = `[p2] join store_sales#3`, 143,778 rows. p2 = `date_dim#3 (f)`, 92 rows.
 
 ### q31 MJ7
 
 | | plan | replan 6 |
 |---|---|---|
 | join tree | `[[p5] join web_sales#3] join customer_address#6` | `[customer_address#6] join m14` |
-| changed by | | the build of MJ7's join on ws_bill_addr_sk = ca_address_sk came out 37605 rows, est 6191.0 (q-error 6.07); flip: `customer_address#6` now builds |
-| C_out | 560,605 B | 1,882,177 B (previous order 1,882,177 B) |
+| changed by | | the build of MJ7's join on ws_bill_addr_sk = ca_address_sk came out 37604 rows, est 6190.7 (q-error 6.07); flip: `customer_address#6` now builds |
+| C_out | 560,605 B | 1,882,127 B (previous order 1,882,127 B) |
 
 Calls that left the order unchanged: DPhyp before the run; replan 1; replan 2; replan 3; replan 4; replan 5; replan 7.
 
-m14 = `[p5] join web_sales#3`, 37,605 rows. p5 = `date_dim#6 (f)`, 92 rows.
+m14 = `[p5] join web_sales#3`, 37,604 rows. p5 = `date_dim#6 (f)`, 92 rows.
 
 ### q31 dynamic filters
 
@@ -1000,23 +998,23 @@ p0 = `date_dim#2 (f)`, 91 rows.
 
 ## q33
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 14017 rows, est 2078.1 (q-error 6.74).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 13980 rows, est 2072.9 (q-error 6.74).
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 5028 rows, est 335.6 (q-error 14.98).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 5028 rows, est 334.7 (q-error 15.02).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 7370 rows, est 2086.1 (q-error 3.53).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 7370 rows, est 2085.8 (q-error 3.53).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 2761 rows, est 336.9 (q-error 8.20).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 2761 rows, est 336.8 (q-error 8.20).
 
 ### q33 MJ1
 
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `([item#2] join ([customer_address#1 (f)] join ([p0] join store_sales))) semi join [item#1 (f)]` | `([[[p0] join store_sales] join customer_address#1 (f)] join item#2) semi join [item#1 (f)]` | `([[customer_address#1 (f)] join m6] join item#2) semi join [m5]` | `[item#2 semi join [m5]] join ([m7] join m6)` |
-| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 26983 rows, est 5091.7 (q-error 5.30); flip: `customer_address#1 (f)` now builds | the build of MJ1's join on ca_address_sk = ss_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
-| C_out | 221,688 B | 221,688 B (plan's order 221,688 B) | 287,542 B (previous order 287,542 B) | 622,009 B (previous order 649,801 B) |
+| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 26339 rows, est 3716.6 (q-error 7.09); flip: `customer_address#1 (f)` now builds | the build of MJ1's join on ca_address_sk = ss_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
+| C_out | 221,688 B | 221,688 B (plan's order 221,688 B) | 280,679 B (previous order 280,679 B) | 612,199 B (previous order 634,293 B) |
 
-m5 = `item#1 (f)`, 1,812 rows. m6 = `[p0] join store_sales`, 26,983 rows. m7 = `customer_address#1 (f)`, 18,246 rows. p0 = `date_dim#1 (f)`, 31 rows.
+m5 = `item#1 (f)`, 1,811 rows. m6 = `[p0] join store_sales`, 26,339 rows. m7 = `customer_address#1 (f)`, 18,246 rows. p0 = `date_dim#1 (f)`, 31 rows.
 
 ### q33 MJ2
 
@@ -1060,9 +1058,9 @@ p0 = `date_dim#1 (f)`, 31 rows. p1 = `date_dim#2 (f)`, 31 rows. p2 = `date_dim#3
 |---|---|---|
 | join tree | `[customer] join agg(MJ2) (f)` | `[agg(MJ2) (f)] join customer` |
 | changed by | | flip: `agg(MJ2) (f)` now builds |
-| C_out | 105,339 B | 105,339 B (plan's order 105,339 B) |
+| C_out | 94,510 B | 94,510 B (plan's order 94,510 B) |
 
-Calls that left the order unchanged: replan 1; replan 2 (MJ1's missed build came out 455 rows, est 7074.5).
+Calls that left the order unchanged: replan 1; replan 2 (MJ1's missed build came out 455 rows, est 6105.7).
 
 ### q34 MJ2
 
@@ -1096,9 +1094,9 @@ MJ3 kept the plan's order: `[p2] join catalog_sales`.
 | changed by | | reordered by DPhyp |
 | C_out | 11,047,236 B | 8,157,513 B (plan's order 11,047,236 B) |
 
-Calls that left the order unchanged: inside p3, replan 1 (MJ1's missed build came out 23496 rows, est 81881.4).
+Calls that left the order unchanged: inside p3, replan 1 (MJ1's missed build came out 23496 rows, est 68515.4).
 
-p0 = `date_dim#1 (f)`, 274 rows. p3 = `[[customer] semi join ([p0] join store_sales)] join customer_address`, 23,496 rows.
+p0 = `date_dim#1 (f)`, 274 rows. p3 = `[[customer] semi join ([p0] join store_sales)] join customer_address`, 22,704 rows.
 
 ### q35 dynamic filters
 
@@ -1109,9 +1107,9 @@ p0 = `date_dim#1 (f)`, 274 rows. p3 = `[[customer] semi join ([p0] join store_sa
 | plan as written | catalog_sales | cs_sold_date_sk | p2.d_date_sk | 2452276 to 2452549 | 12 → 2 (9-10) |
 | after join order | customer_demographics | cd_demo_sk | p3.c_current_cdemo_sk | 44 to 1920788 | 16 → 16 (0-15) |
 
-p0 = `date_dim#1 (f)`, 274 rows. p1 = `date_dim#2 (f)`, 274 rows. p2 = `date_dim#3 (f)`, 274 rows. p3 = `[[customer] semi join ([p0] join store_sales)] join customer_address`, 23,496 rows, holding MJ1.
+p0 = `date_dim#1 (f)`, 274 rows. p1 = `date_dim#2 (f)`, 274 rows. p2 = `date_dim#3 (f)`, 274 rows. p3 = `[[customer] semi join ([p0] join store_sales)] join customer_address`, 22,704 rows, holding MJ1.
 
-Probe p3, replan 1: the build of MJ1's join on c_current_addr_sk = ca_address_sk came out 23496 rows, est 81881.4 (q-error 3.48); m3 = `[customer] semi join ([p0] join store_sales)`, 23,496 rows.
+Probe p3, replan 1: the build of MJ1's join on c_current_addr_sk = ca_address_sk came out 23496 rows, est 68515.4 (q-error 2.92); m3 = `[customer] semi join ([p0] join store_sales)`, 23,496 rows.
 
 ## q36
 
@@ -1143,7 +1141,7 @@ MJ3 kept the plan's order: `agg(MJ5) semi join [agg(MJ4)]`.
 | changed by | | flip: `[p0] join web_sales` now builds |
 | C_out | 1,781,743 B | 1,781,743 B (plan's order 1,781,743 B) |
 
-Calls that left the order unchanged: replan 1 (MJ2's missed build came out 142180 rows, est 49259.0).
+Calls that left the order unchanged: replan 1 (MJ2's missed build came out 142164 rows, est 49253.8).
 
 p0 = `date_dim#1 (f)`, 366 rows.
 
@@ -1152,24 +1150,24 @@ p0 = `date_dim#1 (f)`, 366 rows.
 | | plan | DPhyp before the run | replan 3 |
 |---|---|---|---|
 | join tree | `[customer#2] join ([p1] join catalog_sales)` | `[[p1] join catalog_sales] join customer#2` | `[customer#2] join m5` |
-| changed by | | flip: `[p1] join catalog_sales` now builds | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 287563 rows, est 73606.3 (q-error 3.91); flip: `customer#2` now builds |
-| C_out | 2,662,408 B | 2,662,408 B (plan's order 2,662,408 B) | 6,878,769 B (previous order 6,878,769 B) |
+| changed by | | flip: `[p1] join catalog_sales` now builds | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 286899 rows, est 73433.4 (q-error 3.91); flip: `customer#2` now builds |
+| C_out | 2,662,408 B | 2,662,408 B (plan's order 2,662,408 B) | 6,862,885 B (previous order 6,862,885 B) |
 
 Calls that left the order unchanged: replan 1; replan 2.
 
-m5 = `[p1] join catalog_sales`, 287,563 rows. p1 = `date_dim#2 (f)`, 366 rows.
+m5 = `[p1] join catalog_sales`, 286,899 rows. p1 = `date_dim#2 (f)`, 366 rows.
 
 ### q38 MJ5
 
 | | plan | DPhyp before the run | replan 5 |
 |---|---|---|---|
 | join tree | `[customer#3] join ([p2] join store_sales)` | `[[p2] join store_sales] join customer#3` | `[customer#3] join m7` |
-| changed by | | flip: `[p2] join store_sales` now builds | the build of MJ5's join on ss_customer_sk = c_customer_sk came out 553970 rows, est 158633.4 (q-error 3.49); flip: `customer#3` now builds |
-| C_out | 5,737,914 B | 5,737,914 B (plan's order 5,737,914 B) | 13,251,467 B (previous order 13,251,467 B) |
+| changed by | | flip: `[p2] join store_sales` now builds | the build of MJ5's join on ss_customer_sk = c_customer_sk came out 541109 rows, est 139514.9 (q-error 3.88); flip: `customer#3` now builds |
+| C_out | 5,737,914 B | 5,737,914 B (plan's order 5,737,914 B) | 12,943,820 B (previous order 12,943,820 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4.
 
-m7 = `[p2] join store_sales`, 553,970 rows. p2 = `date_dim#3 (f)`, 366 rows.
+m7 = `[p2] join store_sales`, 541,109 rows. p2 = `date_dim#3 (f)`, 366 rows.
 
 ### q38 dynamic filters
 
@@ -1296,7 +1294,7 @@ skipped: refused: unsupported: BoundedWindowAggExec: window functions (#143)
 | changed by | | reordered by DPhyp |
 | C_out | 12,266,740 B | 1,023,535 B (plan's order 12,266,740 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 21370 rows, est 6123.7).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 21369 rows, est 6123.1).
 
 p0 = `date_dim (f)`, 91 rows.
 
@@ -1316,7 +1314,7 @@ p0 = `date_dim (f)`, 91 rows.
 |---|---|---|
 | join tree | `[[customer] join agg(MJ2)] join customer_address#2` | `[[customer_address#2] join customer] join agg(MJ2)` |
 | changed by | | reordered by DPhyp |
-| C_out | 7,494,543 B | 5,380,204 B (plan's order 7,494,543 B) |
+| C_out | 6,467,832 B | 5,200,949 B (plan's order 6,467,832 B) |
 
 ### q46 MJ2
 
@@ -1347,10 +1345,10 @@ skipped: refused: unsupported: WindowAggExec: window functions (#143)
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `[p0] join ([customer_address (f)] join ([customer_demographics (f)] join ([store] join store_sales (f))))` | `[store] join ([[[customer_demographics (f)] join store_sales (f)] join customer_address (f)] join p0)` | `[m1] join ([[customer_address (f)] join m2] join p0)` | `[m1] join ([p0] join m3)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 7714 rows, est 415.0 (q-error 18.59); flip: `customer_address (f)` now builds | the build of MJ1's join on ss_sold_date_sk = d_date_sk came out 1883 rows, est 282.7 (q-error 6.66); flip: `p0` now builds |
-| C_out | 16,299,981 B | 205,797 B (plan's order 16,299,981 B) | 7,484 B (previous order 7,484 B) | 9,200 B (previous order 9,200 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 7644 rows, est 369.8 (q-error 20.67); flip: `customer_address (f)` now builds | the build of MJ1's join on ss_sold_date_sk = d_date_sk came out 1873 rows, est 278.9 (q-error 6.71); flip: `p0` now builds |
+| C_out | 16,299,981 B | 205,797 B (plan's order 16,299,981 B) | 7,416 B (previous order 7,416 B) | 9,151 B (previous order 9,151 B) |
 
-m1 = `store`, 12 rows. m2 = `[customer_demographics (f)] join store_sales (f)`, 7,714 rows. m3 = `[customer_address (f)] join m2`, 1,883 rows. p0 = `date_dim (f)`, 366 rows.
+m1 = `store`, 12 rows. m2 = `[customer_demographics (f)] join store_sales (f)`, 7,644 rows. m3 = `[customer_address (f)] join m2`, 1,873 rows. p0 = `date_dim (f)`, 366 rows.
 
 ### q48 dynamic filters
 
@@ -1419,8 +1417,8 @@ skipped: refused: unsupported: WindowAggExec: window functions (#143)
 | | plan | DPhyp before the run | replan 1 | replan 3 |
 |---|---|---|---|---|
 | join tree | `[[[[agg(MJ2)] join store_sales] join customer_address] join store] join date_dim#2` | `[[[[store] join customer_address] join agg(MJ2)] join store_sales] join date_dim#2` | `[m1] join ([[agg(MJ2)] join store_sales] join date_dim#2)` | `[[[m1] join agg(MJ2)] join store_sales] join date_dim#2` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 216 rows, est 6.4 (q-error 33.89); reordered by DPhyp | the build of MJ2's join on customer_sk = c_customer_sk came out 1637 rows, est 417.0 (q-error 3.93); reordered by DPhyp |
-| C_out | 94,958 B | 60 B (plan's order 94,958 B) | 301,298 B (previous order 445,143 B) | 445,143 B (previous order 4,425,319 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 216 rows, est 6.0 (q-error 36.03); reordered by DPhyp | the build of MJ2's join on customer_sk = c_customer_sk came out 1631 rows, est 83.4 (q-error 19.56); reordered by DPhyp |
+| C_out | 18,992 B | 53 B (plan's order 18,992 B) | 92,282 B (previous order 153,327 B) | 445,143 B (previous order 4,409,911 B) |
 
 Calls that left the order unchanged: replan 2; replan 4 (MJ1's missed build came out 12 rows, est 216.0).
 
@@ -1434,7 +1432,7 @@ m1 = `[store] join customer_address`, 216 rows.
 | changed by | | the build of MJ2's join on i_item_sk = item_sk came out 417 rows, est 18.1 (q-error 23.04); reordered by DPhyp |
 | C_out | 4,456 B | 77,945 B (previous order 102,683 B) |
 
-Calls that left the order unchanged: DPhyp before the run; replan 1; replan 3 (MJ2's missed build came out 1637 rows, est 417.0).
+Calls that left the order unchanged: DPhyp before the run; replan 1; replan 3 (MJ2's missed build came out 1631 rows, est 83.4).
 
 m2 = `item (f)`, 417 rows. p0 = `date_dim#1 (f)`, 31 rows.
 
@@ -1461,23 +1459,23 @@ p0 = `date_dim (f)`, 30 rows.
 
 ## q56
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 12692 rows, est 1877.0 (q-error 6.76).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 12660 rows, est 1872.2 (q-error 6.76).
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 4750 rows, est 303.1 (q-error 15.67).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 4750 rows, est 302.3 (q-error 15.71).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 6934 rows, est 1884.2 (q-error 3.68).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 6934 rows, est 1884.0 (q-error 3.68).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 2349 rows, est 304.3 (q-error 7.72).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 2349 rows, est 304.2 (q-error 7.72).
 
 ### q56 MJ1
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `([item#2] join ([customer_address#1 (f)] join ([p0] join store_sales))) semi join [item#1 (f)]` | `([[[p0] join store_sales] join customer_address#1 (f)] join item#2) semi join [item#1 (f)]` | `[[item#2 semi join [m5]] join m6] join customer_address#1 (f)` |
-| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 24385 rows, est 2714.8 (q-error 8.98); reordered by DPhyp |
-| C_out | 115,430 B | 115,430 B (plan's order 115,430 B) | 94,177 B (previous order 245,986 B) |
+| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 23789 rows, est 1564.9 (q-error 15.20); reordered by DPhyp |
+| C_out | 115,430 B | 115,430 B (plan's order 115,430 B) | 92,551 B (previous order 239,974 B) |
 
-m5 = `item#1 (f)`, 500 rows. m6 = `[p0] join store_sales`, 24,385 rows. p0 = `date_dim#1 (f)`, 28 rows.
+m5 = `item#1 (f)`, 500 rows. m6 = `[p0] join store_sales`, 23,789 rows. p0 = `date_dim#1 (f)`, 28 rows.
 
 ### q56 MJ2
 
@@ -1524,8 +1522,8 @@ skipped: refused: unsupported: WindowAggExec: window functions (#143)
 | | plan | replan 1 | replan 2 |
 |---|---|---|---|
 | join tree | `[[agg(MJ2)] join agg(MJ3)] join agg(MJ4)` | `[[agg(MJ3)] join agg(MJ2)] join agg(MJ4)` | `[[agg(MJ4)] join agg(MJ3)] join agg(MJ2)` |
-| changed by | | the build of MJ2's join on cs_item_sk = i_item_sk came out 7739 rows, est 469.3 (q-error 16.49); flip: `agg(MJ3)` now builds | the build of MJ3's join on ss_item_sk = i_item_sk came out 20063 rows, est 678.7 (q-error 29.56); reordered by DPhyp |
-| C_out | 1,825 B | 8,969 B (previous order 8,969 B) | 31,125 B (previous order 87,519 B) |
+| changed by | | the build of MJ2's join on cs_item_sk = i_item_sk came out 7739 rows, est 469.3 (q-error 16.49); flip: `agg(MJ3)` now builds | the build of MJ3's join on ss_item_sk = i_item_sk came out 20063 rows, est 471.1 (q-error 42.59); reordered by DPhyp |
+| C_out | 1,816 B | 6,225 B (previous order 6,225 B) | 31,125 B (previous order 87,519 B) |
 
 Calls that left the order unchanged: DPhyp before the run; replan 3.
 
@@ -1547,7 +1545,7 @@ Calls that left the order unchanged: replan 1 (MJ2's missed build came out 7739 
 | changed by | | reordered by DPhyp |
 | C_out | 244,514,521 B | 668,095 B (plan's order 244,514,521 B) |
 
-Calls that left the order unchanged: replan 1; replan 2 (MJ3's missed build came out 20063 rows, est 678.7); replan 3.
+Calls that left the order unchanged: replan 1; replan 2 (MJ3's missed build came out 20063 rows, est 471.1); replan 3.
 
 ### q58 MJ4
 
@@ -1581,7 +1579,7 @@ MJ4 kept the plan's order: `[date_dim#3] join store_sales#2`.
 |---|---|---|
 | join tree | `[[[store#1] join agg(MJ2)] join date_dim#2 (f)] join MJ3` | `[[store#1] join ([date_dim#2 (f)] join agg(MJ2))] join MJ3` |
 | changed by | | reordered by DPhyp |
-| C_out | 10,263,328 B | 1,185,091 B (plan's order 10,263,328 B) |
+| C_out | 10,245,780 B | 1,167,544 B (plan's order 10,245,780 B) |
 
 ### q59 MJ3
 
@@ -1593,25 +1591,25 @@ MJ4 kept the plan's order: `[date_dim#3] join store_sales#2`.
 
 ## q60
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 30857 rows, est 2011.1 (q-error 15.34).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_bill_addr_sk = ca_address_sk came out 30788 rows, est 2006.1 (q-error 15.35).
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 11552 rows, est 324.8 (q-error 35.57).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_item_sk = i_item_sk came out 11552 rows, est 323.9 (q-error 35.66).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 15632 rows, est 2018.8 (q-error 7.74).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_bill_addr_sk = ca_address_sk came out 15629 rows, est 2018.5 (q-error 7.74).
 
-A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 5932 rows, est 326.0 (q-error 18.20).
+A replan was refused, work outside its builds having started: the build of MJ3's join on ws_item_sk = i_item_sk came out 5932 rows, est 325.9 (q-error 18.20).
 
 ### q60 MJ1
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `([item#2] join ([customer_address#1 (f)] join ([p0] join store_sales))) semi join [item#1 (f)]` | `([[[p0] join store_sales] join customer_address#1 (f)] join item#2) semi join [item#1 (f)]` | `[item#2 semi join [m5]] join ([customer_address#1 (f)] join m6)` |
-| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 62336 rows, est 4927.5 (q-error 12.65); reordered by DPhyp; flip: `customer_address#1 (f)` now builds |
-| C_out | 213,135 B | 213,135 B (plan's order 213,135 B) | 414,024 B (previous order 679,986 B) |
+| changed by | | flip: `[p0] join store_sales` now builds; flip: `[[p0] join store_sales] join customer_address#1 (f)` now builds | the build of MJ1's join on ss_addr_sk = ca_address_sk came out 60850 rows, est 3596.9 (q-error 16.92); reordered by DPhyp; flip: `customer_address#1 (f)` now builds |
+| C_out | 213,135 B | 213,135 B (plan's order 213,135 B) | 406,513 B (previous order 663,776 B) |
 
 Calls that left the order unchanged: replan 2 (MJ1's missed build came out 18246 rows, est 8074.0).
 
-m5 = `item#1 (f)`, 1,860 rows. m6 = `[p0] join store_sales`, 62,336 rows. p0 = `date_dim#1 (f)`, 30 rows.
+m5 = `item#1 (f)`, 1,860 rows. m6 = `[p0] join store_sales`, 60,850 rows. p0 = `date_dim#1 (f)`, 30 rows.
 
 ### q60 MJ2
 
@@ -1654,22 +1652,22 @@ p0 = `date_dim#1 (f)`, 30 rows. p1 = `date_dim#2 (f)`, 30 rows. p2 = `date_dim#3
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `[item#1 (f)] join ([[[p0] join ([promotion (f)] join ([store#1 (f)] join store_sales#1))] join customer#1] join customer_address#1 (f))` | `[store#1 (f)] join ([[[[item#1 (f)] join ([p0] join store_sales#1)] join promotion (f)] join customer#1] join customer_address#1 (f))` | `[m2] join ([promotion (f)] join ([[customer_address#1 (f)] join customer#1] join m3))` | `[m2] join ([[[m4] join m3] join customer#1] join m5)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ss_promo_sk = p_promo_sk came out 8621 rows, est 491.6 (q-error 17.54); reordered by DPhyp | the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
-| C_out | 20,723,026 B | 276,733 B (plan's order 20,723,026 B) | 203,907 B (previous order 302,088 B) | 360,887 B (previous order 465,245 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ss_promo_sk = p_promo_sk came out 8435 rows, est 358.6 (q-error 23.52); reordered by DPhyp | the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
+| C_out | 20,723,026 B | 276,733 B (plan's order 20,723,026 B) | 202,339 B (previous order 295,571 B) | 353,101 B (previous order 461,604 B) |
 
-m2 = `store#1 (f)`, 12 rows. m3 = `[item#1 (f)] join ([p0] join store_sales#1)`, 8,621 rows. m4 = `promotion (f)`, 158 rows. m5 = `customer_address#1 (f)`, 18,246 rows. p0 = `date_dim#1 (f)`, 30 rows.
+m2 = `store#1 (f)`, 12 rows. m3 = `[item#1 (f)] join ([p0] join store_sales#1)`, 8,435 rows. m4 = `promotion (f)`, 158 rows. m5 = `customer_address#1 (f)`, 18,246 rows. p0 = `date_dim#1 (f)`, 30 rows.
 
 ### q61 MJ2
 
 | | plan | DPhyp before the run | replan 3 | replan 4 |
 |---|---|---|---|---|
 | join tree | `[item#2 (f)] join ([customer_address#2 (f)] join ([[p1] join ([store#2 (f)] join store_sales#2)] join customer#2))` | `[store#2 (f)] join ([[[item#2 (f)] join ([p1] join store_sales#2)] join customer#2] join customer_address#2 (f))` | `[m7] join ([[customer_address#2 (f)] join customer#2] join m8)` | `[m7] join ([[m8] join customer#2] join m9)` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 8621 rows, est 491.6 (q-error 17.54); reordered by DPhyp | the build of MJ2's join on ca_address_sk = c_current_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
-| C_out | 12,486,552 B | 234,598 B (plan's order 12,486,552 B) | 187,409 B (previous order 335,312 B) | 406,124 B (previous order 423,516 B) |
+| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 8428 rows, est 358.7 (q-error 23.50); reordered by DPhyp | the build of MJ2's join on ca_address_sk = c_current_addr_sk came out 18246 rows, est 8074.0 (q-error 2.26); reordered by DPhyp |
+| C_out | 12,486,552 B | 234,598 B (plan's order 12,486,552 B) | 186,151 B (previous order 327,805 B) | 397,032 B (previous order 420,673 B) |
 
 Calls that left the order unchanged: replan 1; replan 2.
 
-m7 = `store#2 (f)`, 12 rows. m8 = `[item#2 (f)] join ([p1] join store_sales#2)`, 8,621 rows. m9 = `customer_address#2 (f)`, 18,246 rows. p1 = `date_dim#2 (f)`, 30 rows.
+m7 = `store#2 (f)`, 12 rows. m8 = `[item#2 (f)] join ([p1] join store_sales#2)`, 8,428 rows. m9 = `customer_address#2 (f)`, 18,246 rows. p1 = `date_dim#2 (f)`, 30 rows.
 
 ### q61 dynamic filters
 
@@ -1706,7 +1704,7 @@ MJ5 kept the plan's order: `[catalog_returns#2] join catalog_sales#2`.
 |---|---|---|
 | join tree | `[agg(MJ2)] join agg(MJ4)` | `[agg(MJ4)] join m12` |
 | changed by | | the build of MJ4's join on i_item_sk = ss_item_sk came out 12 rows, est 105.6 (q-error 8.80); flip: `agg(MJ4)` now builds |
-| C_out | 671 B | 331 B (previous order 331 B) |
+| C_out | 423 B | 324 B (previous order 324 B) |
 
 Calls that left the order unchanged: DPhyp before the run; replan 1; replan 2; replan 4.
 
@@ -1717,22 +1715,22 @@ m12 = `agg(MJ2)`, 37 rows.
 | | plan | DPhyp before the run | inside p2, replan 1 | inside p2, replan 2 | replan 1 | replan 2 |
 |---|---|---|---|---|---|---|
 | join tree | `[[[[[[[[[[[[[[[[agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)] join date_dim#1 (f)] join store#1] join customer#1] join date_dim#2] join date_dim#3] join customer_demographics#1] join customer_demographics#2] join promotion#1] join household_demographics#1] join household_demographics#2] join customer_address#1] join customer_address#2] join income_band#1] join income_band#2] join item#1 (f)` | `[item#1 (f)] join ([income_band#2] join ([income_band#1] join ([[[[[promotion#1] join ([[[[[[store#1] join ([date_dim#1 (f)] join ([agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)))] join customer#1] join date_dim#2] join date_dim#3] join customer_demographics#1] join customer_demographics#2)] join household_demographics#1] join household_demographics#2] join customer_address#1] join customer_address#2)))` | `[[[[m2] join ([[p0] join ([store_returns#1] join store_sales#1)] join m3)] join customer#1] join date_dim#2] join date_dim#3` | `[[date_dim#3] join ([date_dim#2] join customer#1)] join ([m2] join ([m3] join m4))` | `[[[income_band#1] join ([[income_band#2] join ([[[[m8] join p4] join customer_demographics#2] join promotion#1] join household_demographics#2)] join household_demographics#1)] join customer_address#1] join customer_address#2` | `[[[m9] join ([[m10] join ([[promotion#1] join m11] join household_demographics#2)] join household_demographics#1)] join customer_address#1] join customer_address#2` |
-| changed by | | DPhyp at its budget, the plan's order kept; flip: `date_dim#1 (f)` now builds; flip: `store#1` now builds; flip: `promotion#1` now builds; flip: `income_band#1` now builds; flip: `income_band#2` now builds; flip: `item#1 (f)` now builds | the build of MJ2's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); reordered by DPhyp | the build of MJ2's join on ss_item_sk = cs_item_sk came out 54481 rows, est 13355.7 (q-error 4.08); reordered by DPhyp; flip: `m3` now builds | the build of MJ2's join on i_item_sk = ss_item_sk came out 12 rows, est 105.6 (q-error 8.80); reordered by DPhyp | the build of MJ2's join on ss_promo_sk = p_promo_sk came out 37 rows, est 6.4 (q-error 5.75); flip: `promotion#1` now builds |
-| C_out | 51,700,850 B | 51,700,850 B (plan's order 51,700,850 B) | 18,024,522 B (previous order 23,730,821 B) | 31,072,501 B (previous order 38,238,852 B) | 13,775 B (previous order 12,200,149 B) | 40,912 B (previous order 40,912 B) |
+| changed by | | DPhyp at its budget, the plan's order kept; flip: `date_dim#1 (f)` now builds; flip: `store#1` now builds; flip: `promotion#1` now builds; flip: `income_band#1` now builds; flip: `income_band#2` now builds; flip: `item#1 (f)` now builds | the build of MJ2's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); reordered by DPhyp | the build of MJ2's join on ss_item_sk = cs_item_sk came out 54481 rows, est 12273.7 (q-error 4.44); reordered by DPhyp; flip: `m3` now builds | the build of MJ2's join on i_item_sk = ss_item_sk came out 12 rows, est 105.6 (q-error 8.80); reordered by DPhyp | the build of MJ2's join on ss_promo_sk = p_promo_sk came out 37 rows, est 6.4 (q-error 5.82); flip: `promotion#1` now builds |
+| C_out | 51,700,850 B | 51,700,850 B (plan's order 51,700,850 B) | 18,024,522 B (previous order 23,730,821 B) | 31,072,501 B (previous order 38,238,852 B) | 13,646 B (previous order 12,085,728 B) | 40,912 B (previous order 40,912 B) |
 
-m2 = `store#1`, 12 rows. m3 = `agg(MJ3) (f)`, 17,157 rows. m4 = `[p0] join ([store_returns#1] join store_sales#1)`, 54,481 rows. m8 = `item#1 (f)`, 12 rows. m9 = `income_band#1`, 20 rows. m10 = `income_band#2`, 20 rows. m11 = `[[m8] join p4] join customer_demographics#2`, 37 rows. p0 = `date_dim#1 (f)`, 365 rows. p2 = `[[[[store#1] join ([p0] join ([agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)))] join customer#1] join date_dim#2] join date_dim#3`, 48,625 rows. p4 = `[p2] join customer_demographics#1`, 48,301 rows.
+m2 = `store#1`, 12 rows. m3 = `agg(MJ3) (f)`, 17,157 rows. m4 = `[p0] join ([store_returns#1] join store_sales#1)`, 54,481 rows. m8 = `item#1 (f)`, 12 rows. m9 = `income_band#1`, 20 rows. m10 = `income_band#2`, 20 rows. m11 = `[[m8] join p4] join customer_demographics#2`, 37 rows. p0 = `date_dim#1 (f)`, 365 rows. p2 = `[[[[store#1] join ([p0] join ([agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)))] join customer#1] join date_dim#2] join date_dim#3`, 48,301 rows. p4 = `[p2] join customer_demographics#1`, 47,848 rows.
 
 ### q64 MJ4
 
 | | plan | DPhyp before the run | inside p3, replan 1 | inside p3, replan 2 | replan 1 |
 |---|---|---|---|---|---|
 | join tree | `[[[[[[[[[[[[[[[[agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)] join date_dim#4 (f)] join store#2] join customer#2] join date_dim#5] join date_dim#6] join customer_demographics#3] join customer_demographics#4] join promotion#2] join household_demographics#3] join household_demographics#4] join customer_address#3] join customer_address#4] join income_band#3] join income_band#4] join item#2 (f)` | `[item#2 (f)] join ([income_band#4] join ([income_band#3] join ([[[[[promotion#2] join ([[[[[[store#2] join ([date_dim#4 (f)] join ([agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)))] join customer#2] join date_dim#5] join date_dim#6] join customer_demographics#3] join customer_demographics#4)] join household_demographics#3] join household_demographics#4] join customer_address#3] join customer_address#4)))` | `[[[[m5] join ([[p1] join ([store_returns#2] join store_sales#2)] join m6)] join customer#2] join date_dim#5] join date_dim#6` | `[[date_dim#6] join ([date_dim#5] join customer#2)] join ([m5] join ([m6] join m7))` | `[[[income_band#3] join ([[income_band#4] join ([[[[item#2 (f)] join p5] join customer_demographics#4] join promotion#2] join household_demographics#4)] join household_demographics#3)] join customer_address#3] join customer_address#4` |
-| changed by | | DPhyp at its budget, the plan's order kept; flip: `date_dim#4 (f)` now builds; flip: `store#2` now builds; flip: `promotion#2` now builds; flip: `income_band#3` now builds; flip: `income_band#4` now builds; flip: `item#2 (f)` now builds | the build of MJ4's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); reordered by DPhyp | the build of MJ4's join on ss_item_sk = cs_item_sk came out 55224 rows, est 15853.8 (q-error 3.48); reordered by DPhyp; flip: `m6` now builds | the build of MJ2's join on i_item_sk = ss_item_sk came out 12 rows, est 105.6 (q-error 8.80); reordered by DPhyp |
-| C_out | 51,700,850 B | 51,700,850 B (plan's order 51,700,850 B) | 21,371,263 B (previous order 28,121,452 B) | 31,363,293 B (previous order 38,760,345 B) | 123,598 B (previous order 12,449,498 B) |
+| changed by | | DPhyp at its budget, the plan's order kept; flip: `date_dim#4 (f)` now builds; flip: `store#2` now builds; flip: `promotion#2` now builds; flip: `income_band#3` now builds; flip: `income_band#4` now builds; flip: `item#2 (f)` now builds | the build of MJ4's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); reordered by DPhyp | the build of MJ4's join on ss_item_sk = cs_item_sk came out 55224 rows, est 14768.8 (q-error 3.74); reordered by DPhyp; flip: `m6` now builds | the build of MJ2's join on i_item_sk = ss_item_sk came out 12 rows, est 105.6 (q-error 8.80); reordered by DPhyp |
+| C_out | 51,700,850 B | 51,700,850 B (plan's order 51,700,850 B) | 21,371,263 B (previous order 28,121,452 B) | 31,363,293 B (previous order 38,760,345 B) | 122,484 B (previous order 12,337,256 B) |
 
-Calls that left the order unchanged: replan 2; replan 3 (MJ4's missed build came out 12 rows, est 105.6); replan 4 (MJ4's missed build came out 3 rows, est 32.8).
+Calls that left the order unchanged: replan 2; replan 3 (MJ4's missed build came out 12 rows, est 105.6); replan 4 (MJ4's missed build came out 3 rows, est 32.5).
 
-m5 = `store#2`, 12 rows. m6 = `agg(MJ5) (f)`, 17,157 rows. m7 = `[p1] join ([store_returns#2] join store_sales#2)`, 55,224 rows. p1 = `date_dim#4 (f)`, 366 rows. p3 = `[[[[store#2] join ([p1] join ([agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)))] join customer#2] join date_dim#5] join date_dim#6`, 49,549 rows. p5 = `[p3] join customer_demographics#3`, 49,247 rows.
+m5 = `store#2`, 12 rows. m6 = `agg(MJ5) (f)`, 17,157 rows. m7 = `[p1] join ([store_returns#2] join store_sales#2)`, 55,224 rows. p1 = `date_dim#4 (f)`, 366 rows. p3 = `[[[[store#2] join ([p1] join ([agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)))] join customer#2] join date_dim#5] join date_dim#6`, 49,247 rows. p5 = `[p3] join customer_demographics#3`, 48,803 rows.
 
 ### q64 dynamic filters
 
@@ -1745,15 +1743,15 @@ m5 = `store#2`, 12 rows. m6 = `agg(MJ5) (f)`, 17,157 rows. m7 = `[p1] join ([sto
 | after join order | customer_demographics#2 | cd_demo_sk | p4.c_current_cdemo_sk | 17 to 1920750 | 16 → 16 (0-15) |
 | after join order | customer_demographics#4 | cd_demo_sk | p5.c_current_cdemo_sk | 116 to 1920750 | 16 → 16 (0-15) |
 
-p0 = `date_dim#1 (f)`, 365 rows. p1 = `date_dim#4 (f)`, 366 rows. p2 = `[[[[store#1] join ([p0] join ([agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)))] join customer#1] join date_dim#2] join date_dim#3`, 48,625 rows, holding MJ2, MJ3. p3 = `[[[[store#2] join ([p1] join ([agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)))] join customer#2] join date_dim#5] join date_dim#6`, 49,549 rows, holding MJ4, MJ5. p4 = `[p2] join customer_demographics#1`, 48,301 rows, holding MJ2. p5 = `[p3] join customer_demographics#3`, 49,247 rows, holding MJ4.
+p0 = `date_dim#1 (f)`, 365 rows. p1 = `date_dim#4 (f)`, 366 rows. p2 = `[[[[store#1] join ([p0] join ([agg(MJ3) (f)] join ([store_returns#1] join store_sales#1)))] join customer#1] join date_dim#2] join date_dim#3`, 48,301 rows, holding MJ2, MJ3. p3 = `[[[[store#2] join ([p1] join ([agg(MJ5) (f)] join ([store_returns#2] join store_sales#2)))] join customer#2] join date_dim#5] join date_dim#6`, 49,247 rows, holding MJ4, MJ5. p4 = `[p2] join customer_demographics#1`, 47,848 rows, holding MJ2. p5 = `[p3] join customer_demographics#3`, 48,803 rows, holding MJ4.
 
 Probe p2, replan 1: the build of MJ2's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); m2 = `store#1`, 12 rows; m3 = `agg(MJ3) (f)`, 17,157 rows.
 
-Probe p2, replan 2: the build of MJ2's join on ss_item_sk = cs_item_sk came out 54481 rows, est 13355.7 (q-error 4.08); m4 = `[p0] join ([store_returns#1] join store_sales#1)`, 54,481 rows.
+Probe p2, replan 2: the build of MJ2's join on ss_item_sk = cs_item_sk came out 54481 rows, est 12273.7 (q-error 4.44); m4 = `[p0] join ([store_returns#1] join store_sales#1)`, 54,481 rows.
 
 Probe p3, replan 1: the build of MJ4's join on cs_item_sk = ss_item_sk came out 17157 rows, est 3572.4 (q-error 4.80); m5 = `store#2`, 12 rows; m6 = `agg(MJ5) (f)`, 17,157 rows.
 
-Probe p3, replan 2: the build of MJ4's join on ss_item_sk = cs_item_sk came out 55224 rows, est 15853.8 (q-error 3.48); m7 = `[p1] join ([store_returns#2] join store_sales#2)`, 55,224 rows.
+Probe p3, replan 2: the build of MJ4's join on ss_item_sk = cs_item_sk came out 55224 rows, est 14768.8 (q-error 3.74); m7 = `[p1] join ([store_returns#2] join store_sales#2)`, 55,224 rows.
 
 ## q65
 
@@ -1769,7 +1767,7 @@ MJ3 kept the plan's order: `[p1] join store_sales#2`.
 | changed by | | reordered by DPhyp |
 | C_out | 28,819,239 B | 5,327,456 B (plan's order 28,819,239 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 121 rows, est 21600.0).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 121 rows, est 20264.4).
 
 ### q65 dynamic filters
 
@@ -1782,17 +1780,17 @@ p0 = `date_dim#1 (f)`, 365 rows. p1 = `date_dim#2 (f)`, 365 rows.
 
 ## q66
 
-A replan was refused, work outside its builds having started: the build of MJ2's join on cs_sold_time_sk = t_time_sk came out 28682 rows, est 9787.4 (q-error 2.93).
+A replan was refused, work outside its builds having started: the build of MJ2's join on cs_sold_time_sk = t_time_sk came out 28650 rows, est 9739.2 (q-error 2.94).
 
 ### q66 MJ1
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `[ship_mode#1 (f)] join ([time_dim#1 (f)] join ([p0] join ([warehouse#1] join web_sales)))` | `[warehouse#1] join ([[p0] join ([ship_mode#1 (f)] join web_sales)] join time_dim#1 (f))` | `[m3] join ([time_dim#1 (f)] join m4)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ws_sold_time_sk = t_time_sk came out 14671 rows, est 4912.4 (q-error 2.99); flip: `time_dim#1 (f)` now builds |
-| C_out | 46,601,960 B | 2,284,031 B (plan's order 46,601,960 B) | 999,703 B (previous order 999,703 B) |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ws_sold_time_sk = t_time_sk came out 14670 rows, est 4911.5 (q-error 2.99); flip: `time_dim#1 (f)` now builds |
+| C_out | 46,601,960 B | 2,284,031 B (plan's order 46,601,960 B) | 999,635 B (previous order 999,635 B) |
 
-m3 = `warehouse#1`, 5 rows. m4 = `[p0] join ([ship_mode#1 (f)] join web_sales)`, 14,671 rows. p0 = `date_dim#1 (f)`, 365 rows.
+m3 = `warehouse#1`, 5 rows. m4 = `[p0] join ([ship_mode#1 (f)] join web_sales)`, 14,670 rows. p0 = `date_dim#1 (f)`, 365 rows.
 
 ### q66 MJ2
 
@@ -1827,9 +1825,9 @@ skipped: refused: unsupported: BoundedWindowAggExec: window functions (#143)
 |---|---|---|
 | join tree | `[[customer] join agg(MJ2)] join customer_address#2` | `[[agg(MJ2)] join customer] join customer_address#2` |
 | changed by | | flip: `agg(MJ2)` now builds |
-| C_out | 2,056,963 B | 2,056,963 B (plan's order 2,056,963 B) |
+| C_out | 1,775,170 B | 1,775,170 B (plan's order 1,775,170 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 2348 rows, est 17491.9).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 2286 rows, est 14521.2).
 
 ### q68 MJ2
 
@@ -1870,7 +1868,7 @@ p0 = `date_dim#1 (f)`, 91 rows. p1 = `date_dim#2 (f)`, 91 rows. p2 = `date_dim#3
 | plan as written | catalog_sales | cs_sold_date_sk | p2.d_date_sk | 2452001 to 2452091 | 12 → 1 (7) |
 | after join order | customer_demographics | cd_demo_sk | p3.c_current_cdemo_sk | 306 to 1918272 | 16 → 16 (0-15) |
 
-p0 = `date_dim#1 (f)`, 91 rows. p1 = `date_dim#2 (f)`, 91 rows. p2 = `date_dim#3 (f)`, 91 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 652 rows, holding MJ1.
+p0 = `date_dim#1 (f)`, 91 rows. p1 = `date_dim#2 (f)`, 91 rows. p2 = `date_dim#3 (f)`, 91 rows. p3 = `[[customer_address (f)] join customer] semi join ([p0] join store_sales)`, 625 rows, holding MJ1.
 
 ## q70
 
@@ -1908,9 +1906,9 @@ skipped: refused by datafusion: type_coercion
 |---|---|---|
 | join tree | `[customer] join agg(MJ2) (f)` | `[agg(MJ2) (f)] join customer` |
 | changed by | | flip: `agg(MJ2) (f)` now builds |
-| C_out | 30,097 B | 30,097 B (plan's order 30,097 B) |
+| C_out | 27,003 B | 27,003 B (plan's order 27,003 B) |
 
-Calls that left the order unchanged: replan 1; replan 2 (MJ1's missed build came out 82 rows, est 2021.3).
+Calls that left the order unchanged: replan 1; replan 2 (MJ1's missed build came out 1 rows, est 1744.5).
 
 ### q73 MJ2
 
@@ -1939,34 +1937,34 @@ p0 = `date_dim (f)`, 72 rows.
 | | plan | DPhyp before the run | replan 1 | replan 2 |
 |---|---|---|---|---|
 | join tree | `[[[agg(MJ2) (f)] join agg(MJ3)] join agg(MJ4) (f)] join agg(MJ5)` | `[[[agg(MJ4) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ3)` | `[[[agg(MJ2) (f)] join agg(MJ5)] join agg(MJ4) (f)] join agg(MJ3)` | `[[[agg(MJ4) (f)] join agg(MJ2) (f)] join agg(MJ5)] join agg(MJ3)` |
-| changed by | | reordered by DPhyp | the build of MJ4's join on ws_bill_customer_sk = c_customer_sk came out 147024 rows, est 49124.4 (q-error 2.99); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); reordered by DPhyp |
-| C_out | 5,777,961 B | 1,359,627 B (plan's order 5,777,961 B) | 3,679,599 B (previous order 3,751,457 B) | 6,088,555 B (previous order 7,399,813 B) |
+| changed by | | reordered by DPhyp | the build of MJ4's join on ws_bill_customer_sk = c_customer_sk came out 147010 rows, est 49119.4 (q-error 2.99); reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); reordered by DPhyp |
+| C_out | 3,906,779 B | 1,301,636 B (plan's order 3,906,779 B) | 3,095,058 B (previous order 3,156,970 B) | 5,876,235 B (previous order 7,167,850 B) |
 
-Calls that left the order unchanged: replan 3 (MJ1's missed build came out 11552 rows, est 29404.8); replan 4 (MJ1's missed build came out 4414 rows, est 17916.5); replan 5; replan 6 (MJ1's missed build came out 485 rows, est 6289.9); replan 7.
+Calls that left the order unchanged: replan 3 (MJ1's missed build came out 11552 rows, est 29402.0); replan 4 (MJ1's missed build came out 4414 rows, est 17710.6); replan 5; replan 6 (MJ1's missed build came out 485 rows, est 6289.4); replan 7.
 
 ### q74 MJ2
 
 | | plan | DPhyp before the run | replan 2 |
 |---|---|---|---|
 | join tree | `[p0] join ([customer#1] join store_sales#1)` | `[[p0] join store_sales#1] join customer#1` | `[customer#1] join m5` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 546314 rows, est 133637.7 (q-error 4.09); flip: `customer#1` now builds |
-| C_out | 51,478,017 B | 12,902,178 B (plan's order 51,478,017 B) | 35,057,467 B (previous order 35,057,467 B) |
+| changed by | | reordered by DPhyp | the build of MJ2's join on ss_customer_sk = c_customer_sk came out 533427 rows, est 115175.4 (q-error 4.63); flip: `customer#1` now builds |
+| C_out | 51,478,017 B | 12,902,178 B (plan's order 51,478,017 B) | 34,230,496 B (previous order 34,230,496 B) |
 
 Calls that left the order unchanged: replan 1; replan 3.
 
-m5 = `[p0] join store_sales#1`, 546,314 rows. p0 = `date_dim#1 (f)`, 365 rows.
+m5 = `[p0] join store_sales#1`, 533,427 rows. p0 = `date_dim#1 (f)`, 365 rows.
 
 ### q74 MJ3
 
 | | plan | DPhyp before the run | replan 7 |
 |---|---|---|---|
 | join tree | `[p1] join ([customer#2] join store_sales#2)` | `[[p1] join store_sales#2] join customer#2` | `[customer#2] join m10` |
-| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 549739 rows, est 158199.9 (q-error 3.47); flip: `customer#2` now builds |
-| C_out | 60,939,517 B | 15,273,558 B (plan's order 60,939,517 B) | 35,277,252 B (previous order 35,277,252 B) |
+| changed by | | reordered by DPhyp | the build of MJ3's join on ss_customer_sk = c_customer_sk came out 536691 rows, est 118806.9 (q-error 4.52); flip: `customer#2` now builds |
+| C_out | 60,939,517 B | 15,273,558 B (plan's order 60,939,517 B) | 34,439,950 B (previous order 34,439,950 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5; replan 6.
 
-m10 = `[p1] join store_sales#2`, 549,739 rows. p1 = `date_dim#2 (f)`, 365 rows.
+m10 = `[p1] join store_sales#2`, 536,691 rows. p1 = `date_dim#2 (f)`, 365 rows.
 
 ### q74 MJ4
 
@@ -1976,7 +1974,7 @@ m10 = `[p1] join store_sales#2`, 549,739 rows. p1 = `date_dim#2 (f)`, 365 rows.
 | changed by | | reordered by DPhyp |
 | C_out | 18,923,001 B | 4,742,761 B (plan's order 18,923,001 B) |
 
-Calls that left the order unchanged: replan 1 (MJ4's missed build came out 147024 rows, est 49124.4); replan 2.
+Calls that left the order unchanged: replan 1 (MJ4's missed build came out 147010 rows, est 49119.4); replan 2.
 
 p2 = `date_dim#3 (f)`, 365 rows.
 
@@ -1988,7 +1986,7 @@ p2 = `date_dim#3 (f)`, 365 rows.
 | changed by | | reordered by DPhyp |
 | C_out | 17,545,047 B | 4,397,398 B (plan's order 17,545,047 B) |
 
-Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5 (MJ5's missed build came out 142500 rows, est 45547.2).
+Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4; replan 5 (MJ5's missed build came out 142487 rows, est 45487.5).
 
 p3 = `date_dim#4 (f)`, 365 rows.
 
@@ -2019,11 +2017,11 @@ MJ6 kept the plan's order: `[[p4] join ([item#5 (f)] join store_sales#2)] left j
 
 MJ7 kept the plan's order: `[[p5] join ([item#6 (f)] join web_sales#2)] left join web_returns#2`.
 
-A replan was refused, work outside its builds having started: the build of MJ3's left join on ss_ticket_number = sr_ticket_number and ss_item_sk = sr_item_sk came out 52823 rows, est 15782.2 (q-error 3.35).
+A replan was refused, work outside its builds having started: the build of MJ3's left join on ss_ticket_number = sr_ticket_number and ss_item_sk = sr_item_sk came out 52823 rows, est 13192.9 (q-error 4.00).
 
-A replan was refused, work outside its builds having started: the build of MJ4's left join on ws_order_number = wr_order_number and ws_item_sk = wr_item_sk came out 13736 rows, est 4543.8 (q-error 3.02).
+A replan was refused, work outside its builds having started: the build of MJ4's left join on ws_order_number = wr_order_number and ws_item_sk = wr_item_sk came out 13736 rows, est 4540.2 (q-error 3.03).
 
-A replan was refused, work outside its builds having started: the build of MJ6's left join on ss_ticket_number = sr_ticket_number and ss_item_sk = sr_item_sk came out 53812 rows, est 13331.8 (q-error 4.04).
+A replan was refused, work outside its builds having started: the build of MJ6's left join on ss_ticket_number = sr_ticket_number and ss_item_sk = sr_item_sk came out 53812 rows, est 12251.8 (q-error 4.39).
 
 A replan was refused, work outside its builds having started: the build of MJ7's left join on ws_order_number = wr_order_number and ws_item_sk = wr_item_sk came out 14416 rows, est 4900.7 (q-error 2.94).
 
@@ -2043,6 +2041,10 @@ A replan was refused, work outside its builds having started: the build of MJ7's
 p0 = `date_dim#1 (f)`, 365 rows. p1 = `date_dim#2 (f)`, 365 rows. p2 = `date_dim#3 (f)`, 365 rows. p3 = `date_dim#4 (f)`, 365 rows. p4 = `date_dim#5 (f)`, 365 rows. p5 = `date_dim#6 (f)`, 365 rows. p6 = `[p0] join ([item#1 (f)] join catalog_sales#1)`, 27,388 rows, holding MJ2. p7 = `[p3] join ([item#4 (f)] join catalog_sales#2)`, 28,074 rows, holding MJ5.
 
 ## q76
+
+A replan was refused, work outside its builds having started: the build of MJ2's join on ws_sold_date_sk = d_date_sk came out 81 rows, est 170.0 (q-error 2.10).
+
+A replan was refused, work outside its builds having started: the build of MJ3's join on cs_sold_date_sk = d_date_sk came out 3520 rows, est 7086.5 (q-error 2.01).
 
 ### q76 MJ1
 
@@ -2118,9 +2120,9 @@ MJ7 kept the plan's order: `catalog_sales left join [catalog_returns]`.
 |---|---|---|
 | join tree | `[agg(MJ4) left join [agg(MJ2)]] left join agg(MJ6)` | `([agg(MJ4)] left join agg(MJ6)) left join [agg(MJ2)]` |
 | changed by | | reordered by DPhyp |
-| C_out | 35,784,134 B | 35,784,134 B (plan's order 35,784,134 B) |
+| C_out | 33,335,177 B | 33,335,177 B (plan's order 33,335,177 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 493526 rows, est 142779.6).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 493526 rows, est 133008.2).
 
 ### q78 dynamic filters
 
@@ -2138,9 +2140,9 @@ p0 = `date_dim#2 (f)`, 366 rows.
 |---|---|---|
 | join tree | `[customer] join agg(MJ2)` | `[agg(MJ2)] join customer` |
 | changed by | | flip: `agg(MJ2)` now builds |
-| C_out | 4,320,492 B | 4,320,492 B (plan's order 4,320,492 B) |
+| C_out | 3,876,341 B | 3,876,341 B (plan's order 3,876,341 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 7487 rows, est 61027.4).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 7020 rows, est 52670.1).
 
 ### q79 MJ2
 
@@ -2171,7 +2173,7 @@ A replan was refused, work outside its builds having started: the build of MJ2's
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
 | join tree | `[promotion#1 (f)] join ([item#1 (f)] join ([store] join ([p0] join (store_sales left join [store_returns]))))` | `([store] join ([promotion#1 (f)] join ([[p0] join store_sales] join item#1 (f)))) left join [store_returns]` | `([m9] join ([m10] join ([item#1 (f)] join m11))) left join [m8]` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on ss_item_sk = i_item_sk came out 63241 rows, est 5091.7 (q-error 12.42); flip: `item#1 (f)` now builds |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ss_item_sk = i_item_sk came out 63241 rows, est 4172.2 (q-error 15.16); flip: `item#1 (f)` now builds |
 | C_out | 30,505,123 B | 1,016,736 B (plan's order 30,505,123 B) | 8,533,330 B (previous order 8,533,330 B) |
 
 Calls that left the order unchanged: replan 2 (MJ1's missed build came out 1055 rows, est 8981.3).
@@ -2224,7 +2226,7 @@ MJ3 kept the plan's order: `[[p1] join catalog_returns#2] join customer_address#
 |---|---|---|
 | join tree | `[[[agg(MJ2)] join customer] join customer_address#2 (f)] join agg(MJ3)` | `[[[agg(MJ3)] join agg(MJ2)] join customer] join customer_address#2 (f)` |
 | changed by | | reordered by DPhyp |
-| C_out | 1,781,302 B | 431,547 B (plan's order 1,781,302 B) |
+| C_out | 1,745,656 B | 422,912 B (plan's order 1,745,656 B) |
 
 ### q81 dynamic filters
 
@@ -2255,9 +2257,9 @@ p0 = `date_dim (f)`, 61 rows.
 |---|---|---|
 | join tree | `[[agg(MJ2)] join agg(MJ3)] join agg(MJ4)` | `[[agg(MJ4)] join agg(MJ3)] join agg(MJ2)` |
 | changed by | | reordered by DPhyp |
-| C_out | 2,423 B | 1,666 B (plan's order 2,423 B) |
+| C_out | 2,382 B | 1,591 B (plan's order 2,382 B) |
 
-Calls that left the order unchanged: replan 1 (MJ1's missed build came out 196 rows, est 698.8).
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 196 rows, est 667.6).
 
 ### q83 MJ2
 
@@ -2306,7 +2308,7 @@ p0 = `date_dim#6 semi join [date_dim#5 semi join [date_dim#4 (f)]]`, 21 rows, ho
 
 Calls that left the order unchanged: inside p0, replan 1 (MJ1's missed build came out 464 rows, est 69.8).
 
-p0 = `[customer_address (f)] join customer`, 947 rows.
+p0 = `[customer_address (f)] join customer`, 913 rows.
 
 ### q84 dynamic filters
 
@@ -2314,7 +2316,7 @@ p0 = `[customer_address (f)] join customer`, 947 rows.
 |---|---|---|---|---|---|
 | after join order | customer_demographics | cd_demo_sk | p0.c_current_cdemo_sk | 3781 to 1915892 | 16 → 16 (0-15) |
 
-p0 = `[customer_address (f)] join customer`, 947 rows, holding MJ1.
+p0 = `[customer_address (f)] join customer`, 913 rows, holding MJ1.
 
 Probe p0, replan 1: the build of MJ1's join on ca_address_sk = c_current_addr_sk came out 464 rows, est 69.8 (q-error 6.65); m0 = `customer_address (f)`, 464 rows.
 
@@ -2328,9 +2330,9 @@ Probe p0, replan 1: the build of MJ1's join on ca_address_sk = c_current_addr_sk
 | changed by | | reordered by DPhyp; flip: `web_sales (f)` now builds; flip: `[[[[[[web_sales (f)] join web_returns] join customer_demographics#1 (f)] join customer_address (f)] join p0] join customer_demographics#2] join web_page` now builds |
 | C_out | 38,730 B | 20,115 B (plan's order 38,730 B) |
 
-Calls that left the order unchanged: inside p1, replan 1 (MJ1's missed build came out 8678 rows, est 1637.0); inside p2, replan 1 (MJ1's missed build came out 22 rows, est 1.0).
+Calls that left the order unchanged: inside p1, replan 1 (MJ1's missed build came out 8678 rows, est 1637.0); inside p2, replan 1 (MJ1's missed build came out 21 rows, est 1.0).
 
-p0 = `date_dim (f)`, 366 rows. p1 = `[web_sales (f)] join web_returns`, 835 rows. p2 = `[[[p1] join customer_demographics#1 (f)] join customer_address (f)] join p0`, 1 rows.
+p0 = `date_dim (f)`, 366 rows. p1 = `[web_sales (f)] join web_returns`, 803 rows. p2 = `[[[p1] join customer_demographics#1 (f)] join customer_address (f)] join p0`, 1 rows.
 
 ### q85 dynamic filters
 
@@ -2340,11 +2342,11 @@ p0 = `date_dim (f)`, 366 rows. p1 = `[web_sales (f)] join web_returns`, 835 rows
 | after join order | customer_demographics#1 | cd_demo_sk | p1.wr_refunded_cdemo_sk | 1019 to 1906870 | 16 → 16 (0-15) |
 | after join order | customer_demographics#2 | cd_demo_sk | p2.wr_returning_cdemo_sk | 1037564 | 16 → 1 (8) |
 
-p0 = `date_dim (f)`, 366 rows. p1 = `[web_sales (f)] join web_returns`, 835 rows, holding MJ1. p2 = `[[[p1] join customer_demographics#1 (f)] join customer_address (f)] join p0`, 1 rows, holding MJ1.
+p0 = `date_dim (f)`, 366 rows. p1 = `[web_sales (f)] join web_returns`, 803 rows, holding MJ1. p2 = `[[[p1] join customer_demographics#1 (f)] join customer_address (f)] join p0`, 1 rows, holding MJ1.
 
 Probe p1, replan 1: the build of MJ1's join on ws_item_sk = wr_item_sk and ws_order_number = wr_order_number came out 8678 rows, est 1637.0 (q-error 5.30); m1 = `web_sales (f)`, 8,678 rows.
 
-Probe p2, replan 1: the build of MJ1's join on wr_refunded_addr_sk = ca_address_sk came out 22 rows, est 1.0 (q-error 21.76); m2 = `[p1] join customer_demographics#1 (f)`, 22 rows.
+Probe p2, replan 1: the build of MJ1's join on wr_refunded_addr_sk = ca_address_sk came out 21 rows, est 1.0 (q-error 21.00); m2 = `[p1] join customer_demographics#1 (f)`, 21 rows.
 
 ## q86
 
@@ -2364,7 +2366,7 @@ MJ3 kept the plan's order: `agg(MJ5) anti join [agg(MJ4)]`.
 | changed by | | flip: `[p0] join web_sales` now builds |
 | C_out | 1,781,743 B | 1,781,743 B (plan's order 1,781,743 B) |
 
-Calls that left the order unchanged: replan 1 (MJ2's missed build came out 142180 rows, est 49259.0).
+Calls that left the order unchanged: replan 1 (MJ2's missed build came out 142164 rows, est 49253.8).
 
 p0 = `date_dim#1 (f)`, 366 rows.
 
@@ -2373,24 +2375,24 @@ p0 = `date_dim#1 (f)`, 366 rows.
 | | plan | DPhyp before the run | replan 3 |
 |---|---|---|---|
 | join tree | `[customer#2] join ([p1] join catalog_sales)` | `[[p1] join catalog_sales] join customer#2` | `[customer#2] join m5` |
-| changed by | | flip: `[p1] join catalog_sales` now builds | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 287563 rows, est 73606.3 (q-error 3.91); flip: `customer#2` now builds |
-| C_out | 2,662,408 B | 2,662,408 B (plan's order 2,662,408 B) | 6,878,769 B (previous order 6,878,769 B) |
+| changed by | | flip: `[p1] join catalog_sales` now builds | the build of MJ4's join on cs_bill_customer_sk = c_customer_sk came out 286899 rows, est 73433.4 (q-error 3.91); flip: `customer#2` now builds |
+| C_out | 2,662,408 B | 2,662,408 B (plan's order 2,662,408 B) | 6,862,885 B (previous order 6,862,885 B) |
 
 Calls that left the order unchanged: replan 1; replan 2.
 
-m5 = `[p1] join catalog_sales`, 287,563 rows. p1 = `date_dim#2 (f)`, 366 rows.
+m5 = `[p1] join catalog_sales`, 286,899 rows. p1 = `date_dim#2 (f)`, 366 rows.
 
 ### q87 MJ5
 
 | | plan | DPhyp before the run | replan 5 |
 |---|---|---|---|
 | join tree | `[customer#3] join ([p2] join store_sales)` | `[[p2] join store_sales] join customer#3` | `[customer#3] join m7` |
-| changed by | | flip: `[p2] join store_sales` now builds | the build of MJ5's join on ss_customer_sk = c_customer_sk came out 553970 rows, est 158633.4 (q-error 3.49); flip: `customer#3` now builds |
-| C_out | 5,737,914 B | 5,737,914 B (plan's order 5,737,914 B) | 13,251,467 B (previous order 13,251,467 B) |
+| changed by | | flip: `[p2] join store_sales` now builds | the build of MJ5's join on ss_customer_sk = c_customer_sk came out 541109 rows, est 139514.9 (q-error 3.88); flip: `customer#3` now builds |
+| C_out | 5,737,914 B | 5,737,914 B (plan's order 5,737,914 B) | 12,943,820 B (previous order 12,943,820 B) |
 
 Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4.
 
-m7 = `[p2] join store_sales`, 553,970 rows. p2 = `date_dim#3 (f)`, 366 rows.
+m7 = `[p2] join store_sales`, 541,109 rows. p2 = `date_dim#3 (f)`, 366 rows.
 
 ### q87 dynamic filters
 
@@ -2515,7 +2517,7 @@ p0 = `date_dim (f)`, 30 rows.
 | plan as written | catalog_returns | cr_returned_date_sk | p0.d_date_sk | 30 values, 2451119 to 2451148 | 2 → 1 (0) |
 | after join order | customer_demographics | cd_demo_sk | p1.c_current_cdemo_sk | 844 to 1919882 | 16 → 16 (0-15) |
 
-p0 = `date_dim (f)`, 30 rows. p1 = `[[p0] join catalog_returns] join customer`, 1,857 rows, holding MJ1.
+p0 = `date_dim (f)`, 30 rows. p1 = `[[p0] join catalog_returns] join customer`, 1,783 rows, holding MJ1.
 
 ## q92
 
@@ -2543,15 +2545,15 @@ MJ1 kept the plan's order: `[reason (f)] join (store_sales left join [store_retu
 
 ## q94
 
-MJ1 kept the plan's order: `[[MJ2] semi join web_sales#2] anti join web_returns`.
-
-### q94 MJ2
+### q94 MJ1
 
 | | plan | DPhyp before the run |
 |---|---|---|
-| join tree | `[web_site (f)] join ([customer_address (f)] join ([date_dim (f)] join web_sales#1))` | `[web_site (f)] join ([date_dim (f)] join ([customer_address (f)] join web_sales#1))` |
+| join tree | `[[[web_site (f)] join ([customer_address (f)] join ([date_dim (f)] join web_sales#1))] semi join web_sales#2] anti join web_returns` | `[[[web_site (f)] join ([date_dim (f)] join ([customer_address (f)] join web_sales#1))] semi join web_sales#2] anti join web_returns` |
 | changed by | | reordered by DPhyp |
-| C_out | 1,488,606 B | 912,761 B (plan's order 1,488,606 B) |
+| C_out | 1,489,354 B | 913,508 B (plan's order 1,489,354 B) |
+
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 135 rows, est 14.3).
 
 ## q95
 

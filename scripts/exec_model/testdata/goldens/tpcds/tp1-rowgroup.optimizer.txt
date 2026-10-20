@@ -2684,52 +2684,52 @@ plan diff: this query's section of <mode>.plandiff.txt
 == q16
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
 names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
-MJ1: 2 relations, ordered before the run
-  r0 [MJ2] semi join catalog_sales#2: rows 173.9 est, 40.4 B/row; NDV cs_order_number 173.9
-  r1 catalog_returns: rows 144067 exact, 8.1 B/row; NDV cr_order_number 94339
-  edge r0-r1: r0.cs_order_number = r1.cr_order_number, an anti join keeping r0's rows without a match
-  plan's order (r0 r1), build first
-  DPhyp priced 1 sets, chose (r0 r1): the plan's order
-  oriented (r0 r1), build first
-  join r0 x r1: 71.4 rows x 40.4 B = 2882 B
-  C_out 2882 B; the plan's order, priced by the same estimates, 2882 B
-MJ2: 4 relations, ordered before the run
+MJ1: 6 relations, ordered before the run
   r0 call_center (f): rows 6 est, 8.1 B/row; NDV cc_call_center_sk 6
   r1 customer_address (f): rows 950 est, 8.1 B/row; NDV ca_address_sk 950
   r2 date_dim (f): rows 61 est, 8.1 B/row; NDV d_date_sk 61
-  r3 catalog_sales#1: rows 1441548 exact, 72.9 B/row; NDV cs_ship_date_sk 1921, cs_ship_addr_sk 48005, cs_call_center_sk 6
+  r3 catalog_sales#1: rows 1441548 exact, 72.9 B/row; NDV cs_ship_date_sk 1921, cs_ship_addr_sk 48005, cs_call_center_sk 6, cs_order_number 160000
+  r4 catalog_sales#2: rows 1441548 exact, 16.2 B/row; NDV cs_order_number 160000
+  r5 catalog_returns: rows 144067 exact, 8.1 B/row; NDV cr_order_number 94339
   edge r2-r3: r2.d_date_sk = r3.cs_ship_date_sk
   edge r1-r3: r1.ca_address_sk = r3.cs_ship_addr_sk
   edge r0-r3: r0.cc_call_center_sk = r3.cs_call_center_sk
-  plan's order (r0 (r1 (r2 r3))), build first
-  DPhyp priced 7 sets, chose (r0 ((r1 r3) r2))
-  oriented (r0 (r2 (r1 r3))), build first
+  edge r3-r4: r3.cs_order_number = r4.cs_order_number, then a residual on r3.cs_warehouse_sk, r4.cs_warehouse_sk keeping 0.2, a semi join keeping r3's matches
+  edge r0+r1+r2+r3-r5: r3.cs_order_number = r5.cr_order_number, an anti join keeping r0+r1+r2+r3's rows without a match; applies once r0+r1+r2+r3 are joined
+  plan's order (((r0 (r1 (r2 r3))) r4) r5), build first
+  DPhyp priced 17 sets, chose ((r0 (((r1 r3) r2) r4)) r5)
+  oriented ((r0 ((r2 (r1 r3)) r4)) r5), build first
   join r1 x r3: 27389.4 rows x 64.8 B = 1773464 B
   join r2 x r1+r3: 869.7 rows x 56.6 B = 49249 B
-  join r0 x r1+r2+r3: 869.7 rows x 48.5 B = 42182 B
-  C_out 1864895 B; the plan's order, priced by the same estimates, 3055384 B
+  join r1+r2+r3 x r4: 173.9 rows x 48.5 B = 8436 B
+  join r0 x r1+r2+r3+r4: 173.9 rows x 40.4 B = 7023 B
+  join r0+r1+r2+r3+r4 x r5: 71.4 rows x 40.4 B = 2882 B
+  C_out 1841055 B; the plan's order, priced by the same estimates, 3065289 B
 dynamic filters after join order
   candidate cs_order_number -> catalog_returns.cr_order_number: row group ranges sum to 1.11x the column's range, ordered (under 1.5)
   catalog_returns: row groups 2 -> 2 (0-1)
     cr_order_number by p0.cs_order_number in [117666, 132148]
-  build p0 = [[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))] semi join catalog_sales#2, run first: 2358 rows, 56592 B, holding MJ2; the plan reads it from memory
-  probe p0 replan 1: the build of MJ2's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57)
+  build p0 = [call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2), run first: 2358 rows, 56592 B, holding MJ1; the plan reads it from memory
+  probe p0 replan 1: the build of MJ1's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57)
     kept as memory sources: m0 (6 rows) = call_center (f); m1 (61 rows) = date_dim (f); m2 (2446 rows) = customer_address (f)
-    MJ2: 4 relations, ordered again
+    MJ1: 5 relations, ordered again
       r0 m0: rows 6 measured, 8.1 B/row; NDV cc_call_center_sk 6
       r1 m1: rows 61 measured, 8.1 B/row; NDV d_date_sk 61
       r2 m2: rows 2446 measured, 8.1 B/row; NDV ca_address_sk 2446
-      r3 catalog_sales#1: rows 1441548 exact, 72.9 B/row; NDV cs_ship_addr_sk 48005, cs_ship_date_sk 1921, cs_call_center_sk 6
+      r3 catalog_sales#1: rows 1441548 exact, 72.9 B/row; NDV cs_ship_addr_sk 48005, cs_ship_date_sk 1921, cs_order_number 160000, cs_call_center_sk 6
+      r4 catalog_sales#2: rows 1441548 exact, 16.2 B/row; NDV cs_order_number 160000
       edge r2-r3: r2.ca_address_sk = r3.cs_ship_addr_sk
       edge r1-r3: r1.d_date_sk = r3.cs_ship_date_sk
-      edge r0-r3: r0.cc_call_center_sk = r3.cs_call_center_sk
-      previous order (r0 (r1 (r2 r3))), build first
-      DPhyp priced 7 sets, chose (r0 ((r1 r3) r2))
-      oriented (r0 (r2 (r1 r3))), build first
+      edge r3-r4: r3.cs_order_number = r4.cs_order_number, then a residual on r3.cs_warehouse_sk, r4.cs_warehouse_sk keeping 0.2, a semi join keeping r3's matches
+      edge r0-r1+r2+r3: r0.cc_call_center_sk = r3.cs_call_center_sk; applies once r1+r2+r3 are joined
+      previous order (r0 ((r1 (r2 r3)) r4)), build first
+      DPhyp priced 9 sets, chose (r0 (((r1 r3) r2) r4))
+      oriented (r0 ((r2 (r1 r3)) r4)), build first
       join r1 x r3: 45775.3 rows x 64.8 B = 2963953 B
       join r2 x r1+r3: 2239.3 rows x 56.6 B = 126802 B
-      join r0 x r1+r2+r3: 2239.3 rows x 48.5 B = 108607 B
-      C_out 3199363 B; the previous order, priced by the same estimates, 4801614 B
+      join r1+r2+r3 x r4: 447.9 rows x 48.5 B = 21721 B
+      join r0 x r1+r2+r3+r4: 447.9 rows x 40.4 B = 18083 B
+      C_out 3130559 B; the previous order, priced by the same estimates, 4732810 B
 plan diff: this query's section of <mode>.plandiff.txt
 == q17
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
@@ -9408,30 +9408,27 @@ plan diff: this query's section of <mode>.plandiff.txt
 == q94
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
 names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
-MJ1: 2 relations, ordered before the run
-  r0 [MJ2] semi join web_sales#2: rows 14.3 est, 40.4 B/row; NDV ws_order_number 14.3
-  r1 web_returns: rows 71654 exact, 8.1 B/row; NDV wr_order_number 42242
-  edge r0-r1: r0.ws_order_number = r1.wr_order_number, an anti join keeping r0's rows without a match
-  plan's order (r0 r1), build first
-  DPhyp priced 1 sets, chose (r0 r1): the plan's order
-  oriented (r0 r1), build first
-  join r0 x r1: 4.2 rows x 40.4 B = 171 B
-  C_out 171 B; the plan's order, priced by the same estimates, 171 B
-MJ2: 4 relations, ordered before the run
+MJ1: 6 relations, ordered before the run
   r0 web_site (f): rows 5 est, 8.1 B/row; NDV web_site_sk 5
   r1 customer_address (f): rows 950 est, 8.1 B/row; NDV ca_address_sk 950
   r2 date_dim (f): rows 61 est, 8.1 B/row; NDV d_date_sk 61
-  r3 web_sales#1: rows 719384 exact, 72.9 B/row; NDV ws_ship_date_sk 1945, ws_ship_addr_sk 35012, ws_web_site_sk 30
+  r3 web_sales#1: rows 719384 exact, 72.9 B/row; NDV ws_ship_date_sk 1945, ws_ship_addr_sk 35012, ws_web_site_sk 30, ws_order_number 60000
+  r4 web_sales#2: rows 719384 exact, 16.2 B/row; NDV ws_order_number 60000
+  r5 web_returns: rows 71654 exact, 8.1 B/row; NDV wr_order_number 42242
   edge r2-r3: r2.d_date_sk = r3.ws_ship_date_sk
   edge r1-r3: r1.ca_address_sk = r3.ws_ship_addr_sk
   edge r0-r3: r0.web_site_sk = r3.ws_web_site_sk
-  plan's order (r0 (r1 (r2 r3))), build first
-  DPhyp priced 7 sets, chose (r0 ((r1 r3) r2))
-  oriented (r0 (r2 (r1 r3))), build first
+  edge r3-r4: r3.ws_order_number = r4.ws_order_number, then a residual on r3.ws_warehouse_sk, r4.ws_warehouse_sk keeping 0.2, a semi join keeping r3's matches
+  edge r0+r1+r2+r3-r5: r3.ws_order_number = r5.wr_order_number, an anti join keeping r0+r1+r2+r3's rows without a match; applies once r0+r1+r2+r3 are joined
+  plan's order (((r0 (r1 (r2 r3))) r4) r5), build first
+  DPhyp priced 17 sets, chose (((r0 ((r1 r3) r2)) r4) r5)
+  oriented (((r0 (r2 (r1 r3))) r4) r5), build first
   join r1 x r3: 13668.3 rows x 64.8 B = 885022 B
   join r2 x r1+r3: 428.7 rows x 56.6 B = 24274 B
   join r0 x r1+r2+r3: 71.4 rows x 48.5 B = 3465 B
-  C_out 912761 B; the plan's order, priced by the same estimates, 1488606 B
+  join r0+r1+r2+r3 x r4: 14.3 rows x 40.4 B = 577 B
+  join r0+r1+r2+r3+r4 x r5: 4.2 rows x 40.4 B = 171 B
+  C_out 913508 B; the plan's order, priced by the same estimates, 1489354 B
 replan 1: the build of MJ1's anti join on ws_order_number = wr_order_number came out 135 rows, est 14.3 (q-error 9.45)
   kept as memory sources: m0 (135 rows) = [[web_site (f)] join ([date_dim (f)] join ([customer_address (f)] join web_sales#1))] semi join web_sales#2
   MJ1: 2 relations, ordered again

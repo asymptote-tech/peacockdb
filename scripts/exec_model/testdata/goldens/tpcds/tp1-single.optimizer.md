@@ -585,17 +585,15 @@ p0 = `date_dim (f)`, 91 rows.
 
 ## q16
 
-MJ1 kept the plan's order: `[[MJ2] semi join catalog_sales#2] anti join catalog_returns`.
-
-### q16 MJ2
+### q16 MJ1
 
 | | plan | DPhyp before the run | inside p0, replan 1 |
 |---|---|---|---|
-| join tree | `[call_center (f)] join ([customer_address (f)] join ([date_dim (f)] join catalog_sales#1))` | `[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))` | `[m0] join ([m2] join ([m1] join catalog_sales#1))` |
-| changed by | | reordered by DPhyp | the build of MJ2's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); reordered by DPhyp |
-| C_out | 3,055,384 B | 1,864,895 B (plan's order 3,055,384 B) | 3,199,363 B (previous order 4,801,614 B) |
+| join tree | `[[[call_center (f)] join ([customer_address (f)] join ([date_dim (f)] join catalog_sales#1))] semi join catalog_sales#2] anti join catalog_returns` | `[[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)] anti join catalog_returns` | `[m0] join ([[m2] join ([m1] join catalog_sales#1)] semi join catalog_sales#2)` |
+| changed by | | reordered by DPhyp | the build of MJ1's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); reordered by DPhyp |
+| C_out | 3,065,289 B | 1,841,055 B (plan's order 3,065,289 B) | 3,130,559 B (previous order 4,732,810 B) |
 
-m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_address (f)`, 2,446 rows. p0 = `[[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))] semi join catalog_sales#2`, 2,358 rows.
+m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_address (f)`, 2,446 rows. p0 = `[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)`, 2,358 rows.
 
 ### q16 dynamic filters
 
@@ -603,9 +601,9 @@ m0 = `call_center (f)`, 6 rows. m1 = `date_dim (f)`, 61 rows. m2 = `customer_add
 |---|---|---|---|---|---|
 | after join order | catalog_returns | cr_order_number | p0.cs_order_number | 117666 to 132148 | 2 → 2 (0-1) |
 
-p0 = `[[call_center (f)] join ([date_dim (f)] join ([customer_address (f)] join catalog_sales#1))] semi join catalog_sales#2`, 2,358 rows, holding MJ2.
+p0 = `[call_center (f)] join ([[date_dim (f)] join ([customer_address (f)] join catalog_sales#1)] semi join catalog_sales#2)`, 2,358 rows, holding MJ1.
 
-Probe p0, replan 1: the build of MJ2's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); m0 = `call_center (f)`, 6 rows; m1 = `date_dim (f)`, 61 rows; m2 = `customer_address (f)`, 2,446 rows.
+Probe p0, replan 1: the build of MJ1's join on ca_address_sk = cs_ship_addr_sk came out 2446 rows, est 950.0 (q-error 2.57); m0 = `call_center (f)`, 6 rows; m1 = `date_dim (f)`, 61 rows; m2 = `customer_address (f)`, 2,446 rows.
 
 ## q17
 
@@ -2507,15 +2505,15 @@ MJ1 kept the plan's order: `[reason (f)] join (store_sales left join [store_retu
 
 ## q94
 
-MJ1 kept the plan's order: `[[MJ2] semi join web_sales#2] anti join web_returns`.
-
-### q94 MJ2
+### q94 MJ1
 
 | | plan | DPhyp before the run |
 |---|---|---|
-| join tree | `[web_site (f)] join ([customer_address (f)] join ([date_dim (f)] join web_sales#1))` | `[web_site (f)] join ([date_dim (f)] join ([customer_address (f)] join web_sales#1))` |
+| join tree | `[[[web_site (f)] join ([customer_address (f)] join ([date_dim (f)] join web_sales#1))] semi join web_sales#2] anti join web_returns` | `[[[web_site (f)] join ([date_dim (f)] join ([customer_address (f)] join web_sales#1))] semi join web_sales#2] anti join web_returns` |
 | changed by | | reordered by DPhyp |
-| C_out | 1,488,606 B | 912,761 B (plan's order 1,488,606 B) |
+| C_out | 1,489,354 B | 913,508 B (plan's order 1,489,354 B) |
+
+Calls that left the order unchanged: replan 1 (MJ1's missed build came out 135 rows, est 14.3).
 
 ## q95
 

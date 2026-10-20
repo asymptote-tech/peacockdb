@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .dynamic_filters import Batching, Builds, apply, candidates
 from .join_order import ordered
 from .multijoin import named
-from .names import aliased, described, described_sources
+from .names import aliased, described, described_sources, dropped_by_source
 from .replan import AdaptiveRun, kept_estimates, run_adaptive
 from .report import FilterCandidate, FilterPass, JoinOrder, OptimizerReport, Probed
 from .stats import Statistics
@@ -91,9 +91,10 @@ def _pass(plan, tables, batching, probe, builds, kept, runs) -> tuple[EngineNode
     found = [FilterCandidate(c.build_key.name, c.scan_name, c.column, c.clustering)
              for c in candidates(plan, tables, builds)]
     pruned, scans, made = apply(plan, tables, batching, probe, builds, kept)
+    dropped = dropped_by_source(pruned, *(side for side, _ in made.values()))
     probed = tuple(Probed(name, sum(len(frame) for frame in lanes),
-                          sum(PandasBatch(frame).byte_size() for frame in lanes), _cluster_ids(side), described(side),
-                          described_sources(side))
+                          sum(PandasBatch(frame).byte_size() for frame in lanes), _cluster_ids(side),
+                          described(side, dropped.get(name, frozenset())), described_sources(side))
                    for name, (side, lanes) in made.items())
     replans = tuple((name, replan) for name, (side, _) in made.items() for replan in runs[id(side)].replans)
     refused = tuple((name, miss) for name, (side, _) in made.items() for miss in runs[id(side)].refused)

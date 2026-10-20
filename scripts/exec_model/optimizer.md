@@ -35,8 +35,11 @@ own, when all of these hold (`_join_candidates`):
   joins never do.
 - **The build side** (`_admitted`). First pass: it holds a `GpuFilter` and no join (hash,
   nested-loop or cross). Second pass: it holds a `GpuFilter`, a join, or both. A bare scan never
-  qualifies. No estimate gates a build. A build probed once is a memory source, neither filter
-  nor join, so it is not probed again.
+  qualifies, and the planner's null-key filter below the build's shuffle is not a filter here, as
+  the cluster reads it (`multijoin.null_key_filter`). That is a choice, not a correctness fact: on a
+  join of several keys a filter on one key can still narrow another's range. A union's branches are
+  not read through, as the cluster does not; no corpus case meets either. No estimate gates a build.
+  A build probed once is a memory source, neither filter nor join, so it is not probed again.
 - **The scan.** The probe key lifts ([below](#where-a-key-lifts)) to a `GpuLoadParquet` column,
   the scan reads at least 2 row groups, and it is ordered on the column: `Σ(max_g − min_g) / (MAX −
   MIN)` over its groups' footer ranges is below `ORDERED_BELOW` (`_clustering`). The score is 1 on

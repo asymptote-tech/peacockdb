@@ -220,11 +220,13 @@ python3 scripts/exec_model/run.py --jobs 16
 ```
 
 A whole run is 620 (query, mode) runs. The committed one ran on a 12-core, 15 GiB host in one
-invocation at `--jobs 1`: 5 h 5 min, at most 9.4 GiB resident (`time -v`), the host's available
-memory never under 2.9 GB. At `--jobs 16` on shad-gpu's 22
+invocation at `--jobs 1`: 5 h 20 min, at most 7.7 GiB resident (`time -v`), the host's available
+memory never under 4.2 GiB. tpcds q25's and q29's tp4 sections and the twelve tp4 `.optimizer.txt`
+and `.optimizer.md` files come from a run on a second host, which reproduces every other file byte
+for byte. At `--jobs 16` on shad-gpu's 22
 cores, 600 runs took 15:59. The tail is one task, tpch q9 at `tp4-rowgroup`, whose planned run
-takes about 17 minutes alone; the optimized one takes 27 seconds.
-A worker peaks at about 9.5 GB (tpcds `tp1-single`); size `--jobs` to free memory over that.
+takes about 17 minutes alone (20 on the 12-core host); the optimized one takes 27 seconds.
+A worker peaks at about 8 GB (7.7 GiB in the committed run); size `--jobs` to free memory over that.
 
 ## What is here
 

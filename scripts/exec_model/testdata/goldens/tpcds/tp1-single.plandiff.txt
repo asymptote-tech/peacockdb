@@ -979,7 +979,7 @@ plan diff
 plan diff
 --- before
 +++ after
-@@ -6,22 +6,5 @@
+@@ -6,21 +6,5 @@
            GpuAggregateBatches: group_by=[alias1@0], aggs=[sum(alias2@1) as alias2, sum(alias3@2) as alias3], final=[alias2@1, alias3@2], lanes=1, batches=single, schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
              GpuAggregate: group_by=[cs_order_number@0], aggs=[sum(cs_ext_ship_cost@1) as alias2, sum(cs_net_profit@2) as alias3], lanes=1, batches=multiple, schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
                GpuHashJoin: join_type=LeftAnti, on=[(cs_order_number@0, cr_order_number@0)], lanes=1, batches=multiple, schema=[cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
@@ -999,8 +999,7 @@ plan diff
 -                              GpuFilter: predicate=(d_date@1 >= 2002-02-01) AND (d_date@1 <= 2002-04-02), projection=[d_date_sk@0], lanes=1, batches=multiple, schema=[d_date_sk:Int64]
 -                                GpuLoadParquet: table=date_dim, projections=[d_date_sk@0, d_date@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_date_sk:Int64, d_date:Date32]
 -                            GpuLoadParquet: table=catalog_sales, projections=[cs_ship_date_sk@2, cs_ship_addr_sk@10, cs_call_center_sk@11, cs_warehouse_sk@14, cs_order_number@17, cs_ext_ship_cost@28, cs_net_profit@33], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, schema=[cs_ship_date_sk:Int64, cs_ship_addr_sk:Int64, cs_call_center_sk:Int64, cs_warehouse_sk:Int64, cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
--                    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
--                      GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
+-                    GpuLoadParquet: table=catalog_sales, projections=[cs_warehouse_sk@14, cs_order_number@17], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11]]], lanes=1, batches=multiple, schema=[cs_warehouse_sk:Int64, cs_order_number:Int64]
 +                GpuMemorySource: name=p0, lanes=1, batches=single, schema=[cs_order_number:Int64, cs_ext_ship_cost:Decimal128(7,2), cs_net_profit:Decimal128(7,2)]
                  GpuLoadParquet: table=catalog_returns, projections=[cr_order_number@16], partition_groups=[[[0,1]]], lanes=1, batches=multiple, schema=[cr_order_number:Int64]
 == q17
@@ -1920,7 +1919,7 @@ plan diff
 +++ after
 @@ -3,42 +3,15 @@
      GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-       GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+       GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
          GpuHashJoin: join_type=RightSemi, on=[(c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)], null_equals_null=true, lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
 -          GpuAggregateBatches: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], final=[], lanes=1, batches=single, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
 -            GpuAggregate: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
@@ -4129,7 +4128,7 @@ plan diff
 +++ after
 @@ -3,42 +3,15 @@
      GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-       GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+       GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
          GpuHashJoin: join_type=RightAnti, on=[(c_last_name@0, c_last_name@0), (c_first_name@1, c_first_name@1), (d_date@2, d_date@2)], null_equals_null=true, lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
 -          GpuAggregateBatches: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], final=[], lanes=1, batches=single, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
 -            GpuAggregate: group_by=[c_last_name@0, c_first_name@1, d_date@2], aggs=[], lanes=1, batches=multiple, schema=[c_last_name:Utf8, c_first_name:Utf8, d_date:Date32]
@@ -4373,7 +4372,7 @@ plan diff
 -          GpuProject: exprs=[count(*)@0 as amc], lanes=1, batches=single, schema=[amc:Int64]
 -            GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
 -              GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
--                GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+-                GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
 -                  GpuHashJoin: join_type=Inner, on=[(wp_web_page_sk@0, ws_web_page_sk@0)], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64, ws_web_page_sk:Int64]
 -                    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[wp_web_page_sk:Int64]
 -                      GpuFilter: predicate=(wp_char_count@1 >= 5000) AND (wp_char_count@1 <= 5200), projection=[wp_web_page_sk@0], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64]
@@ -4391,7 +4390,7 @@ plan diff
            GpuProject: exprs=[count(*)@0 as pmc], lanes=1, batches=single, schema=[pmc:Int64]
              GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
                GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
-                 GpuProject: exprs=[], lanes=1, batches=multiple, schema=[]
+                 GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
 -                  GpuHashJoin: join_type=Inner, on=[(wp_web_page_sk@0, ws_web_page_sk@0)], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64, ws_web_page_sk:Int64]
 -                    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[wp_web_page_sk:Int64]
 -                      GpuFilter: predicate=(wp_char_count@1 >= 5000) AND (wp_char_count@1 <= 5200), projection=[wp_web_page_sk@0], lanes=1, batches=multiple, schema=[wp_web_page_sk:Int64]
@@ -4527,7 +4526,7 @@ plan diff
 plan diff
 --- before
 +++ after
-@@ -6,22 +6,5 @@
+@@ -6,21 +6,5 @@
            GpuAggregateBatches: group_by=[alias1@0], aggs=[sum(alias2@1) as alias2, sum(alias3@2) as alias3], final=[alias2@1, alias3@2], lanes=1, batches=single, schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
              GpuAggregate: group_by=[ws_order_number@0], aggs=[sum(ws_ext_ship_cost@1) as alias2, sum(ws_net_profit@2) as alias3], lanes=1, batches=multiple, schema=[alias1:Int64, alias2:Decimal128(17,2), alias3:Decimal128(17,2)]
                GpuHashJoin: join_type=LeftAnti, on=[(ws_order_number@0, wr_order_number@0)], lanes=1, batches=multiple, schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
@@ -4547,8 +4546,7 @@ plan diff
 -                              GpuFilter: predicate=(d_date@1 >= 1999-02-01) AND (d_date@1 <= 1999-04-02), projection=[d_date_sk@0], lanes=1, batches=multiple, schema=[d_date_sk:Int64]
 -                                GpuLoadParquet: table=date_dim, projections=[d_date_sk@0, d_date@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[d_date_sk:Int64, d_date:Date32]
 -                            GpuLoadParquet: table=web_sales, projections=[ws_ship_date_sk@2, ws_ship_addr_sk@11, ws_web_site_sk@13, ws_warehouse_sk@15, ws_order_number@17, ws_ext_ship_cost@28, ws_net_profit@33], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, schema=[ws_ship_date_sk:Int64, ws_ship_addr_sk:Int64, ws_web_site_sk:Int64, ws_warehouse_sk:Int64, ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
--                    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
--                      GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
+-                    GpuLoadParquet: table=web_sales, projections=[ws_warehouse_sk@15, ws_order_number@17], partition_groups=[[[0,1,2,3,4,5]]], lanes=1, batches=multiple, schema=[ws_warehouse_sk:Int64, ws_order_number:Int64]
 +                GpuMemorySource: name=m0, lanes=1, batches=single, schema=[ws_order_number:Int64, ws_ext_ship_cost:Decimal128(7,2), ws_net_profit:Decimal128(7,2)]
                  GpuLoadParquet: table=web_returns, projections=[wr_order_number@13], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[wr_order_number:Int64]
 == q95

@@ -363,10 +363,11 @@ with Task 15: the page and the log share the report data both changed.
 
 ### Task 23: made again and checked
 
-**Files:** `scripts/exec_model/testdata/goldens/**`, `scripts/exec_model/design.md`, README, the
+**Files:** `scripts/exec_model/testdata/goldens/**`, `optimizer/dynamic_filters.py`,
+`optimizer/multijoin.py`, `scripts/exec_model/design.md`, `optimizer.md`, README, tests, the
 detail file.
 
-- [ ] One full `run.py`, the cardinality golden, the corpus answer suites at every mode.
-- [ ] Every moved ratio against the outputs before the rebase, each move explained.
+- [x] One full `run.py`, the cardinality golden, the corpus answer suites at every mode.
+- [x] Every moved ratio against the outputs before the rebase, each move explained.
 - [ ] Proving: CI green on the PR, its GPU job aside; the published report's links resolve.
 
