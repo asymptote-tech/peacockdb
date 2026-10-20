@@ -92,8 +92,12 @@ pub(crate) async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -
 }
 
 /// The answer against plain DataFusion at `target_partitions = 1`, asked whichever of the
-/// three ways this query's declaration names. Runs on every case, regenerating or not: a
-/// wrong answer must not reach a golden, and this is the check that stops it.
+/// four ways this query's declaration names. Runs on every case, regenerating or not: a
+/// wrong answer must not reach a golden, and this is the check that stops it — for the three
+/// that compare. `DataFusionDisabled` compares nothing and stops nothing, so for a query
+/// declaring it the answer is held by the line's DuckDB oracle, which
+/// `a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb`
+/// (`tests/test_cpu_corpus.rs`) holds to one that compares.
 pub(crate) async fn assert_answer(
     dataset: &str,
     sf: &str,
@@ -104,6 +108,9 @@ pub(crate) async fn assert_answer(
 ) {
     let what = format!("{dataset}/{query} at {}", mode.name);
     match cpu_oracle_mode(oracle) {
+        // Nothing to compare against: the query's answer is held by a test naming its own
+        // oracle, not by this session.
+        CpuOracle::DataFusionDisabled => {}
         CpuOracle::DataFusionSubset => {
             assert_subset_of_unlimited(dataset, sf, query, batches, &what).await
         }
@@ -496,10 +503,12 @@ pub(crate) fn result_matches(
 
 /// What a corpus case's answer is compared against.
 ///
-/// Every variant runs the same oracle — plain DataFusion at `target_partitions = 1` — and
+/// Three variants run the same oracle — plain DataFusion at `target_partitions = 1` — and
 /// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
 /// or the count and the containment where the SQL determines no more than those. That is
-/// why it is an argument rather than a second kind of case.
+/// why it is an argument rather than a second kind of case. The fourth asks nothing of it,
+/// because for that query DataFusion is wrong; it belongs here for the same reason, and what
+/// holds the answer in its place is the line's DuckDB oracle rather than this file.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.
@@ -516,17 +525,24 @@ pub(crate) enum CpuOracle {
     /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
     /// membership passes a run that returned one row twice where the oracle has it once.
     DataFusionSubset,
+    /// No compare at all: for a query DataFusion 45 answers wrong or refuses, so there is no
+    /// oracle to ask. What holds the answer instead is the line's DuckDB oracle, which must
+    /// compare (`a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb`,
+    /// `tests/test_cpu_corpus.rs`) — the cells still check the plan, the run and the goldens,
+    /// and the answer is DuckDB's to check.
+    DataFusionDisabled,
 }
 
 impl CpuOracle {
-    /// The three, with the keyword each is written as below. One table:
+    /// The four, with the keyword each is written as below. One table:
     /// `every_oracle_variant_is_named_by_some_line` (`corpus/tests.rs`) holds it to the
     /// lines, so a variant nothing uses is deleted rather than kept, and `cpu_oracle_mode`
     /// decodes a keyword through it rather than spelling the set a second time.
-    pub(crate) const ALL: [CpuOracle; 3] = [
+    pub(crate) const ALL: [CpuOracle; 4] = [
         CpuOracle::DataFusionExact,
         CpuOracle::DataFusionApproximate,
         CpuOracle::DataFusionSubset,
+        CpuOracle::DataFusionDisabled,
     ];
 
     /// The keyword a `corpus_query!` line writes for this oracle.
@@ -535,13 +551,16 @@ impl CpuOracle {
             CpuOracle::DataFusionExact => "data_fusion_exact",
             CpuOracle::DataFusionApproximate => "data_fusion_approximate",
             CpuOracle::DataFusionSubset => "data_fusion_subset",
+            CpuOracle::DataFusionDisabled => "data_fusion_disabled",
         }
     }
 
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
-            CpuOracle::DataFusionExact | CpuOracle::DataFusionSubset => None,
+            CpuOracle::DataFusionExact
+            | CpuOracle::DataFusionSubset
+            | CpuOracle::DataFusionDisabled => None,
             CpuOracle::DataFusionApproximate => Some(1e-12),
         }
     }
@@ -572,24 +591,33 @@ pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
 /// two case lists reach it and a malformed line has to say which file it is in.
 pub(crate) fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let at = path.display();
+    invocations_in(&text, name, &path.display().to_string())
+}
+
+/// The same over the text, so a line's shapes can be read without a file.
+///
+/// The trailing comment goes first and the close is the suffix, because neither end is a
+/// lone parenthesis: the last argument may carry a schema-validation mode mask's parens, and
+/// a comment naming a ticket may carry its own. Hunting the final `)` found whichever came
+/// last, which is the comment's as soon as one has a bracket in it.
+pub(crate) fn invocations_in(text: &str, name: &str, at: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix(name) else {
+        let body = line.trim();
+        let body = body
+            .split_once("//")
+            .map_or(body, |(before, _)| before.trim());
+        let Some(rest) = body.strip_prefix(name) else {
             continue;
         };
         let opened = rest
             .strip_prefix('(')
             .unwrap_or_else(|| panic!("{at}: {line:?} does not open"));
-        // The last `)` rather than the first, with the tail asserted: a line may end in a
-        // comment naming its ticket, which is not a second invocation.
-        let (arguments, tail) = opened
-            .rsplit_once(')')
+        let arguments = opened
+            .strip_suffix(");")
             .unwrap_or_else(|| panic!("{at}: {line:?} does not close"));
-        let tail = tail.split_once("//").map_or(tail, |(before, _)| before);
-        assert_eq!(
-            tail.trim(),
-            ";",
+        assert!(
+            !arguments.contains(");"),
             "{at}: {line:?} carries more than one invocation"
         );
         out.push(split_arguments(arguments));

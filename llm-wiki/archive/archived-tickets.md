@@ -45,6 +45,32 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t62"></a>
+### #62 — a DISTINCT beside an avg or a count is refused at planning
+**Done by [`distinct-companions`](../tasks/distinct-companions.md) (chain K); awaiting merge.**
+
+`avg(x), count(x), count(DISTINCT x)` did not plan: the translator refused any aggregate carrying
+DataFusion's DISTINCT flag, on both backends.
+
+DataFusion's `SingleDistinctToGroupBy` removes the flag only when every other aggregate is `sum`,
+`min` or `max`, because its outer level re-applies the same function and `avg` and `count` are not
+their own merge. So q16, q94 and q95 planned and q28 kept the flag.
+
+**Closed by distinct-companions (chain K).** The restriction was DataFusion's, not the shape's:
+this engine already separates init from merge, so the outer level merges each companion's state
+with ordinary aggregators instead of re-applying the function. A DISTINCT node now lowers to two
+aggregate sequences — an inner stage grouping on `(__distinct_arg, keys)` that dedups the argument
+and runs the companions' inits, an outer stage grouping on `keys` that runs each DISTINCT
+aggregate's non-distinct twin over the deduplicated argument and each companion's state through its
+own merge rule. Grouping sets lower too. Two shapes stay refused by name:
+[#261](../tickets/complete-coverage.md#t261) for a Welford companion, whose state has no init-form
+merge, and [#144](../tickets/complete-coverage.md#t144) for a DISTINCT over two different
+arguments. The wire's `AggregateFuncNode.distinct` went with it, marked `(deprecated)` so no field
+slot moved. tpcds q28 runs at five modes and `tpch/rollup-distinct` and
+`tpch/distinct-functions` joined the corpus. q28 and distinct-functions run on the device at five
+modes too, and rollup-distinct's device cells wait on #65.
+[#262](../tickets/corpus-coverage.md#t262) records that those are the lowering's last unrun ones.
+
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
 **Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**

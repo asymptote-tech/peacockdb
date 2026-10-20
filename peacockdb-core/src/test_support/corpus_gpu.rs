@@ -21,8 +21,8 @@ use super::device_answer::{
 };
 use super::gpu_session::Session;
 use super::{
-    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, mode_named,
-    section_holds_rows,
+    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, is_validated_at,
+    mode_named, section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
@@ -40,7 +40,7 @@ pub(crate) async fn gpu_case(
 ) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
-    let validated = schema_validation(validation, &what);
+    let validated = is_validated_at(validation, mode, &what);
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
     let index = PlanIndex::build(tree.as_ref()).unwrap_or_else(|e| panic!("{what}: {e}"));
     let join_scratch = join_scratch_bytes(&mode.knobs_for(dataset));
@@ -161,18 +161,4 @@ async fn assert_result(
     let golden = corpus_golden::section_of(&corpus_golden::result_golden(dataset, sf), query);
     device_answer_matches(&golden, gpu_oracle, batches)
         .unwrap_or_else(|said| panic!("{what}: {said}"));
-}
-
-/// A `corpus_query!` line's last argument, decoded: whether every batch is held to its
-/// node's declaration. Exhaustive, so a misspelling names the row rather than running it
-/// unvalidated.
-fn schema_validation(s: &str, what: &str) -> bool {
-    match s {
-        "schema_validation_enabled" => true,
-        "schema_validation_disabled" => false,
-        other => panic!(
-            "{what}: corpus_query!: unknown schema validation '{other}' \
-             (expected schema_validation_enabled|schema_validation_disabled)"
-        ),
-    }
 }
