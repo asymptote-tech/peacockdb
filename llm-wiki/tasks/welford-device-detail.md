@@ -120,3 +120,11 @@ dropped, a `compare.rs` unit test for the no-exact-column branch (shown red), th
 `architecture.md`'s Welford prose (coordinator). Nit dropped: `aggregate.cpp:247-249` copies a
 merged moment twice when it has NULLs (a merged count of 0, rare). Counts: harness helpers 22,
 `--lib` 846, total 5488. Completeness pass dispatched.
+
+### 2026-10-20 — completeness pass closed; `completeness approved`
+
+Reviewer: 1 important — `ddof` still described as read (`architecture.md`'s `CudfAggregate` row,
+the fbs comment, a wire test comment); fixed, comment-only. Analyst: 1 important — no ticket for
+the 25.02 `MERGE_M2` INT32 count wrapping past 2^31, now reachable from a keyless `stddev`; filed
+as #287 in corpus-coverage (93 open, next free 288), and archived #94 points at it. No
+`architecture.md` sentence left false. Signoff written. GPU host hard-stopped; dispatched CI follows.

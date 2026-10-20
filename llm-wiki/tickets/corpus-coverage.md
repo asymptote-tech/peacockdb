@@ -9,6 +9,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Aggregates](#aggregates)
   - [#264 — the device refuses a group key that is not a bare column](#t264)
   - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
+  - [#287 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t287)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -59,6 +60,22 @@ The small-table rule hides it: a source under 5 MB plans one lane, so a larger o
 rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
 `sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
 which refused first.
+
+<a id="t287"></a>
+### #287 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently
+On cuDF before 25.06, `merge_m2_input` (`aggregate.cpp`) casts the INT64 state count to INT32 with
+`cudf::cast`, which wraps, and `group_merge_m2` sums it in INT32: a group with more than
+2,147,483,647 non-NULL values gets a wrong or NULL stddev or var, with no error.
+
+Since welford-device a keyless `stddev(x)` is one group, so `SELECT stddev(l_quantity) FROM
+lineitem` reaches it at about sf360; no dataset here does (sf40 lineitem is 240M rows). The cpu's
+count is `u64` and answers right. cuDF 25.06 and later sum in INT64 (`kMergeM2CountType`).
+
+**Corpus query:** none.
+
+**Fix proposed:** on a cuDF older than 25.06, refuse by name a merge whose count column's maximum
+exceeds `INT32_MAX`, as the join session refuses past its `size_type` limits. The check goes with
+25.02.
 
 ## Sort / Limit
 
