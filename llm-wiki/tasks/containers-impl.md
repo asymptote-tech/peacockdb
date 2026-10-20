@@ -68,15 +68,15 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   PYTHON_VERSION PANDAS_VERSION PYARROW_VERSION CLAUDE_CODE_VERSION GH_VERSION GCC_25_02 GCC_26_02
   NVCC_VERSION`; spec files named `cudf-<version>.spec`.
 
-- [ ] **Step 1:** Export both specs from nebius-gpu with `conda list --explicit -p <env>`
+- [x] **Step 1:** Export both specs from nebius-gpu with `conda list --explicit -p <env>`
   (`rapids-cuda-12.2`, `rapids-26.02`; the host is reached by hand, ssh as `dmitry`, address from
   the human). Record in the detail file the libcudf, librmm, libarrow and cuda-version lines of each.
-- [ ] **Step 2: failing test** `test_pins.py::test_specs_hold_the_pinned_cudf` — parse each spec;
+- [x] **Step 2: failing test** `test_pins.py::test_specs_hold_the_pinned_cudf` — parse each spec;
   assert the 25.02 spec has `libcudf-25.02.02` and `libarrow-19.0.1`, the 26.02 spec a
   `libcudf-26.02.` line; `test_pins_match_the_spec` — every key above present in `pins.env`,
   `DUCKDB_VERSION=1.5.4`, `PANDAS_VERSION=3.0.6`, `PYARROW_VERSION=25.0.1`, `CMAKE_VERSION=4.2.3`.
-- [ ] **Step 3:** write `pins.env`; run `python3 scripts/env/tests/test_pins.py` → PASS.
-- [ ] **Step 4:** commit.
+- [x] **Step 3:** write `pins.env`; run `python3 scripts/env/tests/test_pins.py` → PASS.
+- [x] **Step 4:** commit.
 
 ### Task 2: the build image
 
