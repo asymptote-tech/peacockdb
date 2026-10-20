@@ -69,6 +69,9 @@ corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data
 // rollup-stddev puts a Welford under a grouping set, which neither benchmark has; the grouping-set
 // path builds the triple through the one request builder (#280).
 corpus_query!(tpch, 1, rollup_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
+// global-stddev is the keyless Welford, which no other query has: the device runs it through the
+// grouped request builder on one constant key (#216).
+corpus_query!(tpch, 1, global_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_loop_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_limits, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -278,8 +281,7 @@ corpus_query!(tpcds, 1, q28, all_modes, all_modes, duckdb_approx, data_fusion_ex
 //
 // BOTH COLUMNS. Every line runs on both engines at every mode it plans at, but these. Refused
 // at plan time: `in-is-null` (#250), `not-in-uncorrelated` at tp4 (#267). On the device alone,
-// `like-column-pattern` meets #246, `timestamp-s-key-group` #264 and
-// `empty-dispersion-aggregates` #216. Three are absent, on #255.
+// `like-column-pattern` meets #246 and `timestamp-s-key-group` #264. Three are absent, on #255.
 corpus_query!(pbench, 1, anti_null_preserved_condition, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, bool_key_group, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, cross_empty_build, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -294,7 +296,7 @@ corpus_query!(pbench, 1, decimal38_key_group, all_modes, all_modes, duckdb_exact
 // none. `empty-grouped-count` answers no rows under its columns, so DuckDB compares it exactly.
 corpus_query!(pbench, 1, empty_all_null_aggregates, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_count_aggregates, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(pbench, 1, empty_dispersion_aggregates, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled); // device: #216, the keyless Welford
+corpus_query!(pbench, 1, empty_dispersion_aggregates, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_grouped_count, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_pruned_count, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(pbench, 1, empty_side_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

@@ -21,15 +21,16 @@ use crate::tests::compare::Order;
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, synthetic};
 
-/// The functions whose keyless init the device answers today. `Stddev` and `Var` join when
-/// the device has a keyless Welford (#216, welford-device); their cpu half is
-/// `cpu_backend/tests/state_types.rs`.
-const DEVICE_IDENTITY: [AggFunc; 5] = [
+/// Every aggregate SQL can ask for: the device answers each keyless one over no rows,
+/// the Welford pair through the grouped request builder on one constant key.
+const EVERY_FUNC: [AggFunc; 7] = [
     AggFunc::Sum,
     AggFunc::Min,
     AggFunc::Max,
     AggFunc::Count,
     AggFunc::Avg,
+    AggFunc::Stddev,
+    AggFunc::Var,
 ];
 
 fn sql_name(func: AggFunc) -> &'static str {
@@ -96,14 +97,26 @@ pub(crate) fn keyless_init(func: AggFunc, shortcut: bool) -> GpuAggregate {
     )
 }
 
-/// `empty_state`'s row for `node`'s state, its argument typed `input`. `pub(crate)`:
-/// welford-device's keyless cases read it.
+/// `empty_state`'s row for `node`'s state, every argument typed `input`. `pub(crate)`, as
+/// [`empty_state_row_over`].
 pub(crate) fn empty_state_row(node: &GpuAggregate, input: &DataType) -> RecordBatch {
+    empty_state_row_over(node, &vec![input.clone(); node.body.aggs.len()])
+}
+
+/// `empty_state`'s row for `node`'s state, each aggregator's argument typed as `inputs` says,
+/// in aggregator order. `pub(crate)`: the keyless Welford cases read it.
+pub(crate) fn empty_state_row_over(node: &GpuAggregate, inputs: &[DataType]) -> RecordBatch {
+    assert_eq!(
+        inputs.len(),
+        node.body.aggs.len(),
+        "one input type per aggregator"
+    );
     let arrays: Vec<ArrayRef> = node
         .body
         .aggs
         .iter()
-        .map(|agg| {
+        .zip(inputs)
+        .map(|(agg, input)| {
             agg.func
                 .empty_state(input)
                 .expect("every init state is typed")
@@ -132,7 +145,7 @@ fn zero_row_batches(count: usize) -> Vec<RecordBatch> {
 operator_case! {
     GpuAggregate,
     fn a_keyless_init_over_no_input_answers_its_empty_state_on_both() {
-        for func in DEVICE_IDENTITY {
+        for func in EVERY_FUNC {
             let node = keyless_init(func, false);
             let row = empty_state_row(&node, &DataType::Int64);
             for count in [0, 2] {
@@ -150,7 +163,7 @@ operator_case! {
 operator_case! {
     GpuAggregate,
     fn a_keyless_shortcut_over_no_input_answers_count_0_and_nulls_on_both() {
-        for func in DEVICE_IDENTITY {
+        for func in EVERY_FUNC {
             let node = keyless_init(func, true);
             let output = node.kind().schema().expect("not a sink").fields.clone();
             let value = match func {

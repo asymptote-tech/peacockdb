@@ -6,12 +6,10 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 
 ## Contents
 
-- [Welford aggregation](#welford-aggregation)
-  - [#216 (global Welford missing) the device's global aggregate has no Welford arm](#t216)
-  - [#94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific](#t94)
 - [Aggregates](#aggregates)
   - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
   - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
+  - [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 - [Sort / Limit](#sort--limit)
   - [#202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
@@ -28,53 +26,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
   - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
-
-## Welford aggregation
-
-<a id="t216"></a>
-### #216 (global Welford missing) the device's global aggregate has no Welford arm
-
-A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
-`[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
-
-`aggregate.cpp`'s grouped path builds the triple through its request builder (`add_requests`);
-its keyless path (`keyless_aggregate`) reduces a `stddev` or `stddev_pop` name with
-`make_std_aggregation(func->ddof())` whatever the phase — at the init the sample stddev of the
-argument, at the merge the stddev of the state's first column, the count — and the finalize
-project refuses with `ColumnRef stddev(…)$m2@2 is past the 1 columns its input has`; a `var` name
-finds no reduction, `unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
-are refusals on the device in every shape. Pinned in `aggregate_dimension_cases.rs` by the
-four `bug_` cases `…welford_init_answers_a_finished_stddev…`, `…keyless_welford_merge…`,
-`…global_stddev_finalize_is_refused…` and `…keyless_var_merge_is_refused…`; the init's one
-column read at the handle by `aggregate_schema_cases.rs`'s `bug_a_global_stddev_holds_…`.
-
-**Corpus query:** none yet; the simplest is `select stddev_samp(l_quantity), var_samp(l_quantity)
-from lineitem;` (tpch).
-
-**Fix proposed:** in `execute_aggregate`, a keyless node with any stddev or var runs whole through
-the grouped path on one constant `INT32` key, dropped before return — cuDF has `M2`/`MERGE_M2`
-for groupby only. The plan and recipes do not change. Empty input still answers one row, built
-per aggregator: a count 0, the rest NULL. The keyless `stddev` arm goes; its tests can assert
-`holds_as_declared`.
-
-<a id="t94"></a>
-### #94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific
-`merge_m2_input` (`cpp/src/operators/aggregate.cpp`) casts `valid_count` to `kMergeM2CountType`,
-INT32 for the 25.02 runtime; 25.06 and later (cuDF PR #18546) accept only INT64 or FLOAT64
-(`group_merge_m2.cu`). There is no Final arm. The
-26.02 CI leg is build-only so it stays green — this bites at the next GPU-remote cuDF bump.
-Switch or version-gate the type then; the comment marks the site.
-
-The plan never sees this type: it declares every `$count` state `Int64`, and so do the columns
-between calls. The INT32 lives inside the Merge call alone — cast in before `MERGE_M2`, widened
-back to INT64 before it returns. On 25.06 and later the count stays INT64 throughout.
-
-**Fix proposed:** gate at compile time. `cpp/CMakeLists.txt` passes `cudf_VERSION`'s major and
-minor as `PEACOCK_CUDF_VERSION_*` defines; `aggregate.cpp` picks one `constexpr` count type from
-them — INT32 before 25.06, INT64 from 25.06 — as `kMergeM2CountType`, at the one `MERGE_M2` site. No single type serves
-both versions, and each cuDF version is its own build, so no runtime probe. The gate goes when
-25.02 does.
-
 
 ## Aggregates
 
@@ -107,6 +58,22 @@ The small-table rule hides it: a source under 5 MB plans one lane, so a larger o
 rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
 `sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
 which refused first.
+
+<a id="t289"></a>
+### #289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently
+On cuDF before 25.06, `merge_m2_input` (`aggregate.cpp`) casts the INT64 state count to INT32 with
+`cudf::cast`, which wraps, and `group_merge_m2` sums it in INT32: a group with more than
+2,147,483,647 non-NULL values gets a wrong or NULL stddev or var, with no error.
+
+Since welford-device a keyless `stddev(x)` is one group, so `SELECT stddev(l_quantity) FROM
+lineitem` reaches it at about sf360; no dataset here does (sf40 lineitem is 240M rows). The cpu's
+count is `u64` and answers right. cuDF 25.06 and later sum in INT64 (`kMergeM2CountType`).
+
+**Corpus query:** none.
+
+**Fix proposed:** on a cuDF older than 25.06, refuse by name a merge whose count column's maximum
+exceeds `INT32_MAX`, as the join session refuses past its `size_type` limits. The check goes with
+25.02.
 
 ## Sort / Limit
 

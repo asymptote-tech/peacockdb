@@ -98,7 +98,9 @@ call in the process fails with it too. On 2026-10-08 that turned 8 failing corpu
 **Failing on their own:** `gpu_tpch_q1` and `gpu_tpch_shuffle_additive_avg`, each at
 `tp1_rowgroup`, `tp4_rowgroup`, `tp4_single` and `tp4_sized`. Both pass at `tp1_single`, the one
 mode with a single batch, where no Partial runs. q6, which has no avg, passes in every mode.
-`gpu_tpch_shuffle_stddev_tp1_single` also fails, but that is [#94](corpus-coverage.md#t94)'s `group_merge_m2`, not this.
+`gpu_tpch_shuffle_stddev_tp1_single` also failed, on [#94](../archive/archived-tickets.md#t94)'s
+`group_merge_m2` count type, which `kMergeM2CountType` now picks at compile time; no 26.02 device
+run has confirmed it.
 
 **Where it faults.** compute-sanitizer memcheck reports `Invalid __shared__ write of size 16
 bytes … Access to 0xaa8 is misaligned` in
