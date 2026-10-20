@@ -296,7 +296,7 @@ static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vecto
 }
 
 // The table a done call aggregates: the node's declared input at zero rows, so a keyless
-// node answers its identity row through the same reduce a batch takes, and a grouped one no
+// node answers its identity row through the same path a batch takes, and a grouped one no
 // groups. A decimal takes its scale from the field, which the type id cannot carry.
 static TableResult zero_rows_of(const fb::CudfAggregate* agg) {
   const auto* schema = agg->aggr_input_schema();

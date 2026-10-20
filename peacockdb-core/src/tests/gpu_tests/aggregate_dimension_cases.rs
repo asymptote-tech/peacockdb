@@ -280,7 +280,7 @@ operator_case! {
 }
 
 /// `welford_partial(func, seed)` with its key dropped: what a global init over one row emits.
-fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
+pub(crate) fn keyless_welford_partial(func: AggFunc, seed: u64) -> RecordBatch {
     welford_partial(func, seed)
         .project(&[1, 2, 3])
         .expect("the triple")

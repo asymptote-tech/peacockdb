@@ -322,24 +322,21 @@ TEST(AggregateBuilder, AMergeOfOnlyEmptyStatesIsZeroNotNull) {
   EXPECT_EQ((by_key<double>(out, 3)), (std::map<int32_t, double>{{1, 0.0}, {2, 2.0}}));
 }
 
-TEST(AggregateBuilder, ANaNAndANegativeZeroAreValuesNotNulls) {
-  // k 1: 1.0 and NaN, whose moments are NaN in DataFusion's Welford too; k 2: one -0.0.
+TEST(AggregateBuilder, ANaNIsAValueNotANull) {
+  // 1.0 and NaN, whose moments are NaN in DataFusion's Welford too.
   std::vector<std::unique_ptr<cudf::column>> c;
-  c.push_back(hand::column_of<int32_t>({1, 1, 2}));
-  c.push_back(hand::column_of<double>({1.0, std::nan(""), -0.0}));
+  c.push_back(hand::column_of<int32_t>({1, 1}));
+  c.push_back(hand::column_of<double>({1.0, std::nan("")}));
   flatbuffers::FlatBufferBuilder fbb;
   auto node =
       aggregate(fbb, fb::AggregateMode_Partial, {hand::ref(fbb, 0, "k")}, {"k"},
                 {func(fbb, "stddev", {hand::ref(fbb, 1, "v")}, {"s$count", "s$mean", "s$m2"}, 1)});
   auto out = hand::run(fbb, node, one(hand::table_of(std::move(c), {"k", "v"})));
   for (int at : {2, 3}) EXPECT_EQ(out.view().column(at).null_count(), 0) << out.column_names.at(at);
-  EXPECT_EQ((by_key<int64_t>(out, 1)), (std::map<int32_t, int64_t>{{1, 2}, {2, 1}}))
-      << "a NaN is counted";
+  EXPECT_EQ((by_key<int64_t>(out, 1)), (std::map<int32_t, int64_t>{{1, 2}})) << "a NaN is counted";
   auto mean = by_key<double>(out, 2);
   auto m2 = by_key<double>(out, 3);
   EXPECT_TRUE(std::isnan(mean.at(1)) && std::isnan(m2.at(1))) << "NaN stays NaN, not 0.0";
-  EXPECT_EQ(mean.at(2), 0.0) << "-0.0 or 0.0, a value";
-  EXPECT_EQ(m2.at(2), 0.0);
 }
 
 TEST(AggregateBuilder, AKeylessNodeNamesItsColumnsFromItsStateNames) {
@@ -414,9 +411,10 @@ TEST(AggregateBuilder, AKeylessWelfordCarriesTheFunctionsBesideIt) {
 }
 
 TEST(AggregateBuilder, AKeylessWelfordOverZeroRowsAnswersItsEmptyState) {
-  // A done call's input. A groupby over no rows has no group, and a keyless node owes one
-  // row, plan/aggregates.rs's empty_state: a `count` 0, the triple (0, 0.0, 0.0), the
-  // decimal sum NULL at its scale. At Merge a count arrives as a `sum`, so it is NULL there.
+  // A zero-row batch: a Partial's done call is handed one, a Merge's done call refuses. A
+  // groupby over no rows has no group, and a keyless node owes one row, plan/aggregates.rs's
+  // empty_state: a `count` 0, the triple (0, 0.0, 0.0), the decimal sum NULL at its scale. At
+  // Merge a count arrives as a `sum`, so it is NULL there.
   const cudf::data_type cents{cudf::type_id::DECIMAL128, -2};
   for (auto mode : {fb::AggregateMode_Partial, fb::AggregateMode_Merge}) {
     const bool merging = mode == fb::AggregateMode_Merge;

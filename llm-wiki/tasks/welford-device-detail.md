@@ -85,3 +85,38 @@ rows); #216 and #94 archived, the empty Welford section dropped, `tickets.md` 92
 `test_ffi` (no disk for a cudf target dir) and the 26.02 compile (CI's leg). Review round 1
 dispatched.
 - PR #184 → ENS-aggregate-arms.
+
+## Developer, 2026-10-20 — review round 1 fixes (local only, no GPU)
+
+- **Comments.** `zero_rows_of` says "the same path a batch takes"; the zero-row gtest says a
+  Partial's done call is handed the batch and a Merge's refuses; `TheLinkedCudfChoosesIt`
+  says the `INT64` branch is built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image, #129).
+- **NaN guards lose their -0.0 halves**, which could not go red: `==` treats -0.0 and 0.0
+  as equal, and nothing special-cases zero. Renamed `AggregateBuilder.ANaNIsAValueNotANull`
+  and `welford_cases::a_nan_is_a_value_on_both`. The old names in `-impl.md` and above are
+  history.
+- **`tests::compare::a_keyless_lone_approximate_column_is_still_compared`**, `#[should_panic]`:
+  keyless, `approximate=[0]`, cpu sd 1.0 against device sd 2.0. Red under a mutant whose
+  no-exact-column branch returns before the approximate loop ("test did not panic as
+  expected"). Green restored.
+- **`keyless_welford_partial` is `pub(crate)`**, and `aggregate_schema_cases.rs` calls it.
+  That file's `divergences_on_device` import had been unused since 0e5f4063, which removed its
+  last call. It warned in the `gpu` lib build, so it is dropped.
+- **Proven locally.** `cmake --build cpp/build`: rc 0, no warnings. `ctest -L cpu` 1/1
+  (`peacock_cpu_tests` 26). `cargo-cudf.sh` (rapids-cuda-12.2): `--features gpu --lib
+  --no-run` and `--test test_gpu_corpus --features gpu --no-run` both rc 0 with no warnings,
+  after a forced recompile. `gpu_tests::` lists 738. Rust-only `--lib`: 844 passed and 2
+  ignored. `tests::compare`: 12/12.
+- **`build-test.md` counts that move:** Harness helpers 21 → 22, cpu `--lib` 845 → 846, cpu
+  block 3096 → 3097, Rust 4870 → 4871, grand total 5487 → 5488. The renames move nothing.
+
+### 2026-10-20 — review round 1: 0 blocking, 1 important, 7 nits; `completing`
+
+Important: the `cudf 26.02` leg had not run at review time; it is the only build of the `INT64`
+branch. It ran green on c50fce53's PR CI, and the dispatched run before `done` covers it again;
+the wording "compiled by" became "built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image,
+#129)" in archived #94 and the gtest comment. Nits taken: two stale comments, the -0.0 halves
+dropped, a `compare.rs` unit test for the no-exact-column branch (shown red), the shared helper,
+`architecture.md`'s Welford prose (coordinator). Nit dropped: `aggregate.cpp:247-249` copies a
+merged moment twice when it has NULLs (a merged count of 0, rare). Counts: harness helpers 22,
+`--lib` 846, total 5488. Completeness pass dispatched.

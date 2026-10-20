@@ -465,7 +465,8 @@ TEST(MergeM2CountType, Int32Before25_06AndInt64From25_06) {
 }
 
 // The type the aggregate casts to, as this build's cuDF headers choose it. 25.02 is the GPU
-// hosts'; CI's other leg compiles INT64.
+// hosts'. The INT64 branch is built and unit-tested by CI's cudf 26.02 leg (a 25.10a image,
+// #129).
 TEST(MergeM2CountType, TheLinkedCudfChoosesIt) {
 #if CUDF_VERSION_MAJOR == 25 && CUDF_VERSION_MINOR == 2
   EXPECT_EQ(peacock::kMergeM2CountType, cudf::type_id::INT32) << "cuDF 25.02";

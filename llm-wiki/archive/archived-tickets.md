@@ -83,7 +83,8 @@ both versions, and each cuDF version is its own build, so no runtime probe. The 
 **Closed.** `kMergeM2CountType` (`plan_executor_internal.h`) is
 `merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR)` from `<cudf/version_config.hpp>`:
 `INT32` before 25.06, `INT64` from it. No CMake define, no runtime probe. Proven on 25.02 by a
-device run; the 26.02 branch is compiled by CI's 26.02 leg and not yet run on a device
+device run; the `INT64` branch is built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image,
+[#129](../tickets/testinfra.md#t129)) and not yet run on a device
 ([#260](../tickets/system-hardening.md#t260)).
 
 <a id="t164"></a>

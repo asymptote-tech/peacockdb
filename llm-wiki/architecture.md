@@ -239,11 +239,10 @@ each position needs. Every aggregate decomposes into three declared parts, each 
   `stddev` a `CASE` over a `sqrt`, the rest a rename.
 
 A node with no finalize list emits state; a node with one emits finalized columns, on both
-engines. A keyless node holding a `stddev` or `var` runs on the device through the grouped request
-builder on one constant key, since cuDF has `M2` and `MERGE_M2` for groupby only; over zero rows
-it answers `empty_state`'s row.
-Nothing else distinguishes the positions, so the single-node shortcut is not a third case — it
-is init aggregators and finalize expressions on the same node.
+engines. Nothing else distinguishes the positions, so the single-node shortcut is not a third case
+— it is init aggregators and finalize expressions on the same node. A keyless node holding a
+`stddev` or `var` runs on the device through the grouped request builder on one constant key,
+since cuDF has `M2` and `MERGE_M2` for groupby only; over zero rows it answers `empty_state`'s row.
 
 | Aggregate | init (over rows) | state | merge (over state) | finalize |
 |---|---|---|---|---|
@@ -443,7 +442,7 @@ the expression, cuDF extracting every component in INT16 and the arm casting to 
 `return_type` the wire names. A Welford init casts its argument to FLOAT64, the type cuDF's `M2`
 and `MEAN` work in. The Welford merge casts the count to the type the linked cuDF's `MERGE_M2`
 takes, `kMergeM2CountType` (`plan_executor_internal.h`): `INT32` before 25.06 and `INT64` from
-25.06, read from `<cudf/version_config.hpp>` at compile time. It widens it back to INT64, a no-op
+25.06, read from `<cudf/version_config.hpp>` at compile time. The aggregate widens the merged count back to INT64, a no-op
 from 25.06. Both are the state the plan already declares. Hash key normalization feeds the hash alone and never reaches a
 returned value — a cast that cannot change an answer is not one the plan needs to carry — and it
 is the one of the six that is not only C++: the cpu's `hash_keys` does the same widening, because
@@ -1017,9 +1016,7 @@ come back per output handle per call, so a per-node figure is this side's fold o
 
 **Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
 same expression and agree by construction rather than by two implementations happening to
-match. Two
-appended fbs values buy that: `UnaryOp.Sqrt`, so a
-finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
+match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
 stack two merges, per lane and then across lanes.
 
 Three additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields

@@ -18,9 +18,10 @@ use super::aggregate_cases::{
     welford_merge, welford_merge_by, welford_partial,
 };
 use super::aggregate_dimension_cases::{
-    DATE, STRING, dispersion_finalize, rollup_welford_init, welford_init_global,
+    DATE, STRING, dispersion_finalize, keyless_welford_partial, rollup_welford_init,
+    welford_init_global,
 };
-use super::script::{Script, assert_holds_as_declared, divergences_on_device};
+use super::script::{Script, assert_holds_as_declared};
 use crate::plan::{AggFunc, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg, Schema};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, schema};
@@ -199,11 +200,7 @@ operator_case! {
 operator_case! {
     GpuAggregateBatches,
     fn a_global_stddev_merge_holds_its_declared_welford_state() {
-        let partial = |seed| {
-            welford_partial(AggFunc::Stddev, seed)
-                .project(&[1, 2, 3])
-                .expect("the triple")
-        };
+        let partial = |seed| keyless_welford_partial(AggFunc::Stddev, seed);
         let node = welford_merge_by(false, AggFunc::Stddev, None);
         assert_holds_as_declared(&node, Script::Accumulate(vec![partial(1), partial(2)]));
     }

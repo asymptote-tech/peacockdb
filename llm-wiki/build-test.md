@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 5487 test cases — Rust 4870, C++ 219, Python 398.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5488 test cases — Rust 4871, C++ 219, Python 398.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3096 cases: `--lib` 845, `test_cpu_corpus` 2220, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3097 cases: `--lib` 846, `test_cpu_corpus` 2220, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -132,7 +132,7 @@ properties that pricing a batch from the plan's schema took away — so 42 run. 
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
-| Harness helpers | [tests::compare](../peacockdb-core/src/tests/compare.rs), [tests::synthetic](../peacockdb-core/src/tests/synthetic.rs) | 21 |
+| Harness helpers | [tests::compare](../peacockdb-core/src/tests/compare.rs), [tests::synthetic](../peacockdb-core/src/tests/synthetic.rs) | 22 |
 |---|---|--:|
 
 the synthetic batch and the comparator against themselves, with no engine: `synthetic(rows,
@@ -728,7 +728,7 @@ view type. Then the aggregates,
 expressions and sorted merges along the same dimensions. Group keys on dates, `Int64`, strings
 and pairs, each carried through the merge; `count(*)` and expression arguments; every merge
 arm with rows; the global Welford init, merge and dispersion finalize; the Welford state over
-all-NULL groups, a NaN, a -0.0 and lanes that disagree; a keyless Welford beside other
+all-NULL groups, a NaN and lanes that disagree; a keyless Welford beside other
 aggregates, with rows and over nothing; the project expressions,
 casts and functions the corpus uses; sorts and merges on descending, nullable and composite
 keys, and the merge at four lanes. The group keys are `Utf8` too; the aggregate cases declare no

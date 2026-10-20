@@ -225,6 +225,26 @@ fn a_slot_whose_value_differs_is_named_with_the_slot() {
     assert!(why.contains("row"), "{why}");
 }
 
+/// A keyless finalize of one Welford output: its one column approximate, none exact.
+#[test]
+#[should_panic(expected = "stddev at key None: cpu 1e0, device 2e0")]
+fn a_keyless_lone_approximate_column_is_still_compared() {
+    let one = |sd: f64| {
+        RecordBatch::try_new(
+            Arc::new(ArrowSchema::new(vec![Field::new(
+                "stddev",
+                DataType::Float64,
+                true,
+            )])),
+            vec![Arc::new(datafusion::arrow::array::Float64Array::from(
+                vec![sd],
+            ))],
+        )
+        .unwrap()
+    };
+    same_within_welford(&one(1.0), &one(2.0), false, &[0]);
+}
+
 #[test]
 fn a_slot_both_sides_left_empty_is_equal_and_one_side_empty_is_named() {
     assert!(same(&[vec![]], &[vec![]], Order::Any).is_ok());
