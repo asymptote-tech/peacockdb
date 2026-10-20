@@ -371,3 +371,25 @@ detail file.
 - [x] Every moved ratio against the outputs before the rebase, each move explained.
 - [ ] Proving: CI green on the PR, its GPU job aside; the published report's links resolve.
 
+### Task 24: the branch on master's ticket labels
+
+**Files:** history only, then the conflicts' files; `llm-wiki/tickets*`, `llm-wiki/build-test.md`,
+`testdata/cost-registry.csv`, `testdata/report.html`, `testdata/test_duckdb_result.py`, the detail
+file.
+
+- [x] Task 23's work is a commit; the branch rebases onto master at PR #178. A conflict takes
+  master's side where master supersedes the branch, the branch's where it adds; every semantic
+  conflict is listed in the detail file with its resolution, the lines git merged wrong without
+  a conflict among them.
+- [x] master took #287: the branch's, the DuckDB oracle's scans under a limit, is #298, every
+  reference with it; master's #287 is left as it is.
+- [x] Every ticket the branch adds reads `### #NN (short label) title`, its contents line and its
+  index entry the same; the counts and the next free number follow.
+- [x] The named queries' registry rows carry their lines' oracles and schema validation;
+  `testdata/report.html` is regenerated in the commit that adds them, and a run at the tip
+  writes it unchanged.
+- [x] build-test.md's counts are master's with the branch's added.
+- [x] Proving: every commit passes rust-only and the cost-report crate; the named queries'
+  commit and the tip pass `test_cpu_corpus`'s registry checks and the four queries' cases; the
+  tip passes the cheap tier and differs from the old head only in master's files, the ticket
+  record and `test_duckdb_result.py`'s count of the named queries' tpch files.

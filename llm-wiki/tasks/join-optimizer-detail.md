@@ -51,6 +51,11 @@ fixes #236 and #237):
   dearer than planned on #297, a known exception; a build filtered only by the planner's null-key
   filter is no dynamic-filter candidate (Task 23 below). CI on the PR and the published report's links wait
   for a push.
+- Task 24: the branch is ten commits on master at PR #178 (`623073da`). Every ticket it adds
+  has a label, its DuckDB-oracle ticket is #298 since master took #287, and the named queries'
+  registry rows carry their lines' oracles; every commit passes rust-only and the cost-report
+  crate, the tip the whole `test_cpu_corpus` and the cheap tier. `test_duckdb_result.py`
+  counts 43 tpch query files, the named queries' four among them (Task 24 below).
 - `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
   shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
   record fetched, 174,690 rows, sha256 as pinned).
@@ -3094,3 +3099,134 @@ has none for tpch q9 and q18, which the other modes have, and `tp4-sized` adds t
   the same line numbers, each losing `(f)` marks (974 in all) and the parentheses a marked join
   carried and nothing else; every other file, `cost_report.html` included, is byte-identical, so
   the report's line ranges still land.
+
+## Task 24
+
+### The move
+
+Task 23's work was already a commit, so the branch was nine commits on `8e0a7d40`. They replay
+onto master at PR #178 (`623073da`, its change `f30e1ca7`): the ticket header `### #NN (short
+label) title`, the registry's `cpu_oracle`, `gpu_oracle` and `schema_validation` columns with the
+test that holds them to each line, `testdata/report.html` written by `scripts/ticket_widget.py`,
+and master's own #287. `git -c rerere.enabled=false rebase --onto 623073da 8e0a7d40`, so no
+resolution recorded in Task 19's rebase replays.
+
+| # | Commit | Before | After | Conflicted files |
+|---|---|---|---|---|
+| 1 | peacockdb-dphyp | `2bb3a7e1` | `69448594` | — |
+| 2 | benchmarks | `7428ec94` | `02f6a4d8` | — |
+| 3 | cost, the named queries | `9a747bf2` | `2bef3b81` | `tickets.md`, `corpus-coverage.md`, `optimizer.md`, `cost-registry.csv` |
+| 4 | the optimizer | `400394a4` | `3625404b` | `tickets.md`, `optimizer.md`, `system-hardening.md` |
+| 5 | spec, plan, record | `ead4ad49` | `c5d12789` | `build-test.md` (3 hunks) |
+| 6 | every dataset's plans | `0f89ec04` | `bbf7ee8c` | `build-test.md`, `tickets.md`, `optimizer.md`, `scalars.md` |
+| 7 | clusters, null-key filters | `60813d8c` | `299f206b` | `build-test.md`, `tickets.md`, `memory.md`, `optimizer.md` |
+| 8 | the engine side | `f16e0eca` | `5cec3570` | — |
+| 9 | made again and checked | `687777e6` | `fa7ee6ae` | `build-test.md`, `tickets.md`, `optimizer.md` |
+
+Every conflict is a contents block, an index row, an open count or the CSV. The rule is Task
+19's: master's side where master supersedes, the branch's where it adds. A contents block is
+master's, which has the labels, with the branch's new line in the new form at the branch's place.
+An index row is master's with the branch's numbers appended. `build-test.md` is the branch's
+page with master's one test added. The CSV is master's with the branch's four rows (below).
+
+### What git merged without a conflict
+
+- Commit 3: the optimizer row of `tickets.md` and `optimizer.md`'s anchor and header kept
+  `#287`/`t287`. They are #298 (below).
+- Every new ticket's header kept the old `### #NN — title` form, in commits 3, 4, 6, 7 and 9.
+- Commit 9: "currently 298" and "117 open tickets". 298 is taken; the values are 299 and 118.
+- A conflicted commit's message passes through git's cleanup, which drops a line starting with
+  `#` as a comment. Commit 3's "#288. gen_duckdb_cost.sh …" and commit 7's "#296 record …" were
+  lost that way on a first attempt. Each conflicted commit is made with `git commit -C <old>
+  --cleanup=verbatim`, and every message but commit 3's is its old one byte for byte.
+
+### Labels
+
+| # | File | Label |
+|---|---|---|
+| 288 | `corpus-coverage.md` | non-inner join gpu cells |
+| 290 | `optimizer.md` | outer/anti join key NDV |
+| 291 | `optimizer.md` | prototype NaN as NULL |
+| 292 | `scalars.md` | pre-1970 timestamp cast |
+| 293 | `scalars.md` | LIKE backslash escape |
+| 294 | `optimizer.md` | orientation build term |
+| 295 | `optimizer.md` | flat residual estimate |
+| 296 | `memory.md` | probe batch priced twice |
+| 297 | `optimizer.md` | unpriced null-key filter |
+| 298 | `optimizer.md` | DuckDB scan under limit |
+| 238 | `system-hardening.md` | fixed driver step cap |
+
+Each at most 25 characters; the titles are unchanged. #289 is in the archive, which keeps the
+old form.
+
+### #287 is #298
+
+master took #287 for its own ticket, "(row order unchecked)" in `corpus-coverage.md`. The
+branch's, the DuckDB oracle's scans under a limit, is #298: its anchor, header and contents line
+in `optimizer.md`, the index row, commit 3's message, and the five Task 14 mentions in this file.
+Task 19's ticket-number sentence keeps the number it gave and says #298 beside it. master's #287
+stays in the corpus-coverage row of `tickets.md`, `corpus-coverage.md`, `ticket_widget.py`'s two
+oracle tooltips and the two report pages, so the renumbering is by line, not by a global
+replace. `cost-report`'s ticket guard does not catch a ticket left wholly at `t287` in
+`optimizer.md`, since `corpus-coverage.md`'s `t287` is read first; a grep over `optimizer.md`
+and this file does.
+
+The index after each commit: 109 open and the next free 289 after commit 3, 111 and 291 after
+4 and 5, 114 and 294 after 6, 117 and 297 after 7 and 8, 118 and 299 after 9.
+
+### The registry rows and the report
+
+The four named queries' rows carry their lines' last three arguments, `schema_validation_`
+dropped: `data_fusion_exact,golden_exact,enabled` for anti-join-reorder, left-join-fixed and
+semi-join-reorder, and `data_fusion_exact,live_cpu,enabled` for left-join-reorder. The CSV is
+master's 198 rows with these four at the branch's places, 202 rows, 21 of them `na`.
+
+`testdata/report.html` is made again in commit 3, the one commit that changes what it reads: the
+CSV, the conf and every cost golden, cost-report's pricing of a micro-query, and the plan
+sections that move the golden line anchors. It cites 21 tickets, #288 added, none missing from
+the wiki. At the tip `ticket_widget.py` writes it unchanged.
+
+### build-test.md's counts
+
+The branch's counts, plus master's registry test in `test_cpu_corpus`: Rust 4424 → 4425 and the
+total one more at each commit that moves it (5607, 5617, 5638, 5640); the cpu tier 2788,
+`test_cpu_corpus` 1985, the "Corpus, cpu" row 1984, "plus seven checks". master's clause on the
+registry's three columns and its cost-report workflow row came across without a conflict.
+
+### Proving
+
+Per commit: the ticket check (every open header labelled, at most 25 characters, each file's
+contents in header order, the index's rows, open count and next free number), the registry check
+(the CSV's three columns against every `corpus_query!` line, both ways), rust-only (`--lib`,
+`test_corpus_goldens`, `test_cost_model`, `test_ci_coverage`) and `cargo test -p cost-report`.
+
+| Commit | Tickets: open, next free | Registry rows, `na` | rust-only | cost-report |
+|---|---|---|---|---|
+| 1 | 107, 288 | 198, 21 | 810, 2 ignored | 41 |
+| 2 | 107, 288 | 198, 21 | 811, 2 ignored | 41 |
+| 3 | 109, 289 | 202, 21 | 812, 2 ignored | 43 |
+| 4 | 111, 291 | 202, 21 | 812, 2 ignored | 43 |
+| 5 | 111, 291 | 202, 21 | 812, 2 ignored | 43 |
+| 6 | 114, 294 | 202, 21 | 812, 2 ignored | 43 |
+| 7 | 117, 297 | 202, 21 | 812, 2 ignored | 43 |
+| 8 | 117, 297 | 202, 21 | 812, 2 ignored | 43 |
+| 9 | 118, 299 | 202, 21 | 812, 2 ignored | 43 |
+
+- Commits 3 and 9: `test_cpu_corpus` over the registry checks, the four queries' twenty cells and
+  every `duckdb_tpch_` case, 74 passed.
+- Commit 9: the whole `test_cpu_corpus`, 1985 passed. `ticket_widget.py` writes
+  `testdata/report.html` unchanged, 21 tickets cited, none missing. The cheap tier as
+  `pipeline.yml` runs it: 48 files, 521 passed, as before. DPhyp 6; the calibration scripts'
+  tests, 4 files, 29; `testdata/test_duckdb_cost.py` 41.
+- `testdata/test_duckdb_result.py`: `test_the_three_datasets_resolve_their_queries` wanted 39
+  tpch query files and found 43 from commit 3 on, which added the four named queries' files, at
+  the old head as well. Commit 3 now counts 43: 20 of 20, at the tip, where the file and the
+  query directories are commit 3's.
+- The table's runs were made on commits that differ from the ones above only in that count, a
+  file no Rust target, the cost-report crate or the ticket and registry checks read.
+- `git diff` from the old head to commit 9 lists f30e1ca7's 22 files, this file and
+  `test_duckdb_result.py`'s count, nothing else.
+  Its code and script changes and `join-backend-report.html` are f30e1ca7's line for line, and
+  nothing under `scripts/exec_model`, `testdata/goldens`, `testdata/stats`,
+  `testdata/cost_model.conf`, `cost-report`, `peacockdb-core/src` outside `test_support`, or `cpp`
+  differs, so no prototype output can move and `run.py` and the corpus tier are not rerun.
