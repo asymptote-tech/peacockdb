@@ -94,3 +94,4 @@ Not fixed, noted for the human: `architecture.md` "Every cast is explicit" lists
 operand casts as plan-node casts, but the FLOAT64 cast is the C++'s (predates this task);
 welford-device's frozen spec quotes the old `ColumnRef index 2 out of range` message.
 Review round 1 dispatched.
+- PR #183 → ENS-keyless-identity.
