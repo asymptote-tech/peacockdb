@@ -86,7 +86,7 @@ both versions, and each cuDF version is its own build, so no runtime probe. The 
 device run; the `INT64` branch is built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image,
 [#129](../tickets/testinfra.md#t129)) and not yet run on a device
 ([#260](../tickets/system-hardening.md#t260)). The INT32 count still wraps past 2^31 on 25.02:
-[#287](../tickets/corpus-coverage.md#t287).
+[#289](../tickets/corpus-coverage.md#t289).
 
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws

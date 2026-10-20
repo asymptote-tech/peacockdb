@@ -11,7 +11,7 @@ above its header, which the cost widget links to, so link a ticket as
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 288), one ID space across every file. 264–279
+New tickets take the next free number (currently 290), one ID space across every file. 264–279
 are reserved for chain J, whose next number is 268.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
@@ -22,7 +22,7 @@ are never reused, so an old reference still resolves there.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 18 | #264 #267 #287 #202 #217 #204 #214 #168 #210 #57 #56 #60 #251 #227 #174 #233 #253 #254 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 18 | #264 #267 #289 #202 #217 #204 #214 #168 #210 #57 #56 #60 #251 #227 #174 #233 #253 #254 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #255 #284 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 11 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |

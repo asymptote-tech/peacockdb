@@ -126,7 +126,7 @@ merged moment twice when it has NULLs (a merged count of 0, rare). Counts: harne
 Reviewer: 1 important — `ddof` still described as read (`architecture.md`'s `CudfAggregate` row,
 the fbs comment, a wire test comment); fixed, comment-only. Analyst: 1 important — no ticket for
 the 25.02 `MERGE_M2` INT32 count wrapping past 2^31, now reachable from a keyless `stddev`; filed
-as #287 in corpus-coverage (93 open, next free 288), and archived #94 points at it. No
+as #289 in corpus-coverage (93 open; filed as #287, renumbered because master had already used 287), and archived #94 points at it. No
 `architecture.md` sentence left false. Signoff written. GPU host hard-stopped; dispatched CI follows.
 
 Dispatched CI: run 39376356448, dispatched 2026-10-20T05:42:47Z on 1defb71d.

@@ -9,7 +9,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Aggregates](#aggregates)
   - [#264 — the device refuses a group key that is not a bare column](#t264)
   - [#267 — a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
-  - [#287 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t287)
+  - [#289 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 - [Sort / Limit](#sort--limit)
   - [#202 — a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 — a sort with `fetch 0` keeps every row on the device](#t217)
@@ -61,8 +61,8 @@ rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns th
 `sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
 which refused first.
 
-<a id="t287"></a>
-### #287 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently
+<a id="t289"></a>
+### #289 — a Welford merge on cuDF 25.02 wraps a count past 2^31 silently
 On cuDF before 25.06, `merge_m2_input` (`aggregate.cpp`) casts the INT64 state count to INT32 with
 `cudf::cast`, which wraps, and `group_merge_m2` sums it in INT32: a group with more than
 2,147,483,647 non-NULL values gets a wrong or NULL stddev or var, with no error.

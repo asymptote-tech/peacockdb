@@ -136,6 +136,6 @@ request builder on one constant key and answers `empty_state`'s row over zero ro
 state is never NULL, at the init and after every `MERGE_M2`; `kMergeM2CountType` is read from
 cuDF's own version header. `global-stddev` and `empty-dispersion-aggregates` run at all five
 device modes. Final pass: no blocking; one important was stale `ddof` prose (fixed), the other a
-missing ticket, filed as #287: on 25.02 the merge's INT32 count wraps past 2^31, which the
+missing ticket, filed as #289 (first numbered 287, which master had already used): on 25.02 the merge's INT32 count wraps past 2^31, which the
 keyless route now makes reachable from a plain `stddev(x)`. Shortcuts: none. The `INT64` branch is
 built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image) and has had no device run.
