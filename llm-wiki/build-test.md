@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 5640 test cases — Rust 4425, C++ 173, Python 1042.** The Python figure includes the 419 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5684 test cases — Rust 4469, C++ 173, Python 1042.** The Python figure includes the 419 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2788 cases: `--lib` 772, `test_cpu_corpus` 1985, `test_corpus_goldens` 27, `test_cost_model` 4
+#### cpu — `--features rust-only`: no FFI, no device. 2812 cases: `--lib` 772, `test_cpu_corpus` 2009, `test_corpus_goldens` 27, `test_cost_model` 4
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1984 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2008 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -49,7 +49,7 @@ undetermined line's rows are compared only against committed files, that `duckdb
 sections are the registry's rows in both directions, and `all_modes` expanding to the same cells as
 the five spelled out
 
-Then the DuckDB tier, 947 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 967 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
@@ -60,14 +60,14 @@ enabled device cell has its `gpu-result.txt` section and no other, and the commi
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 157 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 161 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
 the cell flap. Read off DataFusion's plan at one partition; a sorted cut is re-run one row wider
 to read the rows either side of it. A cross join keeps its order, and a keyless aggregate
 answers one row, so neither is a hazard. Run once over every line DataFusion plans, all pass: 34 lines cut a
-sorted answer over a join, 28 of them among the 157 with a device cell, and no cut falls on a
+sorted answer over a join, 28 of them among the 161 with a device cell, and no cut falls on a
 tie
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -599,11 +599,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1509 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1529 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 785, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 764 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 784 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -612,7 +612,7 @@ device with every batch held to its node's declared schema through the driver's 
 [#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-763 cells today. From tpch, 171: every line at every mode, but for six. `q11` is off at the
+783 cells today. From tpch, 191: every line at every mode, but for six. `q11` is off at the
 three tp4 modes and `q22` at `tp4-single`, on [#199](tickets/corpus-coverage.md#t199): a keyless
 merge over a lane that got nothing, whose identity row the cpu's section carries and the device
 does not. `rollup-over-join` is off on [#65](tickets/corpus-coverage.md#t65), `mixed-join` on
@@ -628,7 +628,7 @@ three. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` w
 column; `rollup-small-keys` on #65; `timestamp-s-key-group` on
 [#264](tickets/corpus-coverage.md#t264), a cast group key. pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 764th case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 784th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |

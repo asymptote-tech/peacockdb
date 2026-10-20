@@ -42,7 +42,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#262 (DISTINCT device cells) the DISTINCT lowering's device cells have never run](#t262)
   - [#281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run](#t281)
-  - [#288 (non-inner join gpu cells) the named non-inner join queries' device cells have never run](#t288)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
   - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
@@ -863,21 +862,6 @@ from the cpu's, and nothing would say so.
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
-
-<a id="t288"></a>
-### #288 (non-inner join gpu cells) the named non-inner join queries' device cells have never run
-
-`tpch/left-join-reorder`, `semi-join-reorder`, `anti-join-reorder` and `left-join-fixed` put a
-non-inner join where a reorder may move it. They are planned and answered on the cpu at every
-mode, and no device has run one, so a device answer could differ from the cpu's and nothing would
-say so. Their siblings `left-join`, `semi-join` and `anti-join` run everywhere on both engines. The
-cells stay off until the join optimizer's final device check runs them on a GPU.
-
-**Corpus queries:** the four, gpu cells off at all five modes on this ticket alone.
-
-**Fix proposed:** on a GPU host, run the twenty device cells against the cpu's answer and record
-their `gpu-result.txt` sections; each one passing is enabled, each one failing gets the ticket it
-fails on. Then this ticket drops from the registry rows and is archived.
 
 <a id="t253"></a>
 ### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths

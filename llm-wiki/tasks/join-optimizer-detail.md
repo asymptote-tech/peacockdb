@@ -44,8 +44,8 @@ fixes #236 and #237):
   is wiring so tp1 and tp4 hold the same clusters, and a join's residency and scratch are the
   session's; orientation keeps its formula, #294, and a residual edge its flat estimate, #295.
 - Task 22: the engine side is master's with the branch's added and green on rust-only, the whole
-  `test_cpu_corpus`, the cost-report crate and DPhyp; the named queries' device cells stay off on
-  #288 until the final device check (Task 22 below).
+  `test_cpu_corpus`, the cost-report crate and DPhyp; the named queries' device cells were off on
+  #288 until the final device check ran them on the L40S, and are on, #288 closed (Task 22 below).
 - Task 23: the prototype's committed outputs and the cardinality golden are made again on master's
   plans; every moved ratio is explained against the outputs before the rebase, tpcds q24 at tp4
   dearer than planned on #297, a known exception; a build filtered only by the planner's null-key
@@ -2897,6 +2897,8 @@ build-test.md's counts. This pass checked each against the tree.
   `left_join_fixed` are `all_modes` on the cpu and `none` on the device, DuckDB `exact` but for
   left-join-reorder's `fingerprint`; their registry rows carry #288 alone. The device cells stay
   off until the join optimizer's final device check runs them on a GPU; #288 now says so.
+- **The final device check.** All twenty cells ran on nebius-gpu's L40S under cuDF 25.02 and
+  pass; they are on, their answers are recorded in `gpu-result.txt`, and #288 is archived as done.
 - **Cost goldens.** `test_cost_model` without `UPDATE_CANONICAL` derives all fifteen
   `-mini.cost.txt`, five modes over tpch, tpcds and pbench, and none moves. The cost-report
   binary, rendered into a scratch directory, lists TPC-H 35/43, TPC-DS 71/99 and pbench 51/60

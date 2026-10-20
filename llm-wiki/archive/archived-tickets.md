@@ -27,6 +27,19 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t288"></a>
+### #288 — the named non-inner join queries' device cells have never run
+`tpch/left-join-reorder`, `semi-join-reorder`, `anti-join-reorder` and `left-join-fixed` put a
+non-inner join where a reorder may move it. They were planned and answered on the cpu at every
+mode, and no device had run one, so a device answer could differ from the cpu's and nothing would
+say so.
+
+**Done.** All twenty device cells, the four queries at five modes, ran on nebius-gpu's L40S under
+cuDF 25.02 and pass: plan shape and statistics against each mode's `.cpu.txt`, and the answer
+against `mini.result.txt`, or for left-join-reorder, over the result cap, against a live cpu run.
+Their answers are recorded in `gpu-result.txt`, and each `duckdb_gpu_` case holds them to DuckDB.
+The cells are on and no registry row carries the ticket.
+
 <a id="t289"></a>
 ### #289 — a left or anti join's estimate ignores the key domain, and DPhyp orders on it
 `Estimator.equi_join` (`scripts/exec_model/optimizer/cardinality.py`) divides inner rows by the key
