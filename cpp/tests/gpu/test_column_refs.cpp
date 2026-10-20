@@ -72,12 +72,13 @@ TEST(ColumnRefs, ASortKeyRefusesEachBadReference) {
 }
 
 TEST(ColumnRefs, AComputedKeyRefusesEachBadReferenceInsideIt) {
-  // CAST(ref AS FLOAT64): not a bare ColumnRef, so the column path evaluates it, and the
-  // reference inside resolves through the same check.
+  // CAST(ref AS Int32): the AST casts only to INT64 and FLOAT64, so cudf_ast_can_evaluate
+  // answers false without reading the reference, and the column path's own check
+  // (evaluate_column) is the one that resolves it.
   for (auto const& bad : kBadRefs) {
     flatbuffers::FlatBufferBuilder fbb;
     auto inner = hand::ref(fbb, bad.index, bad.name);
-    auto cast = fb::CreateCastExprNode(fbb, inner, fb::DataType_Float64);
+    auto cast = fb::CreateCastExprNode(fbb, inner, fb::DataType_Int32);
     auto key = fb::CreateExpr(fbb, fb::ExprNode_CastExprNode, cast.Union());
     auto why = sort_refusal(fbb, key);
     EXPECT_NE(why.find(bad.says), std::string::npos) << why;

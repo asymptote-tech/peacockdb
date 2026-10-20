@@ -123,7 +123,7 @@ batches and, through `AtDoneIfNothingOut`, answers what it owes over no rows; a 
 group maps one lane with no batch; six pbench `empty-*` queries; the q96, q88 and q90 tp4 cells
 on.
 
-### 7. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../archive/archived-tickets.md#t164), [#225](../archive/archived-tickets.md#t225), [#280](../archive/archived-tickets.md#t280) — state: reviewing — PR #183
+### 7. [`aggregate-arms.md`](aggregate-arms.md) — closes [#164](../archive/archived-tickets.md#t164), [#225](../archive/archived-tickets.md#t225), [#280](../archive/archived-tickets.md#t280) — state: completing — PR #183
 
 The device aggregate reads every state column through its `args` and names every column from the
 wire's `state_names`; one request builder; the dead arms go; `ColumnRef`s checked for bounds and

@@ -105,3 +105,29 @@ Nits: `aggregate.cpp:226-227` an extra copy of the INT32 count child per Welford
 `architecture.md` the "hand their columns over" paragraph's broken join and the `MERGE_M2`
 sentence naming a deleted arm, `build-test.md`'s scan-mapping row prose (coordinator, fixed).
 Reviewer checked the three fixture changes: fixture bugs, not an over-strict check.
+
+## Review round 1 — developer, 2026-10-20
+
+- **Important, fixed.** `ColumnRefs.AComputedKeyRefusesEachBadReferenceInsideIt` used
+  `CAST(ref AS FLOAT64)`, which the AST takes, so `cudf_ast_can_evaluate`'s `ColumnRef` arm threw
+  first and `evaluate_column`'s check (`expr.cpp:943`) could not go red. The key is now
+  `CAST(ref AS Int32)`: the AST casts only to INT64 and FLOAT64, so the routing answers false
+  without reading the reference and the Cast arm's `evaluate_column` resolves it.
+- **Nit, fixed.** `MergedChild` casts an INT32 count straight from the struct's child view
+  (`as_int64_count(column_view)`) and copies only the two moments, as before the builder.
+- **Device, nebius-gpu `~/peacockdb-K`, synced from the working tree over f9f522a7.** Red build
+  (only `expr.cpp:943` back to the raw index, `/tmp/aa-red2.patch`) rc 0, 0 warnings:
+  `peacock_plan_tests --gtest_filter='ColumnRefs.*'` 2 pass, 1 fail —
+  `AComputedKeyRefusesEachBadReferenceInsideIt` at all three bad references (cuDF's
+  `_M_range_check` for the index past the width; the unnamed and misnamed keys not refused).
+  Green build rc 0, 0 warnings, VM C++ tree md5-identical to local:
+  `ColumnRefs.*:AggregateBuilder.*:AggregateMerge.*` 16/16; the L40S list ALL rc=0 —
+  `peacock_cpu_tests` 21, `peacock_gpu_tests` 2, `peacock_join_session_tests` 54,
+  `peacock_plan_tests` 108, `peacockdb_core_gpu_lib gpu_tests::` 728, `test_gpu_corpus` 894,
+  `test_node_timing` 1, `peacock_gpu_benchmarks` 8 (`bench_` skipped). VM soft-stopped.
+- **Local.** `scripts/build.sh … --build` clean; `ctest -L cpu` 21/21. No test count moves.
+
+### 2026-10-20 — round 1 closed; `completing`
+
+The important and the copy nit fixed; the computed-key gtest shown red with `expr.cpp:943`
+reverted; L40S list green again. Completeness pass dispatched.

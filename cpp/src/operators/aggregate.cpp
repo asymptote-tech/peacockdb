@@ -206,6 +206,14 @@ static std::unique_ptr<cudf::column> as_int64(std::unique_ptr<cudf::column> coun
              : std::move(count);
 }
 
+// One child of a merged struct as a column of its own: an INT32 count cast straight from the
+// view, anything else copied, since the struct owns its children (#154).
+static std::unique_ptr<cudf::column> as_int64_count(cudf::column_view child) {
+  return child.type().id() == cudf::type_id::INT32
+             ? cudf::cast(child, cudf::data_type{cudf::type_id::INT64})
+             : std::make_unique<cudf::column>(child);
+}
+
 /// The state columns `built` declared, read out of `results`, appended in order. Reads only
 /// `built.columns`, so one `built` serves every grouping set's results.
 static void append_state_columns(AggregateRequests const& built,
@@ -222,9 +230,8 @@ static void append_state_columns(AggregateRequests const& built,
         columns.push_back(as_int64(std::move(result)));
         break;
       case StateReadback::MergedChild:
-        // Three columns read one struct, so each child is copied out of it (#154).
-        columns.push_back(
-            as_int64(std::make_unique<cudf::column>(result->view().child(state.child))));
+        // Three columns read one struct, so none can take its child over.
+        columns.push_back(as_int64_count(result->view().child(state.child)));
         break;
     }
     names.push_back(state.name);
