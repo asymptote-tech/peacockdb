@@ -218,11 +218,10 @@ impl Session {
         GpuBatch::new(self.executor, handle, seq, stats.rows as usize, 0)
     }
 
-    /// The executor for the node at `index` in the tree's post-order, which is what the
-    /// recipes are indexed by. For the nodes that make one call, which is every exec node
-    /// but an aggregate with a finalize.
-    /// Its per-batch calls only: an aggregate's init also calls at done, which the chain an
-    /// init is built from never sees.
+    /// The chain of per-batch calls for the node at `index` in the tree's post-order, which is
+    /// what the recipes are indexed by: an exec node's, or the one an aggregate's init is built
+    /// from, whose done calls it never sees. For a chain of one call, which is every one but an
+    /// init with a finalize.
     fn exec(&self, index: usize, schema: &ArrowSchema) -> GpuExec {
         let recipe = self.recipe(index).calls_under(CallPattern::PerBatch);
         GpuExec::new(self.site(), &recipe, None, schema).expect("the recipe is an exec node's")

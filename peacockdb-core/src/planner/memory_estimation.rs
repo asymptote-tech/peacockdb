@@ -211,8 +211,9 @@ impl<'a> Tree<'a> {
     }
 
     /// What a node holds whatever the batch size — `None` for a node whose residency
-    /// scales with its input batch. A mid-plan limit is a `BatchAccumulator` by category
-    /// and holds nothing at all, which is why it is not one of these.
+    /// scales with its input batch. A mid-plan limit and an aggregate's init are
+    /// `BatchAccumulator`s by category that hold none of their input — the limit nothing, the
+    /// init a flag — which is why neither is one of these.
     fn held_by_accumulator(&self, seq: usize) -> Option<u64> {
         match as_node_ref(self.nodes[seq]) {
             NodeRef::CoalesceAllBatches(_) | NodeRef::MergeSortedPartitions(_) => {

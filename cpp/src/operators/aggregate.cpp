@@ -181,7 +181,9 @@ static TableResult zero_rows_of(const fb::CudfAggregate* agg) {
 }
 
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
-  auto input = was_handed_nothing(in) ? zero_rows_of(agg) : take_input(in);
+  // Only an init's done call is handed nothing; a merge so handed still refuses.
+  bool done_call = was_handed_nothing(in) && agg->mode() == fb::AggregateMode_Partial;
+  auto input = done_call ? zero_rows_of(agg) : take_input(in);
   auto tv = input.view();
 
   bool is_final = (agg->mode() == fb::AggregateMode_Final ||

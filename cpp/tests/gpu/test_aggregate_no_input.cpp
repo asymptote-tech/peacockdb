@@ -71,9 +71,10 @@ flatbuffers::Offset<fb::AggregateFuncNode> func_over(flatbuffers::FlatBufferBuil
 }
 
 /// count(*), sum(v), sum(amount), min(day) and max(v) over `declared_input`, keyed on `k`
-/// where `grouped`, as the init a done call addresses: Partial mode, seq 1 above the scan.
+/// where `grouped`, as the init a done call addresses: `mode` Partial, seq 1 above the scan.
 /// `count(*)` is `count(1)`, as the planner writes it (`recipe-payloads.txt`).
-std::vector<uint8_t> unfed_aggregate(flatbuffers::FlatBufferBuilder& fbb, bool grouped) {
+std::vector<uint8_t> unfed_aggregate(flatbuffers::FlatBufferBuilder& fbb, bool grouped,
+                                     fb::AggregateMode mode = fb::AggregateMode_Partial) {
   auto scan = unread_scan(fbb);
   std::vector<flatbuffers::Offset<fb::AggregateFuncNode>> funcs{
       func_over(fbb, "count", int64_literal(fbb, 1), "n"),
@@ -92,7 +93,7 @@ std::vector<uint8_t> unfed_aggregate(flatbuffers::FlatBufferBuilder& fbb, bool g
         std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("k")});
   }
   fb::CudfAggregateBuilder builder(fbb);
-  builder.add_mode(fb::AggregateMode_Partial);
+  builder.add_mode(mode);
   if (grouped) {
     builder.add_group_exprs(groups);
     builder.add_group_names(names);
@@ -161,6 +162,19 @@ TEST(AggregateNoInput, AnyOtherNodeHandedNothingStillRefuses) {
   try {
     call_with_nothing(session, /*seq=*/1);
     FAIL() << "a filter handed no input answered";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("not enough input handles"), std::string::npos)
+        << e.what();
+  }
+}
+
+TEST(AggregateNoInput, AMergeHandedNothingStillRefuses) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto buf = unfed_aggregate(fbb, /*grouped=*/false, fb::AggregateMode_Merge);
+  peacock::NodeSession session(buf.data(), buf.size());
+  try {
+    call_with_nothing(session, /*seq=*/1);
+    FAIL() << "a merge handed no input answered";
   } catch (const std::runtime_error& e) {
     EXPECT_NE(std::string(e.what()).find("not enough input handles"), std::string::npos)
         << e.what();

@@ -130,3 +130,59 @@ fn an_init_that_finalizes_itself_carries_the_finalize_in_a_project_of_its_own() 
     assert_eq!(recipe.calls[2].inputs, Vec::<Input>::new());
     assert_eq!(recipe.calls[3].inputs, vec![Input::PriorOutput]);
 }
+
+/// The keyless shortcut: `sum(n)` finalized on the init itself, with no key — the node that
+/// owes its identity row finalized.
+fn finalizing_keyless_init() -> GpuAggregate {
+    GpuAggregate::new(
+        Given::input(BatchLayout::SingleBatch, &["k", "n"]),
+        AggregateBody {
+            group_by: Vec::new(),
+            grouping_sets: Vec::new(),
+            null_exprs: Vec::new(),
+            aggs: vec![AggCall {
+                func: PlanAgg::Sum,
+                args: vec![Expr::column(1, "n")],
+                outputs: vec![Field::new("sum(n)", DataType::Int64, true)],
+            }],
+            finalize: Some(vec![NamedExpr::new(Expr::column(0, "sum(n)"), "sum(n)")]),
+        },
+        columns_of(&["sum(n)"]),
+        columns_of(&["sum(n)"]),
+    )
+}
+
+/// The grouped shortcut's four calls, keyless: what the done pair answers over nothing is the
+/// engine's, so the recipe is the same whatever the keys.
+#[test]
+fn a_keyless_init_that_finalizes_itself_calls_the_pair_again_at_done() {
+    let recipe = aggregate(
+        &finalizing_keyless_init(),
+        &[&columns_of(&["k", "n"])],
+        &mut writer(),
+    )
+    .expect("the aggregate's payloads are writable")
+    .expect("an aggregate drives the ABI");
+    assert_eq!(
+        shape(&recipe),
+        vec![
+            (FbKind::Aggregate { merge: false }, CallPattern::PerBatch),
+            (
+                FbKind::Project(ProjectRole::Finalize),
+                CallPattern::PerBatch
+            ),
+            (
+                FbKind::Aggregate { merge: false },
+                CallPattern::AtDoneIfNothingOut
+            ),
+            (
+                FbKind::Project(ProjectRole::Finalize),
+                CallPattern::AtDoneIfNothingOut
+            ),
+        ]
+    );
+    assert_eq!(recipe.calls[2].target, recipe.calls[0].target);
+    assert_eq!(recipe.calls[3].target, recipe.calls[1].target);
+    assert_eq!(recipe.calls[2].inputs, Vec::<Input>::new());
+    assert_eq!(recipe.calls[3].inputs, vec![Input::PriorOutput]);
+}

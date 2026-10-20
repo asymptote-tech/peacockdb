@@ -1,9 +1,10 @@
 //! The accumulators on a device: what each one holds between calls, and which of its
 //! recipe's calls it makes when.
 //!
-//! Holding is the whole difference from an exec node. A handle an FFI call consumes is
-//! gone by move, and one this executor is sitting on is a `GpuBatch` — so a lane the
-//! driver abandons releases what it held rather than leaking it.
+//! Most of them hold a lane's batches, which is the difference from an exec node; an
+//! aggregate's init holds a flag and the limit nothing. A handle an FFI call consumes is gone
+//! by move, and one this executor is sitting on is a `GpuBatch` — so a lane the driver
+//! abandons releases what it held rather than leaking it.
 //!
 //! One type with a variant per node, since a backend names one type for the category.
 
@@ -126,6 +127,41 @@ impl GpuAccumulator {
 
     /// No seq at all: a limit's bounds are runtime values, so it addresses the slice
     /// symbol rather than a node.
+    /// An aggregate's init: its calls per batch, and the same calls at done if nothing went
+    /// out, the first handed nothing. Anything else is a recipe this executor would drive at
+    /// the wrong moment.
+    pub(crate) fn aggregate_init(
+        site: CallSite,
+        recipe: &Recipe,
+        state: &ArrowSchema,
+        output: &ArrowSchema,
+    ) -> Result<Self, PlanError> {
+        let per_batch = recipe.calls_under(CallPattern::PerBatch);
+        let at_done = recipe.calls_under(CallPattern::AtDoneIfNothingOut);
+        let mirrors = per_batch.calls.len() + at_done.calls.len() == recipe.calls.len()
+            && per_batch.calls.len() == at_done.calls.len()
+            && per_batch.calls.iter().zip(&at_done.calls).enumerate().all(
+                |(position, (call, done))| {
+                    let handed = match position {
+                        0 => Vec::new(),
+                        _ => vec![Input::PriorOutput],
+                    };
+                    done.target == call.target && done.inputs == handed
+                },
+            );
+        if !mirrors {
+            return Err(shape(
+                "an init makes its calls per batch, and the same calls at done if nothing \
+                 went out, the first handed nothing",
+                recipe,
+            ));
+        }
+        Ok(Self::of(State::Init(AggregateInit {
+            chain: GpuExec::new(site, &per_batch, Some(state), output)?,
+            emitted: false,
+        })))
+    }
+
     pub(crate) fn limit(
         site: CallSite,
         recipe: &Recipe,
@@ -176,43 +212,6 @@ impl GpuAccumulator {
 /// The seq a call addresses, once the call is what this node's recipe should hold. A
 /// recipe that names a different pattern or a different input is one this executor would
 /// drive at the wrong moment, which is a wrong answer rather than a failed call.
-impl GpuAccumulator {
-    /// An aggregate's init: its calls per batch, and the same calls at done if nothing went
-    /// out, the first handed nothing. Anything else is a recipe this executor would drive at
-    /// the wrong moment.
-    pub(crate) fn aggregate_init(
-        site: CallSite,
-        recipe: &Recipe,
-        state: &ArrowSchema,
-        output: &ArrowSchema,
-    ) -> Result<Self, PlanError> {
-        let per_batch = recipe.calls_under(CallPattern::PerBatch);
-        let at_done = recipe.calls_under(CallPattern::AtDoneIfNothingOut);
-        let mirrors = per_batch.calls.len() + at_done.calls.len() == recipe.calls.len()
-            && per_batch.calls.len() == at_done.calls.len()
-            && per_batch.calls.iter().zip(&at_done.calls).enumerate().all(
-                |(position, (call, done))| {
-                    let handed = match position {
-                        0 => Vec::new(),
-                        _ => vec![Input::PriorOutput],
-                    };
-                    done.target == call.target && done.inputs == handed
-                },
-            );
-        if !mirrors {
-            return Err(shape(
-                "an init makes its calls per batch, and the same calls at done if nothing \
-                 went out, the first handed nothing",
-                recipe,
-            ));
-        }
-        Ok(Self::of(State::Init(AggregateInit {
-            chain: GpuExec::new(site, &per_batch, Some(state), output)?,
-            emitted: false,
-        })))
-    }
-}
-
 fn addressed(call: &Call, when: CallPattern, input: Input) -> Result<(Seq, FbKind), PlanError> {
     if call.when != when || call.inputs.as_slice() != [input] {
         return Err(PlanError::Invalid(format!(

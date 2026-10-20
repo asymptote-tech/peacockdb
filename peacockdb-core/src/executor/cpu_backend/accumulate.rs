@@ -1,5 +1,6 @@
-//! The accumulators: the nodes that hold a lane's batches back, and the mid-plan limit,
-//! which is one by category and holds nothing at all.
+//! The accumulators: the nodes that hold a lane's batches back, and two that are accumulators
+//! by category alone — the mid-plan limit, which holds nothing, and an aggregate's init,
+//! which holds a flag.
 //!
 //! One type with a variant per behaviour, because a backend names one type for the
 //! category and what these five do differs completely. The variant is what a call site

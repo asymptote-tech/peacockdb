@@ -142,3 +142,45 @@ df-upgrade. Nits, developer: zero-row handles in the walk, a `mirrors` refusal c
 pin, two over-long lines. For the human: `empty_state` is production code only tests call
 (`#[allow(dead_code)]`), as the spec placed it; coding-style would make it `#[cfg(test)]`. #214
 names no wrong row now and may be stale. nebius-gpu started 00:01Z; developer resumed.
+
+### 2026-10-20 — developer, review round 1 addressed (on 74a24ba4)
+
+- **Item 1:** `GpuAccumulator::aggregate_init` moved into the first `impl GpuAccumulator`, after
+  `aggregate`; `addressed` has its doc back.
+- **Item 2:** the walk records `done_rows` (each done chain's answered rows) in place of a count
+  of input-less calls. The empty-lane walk asserts `[1]`; a new walk,
+  `a_keyless_count_over_a_scan_of_nothing_answers_its_identity_row` (`select count(*) … where
+  n_nationkey < 0`, one lane `[[]]`), joins `PROVEN`'s query list. Shown red on the device twice,
+  each a deliberately broken `aggregate.cpp` shipped as a whole file over ssh, then restored:
+  break B (a done call answering the input's zero-row table) failed both walks (`done_rows` `[0]`
+  against `[1]`; "the walk exported no rows"); break A (a count over nothing answering NULL) left
+  the empty-lane walk green — the merge's sum of 25 and NULL is 25 — and failed the
+  scan-of-nothing walk ("first difference at sorted row 0").
+- **Item 5:** the walk skips a zero-row handle at the init, as both executors do; scan handles now
+  record their rows too (`Session::scan` answers rows beside the handle).
+- **Item 6:** `an_init_whose_recipe_lacks_its_done_calls_is_refused` (device). Red with the
+  `mirrors` refusal disabled (red build 2), green restored.
+- **Item 7:** the no-input path is gated on `AggregateMode_Partial`.
+  `AggregateNoInput.AMergeHandedNothingStillRefuses` red without the gate (red build 1), green with.
+- **Item 9:** the seven stale comments reworded. **Item 11:**
+  `a_keyless_init_that_finalizes_itself_calls_the_pair_again_at_done` pins the keyless four-call
+  recipe (red with the done calls dropped from `attach.rs`, restored); `backend.rs`'s doc and the
+  corpus batch-12 comment rewrapped. `empty_state`'s `#[allow(dead_code)]` left as placed.
+
+**Runs.** Local: `--lib` 836 passed, 2 ignored; `test_cpu_corpus` 2190; `test_corpus_goldens` 28;
+`test_cost_model` 3; `test_ci_coverage` 11; `test_module_layout` 18; `test_golden_format` 43;
+`cost-report` 41; build warnings 0 (rust-only and gpu lib); `ctest -L cpu` 1/1. Cost diff
+unchanged: 7 regressions, 0 over 10%. Device: one sync (VM gpu-result matched local), three
+builds — red 1, red 2, green — each source swapped by a whole file over ssh and touched. Green
+targeted: `AggregateNoInput.*` 4/4, the init and walk set 19/19.
+Green L40S list (`gpu-host-test.sh run`): `ALL rc=0` — peacock_plan_tests 95, peacock_join_session_tests
+53, peacock_gpu_tests 2, peacock_cpu_tests 12, peacockdb_core_gpu_lib `gpu_tests::` 725,
+test_gpu_corpus 889, peacock_gpu_benchmarks 8 (3 `bench_` skipped), test_node_timing 1. No
+`gpu-result.txt` recorded this round (no cell changed). VM soft-stopped 00:34Z.
+
+### 2026-10-20 — round 1 closed; `completing`
+
+Developer fixed both code importants and every developer nit, each new test shown red on a broken
+build; L40S list green (plan 95, gpu lib 725, corpus 889). Coordinator: `build-test.md` counts
+(5387 / 4805 / 184; cpu 3059, `--lib` 838; gpu 1626; recipes 23; walk 28; executors 42;
+plan-executor 95) and the walk and executor prose. Completeness pass dispatched.

@@ -615,3 +615,20 @@ fn a_keyless_init_that_answered_rows_makes_no_done_call() {
     assert!(out.is_empty());
     assert_eq!(made(&stats).len(), 0);
 }
+
+/// An init built from a recipe without its done calls is refused rather than built: driven, it
+/// would answer nothing for a lane where nothing went out.
+#[test]
+fn an_init_whose_recipe_lacks_its_done_calls_is_refused() {
+    let (tree, state) = keyless_count_sum(source());
+    let session = Session::open(tree.as_ref());
+    let per_batch = session.recipe(1).calls_under(CallPattern::PerBatch);
+    let Err(refused) = GpuAccumulator::aggregate_init(session.site(), &per_batch, &state, &state)
+    else {
+        panic!("an init built from its per-batch calls alone");
+    };
+    assert!(
+        refused.to_string().contains("the same calls at done if nothing went out"),
+        "{refused}"
+    );
+}

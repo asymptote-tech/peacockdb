@@ -565,9 +565,9 @@ fn loader(t: &Translator, parquet: &ParquetExec) -> Result<Box<dyn GpuNode>, Pla
         scan.groups = covering_prefix(scan.groups, n as u64);
     }
     // #282: no survivor — every row group pruned, or a file with none — is one lane with no
-    // batch, and each node above answers what it owes over nothing. `partition` keeps refusing
-    // an empty list, which the wire reads as the whole file. The source's slot is still taken:
-    // the two passes address sources by their order.
+    // batch, and each node above answers what it owes over nothing. The mapping is never `[]`,
+    // which the validator refuses as no lanes. The source's slot is still taken: the two passes
+    // address sources by their order.
     let batching = batching_for_source(t);
     let partition_groups = match scan.groups.is_empty() {
         true => vec![Vec::new()],

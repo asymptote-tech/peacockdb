@@ -111,7 +111,7 @@ impl Session {
 
     /// One batch's worth of a scan: the row groups the mapping named for it, overriding
     /// the list the node carries.
-    fn scan(&self, seq: Seq, row_groups: &[u32]) -> u64 {
+    fn scan(&self, seq: Seq, row_groups: &[u32]) -> (u64, u64) {
         let mut handle = 0u64;
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
@@ -130,7 +130,7 @@ impl Session {
             "execute_scan_rowgroups(#{seq}, {row_groups:?}) failed: {}",
             self.last_error()
         );
-        handle
+        (handle, stats.rows)
     }
 
     /// One `execute_node`, its input handles grouped by the child slot each fills: each
@@ -293,8 +293,8 @@ struct Walk<'a> {
     on_call: &'a mut dyn FnMut(Seq, FbKind, &[u64], &Session),
     /// The rows in every handle a call answered, which is what an init's done call reads.
     rows: std::collections::HashMap<u64, u64>,
-    /// Calls handed no input at all: an init's done calls.
-    unfed: usize,
+    /// The rows each init's done chain answered, in the order the chains ran.
+    done_rows: Vec<u64>,
 }
 
 /// The hook that reads nothing.
@@ -357,9 +357,6 @@ impl Walk<'_> {
             FbKind::Repartition { lanes } => lanes as usize,
             _ => 1,
         };
-        if inputs.is_empty() {
-            self.unfed += 1;
-        }
         self.made.push((seq, kind));
         let answered = self.session.execute(seq, &inputs, out_cap);
         let handles: Vec<u64> = answered.iter().map(|(handle, _)| *handle).collect();
@@ -382,7 +379,9 @@ impl Walk<'_> {
             let mut batches = Vec::with_capacity(lane.len());
             for row_groups in lane {
                 self.made.push((seq, kind));
-                batches.push(self.session.scan(seq, row_groups));
+                let (handle, rows) = self.session.scan(seq, row_groups);
+                self.rows.insert(handle, rows);
+                batches.push(handle);
             }
             lanes.push(batches);
         }
@@ -601,8 +600,8 @@ fn route(node: &dyn GpuNode, kids: &[Lanes]) -> Lanes {
 struct Walked {
     batches: Vec<RecordBatch>,
     calls: Vec<(Seq, FbKind)>,
-    /// Calls handed no input: an init's done calls.
-    unfed: usize,
+    /// The rows each init's done chain answered, in the order the chains ran.
+    done_rows: Vec<u64>,
 }
 
 /// The calls in the order they were made, `#14 CudfAggregate{Merge}` each. Three of the
@@ -657,7 +656,7 @@ async fn walk_with(
         made: Vec::new(),
         on_call,
         rows: Default::default(),
-        unfed: 0,
+        done_rows: Vec::new(),
     };
     let left = walk.node(tree.as_ref());
     assert!(left.is_empty(), "the sink answered with resident handles");
@@ -671,7 +670,7 @@ async fn walk_with(
     Walked {
         batches: walk.exported,
         calls: walk.made,
-        unfed: walk.unfed,
+        done_rows: walk.done_rows,
     }
 }
 
@@ -1169,6 +1168,7 @@ async fn the_kinds_a_device_has_run_are_the_kinds_this_file_claims() {
         (DISTINCT_BESIDE_COMPANIONS, TWO_LANES),
         (aggregate_init::KEYLESS_OVER_AN_EMPTY_LANE, TWO_LANES),
         (aggregate_init::KEYLESS_SUM, TWO_LANES),
+        (aggregate_init::KEYLESS_OVER_A_SCAN_OF_NOTHING, TWO_LANES),
     ] {
         for (_, kind) in walk(sql, knobs).await.calls {
             if !made.contains(&kind) {

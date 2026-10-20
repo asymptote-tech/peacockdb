@@ -173,8 +173,9 @@ corpus_query!(tpcds, 1, q66, all_modes, all_modes, duckdb_divergent(251, 20, 21,
 corpus_query!(tpcds, 1, q76, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q16, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
-// T19 batch 12, by expected calls. q2 is off on the device on #60: every per-node section matches, and the answer differs in its
-// seven `round(…, 2)` columns while their row count and sums agree to the printed digit.
+// T19 batch 12, by expected calls. q2 is off on the device on #60: every per-node section
+// matches, and the answer differs in its seven `round(…, 2)` columns while their row count and
+// sums agree to the printed digit.
 corpus_query!(tpcds, 1, q25, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q29, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q90, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);

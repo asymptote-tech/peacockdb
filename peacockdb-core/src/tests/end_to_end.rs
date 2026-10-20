@@ -567,7 +567,7 @@ async fn a_two_key_group_by_over_many_rows_does_not_emit_a_group_twice() {
 
 /// An aggregate on the side of a full outer join, over an input no row survives: its init
 /// emits nothing, so the join meets lanes with no build batch, and still owes every nation
-/// padded. A shape where the init's zero-row batch used to be what the join read.
+/// padded.
 #[tokio::test]
 async fn an_outer_join_over_an_aggregate_of_nothing_answers_as_datafusion() {
     let sql = "SELECT n_name, c.cnt FROM (SELECT c_nationkey, count(*) AS cnt FROM customer \
