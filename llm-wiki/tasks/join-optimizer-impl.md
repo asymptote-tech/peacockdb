@@ -376,7 +376,8 @@ detail file.
 
 - [x] One full `run.py`, the cardinality golden, the corpus answer suites at every mode.
 - [x] Every moved ratio against the outputs before the rebase, each move explained.
-- [ ] Proving: CI green on the PR, its GPU job aside; the published report's links resolve.
+- [x] Proving: CI green on the PR, its GPU job aside.
+- [ ] The published report's links resolve.
 
 ### Task 24: the branch on master's ticket labels
 

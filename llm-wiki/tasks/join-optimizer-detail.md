@@ -33,8 +33,10 @@ fixes #236 and #237):
 
 ## Known state
 
-- The task is completing: its signoff is in the spec, and CI on the PR, a pipeline dispatch and an
-  `exec-model-corpus.yml` dispatch are pending after the push.
+- The task is done: its signoff is in the spec, and at `2a52e84a` CI is green on the PR (run
+  `39499656613`), on a pipeline dispatch with the GPU job (`39499648631`, the twenty #288 cells
+  among them) and on `exec-model-corpus.yml` (`39499655339`: three corpus shards and the per-call
+  model on the record S3 holds). The published report's links wait for the merge.
 - Task 19: the branch is five commits on master (`8e0a7d40`), each green on rust-only, the
   cost-report crate and the cheap tier; NULL equality is the plan's flag alone, and the plan reader
   takes master's `GpuEmpty`, `Int8` and scans of no column (Task 19 below).

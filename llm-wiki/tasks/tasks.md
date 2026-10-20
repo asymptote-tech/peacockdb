@@ -134,7 +134,7 @@ Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global
 
 ## Chain C (base: master)
 
-### 1. [`join-optimizer.md`](join-optimizer.md) — state: completing — PR #165
+### 1. [`join-optimizer.md`](join-optimizer.md) — state: done — PR #165
 
 The prototype's join-order optimizer, finished: the engine's plans only, one folder per
 component, one stats sidecar for both embedding modes, `run.py` with its goldens,
