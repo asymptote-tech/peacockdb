@@ -5519,6 +5519,31 @@ cudf=25.02
 | false | 9412 |
 | true  | 9411 |
 +-------+------+
+== cross-empty-build mode=tp1-single
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
+== cross-empty-build mode=tp1-rowgroup
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
+== cross-empty-build mode=tp4-single
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
+== cross-empty-build mode=tp4-rowgroup
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
+== cross-empty-build mode=tp4-sized
++------+------+
+| t_id | t_id |
++------+------+
++------+------+
 == cross-projection mode=tp1-single
 fingerprint: rows=160000
 col 0: nonnull=160000
@@ -8624,6 +8649,121 @@ hash: f98c17d4ae8d950a93a35b1aaef34989decb8398a500665871eda9dcf7cdd754
 | 98765431209840.0080  | 66  |
 | 99999999099963.0081  | 67  |
 +----------------------+-----+
+== empty-all-null-aggregates mode=tp1-single
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-all-null-aggregates mode=tp1-rowgroup
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-all-null-aggregates mode=tp4-single
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-all-null-aggregates mode=tp4-rowgroup
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-all-null-aggregates mode=tp4-sized
++---+----+----+
+| s | lo | hi |
++---+----+----+
+|   |    |    |
++---+----+----+
+== empty-count-aggregates mode=tp1-single
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-count-aggregates mode=tp1-rowgroup
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-count-aggregates mode=tp4-single
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-count-aggregates mode=tp4-rowgroup
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-count-aggregates mode=tp4-sized
++---+----+---+---+
+| n | nv | s | a |
++---+----+---+---+
+| 0 | 0  |   |   |
++---+----+---+---+
+== empty-grouped-count mode=tp1-single
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-grouped-count mode=tp1-rowgroup
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-grouped-count mode=tp4-single
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-grouped-count mode=tp4-rowgroup
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-grouped-count mode=tp4-sized
++-----+---+
+| t_k | n |
++-----+---+
++-----+---+
+== empty-pruned-count mode=tp1-single
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
+== empty-pruned-count mode=tp1-rowgroup
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
+== empty-pruned-count mode=tp4-single
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
+== empty-pruned-count mode=tp4-rowgroup
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
+== empty-pruned-count mode=tp4-sized
++---+----+
+| n | lo |
++---+----+
+| 0 |    |
++---+----+
 == empty-side-left-join mode=tp1-single
 +------+------+
 | t_id | d_id |
@@ -8689,6 +8829,36 @@ hash: f98c17d4ae8d950a93a35b1aaef34989decb8398a500665871eda9dcf7cdd754
 | 6    |      |
 | 7    |      |
 +------+------+
+== empty-table-count mode=tp1-single
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
+== empty-table-count mode=tp1-rowgroup
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
+== empty-table-count mode=tp4-single
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
+== empty-table-count mode=tp4-rowgroup
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
+== empty-table-count mode=tp4-sized
++---+---+
+| n | s |
++---+---+
+| 0 |   |
++---+---+
 == exists-null-keys mode=tp1-single
 +------+
 | d_id |
@@ -381939,6 +382109,71 @@ hash: 43c9395301d8e280c33d5fca37e137ea3988a2848a7ceb5cff2c2fd0b23ebe68
 | 9988  |
 | 9991  |
 +-------+
+== outer-on-true-empty mode=tp1-single
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
+== outer-on-true-empty mode=tp1-rowgroup
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
+== outer-on-true-empty mode=tp4-single
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
+== outer-on-true-empty mode=tp4-rowgroup
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
+== outer-on-true-empty mode=tp4-sized
++------+------+
+| t_id | e_id |
++------+------+
+| 0    |      |
+| 1    |      |
+| 2    |      |
+| 3    |      |
+| 4    |      |
+| 5    |      |
+| 6    |      |
+| 7    |      |
++------+------+
 == probe-exists-residual mode=tp1-single
 +-------+
 | f_id  |
@@ -485081,6 +485316,24 @@ hash: be6f144534b47a0b8d991ab746ce20de2222370e5a3555b807fc8b97eec735b9
 | 48.550000 | 2000 |
 +-----------+------+
 == scalar-subquery-cross mode=tp1-rowgroup
++-----------+------+
+| b1        | b2   |
++-----------+------+
+| 48.550000 | 2000 |
++-----------+------+
+== scalar-subquery-cross mode=tp4-single
++-----------+------+
+| b1        | b2   |
++-----------+------+
+| 48.550000 | 2000 |
++-----------+------+
+== scalar-subquery-cross mode=tp4-rowgroup
++-----------+------+
+| b1        | b2   |
++-----------+------+
+| 48.550000 | 2000 |
++-----------+------+
+== scalar-subquery-cross mode=tp4-sized
 +-----------+------+
 | b1        | b2   |
 +-----------+------+

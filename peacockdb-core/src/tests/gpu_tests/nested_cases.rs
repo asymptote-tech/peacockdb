@@ -512,7 +512,7 @@ operator_case! {
     }
 }
 
-// pbench's `outer-on-true-empty`, once its empty side plans (#282): no build batch at all.
+// pbench's `outer-on-true-empty`, whose empty side scans no row group: no build batch at all.
 operator_case! {
     GpuNestedLoopJoin,
     fn a_predicate_free_right_nested_loop_with_no_build_batch_pads_every_probe_row() {

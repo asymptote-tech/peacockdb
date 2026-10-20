@@ -39,6 +39,8 @@ use crate::test_support::{
 // already renders.
 use crate::planner::SMALL_TABLE_BYTES;
 
+mod aggregate_init;
+
 /// Everything but the aggregates: one lane and one batch, which makes every recipe a
 /// single call per node and the walk a straight line.
 const ONE_LANE: PlanKnobs = PlanKnobs {
@@ -109,7 +111,7 @@ impl Session {
 
     /// One batch's worth of a scan: the row groups the mapping named for it, overriding
     /// the list the node carries.
-    fn scan(&self, seq: Seq, row_groups: &[u32]) -> u64 {
+    fn scan(&self, seq: Seq, row_groups: &[u32]) -> (u64, u64) {
         let mut handle = 0u64;
         let mut stats = PeacockNodeStats::default();
         let rc = unsafe {
@@ -128,11 +130,12 @@ impl Session {
             "execute_scan_rowgroups(#{seq}, {row_groups:?}) failed: {}",
             self.last_error()
         );
-        handle
+        (handle, stats.rows)
     }
 
-    /// One `execute_node`, its input handles grouped by the child slot each fills.
-    fn execute(&self, seq: Seq, inputs: &[Vec<u64>], out_cap: usize) -> Vec<u64> {
+    /// One `execute_node`, its input handles grouped by the child slot each fills: each
+    /// handle it answered, beside the rows in it.
+    fn execute(&self, seq: Seq, inputs: &[Vec<u64>], out_cap: usize) -> Vec<(u64, u64)> {
         let counts: Vec<u64> = inputs.iter().map(|group| group.len() as u64).collect();
         let flat: Vec<u64> = inputs.concat();
         let mut handles = vec![0u64; out_cap];
@@ -157,8 +160,12 @@ impl Session {
             "execute_node(#{seq}, {counts:?} handles) failed: {}",
             self.last_error()
         );
-        handles.truncate(produced as usize);
         handles
+            .into_iter()
+            .zip(stats)
+            .take(produced as usize)
+            .map(|(handle, stats)| (handle, stats.rows))
+            .collect()
     }
 
     /// A join session's build, over `build` or over nothing (0): the session's id.
@@ -284,6 +291,10 @@ struct Walk<'a> {
     /// Told every call `make` made and the handles it answered, while they are resident and
     /// before the next call consumes them — the one moment an intermediate can be read.
     on_call: &'a mut dyn FnMut(Seq, FbKind, &[u64], &Session),
+    /// The rows in every handle a call answered, which is what an init's done call reads.
+    rows: std::collections::HashMap<u64, u64>,
+    /// The rows each init's done chain answered, in the order the chains ran.
+    done_rows: Vec<u64>,
 }
 
 /// The hook that reads nothing.
@@ -308,6 +319,10 @@ impl Walk<'_> {
             .recipes
             .get(index)
             .unwrap_or_else(|| panic!("{} makes ABI calls and carries no recipe", node.name()));
+        // An aggregate's init, whichever category drives it: `aggregate_init.rs`.
+        if let NodeRef::Aggregate(_) = as_node_ref(node) {
+            return self.aggregate_init(node, recipe, &kids[0]);
+        }
         match category {
             ExecutorCategory::Source => self.source(node, recipe),
             ExecutorCategory::Exec => self.per_batch(node, recipe, &kids[0]),
@@ -343,7 +358,9 @@ impl Walk<'_> {
             _ => 1,
         };
         self.made.push((seq, kind));
-        let handles = self.session.execute(seq, &inputs, out_cap);
+        let answered = self.session.execute(seq, &inputs, out_cap);
+        let handles: Vec<u64> = answered.iter().map(|(handle, _)| *handle).collect();
+        self.rows.extend(answered);
         (self.on_call)(seq, kind, &handles, self.session);
         handles
     }
@@ -362,7 +379,9 @@ impl Walk<'_> {
             let mut batches = Vec::with_capacity(lane.len());
             for row_groups in lane {
                 self.made.push((seq, kind));
-                batches.push(self.session.scan(seq, row_groups));
+                let (handle, rows) = self.session.scan(seq, row_groups);
+                self.rows.insert(handle, rows);
+                batches.push(handle);
             }
             lanes.push(batches);
         }
@@ -444,7 +463,8 @@ impl Walk<'_> {
                 held.push(only(self.chain(&streamed, &mut at), node.name()));
             }
             // A lane that got no batch makes no call at done and emits nothing, as every
-            // device accumulator does: a collapse of no handles is refused.
+            // device accumulator but an aggregate's init does (`aggregate_init.rs`): a
+            // collapse of no handles is refused.
             if held.is_empty() {
                 lanes.push(Vec::new());
                 continue;
@@ -538,7 +558,8 @@ impl Walk<'_> {
 
 /// A recipe's calls split into the two phases a walk drives: what runs as batches arrive,
 /// and what runs once the lane is complete. A compaction runs exactly what done runs, so
-/// at one batch per lane the two are the same call.
+/// at one batch per lane the two are the same call. `AtDoneIfNothingOut` is on the done
+/// side, which the init's walk runs only where nothing went out.
 fn phases(recipe: &Recipe) -> (Vec<&Call>, Vec<&Call>) {
     recipe.calls.iter().partition(|call| {
         matches!(
@@ -579,6 +600,8 @@ fn route(node: &dyn GpuNode, kids: &[Lanes]) -> Lanes {
 struct Walked {
     batches: Vec<RecordBatch>,
     calls: Vec<(Seq, FbKind)>,
+    /// The rows each init's done chain answered, in the order the chains ran.
+    done_rows: Vec<u64>,
 }
 
 /// The calls in the order they were made, `#14 CudfAggregate{Merge}` each. Three of the
@@ -632,6 +655,8 @@ async fn walk_with(
         exported: Vec::new(),
         made: Vec::new(),
         on_call,
+        rows: Default::default(),
+        done_rows: Vec::new(),
     };
     let left = walk.node(tree.as_ref());
     assert!(left.is_empty(), "the sink answered with resident handles");
@@ -645,20 +670,23 @@ async fn walk_with(
     Walked {
         batches: walk.exported,
         calls: walk.made,
+        done_rows: walk.done_rows,
     }
 }
 
 /// The walk's answer against DataFusion's on the same SQL, compared as sorted multisets
 /// since a GPU join's output order is not deterministic. Returns the calls it made.
 async fn assert_walk_matches_datafusion(sql: &str, knobs: PlanKnobs) -> Vec<(Seq, FbKind)> {
-    assert_walk_matches_datafusion_with(sql, knobs, &mut no_hook).await
+    assert_walk_matches_datafusion_with(sql, knobs, &mut no_hook)
+        .await
+        .calls
 }
 
 async fn assert_walk_matches_datafusion_with(
     sql: &str,
     knobs: PlanKnobs,
     on_call: &mut dyn FnMut(Seq, FbKind, &[u64], &Session),
-) -> Vec<(Seq, FbKind)> {
+) -> Walked {
     let walked = walk_with(sql, knobs, on_call).await;
     // An exact compare of two empty results holds having compared nothing, so a query whose
     // predicate selected none would prove only that the walk did not crash.
@@ -683,7 +711,7 @@ async fn assert_walk_matches_datafusion_with(
             trail(&walked.calls)
         ),
     );
-    walked.calls
+    walked
 }
 
 fn times(calls: &[(Seq, FbKind)], kind: FbKind) -> usize {
@@ -1138,6 +1166,9 @@ async fn the_kinds_a_device_has_run_are_the_kinds_this_file_claims() {
         (ROLLUP_GROUPING, TWO_LANES),
         (SUM_OF_QUOTIENTS, TWO_LANES),
         (DISTINCT_BESIDE_COMPANIONS, TWO_LANES),
+        (aggregate_init::KEYLESS_OVER_AN_EMPTY_LANE, TWO_LANES),
+        (aggregate_init::KEYLESS_SUM, TWO_LANES),
+        (aggregate_init::KEYLESS_OVER_A_SCAN_OF_NOTHING, TWO_LANES),
     ] {
         for (_, kind) in walk(sql, knobs).await.calls {
             if !made.contains(&kind) {

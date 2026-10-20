@@ -388,6 +388,24 @@ fn an_aggregators_argument_reading_another_column_is_caught_at_plan_time() {
     );
 }
 
+/// An aggregate's init holds one flag and calls at done where nothing went out, so it is a
+/// batch accumulator, as the limit — which streams and holds nothing — already is. One node,
+/// one category, keyed or keyless.
+#[test]
+fn an_aggregate_init_is_a_batch_accumulator() {
+    for group_by in [vec![Expr::column(0, "k")], Vec::new()] {
+        let input = Given::input(one_lane(BatchLayout::MultipleBatches), &["k", "n"]);
+        let state = columns(&["k", "n"]);
+        let node = GpuAggregate::new(
+            input,
+            summing(group_by, vec![Expr::column(1, "n")], None),
+            state.clone(),
+            state,
+        );
+        assert_eq!(category_of(&node), ExecutorCategory::BatchAccumulator);
+    }
+}
+
 #[test]
 fn a_hash_key_past_the_scattered_columns_is_caught_at_plan_time() {
     let input = Given::input(one_lane(BatchLayout::MultipleBatches), &["k"]);

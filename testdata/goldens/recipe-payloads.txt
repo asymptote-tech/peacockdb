@@ -93,7 +93,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#14 CudfCoalescePartitions, lane batches)
                 #14 CudfCoalescePartitions
               GpuMergePartitions: none
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#13 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#13 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#13 CudfAggregate{Partial})
                     #13 CudfAggregate{Partial}
                       mode: Partial
                       group_by: c_count@0
@@ -110,7 +110,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         #11 CudfProject{finalize}
                           c_custkey: c_custkey@0
                           count(orders.o_orderkey): count(orders.o_orderkey)@1
-                      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch)
+                      GpuAggregate: calling_lanes=4, per batch: execute_node(#8 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#8 CudfAggregate{Partial})
                           #8 CudfAggregate{Partial}
                             mode: Partial
                             group_by: c_custkey@0
@@ -201,7 +201,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       #8 CudfProject{finalize}
                         l_suppkey: l_suppkey@0
                         sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)@1
-                    GpuAggregate: calling_lanes=1, per batch: execute_node(#5 CudfAggregate{Partial}, batch)
+                    GpuAggregate: calling_lanes=1, per batch: execute_node(#5 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#5 CudfAggregate{Partial})
                         #5 CudfAggregate{Partial}
                           mode: Partial
                           group_by: l_suppkey@0
@@ -221,7 +221,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           GpuFilter: calling_lanes=1, per batch: execute_node(#24 CudfFilter, batch)
               #24 CudfFilter
                 predicate: IsNotNull(max(revenue0.total_revenue)@0)
-            GpuAggregate: calling_lanes=1, per batch: execute_node(#22 CudfAggregate{Partial}, batch), execute_node(#23 CudfProject{finalize}, prior output)
+            GpuAggregate: calling_lanes=1, per batch: execute_node(#22 CudfAggregate{Partial}, batch), execute_node(#23 CudfProject{finalize}, prior output); at done, if nothing went out: execute_node(#22 CudfAggregate{Partial}), execute_node(#23 CudfProject{finalize}, prior output)
                 #22 CudfAggregate{Partial}
                   mode: Partial
                   group_by: 
@@ -240,7 +240,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     #20 CudfProject{finalize}
                       l_suppkey: l_suppkey@0
                       sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount): sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)@1
-                  GpuAggregate: calling_lanes=1, per batch: execute_node(#17 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=1, per batch: execute_node(#17 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#17 CudfAggregate{Partial})
                       #17 CudfAggregate{Partial}
                         mode: Partial
                         group_by: l_suppkey@0
@@ -290,7 +290,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       mode: Merge
                       group_by: s_name@0
                       count(*): sum(count(*)@1)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#34 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#34 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#34 CudfAggregate{Partial})
                       #34 CudfAggregate{Partial}
                         mode: Partial
                         group_by: s_name@0
@@ -451,7 +451,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               cntrycode: cntrycode@0
               count(*): count(*)@1
               sum(custsale.c_acctbal): sum(custsale.c_acctbal)@2
-          GpuAggregate: calling_lanes=1, per batch: execute_node(#17 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=1, per batch: execute_node(#17 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#17 CudfAggregate{Partial})
               #17 CudfAggregate{Partial}
                 mode: Partial
                 group_by: cntrycode@0
@@ -478,7 +478,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       avg(customer.c_acctbal)$count: sum(avg(customer.c_acctbal)$count@1)
                     #5 CudfProject{finalize}
                       avg(customer.c_acctbal): cast((avg(customer.c_acctbal)$sum@0 Divide cast(avg(customer.c_acctbal)$count@1 as Decimal128(19, 0)))::Decimal128(19, 6) as Decimal128(19, 6))
-                  GpuAggregate: calling_lanes=1, per batch: execute_node(#2 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=1, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
                       #2 CudfAggregate{Partial}
                         mode: Partial
                         group_by: 
@@ -568,7 +568,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
                   var(lineitem.l_quantity): var(var(lineitem.l_quantity)$count@8, var(lineitem.l_quantity)$mean@9, var(lineitem.l_quantity)$m2@10)
                   var_pop(lineitem.l_quantity): var_pop(var_pop(lineitem.l_quantity)$count@11, var_pop(lineitem.l_quantity)$mean@12, var_pop(lineitem.l_quantity)$m2@13)
                   mergeable_agg_state: true
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                   #1 CudfAggregate{Partial}
                     mode: Partial
                     group_by: l_returnflag@1, l_linestatus@2
@@ -637,7 +637,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       mode: Merge
                       group_by: cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4, cd_dep_count@5, cd_dep_employed_count@6, cd_dep_college_count@7
                       count(*): sum(count(*)@8)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#59 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#59 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#59 CudfAggregate{Partial})
                       #59 CudfAggregate{Partial}
                         mode: Partial
                         group_by: cd_gender@0, cd_marital_status@1, cd_education_status@2, cd_purchase_estimate@3, cd_credit_rating@4, cd_dep_count@5, cd_dep_employed_count@6, cd_dep_college_count@7
@@ -886,7 +886,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               __grouping_id: __grouping_id@4
               sum(y.sales): sum(y.sales)@5
               sum(y.number_sales): sum(y.number_sales)@6
-          GpuAggregate: calling_lanes=1, per batch: execute_node(#442 CudfAggregate{Partial}, batch)
+          GpuAggregate: calling_lanes=1, per batch: execute_node(#442 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#442 CudfAggregate{Partial})
               #442 CudfAggregate{Partial}
                 mode: Partial
                 group_by: channel@0, i_brand_id@1, i_class_id@2, i_category_id@3
@@ -938,7 +938,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 group_by: 
                                 avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                                 avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
-                            GpuAggregate: calling_lanes=12, per batch: execute_node(#31 CudfAggregate{Partial}, batch)
+                            GpuAggregate: calling_lanes=12, per batch: execute_node(#31 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#31 CudfAggregate{Partial})
                                 #31 CudfAggregate{Partial}
                                   mode: Partial
                                   group_by: 
@@ -1083,7 +1083,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     group_by: i_brand_id@0, i_class_id@1, i_category_id@2
                                     sum(store_sales.ss_quantity * store_sales.ss_list_price): sum(sum(store_sales.ss_quantity * store_sales.ss_list_price)@3)
                                     count(*): sum(count(*)@4)
-                                GpuAggregate: calling_lanes=4, per batch: execute_node(#135 CudfAggregate{Partial}, batch)
+                                GpuAggregate: calling_lanes=4, per batch: execute_node(#135 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#135 CudfAggregate{Partial})
                                     #135 CudfAggregate{Partial}
                                       mode: Partial
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
@@ -1278,7 +1278,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     brand_id: brand_id@0
                                                     class_id: class_id@1
                                                     category_id: category_id@2
-                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#123 CudfAggregate{Partial}, batch)
+                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#123 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#123 CudfAggregate{Partial})
                                                     #123 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
@@ -1377,7 +1377,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 #115 CudfAggregate{Merge}
                                                                   mode: Merge
                                                                   group_by: brand_id@0, class_id@1, category_id@2
-                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#113 CudfAggregate{Partial}, batch)
+                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#113 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#113 CudfAggregate{Partial})
                                                                   #113 CudfAggregate{Partial}
                                                                     mode: Partial
                                                                     group_by: brand_id@0, class_id@1, category_id@2
@@ -1490,7 +1490,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 group_by: 
                                 avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                                 avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
-                            GpuAggregate: calling_lanes=12, per batch: execute_node(#178 CudfAggregate{Partial}, batch)
+                            GpuAggregate: calling_lanes=12, per batch: execute_node(#178 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#178 CudfAggregate{Partial})
                                 #178 CudfAggregate{Partial}
                                   mode: Partial
                                   group_by: 
@@ -1635,7 +1635,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     group_by: i_brand_id@0, i_class_id@1, i_category_id@2
                                     sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price): sum(sum(catalog_sales.cs_quantity * catalog_sales.cs_list_price)@3)
                                     count(*): sum(count(*)@4)
-                                GpuAggregate: calling_lanes=4, per batch: execute_node(#282 CudfAggregate{Partial}, batch)
+                                GpuAggregate: calling_lanes=4, per batch: execute_node(#282 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#282 CudfAggregate{Partial})
                                     #282 CudfAggregate{Partial}
                                       mode: Partial
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
@@ -1830,7 +1830,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     brand_id: brand_id@0
                                                     class_id: class_id@1
                                                     category_id: category_id@2
-                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#270 CudfAggregate{Partial}, batch)
+                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#270 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#270 CudfAggregate{Partial})
                                                     #270 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
@@ -1929,7 +1929,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 #262 CudfAggregate{Merge}
                                                                   mode: Merge
                                                                   group_by: brand_id@0, class_id@1, category_id@2
-                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#260 CudfAggregate{Partial}, batch)
+                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#260 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#260 CudfAggregate{Partial})
                                                                   #260 CudfAggregate{Partial}
                                                                     mode: Partial
                                                                     group_by: brand_id@0, class_id@1, category_id@2
@@ -2042,7 +2042,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 group_by: 
                                 avg(sq2.quantity * sq2.list_price)$sum: sum(avg(sq2.quantity * sq2.list_price)$sum@0)
                                 avg(sq2.quantity * sq2.list_price)$count: sum(avg(sq2.quantity * sq2.list_price)$count@1)
-                            GpuAggregate: calling_lanes=12, per batch: execute_node(#325 CudfAggregate{Partial}, batch)
+                            GpuAggregate: calling_lanes=12, per batch: execute_node(#325 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#325 CudfAggregate{Partial})
                                 #325 CudfAggregate{Partial}
                                   mode: Partial
                                   group_by: 
@@ -2187,7 +2187,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     group_by: i_brand_id@0, i_class_id@1, i_category_id@2
                                     sum(web_sales.ws_quantity * web_sales.ws_list_price): sum(sum(web_sales.ws_quantity * web_sales.ws_list_price)@3)
                                     count(*): sum(count(*)@4)
-                                GpuAggregate: calling_lanes=4, per batch: execute_node(#429 CudfAggregate{Partial}, batch)
+                                GpuAggregate: calling_lanes=4, per batch: execute_node(#429 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#429 CudfAggregate{Partial})
                                     #429 CudfAggregate{Partial}
                                       mode: Partial
                                       group_by: i_brand_id@2, i_class_id@3, i_category_id@4
@@ -2382,7 +2382,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                     brand_id: brand_id@0
                                                     class_id: class_id@1
                                                     category_id: category_id@2
-                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#417 CudfAggregate{Partial}, batch)
+                                                GpuAggregate: calling_lanes=4, per batch: execute_node(#417 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#417 CudfAggregate{Partial})
                                                     #417 CudfAggregate{Partial}
                                                       mode: Partial
                                                       group_by: brand_id@0, class_id@1, category_id@2
@@ -2481,7 +2481,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                 #409 CudfAggregate{Merge}
                                                                   mode: Merge
                                                                   group_by: brand_id@0, class_id@1, category_id@2
-                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#407 CudfAggregate{Partial}, batch)
+                                                              GpuAggregate: calling_lanes=4, per batch: execute_node(#407 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#407 CudfAggregate{Partial})
                                                                   #407 CudfAggregate{Partial}
                                                                     mode: Partial
                                                                     group_by: brand_id@0, class_id@1, category_id@2
@@ -2579,7 +2579,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               sum(alias2): sum(alias2)@1
               sum(alias3): sum(alias3)@2
           GpuMergePartitions: none
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#40 CudfAggregate{Partial}, batch)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#40 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#40 CudfAggregate{Partial})
                 #40 CudfAggregate{Partial}
                   mode: Partial
                   group_by: 
@@ -2597,7 +2597,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     alias1: alias1@0
                     alias2: alias2@1
                     alias3: alias3@2
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#36 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#36 CudfAggregate{Partial})
                     #36 CudfAggregate{Partial}
                       mode: Partial
                       group_by: cs_order_number@0
@@ -2836,7 +2836,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                         avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                                         avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
                                         mergeable_agg_state: true
-                                    GpuAggregate: calling_lanes=4, per batch: execute_node(#23 CudfAggregate{Partial}, batch)
+                                    GpuAggregate: calling_lanes=4, per batch: execute_node(#23 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#23 CudfAggregate{Partial})
                                         #23 CudfAggregate{Partial}
                                           mode: Partial
                                           group_by: w_warehouse_name@3, w_warehouse_sk@2, i_item_sk@1, d_moy@4
@@ -2994,7 +2994,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                                       avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
                                       mergeable_agg_state: true
-                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#60 CudfAggregate{Partial}, batch)
+                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#60 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#60 CudfAggregate{Partial})
                                       #60 CudfAggregate{Partial}
                                         mode: Partial
                                         group_by: w_warehouse_name@3, w_warehouse_sk@2, i_item_sk@1, d_moy@4
@@ -3139,7 +3139,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       group_by: w_state@0, i_item_id@1
                       sum(CASE WHEN date_dim.d_date < Utf8("2000-03-11") THEN catalog_sales.cs_sales_price - coalesce(catalog_returns.cr_refunded_cash,Int64(0)) ELSE Int64(0) END): sum(sum(CASE WHEN date_dim.d_date < Utf8("2000-03-11") THEN catalog_sales.cs_sales_price - coalesce(catalog_returns.cr_refunded_cash,Int64(0)) ELSE Int64(0) END)@2)
                       sum(CASE WHEN date_dim.d_date >= Utf8("2000-03-11") THEN catalog_sales.cs_sales_price - coalesce(catalog_returns.cr_refunded_cash,Int64(0)) ELSE Int64(0) END): sum(sum(CASE WHEN date_dim.d_date >= Utf8("2000-03-11") THEN catalog_sales.cs_sales_price - coalesce(catalog_returns.cr_refunded_cash,Int64(0)) ELSE Int64(0) END)@3)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#33 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#33 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#33 CudfAggregate{Partial})
                       #33 CudfAggregate{Partial}
                         mode: Partial
                         group_by: w_state@3, i_item_id@4
@@ -3296,7 +3296,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             group_by: i_product_name@0
           #18 CudfProject{finalize}
             i_product_name: i_product_name@0
-        GpuAggregate: calling_lanes=1, per batch: execute_node(#15 CudfAggregate{Partial}, batch)
+        GpuAggregate: calling_lanes=1, per batch: execute_node(#15 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#15 CudfAggregate{Partial})
             #15 CudfAggregate{Partial}
               mode: Partial
               group_by: i_product_name@0
@@ -3340,7 +3340,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     #10 CudfProject{finalize}
                       i_manufact: i_manufact@0
                       count(*): count(*)@1
-                  GpuAggregate: calling_lanes=1, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=1, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
                       #7 CudfAggregate{Partial}
                         mode: Partial
                         group_by: i_manufact@0
@@ -3395,7 +3395,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     mode: Merge
                     group_by: ca_zip@0, ca_city@1
                     sum(web_sales.ws_sales_price): sum(sum(web_sales.ws_sales_price)@2)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#39 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#39 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#39 CudfAggregate{Partial})
                     #39 CudfAggregate{Partial}
                       mode: Partial
                       group_by: ca_zip@2, ca_city@1
@@ -3591,7 +3591,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#101 CudfCoalescePartitions, lane batches)
                 #101 CudfCoalescePartitions
               GpuMergePartitions: none
-                GpuAggregate: calling_lanes=12, per batch: execute_node(#100 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=12, per batch: execute_node(#100 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#100 CudfAggregate{Partial})
                     #100 CudfAggregate{Partial}
                       mode: Partial
                       group_by: channel@0, id@1
@@ -3646,7 +3646,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       sum(salesreturns.profit): sum(sum(salesreturns.profit)@2)
                                       sum(salesreturns.return_amt): sum(sum(salesreturns.return_amt)@3)
                                       sum(salesreturns.net_loss): sum(sum(salesreturns.net_loss)@4)
-                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#21 CudfAggregate{Partial}, batch)
+                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#21 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#21 CudfAggregate{Partial})
                                       #21 CudfAggregate{Partial}
                                         mode: Partial
                                         group_by: s_store_id@4
@@ -3785,7 +3785,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       sum(salesreturns.profit): sum(sum(salesreturns.profit)@2)
                                       sum(salesreturns.return_amt): sum(sum(salesreturns.return_amt)@3)
                                       sum(salesreturns.net_loss): sum(sum(salesreturns.net_loss)@4)
-                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#52 CudfAggregate{Partial}, batch)
+                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#52 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#52 CudfAggregate{Partial})
                                       #52 CudfAggregate{Partial}
                                         mode: Partial
                                         group_by: cp_catalog_page_id@4
@@ -3924,7 +3924,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       sum(salesreturns.profit): sum(sum(salesreturns.profit)@2)
                                       sum(salesreturns.return_amt): sum(sum(salesreturns.return_amt)@3)
                                       sum(salesreturns.net_loss): sum(sum(salesreturns.net_loss)@4)
-                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#89 CudfAggregate{Partial}, batch)
+                                  GpuAggregate: calling_lanes=4, per batch: execute_node(#89 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#89 CudfAggregate{Partial})
                                       #89 CudfAggregate{Partial}
                                         mode: Partial
                                         group_by: web_site_id@4
@@ -4079,7 +4079,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       mode: Merge
                       group_by: 
                       sum(store_sales.ss_ext_sales_price): sum(sum(store_sales.ss_ext_sales_price)@0)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#46 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#46 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#46 CudfAggregate{Partial})
                       #46 CudfAggregate{Partial}
                         mode: Partial
                         group_by: 
@@ -4270,7 +4270,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                       mode: Merge
                       group_by: 
                       sum(store_sales.ss_ext_sales_price): sum(sum(store_sales.ss_ext_sales_price)@0)
-                  GpuAggregate: calling_lanes=4, per batch: execute_node(#91 CudfAggregate{Partial}, batch)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#91 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#91 CudfAggregate{Partial})
                       #91 CudfAggregate{Partial}
                         mode: Partial
                         group_by: 
@@ -4432,7 +4432,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
             mode: Merge
             group_by: 
             count(*): sum(count(*)@0)
-        GpuAggregate: calling_lanes=4, per batch: execute_node(#87 CudfAggregate{Partial}, batch)
+        GpuAggregate: calling_lanes=4, per batch: execute_node(#87 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#87 CudfAggregate{Partial})
             #87 CudfAggregate{Partial}
               mode: Partial
               group_by: 
@@ -4468,7 +4468,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                           #20 CudfAggregate{Merge}
                             mode: Merge
                             group_by: c_last_name@0, c_first_name@1, d_date@2
-                        GpuAggregate: calling_lanes=4, per batch: execute_node(#18 CudfAggregate{Partial}, batch)
+                        GpuAggregate: calling_lanes=4, per batch: execute_node(#18 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#18 CudfAggregate{Partial})
                             #18 CudfAggregate{Partial}
                               mode: Partial
                               group_by: c_last_name@0, c_first_name@1, d_date@2
@@ -4547,7 +4547,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     c_last_name: c_last_name@0
                     c_first_name: c_first_name@1
                     d_date: d_date@2
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#80 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#80 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#80 CudfAggregate{Partial})
                     #80 CudfAggregate{Partial}
                       mode: Partial
                       group_by: c_last_name@0, c_first_name@1, d_date@2
@@ -4579,7 +4579,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 #46 CudfAggregate{Merge}
                                   mode: Merge
                                   group_by: c_last_name@0, c_first_name@1, d_date@2
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#44 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#44 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#44 CudfAggregate{Partial})
                                   #44 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: c_last_name@0, c_first_name@1, d_date@2
@@ -4670,7 +4670,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 #72 CudfAggregate{Merge}
                                   mode: Merge
                                   group_by: c_last_name@0, c_first_name@1, d_date@2
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#70 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#70 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#70 CudfAggregate{Partial})
                                   #70 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: c_last_name@0, c_first_name@1, d_date@2
@@ -4789,7 +4789,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                         mode: Merge
                         group_by: cc_call_center_id@0, cc_name@1, cc_manager@2, cd_marital_status@3, cd_education_status@4
                         sum(catalog_returns.cr_net_loss): sum(sum(catalog_returns.cr_net_loss)@5)
-                    GpuAggregate: calling_lanes=4, per batch: execute_node(#45 CudfAggregate{Partial}, batch)
+                    GpuAggregate: calling_lanes=4, per batch: execute_node(#45 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#45 CudfAggregate{Partial})
                         #45 CudfAggregate{Partial}
                           mode: Partial
                           group_by: cc_call_center_id@0, cc_name@1, cc_manager@2, cd_marital_status@4, cd_education_status@5
@@ -4985,7 +4985,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
               sum(alias2): sum(alias2)@1
               sum(alias3): sum(alias3)@2
           GpuMergePartitions: none
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#55 CudfAggregate{Partial}, batch)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#55 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#55 CudfAggregate{Partial})
                 #55 CudfAggregate{Partial}
                   mode: Partial
                   group_by: 
@@ -5003,7 +5003,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                     alias1: alias1@0
                     alias2: alias2@1
                     alias3: alias3@2
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#51 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#51 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#51 CudfAggregate{Partial})
                     #51 CudfAggregate{Partial}
                       mode: Partial
                       group_by: ws_order_number@0
@@ -5222,7 +5222,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                 sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN Int64(1) ELSE Int64(0) END): sum(sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NULL THEN Int64(1) ELSE Int64(0) END)@0)
                 sum(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END): sum(sum(CASE WHEN ssci.customer_sk IS NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)@1)
                 sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END): sum(sum(CASE WHEN ssci.customer_sk IS NOT NULL AND csci.customer_sk IS NOT NULL THEN Int64(1) ELSE Int64(0) END)@2)
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#39 CudfAggregate{Partial}, batch)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#39 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#39 CudfAggregate{Partial})
                 #39 CudfAggregate{Partial}
                   mode: Partial
                   group_by: 
@@ -5265,7 +5265,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 #11 CudfAggregate{Merge}
                                   mode: Merge
                                   group_by: cs_bill_customer_sk@0, cs_item_sk@1
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#9 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#9 CudfAggregate{Partial})
                                   #9 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: cs_bill_customer_sk@0, cs_item_sk@1
@@ -5326,7 +5326,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 #29 CudfAggregate{Merge}
                                   mode: Merge
                                   group_by: ss_customer_sk@0, ss_item_sk@1
-                              GpuAggregate: calling_lanes=4, per batch: execute_node(#27 CudfAggregate{Partial}, batch)
+                              GpuAggregate: calling_lanes=4, per batch: execute_node(#27 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#27 CudfAggregate{Partial})
                                   #27 CudfAggregate{Partial}
                                     mode: Partial
                                     group_by: ss_customer_sk@1, ss_item_sk@0

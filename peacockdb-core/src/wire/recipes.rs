@@ -118,13 +118,14 @@ fn render_recipe_node(
         // Under the call it belongs to, indented past the tree, so a long payload reads
         // as this node's rather than as the next line of the plan.
         let indent = format!("{}    ", "  ".repeat(depth));
-        let mut previous = None;
+        let mut printed = std::collections::BTreeSet::new();
         for call in &recipe.calls {
             let Some((seq, kind)) = call.target else {
                 continue;
             };
-            // A session's three calls address one seq, and its payload is printed once.
-            if previous.replace(seq) == Some(seq) {
+            // A seq a recipe calls more than once — a session's three calls, an init's done
+            // calls — is one node, and its payload is printed once.
+            if !printed.insert(seq) {
                 continue;
             }
             let _ = writeln!(text, "{indent}#{seq} {kind}");
@@ -186,7 +187,11 @@ impl fmt::Display for Recipe {
         for call in &self.calls {
             let mut arguments: Vec<String> = Vec::new();
             if let Some((seq, kind)) = call.target {
-                if previous.replace(seq) != Some(seq) {
+                // A join session's later calls continue on the seq its build named; any
+                // other call naming a seq again is a call of its own and says which.
+                let continues_session = kind == FbKind::Join && previous == Some(seq);
+                previous = Some(seq);
+                if !continues_session {
                     arguments.push(format!("#{seq} {kind}"));
                 }
             }

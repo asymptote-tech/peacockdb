@@ -50,7 +50,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=660000, certain=0
@@ -64,7 +64,27 @@ GpuUnload: estimated_max_resident_size=55000
               GpuAggregate: estimated_max_resident_size=11968
                 GpuLoadParquet: estimated_max_resident_size=2176, source_bytes=5297, target_batch_bytes=5297, amplification=22.0
 == cross-empty-build
-refused: invalid plan: no surviving row groups: what an empty scan means is the caller's decision, not an empty map — the wire format reads that as one unmapped partition
+GpuUnload
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[t_id:Int32, t_id:Int32]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32]
+      GpuLoadParquet: table=empty, projections=[t_id@0], partition_groups=[[]], lanes=1, batches=multiple, schema=[t_id:Int32]
+    GpuMergePartitions: lanes=1, batches=multiple, schema=[t_id:Int32]
+      GpuLoadParquet: table=tiny, projections=[t_id@0], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuCrossJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
+    GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuMergePartitions: none
+      GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=0, certain=0
+GpuUnload: estimated_max_resident_size=0
+  GpuCrossJoin: estimated_max_resident_size=55
+    GpuCoalesceAllBatches: estimated_max_resident_size=0
+      GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
+    GpuMergePartitions: estimated_max_resident_size=55
+      GpuLoadParquet: estimated_max_resident_size=220, source_bytes=55, target_batch_bytes=55, amplification=4.0
 == cross-projection
 GpuUnload
   GpuCrossJoin: projection=[f_id@1], lanes=1, batches=multiple, schema=[f_id:Int64]
@@ -108,7 +128,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1560000, certain=0
@@ -176,7 +196,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1560000, certain=0
@@ -189,6 +209,146 @@ GpuUnload: estimated_max_resident_size=130000
             GpuAggregateBatches: estimated_max_resident_size=520000
               GpuAggregate: estimated_max_resident_size=200276
                 GpuLoadParquet: estimated_max_resident_size=130952, source_bytes=319618, target_batch_bytes=319618, amplification=6.1
+== empty-all-null-aggregates
+GpuUnload
+  GpuProject: exprs=[sum(tiny.t_v)@0 as s, min(tiny.t_v)@1 as lo, max(tiny.t_v)@2 as hi], lanes=1, batches=single, schema=[s:Int64, lo:Int32, hi:Int32]
+    GpuAggregateBatches: group_by=[], aggs=[sum(sum(tiny.t_v)@0) as sum(tiny.t_v), min(min(tiny.t_v)@1) as min(tiny.t_v), max(max(tiny.t_v)@2) as max(tiny.t_v)], final=[sum(tiny.t_v)@0, min(tiny.t_v)@1, max(tiny.t_v)@2], lanes=1, batches=single, schema=[sum(tiny.t_v):Int64, min(tiny.t_v):Int32, max(tiny.t_v):Int32]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[sum(tiny.t_v):Int64, min(tiny.t_v):Int32, max(tiny.t_v):Int32]
+        GpuAggregateBatches: group_by=[], aggs=[sum(sum(tiny.t_v)@0) as sum(tiny.t_v), min(min(tiny.t_v)@1) as min(tiny.t_v), max(max(tiny.t_v)@2) as max(tiny.t_v)], lanes=4, batches=single, schema=[sum(tiny.t_v):Int64, min(tiny.t_v):Int32, max(tiny.t_v):Int32]
+          GpuAggregate: group_by=[], aggs=[sum(CAST(t_v@0 AS Int64)) as sum(tiny.t_v), min(t_v@0) as min(tiny.t_v), max(t_v@0) as max(tiny.t_v)], lanes=4, batches=multiple, schema=[sum(tiny.t_v):Int64, min(tiny.t_v):Int32, max(tiny.t_v):Int32]
+            GpuFilter: predicate=(t_id@0 + t_v@1) < 0, projection=[t_v@1], lanes=4, batches=multiple, schema=[t_v:Int32]
+              GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#8 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#5 CudfCoalescePartitions, lane batches), execute_node(#6 CudfAggregate{Merge}, prior output); at done: execute_node(#7 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+            GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=304, certain=0
+GpuUnload: estimated_max_resident_size=152
+  GpuProject: estimated_max_resident_size=152
+    GpuAggregateBatches: estimated_max_resident_size=152
+      GpuMergePartitions: estimated_max_resident_size=38
+        GpuAggregateBatches: estimated_max_resident_size=152
+          GpuAggregate: estimated_max_resident_size=836
+            GpuFilter: estimated_max_resident_size=220
+              GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=7.6
+== empty-count-aggregates
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n, count(tiny.t_v)@1 as nv, sum(tiny.t_v)@2 as s, avg(tiny.t_v)@3 as a], lanes=1, batches=single, schema=[n:Int64, nv:Int64, s:Int64, a:Float64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(count(tiny.t_v)@1) as count(tiny.t_v), sum(sum(tiny.t_v)@2) as sum(tiny.t_v), sum(avg(tiny.t_v)$sum@3) as avg(tiny.t_v)$sum, sum(avg(tiny.t_v)$count@4) as avg(tiny.t_v)$count], final=[count(*)@0, count(tiny.t_v)@1, sum(tiny.t_v)@2, CAST(avg(tiny.t_v)$sum@3 AS Float64) / CAST(avg(tiny.t_v)$count@4 AS Float64) as avg(tiny.t_v)], lanes=1, batches=single, schema=[count(*):Int64, count(tiny.t_v):Int64, sum(tiny.t_v):Int64, avg(tiny.t_v):Float64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[count(*):Int64, count(tiny.t_v):Int64, sum(tiny.t_v):Int64, avg(tiny.t_v)$sum:Float64, avg(tiny.t_v)$count:Int64]
+        GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(count(tiny.t_v)@1) as count(tiny.t_v), sum(sum(tiny.t_v)@2) as sum(tiny.t_v), sum(avg(tiny.t_v)$sum@3) as avg(tiny.t_v)$sum, sum(avg(tiny.t_v)$count@4) as avg(tiny.t_v)$count], lanes=4, batches=single, schema=[count(*):Int64, count(tiny.t_v):Int64, sum(tiny.t_v):Int64, avg(tiny.t_v)$sum:Float64, avg(tiny.t_v)$count:Int64]
+          GpuAggregate: group_by=[], aggs=[count(1) as count(*), count(t_v@0) as count(tiny.t_v), sum(CAST(t_v@0 AS Int64)) as sum(tiny.t_v), sum(CAST(t_v@0 AS Float64)) as avg(tiny.t_v)$sum, count(CAST(t_v@0 AS Float64)) as avg(tiny.t_v)$count], lanes=4, batches=multiple, schema=[count(*):Int64, count(tiny.t_v):Int64, sum(tiny.t_v):Int64, avg(tiny.t_v)$sum:Float64, avg(tiny.t_v)$count:Int64]
+            GpuFilter: predicate=(t_id@0 + t_v@1) < 0, projection=[t_v@1], lanes=4, batches=multiple, schema=[t_v:Int32]
+              GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#8 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#5 CudfCoalescePartitions, lane batches), execute_node(#6 CudfAggregate{Merge}, prior output); at done: execute_node(#7 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+            GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=648, certain=0
+GpuUnload: estimated_max_resident_size=288
+  GpuProject: estimated_max_resident_size=288
+    GpuAggregateBatches: estimated_max_resident_size=288
+      GpuMergePartitions: estimated_max_resident_size=90
+        GpuAggregateBatches: estimated_max_resident_size=360
+          GpuAggregate: estimated_max_resident_size=1980
+            GpuFilter: estimated_max_resident_size=220
+              GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=18.0
+== empty-dispersion-aggregates
+GpuUnload
+  GpuProject: exprs=[stddev(tiny.t_v)@0 as sd, var_pop(tiny.t_v)@1 as vp], lanes=1, batches=single, schema=[sd:Float64, vp:Float64]
+    GpuAggregateBatches: group_by=[], aggs=[merge_m2(stddev(tiny.t_v)$count@0, stddev(tiny.t_v)$mean@1, stddev(tiny.t_v)$m2@2) as [stddev(tiny.t_v)$count, stddev(tiny.t_v)$mean, stddev(tiny.t_v)$m2], merge_m2(var_pop(tiny.t_v)$count@3, var_pop(tiny.t_v)$mean@4, var_pop(tiny.t_v)$m2@5) as [var_pop(tiny.t_v)$count, var_pop(tiny.t_v)$mean, var_pop(tiny.t_v)$m2]], final=[CASE WHEN (CAST(stddev(tiny.t_v)$count@0 AS Float64) - 1) <= 0 THEN NULL ELSE sqrt(stddev(tiny.t_v)$m2@2 / (CAST(stddev(tiny.t_v)$count@0 AS Float64) - 1)) END as stddev(tiny.t_v), CASE WHEN (CAST(var_pop(tiny.t_v)$count@3 AS Float64) - 0) <= 0 THEN NULL ELSE var_pop(tiny.t_v)$m2@5 / (CAST(var_pop(tiny.t_v)$count@3 AS Float64) - 0) END as var_pop(tiny.t_v)], lanes=1, batches=single, schema=[stddev(tiny.t_v):Float64, var_pop(tiny.t_v):Float64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[stddev(tiny.t_v)$count:Int64, stddev(tiny.t_v)$mean:Float64, stddev(tiny.t_v)$m2:Float64, var_pop(tiny.t_v)$count:Int64, var_pop(tiny.t_v)$mean:Float64, var_pop(tiny.t_v)$m2:Float64]
+        GpuAggregateBatches: group_by=[], aggs=[merge_m2(stddev(tiny.t_v)$count@0, stddev(tiny.t_v)$mean@1, stddev(tiny.t_v)$m2@2) as [stddev(tiny.t_v)$count, stddev(tiny.t_v)$mean, stddev(tiny.t_v)$m2], merge_m2(var_pop(tiny.t_v)$count@3, var_pop(tiny.t_v)$mean@4, var_pop(tiny.t_v)$m2@5) as [var_pop(tiny.t_v)$count, var_pop(tiny.t_v)$mean, var_pop(tiny.t_v)$m2]], lanes=4, batches=single, schema=[stddev(tiny.t_v)$count:Int64, stddev(tiny.t_v)$mean:Float64, stddev(tiny.t_v)$m2:Float64, var_pop(tiny.t_v)$count:Int64, var_pop(tiny.t_v)$mean:Float64, var_pop(tiny.t_v)$m2:Float64]
+          GpuAggregate: group_by=[], aggs=[count(t_v@0) as stddev(tiny.t_v)$count, mean(t_v@0) as stddev(tiny.t_v)$mean, m2(t_v@0) as stddev(tiny.t_v)$m2, count(t_v@0) as var_pop(tiny.t_v)$count, mean(t_v@0) as var_pop(tiny.t_v)$mean, m2(t_v@0) as var_pop(tiny.t_v)$m2], lanes=4, batches=multiple, schema=[stddev(tiny.t_v)$count:Int64, stddev(tiny.t_v)$mean:Float64, stddev(tiny.t_v)$m2:Float64, var_pop(tiny.t_v)$count:Int64, var_pop(tiny.t_v)$mean:Float64, var_pop(tiny.t_v)$m2:Float64]
+            GpuFilter: predicate=(t_id@0 + t_v@1) < 0, projection=[t_v@1], lanes=4, batches=multiple, schema=[t_v:Int32]
+              GpuLoadParquet: table=tiny, projections=[t_id@0, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#8 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#5 CudfCoalescePartitions, lane batches), execute_node(#6 CudfAggregate{Merge}, prior output); at done: execute_node(#7 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+            GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+              GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=576, certain=0
+GpuUnload: estimated_max_resident_size=144
+  GpuProject: estimated_max_resident_size=144
+    GpuAggregateBatches: estimated_max_resident_size=144
+      GpuMergePartitions: estimated_max_resident_size=108
+        GpuAggregateBatches: estimated_max_resident_size=432
+          GpuAggregate: estimated_max_resident_size=2376
+            GpuFilter: estimated_max_resident_size=220
+              GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=21.6
+== empty-grouped-count
+GpuUnload
+  GpuProject: exprs=[t_k@0, count(*)@1 as n], lanes=4, batches=single, hashed_on=[t_k@0], schema=[t_k:Int32, n:Int64]
+    GpuAggregateBatches: group_by=[t_k@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=4, batches=single, hashed_on=[t_k@0], schema=[t_k:Int32, count(*):Int64]
+      GpuEmitPartitions: hash=[t_k@0], lanes=4, batches=multiple, hashed_on=[t_k@0], schema=[t_k:Int32, count(*):Int64]
+        GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_k:Int32, count(*):Int64]
+          GpuMergePartitions: lanes=1, batches=multiple, schema=[t_k:Int32, count(*):Int64]
+            GpuAggregateBatches: group_by=[t_k@0], aggs=[sum(count(*)@1) as count(*)], lanes=4, batches=single, schema=[t_k:Int32, count(*):Int64]
+              GpuAggregate: group_by=[t_k@0], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[t_k:Int32, count(*):Int64]
+                GpuFilter: predicate=(t_id@0 + t_v@2) < 0, projection=[t_k@1], lanes=4, batches=multiple, schema=[t_k:Int32]
+                  GpuLoadParquet: table=tiny, projections=[t_id@0, t_k@1, t_v@2], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32, t_k:Int32, t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=4, per batch: execute_node(#10 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#7 CudfCoalescePartitions, lane batches), execute_node(#8 CudfAggregate{Merge}, prior output); at done: execute_node(#9 CudfProject{finalize}, prior output)
+      GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#6 CudfRepartition{Hash, 1→4}, batch)
+        GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#5 CudfCoalescePartitions, lane batches)
+          GpuMergePartitions: none
+            GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+                GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+                  GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=336, certain=0
+GpuUnload: estimated_max_resident_size=28
+  GpuProject: estimated_max_resident_size=112
+    GpuAggregateBatches: estimated_max_resident_size=112
+      GpuEmitPartitions: estimated_max_resident_size=448
+        GpuCoalesceAllBatches: estimated_max_resident_size=112
+          GpuMergePartitions: estimated_max_resident_size=28
+            GpuAggregateBatches: estimated_max_resident_size=112
+              GpuAggregate: estimated_max_resident_size=616
+                GpuFilter: estimated_max_resident_size=220
+                  GpuLoadParquet: estimated_max_resident_size=660, source_bytes=165, target_batch_bytes=165, amplification=4.0
+== empty-pruned-count
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n, min(tiny.t_v)@1 as lo], lanes=1, batches=single, schema=[n:Int64, lo:Int32]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), min(min(tiny.t_v)@1) as min(tiny.t_v)], final=[count(*)@0, min(tiny.t_v)@1], lanes=1, batches=single, schema=[count(*):Int64, min(tiny.t_v):Int32]
+      GpuAggregate: group_by=[], aggs=[count(1) as count(*), min(t_v@0) as min(tiny.t_v)], lanes=1, batches=multiple, schema=[count(*):Int64, min(tiny.t_v):Int32]
+        GpuFilter: predicate=t_v@0 < 0, lanes=1, batches=multiple, schema=[t_v:Int32]
+          GpuLoadParquet: table=tiny, projections=[t_v@2], partition_groups=[[]], lanes=1, batches=multiple, schema=[t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#6 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output); at done: execute_node(#5 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+        GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=0, certain=0
+GpuUnload: estimated_max_resident_size=0
+  GpuProject: estimated_max_resident_size=0
+    GpuAggregateBatches: estimated_max_resident_size=0
+      GpuAggregate: estimated_max_resident_size=0
+        GpuFilter: estimated_max_resident_size=0
+          GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
 == empty-side-left-join
 GpuUnload
   GpuProject: exprs=[t_id@1, d_id@0], lanes=1, batches=multiple, schema=[t_id:Int32, d_id:Int64]
@@ -211,6 +371,25 @@ GpuUnload: estimated_max_resident_size=0
       GpuEmpty: estimated_max_resident_size=0
       GpuMergePartitions: estimated_max_resident_size=110
         GpuLoadParquet: estimated_max_resident_size=440, source_bytes=110, target_batch_bytes=110, amplification=4.0
+== empty-table-count
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n, sum(empty.t_v)@1 as s], lanes=1, batches=single, schema=[n:Int64, s:Int64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*), sum(sum(empty.t_v)@1) as sum(empty.t_v)], final=[count(*)@0, sum(empty.t_v)@1], lanes=1, batches=single, schema=[count(*):Int64, sum(empty.t_v):Int64]
+      GpuAggregate: group_by=[], aggs=[count(1) as count(*), sum(CAST(t_v@0 AS Int64)) as sum(empty.t_v)], lanes=1, batches=multiple, schema=[count(*):Int64, sum(empty.t_v):Int64]
+        GpuLoadParquet: table=empty, projections=[t_v@2], partition_groups=[[]], lanes=1, batches=multiple, schema=[t_v:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=0, certain=0
+GpuUnload: estimated_max_resident_size=0
+  GpuProject: estimated_max_resident_size=0
+    GpuAggregateBatches: estimated_max_resident_size=0
+      GpuAggregate: estimated_max_resident_size=0
+        GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
 == exists-null-keys
 GpuUnload
   GpuHashJoin: join_type=LeftSemi, on=[(d_k@1, f_k@0)], projection=[d_id@0], lanes=4, batches=multiple, schema=[d_id:Int64]
@@ -337,7 +516,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=840000, certain=0
@@ -368,7 +547,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1080000, certain=0
@@ -570,7 +749,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=660000, certain=0
@@ -1296,7 +1475,30 @@ GpuUnload: estimated_max_resident_size=1250
           GpuFilter: estimated_max_resident_size=108596
             GpuLoadParquet: estimated_max_resident_size=147384, source_bytes=359381, target_batch_bytes=359381, amplification=4.0
 == outer-on-true-empty
-refused: invalid plan: no surviving row groups: what an empty scan means is the caller's decision, not an empty map — the wire format reads that as one unmapped partition
+GpuUnload
+  GpuProject: exprs=[t_id@1, t_id@0 as e_id], lanes=1, batches=multiple, schema=[t_id:Int32, e_id:Int32]
+    GpuNestedLoopJoin: join_type=Right, filter=true, lanes=1, batches=multiple, schema=[t_id:Int32, t_id:Int32]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[t_id:Int32]
+        GpuLoadParquet: table=empty, projections=[t_id@0], partition_groups=[[]], lanes=1, batches=multiple, schema=[t_id:Int32]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[t_id:Int32]
+        GpuLoadParquet: table=tiny, projections=[t_id@0], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[t_id:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuNestedLoopJoin: calling_lanes=1, join_build(#3 CudfJoin); per probe batch: join_probe
+      GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+      GpuMergePartitions: none
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=0, certain=0
+GpuUnload: estimated_max_resident_size=0
+  GpuProject: estimated_max_resident_size=0
+    GpuNestedLoopJoin: estimated_max_resident_size=55
+      GpuCoalesceAllBatches: estimated_max_resident_size=0
+        GpuLoadParquet: estimated_max_resident_size=0, source_bytes=0, target_batch_bytes=1, amplification=1.0
+      GpuMergePartitions: estimated_max_resident_size=55
+        GpuLoadParquet: estimated_max_resident_size=220, source_bytes=55, target_batch_bytes=55, amplification=4.0
 == probe-exists-residual
 GpuUnload
   GpuHashJoin: join_type=RightSemi, on=[(d_k@0, f_k@1)], filter=d_w@build:1 < f_qty@probe:2, projection=[f_id@0], lanes=4, batches=multiple, schema=[f_id:Int64]
@@ -1454,7 +1656,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=900000, certain=0
@@ -1526,26 +1728,26 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                   GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#10 CudfCoalescePartitions, lane batches), execute_node(#11 CudfAggregate{Merge}, prior output); at done: execute_node(#12 CudfProject{finalize}, prior output)
                     GpuMergePartitions: none
                       GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#8 CudfCoalescePartitions, lane batches), execute_node(#9 CudfAggregate{Merge}, prior output)
-                        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch)
+                        GpuAggregate: calling_lanes=4, per batch: execute_node(#7 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#7 CudfAggregate{Partial})
                           GpuProject: calling_lanes=4, per batch: execute_node(#6 CudfProject, batch)
                             GpuFilter: calling_lanes=4, per batch: execute_node(#5 CudfFilter, batch)
                               GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
               GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#21 CudfCoalescePartitions, lane batches), execute_node(#22 CudfAggregate{Merge}, prior output); at done: execute_node(#23 CudfProject{finalize}, prior output)
                 GpuMergePartitions: none
                   GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#19 CudfCoalescePartitions, lane batches), execute_node(#20 CudfAggregate{Merge}, prior output)
-                    GpuAggregate: calling_lanes=4, per batch: execute_node(#18 CudfAggregate{Partial}, batch)
+                    GpuAggregate: calling_lanes=4, per batch: execute_node(#18 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#18 CudfAggregate{Partial})
                       GpuFilter: calling_lanes=4, per batch: execute_node(#17 CudfFilter, batch)
                         GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#16 CudfScan, row groups)
           GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#32 CudfCoalescePartitions, lane batches), execute_node(#33 CudfAggregate{Merge}, prior output); at done: execute_node(#34 CudfProject{finalize}, prior output)
             GpuMergePartitions: none
               GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#30 CudfCoalescePartitions, lane batches), execute_node(#31 CudfAggregate{Merge}, prior output)
-                GpuAggregate: calling_lanes=4, per batch: execute_node(#29 CudfAggregate{Partial}, batch)
+                GpuAggregate: calling_lanes=4, per batch: execute_node(#29 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#29 CudfAggregate{Partial})
                   GpuFilter: calling_lanes=4, per batch: execute_node(#28 CudfFilter, batch)
                     GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#27 CudfScan, row groups)
       GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#44 CudfCoalescePartitions, lane batches), execute_node(#45 CudfAggregate{Merge}, prior output); at done: execute_node(#46 CudfProject{finalize}, prior output)
         GpuMergePartitions: none
           GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#42 CudfCoalescePartitions, lane batches), execute_node(#43 CudfAggregate{Merge}, prior output)
-            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch)
+            GpuAggregate: calling_lanes=4, per batch: execute_node(#41 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#41 CudfAggregate{Partial})
               GpuProject: calling_lanes=4, per batch: execute_node(#40 CudfProject, batch)
                 GpuFilter: calling_lanes=4, per batch: execute_node(#39 CudfFilter, batch)
                   GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#38 CudfScan, row groups)
@@ -1755,7 +1957,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1080000, certain=0
@@ -1786,7 +1988,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1080000, certain=0
@@ -1817,7 +2019,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1080000, certain=0
@@ -1848,7 +2050,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=1080000, certain=0
@@ -1913,7 +2115,7 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#4 CudfCoalescePartitions, lane batches)
           GpuMergePartitions: none
             GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
-              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+              GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
 --- memory ---
 budget=2147483648, accumulators=840000, certain=0

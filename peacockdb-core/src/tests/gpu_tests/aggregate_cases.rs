@@ -15,12 +15,12 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
 
-use super::script::{Outcome, Script, run_both};
+use super::script::{Outcome, Script, each_answers, run_both};
 use crate::plan::{
     AggCall, AggFunc, AggStateColumns, AggregateBody, BatchLayout, BinaryOp, Expr, GpuAggregate,
     GpuAggregateBatches, GpuNode, NamedExpr, PlanAgg, Schema,
 };
-use crate::tests::compare::{Order, Slot, assert_same, same_within_welford};
+use crate::tests::compare::{Order, Slot, same_within_welford};
 use crate::tests::given::{Given, columns};
 use crate::tests::synthetic::{decimals, schema, synthetic};
 
@@ -28,7 +28,7 @@ pub(crate) fn input() -> RecordBatch {
     synthetic(64, 1)
 }
 
-fn given() -> Box<dyn GpuNode> {
+pub(crate) fn given() -> Box<dyn GpuNode> {
     Given::of(Schema::new(schema()), BatchLayout::MultipleBatches)
 }
 
@@ -175,7 +175,7 @@ operator_case! {
                 call(PlanAgg::Count, Expr::column(2, "i32"), "count(i32)", DataType::Int64),
             ],
         );
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -191,7 +191,7 @@ operator_case! {
                 call(PlanAgg::Count, Expr::column(5, "s"), "count(s)", DataType::Int64),
             ],
         );
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn welford_init_aggs() -> Vec<AggCall> {
 operator_case! {
     GpuAggregate,
     fn a_welford_init_exports_its_count_as_int64() {
-        let outcome = run_both(&welford_init(), Script::Exec(vec![input()]));
+        let outcome = run_both(&welford_init(), Script::Accumulate(vec![input()]));
         welford_answered(&outcome, 0);
     }
 }
@@ -266,7 +266,7 @@ pub(crate) fn decimal_sum() -> GpuAggregate {
 operator_case! {
     GpuAggregate,
     fn a_decimal_sum_is_exported_at_its_declared_precision() {
-        run_both(&decimal_sum(), Script::Exec(vec![decimals(64, 1)])).same(Order::Any);
+        run_both(&decimal_sum(), Script::Accumulate(vec![decimals(64, 1)])).same(Order::Any);
     }
 }
 
@@ -305,7 +305,7 @@ operator_case! {
             intermediate,
             output,
         );
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -348,7 +348,7 @@ operator_case! {
                 DataType::Int64,
             )],
         );
-        let outcome = run_both(&node, Script::Exec(vec![float_key_batch()]));
+        let outcome = run_both(&node, Script::Accumulate(vec![float_key_batch()]));
         assert_eq!(rows(outcome.cpu.as_ref().expect("the cpu answers")), 6);
         assert_eq!(rows(outcome.gpu.as_ref().expect("the device answers")), 4);
     }
@@ -389,23 +389,35 @@ operator_case! {
             vec![false, true],
             vec![true, true],
         ]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
-// Empty inputs, each its own case.
+/// The rows each slot of one side's answer holds.
+pub(crate) fn rows_per_slot(slots: &[Slot]) -> Vec<usize> {
+    slots
+        .iter()
+        .map(|slot| slot.iter().map(RecordBatch::num_rows).sum())
+        .collect()
+}
+
+// Empty inputs, each its own case. A grouped init releases a zero-row batch uncalled and
+// owes no groups at done: nothing in either slot, not a zero-row batch.
 operator_case! {
     GpuAggregate,
-    fn a_grouped_aggregate_over_zero_rows_is_zero_rows_on_both() {
+    fn a_grouped_aggregate_over_a_zero_row_batch_answers_nothing_on_both() {
         let node = init(
             true,
             vec![call(PlanAgg::Sum, Expr::column(3, "i64"), "sum(i64)", DataType::Int64)],
         );
-        run_both(&node, Script::Exec(vec![synthetic(0, 1)])).same(Order::Any);
+        let outcome = run_both(&node, Script::Accumulate(vec![synthetic(0, 1)]));
+        let nothing = vec![Vec::new(); 2];
+        each_answers(&outcome, &nothing, &nothing);
     }
 }
 
-// A global aggregate owes its identity row whatever arrived: count 0, sum NULL.
+// A global aggregate owes its identity row whatever arrived: count 0, sum NULL — at done,
+// since the zero-row batch is released uncalled.
 operator_case! {
     GpuAggregate,
     fn a_global_aggregate_over_zero_rows_keeps_its_identity_row() {
@@ -416,16 +428,21 @@ operator_case! {
                 call(PlanAgg::Sum, Expr::column(3, "i64"), "sum(i64)", DataType::Int64),
             ],
         );
-        run_both(&node, Script::Exec(vec![synthetic(0, 1)])).same(Order::Any);
+        let outcome = run_both(&node, Script::Accumulate(vec![synthetic(0, 1)]));
+        outcome.same(Order::Any);
+        assert_eq!(rows_per_slot(outcome.cpu.as_ref().expect("the cpu answers")), vec![0, 1]);
     }
 }
 
-// The id column is built from a scalar; at zero rows it still holds the declared type.
+// A grouping-set init is grouped, so over a zero-row batch it owes no groups either. The
+// id's declared type is the case with rows' and the gtests'.
 operator_case! {
     GpuAggregate,
-    fn grouping_sets_over_zero_rows_are_zero_rows_of_the_declared_id_type() {
+    fn grouping_sets_over_a_zero_row_batch_answer_nothing_on_both() {
         let node = grouping_sets(vec![vec![false, false], vec![true, true]]);
-        run_both(&node, Script::Exec(vec![synthetic(0, 1)])).same(Order::Any);
+        let outcome = run_both(&node, Script::Accumulate(vec![synthetic(0, 1)]));
+        let nothing = vec![Vec::new(); 2];
+        each_answers(&outcome, &nothing, &nothing);
     }
 }
 
@@ -738,12 +755,11 @@ operator_case! {
     }
 }
 
-// #199 — a global merge over no arrival owes its identity row, count 0. The cpu answers one
-// row, and it is sum's identity rather than count's — NULL, since a count merges by sum —
-// and the device answers nothing; SQL's 0 is on neither.
+// No merge meets no arrival — a keyless init answers its identity row at done — and neither
+// backend invents a row for one.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device() {
+    fn a_global_merge_over_no_arrival_answers_nothing_on_both() {
         let state = columns(&[("count(i32)", DataType::Int64)]);
         let aggs = vec![call(
             PlanAgg::Sum,
@@ -753,14 +769,7 @@ operator_case! {
         )];
         let node = merge_over(state.clone(), body(Vec::new(), aggs, None), state);
         let outcome = run_both(&node, Script::Accumulate(Vec::new()));
-        let null_count: ArrayRef = Arc::new(Int64Array::from(vec![None::<i64>]));
-        assert_same(
-            &[vec![batch_of(vec![("count(i32)", null_count)])]],
-            outcome.cpu.as_ref().expect("the cpu answers"),
-            Order::Any,
-        );
-        let gpu = outcome.gpu.as_ref().expect("the device answers");
-        assert_eq!(gpu.len(), 1, "one slot, the done");
-        assert!(gpu[0].is_empty(), "and nothing in it");
+        let slots = vec![Vec::new()];
+        each_answers(&outcome, &slots, &slots);
     }
 }

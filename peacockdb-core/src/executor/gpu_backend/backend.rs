@@ -85,15 +85,17 @@ impl Backend for GpuBackend {
             NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) => {
                 NodeExecutors::Exec(GpuExec::new(site, recipe, None, &out(node))?)
             }
-            // The one exec node that chains: its first call answers with the state its
-            // finalize reads, and nothing builds a batch from that, so the state schema is
-            // the only thing that can price it.
-            NodeRef::Aggregate(aggregate) => NodeExecutors::Exec(GpuExec::new(
-                site,
-                recipe,
-                Some(&aggregate.intermediate().fields.as_ref().clone()),
-                &out(node),
-            )?),
+            // The init: per batch with rows, and at done where nothing went out. Its first
+            // call answers with the state its finalize reads, and nothing builds a batch from
+            // that, so the state schema is the only thing that can price it.
+            NodeRef::Aggregate(aggregate) => {
+                NodeExecutors::BatchAccumulator(GpuAccumulator::aggregate_init(
+                    site,
+                    recipe,
+                    &aggregate.intermediate().fields.as_ref().clone(),
+                    &out(node),
+                )?)
+            }
             NodeRef::CoalesceAllBatches(_) => NodeExecutors::BatchAccumulator(
                 GpuAccumulator::coalesce(site, recipe, &out(node))?,
             ),
@@ -341,6 +343,8 @@ impl HeldBytes for GpuAccumulator {
             State::Aggregate(state) => state.held_bytes(),
             // A limit holds nothing, which is the whole point of the slice symbol.
             State::Limit(_) => 0,
+            // An init holds a flag.
+            State::Init(_) => 0,
         }
     }
 }

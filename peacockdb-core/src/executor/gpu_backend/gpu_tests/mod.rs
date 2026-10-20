@@ -29,7 +29,7 @@ use crate::executor::{Region, RowRange, collect_regions};
 
 use crate::plan::{BinaryOp, Expr, NamedExpr};
 
-use super::{CallSite, GpuExec, GpuExport};
+use super::{CallSite, GpuAccumulator, GpuExec, GpuExport};
 
 use crate::plan::ColumnOrder;
 
@@ -43,7 +43,7 @@ use crate::plan::ScanMetadata;
 
 use crate::plan::RowGroupMeta;
 
-use crate::wire::{AbiSymbol, Recipe, RecipePlan, Seq, attach_recipes};
+use crate::wire::{AbiSymbol, CallPattern, Recipe, RecipePlan, Seq, attach_recipes};
 
 use crate::plan::Schema;
 
@@ -218,20 +218,28 @@ impl Session {
         GpuBatch::new(self.executor, handle, seq, stats.rows as usize, 0)
     }
 
-    /// The executor for the node at `index` in the tree's post-order, which is what the
-    /// recipes are indexed by. For the nodes that make one call, which is every exec node
-    /// but an aggregate with a finalize.
+    /// The chain of per-batch calls for the node at `index` in the tree's post-order, which is
+    /// what the recipes are indexed by: an exec node's, or the one an aggregate's init is built
+    /// from, whose done calls it never sees. For a chain of one call, which is every one but an
+    /// init with a finalize.
     fn exec(&self, index: usize, schema: &ArrowSchema) -> GpuExec {
-        let recipe = self.recipes.get(index).expect("the node makes ABI calls");
-        GpuExec::new(self.site(), recipe, None, schema).expect("the recipe is an exec node's")
+        let recipe = self.recipe(index).calls_under(CallPattern::PerBatch);
+        GpuExec::new(self.site(), &recipe, None, schema).expect("the recipe is an exec node's")
     }
 
     /// The same, for the node whose calls chain: `state` is what the call before the last
     /// answers with, and nothing builds a batch from it.
     fn chaining_exec(&self, index: usize, state: &ArrowSchema, schema: &ArrowSchema) -> GpuExec {
-        let recipe = self.recipes.get(index).expect("the node makes ABI calls");
-        GpuExec::new(self.site(), recipe, Some(state), schema)
+        let recipe = self.recipe(index).calls_under(CallPattern::PerBatch);
+        GpuExec::new(self.site(), &recipe, Some(state), schema)
             .expect("the recipe is an exec node's")
+    }
+
+    /// The init accumulator for the aggregate at `index`: `state` is what its first call
+    /// answers with, `schema` what the node declares.
+    fn init(&self, index: usize, state: &ArrowSchema, schema: &ArrowSchema) -> GpuAccumulator {
+        GpuAccumulator::aggregate_init(self.site(), self.recipe(index), state, schema)
+            .expect("the recipe is an init's")
     }
 
     /// The accumulator for the node at `index`, built from the recipe that node published.

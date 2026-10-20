@@ -266,9 +266,7 @@ operator_case! {
     }
 }
 
-/// Per pbench query that plans a join, the node-level cases holding its shapes. Two refused
-/// queries are here too, for the day they plan: `cross-empty-build` and `outer-on-true-empty`
-/// (#282).
+/// Per pbench query that plans a join, the node-level cases holding its shapes.
 const PBENCH_SHAPES: &[(&str, &[&str])] = &[
     (
         "anti-null-preserved-condition",

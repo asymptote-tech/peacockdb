@@ -429,6 +429,12 @@ impl PlanAgg {
     pub(crate) fn state_type(self, input: &DataType) -> Result<DataType, PlanError> {
         aggregates::state_type(self, input)
     }
+
+    /// What this aggregator's state column holds over no rows, given its argument's type.
+    #[allow(dead_code)] // the identity cases' reference: no backend builds a row from it
+    pub(crate) fn empty_state(self, input: &DataType) -> Result<ScalarValue, PlanError> {
+        aggregates::empty_state(self, input)
+    }
 }
 
 /// One aggregator call: what it runs, over which expressions, and the columns it
@@ -1248,10 +1254,9 @@ impl ExecutorCategory {
 pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
     match as_node_ref(node) {
         NodeRef::LoadParquet(_) | NodeRef::Empty(_) => ExecutorCategory::Source,
-        NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) | NodeRef::Aggregate(_) => {
-            ExecutorCategory::Exec
-        }
-        NodeRef::CoalesceAllBatches(_)
+        NodeRef::Filter(_) | NodeRef::Project(_) | NodeRef::Sort(_) => ExecutorCategory::Exec,
+        NodeRef::Aggregate(_)
+        | NodeRef::CoalesceAllBatches(_)
         | NodeRef::AccumulateBatchesAndSort(_)
         | NodeRef::AggregateBatches(_)
         | NodeRef::Limit(_) => ExecutorCategory::BatchAccumulator,

@@ -100,7 +100,7 @@ pub struct CpuProbingJoin {
     owes_nothing: bool,
 }
 
-/// A `BatchAccumulator` node's executor. What it holds between calls is one of four
+/// A `BatchAccumulator` node's executor. What it holds between calls is one of five
 /// things, and `accumulate` owns them: a public variant would hand a caller the state a
 /// private module keeps.
 pub struct CpuAccumulator {

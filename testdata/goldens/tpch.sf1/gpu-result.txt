@@ -1889,6 +1889,21 @@ fingerprint: rows=27604
 col 0: nonnull=27604
 col 1: nonnull=27604
 hash: 611d710768ecc851e134d0430658661485b5a19abf8647115b57648363a10c80
+== q11 mode=tp4-single
+fingerprint: rows=27604
+col 0: nonnull=27604
+col 1: nonnull=27604
+hash: 611d710768ecc851e134d0430658661485b5a19abf8647115b57648363a10c80
+== q11 mode=tp4-rowgroup
+fingerprint: rows=27604
+col 0: nonnull=27604
+col 1: nonnull=27604
+hash: 611d710768ecc851e134d0430658661485b5a19abf8647115b57648363a10c80
+== q11 mode=tp4-sized
+fingerprint: rows=27604
+col 0: nonnull=27604
+col 1: nonnull=27604
+hash: 611d710768ecc851e134d0430658661485b5a19abf8647115b57648363a10c80
 == q12 mode=tp1-single
 +------------+-----------------+----------------+
 | l_shipmode | high_line_count | low_line_count |
@@ -4117,6 +4132,18 @@ hash: e30e20cbe2ce222ff94f7137f5d2a0a3efb065116f1f392bfe5ca8bb5c1629a1
 | 31        | 922     | 6806670.18 |
 +-----------+---------+------------+
 == q22 mode=tp1-rowgroup
++-----------+---------+------------+
+| cntrycode | numcust | totacctbal |
++-----------+---------+------------+
+| 13        | 888     | 6737713.99 |
+| 17        | 861     | 6460573.72 |
+| 18        | 964     | 7236687.40 |
+| 23        | 892     | 6701457.95 |
+| 29        | 948     | 7158866.63 |
+| 30        | 909     | 6808436.13 |
+| 31        | 922     | 6806670.18 |
++-----------+---------+------------+
+== q22 mode=tp4-single
 +-----------+---------+------------+
 | cntrycode | numcust | totacctbal |
 +-----------+---------+------------+
