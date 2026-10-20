@@ -31,14 +31,12 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#60 (round() `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Source](#source)
-  - [#186 (scan limit pushdown) a limit pushed into the scan: the cpu ignores it, the device refuses it](#t186)
   - [#282 (scan with no row groups) a scan with no surviving row groups is refused at planning](#t282)
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
   - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
   - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
-  - [#234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#262 (DISTINCT device cells) a DISTINCT under a grouping set has no device cell](#t262)
   - [#281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run](#t281)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
@@ -578,59 +576,6 @@ so the decision comes before the code.
 
 ## Source
 
-<a id="t186"></a>
-### #186 (scan limit pushdown) a limit pushed into the scan: the cpu ignores it, the device refuses it
-
-`SELECT * FROM lineitem LIMIT 10` answers 6,001,215 rows on the cpu at `tp1-single` and
-`tp1-rowgroup`, a wrong answer. On the device every mode fails the first read: `CUDF failure …
-row_groups can't be set along with skip_rows and num_rows`.
-
-One plan shape, two halves of one design left unwritten. `architecture.md` says a limited scan
-plans one lane and one batch. `source()` (`planner/translator/nodes.rs`) gives it one lane but hands
-the mode's batching to `partition`, so the rowgroup modes map one batch per row group (49 for
-lineitem), and nothing validates it. On the cpu, `CpuSource` never reads `node.limit`, and its
-reader has no `with_limit`. At tp1 the limit sits in the scan alone; at tp4 the unload's interval
-hides it, though the loader still reads everything. On the device, `scan.cpp` sets
-`set_num_rows(limit)` and then the call's row groups, which cuDF refuses together, even for one
-row group and for a scan of no column. Pinned by the six `bug_` cases in `gpu_tests/source_cases.rs`:
-sixty-four rows for ten on the cpu, a refused read on the device. #188 is merged here.
-
-**Corpus queries:** `tpch/scan-limit`, cpu off at the two tp1 modes and device off at all five.
-`tpch/nested-limits`, device off at all five. Simplest: `select n_nationkey from nation limit 3;`
-(tpch), 25 rows on the cpu and a refused read on the device, at every mode.
-
-**Fix proposed:** F13 of `reports/bugfix-proposals/10-fixes-v1.md`: a limited scan is one lane
-and one batch over the row groups that cover the limit, and each reader bounds that one call.
-- Planner, `source()`: call `batching_for_source(t)` unconditionally, since it advances the
-  counter the estimator's second pass pairs by. With a limit, map one lane with `Batching::Off`
-  over the shortest prefix of the survivors whose rows reach the limit (all of them if none do);
-  without one, as today. `lanes_for` loses its limit arm. `GpuLoadParquet` keeps the full
-  survivor list, which the validator checks the mapping against.
-- Validator, `plan/source.rs`: a limited scan whose mapping is not one lane and one batch is
-  `PlanError::Invalid`, naming `source()`.
-- Cpu, `cpu_backend/source.rs`: `CpuSource` takes `node.limit`, and `read_next` adds
-  `with_limit`, which parquet 54 composes with `with_row_groups`.
-- Device, `scan.cpp`: drop `set_num_rows`; after the read, slice the table to `limit` rows with
-  `cudf::slice` when it holds more. Stats come from the returned view, so the batch prices
-  exactly. `0` still means no limit: `node_writer.rs` writes `limit.unwrap_or(0)`,
-  so `Some(0)` and `None` are one value on the wire. Harmless, since DataFusion's `EliminateLimit`
-  turns a literal `LIMIT 0` into an empty relation before any scan exists.
-- No recipe, driver, `GpuLimit` or unload change.
-
-Tests: a cpu source case, a validator case, a translator case over `customer` (`limit 3` maps
-`[[[0]]]`), a device executor case and a gtest capping one call. The end-to-end
-`a_limit_slices_at_most_two_batches_and_stops_the_scan` moves its claim onto a filtered variant,
-since both nested-limits scans become one batch. Ten tpch plan sections change (scan-limit and
-nested-limits at five modes) and ten execution sections; `mini.result.txt` is unchanged. The
-source line keeps `limit=10`, printed whenever the node carries one (`plan_text/node_text.rs`).
-Its mapping becomes `partition_groups=[[[0]]]`, one row group reaching ten rows, where today it
-is `[[[0,1,…,48]]]` at tp1-single and the tp4 modes and `[[[0],[1],…,[48]]]` at tp1-rowgroup.
-`batches=multiple` becomes `batches=single`, and the `--- memory ---` estimate falls to one row
-group, from 371 MB at tp1-single. The tp4 unload keeps its own `skip=0, fetch=10`. scan-limit's
-cpu tp1 cells turn on. Its device cells no longer meet the decimal export — #187 is archived and
-`stale-cells` ran `filter_project`'s four cells green against it; nested-limits' still meet the
-zero-column scan and the cross join's batching (#220).
-
 <a id="t282"></a>
 ### #282 (scan with no row groups) a scan with no surviving row groups is refused at planning
 
@@ -758,32 +703,6 @@ return `PlanError::Invalid` naming the node and both counts, in the style of `de
 message. Test, in `plan/validate/tests.rs`: a hand-built sort declaring one column over a
 two-column source is refused, and the same sort declaring both columns passes.
 
-<a id="t234"></a>
-### #234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them
-
-For a mid-plan `GpuLimit`, the driver and the limit's executor each count the rows of the same
-stream against the same interval, for two decisions. Both counts are live, and both agree today.
-
-The driver adds each consumed batch's rows to `rows_seen` (`executor/driver/partitioned.rs`), and
-`settle_limit` reads it to mark the limit satisfied and stop pulling from below. `LimitStream`
-(`cpu_backend/accumulate.rs`, `gpu_backend/accumulate.rs`) keeps its own `seen` and applies
-`interval.range_of(seen, rows)` to decide whether to keep, slice or drop each batch. For an
-unload the driver makes that choice itself and hands the executor a `RowRange`; for a mid-plan
-limit the choice is made twice, in two places. If the counts ever drift — a batch counted on one
-side and not the other — the driver stops the scan before the limit has kept its rows, or keeps
-pulling after it is done: a LIMIT returning short, or reading more than it needs, with no test
-that would notice. Found by `reports/hacks-audit.md` §8.
-
-**Corpus queries:** `tpch/nested-limits`, the one mid-plan limit, where the counts agree.
-
-**Fix proposed:** one count. The driver already computes `range_of(rows_seen, arriving)` for an
-unload and passes the `RowRange` to the executor's call; do the same for a mid-plan limit, and
-make `LimitStream` stateless on both backends: release the batch where the range is `None`,
-forward it where the range covers it, slice it otherwise. `seen` goes. The driver's check that a
-range never needs the ABI's clamp then covers the limit too. Tests: the driver's limit tests assert
-the range each call was handed, and the backends' `LimitStream` tests take a range rather than
-a running count.
-
 <a id="t262"></a>
 ### #262 (DISTINCT device cells) a DISTINCT under a grouping set has no device cell
 
@@ -807,20 +726,25 @@ since it is the record that its device cells are the lowering's last unrun ones.
 ticket is archived. grouping-id, later in chain K, takes it.
 
 <a id="t281"></a>
-### #281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run
+### #281 (limits/sorts gpu cells) empty-sorts' device cells have never run
 
-limits and empty-sorts (chain K) run without a GPU, beside chain J, which holds the GPU host. Their
-device changes are built and not run: `scan.cpp` no longer applies a scan's limit, which a
-`GpuLimit` above the scan now does (#186), and the four `bug_` source cases and three `bug_`
-accumulate cases it turns into agreement cases have run on no device. A device answer could differ
-from the cpu's, and nothing would say so.
+empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
+are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases have
+run on no device, and `tpcds/q17`'s device cell with them. A device answer could differ from the
+cpu's, and nothing would say so.
 
-**Corpus queries:** `tpch/scan-limit` and `tpch/nested-limits` at every device mode, and
-`tpcds/q17` at `tp1-single`, each off on this ticket once chain K has merged.
+limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
+`set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
+against the result golden. `tpch/nested-limits`' five failed then: its region scan declares no
+column, and the device read it as zero rows. master's `CudfScan.rows_only` builds such a scan's
+rows from the footer, and on the rebased branch all five pass (nebius-gpu, 2026-10-16).
+
+**Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
 
 **Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
 each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
 from the registry rows and is archived.
+
 <a id="t253"></a>
 ### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths
 
