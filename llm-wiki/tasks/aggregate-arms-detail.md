@@ -159,3 +159,8 @@ flat-buffer table's last rows now five; `column_ordinal` in the column-indexing 
 C++", the Welford casts) and `run_kind`. Signoff written. GPU host hard-stopped.
 
 Dispatched CI: run 39366697102, dispatched 2026-10-20T03:53:59Z on b06924cc.
+
+### 2026-10-20 — `done`
+
+Dispatched run 39366697102 green on b06924cc, `GPU Tests (nebius-gpu)` included; PR #183's CI
+green on the same head. GPU host hard-stopped. Next: welford-device.
