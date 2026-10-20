@@ -53,7 +53,7 @@ fn driver_with<'a>(
     budget: Option<usize>,
 ) -> Driver<'a, Mock> {
     let mut driver = Driver::<Mock>::new(root, script, budget).expect("the plan indexes");
-    driver.seed();
+    driver.seed().expect("the limits settle");
     driver
 }
 

@@ -21,7 +21,7 @@ namespace peacock {
 /// A scan of no column: the rows the chosen row groups hold, read off the footer, as the one
 /// non-null INT8 column of zeros the plan declares in their place (#63). Nothing is decoded.
 static TableResult rows_of(std::vector<std::string> const& paths,
-                           std::vector<cudf::size_type> const& rgs, uint64_t limit) {
+                           std::vector<cudf::size_type> const& rgs) {
   auto meta = cudf::io::read_parquet_metadata(cudf::io::source_info{paths});
   int64_t rows = 0;
   if (rgs.empty()) {
@@ -30,7 +30,6 @@ static TableResult rows_of(std::vector<std::string> const& paths,
     auto const& groups = meta.rowgroup_metadata();
     for (auto g : rgs) rows += groups.at(static_cast<std::size_t>(g)).at("num_rows");
   }
-  if (limit > 0) rows = std::min<int64_t>(rows, static_cast<int64_t>(limit));
   cudf::numeric_scalar<int8_t> zero(0, true);
   std::vector<std::unique_ptr<cudf::column>> cols;
   cols.push_back(cudf::make_column_from_scalar(zero, static_cast<cudf::size_type>(rows)));
@@ -69,17 +68,7 @@ TableResult execute_scan(const fb::CudfScan* scan,
     for (auto rg : *own) rgs.push_back(static_cast<cudf::size_type>(rg));
   }
 
-  // The limit and the row groups go on before either read: cuDF refuses the two together
-  // (#186), and a scan of no column meets that refusal rather than answering past it.
-  auto opts = cudf::io::parquet_reader_options::builder(cudf::io::source_info{paths}).build();
-  if (scan->limit() > 0) {
-    opts.set_num_rows(static_cast<cudf::size_type>(scan->limit()));
-  }
-  if (!rgs.empty()) {
-    opts.set_row_groups({rgs});
-  }
-
-  if (scan->rows_only()) return rows_of(paths, rgs, scan->limit());
+  if (scan->rows_only()) return rows_of(paths, rgs);
 
   // Build column name list from file_schema + projection.
   std::vector<std::string> all_names;
@@ -100,7 +89,12 @@ TableResult execute_scan(const fb::CudfScan* scan,
     projected_names = all_names;
   }
 
-  opts.set_columns(projected_names);
+  auto opts = cudf::io::parquet_reader_options::builder(cudf::io::source_info{paths})
+                  .columns(projected_names)
+                  .build();
+  if (!rgs.empty()) {
+    opts.set_row_groups({rgs});
+  }
 
   auto result = cudf::io::read_parquet(opts);
 

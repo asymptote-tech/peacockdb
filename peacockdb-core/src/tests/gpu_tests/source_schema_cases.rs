@@ -13,7 +13,7 @@ use crate::tests::synthetic::{decimals, synthetic};
 /// handles held the declaration.
 fn scan_holds_as_declared(case: &str, batch: &RecordBatch) {
     let path = write_parquet(case, batch, 16);
-    let node = scan(&path, batch.schema(), None);
+    let node = scan(&path, batch.schema());
     let found = divergences_on_device(&node, Script::Source { lane: 0 });
     std::fs::remove_file(&path).expect("the file this case wrote");
     assert_none_diverge(found);

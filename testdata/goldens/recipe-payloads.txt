@@ -1,5 +1,5 @@
 == tpch nested-limits
-sha256=a2c47c352aa67a83cfdb91a9d0c864f9151221841531a1500164bfbbd2e4bfbf
+sha256=1c944c657feef6f5d244f11b7851b94deaf0c5e49384f26a91042506deca259f
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuCrossJoin: calling_lanes=1, join_build(#4 CudfJoin); per probe batch: join_probe
       #4 CudfJoin
@@ -9,21 +9,21 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
         projection: [1]
     GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#1 CudfCoalescePartitions, lane batches)
         #1 CudfCoalescePartitions
-      GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
-          #0 CudfScan
-            files: /tmp/peacock-plan-bytes-root/tpch.sf1/region.parquet
-            schema: [__rowmarker__:Int8]
-            limit: 23
-            rows_only: true
+      GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+            #0 CudfScan
+              files: /tmp/peacock-plan-bytes-root/tpch.sf1/region.parquet
+              schema: [__rowmarker__:Int8]
+              rows_only: true
     GpuProject: calling_lanes=1, per batch: execute_node(#3 CudfProject, batch)
         #3 CudfProject
           k: p_partkey@0
       GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
-        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
-            #2 CudfScan
-              files: /tmp/peacock-plan-bytes-root/tpch.sf1/part.parquet
-              schema: [p_partkey:Int64]
-              limit: 28
+        GpuLimit: calling_lanes=1, per straddling batch: slice_handle(batch, row range)
+          GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#2 CudfScan, row groups)
+              #2 CudfScan
+                files: /tmp/peacock-plan-bytes-root/tpch.sf1/part.parquet
+                schema: [p_partkey:Int64]
 == tpch nested-loop-join
 sha256=70517d741393009d3eb5a8255745d9cda49a2c58d4f8c90fa9798f2a5e9030ac
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)

@@ -47,7 +47,6 @@ pub(crate) fn source(table: &str, lanes: usize) -> Box<dyn GpuNode> {
         vec![0],
         partition_groups,
         &scan,
-        None,
         schema(),
     ))
 }
