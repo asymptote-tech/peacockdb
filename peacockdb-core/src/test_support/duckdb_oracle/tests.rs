@@ -154,8 +154,8 @@ fn a_negative_decimal_scale_does_not_buy_a_wider_tolerance() {
 }
 
 /// A zero-column answer has a header with no pipes in it, and `split_cells` reads a pipeless
-/// line as one cell. tpcds q17 is the one such section — it renders `++` where DuckDB renders
-/// fifteen columns — and the width it reports is in the message the line's divergence prints.
+/// line as one cell. An answer that lost its columns renders `++`, and the width it reports is
+/// in the message a width difference prints.
 #[test]
 fn a_zero_column_answer_reports_no_columns() {
     let none = "mode=tp4-sized\n++\n++\n";
@@ -267,20 +267,26 @@ fn a_null_is_not_within_any_tolerance_of_a_value() {
     );
 }
 
-/// tpcds q17's shape: both sides answer zero rows, and ours renders no columns at all
-/// because the cpu emits no batch to take a schema from (#205). The row set is what
-/// diverges, so a line with no positions admits it — and a column-count difference under
-/// any other oracle still fails before a row is read.
+/// A column-count difference fails under every oracle, a row-level divergence included: an
+/// engine that dropped a column is wrong whatever the rows do. Both sides here answer zero
+/// rows, the one shape where the width is all there is to compare.
 #[test]
-fn a_row_level_divergence_admits_a_column_count_difference() {
+fn a_column_count_difference_fails_under_every_oracle() {
     let ours = "++\n++\n";
     let duck = "+---+-----+\n| a | sum |\n+---+-----+\n+---+-----+\n";
-    assert_eq!(compare(&divergent(205, vec![]), ours, duck, &KINDS), Ok(()));
-    assert!(
-        compare(&DuckdbOracle::Exact, ours, duck, &KINDS)
-            .expect_err("a dropped schema under an oracle that reads rows")
-            .contains("columns against")
-    );
+    for oracle in [
+        divergent(251, vec![]),
+        DuckdbOracle::Exact,
+        DuckdbOracle::Approx,
+    ] {
+        let said = compare(&oracle, ours, duck, &KINDS)
+            .expect_err("a dropped schema under an oracle that reads rows");
+        assert!(
+            said.contains("0 columns against 2"),
+            "{}: {said}",
+            oracle.name()
+        );
+    }
 }
 
 /// Each named column has to diverge somewhere. One that came right is a line to update and
@@ -318,9 +324,8 @@ fn a_declared_position_past_the_last_column_names_the_line() {
 #[test]
 fn an_archived_ticket_is_not_open_and_a_listed_one_is() {
     use crate::test_support::ticket_is_open;
-    // Not #235: this task closes it, so a case asserting it is open goes red the day it is
-    // archived. #205 and #251 are what `corpus_cases.inc`'s divergent lines name.
-    assert!(ticket_is_open(205), "#205 is in llm-wiki/tickets/");
+    // #251 is what `corpus_cases.inc`'s divergent lines name; a case asserting it open goes
+    // red the day it is archived, and the fix is to swap in another open number.
     assert!(ticket_is_open(251), "#251 is in llm-wiki/tickets/");
     assert!(
         !ticket_is_open(191),

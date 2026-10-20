@@ -97,3 +97,14 @@ original rule, kept for the record.
 Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
 job but the GPU tests is green; the GPU jobs are not waited on. The device cases are built, not
 run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints, re-proved after the rebase onto limits on master ca4dedeb. Both
+rules landed as written; every Tests line exists, the unpruned predicate included. Item 3 took its
+first branch: q17 and pbench `not-in-uncorrelated` are `duckdb_exact`, and the oracle's
+column-count exemption is gone. The device half ran on nebius-gpu (2026-10-19): the four
+accumulate cases pass, and q17's five device cells are on. Final pass: reviewer and analyst each
+found nothing blocking. Deviations: q17's tp1 device cells run with the schema hook masked on
+open #225; `cost-report/src/main.rs`, outside Scope, swaps its example ticket 205→214 because
+archiving broke it; two DataFusion comparisons outside the corpus still take the raw empty answer.
