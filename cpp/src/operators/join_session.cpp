@@ -33,11 +33,13 @@ namespace peacock {
 using namespace join;
 
 struct JoinSession::State {
+  explicit State(TableResult build) : B(std::move(build)) {}
+
   const fb::CudfJoin* d = nullptr;
   fb::JoinType type = fb::JoinType_Inner;
   cudf::null_equality cmp = cudf::null_equality::UNEQUAL;
   TableResult B;                              // the build side, owned by the session
-  std::vector<cudf::size_type> bkeys, pkeys;  // key ordinals per side
+  std::vector<cudf::size_type> bkeys, pkeys;  // key ordinals per side; pkeys at the first probe
   std::unique_ptr<cudf::hash_join> hj;        // built once
   /// The build's distinct keys, owned here because `dhj` only views them, and the object
   /// built over them. Declared after `B` and before `dhj`, so each outlives what views it.
@@ -79,26 +81,34 @@ struct JoinSession::State {
 
   cudf::table_view Bk() const { return B.view().select(bkeys); }
   cudf::table_view keys_of(TableResult const& P) const { return P.view().select(pkeys); }
+
+  /// The probe side's names: its first batch's, or `probe_schema`'s before one arrived.
+  std::vector<std::string> probe_side_names() const {
+    return probe_names.empty() ? names_of(d->probe_schema()) : probe_names;
+  }
+  /// The filter schema's names over this build and `probe`'s columns (`filter_names`).
+  std::vector<std::string> filter_names_over(std::vector<std::string> const& probe) const {
+    return filter_names(map, B.column_names, probe);
+  }
 };
 
 JoinSession::JoinSession(const fb::CudfJoin* d, std::optional<TableResult> build)
-    : s_(std::make_unique<State>()) {
+    // No build batch is an empty build side (#212), typed from the plan's own schema so the
+    // output's build columns carry the types the matched rows would have carried. A side of no
+    // columns is refused by `TableResult::owning`, which every route into a handle passes
+    // through, so there is no second check for it here.
+    : s_(std::make_unique<State>(
+          build ? std::move(*build)
+                : null_table(types_of(d->build_schema()), names_of(d->build_schema()), 0))) {
   s_->d = d;
   s_->type = d->join_type();
   s_->cmp = d->null_equals_null() ? cudf::null_equality::EQUAL : cudf::null_equality::UNEQUAL;
-  // No build batch is an empty build side (#212), typed from the plan's own schema so the
-  // output's build columns carry the types the matched rows would have carried. A side of no
-  // columns is refused by `TableResult::owning`, which every route into a handle passes
-  // through, so there is no second check for it here.
-  s_->B = build ? std::move(*build)
-                : null_table(types_of(d->build_schema()), names_of(d->build_schema()), 0);
   if (d->keys()) {
     for (auto const* k : *d->keys()) {
       if (k->left()->node_type() != fb::ExprNode_ColumnRef ||
           k->right()->node_type() != fb::ExprNode_ColumnRef)
         throw std::runtime_error("CudfJoin: only ColumnRef keys");
-      s_->bkeys.push_back(static_cast<cudf::size_type>(k->left()->node_as_ColumnRef()->index()));
-      s_->pkeys.push_back(static_cast<cudf::size_type>(k->right()->node_as_ColumnRef()->index()));
+      s_->bkeys.push_back(column_ordinal(k->left()->node_as_ColumnRef(), s_->B.column_names));
     }
   }
   // Refused here rather than at the first emit, where a type answering only at finish would
@@ -118,7 +128,8 @@ JoinSession::JoinSession(const fb::CudfJoin* d, std::optional<TableResult> build
   // A conjunct reading only the side a semi join does not emit filters that side before any
   // key work; for RightSemi/RightAnti that side is the build.
   if (is_probe_side_semi(s_->type) && !s_->build_only.empty()) {
-    auto keep = eval_on(s_->build_only, s_->B.view(), fb::JoinSide_Left, s_->map);
+    auto keep = eval_on(s_->build_only, s_->B.view(), fb::JoinSide_Left, s_->map,
+                        s_->filter_names_over(s_->probe_side_names()));
     s_->B = TableResult::owning(cudf::apply_boolean_mask(s_->B.view(), keep->view()),
                                 s_->B.column_names);
   }
@@ -136,10 +147,11 @@ JoinSession::JoinSession(const fb::CudfJoin* d, std::optional<TableResult> build
   const bool pairs_only = !s_->bkeys.empty() && emits_pairs(s_->type);
   if (!s_->cross.empty() && !pairs_only) {
     auto tt = filter_type_table(s_->map, s_->B.view(), types_of(d->probe_schema()));
+    const auto names = s_->filter_names_over(s_->probe_side_names());
     for (auto const* e : s_->cross) {
-      if (cudf_ast_can_evaluate(e, tt.view())) {
+      if (cudf_ast_can_evaluate(e, tt.view(), names)) {
         s_->A.push_back(AstConjunct{e});
-      } else if (!hoist(e, tt.view())) {
+      } else if (!hoist(e, tt.view(), names)) {
         s_->R.push_back(e);
       }
     }
@@ -149,7 +161,7 @@ JoinSession::JoinSession(const fb::CudfJoin* d, std::optional<TableResult> build
     s_->cross_is_ast = s_->R.empty() && !emits_pairs(s_->type) && !s_->bkeys.empty();
     const bool uses_ast = !s_->A.empty() && (s_->bkeys.empty() || s_->cross_is_ast);
     if (uses_ast && !s_->hoist_build.empty())
-      s_->B_cond = cond_table(s_->B.view(), fb::JoinSide_Left, s_->map, s_->hoist_build);
+      s_->B_cond = cond_table(s_->B.view(), fb::JoinSide_Left, s_->map, s_->hoist_build, names);
     if (s_->cross_is_ast) return;
   }
   if (s_->bkeys.empty()) return;  // a nested loop: cuDF's conditional joins, no hash table
@@ -209,7 +221,8 @@ void JoinSession::split_residual() {
 /// the comparison is then two column references the AST can take. False when the conjunct is
 /// not of that shape, or when the comparison is still refused after it -- it then goes to
 /// `R`, where the column path evaluates anything.
-bool JoinSession::hoist(const fb::Expr* e, cudf::table_view tt) {
+bool JoinSession::hoist(const fb::Expr* e, cudf::table_view tt,
+                        std::vector<std::string> const& names) {
   if (e->node_type() != fb::ExprNode_BinaryExprNode) return false;
   auto const* b = e->node_as_BinaryExprNode();
   if (!is_comparison(b->op())) return false;
@@ -234,8 +247,8 @@ bool JoinSession::hoist(const fb::Expr* e, cudf::table_view tt) {
   if (!reads_a_side[1]) ops[1].build = !ops[0].build;
   auto type_of = [&](const fb::Expr* x) {
     if (x->node_type() == fb::ExprNode_ColumnRef)
-      return tt.column(x->node_as_ColumnRef()->index()).type();
-    return build_column(x, tt)->type();
+      return column_at(tt, names, x->node_as_ColumnRef()).type();
+    return build_column(x, tt, names)->type();
   };
   if (!hoisted_is_ast_able(b->op(), type_of(sides[0]), type_of(sides[1]))) return false;
   for (int i = 0; i < 2; ++i) {
@@ -263,12 +276,16 @@ std::optional<TableResult> JoinSession::probe(TableResult P) {
   if (s_->probe_types.empty()) {
     s_->probe_types = types_of(P.view());
     s_->probe_names = P.column_names;
+    if (s_->d->keys())
+      for (auto const* k : *s_->d->keys())
+        s_->pkeys.push_back(column_ordinal(k->right()->node_as_ColumnRef(), P.column_names));
   }
   if (s_->empty_build) return probe_empty_build(std::move(P));
   // A build-side semi type's probe-only conjunct filters the batch before its keys are
   // taken: a probe row failing it cannot witness a match.
   if (is_build_side_semi(s_->type) && !s_->probe_only.empty()) {
-    auto keep = eval_on(s_->probe_only, P.view(), fb::JoinSide_Right, s_->map);
+    auto keep = eval_on(s_->probe_only, P.view(), fb::JoinSide_Right, s_->map,
+                        s_->filter_names_over(P.column_names));
     P = TableResult::owning(cudf::apply_boolean_mask(P.view(), keep->view()), P.column_names);
   }
   if (s_->bkeys.empty()) return s_->d->filter() ? probe_nested(P) : probe_cross(P);
@@ -326,7 +343,8 @@ std::optional<TableResult> JoinSession::probe(TableResult P) {
 /// match; the preserved side's own conjuncts are ANDed in here, so a NULL one is no match.
 TableResult JoinSession::kept_probe_rows(TableResult const& P, std::unique_ptr<cudf::column> hit) {
   if (!s_->probe_only.empty()) {
-    auto R = eval_on(s_->probe_only, P.view(), fb::JoinSide_Right, s_->map);
+    auto R = eval_on(s_->probe_only, P.view(), fb::JoinSide_Right, s_->map,
+                     s_->filter_names_over(P.column_names));
     hit = cudf::binary_operation(hit->view(), R->view(), cudf::binary_operator::LOGICAL_AND, kBool);
   }
   // Anti is semi's complement, here and everywhere: design §3.4 D13.
@@ -340,7 +358,8 @@ TableResult JoinSession::kept_probe_rows(TableResult const& P, std::unique_ptr<c
 std::optional<TableResult> JoinSession::probe_mixed(TableResult const& P) {
   ExprContext ctx;
   auto Pk = s_->keys_of(P);
-  auto Pc = cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe);
+  auto Pc = cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe,
+                       s_->filter_names_over(P.column_names));
   const auto bw = s_->B.num_columns(), pw = P.num_columns();
   if (is_build_side_semi(s_->type)) {
     auto const& pred = cross_ast(s_->A, ctx, s_->map, false, bw, pw);
@@ -442,7 +461,8 @@ std::optional<TableResult> JoinSession::probe_nested(TableResult const& P) {
 
 std::optional<TableResult> JoinSession::probe_nested_rowwise(TableResult const& P) {
   ExprContext ctx;
-  auto Pcond = cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe);
+  auto Pcond = cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe,
+                          s_->filter_names_over(P.column_names));
   auto Bc = s_->B_cond_view();
   auto Pc = Pcond.view();
   const auto bw = s_->B.num_columns(), pw = P.num_columns();
@@ -493,13 +513,14 @@ std::optional<TableResult> JoinSession::probe_nested_candidates(TableResult cons
   // One AST for every chunk: a column reference names an ordinal, not a table.
   auto const& a = cross_ast(s_->A, ctx, s_->map, false, s_->B.num_columns(), P.num_columns());
   auto Bc = s_->B_cond_view();
+  const auto names = s_->filter_names_over(P.column_names);
   const auto candidates = cudf::conditional_inner_join_size(
-      Bc, cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe).view(), a);
+      Bc, cond_table(P.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe, names).view(), a);
   auto ranges = chunks(candidates, row_bytes, P.num_rows(), s_->d->chunk_bytes());
   std::vector<TableResult> parts;
   for (auto [lo, hi] : ranges) {
     TableResult Pc = P.slice(lo, hi);
-    auto Pcond = cond_table(Pc.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe);
+    auto Pcond = cond_table(Pc.view(), fb::JoinSide_Right, s_->map, s_->hoist_probe, names);
     // A sizer evaluates the condition over every pair, so one range reuses the count above.
     auto n =
         ranges.size() == 1 ? candidates : cudf::conditional_inner_join_size(Bc, Pcond.view(), a);
@@ -554,7 +575,8 @@ std::optional<TableResult> JoinSession::probe_cross(TableResult P) {
 void JoinSession::keep_and_derive(TableResult const& Pc, cudf::column_view bi, cudf::column_view pi,
                                   std::vector<const fb::Expr*> const& cs,
                                   std::vector<TableResult>& parts) {
-  auto mask = residual_mask(s_->B.view(), Pc.view(), bi, pi, cs, s_->map);
+  auto mask = residual_mask(s_->B.view(), Pc.view(), bi, pi, cs, s_->map,
+                            s_->filter_names_over(Pc.column_names));
   auto kept = cudf::apply_boolean_mask(cudf::table_view{{bi, pi}}, mask->view());
   derive(Pc, kept->get_column(0).view(), kept->get_column(1).view(), parts);
 }
@@ -580,7 +602,8 @@ std::optional<TableResult> JoinSession::finish() {
       // The preserved side's own conjuncts, over the build's rows: `matched AND R`.
       auto m = std::move(s_->matched);
       if (!s_->build_only.empty()) {
-        auto R = eval_on(s_->build_only, s_->B.view(), fb::JoinSide_Left, s_->map);
+        auto R = eval_on(s_->build_only, s_->B.view(), fb::JoinSide_Left, s_->map,
+                         s_->filter_names_over(s_->probe_side_names()));
         m = cudf::binary_operation(m->view(), R->view(), cudf::binary_operator::LOGICAL_AND, kBool);
       }
       // `with` shares B's column owners and owns the mark, so the build is not copied.

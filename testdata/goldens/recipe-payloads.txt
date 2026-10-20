@@ -65,7 +65,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
           files: /tmp/peacock-plan-bytes-root/tpch.sf1/nation.parquet
           schema: [n_nationkey:Int32, n_name:Utf8, n_regionkey:Int32, n_comment:Utf8]
 == tpch q13
-sha256=0d183cabd5a433c105d7c683803ec89fde251eb392b1b9dd213886473eb0911f
+sha256=bb50b9ab738b3de34e398479df4697888046c5c0313fa3501c437991f604922e
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#21 CudfSortPreservingMerge, all lanes)
       #21 CudfSortPreservingMerge
@@ -146,7 +146,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       files: /tmp/peacock-plan-bytes-root/tpch.sf1/orders.parquet
                                       schema: [o_orderkey:Int64, o_custkey:Int64, o_comment:Utf8]
 == tpch q15
-sha256=4f39bd6187658ef5e313ca9c38b48b7745b0c1a9f711106b8ec03dfd6d7aa058
+sha256=aaa6a3d6d2d12bda42ad4b46c52e89ba033c60a1252c517f381ac3e8cbb0065e
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#29 CudfSortPreservingMerge, all lanes)
       #29 CudfSortPreservingMerge
@@ -254,7 +254,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                             schema: [l_suppkey:Int64, l_extendedprice:Decimal128, l_discount:Decimal128, l_shipdate:Date32]
 == tpch q21
-sha256=0ae16d9f68791c9c2d6d48c735f5c92a789988c06a12860665aaf50b5d84cc5f
+sha256=1420ee43e219f051bdc0d912606a8fb4b1e12a8688d189d14b5bf91d4d5c98df
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#44 CudfSortPreservingMerge, all lanes)
       #44 CudfSortPreservingMerge
@@ -427,7 +427,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                   files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                                   schema: [l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
 == tpch q22
-sha256=cb1131f82f51fcfe1bd18de0a0fdcfe7f19aa7760d2c2333b0ad523e85516e2a
+sha256=27c82db6e188875610cccbbc0243842bb3c6eb7359c5c94271aad7564c62daa6
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#23 CudfSortPreservingMerge, all lanes)
       #23 CudfSortPreservingMerge
@@ -524,7 +524,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               files: /tmp/peacock-plan-bytes-root/tpch.sf1/orders.parquet
                               schema: [o_custkey:Int64]
 == tpch shuffle-stddev
-sha256=06ff10b3b03468b74f0bca7c993e24a880448aded22b7e51d156c521de7566dc
+sha256=58d4e27935ae062b86ca18e94c41037abe93ba997287a2e70017b45b6fd0afee
 GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=4, per batch: execute_node(#9 CudfProject, batch)
       #9 CudfProject
@@ -539,11 +539,10 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
         #7 CudfAggregate{Merge}
           mode: Merge
           group_by: l_returnflag@0, l_linestatus@1
-          stddev(lineitem.l_quantity): stddev(stddev(lineitem.l_quantity)$count@2, stddev(lineitem.l_quantity)$mean@3, stddev(lineitem.l_quantity)$m2@4)
-          stddev_pop(lineitem.l_quantity): stddev_pop(stddev_pop(lineitem.l_quantity)$count@5, stddev_pop(lineitem.l_quantity)$mean@6, stddev_pop(lineitem.l_quantity)$m2@7)
-          var(lineitem.l_quantity): var(var(lineitem.l_quantity)$count@8, var(lineitem.l_quantity)$mean@9, var(lineitem.l_quantity)$m2@10)
-          var_pop(lineitem.l_quantity): var_pop(var_pop(lineitem.l_quantity)$count@11, var_pop(lineitem.l_quantity)$mean@12, var_pop(lineitem.l_quantity)$m2@13)
-          mergeable_agg_state: true
+          stddev(lineitem.l_quantity)$count, stddev(lineitem.l_quantity)$mean, stddev(lineitem.l_quantity)$m2: stddev(stddev(lineitem.l_quantity)$count@2, stddev(lineitem.l_quantity)$mean@3, stddev(lineitem.l_quantity)$m2@4) ddof=1
+          stddev_pop(lineitem.l_quantity)$count, stddev_pop(lineitem.l_quantity)$mean, stddev_pop(lineitem.l_quantity)$m2: stddev_pop(stddev_pop(lineitem.l_quantity)$count@5, stddev_pop(lineitem.l_quantity)$mean@6, stddev_pop(lineitem.l_quantity)$m2@7)
+          var(lineitem.l_quantity)$count, var(lineitem.l_quantity)$mean, var(lineitem.l_quantity)$m2: var(var(lineitem.l_quantity)$count@8, var(lineitem.l_quantity)$mean@9, var(lineitem.l_quantity)$m2@10) ddof=1
+          var_pop(lineitem.l_quantity)$count, var_pop(lineitem.l_quantity)$mean, var_pop(lineitem.l_quantity)$m2: var_pop(var_pop(lineitem.l_quantity)$count@11, var_pop(lineitem.l_quantity)$mean@12, var_pop(lineitem.l_quantity)$m2@13)
         #8 CudfProject{finalize}
           l_returnflag: l_returnflag@0
           l_linestatus: l_linestatus@1
@@ -563,26 +562,24 @@ GpuUnload: calling_lanes=4, per handle: result_from_handle(batch, row range)
                 #3 CudfAggregate{Merge}
                   mode: Merge
                   group_by: l_returnflag@0, l_linestatus@1
-                  stddev(lineitem.l_quantity): stddev(stddev(lineitem.l_quantity)$count@2, stddev(lineitem.l_quantity)$mean@3, stddev(lineitem.l_quantity)$m2@4)
-                  stddev_pop(lineitem.l_quantity): stddev_pop(stddev_pop(lineitem.l_quantity)$count@5, stddev_pop(lineitem.l_quantity)$mean@6, stddev_pop(lineitem.l_quantity)$m2@7)
-                  var(lineitem.l_quantity): var(var(lineitem.l_quantity)$count@8, var(lineitem.l_quantity)$mean@9, var(lineitem.l_quantity)$m2@10)
-                  var_pop(lineitem.l_quantity): var_pop(var_pop(lineitem.l_quantity)$count@11, var_pop(lineitem.l_quantity)$mean@12, var_pop(lineitem.l_quantity)$m2@13)
-                  mergeable_agg_state: true
+                  stddev(lineitem.l_quantity)$count, stddev(lineitem.l_quantity)$mean, stddev(lineitem.l_quantity)$m2: stddev(stddev(lineitem.l_quantity)$count@2, stddev(lineitem.l_quantity)$mean@3, stddev(lineitem.l_quantity)$m2@4) ddof=1
+                  stddev_pop(lineitem.l_quantity)$count, stddev_pop(lineitem.l_quantity)$mean, stddev_pop(lineitem.l_quantity)$m2: stddev_pop(stddev_pop(lineitem.l_quantity)$count@5, stddev_pop(lineitem.l_quantity)$mean@6, stddev_pop(lineitem.l_quantity)$m2@7)
+                  var(lineitem.l_quantity)$count, var(lineitem.l_quantity)$mean, var(lineitem.l_quantity)$m2: var(var(lineitem.l_quantity)$count@8, var(lineitem.l_quantity)$mean@9, var(lineitem.l_quantity)$m2@10) ddof=1
+                  var_pop(lineitem.l_quantity)$count, var_pop(lineitem.l_quantity)$mean, var_pop(lineitem.l_quantity)$m2: var_pop(var_pop(lineitem.l_quantity)$count@11, var_pop(lineitem.l_quantity)$mean@12, var_pop(lineitem.l_quantity)$m2@13)
               GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
                   #1 CudfAggregate{Partial}
                     mode: Partial
                     group_by: l_returnflag@1, l_linestatus@2
-                    stddev(lineitem.l_quantity): stddev(l_quantity@0)
-                    stddev_pop(lineitem.l_quantity): stddev_pop(l_quantity@0)
-                    var(lineitem.l_quantity): var(l_quantity@0)
-                    var_pop(lineitem.l_quantity): var_pop(l_quantity@0)
-                    mergeable_agg_state: true
+                    stddev(lineitem.l_quantity)$count, stddev(lineitem.l_quantity)$mean, stddev(lineitem.l_quantity)$m2: stddev(l_quantity@0) ddof=1
+                    stddev_pop(lineitem.l_quantity)$count, stddev_pop(lineitem.l_quantity)$mean, stddev_pop(lineitem.l_quantity)$m2: stddev_pop(l_quantity@0)
+                    var(lineitem.l_quantity)$count, var(lineitem.l_quantity)$mean, var(lineitem.l_quantity)$m2: var(l_quantity@0) ddof=1
+                    var_pop(lineitem.l_quantity)$count, var_pop(lineitem.l_quantity)$mean, var_pop(lineitem.l_quantity)$m2: var_pop(l_quantity@0)
                 GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
                     #0 CudfScan
                       files: /tmp/peacock-plan-bytes-root/tpch.sf1/lineitem.parquet
                       schema: [l_quantity:Decimal128, l_returnflag:Utf8, l_linestatus:Utf8]
 == tpcds q10
-sha256=40454f2b3e558f388b1152ed7613ba11aed4f7caa3a548d0f532cfbbea36fd75
+sha256=23eaae459bcc69d77041b52afa357054f5f6230f5cb4736b44f8cdb2345f6dd7
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#69 CudfSortPreservingMerge, all lanes)
       #69 CudfSortPreservingMerge
@@ -853,7 +850,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
                                           schema: [cs_sold_date_sk:Int64, cs_ship_customer_sk:Int64]
 == tpcds q14
-sha256=1e8fd55a3ad65d27b866c747076477a7155180daafd5dd6c2ad3b19f87e919a2
+sha256=2030b5b6a9289236ec623469de4ce50aebdca4755e7896758d77ab261490361e
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#448 CudfSortPreservingMerge, all lanes)
       #448 CudfSortPreservingMerge
@@ -2552,7 +2549,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                                         files: /tmp/peacock-plan-bytes-root/tpcds.sf1/store_sales.parquet
                                                                                         schema: [ss_sold_date_sk:Int64, ss_item_sk:Int64]
 == tpcds q16
-sha256=746369bc7192328dc6e85fd34c094a65c743171ddeb61f6134da791dbd43dc03
+sha256=8e430cbdb9c0ed5e71522d66aca6693b1cc78b6ed56b7f9929eed9b1f12812b2
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
       #45 CudfProject
@@ -2735,7 +2732,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_returns.parquet
                             schema: [cr_order_number:Int64]
 == tpcds q39
-sha256=e0be9b41cc550fddaf0d160f76cb7b8007652b393db48affdbe3f44043f3fb20
+sha256=dbac7fd4136d234526d1fe9621b95095a7b7293684c12a772f8deca06332fb4c
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#78 CudfProject, batch)
       #78 CudfProject
@@ -2809,10 +2806,9 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               #29 CudfAggregate{Merge}
                                 mode: Merge
                                 group_by: w_warehouse_name@0, w_warehouse_sk@1, i_item_sk@2, d_moy@3
-                                stddev(inventory.inv_quantity_on_hand): stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6)
+                                stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6) ddof=1
                                 avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                                 avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
-                                mergeable_agg_state: true
                               #30 CudfProject{finalize}
                                 w_warehouse_name: w_warehouse_name@0
                                 w_warehouse_sk: w_warehouse_sk@1
@@ -2832,18 +2828,16 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                       #25 CudfAggregate{Merge}
                                         mode: Merge
                                         group_by: w_warehouse_name@0, w_warehouse_sk@1, i_item_sk@2, d_moy@3
-                                        stddev(inventory.inv_quantity_on_hand): stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6)
+                                        stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6) ddof=1
                                         avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                                         avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
-                                        mergeable_agg_state: true
                                     GpuAggregate: calling_lanes=4, per batch: execute_node(#23 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#23 CudfAggregate{Partial})
                                         #23 CudfAggregate{Partial}
                                           mode: Partial
                                           group_by: w_warehouse_name@3, w_warehouse_sk@2, i_item_sk@1, d_moy@4
-                                          stddev(inventory.inv_quantity_on_hand): stddev(inv_quantity_on_hand@0)
+                                          stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(inv_quantity_on_hand@0) ddof=1
                                           avg(inventory.inv_quantity_on_hand)$sum: sum(cast(inv_quantity_on_hand@0 as Float64))
                                           avg(inventory.inv_quantity_on_hand)$count: count(cast(inv_quantity_on_hand@0 as Float64))
-                                          mergeable_agg_state: true
                                       GpuProject: calling_lanes=4, per batch: execute_node(#22 CudfProject, batch)
                                           #22 CudfProject
                                             inv_quantity_on_hand: inv_quantity_on_hand@1
@@ -2967,10 +2961,9 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                             #66 CudfAggregate{Merge}
                               mode: Merge
                               group_by: w_warehouse_name@0, w_warehouse_sk@1, i_item_sk@2, d_moy@3
-                              stddev(inventory.inv_quantity_on_hand): stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6)
+                              stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6) ddof=1
                               avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                               avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
-                              mergeable_agg_state: true
                             #67 CudfProject{finalize}
                               w_warehouse_name: w_warehouse_name@0
                               w_warehouse_sk: w_warehouse_sk@1
@@ -2990,18 +2983,16 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                     #62 CudfAggregate{Merge}
                                       mode: Merge
                                       group_by: w_warehouse_name@0, w_warehouse_sk@1, i_item_sk@2, d_moy@3
-                                      stddev(inventory.inv_quantity_on_hand): stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6)
+                                      stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(stddev(inventory.inv_quantity_on_hand)$count@4, stddev(inventory.inv_quantity_on_hand)$mean@5, stddev(inventory.inv_quantity_on_hand)$m2@6) ddof=1
                                       avg(inventory.inv_quantity_on_hand)$sum: sum(avg(inventory.inv_quantity_on_hand)$sum@7)
                                       avg(inventory.inv_quantity_on_hand)$count: sum(avg(inventory.inv_quantity_on_hand)$count@8)
-                                      mergeable_agg_state: true
                                   GpuAggregate: calling_lanes=4, per batch: execute_node(#60 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#60 CudfAggregate{Partial})
                                       #60 CudfAggregate{Partial}
                                         mode: Partial
                                         group_by: w_warehouse_name@3, w_warehouse_sk@2, i_item_sk@1, d_moy@4
-                                        stddev(inventory.inv_quantity_on_hand): stddev(inv_quantity_on_hand@0)
+                                        stddev(inventory.inv_quantity_on_hand)$count, stddev(inventory.inv_quantity_on_hand)$mean, stddev(inventory.inv_quantity_on_hand)$m2: stddev(inv_quantity_on_hand@0) ddof=1
                                         avg(inventory.inv_quantity_on_hand)$sum: sum(cast(inv_quantity_on_hand@0 as Float64))
                                         avg(inventory.inv_quantity_on_hand)$count: count(cast(inv_quantity_on_hand@0 as Float64))
-                                        mergeable_agg_state: true
                                     GpuProject: calling_lanes=4, per batch: execute_node(#59 CudfProject, batch)
                                         #59 CudfProject
                                           inv_quantity_on_hand: inv_quantity_on_hand@1
@@ -3097,7 +3088,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                   files: /tmp/peacock-plan-bytes-root/tpcds.sf1/inventory.parquet
                                                                   schema: [inv_date_sk:Int64, inv_item_sk:Int64, inv_warehouse_sk:Int64, inv_quantity_on_hand:Int32]
 == tpcds q40
-sha256=9aecb49dcf5319c339bbbbd1e974b0e27cbd51741d57b71bdb76196a68b0ced7
+sha256=dfc9901803c47494e068c200ac6a99ac03d4170429fd1f0933423e73f4142d9a
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#43 CudfSortPreservingMerge, all lanes)
       #43 CudfSortPreservingMerge
@@ -3279,7 +3270,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                               files: /tmp/peacock-plan-bytes-root/tpcds.sf1/catalog_sales.parquet
                                                               schema: [cs_sold_date_sk:Int64, cs_warehouse_sk:Int64, cs_item_sk:Int64, cs_order_number:Int64, cs_sales_price:Decimal128]
 == tpcds q41
-sha256=4cf17bd0246fb099df28419b0257ae442bfc8fe3d793bb042b22cb57eda615b0
+sha256=b58f6d8f7e676d0a16b9ed6c9eaa981ea65bf8dd4ca045aa9a55f58de3b2822c
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#20 CudfSortPreservingMerge, all lanes)
       #20 CudfSortPreservingMerge
@@ -3362,7 +3353,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                               files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                               schema: [i_category:Utf8, i_manufact:Utf8, i_size:Utf8, i_color:Utf8, i_units:Utf8]
 == tpcds q45
-sha256=c630419ca3a93eeaa7ee1e52f7a5867a75cb229c3d18e721ed19c7f2b51c39f7
+sha256=50b910a52f18848d816680e21d3cc1d9762b02b83fd0499b08d13c59d1c285d1
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#48 CudfSortPreservingMerge, all lanes)
       #48 CudfSortPreservingMerge
@@ -3552,7 +3543,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 files: /tmp/peacock-plan-bytes-root/tpcds.sf1/item.parquet
                                 schema: [i_item_sk:Int64, i_item_id:Utf8]
 == tpcds q5
-sha256=e9c1e5f5814ee4bc0026fcefdfd2e74d7c5b53315c35a7f0ab72f7a307c2bcbb
+sha256=d27906c9de4797b7e93c0d21cac0d06b4375a2781a0fe6ed7f1938182d348c90
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#108 CudfSortPreservingMerge, all lanes)
       #108 CudfSortPreservingMerge
@@ -4039,7 +4030,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                                     files: /tmp/peacock-plan-bytes-root/tpcds.sf1/web_sales.parquet
                                                                     schema: [ws_item_sk:Int64, ws_web_site_sk:Int64, ws_order_number:Int64]
 == tpcds q61
-sha256=91eea505cae9a06b15140214ee6d9064bb8dd5e98ea2c944107b418683072d5f
+sha256=d54c41bd4a9a1f21e81d01f23c6cc061690f44ff2830c70fdf11fd86e8104f55
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuAccumulateBatchesAndSort: calling_lanes=1, per batch: execute_node(#102 CudfSort, batch); at done: execute_node(#103 CudfSortPreservingMerge, lane batches)
       #102 CudfSort
@@ -4415,7 +4406,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                           files: /tmp/peacock-plan-bytes-root/tpcds.sf1/customer.parquet
                                           schema: [c_customer_sk:Int64, c_current_addr_sk:Int64]
 == tpcds q87
-sha256=ed910a9f00f44c6e1a20d39294642650c507f39aa38f784f8cbddf59ff7f6b65
+sha256=555d8bb39d6c1554e3b51a9ff0dd6506c49884863abe8ea411e2474a0f53e21f
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#90 CudfCoalescePartitions, lane batches), execute_node(#91 CudfAggregate{Merge}, prior output); at done: execute_node(#92 CudfProject{finalize}, prior output)
       #90 CudfCoalescePartitions
@@ -4742,7 +4733,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                                           files: /tmp/peacock-plan-bytes-root/tpcds.sf1/store_sales.parquet
                                                           schema: [ss_sold_date_sk:Int64, ss_customer_sk:Int64]
 == tpcds q91
-sha256=e0ef37c59df41e0d4eace4d41e16b01c8305d320165ef21a31c87fbeeb48689c
+sha256=1a90f687adcfe56e473beb0e00ccbe43a234554aa4f2687944cedccf90165477
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#56 CudfProject, batch)
       #56 CudfProject
@@ -4958,7 +4949,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                             files: /tmp/peacock-plan-bytes-root/tpcds.sf1/customer_demographics.parquet
                                             schema: [cd_demo_sk:Int64, cd_marital_status:Utf8, cd_education_status:Utf8]
 == tpcds q95
-sha256=4f5a0fdf854afbd5ca985dd100cb4dddce30cbaf65ccabfe27fff41fb17a0fdf
+sha256=63eea34bfdb79f5996b64d7233c13e9c44faa6eb44414f6b440f8ac2f22fc3eb
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#60 CudfProject, batch)
       #60 CudfProject
@@ -5193,7 +5184,7 @@ GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
                                 files: /tmp/peacock-plan-bytes-root/tpcds.sf1/web_sales.parquet
                                 schema: [ws_warehouse_sk:Int64, ws_order_number:Int64]
 == tpcds q97
-sha256=1629ef6449bd62f8cfc01becbd2abf0de4eef30de8015b6122cf783411203237
+sha256=6075ffdb3b3c89de732ef49af6272ceadb6d55bbde981fc20fe9a31fd9130fa4
 GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
   GpuProject: calling_lanes=1, per batch: execute_node(#45 CudfProject, batch)
       #45 CudfProject

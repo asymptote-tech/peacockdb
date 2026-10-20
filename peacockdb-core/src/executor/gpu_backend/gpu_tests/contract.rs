@@ -43,9 +43,9 @@ fn summed(keys: &[(&str, DataType)]) -> (Schema, AggregateBody, AggregateBody) {
         .enumerate()
         .map(|(ordinal, (name, _))| Expr::column(ordinal as u32, name))
         .collect();
-    let sum = |column: u32| AggCall {
+    let sum = |column: u32, name: &str| AggCall {
         func: PlanAgg::Sum,
-        args: vec![Expr::column(column, "v")],
+        args: vec![Expr::column(column, name)],
         outputs: vec![Field::new("sum(v)", DataType::Int64, true)],
     };
     (
@@ -54,14 +54,14 @@ fn summed(keys: &[(&str, DataType)]) -> (Schema, AggregateBody, AggregateBody) {
             group_by: group_by.clone(),
             grouping_sets: Vec::new(),
             null_exprs: Vec::new(),
-            aggs: vec![sum(1)],
+            aggs: vec![sum(1, "v")],
             finalize: None,
         },
         AggregateBody {
             group_by,
             grouping_sets: Vec::new(),
             null_exprs: Vec::new(),
-            aggs: vec![sum(keys.len() as u32)],
+            aggs: vec![sum(keys.len() as u32, "sum(v)")],
             finalize: None,
         },
     )

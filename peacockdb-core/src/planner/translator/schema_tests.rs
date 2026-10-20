@@ -9,6 +9,8 @@
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::union::UnionExec;
 
 use super::Translator;
 use crate::plan::AggFunc;
@@ -259,6 +261,45 @@ async fn a_union_branch_is_cast_to_the_declared_output_by_a_project() {
             &DataType::Decimal128(15, 2)
         );
     }
+}
+
+#[tokio::test]
+async fn a_union_branch_named_otherwise_is_renamed_by_a_project() {
+    // SQL never reaches this shape — DataFusion aliases a union's branches to its names itself —
+    // so the union is built by hand: the second branch holds `n_regionkey` where the union
+    // declares `n_nationkey`, at the same type. A union forwards its branches' batches as they
+    // are, so the node above would meet the branch's name under a reference to the union's.
+    let union: Arc<dyn ExecutionPlan> = Arc::new(UnionExec::new(vec![
+        physical_plan_for("SELECT n_nationkey FROM nation", 1).await,
+        physical_plan_for("SELECT n_regionkey FROM nation", 1).await,
+    ]));
+    let tree = Translator::new(1, Batching::Off)
+        .translate(&union)
+        .expect("translate the plan");
+    let union = tree.children()[0];
+    let declared = types_of(union);
+    assert_eq!(declared, vec![("n_nationkey".to_string(), DataType::Int32)]);
+    let branches = union.children();
+    assert!(
+        !matches!(as_node_ref(branches[0]), NodeRef::Project(_)),
+        "a branch already under the union's names and types is left as it is"
+    );
+    let NodeRef::Project(project) = as_node_ref(branches[1]) else {
+        panic!("the branch named otherwise is renamed by a project");
+    };
+    assert_eq!(
+        project.exprs[0].expr,
+        Expr::column(0, "n_regionkey"),
+        "a bare reference: nothing to cast where the types agree"
+    );
+    assert_eq!(
+        types_of(branches[1]),
+        declared,
+        "the project emits the union's names"
+    );
+    union
+        .validate_schemas_and_partitions()
+        .expect("every branch now declares the union's names");
 }
 
 #[tokio::test]

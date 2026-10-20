@@ -45,10 +45,10 @@ inline peacock::TableResult table_of(std::vector<std::unique_ptr<cudf::column>> 
                                       std::move(names));
 }
 
-/// A ColumnRef carrying its column's name.
+/// A ColumnRef carrying its column's name; `name` null writes none, which the reader refuses.
 inline flatbuffers::Offset<fb::Expr> ref(flatbuffers::FlatBufferBuilder& fbb, uint32_t index,
                                          const char* name) {
-  auto text = fbb.CreateString(name);
+  auto text = name ? fbb.CreateString(name) : flatbuffers::Offset<flatbuffers::String>{};
   return fb::CreateExpr(fbb, fb::ExprNode_ColumnRef, fb::CreateColumnRef(fbb, index, text).Union());
 }
 

@@ -69,7 +69,7 @@ refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no t
 
 ### 5 (aggregate half). The executor derives ddof from the aggregate's name
 
-Folded into [#225](../tickets/corpus-coverage.md#t225), whose fix makes the wire change it needs.
+Folded into [#225](../archive/archived-tickets.md#t225), whose fix makes the wire change it needs.
 
 `cpp/src/operators/aggregate.cpp:42`: `stddev_ddof` derives the
 ddof from the aggregate's *name*, while the Rust side already computed it as data

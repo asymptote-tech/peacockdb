@@ -1,4 +1,5 @@
 use super::*;
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::ParquetReadOptions;
@@ -164,4 +165,112 @@ async fn a_scan_over_several_files_is_refused_rather_than_measured_from_one() {
         "{err}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// nation registered under its own schema with `rename` applied to every field name, then
+/// `sql` planned over it, the scan's metadata read.
+async fn metadata_over(
+    rename: impl Fn(&str) -> String,
+    sql: &str,
+) -> Result<ScanMetadata, PlanError> {
+    let path = minimal().join("nation.parquet");
+    let path = path.to_str().unwrap();
+    let own = SessionContext::new();
+    own.register_parquet("nation", path, ParquetReadOptions::default())
+        .await
+        .expect("the file's own schema");
+    let file = own
+        .table("nation")
+        .await
+        .expect("registered")
+        .schema()
+        .as_arrow()
+        .clone();
+    let declared = ArrowSchema::new(
+        file.fields()
+            .iter()
+            .map(|f| f.as_ref().clone().with_name(rename(f.name())))
+            .collect::<Vec<_>>(),
+    );
+    let ctx = SessionContext::new();
+    ctx.register_parquet(
+        "declared",
+        path,
+        ParquetReadOptions::default().schema(&declared),
+    )
+    .await
+    .expect("registered under the declared schema");
+    let plan = ctx
+        .sql(sql)
+        .await
+        .expect("the query parses")
+        .create_physical_plan()
+        .await
+        .expect("the query plans");
+    let scan = find_scan(&plan).expect("a scan");
+    survivor_metadata(scan.as_any().downcast_ref::<ParquetExec>().unwrap())
+}
+
+#[tokio::test]
+async fn a_declared_schema_that_renames_a_read_column_is_refused_naming_both() {
+    // The device reads n_name by the declared name and finds none; the cpu reads ordinal 1.
+    let refused = metadata_over(
+        |n| {
+            if n == "n_name" {
+                "nation_name".into()
+            } else {
+                n.into()
+            }
+        },
+        "SELECT * FROM declared",
+    )
+    .await
+    .expect_err("a renamed column is read by different names on the two engines");
+    let message = refused.to_string();
+    assert!(matches!(refused, PlanError::Unsupported(_)), "{message}");
+    assert!(
+        message.contains("ordinal 1")
+            && message.contains("`nation_name`")
+            && message.contains("`n_name`"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn a_declared_schema_that_swaps_two_columns_of_one_type_is_refused() {
+    // Same type, so nothing downstream would notice: the device would read one key as the other.
+    let refused = metadata_over(
+        |n| match n {
+            "n_nationkey" => "n_regionkey".into(),
+            "n_regionkey" => "n_nationkey".into(),
+            other => other.into(),
+        },
+        "SELECT * FROM declared",
+    )
+    .await
+    .expect_err("a swap reads each key as the other on the device");
+    let message = refused.to_string();
+    assert!(
+        message.contains("ordinal 0")
+            && message.contains("`n_regionkey`")
+            && message.contains("`n_nationkey`"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn a_rename_of_a_column_the_scan_does_not_read_plans() {
+    // Only the projected ordinals are read, and n_comment is not one of them here.
+    metadata_over(
+        |n| {
+            if n == "n_comment" {
+                "remark".into()
+            } else {
+                n.into()
+            }
+        },
+        "SELECT n_name FROM declared",
+    )
+    .await
+    .expect("an unread column's name is nobody's to check");
 }

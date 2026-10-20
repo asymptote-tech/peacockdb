@@ -86,11 +86,11 @@ void export_table_to_ipc(const cudf::table_view& tview,
     auto t = tview.column(i).type();
     bool fixed = cudf::is_fixed_point(t);
     if (fixed && t.id() != cudf::type_id::DECIMAL128)
-      throw std::runtime_error("export: column " + column_names[i] +
+      throw std::runtime_error("export: column " + column_names.at(i) +
                                " is a narrow fixed_point; the loader widens every decimal to "
                                "DECIMAL128 and nothing may narrow one");
     if (decimal_precisions && decimal_precisions[i] != 0 && !fixed)
-      throw std::runtime_error("export: column " + column_names[i] +
+      throw std::runtime_error("export: column " + column_names.at(i) +
                                " is not a decimal but was given precision " +
                                std::to_string(decimal_precisions[i]));
   }

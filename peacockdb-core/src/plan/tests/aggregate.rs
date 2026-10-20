@@ -75,6 +75,59 @@ fn a_welford_triple_is_one_aggregate_under_the_name_sql_wrote() {
         vec![("stddev", "stddev(v)")],
         "three aggregators, one SQL name, one alias"
     );
+    assert_eq!(
+        funcs[0].state_names,
+        ["stddev(v)$count", "stddev(v)$mean", "stddev(v)$m2"],
+        "the triple's three columns, each under the name the plan declares"
+    );
+    assert_eq!(funcs[0].ddof, 1, "the sample form");
+}
+
+/// A plain aggregator is one column under its call's output name, and has no ddof.
+#[test]
+fn a_plain_aggregate_has_one_state_name_and_no_ddof() {
+    let body = AggregateBody {
+        group_by: vec![Expr::column(0, "k")],
+        grouping_sets: Vec::new(),
+        null_exprs: Vec::new(),
+        aggs: vec![AggCall {
+            func: PlanAgg::Sum,
+            args: vec![Expr::column(1, "v")],
+            outputs: vec![Field::new("sum(v)", DataType::Int64, true)],
+        }],
+        finalize: None,
+    };
+    let state = columns(&["k", "sum(v)"]);
+    let funcs = state_funcs(&body, &state).expect("nameable");
+    assert_eq!(funcs[0].state_names, ["sum(v)"]);
+    assert_eq!(funcs[0].ddof, 0);
+}
+
+/// A merge's `merge_m2` is one call with three outputs; its names are those three.
+#[test]
+fn a_welford_merge_names_the_three_columns_it_merges() {
+    let names = ["stddev(v)$count", "stddev(v)$mean", "stddev(v)$m2"];
+    let body = AggregateBody {
+        group_by: vec![Expr::column(0, "k")],
+        grouping_sets: Vec::new(),
+        null_exprs: Vec::new(),
+        aggs: vec![AggCall {
+            func: PlanAgg::MergeM2,
+            args: (0..3)
+                .map(|i| Expr::column(1 + i, names[i as usize]))
+                .collect(),
+            outputs: names
+                .iter()
+                .map(|n| Field::new(*n, DataType::Float64, true))
+                .collect(),
+        }],
+        finalize: None,
+    };
+    let state = welford_state(&["k", names[0], names[1], names[2]], 1, "stddev(v)");
+    let funcs = state_funcs(&body, &state).expect("nameable");
+    assert_eq!(funcs[0].name, "stddev");
+    assert_eq!(funcs[0].state_names, names);
+    assert_eq!(funcs[0].ddof, 1);
 }
 
 /// The grouping-set init emits `__grouping_id` beside its keys, so the state is one column

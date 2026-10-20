@@ -17,9 +17,9 @@ use super::serialize::serialize_schema;
 use super::expr_writer::write_expr;
 use super::node_writer;
 use super::writer::Payload;
-use crate::plan::AggCall;
 use crate::plan::PlanError;
 use crate::plan::Schema;
+use crate::plan::StateFunc;
 use crate::plan::{AggregateBody, Phase};
 
 pub(crate) fn aggregate<'a>(
@@ -63,7 +63,7 @@ pub(crate) fn aggregate<'a>(
         })
         .collect();
 
-    let (funcs, mergeable) = state_funcs(b, body, state)?;
+    let funcs = state_funcs(b, body, state)?;
 
     let group_exprs = b.create_vector(&group_exprs);
     let group_names = b.create_vector(&group_names);
@@ -87,7 +87,6 @@ pub(crate) fn aggregate<'a>(
             null_names: Some(null_names),
             grouping_sets: Some(grouping_sets),
             aggr_input_schema: Some(input_schema),
-            mergeable_agg_state: mergeable,
         },
     );
     Ok(Payload {
@@ -135,48 +134,53 @@ fn state_funcs<'a>(
     b: &mut FlatBufferBuilder<'a>,
     body: &AggregateBody,
     state: &Schema,
-) -> Result<(Vec<WIPOffset<fb::AggregateFuncNode<'a>>>, bool), PlanError> {
+) -> Result<Vec<WIPOffset<fb::AggregateFuncNode<'a>>>, PlanError> {
     let declared = crate::plan::state_funcs(body, state)?;
     let mut funcs = Vec::with_capacity(declared.len());
-    let mut folded = false;
     for func in &declared {
-        folded |= func.welford;
-        funcs.push(named_func(b, func.name, func.call, &func.alias)?);
+        funcs.push(named_func(b, func)?);
     }
-    Ok((funcs, folded))
+    Ok(funcs)
 }
 
-/// `out_decimal_precision`/`out_decimal_scale` stay at zero, and that is a decision. They
-/// are the wire's channel for `avg`'s declared decimal type (read by `aggregate.cpp` at
-/// :216 and :711), but the engine never sends an `avg` to a device:
-/// decomposition splits it into sum and count, so the scale rides on the finalize divide's own
-/// `out_decimal_precision`, which `expr_writer` sets and
+/// Every state column the function emits is named here, from the plan, and a Welford's
+/// `ddof` rides beside its three names. `out_decimal_precision`/`out_decimal_scale` stay at
+/// zero and are read by nothing: they carried `avg`'s declared decimal type, and the engine
+/// never sends an `avg` to a device — decomposition splits it into sum and count, so the scale
+/// rides on the finalize divide's own `out_decimal_precision`, which `expr_writer` sets and
 /// `an_average_finalizes_to_the_digits_the_oracle_computes` proves against the oracle's digits.
-/// No shape the engine plans sends a name `is_avg` matches: inside the Welford triple the func is
-/// named by `sql_name`, and `wire_name`'s `"mean"` is reachable only from the arm below it, which
-/// decomposition leaves no `Mean` aggregator to enter. Written out rather than defaulted so a
-/// field added to the table has to be answered here.
+/// Written out rather than defaulted so a field added to the table has to be answered here.
 fn named_func<'a>(
     b: &mut FlatBufferBuilder<'a>,
-    name: &str,
-    call: &AggCall,
-    alias: &str,
+    func: &StateFunc,
 ) -> Result<WIPOffset<fb::AggregateFuncNode<'a>>, PlanError> {
-    let mut args = Vec::with_capacity(call.args.len());
-    for arg in &call.args {
+    let mut args = Vec::with_capacity(func.call.args.len());
+    for arg in &func.call.args {
         args.push(write_expr(b, arg)?);
     }
     let args = b.create_vector(&args);
-    let name = b.create_string(name);
-    let alias = b.create_string(alias);
+    let name = b.create_string(func.name);
+    let names: Vec<WIPOffset<&str>> = func
+        .state_names
+        .iter()
+        .map(|n| b.create_string(n))
+        .collect();
+    let state_names = b.create_vector(&names);
+    let ddof = i8::try_from(func.ddof).map_err(|_| {
+        PlanError::Invalid(format!(
+            "{}: ddof {} does not fit the wire's int8",
+            func.name, func.ddof
+        ))
+    })?;
     Ok(fb::AggregateFuncNode::create(
         b,
         &fb::AggregateFuncNodeArgs {
             name: Some(name),
             args: Some(args),
-            alias: Some(alias),
             out_decimal_precision: 0,
             out_decimal_scale: 0,
+            state_names: Some(state_names),
+            ddof,
         },
     ))
 }

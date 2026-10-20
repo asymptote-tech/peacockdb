@@ -7,10 +7,8 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 ## Contents
 
 - [Welford aggregation](#welford-aggregation)
-  - [#225 (Welford column aliases) the device names every Welford state column by the same alias](#t225)
   - [#216 (global Welford missing) the device's global aggregate has no Welford arm](#t216)
   - [#94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific](#t94)
-  - [#280 (Welford grouping sets) a `stddev` or `var` under a grouping set answers one column where the plan declares three](#t280)
 - [Aggregates](#aggregates)
   - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
   - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
@@ -28,7 +26,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
-  - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
   - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
   - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
@@ -37,56 +34,18 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 
 ## Welford aggregation
 
-<a id="t225"></a>
-### #225 (Welford column aliases) the device names every Welford state column by the same alias
-
-The plan declares a `stddev` or `var` state as `<out>$count`, `<out>$mean`, `<out>$m2`; the
-device holds all three under `<out>`, at the init and at the merge alike, the types as declared.
-
-The wire folds the triple into one `AggregateFuncNode` with one `alias` (`plan/aggregate.rs`,
-`state_funcs`, `welford: true`), and `aggregate.cpp`'s Partial and Merge arms push each child
-under it. No answer is wrong today: the merge packs the triple by offset and the finalize reads
-it by ordinal; a reader resolving a state column by name would take the wrong one. The fix is
-the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned by
-`bug_stddev_holds_three_identically_named_columns` (the init) and
-`bug_stddev_merge_holds_three_identically_named_columns` (the merge)
-in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
-`tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
-`schema_validation_disabled`; the cells stay enabled and their values match. 2026-10-09: five of
-them now, `stale-cells` having turned on the four device modes that a closed #183 still held off.
-Validation was off for all five, so that run says nothing about the names and the refusal still
-stands at every mode; the row keeps no `225` only because no cell of it is off.
-
-**Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
-only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
-three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
-its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
-mode, refused at its first `GpuAggregate`, its cells off here; `tpcds/q17` at the two tp1 modes,
-refused the same way, runs there with the hook masked.
-
-**Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
-from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
-the triple from it; the Final arm, which answers one column, already names it right. Not
-suffixes in C++: `$count`/`$mean`/`$m2` is DataFusion's convention, and a second copy drifts. Then both `bug_` tests expect `None`.
-
-In the same append, a `ddof: int8` beside `state_names`, which `state_funcs` fills from
-`AggStateColumns.ddof`. `aggregate.cpp` reads it where it now calls `stddev_ddof(func_name)`, and
-that helper, which re-derives from the aggregate's name what the planner already holds, goes.
-Not wrong today: every name the writer emits maps to the right ddof. It rides along because this
-is the wire change it needs (`reports/hacks-audit.md` §5, aggregate half).
-
 <a id="t216"></a>
 ### #216 (global Welford missing) the device's global aggregate has no Welford arm
 
 A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
 `[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
 
-`aggregate.cpp`'s grouped path honours `mergeable` and emits the triple with `MERGE_M2`; its
-keyless path (`key_cols.empty()`) tests `is_stddev_name` alone and reduces that name with
-`make_std_aggregation`, whatever the phase — at the init the sample stddev of the argument, at
-the merge the stddev of the state's first column, the count — and the finalize project refuses
-with `ColumnRef index 2 out of range (cols=1)`; a `var` name falls to `make_reduce_agg`'s
-`unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
+`aggregate.cpp`'s grouped path builds the triple through its request builder (`add_requests`);
+its keyless path (`keyless_aggregate`) reduces a `stddev` or `stddev_pop` name with
+`make_std_aggregation(func->ddof())` whatever the phase — at the init the sample stddev of the
+argument, at the merge the stddev of the state's first column, the count — and the finalize
+project refuses with `ColumnRef stddev(…)$m2@2 is past the 1 columns its input has`; a `var` name
+finds no reduction, `unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
 are refusals on the device in every shape. Pinned in `aggregate_dimension_cases.rs` by the
 four `bug_` cases `…welford_init_answers_a_finished_stddev…`, `…keyless_welford_merge…`,
 `…global_stddev_finalize_is_refused…` and `…keyless_var_merge_is_refused…`; the init's one
@@ -98,14 +57,14 @@ from lineitem;` (tpch).
 **Fix proposed:** in `execute_aggregate`, a keyless node with any stddev or var runs whole through
 the grouped path on one constant `INT32` key, dropped before return — cuDF has `M2`/`MERGE_M2`
 for groupby only. The plan and recipes do not change. Empty input still answers one row, built
-per aggregator: a count 0, the rest NULL. The keyless `is_stddev_name` arm goes. After #225, so
-its tests can assert `holds_as_declared`.
+per aggregator: a count 0, the rest NULL. The keyless `stddev` arm goes; its tests can assert
+`holds_as_declared`.
 
 <a id="t94"></a>
 ### #94 (MERGE_M2 count type) MERGE_M2 count-child type is cuDF-version-specific
-The stddev/var Merge arm (`cpp/src/operators/aggregate.cpp`, the `AggPhase::Merge` Welford
-branch) casts `valid_count` to INT32 for the 25.02 GPU runtime; 25.06 and later (cuDF PR #18546) accept only
-INT64 or FLOAT64 (`group_merge_m2.cu`). The Final arm casts the same way but never runs. The
+`merge_m2_input` (`cpp/src/operators/aggregate.cpp`) casts `valid_count` to `kMergeM2CountType`,
+INT32 for the 25.02 runtime; 25.06 and later (cuDF PR #18546) accept only INT64 or FLOAT64
+(`group_merge_m2.cu`). There is no Final arm. The
 26.02 CI leg is build-only so it stays green — this bites at the next GPU-remote cuDF bump.
 Switch or version-gate the type then; the comment marks the site.
 
@@ -115,39 +74,17 @@ back to INT64 before it returns. On 25.06 and later the count stays INT64 throug
 
 **Fix proposed:** gate at compile time. `cpp/CMakeLists.txt` passes `cudf_VERSION`'s major and
 minor as `PEACOCK_CUDF_VERSION_*` defines; `aggregate.cpp` picks one `constexpr` count type from
-them — INT32 before 25.06, INT64 from 25.06 — and both `MERGE_M2` sites use it. No single type serves
+them — INT32 before 25.06, INT64 from 25.06 — as `kMergeM2CountType`, at the one `MERGE_M2` site. No single type serves
 both versions, and each cuDF version is its own build, so no runtime probe. The gate goes when
 25.02 does.
 
-<a id="t280"></a>
-### #280 (Welford grouping sets) a `stddev` or `var` under a grouping set answers one column where the plan declares three
-
-A `stddev` or `var` under `ROLLUP`, `CUBE` or `GROUPING SETS` is refused on the device; the cpu
-answers it.
-
-The wire folds the init's three Welford calls (`Count`, `Mean`, `M2`) into one
-`AggregateFuncNode` and sets `mergeable_agg_state`. `execute_aggregate`'s grouped path honours
-the flag and emits `[count, mean, m2]` (`aggregate.cpp:615-632`). Its grouping-set path
-(`:363-423`) predates it: one request per function node through `make_agg`, which for a stddev
-name is cuDF's `STD` and for a var name `VARIANCE`, one finished column per group. The plan
-declares three state columns, so the export against the declared schema refuses the node, or the
-finalize project above finds `ColumnRef index 2 out of range`; a function after it in the node
-reads a shifted column. Found by the 2026-10-08 column-indexing audit; no test reaches it.
-
-**Corpus query:** none: no tpch or tpcds query has the shape. Simplest: `select l_returnflag,
-l_linestatus, stddev_samp(l_quantity), var_pop(l_quantity) from lineitem group by rollup
-(l_returnflag, l_linestatus);` (tpch).
-
-**Fix proposed:** one request builder for the grouped and grouping-set paths, so the
-grouping-set path builds the Welford triple the grouped one does; the query above added as
-`tpch/rollup-stddev`. Both in aggregate-arms, chain K.
 
 ## Aggregates
 
 <a id="t264"></a>
 ### #264 (computed group key) the device refuses a group key that is not a bare column
 `CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
-(`cpp/src/operators/aggregate.cpp:163`) for any group expression that is not a `ColumnRef`, so
+(`execute_aggregate`, `cpp/src/operators/aggregate.cpp`) for any group expression that is not a `ColumnRef`, so
 `GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on the
 device, at every mode. The cpu answers. The planner does not lower a group expression into a
 project below the aggregate, and the recipe hands the expression through as it stands — so the
@@ -324,8 +261,7 @@ run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
 
 **Corpus queries:** `tpcds/q39` — `CASE mean WHEN 0 THEN NULL ELSE stdev/mean END` in a project
 and `CASE mean WHEN 0 THEN 0 ELSE stdev/mean END > 1` in a filter, each twice per plan (the CTE is
-read twice). All five gpu cells are off, and registry row 40 tags `57 225`: since the join
-session, every mode meets [#225](#t225)'s Welford names at the aggregate below the filter first.
+read twice). All five gpu cells are off, and registry row 40 tags `57`.
 
 **Fix proposed:** [fix 7 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix7), about 20 lines in `build_column_case`.
 Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
@@ -431,21 +367,6 @@ the existing `peacock_result_from_handle` and counting in Rust. The first is wor
 because the second copies a resident table to count its nulls, and the gpu hook already holds
 both arguments it would need. Either way the device flavour then passes `PerColumn` and nothing
 else changes. Not type-checkable without cuDF, so it wants a host with a card.
-
-<a id="t164"></a>
-### #164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
-
-The C++ half of [#135](../archive/archived-tickets.md#t135), which the planner
-closed on the Rust side by checking a reference's name against the field at its position.
-
-`expr.cpp` ~L349 returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing,
-turning a bad ordinal into a confusing type error further along. The third closure #135 named is
-unstarted and belongs here too: a per-node type check in the GPU tiers, the only thing that would
-surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
-`driver-output-hook` are that check for the operator and corpus tiers — every device batch held
-to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
-half is closed — `register_handle`, the only path to a handle number, refuses a handle whose names
-do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
 
 <a id="t174"></a>
 ### #174 (two clamps, one rule) two clamps for one rule, and nothing compares them

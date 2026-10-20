@@ -19,12 +19,12 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in) {
   // AST fast path when the predicate has no LIKE / CASE / ScalarFunction nodes;
   // otherwise produce the bool mask via the column-producing evaluator.
   std::unique_ptr<cudf::column> mask;
-  if (cudf_ast_can_evaluate(filter->predicate(), input.view())) {
+  if (cudf_ast_can_evaluate(filter->predicate(), input.view(), input.column_names)) {
     ExprContext ctx;
     auto& predicate = build_expr(filter->predicate(), ctx);
     mask = cudf::compute_column(input.view(), predicate);
   } else {
-    mask = build_column(filter->predicate(), input.view());
+    mask = build_column(filter->predicate(), input.view(), input.column_names);
   }
   auto filtered = cudf::apply_boolean_mask(input.view(), mask->view());
   auto result = TableResult::owning(std::move(filtered), std::move(input.column_names));

@@ -53,7 +53,7 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
       std::vector<cudf::column_view> key_views;
       if (we->partition_by()) {
         for (flatbuffers::uoffset_t k = 0; k < we->partition_by()->size(); ++k) {
-          key_owned.push_back(evaluate_column(we->partition_by()->Get(k), tv));
+          key_owned.push_back(evaluate_column(we->partition_by()->Get(k), tv, input.column_names));
           key_views.push_back(key_owned.back().view());
         }
       }
@@ -66,7 +66,7 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in) {
       cudf::column_view arg_view;
       bool has_arg = we->args() && we->args()->size() > 0;
       if (has_arg) {
-        arg = evaluate_column(we->args()->Get(0), tv);
+        arg = evaluate_column(we->args()->Get(0), tv, input.column_names);
         arg_view = arg.view();
       } else {
         arg_view = tv.column(0);

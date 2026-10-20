@@ -148,6 +148,7 @@ add_custom_target(gpu_plan_fbs DEPENDS ${FBS_GENERATED_HEADER})
 add_library(peacock_gpu SHARED
   src/gpu_executor.cpp
   src/expr.cpp
+  src/column_refs.cpp
   src/node_session.cpp
   src/table_result.cpp
   src/operators/dispatch.cpp
@@ -209,7 +210,8 @@ set_tests_properties(peacock_gpu_tests PROPERTIES LABELS "gpu")
 
 # Plan executor GPU tests — executes FlatBuffer plans against testdata Parquet files
 add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp tests/gpu/test_grouping_id.cpp
-  tests/gpu/test_aggregate_no_input.cpp)
+  tests/gpu/test_aggregate_no_input.cpp tests/gpu/test_column_refs.cpp
+  tests/gpu/test_aggregate_builder.cpp)
 target_include_directories(peacock_plan_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src

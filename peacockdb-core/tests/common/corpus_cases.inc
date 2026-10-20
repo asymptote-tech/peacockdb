@@ -65,7 +65,10 @@ corpus_query!(tpch, 1, nested_loop_join, all_modes, all_modes, duckdb_exact, dat
 // `__rowmarker__` (#63) — on and not yet proven on a device, as scan-limit's cells are.
 // mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
 corpus_query!(tpch, 1, shuffle_additive_avg, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_disabled); // #225
+corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
+// rollup-stddev puts a Welford under a grouping set, which neither benchmark has; the grouping-set
+// path builds the triple through the one request builder (#280).
+corpus_query!(tpch, 1, rollup_stddev, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_loop_left_join, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, nested_limits, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -103,9 +106,7 @@ corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact
 // inner stage shuffles at tp4 on the keys alone, the grouping id dropped as rollup-over-join's is,
 // and it runs on the device at every mode. distinct-functions runs on the device at every mode — the
 // first plan from the lowering a device has run (#262) — under shuffle-stddev's Welford
-// tolerance oracle, its stddev one ULP from the cpu's in two groups. Its mask excuses the three
-// tp4 modes on #225 and only those: the Welford state named three times for the alias is in the
-// outer init, which the tp1 modes fold into their finalizing node and never emit.
+// tolerance oracle, its stddev one ULP from the cpu's in two groups.
 // DataFusion 45 refuses stddev(DISTINCT) and averages a grouped decimal avg(DISTINCT) plainly,
 // so DataFusion is no oracle for distinct-functions: DuckDB is, and
 // a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb in test_cpu_corpus.rs holds
@@ -114,11 +115,11 @@ corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact
 // are decimals ours renders shorter than DuckDB's floats, so both lines' DuckDB compare is the
 // approximate one.
 corpus_query!(tpch, 1, rollup_distinct, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, data_fusion_disabled, golden_approx_std, schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)); // #225
+corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, data_fusion_disabled, golden_approx_std, schema_validation_enabled);
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// four: q78 and q2 (#60's `round`), q5 (#210's decimal literal), q39 (#225's Welford names). The
+// four: q78 and q2 (#60's `round`), q5 (#210's decimal literal), q39 (#57's CASE). The
 // joins' own blockers, #152's side copies and #220's batch splits, went with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -245,9 +246,8 @@ corpus_query!(tpcds, 1, q14, all_modes, all_modes, duckdb_exact, data_fusion_exa
 // seven run at every cpu mode; q18 and q22 carry a rollup, which held them off the three tp4
 // modes on #189's UInt8 grouping-set id at the shuffle until it stopped being hashed; q24's
 // nested-loop join projects, which the cpu applies.
-// q17's two tp1 cells meet #225's Welford names at the schema hook, so they run without it. The
-// rest run everywhere.
-corpus_query!(tpcds, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_disabled(tp1_single | tp1_rowgroup)); // #225
+// q17 and the rest run everywhere.
+corpus_query!(tpcds, 1, q17, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q18, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q22, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q24, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -258,8 +258,7 @@ corpus_query!(tpcds, 1, q32, all_modes, all_modes, duckdb_exact, data_fusion_exa
 // T19 batch 20, the last six, run rather than declared, and the rollout's end. All six run at
 // every cpu mode; q39 takes the tolerance oracle, its `cov` differing from DataFusion's in the
 // last digits at every mode — the Welford merge over batches, as shuffle-stddev found. On the
-// device q39 meets #225's Welford names at the schema hook, below #57's CASE in the filter; the
-// other five run everywhere.
+// device q39 meets #57's CASE in the filter; the other five run everywhere.
 corpus_query!(tpcds, 1, q35, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q39, all_modes, none, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 corpus_query!(tpcds, 1, q65, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

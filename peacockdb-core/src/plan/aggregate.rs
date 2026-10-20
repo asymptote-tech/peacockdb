@@ -31,24 +31,41 @@ pub(crate) fn state_funcs<'a>(
                 if funcs.iter().any(|f| f.alias == owner.output) {
                     continue;
                 }
+                // Every aggregator the triple folds, in state order: the init's three calls,
+                // or the merge's one merge_m2 with three outputs.
+                let state_names = body
+                    .aggs
+                    .iter()
+                    .enumerate()
+                    .filter(|(at, _)| {
+                        welford
+                            .get(*at)
+                            .copied()
+                            .flatten()
+                            .is_some_and(|other| other.output == owner.output)
+                    })
+                    .flat_map(|(_, owned)| owned.outputs.iter().map(|field| field.name().clone()))
+                    .collect();
                 funcs.push(StateFunc {
                     name: sql_name(owner.func, owner.ddof),
                     call,
                     alias: owner.output.clone(),
-                    welford: true,
+                    state_names,
+                    ddof: owner.ddof,
                 });
             }
             None => {
-                let alias = call
+                let state_names: Vec<String> = call
                     .outputs
-                    .first()
+                    .iter()
                     .map(|field| field.name().clone())
-                    .unwrap_or_default();
+                    .collect();
                 funcs.push(StateFunc {
                     name: agg_name(call.func)?,
                     call,
-                    alias,
-                    welford: false,
+                    alias: state_names.first().cloned().unwrap_or_default(),
+                    state_names,
+                    ddof: 0,
                 });
             }
         }

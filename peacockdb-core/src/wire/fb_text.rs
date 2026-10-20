@@ -64,9 +64,17 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                             written.join(", ")
                         })
                         .unwrap_or_default();
+                    let named = func
+                        .state_names()
+                        .map(|names| names.iter().collect::<Vec<_>>().join(", "))
+                        .unwrap_or_default();
+                    let ddof = match func.ddof() {
+                        0 => String::new(),
+                        d => format!(" ddof={d}"),
+                    };
                     field(
-                        func.alias().unwrap_or_default(),
-                        format!("{}({args})", func.name().unwrap_or("?")),
+                        &named,
+                        format!("{}({args}){ddof}", func.name().unwrap_or("?")),
                     );
                 }
             }
@@ -101,9 +109,6 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
                     })
                     .collect();
                 field("grouping_sets", written.join(", "));
-            }
-            if aggregate.mergeable_agg_state() {
-                field("mergeable_agg_state", "true".to_string());
             }
         }
         // Every field the session reads, the two schemas included: they are what an absent

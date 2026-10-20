@@ -28,8 +28,19 @@ cudf::data_type binop_output_type(fb::BinaryOp op, cudf::data_type lhs,
 
 // Whether an expression can be evaluated through the cuDF AST fast path (true)
 // or must take the column-producing path (false). Routes decimal operands and
-// un-inferrable / mismatched-type binary ops to the column path.
-bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table);
+// un-inferrable / mismatched-type binary ops to the column path. `names` is the table's,
+// and every ColumnRef of an expression answered true has been resolved against it.
+bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table,
+                           std::vector<std::string> const& names);
+
+// The ordinal a ColumnRef names in a table whose columns are `names`, checked (#164): an index
+// past the width throws naming the index and the width, a reference with no name throws, and a
+// name other than names[index] throws naming both. `names` is the table's, one per column.
+cudf::size_type column_ordinal(const fb::ColumnRef* ref, std::vector<std::string> const& names);
+
+// table.column(column_ordinal(ref, names)): the column, borrowed.
+cudf::column_view column_at(cudf::table_view const& table, std::vector<std::string> const& names,
+                            const fb::ColumnRef* ref);
 
 /// What an expression evaluated to: a column the evaluation made, or one of the input
 /// table's own columns, borrowed — a bare ColumnRef is the second. Copying it was #154's
@@ -52,7 +63,8 @@ struct EvaluatedColumn {
 // the private expr.h because ExitCopies.ABareColumnRefIsBorrowedNotCopied asserts the borrow
 // directly — that nothing is allocated and the view is the input's own buffer — which no
 // operator-level call can show.
-EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table);
+EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table,
+                                std::vector<std::string> const& names);
 
 // The two size_type ceilings a CudfJoin checks before it makes pairs or a cross product
 // (join-rewrite-design.md §3.9). Reachable here because a test exercises them on sizes:
