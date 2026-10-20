@@ -95,3 +95,13 @@ operand casts as plan-node casts, but the FLOAT64 cast is the C++'s (predates th
 welford-device's frozen spec quotes the old `ColumnRef index 2 out of range` message.
 Review round 1 dispatched.
 - PR #183 → ENS-keyless-identity.
+
+### 2026-10-20 — review round 1: 0 blocking, 1 important, 4 nits
+
+1. Important: `test_column_refs.cpp:74-76` — the column path's own check (`expr.cpp:943`) cannot go
+   red: `CAST(ref AS FLOAT64)` is AST-able, so `cudf_ast_can_evaluate` throws first. Developer: an
+   `Int32` cast, shown red with line 943 reverted.
+Nits: `aggregate.cpp:226-227` an extra copy of the INT32 count child per Welford merge (developer);
+`architecture.md` the "hand their columns over" paragraph's broken join and the `MERGE_M2`
+sentence naming a deleted arm, `build-test.md`'s scan-mapping row prose (coordinator, fixed).
+Reviewer checked the three fixture changes: fixture bugs, not an over-strict check.

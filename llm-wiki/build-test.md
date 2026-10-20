@@ -607,8 +607,9 @@ build row, a RightSemi its distinct build keys, and an empty relation is no sour
 
 a column keeps its ordinal and name, a literal DataFusion's scalar, a binary op its declared
 type, the four unaries one for one; from parquet metadata, rows and bytes are the surviving row
-groups' own totals over the projected columns, a scan over several files is refused, and the
-lanes deal the survivors as the mapping says
+groups' own totals over the projected columns, a scan over several files is refused, a declared
+schema that renames or reorders a column the scan reads is refused naming the ordinal and both
+names, and the lanes deal the survivors as the mapping says
 
 | Expression text | [plan_text::expr_text::tests](../peacockdb-core/src/plan_text/expr_text/tests.rs) | 4 |
 |---|---|--:|

@@ -1013,9 +1013,8 @@ same expression and agree by construction rather than by two implementations hap
 match. The device's keyless Welford path is the one exception: `stddev` comes back finished and
 the project above it refuses, `var` is refused at the aggregate ([#216](tickets/corpus-coverage.md#t216)). Two
 appended fbs values buy that: `UnaryOp.Sqrt`, so a
-finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge — cuDF's
-`MERGE_M2` is otherwise reachable only from an arm that finalizes on the same call, and these
-plans stack two merges, per lane and then across lanes.
+finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
+stack two merges, per lane and then across lanes.
 
 Three additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields
 are plan constants and these are decided per call:
@@ -1092,7 +1091,7 @@ semantics change with no ABI change at all.
 deep copy once per node; this one pays it once per node per *batch*. So no operator copies
 where a move would do, bar the Welford merge's copies in `aggregate.cpp`: `merge_m2_input` copies
 the mean and m2 into the struct cuDF reads, and each merged column is copied back out of it.
-project and window share their input's owners through `TableResult`, a filter's fused
+Elsewhere, project and window share their input's owners through `TableResult`, a filter's fused
 projection selects from the table it just filtered, the aggregate releases groupby's key tables,
 a join session moves its gathered columns into its output, and a bare `ColumnRef` evaluates to a
 view of the input's own column rather than a copy of it.
