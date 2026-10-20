@@ -13,8 +13,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#280 (Welford grouping sets) a `stddev` or `var` under a grouping set answers one column where the plan declares three](#t280)
 - [Aggregates](#aggregates)
   - [#199 (empty global aggregate) a global aggregate over no arrival drops its identity row](#t199)
-  - [#55 (q66 divisor cast) q66: two-phase decimal aggregate ignores the partial-phase divisor cast](#t55)
-  - [#65 (grouping-set id format) the device's grouping-set id is not DataFusion's value or width](#t65)
   - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
   - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 - [Sort / Limit](#sort--limit)
@@ -33,7 +31,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
-  - [#262 (DISTINCT device cells) a DISTINCT under a grouping set has no device cell](#t262)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
   - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
@@ -195,78 +192,6 @@ between init and merge a keyless sequence only collapses lanes, which keeps the 
 cpu's `!self.grouped` clause, which merges over nothing, goes, and the twelve #180 cells turn on at
 the tp4 modes.
 
-<a id="t55"></a>
-### #55 (q66 divisor cast) q66: two-phase decimal aggregate ignores the partial-phase divisor cast
-
-Filed against the old executor. DataFusion casts `sum(decimal / int)`'s divisor to Decimal128 in
-the Partial phase only. The device's Final aggregate evaluated the argument again, over the
-partial state, where the cast column does not exist, and cuDF failed the cast.
-
-Most likely stale. The wire has no Final aggregate any more: `aggregate_writer.rs` writes `Init`
-as `Partial` and `Merge` as `Merge`. The division runs once, in `Partial`, where `arg_col`
-(`cpp/src/operators/aggregate.cpp`) builds a computed argument over the original input. A merge
-reads state columns by reference. q66's five cpu cells, which run the same translated expression,
-are green. What is missing is a device run: nothing has put a summed quotient on a device.
-
-**Corpus queries:** `tpcds/q66` — twelve `sum(<month>_sales / w_warehouse_sq_ft)` over a two-branch
-union. Its five gpu cells are on since join-backend's task 14, which ran them on an L40S under
-cuDF 25.02: each matched the cpu's sections and its answer met DuckDB, so registry row 67 tags
-nothing. That is the corpus half of the proof; the walk test below is still owed.
-
-**Fix proposed:** no code change — a proof, then archive. Add a walk test beside
-`each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
-`wire/gpu_tests/mod.rs`: `SUM_OF_QUOTIENTS`, a grouped `sum(l_extendedprice / l_linenumber)`
-under an outer `sum`, through `assert_walk_matches_datafusion` at `TWO_LANES`. The oracle
-compare on the digits is the proof: a merge that re-evaluated the quotient over state would
-throw or answer different digits. Pin the `PARTIAL`, `MERGE` and `FINALIZE` counts from the
-trail, as the neighbouring tests do, so the shape cannot quietly lose its merges. Green on
-shad-gpu closes #55: drop `55` from registry row 67 and archive the ticket as stale. Red means
-the defect is live, and the throwing call names its phase.
-
-<a id="t65"></a>
-### #65 (grouping-set id format) the device's grouping-set id is not DataFusion's value or width
-
-A ROLLUP, CUBE or GROUPING SETS init on the device numbers the id's bits from the other end, and
-holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to
-32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value, silently: it
-plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
-
-`aggregate.cpp` sets bit `i` for masked key `i` and builds the column from a
-`cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
-(`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
-3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
-reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
-`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
-validator refuses the width. Pinned by four `bug_` cases — two in
-`gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
-type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
-`GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
-55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
-the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
-the cast; the fix below covers both.
-
-**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
-`tpch/rollup-distinct`, tpcds q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
-device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
-meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
-id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
-window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
-`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
-group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
-device answers the five subtotal rows with g = 2.
-
-**Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
-`grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
-`uint64_t` and builds `numeric_scalar<uint8_t/uint16_t/uint32_t/uint64_t>` by `nkeys` ≤ 8/16/32,
-throwing past 64 keys as DataFusion does. No wire change and no golden regenerates: payloads print
-masks and names, never an id. The report rejects carrying the id or its type on the wire, a
-frozen-surface append and a `recipe-payloads.txt` regen for a value the C++ can compute; that
-changes at DataFusion 55, where the width depends on the ordinal (#228). Tests: the four `bug_`
-pins flip and `grouping_sets_as_exported` goes; a rollup contract case on both engines; a walk
-test running the query above; the exec model's fold (`scripts/exec_model/operators/aggregates.py`)
-and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which stops hashing the
-id; independent of it.
-
 <a id="t264"></a>
 ### #264 (computed group key) the device refuses a group key that is not a bare column
 `CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
@@ -413,8 +338,8 @@ through `typed-nulls.md` by that spec's own instruction, and pinned by
 `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
 the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
 `Decimal128` row. **Corpus queries:** `tpcds/q5`, whose `0.00 as return_amt` and `net_loss` the
-schema hook refuses as FLOAT64 at every mode, ahead of #65. The likely fix is `cudf_ast_can_evaluate` refusing a bare decimal literal as it already
-refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
+schema hook refuses as FLOAT64 at every mode. The likely fix is `cudf_ast_can_evaluate` refusing
+a bare decimal literal as it already refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t57"></a>
 ### #57 (value-form CASE) the device refuses a value-form CASE
@@ -588,28 +513,6 @@ surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-sch
 to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
 half is closed — `register_handle`, the only path to a handle number, refuses a handle whose names
 do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
-
-<a id="t262"></a>
-### #262 (DISTINCT device cells) a DISTINCT under a grouping set has no device cell
-
-No device has run a DISTINCT under a grouping set: `tpch/rollup-distinct`, the corpus query of
-that shape, is off at every device mode.
-
-The rest of the lowering is proven on a device. `tpch/distinct-functions` runs at all five modes
-on nebius-gpu (distinct-companions, chain K, which closed
-[#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
-match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. tpcds q28, six
-keyless DISTINCT blocks cross-joined, joined it at all five modes on 2026-10-16, once #152 had
-closed. So an outer init running merge aggregators over state and a `__distinct_arg` key work on
-a device, and the widened `avg(…)$sum` state reached it under the type id and scale the plan
-declares. Its *precision* is not part of that: a device holds `{type_id, scale}`, so the
-widening stays pinned by a plan test, which is the only reading of it there is.
-
-**Corpus queries:** `tpch/rollup-distinct`, off on #65. Its row names this ticket beside #65,
-since it is the record that its device cells are the lowering's last unrun ones.
-
-**Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
-ticket is archived. grouping-id, later in chain K, takes it.
 
 <a id="t253"></a>
 ### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths

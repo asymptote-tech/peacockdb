@@ -45,6 +45,83 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t65"></a>
+### #65 — the device's grouping-set id is not DataFusion's value or width
+**Done by [`grouping-id`](../tasks/grouping-id.md) (chain K); awaiting merge.**
+
+A ROLLUP, CUBE or GROUPING SETS init on the device numbers the id's bits from the other end, and
+holds it as `Int32` where DataFusion declares `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to
+32 and `UInt64` beyond. `GROUPING()` over the full key list reads the wrong value, silently: it
+plans on 45 as `CAST(__grouping_id AS Int32)` and answers the device's bits.
+
+`aggregate.cpp` sets bit `i` for masked key `i` and builds the column from a
+`cudf::numeric_scalar<int32_t>`. DataFusion 45 folds `(acc << 1) | is_null`, first key highest
+(`aggregates/mod.rs`), at the width `Aggregate::grouping_id_type` picks: a two-key rollup is 0, 1,
+3 there and 0, 2, 3 here. The merge above only needs one id per set, so it is right; every other
+reader is not. `GROUPING(k1, …, kn)` over the full key list plans on 45 as
+`CAST(__grouping_id AS Int32)` and answers the device's bits, a silent wrong answer. The schema
+validator refuses the width. Pinned by four `bug_` cases — two in
+`gpu_tests/aggregate_cases.rs`, whose `grouping_sets_as_exported` swaps both the bits and the
+type, one in `gpu_tests/aggregate_schema_cases.rs` and one in `wire/gpu_tests/mod.rs`.
+`GROUPING()` over a subset or a reordering of the keys is refused on the device (#230). DataFusion
+55's duplicate ordinal is #228. Under a DISTINCT the inner stage carries one more key, so there
+the device's id is doubled and at 8, 16 or 32 keys the project above the outer stage overflows
+the cast; the fix below covers both.
+
+**Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
+`tpch/rollup-distinct`, tpcds q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
+device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
+meets [#210](../tickets/corpus-coverage.md#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
+id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
+window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
+`select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
+group by rollup (n_regionkey, n_nationkey);` (tpch): 31 rows with g in {0, 1, 3} on the cpu; the
+device answers the five subtotal rows with g = 2.
+
+**Fix proposed:** [fix 14 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix14), in C++ alone. A static
+`grouping_id_column(gid, nkeys, rows)` in `aggregate.cpp` folds `gid = (gid << 1) | masked` into a
+`uint64_t` and builds `numeric_scalar<uint8_t/uint16_t/uint32_t/uint64_t>` by `nkeys` ≤ 8/16/32,
+throwing past 64 keys as DataFusion does. No wire change and no golden regenerates: payloads print
+masks and names, never an id. The report rejects carrying the id or its type on the wire, a
+frozen-surface append and a `recipe-payloads.txt` regen for a value the C++ can compute; that
+changes at DataFusion 55, where the width depends on the ordinal (#228). Tests: the four `bug_`
+pins flip and `grouping_sets_as_exported` goes; a rollup contract case on both engines; a walk
+test running the query above; the exec model's fold (`scripts/exec_model/operators/aggregates.py`)
+and its three pins, `{0, 2, 3}` to `{0, 1, 3}`. Cleaner after #189's fix, which stops hashing the
+id; independent of it.
+
+**Closed.** `grouping_id_column` (`aggregate.cpp`) folds the mask in key order, the first key
+highest, into the width DataFusion declares, and refuses past 64 keys; the exec model folds the
+same way. Cells turned on at all five modes: `rollup-over-join`, `rollup-distinct`,
+`rollup-grouping`, q14, q18, q22, q77, q80 and `rollup-small-keys`. q5 stays off on
+[#210](../tickets/corpus-coverage.md#t210).
+
+<a id="t262"></a>
+### #262 — a DISTINCT under a grouping set has no device cell
+**Done by [`grouping-id`](../tasks/grouping-id.md) (chain K); awaiting merge.**
+
+No device has run a DISTINCT under a grouping set: `tpch/rollup-distinct`, the corpus query of
+that shape, is off at every device mode.
+
+The rest of the lowering is proven on a device. `tpch/distinct-functions` runs at all five modes
+on nebius-gpu (distinct-companions, chain K, which closed
+[#62](../archive/archived-tickets.md#t62)): plan shape, per-node rows, batch lists and bytes
+match the cpu's sections exactly, and so does the answer bar one ULP of `stddev`. tpcds q28, six
+keyless DISTINCT blocks cross-joined, joined it at all five modes on 2026-10-16, once #152 had
+closed. So an outer init running merge aggregators over state and a `__distinct_arg` key work on
+a device, and the widened `avg(…)$sum` state reached it under the type id and scale the plan
+declares. Its *precision* is not part of that: a device holds `{type_id, scale}`, so the
+widening stays pinned by a plan test, which is the only reading of it there is.
+
+**Corpus queries:** `tpch/rollup-distinct`, off on #65. Its row names this ticket beside #65,
+since it is the record that its device cells are the lowering's last unrun ones.
+
+**Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
+ticket is archived. grouping-id, later in chain K, takes it.
+
+**Closed.** `rollup-distinct` runs at all five device modes, `golden_exact`; the two-stage
+DISTINCT walk and the eight-key DISTINCT rollup walk are green on nebius-gpu.
+
 <a id="t281"></a>
 ### #281 — limits' and empty-sorts' device cells have never run
 **Done by [`limits`](../tasks/limits.md) and [`empty-sorts`](../tasks/empty-sorts.md) (chain K); awaiting merge.**
@@ -74,7 +151,8 @@ result sections were a bare `++`/`++`, and both lines were `duckdb_divergent(205
 zero-row batch under the sink's input schema, made by the driver (`Driver::answer`) and recorded
 as no node's emission. DataFusion's empty answer gets its columns the same way through
 `oracle_answer`, in the corpus and `end_to_end.rs`; `end_to_end/dimensions.rs` and
-`join_fixture.rs` still compare against its raw answer, and no zero-row case reaches them. Both result sections carry their header and both lines are `duckdb_exact`;
+`join_fixture.rs` still compare against its raw answer, and no zero-row case reaches them. Both
+result sections carry their header and both lines are `duckdb_exact`;
 the oracle's row-level exemption for a differing column count is gone.
 
 <a id="t186"></a>
@@ -148,7 +226,7 @@ arguments. The wire's `AggregateFuncNode.distinct` went with it, marked `(deprec
 slot moved. tpcds q28 runs at five modes and `tpch/rollup-distinct` and
 `tpch/distinct-functions` joined the corpus. q28 and distinct-functions run on the device at five
 modes too, and rollup-distinct's device cells wait on #65.
-[#262](../tickets/corpus-coverage.md#t262) records that those are the lowering's last unrun ones.
+[#262](#t262) records that those are the lowering's last unrun ones.
 
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
@@ -249,7 +327,7 @@ answers on the device at all five modes; `scalar-subquery-cross` at tp1, its tp4
 `without_build` refused a lane with no build batch where the answer owed was every probe row.
 Both engines answer `set_build(None)` as an empty build: Right and Full pad every probe row,
 RightAnti returns it. `without_build`, `feeds_owing_build` and the driver's scatter-drop exception
-are gone. tpcds q77 runs past it, its device cells off on [#65](../tickets/corpus-coverage.md#t65);
+are gone. tpcds q77 runs past it, its device cells off on [#65](#t65);
 pbench's `sparse-build-*` rows answer.
 
 <a id="t173"></a>
@@ -377,7 +455,7 @@ canonicalizes NaN on both engines rather than hashing its raw bits as comet does
 **Corpus queries:** `pbench/bool-key-group`, all five device cells on. The two float rows
 (`float64-key-group`, `float32-key-group`) are commented out on [#243](../tickets/joins.md#t243),
 which is the cpu's float equality and not this ticket. `pbench/rollup-small-keys` hashes a boolean
-second key and its device cells are off on [#65](../tickets/corpus-coverage.md#t65), the
+second key and its device cells are off on [#65](#t65), the
 grouping-id width.
 
 <a id="t240"></a>
@@ -434,7 +512,7 @@ A ROLLUP, CUBE or GROUPING SETS aggregate that shuffled was refused on the cpu �
 type in hasher: UInt8`; the tp1 modes do not shuffle and always passed. `shuffle_below` copied
 DataFusion's `FinalPartitioned` hash keys, `__grouping_id` among them, and comet's murmur3 had no
 unsigned arm. Hashing the id was wrong in itself: the two engines' ids differ in type and bits
-([#65](../tickets/corpus-coverage.md#t65)), so a subtotal row would have landed in different
+([#65](#t65)), so a subtotal row would have landed in different
 lanes.
 
 Two independent fixes, and the ticket needed both. `drop_grouping_id` takes the id's ordinal out
@@ -481,7 +559,7 @@ of pbench's block in `corpus_cases.inc`; this ticket is the part that says whose
 gpu cell with `PCK_WRITE_GPU_RESULT=1` and settled each on what it measured: 30 on, 98 off with
 the ticket each failed on, 157 never runnable because a gpu cell needs a cpu cell at its mode.
 `int8-key-group` landed and passes at all five. Fourteen of the sixteen tp1 cells are on; the two
-of `rollup-small-keys` are off on [#65](../tickets/corpus-coverage.md#t65), the first corpus cell to reach
+of `rollup-small-keys` are off on [#65](#t65), the first corpus cell to reach
 that ticket on a device. `gpu-result.txt` is golden 18 of 18 and every section of it agrees with
 DuckDB. The rest belong to `join-backend` (#152, #220, #63) and `repartition-keys` (#95, #206,
 #240, #189), as this ticket said.
@@ -1097,6 +1175,39 @@ which is what `architecture.md` requires of a node ("a zero-row batch and no bat
 arrival"). The one wrong answer it led to is [#199](../tickets/corpus-coverage.md#t199)'s: a keyless
 aggregate owes one row whatever arrived, and #199's fix covers a limit that sends nothing. Its three
 `bug_` pins in `gpu_tests/harness_cases.rs` were dropped with it.
+
+<a id="t55"></a>
+### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
+**Stale, proven by [`grouping-id`](../tasks/grouping-id.md) (chain K); awaiting merge.**
+
+Filed against the old executor. DataFusion casts `sum(decimal / int)`'s divisor to Decimal128 in
+the Partial phase only. The device's Final aggregate evaluated the argument again, over the
+partial state, where the cast column does not exist, and cuDF failed the cast.
+
+Most likely stale. The wire has no Final aggregate any more: `aggregate_writer.rs` writes `Init`
+as `Partial` and `Merge` as `Merge`. The division runs once, in `Partial`, where `arg_col`
+(`cpp/src/operators/aggregate.cpp`) builds a computed argument over the original input. A merge
+reads state columns by reference. q66's five cpu cells, which run the same translated expression,
+are green. What is missing is a device run: nothing has put a summed quotient on a device.
+
+**Corpus queries:** `tpcds/q66` — twelve `sum(<month>_sales / w_warehouse_sq_ft)` over a two-branch
+union. Its five gpu cells are on since join-backend's task 14, which ran them on an L40S under
+cuDF 25.02: each matched the cpu's sections and its answer met DuckDB, so registry row 67 tags
+nothing. That is the corpus half of the proof; the walk test below is still owed.
+
+**Fix proposed:** no code change — a proof, then archive. Add a walk test beside
+`each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
+`wire/gpu_tests/mod.rs`: `SUM_OF_QUOTIENTS`, a grouped `sum(l_extendedprice / l_linenumber)`
+under an outer `sum`, through `assert_walk_matches_datafusion` at `TWO_LANES`. The oracle
+compare on the digits is the proof: a merge that re-evaluated the quotient over state would
+throw or answer different digits. Pin the `PARTIAL`, `MERGE` and `FINALIZE` counts from the
+trail, as the neighbouring tests do, so the shape cannot quietly lose its merges. Green on
+shad-gpu closes #55: drop `55` from registry row 67 and archive the ticket as stale. Red means
+the defect is live, and the throwing call names its phase.
+
+**Stale 2026-10-19.** `a_summed_quotient_divides_once_in_the_partial_and_merges_by_reference`
+(`wire/gpu_tests/mod.rs`) was green on the red build and the green one; q66 was already on at all
+five device modes.
 
 <a id="t256"></a>
 ### #256 — a scan whose row groups all prune is refused as an invalid plan

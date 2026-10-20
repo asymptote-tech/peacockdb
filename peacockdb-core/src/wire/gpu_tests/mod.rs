@@ -443,6 +443,12 @@ impl Walk<'_> {
                 };
                 held.push(only(self.chain(&streamed, &mut at), node.name()));
             }
+            // A lane that got no batch makes no call at done and emits nothing, as every
+            // device accumulator does: a collapse of no handles is refused.
+            if held.is_empty() {
+                lanes.push(Vec::new());
+                continue;
+            }
             let mut at = At {
                 lane: held,
                 ..At::default()
@@ -712,6 +718,20 @@ const MAX_OF_SUMS: &str = "SELECT max(per_flag) FROM \
      (SELECT l_returnflag, sum(l_quantity) AS per_flag FROM lineitem GROUP BY l_returnflag)";
 const ROLLUP: &str = "SELECT l_returnflag, l_linestatus, sum(l_quantity) FROM lineitem \
      GROUP BY ROLLUP(l_returnflag, l_linestatus)";
+const ROLLUP_GROUPING: &str = "SELECT n_regionkey, n_nationkey, \
+     grouping(n_regionkey, n_nationkey) AS g, count(*) FROM nation \
+     GROUP BY ROLLUP (n_regionkey, n_nationkey)";
+const DISTINCT_UNDER_A_WIDE_ROLLUP: &str = "SELECT l_orderkey, l_partkey, l_linenumber, \
+     l_returnflag, l_linestatus, l_shipinstruct, l_shipmode, l_comment, \
+     grouping(l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, l_shipinstruct, \
+     l_shipmode, l_comment) AS g, \
+     count(DISTINCT l_suppkey), count(*) FROM lineitem WHERE l_orderkey <= 7 \
+     GROUP BY ROLLUP (l_orderkey, l_partkey, l_linenumber, l_returnflag, l_linestatus, \
+     l_shipinstruct, l_shipmode, l_comment)";
+const SUM_OF_QUOTIENTS: &str = "SELECT sum(per_flag) FROM (SELECT l_returnflag, \
+     sum(l_extendedprice / l_linenumber) AS per_flag FROM lineitem GROUP BY l_returnflag)";
+const DISTINCT_BESIDE_COMPANIONS: &str = "SELECT l_returnflag, count(DISTINCT l_suppkey), \
+     avg(l_quantity), count(*) FROM lineitem GROUP BY l_returnflag";
 
 #[tokio::test]
 async fn a_bare_scan_comes_back_as_the_table() {
@@ -762,6 +782,60 @@ async fn each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them()
         times(&calls, FbKind::Project(ProjectRole::Finalize)),
         2,
         "the finalize runs once per lane, at done: {}",
+        trail(&calls)
+    );
+}
+
+/// q66's shape (#55). DataFusion casts the divisor of `sum(decimal / int)` in the partial
+/// alone; a merge that evaluated the argument again over state would find no such column, or
+/// divide twice. The inner sum merges on each lane and across them; the outer folds its two
+/// partials in one merge.
+#[tokio::test]
+async fn a_summed_quotient_divides_once_in_the_partial_and_merges_by_reference() {
+    let calls = assert_walk_matches_datafusion(SUM_OF_QUOTIENTS, TWO_LANES).await;
+    assert_eq!(
+        times(&calls, PARTIAL),
+        4,
+        "an init per lane for each sum: {}",
+        trail(&calls)
+    );
+    assert_eq!(
+        times(&calls, MERGE),
+        5,
+        "the inner sum's four merges and the outer's one: {}",
+        trail(&calls)
+    );
+    assert_eq!(
+        times(&calls, FINALIZE),
+        3,
+        "two inner finalizes, one outer: {}",
+        trail(&calls)
+    );
+}
+
+/// The DISTINCT lowering (#262). An inner stage grouping on the argument and the key runs
+/// the companions' inits. The outer stage's init counts the deduplicated argument and runs
+/// `avg`'s and `count`'s merge rules over the inner's state. DataFusion 45 answers these
+/// shapes right; `avg` and `stddev` DISTINCT it does not.
+#[tokio::test]
+async fn a_distinct_count_beside_its_companions_runs_both_stages_on_a_device() {
+    let calls = assert_walk_matches_datafusion(DISTINCT_BESIDE_COMPANIONS, TWO_LANES).await;
+    assert_eq!(
+        times(&calls, PARTIAL),
+        4,
+        "two stages, each its init on both lanes: {}",
+        trail(&calls)
+    );
+    assert_eq!(
+        times(&calls, MERGE),
+        6,
+        "the inner stage's four merges and the outer's two: {}",
+        trail(&calls)
+    );
+    assert_eq!(
+        times(&calls, FINALIZE),
+        2,
+        "the outer stage finalizes once per lane: {}",
         trail(&calls)
     );
 }
@@ -821,6 +895,13 @@ async fn a_rollup_answers_with_every_grouping_set() {
         "the sets are expanded once, by the init: {}",
         trail(&calls)
     );
+}
+
+/// `GROUPING()` over every key plans as the grouping id cast to Int32, so the id's value is
+/// the answer here rather than a tag that only keeps the sets apart.
+#[tokio::test]
+async fn a_grouping_over_every_key_answers_datafusions_id() {
+    assert_walk_matches_datafusion(ROLLUP_GROUPING, TWO_LANES).await;
 }
 
 // What the device holds between calls, read by hand. An intermediate has no declaration
@@ -908,18 +989,38 @@ async fn a_sum_partial_holds_a_string_key_and_a_scale_2_sum() {
     assert_eq!(after(&held, PARTIAL), vec![&expected; 2]);
 }
 
-// #65 — the plan declares `__grouping_id` `UInt8`, as DataFusion's partial does, and the
-// device holds `INT32`. Wanted: `TypeId::UInt8` at position 2.
 #[tokio::test]
-async fn bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8() {
+async fn a_rollup_partial_holds_the_uint8_grouping_id_the_plan_declares() {
     let held = held(ROLLUP, ONE_LANE).await;
     let expected = DeviceSchema(vec![
         column("l_returnflag", TypeId::String),
         column("l_linestatus", TypeId::String),
-        column("__grouping_id", TypeId::Int32),
+        column("__grouping_id", TypeId::UInt8),
         decimal("sum(lineitem.l_quantity)", 2),
     ]);
     assert_eq!(after(&held, PARTIAL), vec![&expected]);
+}
+
+/// Eight keys and the DISTINCT argument make nine, so both stages carry a `UInt16` id where
+/// DataFusion's over the eight is `UInt8`, and a project narrows it above the outer stage.
+/// The argument is the first key and never masked, so its bit, the highest, is 0 and the
+/// narrowed value is DataFusion's; `g`, `GROUPING()` over the eight, puts it in the answer
+/// `held` holds to the oracle.
+#[tokio::test]
+async fn a_distinct_under_an_eight_key_rollup_narrows_a_uint16_id_to_datafusions() {
+    let held = held(DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE).await;
+    let ids: Vec<TypeId> = after(&held, PARTIAL)
+        .iter()
+        .map(|schema| {
+            schema
+                .0
+                .iter()
+                .find(|(name, _)| name == "__grouping_id")
+                .map(|(_, held)| held.id)
+                .expect("each stage's init carries the id")
+        })
+        .collect();
+    assert_eq!(ids, vec![TypeId::UInt16, TypeId::UInt16]);
 }
 
 #[tokio::test]
@@ -1031,8 +1132,12 @@ async fn the_kinds_a_device_has_run_are_the_kinds_this_file_claims() {
         (SEMI_JOIN, ONE_LANE),
         (MAX_OF_SUMS, ONE_LANE),
         (ROLLUP, ONE_LANE),
+        (DISTINCT_UNDER_A_WIDE_ROLLUP, ONE_LANE),
         (SUM_BY_FLAG, TWO_LANES),
         (AVG_BY_FLAG, TWO_LANES),
+        (ROLLUP_GROUPING, TWO_LANES),
+        (SUM_OF_QUOTIENTS, TWO_LANES),
+        (DISTINCT_BESIDE_COMPANIONS, TWO_LANES),
     ] {
         for (_, kind) in walk(sql, knobs).await.calls {
             if !made.contains(&kind) {

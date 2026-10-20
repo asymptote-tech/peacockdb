@@ -16,6 +16,7 @@
 #include <cudf/utilities/default_stream.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -129,6 +130,29 @@ static std::unique_ptr<cudf::reduce_aggregation> make_reduce_agg(
       func_name == "mean" || func_name == "MEAN")
     return cudf::make_mean_aggregation<cudf::reduce_aggregation>();
   throw std::runtime_error("unsupported aggregate function: " + func_name);
+}
+
+// DataFusion's `__grouping_id` (`group_id_array`, datafusion-physical-plan aggregates/mod.rs):
+// the mask folds in key order, the first key highest, held at the narrowest unsigned width
+// with a bit per key (`Aggregate::grouping_id_type`). GROUPING() over every key reads it, so
+// the value is an answer. DataFusion refuses past 64 keys, and so does this.
+static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vector<uint8_t>* mask,
+                                                        cudf::size_type nkeys,
+                                                        cudf::size_type rows) {
+  if (nkeys > 64)
+    throw std::runtime_error("grouping sets over " + std::to_string(nkeys) +
+                             " keys: DataFusion's grouping id holds at most 64");
+  uint64_t gid = 0;
+  for (cudf::size_type i = 0; i < nkeys; ++i) gid = (gid << 1) | (mask->Get(i) ? 1u : 0u);
+  auto column = [&](auto width) {
+    using T = decltype(width);
+    cudf::numeric_scalar<T> id(static_cast<T>(gid), true);
+    return cudf::make_column_from_scalar(id, rows);
+  };
+  if (nkeys <= 8) return column(uint8_t{});
+  if (nkeys <= 16) return column(uint16_t{});
+  if (nkeys <= 32) return column(uint32_t{});
+  return column(uint64_t{});
 }
 
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
@@ -312,17 +336,10 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
                                std::move(out_names));
   }
 
-  // ---- ROLLUP / CUBE / GROUPING SETS ----
-  // DataFusion's Partial expands these into N grouping sets and appends a
-  // `__grouping_id` column after the group columns; the Final then re-groups by
-  // [group cols..., __grouping_id] as a plain GROUP BY and the outer projection
-  // drops the id. cuDF has no native ROLLUP/CUBE, so per set we substitute the
-  // per-position NULL placeholder (null_exprs[i]) for masked group columns, run
-  // the same aggregations, tag rows with a distinct id, and concatenate.
-  //
-  // NON-EMPTY null_exprs is the discriminator, not grouping_sets: a plain GROUP BY
-  // — and the Final of a grouping-set agg — still serializes one all-false mask
-  // but leaves null_exprs EMPTY, and must take the single-groupby path below.
+  // ---- ROLLUP / CUBE / GROUPING SETS ---- (architecture.md, "Grouping sets")
+  // One groupby per set, masked keys swapped for their typed NULL placeholder, each set's
+  // rows tagged with DataFusion's grouping id, concatenated. A non-empty null_exprs selects
+  // this arm: a plain GROUP BY and a grouping set's merge carry one all-false mask and none.
   if (agg->null_exprs() && agg->null_exprs()->size() > 0 &&
       agg->grouping_sets() && agg->grouping_sets()->size() > 0) {
     auto* sets = agg->grouping_sets();
@@ -367,19 +384,8 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
 
       std::vector<cudf::column_view> set_keys;
       set_keys.reserve(nkeys);
-      // gid only has to be DISTINCT per set (so Final keeps sets apart when a
-      // placeholder NULL collides with a natural NULL). It does NOT match
-      // DataFusion's __grouping_id bit convention; unobservable while no enabled
-      // query projects/orders by GROUPING(col). Make it match before one does (#65).
-      int32_t gid = 0;
-      for (cudf::size_type i = 0; i < nkeys; ++i) {
-        if (mask->Get(i)) {  // masked -> NULL placeholder; record the bit
-          set_keys.push_back(null_placeholders[i]->view());
-          gid |= (1 << i);
-        } else {
-          set_keys.push_back(key_cols[i]);
-        }
-      }
+      for (cudf::size_type i = 0; i < nkeys; ++i)
+        set_keys.push_back(mask->Get(i) ? null_placeholders[i]->view() : key_cols[i]);
 
       cudf::groupby::groupby gbs{cudf::table_view{set_keys},
                                  cudf::null_policy::INCLUDE};
@@ -399,8 +405,7 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
       // than copied (#154). The row count is read before the release empties it.
       auto const set_rows = gk->num_rows();
       for (auto& key : gk->release()) cols.push_back(std::move(key));
-      cudf::numeric_scalar<int32_t> gid_s(gid, true);
-      cols.push_back(cudf::make_column_from_scalar(gid_s, set_rows));
+      cols.push_back(grouping_id_column(mask, nkeys, set_rows));
       for (size_t a = 0; a < res.size(); ++a) {
         auto col = std::move(res[a].results[0]);
         if (gs_is_count[a] && col->type().id() == cudf::type_id::INT32)

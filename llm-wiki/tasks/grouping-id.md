@@ -174,3 +174,14 @@ id, the quotient or the DISTINCT lowering's device path is a ticket, not a fix h
 As the chain header says: one sync per task to its host, with as many back-to-back builds as its
 red/green pairs need, the red build first.
 The corpus run is filtered to the rows above and `rollup-grouping`.
+
+## Completeness signoff
+
+Solved under its constraints. The device's id folds and widens as DataFusion's, every width
+boundary pinned from both sides and 65 keys refused; the exec model agrees. #55 is stale, proven
+by the quotient walk; #262 closed by the two-stage DISTINCT walks, one reading `GROUPING()`
+through the narrowing. 45 device cells on; q5 stays off on #210. Final pass: one blocking (a
+Python test pinning tpch's query count at 41, fixed) and two important, both the same stale
+`build-test.md` row count (fixed). Shortcuts: none. Outside Scope: comment-only edits in
+`planner/translator/`, a shared `cpp/tests/gpu/hand_tables.hpp`, the walk harness skipping the
+at-done call on an empty lane as the device does, and `testdata/test_duckdb_result.py`'s count.

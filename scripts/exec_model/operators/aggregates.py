@@ -262,13 +262,16 @@ def single(frame: pd.DataFrame, keys: list[str], aggs: list[Agg]) -> pd.DataFram
 
 
 def grouping_set_id(mask) -> int:
-    """The id tagging a set's rows: the bitmask of its MASKED positions.
+    """The id tagging a set's rows: DataFusion's `__grouping_id`.
 
-    Distinct per set, which is all the merge needs to keep sets apart when a placeholder
-    NULL collides with a natural one — but not DataFusion's `GROUPING()` encoding, which
-    is [#65](../../../llm-wiki/tickets/corpus-coverage.md#t65) and unobservable until a query projects it.
+    The mask folds in key order, the first key highest, as `group_id_array` does
+    (datafusion-physical-plan, aggregates/mod.rs). `GROUPING(k1, …, kn)` over the full key
+    list reads this value, so it is the answer and not just a tag that keeps the sets apart.
     """
-    return sum(1 << i for i, masked in enumerate(mask) if masked)
+    gid = 0
+    for masked in mask:
+        gid = (gid << 1) | int(bool(masked))
+    return gid
 
 
 def rollup_masks(n_keys: int) -> list[tuple[bool, ...]]:
@@ -276,7 +279,7 @@ def rollup_masks(n_keys: int) -> list[tuple[bool, ...]]:
 
     A mask entry is True where that key position is masked *out*, matching the fb
     `GroupingSetMask` convention. For two keys that is (F,F), (F,T), (T,T), so the ids are
-    0, 2 and 3 rather than 0, 1, 2.
+    0, 1 and 3.
     """
     return [tuple([False] * kept + [True] * (n_keys - kept)) for kept in range(n_keys, -1, -1)]
 

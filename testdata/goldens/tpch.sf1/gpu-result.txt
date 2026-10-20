@@ -5857,6 +5857,1031 @@ hash: db8ce65392f1ec58862d813d3b5d14920d624409d3c25e4733180e761bed9efa
 | 4           | MIDDLE EAST |  foxes boost furiously along the carefully dogged tithes. slyly regular orbits according to the special epit        | 8           | INDIA          | 2           | uriously unusual deposits about the slyly final pinto beans could                                                  |
 | 4           | MIDDLE EAST |  foxes boost furiously along the carefully dogged tithes. slyly regular orbits according to the special epit        | 9           | INDONESIA      | 2           | d deposits sleep quickly according to the dogged, regular dolphins. special excuses haggle furiously special reque |
 +-------------+-------------+---------------------------------------------------------------------------------------------------------------------+-------------+----------------+-------------+--------------------------------------------------------------------------------------------------------------------+
+== rollup-distinct mode=tp1-single
++--------------+--------------+------------------------------------+--------------------------+----------+
+| l_returnflag | l_linestatus | count(DISTINCT lineitem.l_suppkey) | avg(lineitem.l_quantity) | count(*) |
++--------------+--------------+------------------------------------+--------------------------+----------+
+|              |              | 10000                              | 25.507967                | 6001215  |
+| A            |              | 10000                              | 25.522005                | 1478493  |
+| A            | F            | 10000                              | 25.522005                | 1478493  |
+| N            |              | 10000                              | 25.502204                | 3043852  |
+| N            | F            | 9806                               | 25.516471                | 38854    |
+| N            | O            | 10000                              | 25.502019                | 3004998  |
+| R            |              | 10000                              | 25.505793                | 1478870  |
+| R            | F            | 10000                              | 25.505793                | 1478870  |
++--------------+--------------+------------------------------------+--------------------------+----------+
+== rollup-distinct mode=tp1-rowgroup
++--------------+--------------+------------------------------------+--------------------------+----------+
+| l_returnflag | l_linestatus | count(DISTINCT lineitem.l_suppkey) | avg(lineitem.l_quantity) | count(*) |
++--------------+--------------+------------------------------------+--------------------------+----------+
+|              |              | 10000                              | 25.507967                | 6001215  |
+| A            |              | 10000                              | 25.522005                | 1478493  |
+| A            | F            | 10000                              | 25.522005                | 1478493  |
+| N            |              | 10000                              | 25.502204                | 3043852  |
+| N            | F            | 9806                               | 25.516471                | 38854    |
+| N            | O            | 10000                              | 25.502019                | 3004998  |
+| R            |              | 10000                              | 25.505793                | 1478870  |
+| R            | F            | 10000                              | 25.505793                | 1478870  |
++--------------+--------------+------------------------------------+--------------------------+----------+
+== rollup-distinct mode=tp4-single
++--------------+--------------+------------------------------------+--------------------------+----------+
+| l_returnflag | l_linestatus | count(DISTINCT lineitem.l_suppkey) | avg(lineitem.l_quantity) | count(*) |
++--------------+--------------+------------------------------------+--------------------------+----------+
+|              |              | 10000                              | 25.507967                | 6001215  |
+| A            |              | 10000                              | 25.522005                | 1478493  |
+| A            | F            | 10000                              | 25.522005                | 1478493  |
+| N            |              | 10000                              | 25.502204                | 3043852  |
+| N            | F            | 9806                               | 25.516471                | 38854    |
+| N            | O            | 10000                              | 25.502019                | 3004998  |
+| R            |              | 10000                              | 25.505793                | 1478870  |
+| R            | F            | 10000                              | 25.505793                | 1478870  |
++--------------+--------------+------------------------------------+--------------------------+----------+
+== rollup-distinct mode=tp4-rowgroup
++--------------+--------------+------------------------------------+--------------------------+----------+
+| l_returnflag | l_linestatus | count(DISTINCT lineitem.l_suppkey) | avg(lineitem.l_quantity) | count(*) |
++--------------+--------------+------------------------------------+--------------------------+----------+
+|              |              | 10000                              | 25.507967                | 6001215  |
+| A            |              | 10000                              | 25.522005                | 1478493  |
+| A            | F            | 10000                              | 25.522005                | 1478493  |
+| N            |              | 10000                              | 25.502204                | 3043852  |
+| N            | F            | 9806                               | 25.516471                | 38854    |
+| N            | O            | 10000                              | 25.502019                | 3004998  |
+| R            |              | 10000                              | 25.505793                | 1478870  |
+| R            | F            | 10000                              | 25.505793                | 1478870  |
++--------------+--------------+------------------------------------+--------------------------+----------+
+== rollup-distinct mode=tp4-sized
++--------------+--------------+------------------------------------+--------------------------+----------+
+| l_returnflag | l_linestatus | count(DISTINCT lineitem.l_suppkey) | avg(lineitem.l_quantity) | count(*) |
++--------------+--------------+------------------------------------+--------------------------+----------+
+|              |              | 10000                              | 25.507967                | 6001215  |
+| A            |              | 10000                              | 25.522005                | 1478493  |
+| A            | F            | 10000                              | 25.522005                | 1478493  |
+| N            |              | 10000                              | 25.502204                | 3043852  |
+| N            | F            | 9806                               | 25.516471                | 38854    |
+| N            | O            | 10000                              | 25.502019                | 3004998  |
+| R            |              | 10000                              | 25.505793                | 1478870  |
+| R            | F            | 10000                              | 25.505793                | 1478870  |
++--------------+--------------+------------------------------------+--------------------------+----------+
+== rollup-grouping mode=tp1-single
++-------------+-------------+---+----------+
+| n_regionkey | n_nationkey | g | count(*) |
++-------------+-------------+---+----------+
+|             |             | 3 | 25       |
+| 0           |             | 1 | 5        |
+| 0           | 0           | 0 | 1        |
+| 0           | 14          | 0 | 1        |
+| 0           | 15          | 0 | 1        |
+| 0           | 16          | 0 | 1        |
+| 0           | 5           | 0 | 1        |
+| 1           |             | 1 | 5        |
+| 1           | 1           | 0 | 1        |
+| 1           | 17          | 0 | 1        |
+| 1           | 2           | 0 | 1        |
+| 1           | 24          | 0 | 1        |
+| 1           | 3           | 0 | 1        |
+| 2           |             | 1 | 5        |
+| 2           | 12          | 0 | 1        |
+| 2           | 18          | 0 | 1        |
+| 2           | 21          | 0 | 1        |
+| 2           | 8           | 0 | 1        |
+| 2           | 9           | 0 | 1        |
+| 3           |             | 1 | 5        |
+| 3           | 19          | 0 | 1        |
+| 3           | 22          | 0 | 1        |
+| 3           | 23          | 0 | 1        |
+| 3           | 6           | 0 | 1        |
+| 3           | 7           | 0 | 1        |
+| 4           |             | 1 | 5        |
+| 4           | 10          | 0 | 1        |
+| 4           | 11          | 0 | 1        |
+| 4           | 13          | 0 | 1        |
+| 4           | 20          | 0 | 1        |
+| 4           | 4           | 0 | 1        |
++-------------+-------------+---+----------+
+== rollup-grouping mode=tp1-rowgroup
++-------------+-------------+---+----------+
+| n_regionkey | n_nationkey | g | count(*) |
++-------------+-------------+---+----------+
+|             |             | 3 | 25       |
+| 0           |             | 1 | 5        |
+| 0           | 0           | 0 | 1        |
+| 0           | 14          | 0 | 1        |
+| 0           | 15          | 0 | 1        |
+| 0           | 16          | 0 | 1        |
+| 0           | 5           | 0 | 1        |
+| 1           |             | 1 | 5        |
+| 1           | 1           | 0 | 1        |
+| 1           | 17          | 0 | 1        |
+| 1           | 2           | 0 | 1        |
+| 1           | 24          | 0 | 1        |
+| 1           | 3           | 0 | 1        |
+| 2           |             | 1 | 5        |
+| 2           | 12          | 0 | 1        |
+| 2           | 18          | 0 | 1        |
+| 2           | 21          | 0 | 1        |
+| 2           | 8           | 0 | 1        |
+| 2           | 9           | 0 | 1        |
+| 3           |             | 1 | 5        |
+| 3           | 19          | 0 | 1        |
+| 3           | 22          | 0 | 1        |
+| 3           | 23          | 0 | 1        |
+| 3           | 6           | 0 | 1        |
+| 3           | 7           | 0 | 1        |
+| 4           |             | 1 | 5        |
+| 4           | 10          | 0 | 1        |
+| 4           | 11          | 0 | 1        |
+| 4           | 13          | 0 | 1        |
+| 4           | 20          | 0 | 1        |
+| 4           | 4           | 0 | 1        |
++-------------+-------------+---+----------+
+== rollup-grouping mode=tp4-single
++-------------+-------------+---+----------+
+| n_regionkey | n_nationkey | g | count(*) |
++-------------+-------------+---+----------+
+|             |             | 3 | 25       |
+| 0           |             | 1 | 5        |
+| 0           | 0           | 0 | 1        |
+| 0           | 14          | 0 | 1        |
+| 0           | 15          | 0 | 1        |
+| 0           | 16          | 0 | 1        |
+| 0           | 5           | 0 | 1        |
+| 1           |             | 1 | 5        |
+| 1           | 1           | 0 | 1        |
+| 1           | 17          | 0 | 1        |
+| 1           | 2           | 0 | 1        |
+| 1           | 24          | 0 | 1        |
+| 1           | 3           | 0 | 1        |
+| 2           |             | 1 | 5        |
+| 2           | 12          | 0 | 1        |
+| 2           | 18          | 0 | 1        |
+| 2           | 21          | 0 | 1        |
+| 2           | 8           | 0 | 1        |
+| 2           | 9           | 0 | 1        |
+| 3           |             | 1 | 5        |
+| 3           | 19          | 0 | 1        |
+| 3           | 22          | 0 | 1        |
+| 3           | 23          | 0 | 1        |
+| 3           | 6           | 0 | 1        |
+| 3           | 7           | 0 | 1        |
+| 4           |             | 1 | 5        |
+| 4           | 10          | 0 | 1        |
+| 4           | 11          | 0 | 1        |
+| 4           | 13          | 0 | 1        |
+| 4           | 20          | 0 | 1        |
+| 4           | 4           | 0 | 1        |
++-------------+-------------+---+----------+
+== rollup-grouping mode=tp4-rowgroup
++-------------+-------------+---+----------+
+| n_regionkey | n_nationkey | g | count(*) |
++-------------+-------------+---+----------+
+|             |             | 3 | 25       |
+| 0           |             | 1 | 5        |
+| 0           | 0           | 0 | 1        |
+| 0           | 14          | 0 | 1        |
+| 0           | 15          | 0 | 1        |
+| 0           | 16          | 0 | 1        |
+| 0           | 5           | 0 | 1        |
+| 1           |             | 1 | 5        |
+| 1           | 1           | 0 | 1        |
+| 1           | 17          | 0 | 1        |
+| 1           | 2           | 0 | 1        |
+| 1           | 24          | 0 | 1        |
+| 1           | 3           | 0 | 1        |
+| 2           |             | 1 | 5        |
+| 2           | 12          | 0 | 1        |
+| 2           | 18          | 0 | 1        |
+| 2           | 21          | 0 | 1        |
+| 2           | 8           | 0 | 1        |
+| 2           | 9           | 0 | 1        |
+| 3           |             | 1 | 5        |
+| 3           | 19          | 0 | 1        |
+| 3           | 22          | 0 | 1        |
+| 3           | 23          | 0 | 1        |
+| 3           | 6           | 0 | 1        |
+| 3           | 7           | 0 | 1        |
+| 4           |             | 1 | 5        |
+| 4           | 10          | 0 | 1        |
+| 4           | 11          | 0 | 1        |
+| 4           | 13          | 0 | 1        |
+| 4           | 20          | 0 | 1        |
+| 4           | 4           | 0 | 1        |
++-------------+-------------+---+----------+
+== rollup-grouping mode=tp4-sized
++-------------+-------------+---+----------+
+| n_regionkey | n_nationkey | g | count(*) |
++-------------+-------------+---+----------+
+|             |             | 3 | 25       |
+| 0           |             | 1 | 5        |
+| 0           | 0           | 0 | 1        |
+| 0           | 14          | 0 | 1        |
+| 0           | 15          | 0 | 1        |
+| 0           | 16          | 0 | 1        |
+| 0           | 5           | 0 | 1        |
+| 1           |             | 1 | 5        |
+| 1           | 1           | 0 | 1        |
+| 1           | 17          | 0 | 1        |
+| 1           | 2           | 0 | 1        |
+| 1           | 24          | 0 | 1        |
+| 1           | 3           | 0 | 1        |
+| 2           |             | 1 | 5        |
+| 2           | 12          | 0 | 1        |
+| 2           | 18          | 0 | 1        |
+| 2           | 21          | 0 | 1        |
+| 2           | 8           | 0 | 1        |
+| 2           | 9           | 0 | 1        |
+| 3           |             | 1 | 5        |
+| 3           | 19          | 0 | 1        |
+| 3           | 22          | 0 | 1        |
+| 3           | 23          | 0 | 1        |
+| 3           | 6           | 0 | 1        |
+| 3           | 7           | 0 | 1        |
+| 4           |             | 1 | 5        |
+| 4           | 10          | 0 | 1        |
+| 4           | 11          | 0 | 1        |
+| 4           | 13          | 0 | 1        |
+| 4           | 20          | 0 | 1        |
+| 4           | 4           | 0 | 1        |
++-------------+-------------+---+----------+
+== rollup-over-join mode=tp1-single
++-------------+--------------+----------+
+| c_nationkey | c_mktsegment | count(*) |
++-------------+--------------+----------+
+|             |              | 150000   |
+| 0           |              | 5925     |
+| 0           | AUTOMOBILE   | 1202     |
+| 0           | BUILDING     | 1158     |
+| 0           | FURNITURE    | 1196     |
+| 0           | HOUSEHOLD    | 1216     |
+| 0           | MACHINERY    | 1153     |
+| 1           |              | 5975     |
+| 1           | AUTOMOBILE   | 1172     |
+| 1           | BUILDING     | 1261     |
+| 1           | FURNITURE    | 1138     |
+| 1           | HOUSEHOLD    | 1198     |
+| 1           | MACHINERY    | 1206     |
+| 10          |              | 6009     |
+| 10          | AUTOMOBILE   | 1126     |
+| 10          | BUILDING     | 1245     |
+| 10          | FURNITURE    | 1232     |
+| 10          | HOUSEHOLD    | 1255     |
+| 10          | MACHINERY    | 1151     |
+| 11          |              | 5963     |
+| 11          | AUTOMOBILE   | 1161     |
+| 11          | BUILDING     | 1204     |
+| 11          | FURNITURE    | 1182     |
+| 11          | HOUSEHOLD    | 1230     |
+| 11          | MACHINERY    | 1186     |
+| 12          |              | 5948     |
+| 12          | AUTOMOBILE   | 1182     |
+| 12          | BUILDING     | 1211     |
+| 12          | FURNITURE    | 1243     |
+| 12          | HOUSEHOLD    | 1154     |
+| 12          | MACHINERY    | 1158     |
+| 13          |              | 6033     |
+| 13          | AUTOMOBILE   | 1183     |
+| 13          | BUILDING     | 1224     |
+| 13          | FURNITURE    | 1211     |
+| 13          | HOUSEHOLD    | 1201     |
+| 13          | MACHINERY    | 1214     |
+| 14          |              | 5992     |
+| 14          | AUTOMOBILE   | 1171     |
+| 14          | BUILDING     | 1200     |
+| 14          | FURNITURE    | 1253     |
+| 14          | HOUSEHOLD    | 1156     |
+| 14          | MACHINERY    | 1212     |
+| 15          |              | 5921     |
+| 15          | AUTOMOBILE   | 1157     |
+| 15          | BUILDING     | 1171     |
+| 15          | FURNITURE    | 1224     |
+| 15          | HOUSEHOLD    | 1172     |
+| 15          | MACHINERY    | 1197     |
+| 16          |              | 5974     |
+| 16          | AUTOMOBILE   | 1211     |
+| 16          | BUILDING     | 1154     |
+| 16          | FURNITURE    | 1221     |
+| 16          | HOUSEHOLD    | 1226     |
+| 16          | MACHINERY    | 1162     |
+| 17          |              | 5975     |
+| 17          | AUTOMOBILE   | 1215     |
+| 17          | BUILDING     | 1233     |
+| 17          | FURNITURE    | 1188     |
+| 17          | HOUSEHOLD    | 1226     |
+| 17          | MACHINERY    | 1113     |
+| 18          |              | 6024     |
+| 18          | AUTOMOBILE   | 1214     |
+| 18          | BUILDING     | 1234     |
+| 18          | FURNITURE    | 1150     |
+| 18          | HOUSEHOLD    | 1159     |
+| 18          | MACHINERY    | 1267     |
+| 19          |              | 6100     |
+| 19          | AUTOMOBILE   | 1272     |
+| 19          | BUILDING     | 1203     |
+| 19          | FURNITURE    | 1163     |
+| 19          | HOUSEHOLD    | 1189     |
+| 19          | MACHINERY    | 1273     |
+| 2           |              | 5999     |
+| 2           | AUTOMOBILE   | 1168     |
+| 2           | BUILDING     | 1222     |
+| 2           | FURNITURE    | 1158     |
+| 2           | HOUSEHOLD    | 1200     |
+| 2           | MACHINERY    | 1251     |
+| 20          |              | 5904     |
+| 20          | AUTOMOBILE   | 1183     |
+| 20          | BUILDING     | 1182     |
+| 20          | FURNITURE    | 1187     |
+| 20          | HOUSEHOLD    | 1206     |
+| 20          | MACHINERY    | 1146     |
+| 21          |              | 6008     |
+| 21          | AUTOMOBILE   | 1186     |
+| 21          | BUILDING     | 1230     |
+| 21          | FURNITURE    | 1200     |
+| 21          | HOUSEHOLD    | 1215     |
+| 21          | MACHINERY    | 1177     |
+| 22          |              | 6078     |
+| 22          | AUTOMOBILE   | 1191     |
+| 22          | BUILDING     | 1207     |
+| 22          | FURNITURE    | 1192     |
+| 22          | HOUSEHOLD    | 1265     |
+| 22          | MACHINERY    | 1223     |
+| 23          |              | 6011     |
+| 23          | AUTOMOBILE   | 1207     |
+| 23          | BUILDING     | 1228     |
+| 23          | FURNITURE    | 1172     |
+| 23          | HOUSEHOLD    | 1246     |
+| 23          | MACHINERY    | 1158     |
+| 24          |              | 5983     |
+| 24          | AUTOMOBILE   | 1207     |
+| 24          | BUILDING     | 1182     |
+| 24          | FURNITURE    | 1238     |
+| 24          | HOUSEHOLD    | 1164     |
+| 24          | MACHINERY    | 1192     |
+| 3           |              | 6020     |
+| 3           | AUTOMOBILE   | 1166     |
+| 3           | BUILDING     | 1254     |
+| 3           | FURNITURE    | 1152     |
+| 3           | HOUSEHOLD    | 1231     |
+| 3           | MACHINERY    | 1217     |
+| 4           |              | 5995     |
+| 4           | AUTOMOBILE   | 1195     |
+| 4           | BUILDING     | 1168     |
+| 4           | FURNITURE    | 1234     |
+| 4           | HOUSEHOLD    | 1179     |
+| 4           | MACHINERY    | 1219     |
+| 5           |              | 5952     |
+| 5           | AUTOMOBILE   | 1208     |
+| 5           | BUILDING     | 1165     |
+| 5           | FURNITURE    | 1147     |
+| 5           | HOUSEHOLD    | 1217     |
+| 5           | MACHINERY    | 1215     |
+| 6           |              | 6100     |
+| 6           | AUTOMOBILE   | 1229     |
+| 6           | BUILDING     | 1243     |
+| 6           | FURNITURE    | 1226     |
+| 6           | HOUSEHOLD    | 1235     |
+| 6           | MACHINERY    | 1167     |
+| 7           |              | 5908     |
+| 7           | AUTOMOBILE   | 1205     |
+| 7           | BUILDING     | 1150     |
+| 7           | FURNITURE    | 1166     |
+| 7           | HOUSEHOLD    | 1190     |
+| 7           | MACHINERY    | 1197     |
+| 8           |              | 6042     |
+| 8           | AUTOMOBILE   | 1111     |
+| 8           | BUILDING     | 1221     |
+| 8           | FURNITURE    | 1247     |
+| 8           | HOUSEHOLD    | 1227     |
+| 8           | MACHINERY    | 1236     |
+| 9           |              | 6161     |
+| 9           | AUTOMOBILE   | 1230     |
+| 9           | BUILDING     | 1192     |
+| 9           | FURNITURE    | 1248     |
+| 9           | HOUSEHOLD    | 1232     |
+| 9           | MACHINERY    | 1259     |
++-------------+--------------+----------+
+== rollup-over-join mode=tp1-rowgroup
++-------------+--------------+----------+
+| c_nationkey | c_mktsegment | count(*) |
++-------------+--------------+----------+
+|             |              | 150000   |
+| 0           |              | 5925     |
+| 0           | AUTOMOBILE   | 1202     |
+| 0           | BUILDING     | 1158     |
+| 0           | FURNITURE    | 1196     |
+| 0           | HOUSEHOLD    | 1216     |
+| 0           | MACHINERY    | 1153     |
+| 1           |              | 5975     |
+| 1           | AUTOMOBILE   | 1172     |
+| 1           | BUILDING     | 1261     |
+| 1           | FURNITURE    | 1138     |
+| 1           | HOUSEHOLD    | 1198     |
+| 1           | MACHINERY    | 1206     |
+| 10          |              | 6009     |
+| 10          | AUTOMOBILE   | 1126     |
+| 10          | BUILDING     | 1245     |
+| 10          | FURNITURE    | 1232     |
+| 10          | HOUSEHOLD    | 1255     |
+| 10          | MACHINERY    | 1151     |
+| 11          |              | 5963     |
+| 11          | AUTOMOBILE   | 1161     |
+| 11          | BUILDING     | 1204     |
+| 11          | FURNITURE    | 1182     |
+| 11          | HOUSEHOLD    | 1230     |
+| 11          | MACHINERY    | 1186     |
+| 12          |              | 5948     |
+| 12          | AUTOMOBILE   | 1182     |
+| 12          | BUILDING     | 1211     |
+| 12          | FURNITURE    | 1243     |
+| 12          | HOUSEHOLD    | 1154     |
+| 12          | MACHINERY    | 1158     |
+| 13          |              | 6033     |
+| 13          | AUTOMOBILE   | 1183     |
+| 13          | BUILDING     | 1224     |
+| 13          | FURNITURE    | 1211     |
+| 13          | HOUSEHOLD    | 1201     |
+| 13          | MACHINERY    | 1214     |
+| 14          |              | 5992     |
+| 14          | AUTOMOBILE   | 1171     |
+| 14          | BUILDING     | 1200     |
+| 14          | FURNITURE    | 1253     |
+| 14          | HOUSEHOLD    | 1156     |
+| 14          | MACHINERY    | 1212     |
+| 15          |              | 5921     |
+| 15          | AUTOMOBILE   | 1157     |
+| 15          | BUILDING     | 1171     |
+| 15          | FURNITURE    | 1224     |
+| 15          | HOUSEHOLD    | 1172     |
+| 15          | MACHINERY    | 1197     |
+| 16          |              | 5974     |
+| 16          | AUTOMOBILE   | 1211     |
+| 16          | BUILDING     | 1154     |
+| 16          | FURNITURE    | 1221     |
+| 16          | HOUSEHOLD    | 1226     |
+| 16          | MACHINERY    | 1162     |
+| 17          |              | 5975     |
+| 17          | AUTOMOBILE   | 1215     |
+| 17          | BUILDING     | 1233     |
+| 17          | FURNITURE    | 1188     |
+| 17          | HOUSEHOLD    | 1226     |
+| 17          | MACHINERY    | 1113     |
+| 18          |              | 6024     |
+| 18          | AUTOMOBILE   | 1214     |
+| 18          | BUILDING     | 1234     |
+| 18          | FURNITURE    | 1150     |
+| 18          | HOUSEHOLD    | 1159     |
+| 18          | MACHINERY    | 1267     |
+| 19          |              | 6100     |
+| 19          | AUTOMOBILE   | 1272     |
+| 19          | BUILDING     | 1203     |
+| 19          | FURNITURE    | 1163     |
+| 19          | HOUSEHOLD    | 1189     |
+| 19          | MACHINERY    | 1273     |
+| 2           |              | 5999     |
+| 2           | AUTOMOBILE   | 1168     |
+| 2           | BUILDING     | 1222     |
+| 2           | FURNITURE    | 1158     |
+| 2           | HOUSEHOLD    | 1200     |
+| 2           | MACHINERY    | 1251     |
+| 20          |              | 5904     |
+| 20          | AUTOMOBILE   | 1183     |
+| 20          | BUILDING     | 1182     |
+| 20          | FURNITURE    | 1187     |
+| 20          | HOUSEHOLD    | 1206     |
+| 20          | MACHINERY    | 1146     |
+| 21          |              | 6008     |
+| 21          | AUTOMOBILE   | 1186     |
+| 21          | BUILDING     | 1230     |
+| 21          | FURNITURE    | 1200     |
+| 21          | HOUSEHOLD    | 1215     |
+| 21          | MACHINERY    | 1177     |
+| 22          |              | 6078     |
+| 22          | AUTOMOBILE   | 1191     |
+| 22          | BUILDING     | 1207     |
+| 22          | FURNITURE    | 1192     |
+| 22          | HOUSEHOLD    | 1265     |
+| 22          | MACHINERY    | 1223     |
+| 23          |              | 6011     |
+| 23          | AUTOMOBILE   | 1207     |
+| 23          | BUILDING     | 1228     |
+| 23          | FURNITURE    | 1172     |
+| 23          | HOUSEHOLD    | 1246     |
+| 23          | MACHINERY    | 1158     |
+| 24          |              | 5983     |
+| 24          | AUTOMOBILE   | 1207     |
+| 24          | BUILDING     | 1182     |
+| 24          | FURNITURE    | 1238     |
+| 24          | HOUSEHOLD    | 1164     |
+| 24          | MACHINERY    | 1192     |
+| 3           |              | 6020     |
+| 3           | AUTOMOBILE   | 1166     |
+| 3           | BUILDING     | 1254     |
+| 3           | FURNITURE    | 1152     |
+| 3           | HOUSEHOLD    | 1231     |
+| 3           | MACHINERY    | 1217     |
+| 4           |              | 5995     |
+| 4           | AUTOMOBILE   | 1195     |
+| 4           | BUILDING     | 1168     |
+| 4           | FURNITURE    | 1234     |
+| 4           | HOUSEHOLD    | 1179     |
+| 4           | MACHINERY    | 1219     |
+| 5           |              | 5952     |
+| 5           | AUTOMOBILE   | 1208     |
+| 5           | BUILDING     | 1165     |
+| 5           | FURNITURE    | 1147     |
+| 5           | HOUSEHOLD    | 1217     |
+| 5           | MACHINERY    | 1215     |
+| 6           |              | 6100     |
+| 6           | AUTOMOBILE   | 1229     |
+| 6           | BUILDING     | 1243     |
+| 6           | FURNITURE    | 1226     |
+| 6           | HOUSEHOLD    | 1235     |
+| 6           | MACHINERY    | 1167     |
+| 7           |              | 5908     |
+| 7           | AUTOMOBILE   | 1205     |
+| 7           | BUILDING     | 1150     |
+| 7           | FURNITURE    | 1166     |
+| 7           | HOUSEHOLD    | 1190     |
+| 7           | MACHINERY    | 1197     |
+| 8           |              | 6042     |
+| 8           | AUTOMOBILE   | 1111     |
+| 8           | BUILDING     | 1221     |
+| 8           | FURNITURE    | 1247     |
+| 8           | HOUSEHOLD    | 1227     |
+| 8           | MACHINERY    | 1236     |
+| 9           |              | 6161     |
+| 9           | AUTOMOBILE   | 1230     |
+| 9           | BUILDING     | 1192     |
+| 9           | FURNITURE    | 1248     |
+| 9           | HOUSEHOLD    | 1232     |
+| 9           | MACHINERY    | 1259     |
++-------------+--------------+----------+
+== rollup-over-join mode=tp4-single
++-------------+--------------+----------+
+| c_nationkey | c_mktsegment | count(*) |
++-------------+--------------+----------+
+|             |              | 150000   |
+| 0           |              | 5925     |
+| 0           | AUTOMOBILE   | 1202     |
+| 0           | BUILDING     | 1158     |
+| 0           | FURNITURE    | 1196     |
+| 0           | HOUSEHOLD    | 1216     |
+| 0           | MACHINERY    | 1153     |
+| 1           |              | 5975     |
+| 1           | AUTOMOBILE   | 1172     |
+| 1           | BUILDING     | 1261     |
+| 1           | FURNITURE    | 1138     |
+| 1           | HOUSEHOLD    | 1198     |
+| 1           | MACHINERY    | 1206     |
+| 10          |              | 6009     |
+| 10          | AUTOMOBILE   | 1126     |
+| 10          | BUILDING     | 1245     |
+| 10          | FURNITURE    | 1232     |
+| 10          | HOUSEHOLD    | 1255     |
+| 10          | MACHINERY    | 1151     |
+| 11          |              | 5963     |
+| 11          | AUTOMOBILE   | 1161     |
+| 11          | BUILDING     | 1204     |
+| 11          | FURNITURE    | 1182     |
+| 11          | HOUSEHOLD    | 1230     |
+| 11          | MACHINERY    | 1186     |
+| 12          |              | 5948     |
+| 12          | AUTOMOBILE   | 1182     |
+| 12          | BUILDING     | 1211     |
+| 12          | FURNITURE    | 1243     |
+| 12          | HOUSEHOLD    | 1154     |
+| 12          | MACHINERY    | 1158     |
+| 13          |              | 6033     |
+| 13          | AUTOMOBILE   | 1183     |
+| 13          | BUILDING     | 1224     |
+| 13          | FURNITURE    | 1211     |
+| 13          | HOUSEHOLD    | 1201     |
+| 13          | MACHINERY    | 1214     |
+| 14          |              | 5992     |
+| 14          | AUTOMOBILE   | 1171     |
+| 14          | BUILDING     | 1200     |
+| 14          | FURNITURE    | 1253     |
+| 14          | HOUSEHOLD    | 1156     |
+| 14          | MACHINERY    | 1212     |
+| 15          |              | 5921     |
+| 15          | AUTOMOBILE   | 1157     |
+| 15          | BUILDING     | 1171     |
+| 15          | FURNITURE    | 1224     |
+| 15          | HOUSEHOLD    | 1172     |
+| 15          | MACHINERY    | 1197     |
+| 16          |              | 5974     |
+| 16          | AUTOMOBILE   | 1211     |
+| 16          | BUILDING     | 1154     |
+| 16          | FURNITURE    | 1221     |
+| 16          | HOUSEHOLD    | 1226     |
+| 16          | MACHINERY    | 1162     |
+| 17          |              | 5975     |
+| 17          | AUTOMOBILE   | 1215     |
+| 17          | BUILDING     | 1233     |
+| 17          | FURNITURE    | 1188     |
+| 17          | HOUSEHOLD    | 1226     |
+| 17          | MACHINERY    | 1113     |
+| 18          |              | 6024     |
+| 18          | AUTOMOBILE   | 1214     |
+| 18          | BUILDING     | 1234     |
+| 18          | FURNITURE    | 1150     |
+| 18          | HOUSEHOLD    | 1159     |
+| 18          | MACHINERY    | 1267     |
+| 19          |              | 6100     |
+| 19          | AUTOMOBILE   | 1272     |
+| 19          | BUILDING     | 1203     |
+| 19          | FURNITURE    | 1163     |
+| 19          | HOUSEHOLD    | 1189     |
+| 19          | MACHINERY    | 1273     |
+| 2           |              | 5999     |
+| 2           | AUTOMOBILE   | 1168     |
+| 2           | BUILDING     | 1222     |
+| 2           | FURNITURE    | 1158     |
+| 2           | HOUSEHOLD    | 1200     |
+| 2           | MACHINERY    | 1251     |
+| 20          |              | 5904     |
+| 20          | AUTOMOBILE   | 1183     |
+| 20          | BUILDING     | 1182     |
+| 20          | FURNITURE    | 1187     |
+| 20          | HOUSEHOLD    | 1206     |
+| 20          | MACHINERY    | 1146     |
+| 21          |              | 6008     |
+| 21          | AUTOMOBILE   | 1186     |
+| 21          | BUILDING     | 1230     |
+| 21          | FURNITURE    | 1200     |
+| 21          | HOUSEHOLD    | 1215     |
+| 21          | MACHINERY    | 1177     |
+| 22          |              | 6078     |
+| 22          | AUTOMOBILE   | 1191     |
+| 22          | BUILDING     | 1207     |
+| 22          | FURNITURE    | 1192     |
+| 22          | HOUSEHOLD    | 1265     |
+| 22          | MACHINERY    | 1223     |
+| 23          |              | 6011     |
+| 23          | AUTOMOBILE   | 1207     |
+| 23          | BUILDING     | 1228     |
+| 23          | FURNITURE    | 1172     |
+| 23          | HOUSEHOLD    | 1246     |
+| 23          | MACHINERY    | 1158     |
+| 24          |              | 5983     |
+| 24          | AUTOMOBILE   | 1207     |
+| 24          | BUILDING     | 1182     |
+| 24          | FURNITURE    | 1238     |
+| 24          | HOUSEHOLD    | 1164     |
+| 24          | MACHINERY    | 1192     |
+| 3           |              | 6020     |
+| 3           | AUTOMOBILE   | 1166     |
+| 3           | BUILDING     | 1254     |
+| 3           | FURNITURE    | 1152     |
+| 3           | HOUSEHOLD    | 1231     |
+| 3           | MACHINERY    | 1217     |
+| 4           |              | 5995     |
+| 4           | AUTOMOBILE   | 1195     |
+| 4           | BUILDING     | 1168     |
+| 4           | FURNITURE    | 1234     |
+| 4           | HOUSEHOLD    | 1179     |
+| 4           | MACHINERY    | 1219     |
+| 5           |              | 5952     |
+| 5           | AUTOMOBILE   | 1208     |
+| 5           | BUILDING     | 1165     |
+| 5           | FURNITURE    | 1147     |
+| 5           | HOUSEHOLD    | 1217     |
+| 5           | MACHINERY    | 1215     |
+| 6           |              | 6100     |
+| 6           | AUTOMOBILE   | 1229     |
+| 6           | BUILDING     | 1243     |
+| 6           | FURNITURE    | 1226     |
+| 6           | HOUSEHOLD    | 1235     |
+| 6           | MACHINERY    | 1167     |
+| 7           |              | 5908     |
+| 7           | AUTOMOBILE   | 1205     |
+| 7           | BUILDING     | 1150     |
+| 7           | FURNITURE    | 1166     |
+| 7           | HOUSEHOLD    | 1190     |
+| 7           | MACHINERY    | 1197     |
+| 8           |              | 6042     |
+| 8           | AUTOMOBILE   | 1111     |
+| 8           | BUILDING     | 1221     |
+| 8           | FURNITURE    | 1247     |
+| 8           | HOUSEHOLD    | 1227     |
+| 8           | MACHINERY    | 1236     |
+| 9           |              | 6161     |
+| 9           | AUTOMOBILE   | 1230     |
+| 9           | BUILDING     | 1192     |
+| 9           | FURNITURE    | 1248     |
+| 9           | HOUSEHOLD    | 1232     |
+| 9           | MACHINERY    | 1259     |
++-------------+--------------+----------+
+== rollup-over-join mode=tp4-rowgroup
++-------------+--------------+----------+
+| c_nationkey | c_mktsegment | count(*) |
++-------------+--------------+----------+
+|             |              | 150000   |
+| 0           |              | 5925     |
+| 0           | AUTOMOBILE   | 1202     |
+| 0           | BUILDING     | 1158     |
+| 0           | FURNITURE    | 1196     |
+| 0           | HOUSEHOLD    | 1216     |
+| 0           | MACHINERY    | 1153     |
+| 1           |              | 5975     |
+| 1           | AUTOMOBILE   | 1172     |
+| 1           | BUILDING     | 1261     |
+| 1           | FURNITURE    | 1138     |
+| 1           | HOUSEHOLD    | 1198     |
+| 1           | MACHINERY    | 1206     |
+| 10          |              | 6009     |
+| 10          | AUTOMOBILE   | 1126     |
+| 10          | BUILDING     | 1245     |
+| 10          | FURNITURE    | 1232     |
+| 10          | HOUSEHOLD    | 1255     |
+| 10          | MACHINERY    | 1151     |
+| 11          |              | 5963     |
+| 11          | AUTOMOBILE   | 1161     |
+| 11          | BUILDING     | 1204     |
+| 11          | FURNITURE    | 1182     |
+| 11          | HOUSEHOLD    | 1230     |
+| 11          | MACHINERY    | 1186     |
+| 12          |              | 5948     |
+| 12          | AUTOMOBILE   | 1182     |
+| 12          | BUILDING     | 1211     |
+| 12          | FURNITURE    | 1243     |
+| 12          | HOUSEHOLD    | 1154     |
+| 12          | MACHINERY    | 1158     |
+| 13          |              | 6033     |
+| 13          | AUTOMOBILE   | 1183     |
+| 13          | BUILDING     | 1224     |
+| 13          | FURNITURE    | 1211     |
+| 13          | HOUSEHOLD    | 1201     |
+| 13          | MACHINERY    | 1214     |
+| 14          |              | 5992     |
+| 14          | AUTOMOBILE   | 1171     |
+| 14          | BUILDING     | 1200     |
+| 14          | FURNITURE    | 1253     |
+| 14          | HOUSEHOLD    | 1156     |
+| 14          | MACHINERY    | 1212     |
+| 15          |              | 5921     |
+| 15          | AUTOMOBILE   | 1157     |
+| 15          | BUILDING     | 1171     |
+| 15          | FURNITURE    | 1224     |
+| 15          | HOUSEHOLD    | 1172     |
+| 15          | MACHINERY    | 1197     |
+| 16          |              | 5974     |
+| 16          | AUTOMOBILE   | 1211     |
+| 16          | BUILDING     | 1154     |
+| 16          | FURNITURE    | 1221     |
+| 16          | HOUSEHOLD    | 1226     |
+| 16          | MACHINERY    | 1162     |
+| 17          |              | 5975     |
+| 17          | AUTOMOBILE   | 1215     |
+| 17          | BUILDING     | 1233     |
+| 17          | FURNITURE    | 1188     |
+| 17          | HOUSEHOLD    | 1226     |
+| 17          | MACHINERY    | 1113     |
+| 18          |              | 6024     |
+| 18          | AUTOMOBILE   | 1214     |
+| 18          | BUILDING     | 1234     |
+| 18          | FURNITURE    | 1150     |
+| 18          | HOUSEHOLD    | 1159     |
+| 18          | MACHINERY    | 1267     |
+| 19          |              | 6100     |
+| 19          | AUTOMOBILE   | 1272     |
+| 19          | BUILDING     | 1203     |
+| 19          | FURNITURE    | 1163     |
+| 19          | HOUSEHOLD    | 1189     |
+| 19          | MACHINERY    | 1273     |
+| 2           |              | 5999     |
+| 2           | AUTOMOBILE   | 1168     |
+| 2           | BUILDING     | 1222     |
+| 2           | FURNITURE    | 1158     |
+| 2           | HOUSEHOLD    | 1200     |
+| 2           | MACHINERY    | 1251     |
+| 20          |              | 5904     |
+| 20          | AUTOMOBILE   | 1183     |
+| 20          | BUILDING     | 1182     |
+| 20          | FURNITURE    | 1187     |
+| 20          | HOUSEHOLD    | 1206     |
+| 20          | MACHINERY    | 1146     |
+| 21          |              | 6008     |
+| 21          | AUTOMOBILE   | 1186     |
+| 21          | BUILDING     | 1230     |
+| 21          | FURNITURE    | 1200     |
+| 21          | HOUSEHOLD    | 1215     |
+| 21          | MACHINERY    | 1177     |
+| 22          |              | 6078     |
+| 22          | AUTOMOBILE   | 1191     |
+| 22          | BUILDING     | 1207     |
+| 22          | FURNITURE    | 1192     |
+| 22          | HOUSEHOLD    | 1265     |
+| 22          | MACHINERY    | 1223     |
+| 23          |              | 6011     |
+| 23          | AUTOMOBILE   | 1207     |
+| 23          | BUILDING     | 1228     |
+| 23          | FURNITURE    | 1172     |
+| 23          | HOUSEHOLD    | 1246     |
+| 23          | MACHINERY    | 1158     |
+| 24          |              | 5983     |
+| 24          | AUTOMOBILE   | 1207     |
+| 24          | BUILDING     | 1182     |
+| 24          | FURNITURE    | 1238     |
+| 24          | HOUSEHOLD    | 1164     |
+| 24          | MACHINERY    | 1192     |
+| 3           |              | 6020     |
+| 3           | AUTOMOBILE   | 1166     |
+| 3           | BUILDING     | 1254     |
+| 3           | FURNITURE    | 1152     |
+| 3           | HOUSEHOLD    | 1231     |
+| 3           | MACHINERY    | 1217     |
+| 4           |              | 5995     |
+| 4           | AUTOMOBILE   | 1195     |
+| 4           | BUILDING     | 1168     |
+| 4           | FURNITURE    | 1234     |
+| 4           | HOUSEHOLD    | 1179     |
+| 4           | MACHINERY    | 1219     |
+| 5           |              | 5952     |
+| 5           | AUTOMOBILE   | 1208     |
+| 5           | BUILDING     | 1165     |
+| 5           | FURNITURE    | 1147     |
+| 5           | HOUSEHOLD    | 1217     |
+| 5           | MACHINERY    | 1215     |
+| 6           |              | 6100     |
+| 6           | AUTOMOBILE   | 1229     |
+| 6           | BUILDING     | 1243     |
+| 6           | FURNITURE    | 1226     |
+| 6           | HOUSEHOLD    | 1235     |
+| 6           | MACHINERY    | 1167     |
+| 7           |              | 5908     |
+| 7           | AUTOMOBILE   | 1205     |
+| 7           | BUILDING     | 1150     |
+| 7           | FURNITURE    | 1166     |
+| 7           | HOUSEHOLD    | 1190     |
+| 7           | MACHINERY    | 1197     |
+| 8           |              | 6042     |
+| 8           | AUTOMOBILE   | 1111     |
+| 8           | BUILDING     | 1221     |
+| 8           | FURNITURE    | 1247     |
+| 8           | HOUSEHOLD    | 1227     |
+| 8           | MACHINERY    | 1236     |
+| 9           |              | 6161     |
+| 9           | AUTOMOBILE   | 1230     |
+| 9           | BUILDING     | 1192     |
+| 9           | FURNITURE    | 1248     |
+| 9           | HOUSEHOLD    | 1232     |
+| 9           | MACHINERY    | 1259     |
++-------------+--------------+----------+
+== rollup-over-join mode=tp4-sized
++-------------+--------------+----------+
+| c_nationkey | c_mktsegment | count(*) |
++-------------+--------------+----------+
+|             |              | 150000   |
+| 0           |              | 5925     |
+| 0           | AUTOMOBILE   | 1202     |
+| 0           | BUILDING     | 1158     |
+| 0           | FURNITURE    | 1196     |
+| 0           | HOUSEHOLD    | 1216     |
+| 0           | MACHINERY    | 1153     |
+| 1           |              | 5975     |
+| 1           | AUTOMOBILE   | 1172     |
+| 1           | BUILDING     | 1261     |
+| 1           | FURNITURE    | 1138     |
+| 1           | HOUSEHOLD    | 1198     |
+| 1           | MACHINERY    | 1206     |
+| 10          |              | 6009     |
+| 10          | AUTOMOBILE   | 1126     |
+| 10          | BUILDING     | 1245     |
+| 10          | FURNITURE    | 1232     |
+| 10          | HOUSEHOLD    | 1255     |
+| 10          | MACHINERY    | 1151     |
+| 11          |              | 5963     |
+| 11          | AUTOMOBILE   | 1161     |
+| 11          | BUILDING     | 1204     |
+| 11          | FURNITURE    | 1182     |
+| 11          | HOUSEHOLD    | 1230     |
+| 11          | MACHINERY    | 1186     |
+| 12          |              | 5948     |
+| 12          | AUTOMOBILE   | 1182     |
+| 12          | BUILDING     | 1211     |
+| 12          | FURNITURE    | 1243     |
+| 12          | HOUSEHOLD    | 1154     |
+| 12          | MACHINERY    | 1158     |
+| 13          |              | 6033     |
+| 13          | AUTOMOBILE   | 1183     |
+| 13          | BUILDING     | 1224     |
+| 13          | FURNITURE    | 1211     |
+| 13          | HOUSEHOLD    | 1201     |
+| 13          | MACHINERY    | 1214     |
+| 14          |              | 5992     |
+| 14          | AUTOMOBILE   | 1171     |
+| 14          | BUILDING     | 1200     |
+| 14          | FURNITURE    | 1253     |
+| 14          | HOUSEHOLD    | 1156     |
+| 14          | MACHINERY    | 1212     |
+| 15          |              | 5921     |
+| 15          | AUTOMOBILE   | 1157     |
+| 15          | BUILDING     | 1171     |
+| 15          | FURNITURE    | 1224     |
+| 15          | HOUSEHOLD    | 1172     |
+| 15          | MACHINERY    | 1197     |
+| 16          |              | 5974     |
+| 16          | AUTOMOBILE   | 1211     |
+| 16          | BUILDING     | 1154     |
+| 16          | FURNITURE    | 1221     |
+| 16          | HOUSEHOLD    | 1226     |
+| 16          | MACHINERY    | 1162     |
+| 17          |              | 5975     |
+| 17          | AUTOMOBILE   | 1215     |
+| 17          | BUILDING     | 1233     |
+| 17          | FURNITURE    | 1188     |
+| 17          | HOUSEHOLD    | 1226     |
+| 17          | MACHINERY    | 1113     |
+| 18          |              | 6024     |
+| 18          | AUTOMOBILE   | 1214     |
+| 18          | BUILDING     | 1234     |
+| 18          | FURNITURE    | 1150     |
+| 18          | HOUSEHOLD    | 1159     |
+| 18          | MACHINERY    | 1267     |
+| 19          |              | 6100     |
+| 19          | AUTOMOBILE   | 1272     |
+| 19          | BUILDING     | 1203     |
+| 19          | FURNITURE    | 1163     |
+| 19          | HOUSEHOLD    | 1189     |
+| 19          | MACHINERY    | 1273     |
+| 2           |              | 5999     |
+| 2           | AUTOMOBILE   | 1168     |
+| 2           | BUILDING     | 1222     |
+| 2           | FURNITURE    | 1158     |
+| 2           | HOUSEHOLD    | 1200     |
+| 2           | MACHINERY    | 1251     |
+| 20          |              | 5904     |
+| 20          | AUTOMOBILE   | 1183     |
+| 20          | BUILDING     | 1182     |
+| 20          | FURNITURE    | 1187     |
+| 20          | HOUSEHOLD    | 1206     |
+| 20          | MACHINERY    | 1146     |
+| 21          |              | 6008     |
+| 21          | AUTOMOBILE   | 1186     |
+| 21          | BUILDING     | 1230     |
+| 21          | FURNITURE    | 1200     |
+| 21          | HOUSEHOLD    | 1215     |
+| 21          | MACHINERY    | 1177     |
+| 22          |              | 6078     |
+| 22          | AUTOMOBILE   | 1191     |
+| 22          | BUILDING     | 1207     |
+| 22          | FURNITURE    | 1192     |
+| 22          | HOUSEHOLD    | 1265     |
+| 22          | MACHINERY    | 1223     |
+| 23          |              | 6011     |
+| 23          | AUTOMOBILE   | 1207     |
+| 23          | BUILDING     | 1228     |
+| 23          | FURNITURE    | 1172     |
+| 23          | HOUSEHOLD    | 1246     |
+| 23          | MACHINERY    | 1158     |
+| 24          |              | 5983     |
+| 24          | AUTOMOBILE   | 1207     |
+| 24          | BUILDING     | 1182     |
+| 24          | FURNITURE    | 1238     |
+| 24          | HOUSEHOLD    | 1164     |
+| 24          | MACHINERY    | 1192     |
+| 3           |              | 6020     |
+| 3           | AUTOMOBILE   | 1166     |
+| 3           | BUILDING     | 1254     |
+| 3           | FURNITURE    | 1152     |
+| 3           | HOUSEHOLD    | 1231     |
+| 3           | MACHINERY    | 1217     |
+| 4           |              | 5995     |
+| 4           | AUTOMOBILE   | 1195     |
+| 4           | BUILDING     | 1168     |
+| 4           | FURNITURE    | 1234     |
+| 4           | HOUSEHOLD    | 1179     |
+| 4           | MACHINERY    | 1219     |
+| 5           |              | 5952     |
+| 5           | AUTOMOBILE   | 1208     |
+| 5           | BUILDING     | 1165     |
+| 5           | FURNITURE    | 1147     |
+| 5           | HOUSEHOLD    | 1217     |
+| 5           | MACHINERY    | 1215     |
+| 6           |              | 6100     |
+| 6           | AUTOMOBILE   | 1229     |
+| 6           | BUILDING     | 1243     |
+| 6           | FURNITURE    | 1226     |
+| 6           | HOUSEHOLD    | 1235     |
+| 6           | MACHINERY    | 1167     |
+| 7           |              | 5908     |
+| 7           | AUTOMOBILE   | 1205     |
+| 7           | BUILDING     | 1150     |
+| 7           | FURNITURE    | 1166     |
+| 7           | HOUSEHOLD    | 1190     |
+| 7           | MACHINERY    | 1197     |
+| 8           |              | 6042     |
+| 8           | AUTOMOBILE   | 1111     |
+| 8           | BUILDING     | 1221     |
+| 8           | FURNITURE    | 1247     |
+| 8           | HOUSEHOLD    | 1227     |
+| 8           | MACHINERY    | 1236     |
+| 9           |              | 6161     |
+| 9           | AUTOMOBILE   | 1230     |
+| 9           | BUILDING     | 1192     |
+| 9           | FURNITURE    | 1248     |
+| 9           | HOUSEHOLD    | 1232     |
+| 9           | MACHINERY    | 1259     |
++-------------+--------------+----------+
 == scan-limit mode=tp1-single
 +------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+------------+--------------+---------------+-------------------+------------+-------------------------------------------+
 | l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus | l_shipdate | l_commitdate | l_receiptdate | l_shipinstruct    | l_shipmode | l_comment                                 |
