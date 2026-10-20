@@ -48,15 +48,15 @@ std::vector<std::string> concat_names(std::vector<std::string> a,
   return a;
 }
 
-/// [build..., probe...] as one handle. Assembled by hand through the public fields, as
-/// project.cpp is: no TableResult constructor combines two tables, and both sides keep
-/// their own owners, so nothing is copied.
+/// [build..., probe...] as one handle, from both sides' parts: each keeps its own owners,
+/// so nothing is copied.
 TableResult side_by_side(TableResult build_part, TableResult probe_part) {
-  TableResult t = std::move(build_part);
-  t.owners.insert(t.owners.end(), probe_part.owners.begin(), probe_part.owners.end());
-  t.columns.insert(t.columns.end(), probe_part.columns.begin(), probe_part.columns.end());
-  t.column_names = concat_names(std::move(t.column_names), probe_part.column_names);
-  return t;
+  auto owners = std::move(build_part.owners);
+  owners.insert(owners.end(), probe_part.owners.begin(), probe_part.owners.end());
+  auto columns = std::move(build_part.columns);
+  columns.insert(columns.end(), probe_part.columns.begin(), probe_part.columns.end());
+  return TableResult::of(std::move(owners), std::move(columns),
+                         concat_names(std::move(build_part.column_names), probe_part.column_names));
 }
 
 /// `projection` over what a call emits -- the two sides for the pair types, one side for

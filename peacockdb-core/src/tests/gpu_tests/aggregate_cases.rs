@@ -120,27 +120,12 @@ pub(crate) fn gpu_slot(outcome: &Outcome, at: usize) -> &RecordBatch {
     &outcome.gpu.as_ref().expect("the device answers")[at][0]
 }
 
-pub(crate) fn batch_of(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
-    RecordBatch::try_from_iter(columns).expect("columns of one length")
-}
-
-/// The device's Welford state against the cpu's at slot `at`, the count exact and `Int64`
-/// on both. The device names all three state columns by the aggregate's alias, since
-/// `aggregate.cpp` names a struct's children by it — a relabelling unobservable past the
-/// sink and carrying no ticket — so the columns are read by position and the expected
-/// batch borrows the device's own names. The mean and m2 are checked to
-/// `WELFORD_RELATIVE`, since a Welford update is order-dependent and a mean is not dyadic,
-/// and the harness's exact comparison has no tolerance by design.
+/// The device's Welford state against the cpu's at slot `at`, the count exact and `Int64` on
+/// both, names as declared. The mean and m2 are checked to `WELFORD_RELATIVE`, since a Welford
+/// update is order-dependent and a mean is not dyadic, and the harness's exact comparison has
+/// no tolerance by design.
 fn welford_answered(outcome: &Outcome, at: usize) {
-    let cpu = cpu_slot(outcome, at);
-    let gpu = gpu_slot(outcome, at);
-    let names: Vec<String> = (0..cpu.num_columns())
-        .map(|i| gpu.schema().field(i).name().clone())
-        .collect();
-    let expected: Vec<(&str, ArrayRef)> = (0..cpu.num_columns())
-        .map(|i| (names[i].as_str(), cpu.column(i).clone()))
-        .collect();
-    same_within_welford(&batch_of(expected), gpu, true, &[2, 3]);
+    same_within_welford(cpu_slot(outcome, at), gpu_slot(outcome, at), true, &[2, 3]);
 }
 
 // `GpuAggregate`: aggregators over raw rows, state out — or, with a finalize, the
@@ -576,12 +561,13 @@ operator_case! {
         let node = merge_over(
             state.clone(),
             body(vec![Expr::column(0, "key")], aggs, None),
-            state,
+            state.clone(),
         );
+        // Under the state's own names: the merge reads `count(i32)` by its name.
         let counts = |seed| {
             let s = sum_state(32, seed);
             let ones: ArrayRef = Arc::new(Int64Array::from(vec![1i64; s.num_rows()]));
-            RecordBatch::try_new(s.schema(), vec![s.column(0).clone(), ones]).unwrap()
+            RecordBatch::try_new(state.fields.clone(), vec![s.column(0).clone(), ones]).unwrap()
         };
         run_both(&node, Script::Accumulate(vec![counts(1), counts(2)])).same(Order::Any);
     }

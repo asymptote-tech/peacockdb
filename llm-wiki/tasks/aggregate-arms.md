@@ -188,3 +188,15 @@ change. `__grouping_id` keeps its C++-built name, which is the plan's.
 
 As the chain header says: one sync per task to its host, with as many back-to-back builds as its
 red/green pairs need, the red build first.
+
+## Completeness signoff
+
+Solved under its constraints. One request builder serves the grouped and grouping-set paths,
+reading every input through its `args` and naming every state column from `state_names`; the
+dead arms are gone; every `ColumnRef` reader resolves through `column_ordinal` and every
+`TableResult` through a checking constructor; a scan's names are checked at plan time.
+`rollup-stddev` runs at five device modes and every enabled corpus cell runs with the schema hook
+on. Final pass: no blocking; one important was a check no test could turn red (now pinned on the
+cpu tier, shown red), the rest stale prose, fixed. Shortcuts: none. Outside Scope, forced by the
+evaluator signature, the private constructor or the name check: `window.cpp`, `dispatch.cpp`, the
+`join_*` files, and three test fixtures that read state under the wrong name.

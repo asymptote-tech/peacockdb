@@ -1,4 +1,5 @@
 #include <peacock_gpu.h>
+#include "peacock/operators.h"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
 
@@ -7,6 +8,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -81,6 +83,14 @@ cudf::column_view typed_col(cudf::data_type dt) {
   return cudf::column_view{dt, 0, nullptr, nullptr, 0};
 }
 
+// A standalone ColumnRef table; `name` null writes none.
+const fb::ColumnRef* finished_ref(flatbuffers::FlatBufferBuilder& b, uint32_t index,
+                                  const char* name) {
+  auto text = name ? b.CreateString(name) : flatbuffers::Offset<flatbuffers::String>{};
+  b.Finish(fb::CreateColumnRef(b, index, text));
+  return flatbuffers::GetRoot<fb::ColumnRef>(b.GetBufferPointer());
+}
+
 }  // namespace
 
 // cudf_ast_can_evaluate: same-type non-decimal operands fuse via AST; any decimal operand
@@ -93,7 +103,7 @@ TEST(AstRouting, CudfAstCanEvaluate) {
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
                                         typed_col(cudf::data_type{cudf::type_id::INT32})};
-    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
+    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"l", "r"}));
   }
   // int32 < int64  →  type mismatch, column path.
   {
@@ -102,7 +112,7 @@ TEST(AstRouting, CudfAstCanEvaluate) {
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
                                         typed_col(cudf::data_type{cudf::type_id::INT64})};
-    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
+    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"l", "r"}));
   }
   // decimal * decimal  →  decimal operand, column path.
   {
@@ -110,7 +120,7 @@ TEST(AstRouting, CudfAstCanEvaluate) {
     auto buf = make_binary(b, fb::BinaryOp_Multiply);
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(dec(-2)), typed_col(dec(-2))};
-    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
+    EXPECT_FALSE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"l", "r"}));
   }
   // Bare column ref is trivially AST-able.
   {
@@ -118,7 +128,170 @@ TEST(AstRouting, CudfAstCanEvaluate) {
     auto buf = make_column_ref(b, 0);
     auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
     std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32})};
-    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}));
+    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"c"}));
+  }
+}
+
+// #164: a ColumnRef is resolved by index AND name, as the planner's own check does
+// (expr_physical.rs); each wrong reference has its own message.
+TEST(ColumnRefs, TheNamedColumnResolves) {
+  flatbuffers::FlatBufferBuilder b;
+  EXPECT_EQ(peacock::column_ordinal(finished_ref(b, 1, "m"), {"n", "m"}), 1);
+}
+
+TEST(ColumnRefs, AnIndexPastTheWidthIsRefusedNamingBoth) {
+  flatbuffers::FlatBufferBuilder b;
+  try {
+    peacock::column_ordinal(finished_ref(b, 2, "n"), {"n", "m"});
+    FAIL() << "an index past the width resolved";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(), "ColumnRef n@2 is past the 2 columns its input has");
+  }
+}
+
+TEST(ColumnRefs, AReferenceWithNoNameIsRefused) {
+  flatbuffers::FlatBufferBuilder b;
+  try {
+    peacock::column_ordinal(finished_ref(b, 0, nullptr), {"n", "m"});
+    FAIL() << "an unnamed reference resolved";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(),
+                 "ColumnRef @0 carries no name, so nothing checks it reads the column the plan "
+                 "meant");
+  }
+}
+
+TEST(ColumnRefs, ANameOtherThanTheColumnsIsRefusedNamingBoth) {
+  flatbuffers::FlatBufferBuilder b;
+  try {
+    peacock::column_ordinal(finished_ref(b, 0, "m"), {"n", "m"});
+    FAIL() << "a reference named for another column resolved";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(), "ColumnRef m@0 reads n at that position");
+  }
+}
+
+TEST(ColumnRefs, ColumnAtBorrowsTheColumnTheRefNames) {
+  flatbuffers::FlatBufferBuilder b;
+  std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
+                                      typed_col(cudf::data_type{cudf::type_id::INT64})};
+  auto got = peacock::column_at(cudf::table_view{cols}, {"n", "m"}, finished_ref(b, 1, "m"));
+  EXPECT_EQ(got.type().id(), cudf::type_id::INT64);
+}
+
+TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderAnOperator) {
+  // make_binary writes l@0 < r@1; the names here say r is at 0.
+  flatbuffers::FlatBufferBuilder b;
+  auto buf = make_binary(b, fb::BinaryOp_Lt);
+  auto* expr = flatbuffers::GetRoot<fb::Expr>(buf.data());
+  std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32}),
+                                      typed_col(cudf::data_type{cudf::type_id::INT32})};
+  EXPECT_THROW(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"r", "l"}),
+               std::runtime_error);
+  EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"l", "r"}));
+}
+
+namespace {
+
+// `wrap` builds an expression around a ColumnRef Expr. No shape here passes through
+// infer_expr_type, so the ColumnRef arm's check is the only one before build_expr's AST arm.
+using Wrap = std::function<flatbuffers::Offset<fb::Expr>(flatbuffers::FlatBufferBuilder&,
+                                                         flatbuffers::Offset<fb::Expr>)>;
+
+void expect_each_bad_ref_refused(Wrap const& wrap) {
+  struct Bad {
+    uint32_t index;
+    const char* name;
+    const char* message;
+  };
+  const Bad bads[] = {
+      {0, "c", "ColumnRef c@0 reads x at that position"},
+      {0, nullptr,
+       "ColumnRef @0 carries no name, so nothing checks it reads the column the plan meant"},
+      {1, "x", "ColumnRef x@1 is past the 1 columns its input has"},
+  };
+  std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32})};
+  auto evaluate = [&](uint32_t index, const char* name) {
+    flatbuffers::FlatBufferBuilder b;
+    auto text = name ? b.CreateString(name) : flatbuffers::Offset<flatbuffers::String>{};
+    auto ref =
+        fb::CreateExpr(b, fb::ExprNode_ColumnRef, fb::CreateColumnRef(b, index, text).Union());
+    b.Finish(wrap(b, ref));
+    return peacock::cudf_ast_can_evaluate(flatbuffers::GetRoot<fb::Expr>(b.GetBufferPointer()),
+                                          cudf::table_view{cols}, {"x"});
+  };
+  for (auto const& bad : bads) {
+    try {
+      evaluate(bad.index, bad.name);
+      ADD_FAILURE() << "resolved: " << bad.message;
+    } catch (std::runtime_error const& e) {
+      EXPECT_STREQ(e.what(), bad.message);
+    }
+  }
+  EXPECT_TRUE(evaluate(0, "x"));
+}
+
+}  // namespace
+
+TEST(ColumnRefs, TheAstRouteResolvesABareReference) {
+  expect_each_bad_ref_refused([](auto&, auto ref) { return ref; });
+}
+
+TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderACast) {
+  expect_each_bad_ref_refused([](flatbuffers::FlatBufferBuilder& b, auto ref) {
+    auto cast = fb::CreateCastExprNode(b, ref, fb::DataType_Int64);
+    return fb::CreateExpr(b, fb::ExprNode_CastExprNode, cast.Union());
+  });
+}
+
+TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderAUnaryOperator) {
+  expect_each_bad_ref_refused([](flatbuffers::FlatBufferBuilder& b, auto ref) {
+    auto neg = fb::CreateUnaryExprNode(b, fb::UnaryOp_Negative, ref);
+    return fb::CreateExpr(b, fb::ExprNode_UnaryExprNode, neg.Union());
+  });
+}
+
+// #164: a handle's owners, columns and names are one list read by one ordinal, so a
+// TableResult assembled from parts is refused unless the three agree, and refused empty.
+TEST(TableResultInvariant, PartsOfDifferentLengthsAreRefused) {
+  auto int64 = typed_col(cudf::data_type{cudf::type_id::INT64});
+  try {
+    peacock::TableResult::of({nullptr, nullptr}, {int64, int64}, {"a"});
+    FAIL() << "two columns took one name";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(), "TableResult: 2 columns, 2 owners and 1 names");
+  }
+}
+
+TEST(TableResultInvariant, NoColumnsAreRefused) {
+  EXPECT_THROW(peacock::TableResult::of({}, {}, {}), std::runtime_error);
+}
+
+// The planner writes Partial and Merge only; an aggregate finalizes in a project. A Final or
+// Single mode is a hand-built plan the arms that served it no longer exist for, so it is refused
+// by name before any input is read — which is why this runs with no device.
+TEST(AggregatePhase, FinalAndSingleAreRefusedNamingTheMode) {
+  for (auto mode : {fb::AggregateMode_Final, fb::AggregateMode_FinalPartitioned,
+                    fb::AggregateMode_Single, fb::AggregateMode_SinglePartitioned}) {
+    flatbuffers::FlatBufferBuilder b;
+    // An input schema, so the no-input arm has something to build from if the mode is not
+    // refused first.
+    auto field = fb::CreateField(b, b.CreateString("v"), fb::DataType_Int64, true);
+    auto schema =
+        fb::CreateSchema(b, b.CreateVector(std::vector<flatbuffers::Offset<fb::Field>>{field}));
+    fb::CudfAggregateBuilder agg(b);
+    agg.add_mode(mode);
+    agg.add_aggr_input_schema(schema);
+    auto node = fb::CreatePlanNode(b, fb::PlanNodeKind_CudfAggregate, agg.Finish().Union());
+    b.Finish(fb::CreateGpuPlan(b, node));
+    try {
+      peacock::execute_one(fb::GetGpuPlan(b.GetBufferPointer())->root(), {});
+      ADD_FAILURE() << fb::EnumNameAggregateMode(mode) << " was not refused";
+    } catch (std::runtime_error const& e) {
+      EXPECT_NE(std::string(e.what()).find(std::string("mode ") + fb::EnumNameAggregateMode(mode)),
+                std::string::npos)
+          << e.what();
+    }
   }
 }
 

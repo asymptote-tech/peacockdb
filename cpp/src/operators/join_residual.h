@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -26,8 +27,10 @@ struct CondTable {
   cudf::table_view view() const { return cudf::table_view{cols}; }
 };
 
+/// `names` is the filter schema's (`filter_names`), which a hoisted expression reads by.
 CondTable cond_table(cudf::table_view side, fb::JoinSide which, JoinFilterColMap map,
-                     std::vector<const fb::Expr*> const& hoisted);
+                     std::vector<const fb::Expr*> const& hoisted,
+                     std::vector<std::string> const& names);
 
 /// A zero-row table of the filter's columns in filter-schema order: what
 /// cudf_ast_can_evaluate reads, which is types only.
@@ -58,6 +61,11 @@ struct AstConjunct {
   Operand lhs, rhs;
 };
 
+/// The names of a filter-schema table: entry i of `map` names its side and ordinal, and the
+/// residual's ColumnRef(i) carries that column's name (plan/join.rs, check_filter_columns).
+std::vector<std::string> filter_names(JoinFilterColMap map, std::vector<std::string> const& build,
+                                      std::vector<std::string> const& probe);
+
 /// The residual's top-level AND-chain, flattened.
 void conjuncts_of(const fb::Expr* e, std::vector<const fb::Expr*>& out);
 
@@ -74,13 +82,15 @@ std::size_t filter_row_bytes(JoinFilterColMap map, cudf::table_view B, cudf::tab
 
 /// AND over `cs` of `c IS TRUE`, evaluated over the rows of one side.
 std::unique_ptr<cudf::column> eval_on(std::vector<const fb::Expr*> const& cs, cudf::table_view side,
-                                      fb::JoinSide which, JoinFilterColMap map);
+                                      fb::JoinSide which, JoinFilterColMap map,
+                                      std::vector<std::string> const& names);
 
 /// The residual over the key matches, evaluated once per pair on the filter's columns alone.
 std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view P,
                                             cudf::column_view bi, cudf::column_view pi,
                                             std::vector<const fb::Expr*> const& cs,
-                                            JoinFilterColMap map);
+                                            JoinFilterColMap map,
+                                            std::vector<std::string> const& names);
 
 /// AND of the AST-able conjuncts as one cuDF AST. `flip` swaps which side cuDF calls its
 /// left, and `bw`/`pw` are the sides' own widths, which a hoisted reference sits past.

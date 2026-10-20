@@ -3,13 +3,15 @@
 //! What it adds to the pruning pass is the per-group rows and bytes the mapping needs.
 //! Bytes are the parquet
 //! column-chunk totals over the projected columns: a varchar's width is a property of
-//! the data, and the file already knows it.
+//! the data, and the file already knows it. It also refuses a declared schema that renames
+//! or reorders a column the scan reads: the device reads by name and the cpu by ordinal.
 
 use crate::plan::ScanMetadata;
 use std::collections::BTreeSet;
 
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
+use datafusion::physical_plan::ExecutionPlan;
 
 use super::rowgroup_prune::surviving_row_groups;
 use crate::plan::PlanError;
@@ -66,6 +68,40 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
         Some(columns) => columns.clone(),
         None => (0..config.file_schema.fields().len()).collect(),
     };
+    // The device reads a scan's columns by the declared names (the writer sends the output
+    // schema and no projection) and the cpu by the projection's file ordinals; the two read the
+    // same column only while each declared name is the file's at that ordinal.
+    let file_fields = reader
+        .metadata()
+        .file_metadata()
+        .schema_descr()
+        .root_schema()
+        .get_fields();
+    let declared = parquet.schema();
+    for (position, ordinal) in projected.iter().enumerate() {
+        let held = file_fields
+            .get(*ordinal)
+            .map(|field| field.name())
+            .ok_or_else(|| {
+                PlanError::Invalid(format!(
+                    "{path}: the file has no column at ordinal {ordinal}"
+                ))
+            })?;
+        let wanted = declared
+            .fields()
+            .get(position)
+            .map(|field| field.name())
+            .ok_or_else(|| {
+                PlanError::Invalid(format!("{path}: the scan declares no column {position}"))
+            })?;
+        if held != wanted {
+            return Err(PlanError::Unsupported(format!(
+                "{path}: the scan declares column {position} as `{wanted}` and the file holds \
+                 `{held}` at ordinal {ordinal} — the device reads a column by its name and the \
+                 cpu by its ordinal, so the two would read different columns"
+            )));
+        }
+    }
     let survivors = surviving_row_groups(parquet);
 
     let mut metadata = Vec::new();

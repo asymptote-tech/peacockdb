@@ -66,7 +66,7 @@ class Agg:
 
     `ddof` is the stddev/var divisor's degrees of freedom: 1 for the sample forms
     (STDDEV/STDDEV_SAMP/VAR/VAR_SAMP), 0 for the population ones (STDDEV_POP/VAR_POP),
-    matching `stddev_ddof` in `cpp/src/operators/aggregate.cpp`.
+    matching `AggStateColumns.ddof`, which the wire carries as `AggregateFuncNode.ddof`.
     """
 
     func: str

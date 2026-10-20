@@ -73,6 +73,14 @@ void for_each_child(const fb::Expr* e, F&& f) {
 
 }  // namespace
 
+std::vector<std::string> filter_names(JoinFilterColMap map, std::vector<std::string> const& build,
+                                      std::vector<std::string> const& probe) {
+  std::vector<std::string> names;
+  for (auto const& fc : map)
+    names.push_back(fc.side() == fb::JoinSide_Left ? build.at(fc.index()) : probe.at(fc.index()));
+  return names;
+}
+
 /// The residual's top-level AND-chain, flattened.
 void conjuncts_of(const fb::Expr* e, std::vector<const fb::Expr*>& out) {
   if (e->node_type() == fb::ExprNode_BinaryExprNode &&
@@ -119,14 +127,15 @@ static std::vector<cudf::column_view> side_slots(cudf::table_view side, fb::Join
 }
 
 CondTable cond_table(cudf::table_view side, fb::JoinSide which, JoinFilterColMap map,
-                     std::vector<const fb::Expr*> const& hoisted) {
+                     std::vector<const fb::Expr*> const& hoisted,
+                     std::vector<std::string> const& names) {
   CondTable ct;
   for (auto const& c : side) ct.cols.push_back(c);
   if (hoisted.empty()) return ct;
   auto slot_cols = side_slots(side, which, map);
   cudf::table_view slots{slot_cols};
   for (auto const* e : hoisted) {
-    ct.owned.push_back(build_column(e, slots));
+    ct.owned.push_back(build_column(e, slots, names));
     ct.cols.push_back(ct.owned.back()->view());
   }
   return ct;
@@ -134,7 +143,8 @@ CondTable cond_table(cudf::table_view side, fb::JoinSide which, JoinFilterColMap
 
 /// AND over `cs` of `c IS TRUE`, evaluated over the rows of one side.
 std::unique_ptr<cudf::column> eval_on(std::vector<const fb::Expr*> const& cs, cudf::table_view side,
-                                      fb::JoinSide which, JoinFilterColMap map) {
+                                      fb::JoinSide which, JoinFilterColMap map,
+                                      std::vector<std::string> const& names) {
   auto cols = side_slots(side, which, map);
   cudf::table_view ft{cols};
   auto acc = bools(side.num_rows(), true);
@@ -142,7 +152,7 @@ std::unique_ptr<cudf::column> eval_on(std::vector<const fb::Expr*> const& cs, cu
   for (auto const* e : cs) {
     // R IS TRUE: a NULL condition is no match, so an anti join keeps the row and a mark
     // reads false rather than NULL (design §3.4, D3).
-    auto v = cudf::replace_nulls(build_column(e, ft)->view(), f);
+    auto v = cudf::replace_nulls(build_column(e, ft, names)->view(), f);
     acc = cudf::binary_operation(acc->view(), v->view(), cudf::binary_operator::LOGICAL_AND, kBool);
   }
   return acc;
@@ -153,7 +163,8 @@ std::unique_ptr<cudf::column> eval_on(std::vector<const fb::Expr*> const& cs, cu
 std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view P,
                                             cudf::column_view bi, cudf::column_view pi,
                                             std::vector<const fb::Expr*> const& cs,
-                                            JoinFilterColMap map) {
+                                            JoinFilterColMap map,
+                                            std::vector<std::string> const& names) {
   std::vector<std::unique_ptr<cudf::table>> owned;
   std::vector<cudf::column_view> cols;
   for (auto const& fc : map) {
@@ -168,15 +179,17 @@ std::unique_ptr<cudf::column> residual_mask(cudf::table_view B, cudf::table_view
   // pairs; one column gives the view the pairs' count. No ColumnRef can address it: a
   // conjunct naming a column under an empty map is refused in `split_residual`.
   std::unique_ptr<cudf::column> row_count;
+  std::vector<std::string> ft_names = names;
   if (cols.empty()) {
     row_count = bools(bi.size(), true);
     cols.push_back(row_count->view());
+    ft_names.push_back("__row_count");
   }
   cudf::table_view ft{cols};
   auto acc = bools(bi.size(), true);
   cudf::numeric_scalar<bool> f(false);
   for (auto const* e : cs) {
-    auto v = cudf::replace_nulls(build_column(e, ft)->view(), f);
+    auto v = cudf::replace_nulls(build_column(e, ft, ft_names)->view(), f);
     acc = cudf::binary_operation(acc->view(), v->view(), cudf::binary_operator::LOGICAL_AND, kBool);
   }
   return acc;
@@ -240,13 +253,18 @@ static cudf::ast::ast_operator ast_op_of(fb::BinaryOp op) {
 /// routing rule answers for a hoisted comparison too.
 bool hoisted_is_ast_able(fb::BinaryOp op, cudf::data_type lt, cudf::data_type rt) {
   flatbuffers::FlatBufferBuilder fbb;
-  auto l = fb::CreateExpr(fbb, fb::ExprNode_ColumnRef, fb::CreateColumnRef(fbb, 0).Union());
-  auto r = fb::CreateExpr(fbb, fb::ExprNode_ColumnRef, fb::CreateColumnRef(fbb, 1).Union());
+  auto ref = [&](uint32_t i, const char* name) {
+    return fb::CreateExpr(fbb, fb::ExprNode_ColumnRef,
+                          fb::CreateColumnRef(fbb, i, fbb.CreateString(name)).Union());
+  };
+  auto l = ref(0, "lhs");
+  auto r = ref(1, "rhs");
   fbb.Finish(fb::CreateExpr(fbb, fb::ExprNode_BinaryExprNode,
                             fb::CreateBinaryExprNode(fbb, l, op, r).Union()));
   auto lc = null_column(lt, 0), rc = null_column(rt, 0);
   cudf::table_view tt{{lc->view(), rc->view()}};
-  return cudf_ast_can_evaluate(flatbuffers::GetRoot<fb::Expr>(fbb.GetBufferPointer()), tt);
+  return cudf_ast_can_evaluate(flatbuffers::GetRoot<fb::Expr>(fbb.GetBufferPointer()), tt,
+                               {"lhs", "rhs"});
 }
 
 /// `lhs OP rhs` as cuDF AST nodes owned by `ctx`. `flip` swaps which side cuDF calls its

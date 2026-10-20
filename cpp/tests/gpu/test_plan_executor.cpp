@@ -60,13 +60,28 @@ static std::string parquet_path(const std::string& table) {
 }
 
 /// Build an Expr wrapping a ColumnRef.
-static flatbuffers::Offset<fb::Expr> make_col_ref(
-    flatbuffers::FlatBufferBuilder& fbb, uint32_t index,
-    const char* name = nullptr) {
+static flatbuffers::Offset<fb::Expr> make_col_ref(flatbuffers::FlatBufferBuilder& fbb,
+                                                  uint32_t index, const char* name) {
   auto name_off = name ? fbb.CreateString(name)
                        : flatbuffers::Offset<flatbuffers::String>{};
   auto col = fb::CreateColumnRef(fbb, index, name_off);
   return fb::CreateExpr(fbb, fb::ExprNode_ColumnRef, col.Union());
+}
+
+/// `name(args)` emitting the state columns `states`, as the planner writes a function node.
+static flatbuffers::Offset<fb::AggregateFuncNode> make_agg_func(
+    flatbuffers::FlatBufferBuilder& fbb, const char* name,
+    std::vector<flatbuffers::Offset<fb::Expr>> const& args, std::vector<std::string> const& states,
+    int8_t ddof = 0) {
+  auto name_off = fbb.CreateString(name);
+  auto args_off = fbb.CreateVector(args);
+  auto states_off = fbb.CreateVectorOfStrings(states);
+  fb::AggregateFuncNodeBuilder func(fbb);
+  func.add_name(name_off);
+  func.add_args(args_off);
+  func.add_state_names(states_off);
+  func.add_ddof(ddof);
+  return func.Finish();
 }
 
 /// Build an Expr wrapping an Int64 literal.
@@ -470,8 +485,8 @@ static flatbuffers::Offset<fb::PlanNode> nation_join_region(
   auto region_node = make_plan_node(
       fbb, fb::PlanNodeKind_CudfScan, region_scan.Union());
 
-  auto lk = make_col_ref(fbb, 2);
-  auto rk = make_col_ref(fbb, 0);
+  auto lk = make_col_ref(fbb, 2, "n_regionkey");
+  auto rk = make_col_ref(fbb, 0, "r_regionkey");
   auto join_key = fb::CreateJoinKey(fbb, lk, rk);
   auto keys_vec = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::JoinKey>>{join_key});
@@ -535,7 +550,7 @@ TEST(PlanExecutor, SortNationByName) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
 
   // Sort by col 0 (n_name) ascending.
-  auto sort_expr = make_col_ref(fbb, 0);
+  auto sort_expr = make_col_ref(fbb, 0, "n_name");
   auto sort_spec = fb::CreateSortExprNode(fbb, sort_expr, /*asc=*/true,
                                            /*nulls_first=*/false);
   auto sort_specs = fbb.CreateVector(
@@ -578,7 +593,7 @@ TEST(PlanExecutor, SortWithFetch) {
   auto scan_node =
       make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
 
-  auto sort_expr = make_col_ref(fbb, 0);
+  auto sort_expr = make_col_ref(fbb, 0, "n_name");
   auto sort_spec = fb::CreateSortExprNode(fbb, sort_expr, /*asc=*/true,
                                            /*nulls_first=*/false);
   auto sort_specs = fbb.CreateVector(
@@ -611,16 +626,13 @@ TEST(PlanExecutor, AggregateCount) {
   auto scan_node =
       make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
 
-  // Aggregate: count(*) with no group-by.
-  auto func_name = fbb.CreateString("count");
-  auto func_alias = fbb.CreateString("count(*)");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0, func_alias);
+  // Aggregate: count(*) with no group-by, over a column as the planner writes it.
+  auto agg_func = make_agg_func(fbb, "count", {make_col_ref(fbb, 0, "r_regionkey")}, {"count(*)"});
   auto agg_funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
 
-  auto agg = fb::CreateCudfAggregate(
-      fbb, fb::AggregateMode_Single,
-      /*group_exprs=*/0, /*group_names=*/0, agg_funcs, scan_node);
+  auto agg = fb::CreateCudfAggregate(fbb, fb::AggregateMode_Partial,
+                                     /*group_exprs=*/0, /*group_names=*/0, agg_funcs, scan_node);
   auto agg_node =
       make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union());
   auto buf = finish_plan(fbb, agg_node);
@@ -643,22 +655,19 @@ TEST(PlanExecutor, AggregateGroupBy) {
   auto join_node = nation_join_region(fbb, std::vector<uint32_t>{5});
 
   // Aggregate: GROUP BY r_name (col 0), count(*)
-  auto group_expr = make_col_ref(fbb, 0);
+  auto group_expr = make_col_ref(fbb, 0, "r_name");
   auto group_exprs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::Expr>>{group_expr});
   auto group_name = fbb.CreateString("r_name");
   auto group_names_vec = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{group_name});
 
-  auto func_name = fbb.CreateString("count");
-  auto func_alias = fbb.CreateString("nation_count");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, func_name, /*args=*/0, func_alias);
+  auto agg_func = make_agg_func(fbb, "count", {make_col_ref(fbb, 0, "r_name")}, {"nation_count"});
   auto agg_funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
 
-  auto agg = fb::CreateCudfAggregate(
-      fbb, fb::AggregateMode_Single, group_exprs, group_names_vec,
-      agg_funcs, join_node);
+  auto agg = fb::CreateCudfAggregate(fbb, fb::AggregateMode_Partial, group_exprs, group_names_vec,
+                                     agg_funcs, join_node);
   auto agg_node =
       make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union());
   auto buf = finish_plan(fbb, agg_node);
@@ -695,8 +704,8 @@ TEST(PlanExecutor, ProjectRename) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
 
   // Project: select col 1 as "region_name", col 0 as "key"
-  auto e1 = make_col_ref(fbb, 1);
-  auto e2 = make_col_ref(fbb, 0);
+  auto e1 = make_col_ref(fbb, 1, "r_name");
+  auto e2 = make_col_ref(fbb, 0, "r_regionkey");
   auto exprs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::Expr>>{e1, e2});
   auto a1 = fbb.CreateString("region_name");
@@ -740,7 +749,7 @@ TEST(PlanExecutor, ProjectSqrtThroughTheAst) {
 
   // sqrt(CAST(r_regionkey AS FLOAT64)) — a cast to FLOAT64 is one of the two the AST
   // has, so the whole expression stays AST-able.
-  auto casted = make_cast_expr(fbb, make_col_ref(fbb, 0), fb::DataType_Float64);
+  auto casted = make_cast_expr(fbb, make_col_ref(fbb, 0, "r_regionkey"), fb::DataType_Float64);
   auto un = fb::CreateUnaryExprNode(fbb, fb::UnaryOp_Sqrt, casted);
   auto root_sqrt = fb::CreateExpr(fbb, fb::ExprNode_UnaryExprNode, un.Union());
   auto exprs = fbb.CreateVector(
@@ -785,9 +794,9 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
   // sqrt(CASE WHEN r_regionkey >= 0 THEN CAST(r_regionkey AS FLOAT64) ELSE 0.0 END).
   // The CASE is what routes it: the AST has no such node, so cudf_ast_can_evaluate says no for the
   // whole expression and the column evaluator takes it.
-  auto when = make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_GtEq,
+  auto when = make_binary_expr(fbb, make_col_ref(fbb, 0, "r_regionkey"), fb::BinaryOp_GtEq,
                                make_int64_literal(fbb, 0));
-  auto then = make_cast_expr(fbb, make_col_ref(fbb, 0), fb::DataType_Float64);
+  auto then = make_cast_expr(fbb, make_col_ref(fbb, 0, "r_regionkey"), fb::DataType_Float64);
   auto arm = fb::CreateCaseWhenThen(fbb, when, then);
   auto arms = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{arm});
@@ -854,25 +863,31 @@ static flatbuffers::Offset<fb::PlanNode> nation_scan_node(
 ///
 /// The ordinals differ by mode and that is the whole point of the pair: a Partial reads
 /// the scan, where the key is column 2 and the value column 0, while a Merge reads the
-/// Partial's own output, where the key is column 0 and the state begins at column 1.
-static flatbuffers::Offset<fb::PlanNode> nation_aggregate(
-    flatbuffers::FlatBufferBuilder& fbb, flatbuffers::Offset<fb::PlanNode> input,
-    fb::AggregateMode mode, const char* func, bool mergeable) {
+/// Partial's own output, where the key is column 0 and the state begins at column 1. A
+/// merge reads each state column through its args, as the planner writes them.
+static flatbuffers::Offset<fb::PlanNode> nation_aggregate(flatbuffers::FlatBufferBuilder& fbb,
+                                                          flatbuffers::Offset<fb::PlanNode> input,
+                                                          fb::AggregateMode mode,
+                                                          const char* func) {
   bool merging = mode == fb::AggregateMode_Merge;
+  bool welford = std::string(func) == "stddev";
   auto group = make_col_ref(fbb, merging ? 0 : 2, "n_regionkey");
   auto groups = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::Expr>>{group});
   auto group_name = fbb.CreateString("n_regionkey");
   auto group_names = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{group_name});
-  // A merge reads its state columns positionally from just past the keys, so the
-  // argument matters only to the partial; it is written either way because the field is
-  // not optional.
-  auto arg = make_col_ref(fbb, merging ? 1 : 0, "n_nationkey");
-  auto args = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{arg});
-  auto name = fbb.CreateString(func);
-  auto alias = fbb.CreateString("state");
-  auto agg_func = fb::CreateAggregateFuncNode(fbb, name, args, alias);
+  std::vector<std::string> states =
+      welford ? std::vector<std::string>{"state$count", "state$mean", "state$m2"}
+              : std::vector<std::string>{"state"};
+  std::vector<flatbuffers::Offset<fb::Expr>> args;
+  if (!merging) {
+    args.push_back(make_col_ref(fbb, 0, "n_nationkey"));
+  } else {
+    for (size_t i = 0; i < states.size(); ++i)
+      args.push_back(make_col_ref(fbb, static_cast<uint32_t>(1 + i), states[i].c_str()));
+  }
+  auto agg_func = make_agg_func(fbb, func, args, states, welford ? 1 : 0);
   auto funcs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{agg_func});
   fb::CudfAggregateBuilder builder(fbb);
@@ -881,7 +896,6 @@ static flatbuffers::Offset<fb::PlanNode> nation_aggregate(
   builder.add_group_names(group_names);
   builder.add_aggr_funcs(funcs);
   builder.add_input(input);
-  builder.add_mergeable_agg_state(mergeable);
   auto agg = builder.Finish();
   return make_plan_node(fbb, fb::PlanNodeKind_CudfAggregate, agg.Union());
 }
@@ -914,31 +928,27 @@ static std::map<int32_t, std::vector<double>> by_group(
   return rows;
 }
 
-/// One partial, and the same partial unioned with itself and merged.
-static std::pair<std::map<int32_t, std::vector<double>>,
-                 std::map<int32_t, std::vector<double>>>
-partial_and_merged(const char* func, bool mergeable) {
+/// One partial of `func`, and the same partial unioned with itself and merged by `merge` —
+/// `sum` for a `count`, which never reaches a Merge, and the function itself otherwise.
+static std::pair<std::map<int32_t, std::vector<double>>, std::map<int32_t, std::vector<double>>>
+partial_and_merged(const char* func, const char* merge) {
   std::map<int32_t, std::vector<double>> partial_rows;
   {
     flatbuffers::FlatBufferBuilder fbb;
-    auto partial = nation_aggregate(fbb, nation_scan_node(fbb),
-                                    fb::AggregateMode_Partial, func, mergeable);
+    auto partial = nation_aggregate(fbb, nation_scan_node(fbb), fb::AggregateMode_Partial, func);
     auto buf = finish_plan(fbb, partial);
     partial_rows = by_group(WholePlan(buf).result());
   }
   std::map<int32_t, std::vector<double>> merged_rows;
   {
     flatbuffers::FlatBufferBuilder fbb;
-    auto left = nation_aggregate(fbb, nation_scan_node(fbb),
-                                 fb::AggregateMode_Partial, func, mergeable);
-    auto right = nation_aggregate(fbb, nation_scan_node(fbb),
-                                  fb::AggregateMode_Partial, func, mergeable);
+    auto left = nation_aggregate(fbb, nation_scan_node(fbb), fb::AggregateMode_Partial, func);
+    auto right = nation_aggregate(fbb, nation_scan_node(fbb), fb::AggregateMode_Partial, func);
     auto inputs = fbb.CreateVector(
         std::vector<flatbuffers::Offset<fb::PlanNode>>{left, right});
     auto both = fb::CreateCudfUnion(fbb, inputs);
     auto both_node = make_plan_node(fbb, fb::PlanNodeKind_CudfUnion, both.Union());
-    auto merged = nation_aggregate(fbb, both_node, fb::AggregateMode_Merge, func,
-                                   mergeable);
+    auto merged = nation_aggregate(fbb, both_node, fb::AggregateMode_Merge, merge);
     auto buf = finish_plan(fbb, merged);
     merged_rows = by_group(WholePlan(buf).result());
   }
@@ -946,7 +956,7 @@ partial_and_merged(const char* func, bool mergeable) {
 }
 
 TEST(AggregateMerge, WelfordStateComesBackAsStateAndNotAsAValue) {
-  auto [partial, merged] = partial_and_merged("stddev", /*mergeable=*/true);
+  auto [partial, merged] = partial_and_merged("stddev", "stddev");
   ASSERT_EQ(partial.size(), 5u) << "five regions";
   ASSERT_EQ(merged.size(), partial.size());
   for (auto& [key, state] : partial) {
@@ -963,16 +973,14 @@ TEST(AggregateMerge, TheMergedCountIsWidenedSoASecondMergeReadsTheSameLayout) {
   // cuDF's group_merge_m2 takes an INT32 count and hands one back; a chain of merges
   // only works if the width the arm emits is the width the next arm reads.
   flatbuffers::FlatBufferBuilder fbb;
-  auto left = nation_aggregate(fbb, nation_scan_node(fbb),
-                               fb::AggregateMode_Partial, "stddev", true);
-  auto right = nation_aggregate(fbb, nation_scan_node(fbb),
-                                fb::AggregateMode_Partial, "stddev", true);
+  auto left = nation_aggregate(fbb, nation_scan_node(fbb), fb::AggregateMode_Partial, "stddev");
+  auto right = nation_aggregate(fbb, nation_scan_node(fbb), fb::AggregateMode_Partial, "stddev");
   auto inputs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::PlanNode>>{left, right});
   auto both = fb::CreateCudfUnion(fbb, inputs);
   auto both_node = make_plan_node(fbb, fb::PlanNodeKind_CudfUnion, both.Union());
-  auto once = nation_aggregate(fbb, both_node, fb::AggregateMode_Merge, "stddev", true);
-  auto twice = nation_aggregate(fbb, once, fb::AggregateMode_Merge, "stddev", true);
+  auto once = nation_aggregate(fbb, both_node, fb::AggregateMode_Merge, "stddev");
+  auto twice = nation_aggregate(fbb, once, fb::AggregateMode_Merge, "stddev");
   auto buf = finish_plan(fbb, twice);
 
   WholePlan plan(buf);
@@ -984,23 +992,11 @@ TEST(AggregateMerge, TheMergedCountIsWidenedSoASecondMergeReadsTheSameLayout) {
   EXPECT_EQ(view.column(3).type().id(), cudf::type_id::FLOAT64);
 }
 
-TEST(AggregateMerge, AnAvgsSumAndCountBothSurviveTheMerge) {
-  auto [partial, merged] = partial_and_merged("avg", /*mergeable=*/false);
-  ASSERT_EQ(partial.size(), 5u);
-  for (auto& [key, state] : partial) {
-    ASSERT_EQ(state.size(), 2u) << "the partial emits [sum, count]";
-    auto& after = merged.at(key);
-    ASSERT_EQ(after.size(), 2u) << "the merge emits both, since the divide is the finalize";
-    EXPECT_DOUBLE_EQ(after[0], state[0] * 2) << "group " << key;
-    EXPECT_DOUBLE_EQ(after[1], state[1] * 2) << "group " << key;
-  }
-}
-
 TEST(AggregateMerge, AOneColumnAggregateMergesByItsOwnRule) {
-  // sum merges by sum, and count by sum — the one place a merge is not the same
-  // aggregation as the partial it merges.
-  for (const char* func : {"sum", "count"}) {
-    auto [partial, merged] = partial_and_merged(func, /*mergeable=*/false);
+  // A sum's state merges by sum, and so does a count's: the plan writes a count's merge as
+  // `sum` (`count(*): sum(count(*)@1)`), so no count ever reaches a Merge.
+  for (auto [func, merge] : {std::pair{"sum", "sum"}, std::pair{"count", "sum"}}) {
+    auto [partial, merged] = partial_and_merged(func, merge);
     ASSERT_EQ(partial.size(), 5u) << func;
     for (auto& [key, state] : partial) {
       ASSERT_EQ(state.size(), 1u) << func;
@@ -1020,8 +1016,8 @@ TEST(AggregateMerge, AOneColumnAggregateMergesByItsOwnRule) {
 static std::vector<uint8_t> date_part_over_a_made_date(flatbuffers::FlatBufferBuilder& fbb,
                                                        const char* field) {
   auto scan_node = nation_scan_node(fbb);
-  auto early =
-      make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_Lt, make_int64_literal(fbb, 10));
+  auto early = make_binary_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"), fb::BinaryOp_Lt,
+                                make_int64_literal(fbb, 10));
   auto arm = fb::CreateCaseWhenThen(fbb, early, make_date32_literal(fbb, 9204));
   auto arms = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{arm});
   auto later = make_date32_literal(fbb, 12384);
@@ -1035,8 +1031,8 @@ static std::vector<uint8_t> date_part_over_a_made_date(flatbuffers::FlatBufferBu
   auto date_node = make_plan_node(fbb, fb::PlanNodeKind_CudfProject, date_proj.Union());
 
   auto field_lit = make_string_literal(fbb, field);
-  auto args =
-      fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{field_lit, make_col_ref(fbb, 0)});
+  auto args = fbb.CreateVector(
+      std::vector<flatbuffers::Offset<fb::Expr>>{field_lit, make_col_ref(fbb, 0, "d")});
   auto name = fbb.CreateString("date_part");
   auto fn = fb::CreateScalarFunctionExprNode(fbb, name, args, fb::DataType_Int32,
                                              /*return_decimal_precision=*/0,
@@ -1112,8 +1108,8 @@ TEST(PlanExecutor, JoinProjectSort) {
   auto cb_node = make_plan_node(
       fbb, fb::PlanNodeKind_CudfCoalesceBatches, cb.Union());
 
-  auto pe1 = make_col_ref(fbb, 0);
-  auto pe2 = make_col_ref(fbb, 1);
+  auto pe1 = make_col_ref(fbb, 0, "n_name");
+  auto pe2 = make_col_ref(fbb, 1, "r_name");
   auto proj_exprs = fbb.CreateVector(
       std::vector<flatbuffers::Offset<fb::Expr>>{pe1, pe2});
   auto pa1 = fbb.CreateString("n_name");
@@ -1126,7 +1122,7 @@ TEST(PlanExecutor, JoinProjectSort) {
       make_plan_node(fbb, fb::PlanNodeKind_CudfProject, project.Union());
 
   // Sort by n_name (col 0) ascending.
-  auto sort_expr = make_col_ref(fbb, 0);
+  auto sort_expr = make_col_ref(fbb, 0, "n_name");
   auto sort_spec = fb::CreateSortExprNode(fbb, sort_expr, /*asc=*/true,
                                            /*nulls_first=*/false);
   auto sort_specs = fbb.CreateVector(
@@ -2118,8 +2114,8 @@ TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
 /// A TIMESTAMP_DAYS column from two Date32 literals, cast up to `unit`.
 static flatbuffers::Offset<fb::Expr> made_timestamp(flatbuffers::FlatBufferBuilder& fbb,
                                                     fb::DataType unit) {
-  auto early =
-      make_binary_expr(fbb, make_col_ref(fbb, 0), fb::BinaryOp_Lt, make_int64_literal(fbb, 10));
+  auto early = make_binary_expr(fbb, make_col_ref(fbb, 0, "n_nationkey"), fb::BinaryOp_Lt,
+                                make_int64_literal(fbb, 10));
   auto arm = fb::CreateCaseWhenThen(fbb, early, make_date32_literal(fbb, 9204));
   auto arms = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{arm});
   auto made = fb::CreateCaseExprNode(fbb, /*expr=*/flatbuffers::Offset<fb::Expr>{}, arms,
@@ -2349,12 +2345,14 @@ TEST(TableResult, ATableOfNoColumnsIsRefused) {
   EXPECT_THROW(t.select({}), std::runtime_error) << "selecting no ordinals is the same table";
 
   // The same rule where a handle enters the registry, which is the boundary every
-  // consumer reads through: the fields are public, so an empty one can be assembled
-  // without calling a constructor at all.
+  // consumer reads through: the fields are public, so a built one can be emptied by hand.
   flatbuffers::FlatBufferBuilder fbb;
   auto buf = customer_scan_plan(fbb, {0});
   peacock::NodeSession session(buf.data(), buf.size());
-  EXPECT_THROW(session.adopt(peacock::TableResult{}), std::runtime_error)
+  t.owners.clear();
+  t.columns.clear();
+  t.column_names.clear();
+  EXPECT_THROW(session.adopt(std::move(t)), std::runtime_error)
       << "a handle of no columns registered by hand";
 }
 
@@ -2599,7 +2597,7 @@ TEST(ExitCopies, ABareColumnRefIsBorrowedNotCopied) {
   flatbuffers::FlatBufferBuilder fbb;
   const fb::Expr* ref = finished_expr(fbb, make_col_ref(fbb, 0, "a"));
   peacock::EvaluatedColumn got_column;
-  auto got = allocated_by([&] { got_column = peacock::evaluate_column(ref, table.view()); });
+  auto got = allocated_by([&] { got_column = peacock::evaluate_column(ref, table.view(), {"a"}); });
   EXPECT_EQ(got.total, 0) << "a bare column reference allocates nothing";
   EXPECT_EQ(got_column.owned, nullptr) << "and owns nothing";
   EXPECT_EQ(got_column.view().data<int64_t>(), table.view().column(0).data<int64_t>())
@@ -2635,7 +2633,7 @@ TEST(ExitCopies, ANonAstPredicateDoesNotCopyTheColumnItReads) {
   // the node routes to compute_column, allocates less, and the bound below stays green with
   // nothing left covering expr.cpp's site.
   const fb::Expr* pred_expr = fb::GetGpuPlan(buf.data())->root()->node_as_CudfFilter()->predicate();
-  ASSERT_FALSE(peacock::cudf_ast_can_evaluate(pred_expr, input.view()))
+  ASSERT_FALSE(peacock::cudf_ast_can_evaluate(pred_expr, input.view(), input.column_names))
       << "a decimal comparison must take the column path, or this case tests nothing";
   // The predicate and the filter run straight against cuDF, the scalar built at the
   // literal's own scale as `build_scalar` builds it: everything the operator must allocate
@@ -2675,7 +2673,7 @@ static std::vector<uint8_t> customer_filter_plan(flatbuffers::FlatBufferBuilder&
 
 /// Run that filter over one row group and report what the filter node alone allocated.
 static Allocated customer_filter_call(const std::vector<uint32_t>& projection,
-                                      peacock::TableResult* out_table) {
+                                      std::optional<peacock::TableResult>* out_table) {
   flatbuffers::FlatBufferBuilder fbb;
   auto buf = customer_filter_plan(fbb, projection);
   peacock::NodeSession session(buf.data(), buf.size());
@@ -2703,8 +2701,9 @@ TEST(ExitCopies, AFiltersProjectionCopiesNoColumnItKeeps) {
 TEST(ExitCopies, AFiltersRepeatedProjectionOrdinalAnswersBothColumns) {
   // The trap a release would have sprung: one column moved twice leaves a hole. With an
   // owner per column it is two entries over one owner, and both answer.
-  peacock::TableResult got;
-  customer_filter_call({1, 1}, &got);
+  std::optional<peacock::TableResult> called;
+  customer_filter_call({1, 1}, &called);
+  auto const& got = called.value();
   ASSERT_EQ(got.num_columns(), 2);
   EXPECT_EQ(got.owners[0], got.owners[1]) << "two entries over one owner, not two copies";
   EXPECT_EQ(got.column_names, (std::vector<std::string>{"c_name", "c_name"}));
@@ -2720,7 +2719,8 @@ TEST(ExitCopies, AProjectOfColumnRefsAllocatesNothing) {
   flatbuffers::FlatBufferBuilder fbb;
   auto scan_node = nation_scan_node(fbb);
   auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{
-      make_col_ref(fbb, 1), make_col_ref(fbb, 0), make_col_ref(fbb, 1)});
+      make_col_ref(fbb, 1, "n_name"), make_col_ref(fbb, 0, "n_nationkey"),
+      make_col_ref(fbb, 1, "n_name")});
   auto aliases = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{
       fbb.CreateString("name"), fbb.CreateString("key"), fbb.CreateString("name_again")});
   auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
@@ -2801,8 +2801,9 @@ TEST(ExitCopies, AFiltersUnselectedColumnIsFreedWithTheIntermediate) {
   // Both calls filter the same two columns of the same row group. Only the one that drops
   // c_name may give its bytes back, so the wider call is the bound and the dropped column's
   // own size — measured on this very column — is the margin.
-  peacock::TableResult both;
-  auto whole = customer_filter_call({0, 1}, &both);
+  std::optional<peacock::TableResult> called;
+  auto whole = customer_filter_call({0, 1}, &called);
+  auto const& both = called.value();
   ASSERT_EQ(both.num_columns(), 2);
   auto dropped = allocated_by([&] { auto copy = std::make_unique<cudf::column>(both.columns[1]); });
   ASSERT_GT(dropped.total, 0);
@@ -2819,7 +2820,8 @@ TEST(ExitCopies, AProjectHoldsItsSharedColumnOnceAndDropsTheRest) {
   // TableResult dies before it returns — and the three unprojected columns go with it.
   flatbuffers::FlatBufferBuilder fbb;
   auto scan_node = nation_scan_node(fbb);
-  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 1)});
+  auto exprs =
+      fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 1, "n_name")});
   auto aliases = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("name")});
   auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
@@ -2851,10 +2853,7 @@ static std::vector<uint8_t> customer_count_by_key_plan(flatbuffers::FlatBufferBu
       std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
   auto group_names = fbb.CreateVector(
       std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString("c_custkey")});
-  auto args = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<fb::Expr>>{make_col_ref(fbb, 0, "c_custkey")});
-  auto func =
-      fb::CreateAggregateFuncNode(fbb, fbb.CreateString("count"), args, fbb.CreateString("n"));
+  auto func = make_agg_func(fbb, "count", {make_col_ref(fbb, 0, "c_custkey")}, {"n"});
   auto funcs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{func});
   fb::CudfAggregateBuilder ab(fbb);
   ab.add_mode(fb::AggregateMode_Partial);

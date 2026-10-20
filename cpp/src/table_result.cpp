@@ -1,7 +1,7 @@
-// TableResult's four constructors (plan_executor.h). A handle's table is built by one of these
-// or assembled through the public fields, which `project.cpp` does because a project reorders
-// and renames and no constructor has that shape; `register_handle` is the single check either
-// way, so the owner-per-column rule has one enforcement point rather than one per route.
+// TableResult's five constructors (plan_executor.h), the only way to build one (#164): the
+// default constructor is private. `of` takes parts, for a project that reorders and renames and
+// a join that joins two sides' columns. The fields stay public, so `register_handle` checks the
+// shape again where a handle enters the registry.
 
 #include "plan_executor.h"
 
@@ -51,9 +51,9 @@ TableResult TableResult::select(std::vector<cudf::size_type> const& ordinals) co
     if (i < 0 || i >= num_columns())
       throw std::runtime_error("TableResult::select: ordinal " + std::to_string(i) + " of " +
                                std::to_string(num_columns()) + " columns");
-    out.owners.push_back(owners[i]);
+    out.owners.push_back(owners.at(i));
     out.columns.push_back(columns[i]);
-    out.column_names.push_back(column_names[i]);
+    out.column_names.push_back(column_names.at(i));
   }
   if (out.columns.empty())
     throw std::runtime_error("TableResult::select: no ordinals is a table of no columns");
@@ -69,6 +69,24 @@ TableResult TableResult::with(std::unique_ptr<cudf::column> column, std::string 
   out.columns.push_back(owner->view());
   out.owners.push_back(std::move(owner));
   out.column_names.push_back(std::move(name));
+  return out;
+}
+
+TableResult TableResult::of(std::vector<std::shared_ptr<cudf::column const>> owners,
+                            std::vector<cudf::column_view> columns,
+                            std::vector<std::string> column_names) {
+  if (columns.empty())
+    throw std::runtime_error(
+        "TableResult: a table of no columns reads as no rows; the plan's placeholder "
+        "column exists so that none is ever made");
+  if (owners.size() != columns.size() || column_names.size() != columns.size())
+    throw std::runtime_error("TableResult: " + std::to_string(columns.size()) + " columns, " +
+                             std::to_string(owners.size()) + " owners and " +
+                             std::to_string(column_names.size()) + " names");
+  TableResult out;
+  out.owners = std::move(owners);
+  out.columns = std::move(columns);
+  out.column_names = std::move(column_names);
   return out;
 }
 

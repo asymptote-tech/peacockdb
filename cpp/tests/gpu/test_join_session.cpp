@@ -209,11 +209,17 @@ struct SField {
   int8_t decimal_scale = 0;
 };
 
+/// The builder a spec's filter is written with: it knows each filter column's name, so `col`
+/// names a residual reference as the planner does (plan/join.rs, check_filter_columns).
+struct FilterBuilder : flatbuffers::FlatBufferBuilder {
+  std::vector<std::string> names;  // per filter column, from its side's schema
+};
+
 /// What a `CudfJoin` says; `make_plan` serializes it as the plan's one node.
 struct JoinSpec {
   fb::JoinType type = fb::JoinType_Inner;
   std::vector<std::pair<uint32_t, uint32_t>> keys;  // (build col, probe col)
-  std::function<flatbuffers::Offset<fb::Expr>(flatbuffers::FlatBufferBuilder&)> filter;
+  std::function<flatbuffers::Offset<fb::Expr>(FilterBuilder&)> filter;
   std::vector<std::pair<fb::JoinSide, uint32_t>> filter_columns;
   bool null_equals_null = false;
   std::vector<SField> build_schema, probe_schema;
@@ -221,8 +227,21 @@ struct JoinSpec {
   uint64_t chunk_bytes = 0;
 };
 
-static flatbuffers::Offset<fb::Expr> col(flatbuffers::FlatBufferBuilder& f, uint32_t i) {
-  return fb::CreateExpr(f, fb::ExprNode_ColumnRef, fb::CreateColumnRef(f, i).Union());
+static flatbuffers::Offset<fb::Expr> named_col(flatbuffers::FlatBufferBuilder& f, uint32_t i,
+                                               std::string const& name) {
+  return fb::CreateExpr(f, fb::ExprNode_ColumnRef,
+                        fb::CreateColumnRef(f, i, f.CreateString(name)).Union());
+}
+/// Column `i` under `names[i]`; past the names, under none, which the reader refuses.
+static flatbuffers::Offset<fb::Expr> col_of(flatbuffers::FlatBufferBuilder& f, uint32_t i,
+                                            std::vector<std::string> const& names) {
+  if (i >= names.size())
+    return fb::CreateExpr(f, fb::ExprNode_ColumnRef, fb::CreateColumnRef(f, i).Union());
+  return named_col(f, i, names[i]);
+}
+/// Filter column `i`, under its name.
+static flatbuffers::Offset<fb::Expr> col(FilterBuilder& f, uint32_t i) {
+  return col_of(f, i, f.names);
 }
 static flatbuffers::Offset<fb::Expr> bin(flatbuffers::FlatBufferBuilder& f,
                                          flatbuffers::Offset<fb::Expr> l, fb::BinaryOp op,
@@ -248,9 +267,18 @@ static flatbuffers::Offset<fb::Schema> schema_of(flatbuffers::FlatBufferBuilder&
 }
 
 static std::vector<uint8_t> make_plan(JoinSpec const& s) {
-  flatbuffers::FlatBufferBuilder f;
+  auto names = [](std::vector<SField> const& side) {
+    std::vector<std::string> out;
+    for (auto const& field : side) out.push_back(field.name);
+    return out;
+  };
+  const auto build_names = names(s.build_schema), probe_names = names(s.probe_schema);
+  FilterBuilder f;
+  for (auto [side, i] : s.filter_columns)
+    f.names.push_back((side == fb::JoinSide_Left ? build_names : probe_names).at(i));
   std::vector<flatbuffers::Offset<fb::JoinKey>> keys;
-  for (auto [b, p] : s.keys) keys.push_back(fb::CreateJoinKey(f, col(f, b), col(f, p)));
+  for (auto [b, p] : s.keys)
+    keys.push_back(fb::CreateJoinKey(f, col_of(f, b, build_names), col_of(f, p, probe_names)));
   auto filter = s.filter ? s.filter(f) : flatbuffers::Offset<fb::Expr>{};
   std::vector<fb::JoinFilterColumn> fcs;
   for (auto [side, i] : s.filter_columns) fcs.emplace_back(i, side);
@@ -1983,6 +2011,38 @@ TEST(JoinSession, ASideOfNoColumnsIsRefused) {
   uint64_t j = 0;
   EXPECT_NE(peacock_join_build(s.exec(), 0, 0, &j, nullptr), 0);
   EXPECT_NE(s.error().find("no columns"), std::string::npos) << s.error();
+}
+
+// #164: the residual's references resolve against its filter-schema table, whose names are
+// the two sides' columns in the map's order. One named for another column is refused.
+TEST(ColumnRefs, AJoinResidualResolvesThroughItsSidesNames) {
+  for (bool misnamed : {false, true}) {
+    JoinSpec spec{.type = fb::JoinType_Inner,
+                  .keys = {{0, 0}},
+                  .filter_columns = {{fb::JoinSide_Left, 1}, {fb::JoinSide_Right, 1}},
+                  .build_schema = {{"lk", fb::DataType_Int64}, {"lv", fb::DataType_Int64}},
+                  .probe_schema = {{"rk", fb::DataType_Int64}, {"rv", fb::DataType_Int64}}};
+    spec.filter = [misnamed](auto& f) {
+      auto lhs = misnamed ? named_col(f, 0, "rv") : col(f, 0);
+      return bin(f, lhs, fb::BinaryOp_Lt, col(f, 1));
+    };
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(peacock_join_build(
+                  s.exec(), 0, s.upload({i64("lk", {1, 1, 2}), i64("lv", {5, 9, 1})}), &j, nullptr),
+              0)
+        << s.error();
+    auto rc = peacock_join_probe(s.exec(), j, s.upload({i64("rk", {1, 2}), i64("rv", {7, 3})}),
+                                 &out, nullptr);
+    if (misnamed) {
+      EXPECT_NE(rc, 0);
+      EXPECT_NE(s.error().find("ColumnRef rv@0 reads lv at that position"), std::string::npos)
+          << s.error();
+    } else {
+      ASSERT_EQ(rc, 0) << s.error();
+      EXPECT_EQ(s.rows(out), sorted({"1|5|1|7", "2|1|2|3"}));
+    }
+  }
 }
 
 // Join tables here are tens of rows; 1 GiB is a floor, as in test_plan_executor.cpp.

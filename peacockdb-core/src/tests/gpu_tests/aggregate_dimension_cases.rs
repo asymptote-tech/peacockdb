@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, Int64Array, UInt8Array};
-use datafusion::arrow::compute::concat_batches;
+use datafusion::arrow::compute::{
+    SortColumn, concat_batches, lexsort_to_indices, take_record_batch,
+};
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
@@ -18,8 +20,8 @@ use super::aggregate_cases::{
 };
 use super::script::{Outcome, Script, each_answers, run_both};
 use crate::plan::{
-    AggCall, AggFunc, AggSpec, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg,
-    Schema, finalize,
+    AggCall, AggFunc, AggSpec, AggStateColumns, AggregateBody, BatchLayout, BinaryOp, Expr,
+    GpuAggregate, GpuAggregateBatches, NamedExpr, PlanAgg, Schema, finalize,
 };
 use crate::tests::compare::{Order, same_within_welford};
 use crate::tests::given::{Given, columns};
@@ -475,22 +477,22 @@ fn global_finalize_outcome(func: AggFunc) -> Outcome {
 }
 
 // #216 — over the one column the keyless merge answers, the finalize's `m2` reference is
-// out of range; the cpu answers the finalized stddev.
+// past the input's width; the cpu answers the finalized stddev.
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_global_stddev_finalize_is_refused_on_the_device() {
         let outcome = global_finalize_outcome(AggFunc::Stddev);
         assert!(
-            outcome.gpu_refuses().contains("ColumnRef index 2 out of range (cols=1)"),
+            outcome.gpu_refuses().contains("is past the 1 columns its input has"),
             "{}",
             outcome.gpu_refuses()
         );
     }
 }
 
-// #216 — the variance never reaches its finalize: the keyless path knows `stddev` alone
-// (`is_stddev_name`), so a `var` name falls through to `make_reduce_agg` and the aggregate
-// itself is refused; the cpu answers the finalized variance.
+// #216 — the variance never reaches its finalize: the keyless path reduces a `stddev` name
+// alone, so a `var` name finds no reduction and the aggregate itself is refused; the cpu
+// answers the finalized variance.
 operator_case! {
     GpuAggregateBatches,
     fn bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device() {
@@ -501,6 +503,156 @@ operator_case! {
                 .contains("[in CudfAggregate] unsupported aggregate function: var"),
             "{}",
             outcome.gpu_refuses()
+        );
+    }
+}
+
+// A Welford under a grouping set (#280): the set path builds the triple through the one
+// request builder, and the `sum` after the triples reads its own column, not a neighbour's.
+
+/// One key under ROLLUP, then a `stddev(f64)`, a `var_pop(f64)` and a `sum(i64)` after them.
+/// Both triples are over `f64`, which `welford_init` shows has no all-NULL group in `input()`
+/// (all-NULL groups are welford-device's).
+fn rollup_welford_state() -> Schema {
+    let triple = |out: &str| {
+        [
+            ("$count", DataType::Int64),
+            ("$mean", DataType::Float64),
+            ("$m2", DataType::Float64),
+        ]
+        .map(|(suffix, ty)| (format!("{out}{suffix}"), ty))
+    };
+    let mut named: Vec<(String, DataType)> = vec![
+        ("key".to_string(), DataType::Int32),
+        ("__grouping_id".to_string(), DataType::UInt8),
+    ];
+    named.extend(triple("stddev(f64)"));
+    named.extend(triple("var_pop(f64)"));
+    named.push(("sum(i64)".to_string(), DataType::Int64));
+    let fields: Vec<(&str, DataType)> =
+        named.iter().map(|(n, t)| (n.as_str(), t.clone())).collect();
+    Schema {
+        group_keys: vec![0, 1],
+        agg_state: vec![
+            AggStateColumns {
+                output: "stddev(f64)".into(),
+                func: AggFunc::Stddev,
+                ddof: 1,
+                positions: vec![2, 3, 4],
+            },
+            AggStateColumns {
+                output: "var_pop(f64)".into(),
+                func: AggFunc::Var,
+                ddof: 0,
+                positions: vec![5, 6, 7],
+            },
+        ],
+        ..columns(&fields)
+    }
+}
+
+pub(crate) fn rollup_welford_init() -> GpuAggregate {
+    let triple = |out: &str| -> Vec<AggCall> {
+        [
+            (PlanAgg::Count, "$count", DataType::Int64),
+            (PlanAgg::Mean, "$mean", DataType::Float64),
+            (PlanAgg::M2, "$m2", DataType::Float64),
+        ]
+        .into_iter()
+        .map(|(func, suffix, ty)| call(func, Expr::column(4, "f64"), &format!("{out}{suffix}"), ty))
+        .collect()
+    };
+    let mut aggs = triple("stddev(f64)");
+    aggs.extend(triple("var_pop(f64)"));
+    aggs.push(sum_i64());
+    let state = rollup_welford_state();
+    let body = AggregateBody {
+        group_by: vec![Expr::column(1, "key")],
+        grouping_sets: vec![vec![false], vec![true]],
+        null_exprs: vec![Expr::Literal(ScalarValue::Int32(None))],
+        aggs,
+        finalize: None,
+    };
+    GpuAggregate::new(
+        Given::of(Schema::new(schema()), BatchLayout::MultipleBatches),
+        body,
+        state.clone(),
+        state,
+    )
+}
+
+fn rollup_welford_merge() -> GpuAggregateBatches {
+    let state = rollup_welford_state();
+    let field = |at: u32| state.fields.field(at as usize).clone();
+    let merged = |at: u32| AggCall {
+        func: PlanAgg::MergeM2,
+        args: (at..at + 3)
+            .map(|i| Expr::column(i, field(i).name()))
+            .collect(),
+        outputs: (at..at + 3).map(field).collect(),
+    };
+    let aggs = vec![
+        merged(2),
+        merged(5),
+        call(
+            PlanAgg::Sum,
+            Expr::column(8, "sum(i64)"),
+            "sum(i64)",
+            DataType::Int64,
+        ),
+    ];
+    let group_by = vec![Expr::column(0, "key"), Expr::column(1, "__grouping_id")];
+    merge_over(state.clone(), body(group_by, aggs, None), state)
+}
+
+/// Rows by `__grouping_id`, then `key`, NULLs first: a rollup repeats a key across its sets, so
+/// both sides are paired by position once in this order.
+fn by_set_then_key(batch: &RecordBatch) -> RecordBatch {
+    let order = lexsort_to_indices(
+        &[
+            SortColumn {
+                values: batch.column(1).clone(),
+                options: None,
+            },
+            SortColumn {
+                values: batch.column(0).clone(),
+                options: None,
+            },
+        ],
+        None,
+    )
+    .expect("sortable keys");
+    take_record_batch(batch, &order).expect("the rows in that order")
+}
+
+const ROLLUP_WELFORD_MOMENTS: [usize; 4] = [3, 4, 6, 7];
+
+operator_case! {
+    GpuAggregate,
+    fn a_rollup_with_a_stddev_a_var_and_a_sum_agrees() {
+        let outcome = run_both(&rollup_welford_init(), Script::Accumulate(vec![input()]));
+        same_within_welford(
+            &by_set_then_key(cpu_slot(&outcome, 0)),
+            &by_set_then_key(gpu_slot(&outcome, 0)),
+            false,
+            &ROLLUP_WELFORD_MOMENTS,
+        );
+    }
+}
+
+operator_case! {
+    GpuAggregateBatches,
+    fn a_rollup_welford_merge_agrees() {
+        let partial = |seed| {
+            let init = run_both(&rollup_welford_init(), Script::Accumulate(vec![synthetic(64, seed)]));
+            cpu_slot(&init, 0).clone()
+        };
+        let outcome = run_both(&rollup_welford_merge(), Script::Accumulate(vec![partial(1), partial(2)]));
+        same_within_welford(
+            &by_set_then_key(cpu_slot(&outcome, 2)),
+            &by_set_then_key(gpu_slot(&outcome, 2)),
+            false,
+            &ROLLUP_WELFORD_MOMENTS,
         );
     }
 }

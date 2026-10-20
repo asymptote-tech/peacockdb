@@ -158,16 +158,19 @@ table AggregateFuncNode {
   /// anything reaches the wire (translator/aggregate/distinct.rs). The slot stays so
   /// `alias` and every later field keep theirs.
   distinct: bool (deprecated);
-  /// Output column alias (e.g. "count(*)"). If absent, defaults to name.
-  alias: string;
-  /// DataFusion's declared decimal output type for this aggregate (the *final*
-  /// result type, even in Partial mode), when it is a Decimal128. Needed for
-  /// avg, whose result scale is s+4 in DataFusion but cuDF's mean keeps the
-  /// input scale s. The executor casts the input to this scale before the mean
-  /// so the value (not just the displayed scale) matches. precision == 0 means
-  /// "not declared"; the executor then uses cuDF's natural scale.
+  /// Never set: every column a function emits is named by state_names.
+  alias: string (deprecated);
+  /// Written as zero and read by nothing: they carried avg's declared decimal type, and no
+  /// avg reaches a device — decomposition splits it into sum and count.
   out_decimal_precision: uint8;
   out_decimal_scale: int8;
+  /// The state columns this function emits, in order: one for a sum, min, max or count, three
+  /// (`<out>$count`, `<out>$mean`, `<out>$m2`) for a stddev or var. The executor names every
+  /// column it emits from here.
+  state_names: [string];
+  /// A stddev's or var's divisor offset: 1 for the sample forms, 0 for the population ones.
+  /// 0, and unread, for every other function.
+  ddof: int8;
 }
 
 /// SQL LIKE / NOT LIKE / ILIKE / NOT ILIKE.
@@ -417,13 +420,8 @@ table CudfAggregate {
   /// `input` is the Partial-stage output (group cols + partial accumulator
   /// columns) rather than the original ungrouped columns the args reference.
   aggr_input_schema: Schema;
-  /// True when this aggregate's partial state will be MERGED further up. Drives
-  /// the executor's STDDEV/VAR state shape: when set, a Partial stddev/var emits
-  /// the 3-col Welford state [count, mean, m2] (matching DataFusion's Partial
-  /// schema) so a later stage can MERGE_M2; when false a Partial stddev keeps the
-  /// 1-col make_std singleton. AVG is unaffected — its 2-col [sum, count] state is
-  /// emitted either way. See #25.
-  mergeable_agg_state: bool = false;
+  /// Never set: every Welford state is the mergeable triple.
+  mergeable_agg_state: bool = false (deprecated);
 }
 
 /// A join answered through the session symbols (peacock_join_*), never execute_node: a leaf,

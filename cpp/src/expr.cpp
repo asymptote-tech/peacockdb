@@ -68,8 +68,8 @@ void debug_sync(const char* tag) {
 // TU-private forward declarations: the expression builders below are mutually
 // recursive. (Cross-TU declarations live in peacock/expr.h.)
 static bool is_predicate_op(fb::BinaryOp op);
-static cudf::type_id infer_expr_type(const fb::Expr* expr,
-                                     cudf::table_view const& table);
+static cudf::type_id infer_expr_type(const fb::Expr* expr, cudf::table_view const& table,
+                                     std::vector<std::string> const& names);
 static std::unique_ptr<cudf::scalar> build_scalar(const fb::ScalarValue* sv);
 
 
@@ -335,17 +335,13 @@ static bool is_string_like_literal(const fb::Expr* expr) {
 }
 
 // Best-effort static type of an expression, resolved against the input table
-// (column refs need the schema). Used only to decide AST-ability; returns
-// EMPTY for shapes we can't infer, which callers treat conservatively.
-static cudf::type_id infer_expr_type(const fb::Expr* expr,
-                                     cudf::table_view const& table) {
+// (column refs need the schema). Used only to decide AST-ability; a bad reference
+// throws, and EMPTY is left for shapes we can't infer, which callers treat conservatively.
+static cudf::type_id infer_expr_type(const fb::Expr* expr, cudf::table_view const& table,
+                                     std::vector<std::string> const& names) {
   switch (expr->node_type()) {
-    case fb::ExprNode_ColumnRef: {
-      auto idx = static_cast<cudf::size_type>(
-          expr->node_as_ColumnRef()->index());
-      if (idx < 0 || idx >= table.num_columns()) return cudf::type_id::EMPTY;
-      return table.column(idx).type().id();
-    }
+    case fb::ExprNode_ColumnRef:
+      return column_at(table, names, expr->node_as_ColumnRef()).type().id();
     case fb::ExprNode_LiteralExpr: {
       auto* sv = expr->node_as_LiteralExpr()->value();
       return sv ? fb_to_type_id(sv->type()) : cudf::type_id::EMPTY;
@@ -353,8 +349,8 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
     case fb::ExprNode_BinaryExprNode: {
       auto* b = expr->node_as_BinaryExprNode();
       if (is_predicate_op(b->op())) return cudf::type_id::BOOL8;
-      auto lt = infer_expr_type(b->left(), table);
-      auto rt = infer_expr_type(b->right(), table);
+      auto lt = infer_expr_type(b->left(), table, names);
+      auto rt = infer_expr_type(b->right(), table, names);
       auto is_float = [](cudf::type_id t) {
         return t == cudf::type_id::FLOAT32 || t == cudf::type_id::FLOAT64;
       };
@@ -373,7 +369,7 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
         // Negative and Sqrt both answer in their operand's type; a stddev's
         // finalize takes the root of a FLOAT64 quotient.
         default:
-          return infer_expr_type(u->arg(), table);
+          return infer_expr_type(u->arg(), table, names);
       }
     }
     case fb::ExprNode_CastExprNode:
@@ -383,7 +379,7 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
     case fb::ExprNode_CaseExprNode: {
       auto* c = expr->node_as_CaseExprNode();
       if (c->when_thens() && c->when_thens()->size() > 0)
-        return infer_expr_type(c->when_thens()->Get(0)->then(), table);
+        return infer_expr_type(c->when_thens()->Get(0)->then(), table, names);
       return cudf::type_id::EMPTY;
     }
     case fb::ExprNode_ScalarFunctionExprNode:
@@ -400,7 +396,8 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr,
 // with no arm below is assumed AST-able (`default: true`), and the binary arm checks operand
 // types but never the operator, so a new node kind or an operator the AST lacks (a bitwise
 // shift) is sent to the AST and throws there instead of taking the column path.
-bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table) {
+bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table,
+                           std::vector<std::string> const& names) {
   switch (expr->node_type()) {
     case fb::ExprNode_LikeExprNode:
     case fb::ExprNode_CaseExprNode:
@@ -422,8 +419,8 @@ bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table) 
       // no decimal support. So any decimal operand or type mismatch goes to the
       // column path, where cudf::binary_operation coerces (and handles
       // fixed_point) natively.
-      auto lt = infer_expr_type(b->left(), table);
-      auto rt = infer_expr_type(b->right(), table);
+      auto lt = infer_expr_type(b->left(), table, names);
+      auto rt = infer_expr_type(b->right(), table, names);
       // Un-inferrable operand → column path. Checked BEFORE the lt != rt test,
       // which two EMPTYs would otherwise pass as "AST-able".
       if (lt == cudf::type_id::EMPTY || rt == cudf::type_id::EMPTY)
@@ -432,10 +429,16 @@ bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table) 
         return false;
       if (lt != rt)
         return false;
-      return cudf_ast_can_evaluate(b->left(), table) && cudf_ast_can_evaluate(b->right(), table);
+      return cudf_ast_can_evaluate(b->left(), table, names) &&
+             cudf_ast_can_evaluate(b->right(), table, names);
     }
     case fb::ExprNode_UnaryExprNode:
-      return cudf_ast_can_evaluate(expr->node_as_UnaryExprNode()->arg(), table);
+      return cudf_ast_can_evaluate(expr->node_as_UnaryExprNode()->arg(), table, names);
+    case fb::ExprNode_ColumnRef:
+      // Resolved here so every reference of an expression answered true has been checked:
+      // build_expr's AST arm reads the index alone.
+      column_ordinal(expr->node_as_ColumnRef(), names);
+      return true;
     case fb::ExprNode_CastExprNode: {
       // cuDF AST only has CAST_TO_INT64 / CAST_TO_FLOAT64. Any other target
       // (notably Decimal128) must go through the column path, which uses
@@ -443,7 +446,7 @@ bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table) 
       auto target = fb_to_type_id(expr->node_as_CastExprNode()->target_type());
       if (target != cudf::type_id::INT64 && target != cudf::type_id::FLOAT64)
         return false;
-      return cudf_ast_can_evaluate(expr->node_as_CastExprNode()->expr(), table);
+      return cudf_ast_can_evaluate(expr->node_as_CastExprNode()->expr(), table, names);
     }
     default:
       return true;
@@ -522,8 +525,8 @@ static cudf::binary_operator fb_to_binop(fb::BinaryOp op) {
   }
 }
 
-std::unique_ptr<cudf::column> build_column(
-    const fb::Expr* expr, cudf::table_view const& table);
+std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_view const& table,
+                                           std::vector<std::string> const& names);
 
 // Evaluate an AST-able subtree by routing it through cudf::compute_column.
 static std::unique_ptr<cudf::column> eval_ast_subtree(
@@ -579,8 +582,9 @@ cudf::data_type binop_output_type(
   return lhs;
 }
 
-static std::unique_ptr<cudf::column> build_column_binary(
-    const fb::BinaryExprNode* bin, cudf::table_view const& table) {
+static std::unique_ptr<cudf::column> build_column_binary(const fb::BinaryExprNode* bin,
+                                                         cudf::table_view const& table,
+                                                         std::vector<std::string> const& names) {
   auto* lhs = bin->left();
   auto* rhs = bin->right();
   auto op = fb_to_binop(bin->op());
@@ -590,8 +594,8 @@ static std::unique_ptr<cudf::column> build_column_binary(
   // out_decimal_precision/scale. Pre-scale the numerator to hit it: with output
   // exponent e_o = −out_scale and denominator exponent e_r, set e_l = e_o + e_r.
   if (bin->op() == fb::BinaryOp_Divide && bin->out_decimal_precision() != 0) {
-    auto lcol = evaluate_column(lhs, table);
-    auto rcol = evaluate_column(rhs, table);
+    auto lcol = evaluate_column(lhs, table, names);
+    auto rcol = evaluate_column(rhs, table, names);
     if (lcol.view().type().id() == cudf::type_id::DECIMAL128 &&
         rcol.view().type().id() == cudf::type_id::DECIMAL128) {
       int32_t e_o = -static_cast<int32_t>(bin->out_decimal_scale());
@@ -612,7 +616,7 @@ static std::unique_ptr<cudf::column> build_column_binary(
   // Column-scalar fast path when one side is a literal.
   if (rhs->node_type() == fb::ExprNode_LiteralExpr &&
       lhs->node_type() != fb::ExprNode_LiteralExpr) {
-    auto lcol = evaluate_column(lhs, table);
+    auto lcol = evaluate_column(lhs, table, names);
     auto rsv = rhs->node_as_LiteralExpr()->value();
     auto rscalar = build_scalar(rsv);
     auto out = binop_output_type(bin->op(), lcol.view().type(), rscalar->type());
@@ -620,7 +624,7 @@ static std::unique_ptr<cudf::column> build_column_binary(
   }
   if (lhs->node_type() == fb::ExprNode_LiteralExpr &&
       rhs->node_type() != fb::ExprNode_LiteralExpr) {
-    auto rcol = evaluate_column(rhs, table);
+    auto rcol = evaluate_column(rhs, table, names);
     auto lsv = lhs->node_as_LiteralExpr()->value();
     auto lscalar = build_scalar(lsv);
     auto out = binop_output_type(bin->op(), lscalar->type(), rcol.view().type());
@@ -628,14 +632,15 @@ static std::unique_ptr<cudf::column> build_column_binary(
   }
 
   // Both sides materialise to columns.
-  auto lcol = evaluate_column(lhs, table);
-  auto rcol = evaluate_column(rhs, table);
+  auto lcol = evaluate_column(lhs, table, names);
+  auto rcol = evaluate_column(rhs, table, names);
   auto out = binop_output_type(bin->op(), lcol.view().type(), rcol.view().type());
   return cudf::binary_operation(lcol.view(), rcol.view(), op, out);
 }
 
-static std::unique_ptr<cudf::column> build_column_scalar_fn(
-    const fb::ScalarFunctionExprNode* sf, cudf::table_view const& table) {
+static std::unique_ptr<cudf::column> build_column_scalar_fn(const fb::ScalarFunctionExprNode* sf,
+                                                            cudf::table_view const& table,
+                                                            std::vector<std::string> const& names) {
   auto name = sf->name() ? sf->name()->str() : std::string{};
   auto* args = sf->args();
   if (!args || args->size() == 0)
@@ -659,7 +664,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
     else if (field == "MINUTE")  comp = cudf::datetime::datetime_component::MINUTE;
     else if (field == "SECOND")  comp = cudf::datetime::datetime_component::SECOND;
     else throw std::runtime_error("date_part: unsupported field " + field);
-    auto ts = evaluate_column(args->Get(1), table);
+    auto ts = evaluate_column(args->Get(1), table, names);
     auto component = cudf::datetime::extract_datetime_component(ts.view(), comp);
     // cuDF answers INT16 for every field; the wire names the type DataFusion declared.
     cudf::data_type want{fb_to_type_id(sf->return_type())};
@@ -673,7 +678,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   if (name == "substr" || name == "substring") {
     if (args->size() < 2 || args->size() > 3)
       throw std::runtime_error("substr expects 2 or 3 args");
-    auto strcol = evaluate_column(args->Get(0), table);
+    auto strcol = evaluate_column(args->Get(0), table, names);
 
     auto lit_int = [&](const fb::Expr* e) -> int32_t {
       if (e->node_type() != fb::ExprNode_LiteralExpr)
@@ -705,7 +710,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   if (name == "abs") {
     if (args->size() != 1)
       throw std::runtime_error("abs expects 1 arg");
-    auto col = evaluate_column(args->Get(0), table);
+    auto col = evaluate_column(args->Get(0), table, names);
     return cudf::unary_operation(col.view(), cudf::unary_operator::ABS);
   }
 
@@ -716,7 +721,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   if (name == "round") {
     if (args->size() < 1 || args->size() > 2)
       throw std::runtime_error("round expects 1 or 2 args");
-    auto col = evaluate_column(args->Get(0), table);
+    auto col = evaluate_column(args->Get(0), table, names);
     int32_t places = 0;
     if (args->size() == 2) {
       auto* e = args->Get(1);
@@ -735,7 +740,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   if (name == "lower") {
     if (args->size() != 1)
       throw std::runtime_error("lower expects 1 arg");
-    auto col = evaluate_column(args->Get(0), table);
+    auto col = evaluate_column(args->Get(0), table, names);
     return cudf::strings::to_lower(cudf::strings_column_view{col.view()});
   }
 
@@ -743,7 +748,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   if (name == "upper") {
     if (args->size() != 1)
       throw std::runtime_error("upper expects 1 arg");
-    auto col = evaluate_column(args->Get(0), table);
+    auto col = evaluate_column(args->Get(0), table, names);
     return cudf::strings::to_upper(cudf::strings_column_view{col.view()});
   }
 
@@ -755,7 +760,7 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
     owned.reserve(args->size());
     views.reserve(args->size());
     for (flatbuffers::uoffset_t k = 0; k < args->size(); ++k) {
-      owned.push_back(evaluate_column(args->Get(k), table));
+      owned.push_back(evaluate_column(args->Get(k), table, names));
       views.push_back(owned.back().view());
     }
     cudf::string_scalar separator("", true);
@@ -767,9 +772,9 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   // selecting arg_k where it is valid, otherwise the accumulated result.
   if (name == "coalesce") {
     auto n = args->size();
-    auto result = build_column(args->Get(n - 1), table);
+    auto result = build_column(args->Get(n - 1), table, names);
     for (int k = static_cast<int>(n) - 2; k >= 0; --k) {
-      auto col = evaluate_column(args->Get(k), table);
+      auto col = evaluate_column(args->Get(k), table, names);
       auto mask = cudf::is_valid(col.view());
       result = cudf::copy_if_else(col.view(), result->view(), mask->view());
     }
@@ -779,8 +784,9 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(
   throw std::runtime_error("unsupported scalar function in column path: " + name);
 }
 
-static std::unique_ptr<cudf::column> build_column_case(
-    const fb::CaseExprNode* c, cudf::table_view const& table) {
+static std::unique_ptr<cudf::column> build_column_case(const fb::CaseExprNode* c,
+                                                       cudf::table_view const& table,
+                                                       std::vector<std::string> const& names) {
   // Search-form CASE only. Value-form (`CASE x WHEN v THEN t END`) survives
   // DataFusion's rewrites and does reach here (only TPC-DS q39, itself disabled
   // for stddev ULP, #54), but a copy_if_else fold on the comparand came back
@@ -795,18 +801,18 @@ static std::unique_ptr<cudf::column> build_column_case(
   // backward so each step produces `if cond_i then then_i else accumulated`.
   std::unique_ptr<cudf::column> result;
   if (c->else_expr()) {
-    result = build_column(c->else_expr(), table);
+    result = build_column(c->else_expr(), table, names);
   } else {
     // Use the THEN type of the last branch as a reference for null fill.
-    auto last_then = evaluate_column(whens->Get(whens->size() - 1)->then(), table);
+    auto last_then = evaluate_column(whens->Get(whens->size() - 1)->then(), table, names);
     auto null_scalar = cudf::make_default_constructed_scalar(last_then.view().type());
     result = cudf::make_column_from_scalar(*null_scalar, last_then.view().size());
   }
 
   for (cudf::size_type i = static_cast<cudf::size_type>(whens->size()) - 1; i >= 0; --i) {
     auto* wt = whens->Get(static_cast<flatbuffers::uoffset_t>(i));
-    auto cond = evaluate_column(wt->when(), table);
-    auto then = evaluate_column(wt->then(), table);
+    auto cond = evaluate_column(wt->when(), table, names);
+    auto then = evaluate_column(wt->then(), table, names);
     result = cudf::copy_if_else(then.view(), result->view(), cond.view());
   }
   return result;
@@ -829,7 +835,8 @@ static const char* expr_kind_name(fb::ExprNode k) {
 // Everything an expression can evaluate to except a bare ColumnRef, which
 // `evaluate_column` answers with a view of the input's own column.
 static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
-                                                 cudf::table_view const& table) {
+                                                 cudf::table_view const& table,
+                                                 std::vector<std::string> const& names) {
   // Plain literal: broadcast scalar to the table's row count. cudf::ast
   // doesn't have a defined behaviour for literal-only expressions in
   // compute_column, so handle this case before the AST fast path.
@@ -841,7 +848,7 @@ static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
   }
 
   // AST-able expressions go through cudf::compute_column for fusion.
-  if (cudf_ast_can_evaluate(expr, table)) {
+  if (cudf_ast_can_evaluate(expr, table, names)) {
     auto out = eval_ast_subtree(expr, table);
     debug_sync("AST->compute_column");
     return out;
@@ -849,11 +856,11 @@ static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
 
   switch (expr->node_type()) {
     case fb::ExprNode_BinaryExprNode:
-      return build_column_binary(expr->node_as_BinaryExprNode(), table);
+      return build_column_binary(expr->node_as_BinaryExprNode(), table, names);
 
     case fb::ExprNode_UnaryExprNode: {
       auto* un = expr->node_as_UnaryExprNode();
-      auto arg = evaluate_column(un->arg(), table);
+      auto arg = evaluate_column(un->arg(), table, names);
       switch (un->op()) {
         case fb::UnaryOp_Not:
           return cudf::unary_operation(arg.view(), cudf::unary_operator::NOT);
@@ -871,7 +878,7 @@ static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
 
     case fb::ExprNode_LikeExprNode: {
       auto* l = expr->node_as_LikeExprNode();
-      auto strcol = evaluate_column(l->expr(), table);
+      auto strcol = evaluate_column(l->expr(), table, names);
       auto* psv = l->pattern() && l->pattern()->node_type() == fb::ExprNode_LiteralExpr
                       ? l->pattern()->node_as_LiteralExpr()->value()
                       : nullptr;
@@ -889,14 +896,14 @@ static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
     }
 
     case fb::ExprNode_CaseExprNode:
-      return build_column_case(expr->node_as_CaseExprNode(), table);
+      return build_column_case(expr->node_as_CaseExprNode(), table, names);
 
     case fb::ExprNode_ScalarFunctionExprNode:
-      return build_column_scalar_fn(expr->node_as_ScalarFunctionExprNode(), table);
+      return build_column_scalar_fn(expr->node_as_ScalarFunctionExprNode(), table, names);
 
     case fb::ExprNode_CastExprNode: {
       auto* cast = expr->node_as_CastExprNode();
-      auto inner = evaluate_column(cast->expr(), table);
+      auto inner = evaluate_column(cast->expr(), table, names);
       auto target_id = fb_to_type_id(cast->target_type());
       // String->string cast is a no-op: cuDF maps every Arrow string variant to
       // the single STRING type, so DataFusion's coercion of two char keys has
@@ -926,17 +933,14 @@ static std::unique_ptr<cudf::column> make_column(const fb::Expr* expr,
   }
 }
 
-EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table) {
+EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& table,
+                                std::vector<std::string> const& names) {
   if (debug_enabled()) {
     PCK_TRACE("  evaluate_column kind=%s rows=%d cols=%d", expr_kind_name(expr->node_type()),
               table.num_rows(), table.num_columns());
   }
   if (expr->node_type() == fb::ExprNode_ColumnRef) {
-    auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
-    if (idx < 0 || idx >= table.num_columns()) {
-      throw std::runtime_error("ColumnRef index " + std::to_string(idx) +
-                               " out of range (cols=" + std::to_string(table.num_columns()) + ")");
-    }
+    auto idx = column_ordinal(expr->node_as_ColumnRef(), names);
     auto cv = table.column(idx);
     if (debug_enabled()) {
       PCK_TRACE("  ColumnRef idx=%d type_id=%d size=%d null_count=%d", static_cast<int>(idx),
@@ -945,11 +949,12 @@ EvaluatedColumn evaluate_column(const fb::Expr* expr, cudf::table_view const& ta
     }
     return {nullptr, cv};
   }
-  return {make_column(expr, table), {}};
+  return {make_column(expr, table, names), {}};
 }
 
-std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_view const& table) {
-  return evaluate_column(expr, table).take();
+std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_view const& table,
+                                           std::vector<std::string> const& names) {
+  return evaluate_column(expr, table, names).take();
 }
 
 }  // namespace peacock
