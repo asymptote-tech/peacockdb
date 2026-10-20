@@ -84,3 +84,4 @@ rows); #216 and #94 archived, the empty Welford section dropped, `tickets.md` 92
 (corpus-coverage 17); #261 and #260 rewritten. Cost: no change vs base. Not run locally:
 `test_ffi` (no disk for a cudf target dir) and the 26.02 compile (CI's leg). Review round 1
 dispatched.
+- PR #184 → ENS-aggregate-arms.
