@@ -198,3 +198,8 @@ meet it, unreachable). Cost-report job green on HEAD; nothing pins a moved count
 GPU host hard-stopped; dispatched CI follows.
 
 Dispatched CI: run 39350996530, dispatched 2026-10-20T01:00:35Z on 6c602488.
+
+### 2026-10-20 — `done`
+
+Dispatched run 39350996530 green on 6c602488, `GPU Tests (nebius-gpu)` included; PR #182's CI
+green on the same head. GPU host hard-stopped. Next: aggregate-arms.
