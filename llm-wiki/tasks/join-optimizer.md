@@ -288,3 +288,16 @@ at its commit; `optimizer.md` exists within 300 lines; every answer equals DuckD
 sits on master in a few green commits, the prototype reads and runs master's plans by master's
 join rules, the optimizer's rules no longer encode closed tickets, and every output is made
 again on master with its moves explained.
+
+## Completeness signoff
+
+Solved under its constraints. Shortcuts: conflict detection is CD-A, not CD-C, correct and not
+complete, no crate change; orientation does not price the build as the session holds it (#294).
+Known exceptions, dearer than planned: tpcds q24 at the tp4 modes (#297), q16 by 0.02 % at all five;
+q84 is cheaper than planned, its limit a rise against its earlier ratio. The sf40 benchmarks time
+the 26 cases measured, not master's device column today; Task 8's Nsight step is deferred. Plan
+diffs sit in `.plandiff.txt` for GitHub's display limit. Regenerations and the corpus tier ran
+locally and on a second CPU host, byte-identical where both ran. The final ratio is projected,
+E × O/P / D. Also: `backend.rs`'s doc comment; DPhyp's priced sets counted, not printed; `plan_text`
+a function; the embeddings check two tests; pbench outside the prototype's suites (#291); dynamic
+filters' NULL rule master's flag; the record keyed by content; a dynamic step cap; twelve commits.

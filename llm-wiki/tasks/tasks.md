@@ -176,7 +176,7 @@ three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, 
 
 ## Chain C (base: master)
 
-### 1. [`join-optimizer.md`](join-optimizer.md) — state: building — PR #165
+### 1. [`join-optimizer.md`](join-optimizer.md) — state: completing — PR #165
 
 The prototype's join-order optimizer, finished: the engine's plans only, one folder per
 component, one stats sidecar for both embedding modes, `run.py` with its goldens,
