@@ -226,3 +226,11 @@ component, one stats sidecar for both embedding modes, `run.py` with its goldens
 `.optimizer.txt` and cost report, the record in S3, every device-enabled benchmark, cardinality
 per join, three documents. The branch and its PR exist, so the coordinator picks the branch up
 rather than branching afresh; `join-optimizer-detail.md` says what is on it.
+
+### 2. [`containers.md`](containers.md) — closes [#226](../tickets/benchmarks.md#t226) — state: approved to build
+
+A build image and a device-run image per cuDF version (25.02, 26.02) on ghcr.io, one launcher for
+isolated ensemble instances on a fresh CPU VM, provider adapters and a device run for any GPU host
+reached over ssh, and the benchmark of every device-enabled query on an 80 GB A100 or H100 with
+each result naming its device. The branch starts from `ENS-optimizer` and moves onto master once
+that merges.
