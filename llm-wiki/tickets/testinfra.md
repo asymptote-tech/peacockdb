@@ -46,9 +46,8 @@ file that ever becomes an input has to come off this list".
 
 So a commit that only moves a ticket between `llm-wiki/tickets/` and
 `llm-wiki/archive/archived-tickets.md` can break `--lib` and no run reports it. Two cases are live:
-`an_archived_ticket_is_not_open_and_a_listed_one_is` asserts `ticket_is_open(205)` and
-`ticket_is_open(251)` directly, and every `duckdb_divergent(<n>)` line goes red when `<n>` is
-archived. #205 is on the archival path already — `corpus-coverage.md` names its fix. The helper's
+`an_archived_ticket_is_not_open_and_a_listed_one_is` asserts `ticket_is_open(251)` directly, and
+every `duckdb_divergent(<n>)` line goes red when `<n>` is archived. The helper's
 post-merge protocol guarantees the shape: it archives task specs in a master-only commit carrying
 nothing else. Master then goes red on the next unrelated code push, with the cause several commits
 back.

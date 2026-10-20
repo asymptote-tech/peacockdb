@@ -51831,8 +51831,10 @@ mode=tp4-sized
 +-------+
 == not-in-uncorrelated
 mode=tp1-rowgroup
-++
-++
++------+
+| f_id |
++------+
++------+
 == not-in-under-or
 mode=tp4-sized
 +-------+

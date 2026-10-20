@@ -21,7 +21,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
-  - [#205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
   - [#210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column](#t210)
@@ -35,7 +34,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
   - [#262 (DISTINCT device cells) a DISTINCT under a grouping set has no device cell](#t262)
-  - [#281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run](#t281)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
   - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
@@ -66,8 +64,8 @@ stands at every mode; the row keeps no `225` only because no cell of it is off.
 only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
 three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
 its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
-mode and `tpcds/q17` at the two tp1 modes, refused at their first `GpuAggregate`, their cells off
-here.
+mode, refused at its first `GpuAggregate`, its cells off here; `tpcds/q17` at the two tp1 modes,
+refused the same way, runs there with the hook masked.
 
 **Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
 from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
@@ -190,10 +188,12 @@ from `decomposition()` (`plan/aggregates.rs`), which gains an empty-input value 
 finalizes it (count 0, the rest NULL); a merge never meets no arrival, and its count sums to 0,
 not NULL. Every aggregate sequence starts with a `GpuAggregate` (`aggregate_sequence`, its only
 builder), so the init covers them all. The driver owes the done call to every lane, one that saw
-no batch included — today such a lane gets no call. Sources of nothing below the init ([#214](../archive/archived-tickets.md#t214)'s
-limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
-sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
-merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
+no batch included — today such a lane gets no call. Sources of nothing below the init
+([#214](../archive/archived-tickets.md#t214)'s limit and the joins; the cpu's sort and merge stopped
+being one with [#205](../archive/archived-tickets.md#t205)) need no fix of their own for this;
+between init and merge a keyless sequence only collapses lanes, which keeps the one-row batch. The
+cpu's `!self.grouped` clause, which merges over nothing, goes, and the twelve #180 cells turn on at
+the tp4 modes.
 
 <a id="t55"></a>
 ### #55 (q66 divisor cast) q66: two-phase decimal aggregate ignores the partial-phase divisor cast
@@ -365,46 +365,6 @@ rows.
 both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` to
 `min(fetch, rows)`. One slice for every path. The two `bug_` pins become green `same` cases, and
 `architecture.md`'s three notes on this exception drop.
-
-<a id="t205"></a>
-### #205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches
-
-A `GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows
-emits no batch on the cpu, where the device emits one of zero rows.
-
-DataFusion's `SortExec` over zero rows yields no batch at all, and `SortedRuns::mark_done_and_fetch`
-and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
-answer to `coalesce_or_nothing`, which reads it as the lane that received nothing. `CpuExec::exec` concatenates
-the same empty answer under the declared schema and gets zero rows, and the cpu coalesce does too, so
-the two cpu paths disagree with each other as well as with the device. Downstream, nothing and a
-zero-row batch are different arrivals: a global merge over nothing is #199's site. Pinned by
-`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu` and its two neighbours
-(`gpu_tests/accumulate_cases.rs`). First corpus cell to reach it: `tpcds/q17` at `tp1-single`,
-which answers zero rows — 12 bytes at the device's unload against the cpu's 0 (2026-09-17).
-
-**Corpus queries:** `tpcds/q17` at `tp1-single`, the first enabled corpus query that answers zero
-rows (`mini.result.txt`). `pbench/not-in-uncorrelated` at the two tp1 modes is the second, and it
-reaches the no-batch half without a sort: its cross join's build is empty, so the lane ends with
-no call, and the root receives nothing on both engines. Its line is `duckdb_divergent(205)`, as
-q17's is, and its tp1 device cells are on. q17's device cells are all off: its tp1 cells meet
-[#225](#t225) first, and its tp4 cells, which pass, stay off until this fix moves the row's answer. The 12 bytes are the device's one zero-row batch: three `Utf8`
-columns, one 4-byte offset each. Simplest shape, unconfirmed on a build:
-`select n_name from nation where n_nationkey < 0 order by n_name;` (tpch).
-
-**Fix proposed:** in `cpu_backend/accumulate.rs`, skip the sort when every held batch has zero
-rows. `SortedRuns::mark_done_and_fetch` and `CpuPartitionAccumulator::accumulate_and_fetch` at the
-last `Done` then pass the held batches to `coalesce_or_nothing`. It concatenates them into one
-zero-row batch under the schema, as the device answers. The fetch has no rows to cut. No arrival
-at all stays nothing, as now. The three `bug_` pins become green `same` cases, and `tpcds/q17`'s
-device cell turns on at `tp1-single`, its comment in `corpus_cases.inc` updated.
-
-An empty answer must still have a schema. A query that answers zero rows answers them under its
-declared columns, never as no batch at all: today `tpcds/q17`'s `mini.result.txt` section is a bare
-`++`/`++`, with no column names or types, so nothing checks them, and DuckDB's answer
-(`duckdb-result.txt`, #235) prints the header ours lacks. Beside the fix above, the unload answers a
-query whose root received nothing with one zero-row batch under the sink's declared schema, on both
-backends, so an answer's schema never depends on how its rows ran out. `q17`'s result section is
-then regenerated with its header, and #235's empty-answer divergence goes.
 
 ## Scalars
 
@@ -650,26 +610,6 @@ since it is the record that its device cells are the lowering's last unrun ones.
 
 **Fix proposed:** when #65 has closed, run those cells and enable each one that passes. Then this
 ticket is archived. grouping-id, later in chain K, takes it.
-
-<a id="t281"></a>
-### #281 (limits/sorts gpu cells) empty-sorts' device cells have never run
-
-empty-sorts (chain K) was proved on the cpu while chain J held the GPU host. Its device changes
-are built and not run: the three `bug_` accumulate cases its fix turns into agreement cases have
-run on no device, and `tpcds/q17`'s device cell with them. A device answer could differ from the
-cpu's, and nothing would say so.
-
-limits' half of this is closed. Its four converted `bug_` source cases and its `scan.cpp` without
-`set_num_rows` ran on nebius-gpu 2026-10-09; `tpch/scan-limit`'s five device cells are enabled
-against the result golden. `tpch/nested-limits`' five failed then: its region scan declares no
-column, and the device read it as zero rows. master's `CudfScan.rows_only` builds such a scan's
-rows from the footer, and on the rebased branch all five pass (nebius-gpu, 2026-10-16).
-
-**Corpus queries:** `tpcds/q17` at `tp1-single`, off on this ticket once chain K has merged.
-
-**Fix proposed:** on a GPU host, once one is free: run the device test tier and those cells;
-each cell passing is enabled, each failing gets the ticket it fails on. Then this ticket drops
-from the registry rows and is archived.
 
 <a id="t253"></a>
 ### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths

@@ -357,7 +357,7 @@ pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
 
 /// A rendered table's column count, read off its header rather than its data: an answer of
 /// no rows still has one. A header with NO pipe has no cells either — a zero-column answer
-/// renders as `++`, and `split_cells` reads a pipeless line as one cell (tpcds q17).
+/// renders as `++`, and `split_cells` reads a pipeless line as one cell.
 pub(crate) fn rendered_width(table: &str) -> usize {
     match table.lines().nth(1) {
         Some(header) if header.contains('|') => split_cells(header).len(),

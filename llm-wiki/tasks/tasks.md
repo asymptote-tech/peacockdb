@@ -71,7 +71,7 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 > - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
 >   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
 >   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
->   and empty-sorts' device changes and cases ([#281](../tickets/corpus-coverage.md#t281)). Each
+>   and empty-sorts' device changes and cases ([#281](../archive/archived-tickets.md#t281)). Each
 >   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
 >   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
 >   nebius-gpu cannot exercise.
@@ -86,13 +86,13 @@ GPU halves now run on nebius-gpu beside chain J. limits and empty-sorts were add
 started. grouping-id through welford-device came from chain L: the Welford and aggregate tickets,
 and the column references the device aggregate reads by counting.
 
-### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: rebase needed(done) — PR #170
+### 1. [`guard-checks.md`](guard-checks.md) — closes [#233](../tickets/corpus-coverage.md#t233), [#174](../tickets/corpus-coverage.md#t174) — state: done — PR #170
 
 The validator checks a pass-through node's column count; the Rust and C++ row-range clamps read
 one shared case table, `testdata/fixtures/row-range-clamp.txt`; the driver's mock calls the
 shipped clamp.
 
-### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../archive/archived-tickets.md#t62) — state: rebase needed(done) — PR #171
+### 2. [`distinct-companions.md`](distinct-companions.md) — closes [#62](../archive/archived-tickets.md#t62) — state: done — PR #171
 
 A DISTINCT aggregate lowers to two aggregate sequences beside any per-column companion, with or
 without grouping sets; #144 and #261 refused by name; the wire's `distinct` field deprecated; q28,
@@ -105,7 +105,7 @@ A scan's limit becomes a `GpuLimit` above the scan and leaves both readers; the 
 limit's emitted rows rather than its input; scan-limit on at all five modes on both engines, and
 nested-limits off on the device under #285.
 
-### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../tickets/corpus-coverage.md#t205) — state: rebase needed(done) — PR #174
+### 4. [`empty-sorts.md`](empty-sorts.md) — closes [#205](../archive/archived-tickets.md#t205) — state: done — PR #174
 
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.
