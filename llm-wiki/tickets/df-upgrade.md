@@ -74,7 +74,7 @@ Tests: a `bug_` test per rule on a plain session (a two-branch union with a sele
 and an end-to-end case each (`sum(n_nationkey)` per branch; `sum(l_quantity)` over
 `l_receiptdate > l_shipdate + 5`). The q27 and q72 sections of the five tpcds `.plans.txt` turn
 from refusals into trees; `recipe-payloads.txt` is unchanged. Next: q27's tp4 cpu cells, its third
-branch a keyless `avg` over a join, are no longer blocked and need a run. q72's cpu cells need a measured
+branch a keyless `avg` over a join, need a run. q72's cpu cells need a measured
 run: its FROM-order first join (#20) is paid by the oracle too and may not fit a 15 GiB runner
 at the tp1 modes. Device cells for both meet #152. An upgrade would retire at most one rule;
 #166 is the one concrete reason for an upgrade this does not supply.

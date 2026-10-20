@@ -251,7 +251,7 @@ when `start < stop` is false — always, at `n_rows == 0` — so the batch is re
 the interval. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two
 neighbours (`gpu_tests/harness_cases.rs`). Joins read no batch as an empty side, and a keyless
 init answers its identity row whatever arrived ([#199](../archive/archived-tickets.md#t199)), so
-nothing now sees the difference in rows.
+nothing sees the difference in rows.
 
 **Corpus query:** none.
 

@@ -120,3 +120,25 @@ lane at tp4-rowgroup and tp4-sized. Cost: 7 regressions, all `cuda_aggregate_byt
 identity rows (q32 and q11 at the three tp4 modes +51, q22 tp4-single +52), none over 10%.
 Review round 1 dispatched.
 - PR #182 → ENS-grouping-id.
+
+### 2026-10-20 — review round 1: 0 blocking, 3 important, 11 nits
+
+1. Important: `gpu_backend/accumulate.rs:176-216` — `impl GpuAccumulator { aggregate_init }`
+   inserted between `addressed`'s doc and `addressed`. Developer.
+2. Important: `wire/gpu_tests/aggregate_init.rs:56-70` — the empty-lane walk cannot tell
+   `(0, NULL, NULL)` from NULLs or no row. Developer: assert the done call's one row, and walk
+   `count(*)` over a `[[]]` scan where the identity row is the answer.
+3. Important: the 7 cost regressions are outside the board note's pre-acceptance. Coordinator's
+   decision: accepted — each is an identity row the spec requires (q32 and q11 at tp4 +51, q22
+   tp4-single +52, all `cuda_aggregate_bytes`), and master's gate passes them (none over 10%).
+   Named here and in PR #182 for the human.
+Nits, coordinator (markdown): `build-test.md` stray column on the walk row; `architecture.md`'s
+exec-model differences recounted, the `[[]]` sentence (nothing reads `[]` as the whole file: the
+validator refuses it), batch sizing names the limit and the init; "now"/"no longer" in #214 and
+df-upgrade. Nits, developer: zero-row handles in the walk, a `mirrors` refusal case,
+`aggregate.cpp:184` no-input gated on Partial, stale comments (`cpu_backend/accumulate.rs:1-2`,
+`gpu_backend/accumulate.rs:4`, `gpu_backend/gpu_tests/mod.rs:222-224`, `gpu_tests/exec.rs:1-2`,
+`end_to_end.rs:570`, `nodes.rs:569`, `memory_estimation.rs:214-216`), the keyless shortcut recipe
+pin, two over-long lines. For the human: `empty_state` is production code only tests call
+(`#[allow(dead_code)]`), as the spec placed it; coding-style would make it `#[cfg(test)]`. #214
+names no wrong row now and may be stale. nebius-gpu started 00:01Z; developer resumed.

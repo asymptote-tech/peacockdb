@@ -130,8 +130,8 @@ share is first reached, which overshoots by a whole group. Within a chunk, conse
 groups pack greedily into batches while bytes stay under target; a single row group over target
 is still its own batch, so the minimum granularity is one row group, and the planner produces a
 plan for any non-empty survivor list. An empty one — a file with no row group, or a filter that
-prunes every group — maps to one lane holding no batch, `[[]]`, never an empty mapping, which the
-wire would read as the whole file.
+prunes every group — maps to one lane holding no batch, `[[]]`, never `[]`, which the validator
+refuses as no lanes.
 
 **The balance bound holds for uniform row groups, and contiguity is why it is not universal.**
 Max−min lane rows ≤ one row group is true of what a parquet writer emits — one group size per
@@ -150,8 +150,8 @@ holds it. Type widths are for columns the plan creates rather than reads.
 size is how the planner spends it, so an estimator pass (`planner/memory_estimation.rs`)
 solves for it per source.
 
-The walk starts at each source and follows its batch upward to the nearest accumulator other than an
-aggregate's init, which the walk passes through as the per-batch transform it is. Every
+The walk starts at each source and follows its batch upward to the nearest accumulator, passing
+through a limit and an aggregate's init, which hold nothing and transform per batch. Every
 node in between is a per-batch transform, so what it holds is proportional to the source batch,
 and the **amplification** is a product along the path: filter selectivity, the width change
 across a project, a join's cardinality, and the lane count in force at that point. A source's
@@ -793,13 +793,13 @@ changed. A naive rescan survives as a test-only oracle compared pick by pick, si
 incremental schedule that disagrees with it is wrong by definition. A Python model of these
 same rules — the scheduler, both drivers, the accountant, operators over pandas — is
 `scripts/exec_model/`, which is where a rule is cheapest to argue with; build-test.md says what
-it runs. Two things differ at the empty case: its driver answers nothing where the sink received
-nothing (`partitioned_driver.py`, `results`) and the engine's answers one zero-row batch under the
-sink's input columns (`Driver::answer`), and its accumulators emit one empty batch even over no
-arrival (`operators/accumulators.py`) where the engine keeps a lane that received nothing
-answering nothing but for a keyless init, which answers its identity row; the model runs the init
-as an `Exec`, per batch, a zero-row one included. One rule differs: the model still judges a mid-plan limit by its input
-(`partitioned_driver.py`), where the driver now reads what the limit emitted (#234).
+it runs. Two things differ at the empty case. Its driver answers nothing where the sink received
+nothing (`partitioned_driver.py`, `results`); the engine's answers one zero-row batch under the
+sink's input columns (`Driver::answer`). Its accumulators emit one empty batch even over no
+arrival (`operators/accumulators.py`); the engine's lane that received nothing answers nothing,
+but for a keyless init, which answers its identity row. Two rules differ. The model runs the init
+as an `Exec`, per batch, a zero-row one included. And it still judges a mid-plan limit by its
+input (`partitioned_driver.py`), where the driver now reads what the limit emitted (#234).
 
 The unit that becomes ready is not always an output lane: a `PartitionAccumulator` has one
 output lane and becomes ready one *input* lane at a time, and an emitter reads a single input
