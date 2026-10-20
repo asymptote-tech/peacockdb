@@ -307,7 +307,7 @@ def test_a_rollup_carries_the_grouping_id_through_the_whole_sequence():
                                                   A.finalize_exprs(aggs)))
     got, _ = execute(root)
     assert list(got.columns) == ["g", "k", A.GROUPING_ID, "sum_v"]
-    assert set(got[A.GROUPING_ID]) == {0, 2, 3}
+    assert set(got[A.GROUPING_ID]) == {0, 1, 3}
 
     # …and the projection that drops it, which is what the plan in the spec shows.
     exprs = [Alias(Col("g"), "g"), Alias(Col("k"), "k"), Alias(Col("sum_v"), "sum_v")]

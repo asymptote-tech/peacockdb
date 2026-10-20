@@ -70,7 +70,7 @@ the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to 
 >   ticketing it.
 > - **On resuming the chain, reset the board first, in one commit:** distinct-companions,
 >   limits and empty-sorts go from `done` to `building`. Their GPU halves are now runnable:
->   distinct-companions' device cells ([#262](../tickets/corpus-coverage.md#t262)), and limits'
+>   distinct-companions' device cells ([#262](../archive/archived-tickets.md#t262)), and limits'
 >   and empty-sorts' device changes and cases ([#281](../archive/archived-tickets.md#t281)). Each
 >   task runs its GPU tests, turns on the cells that pass, and tickets those that fail.
 >   guard-checks stays `done`: its GPU-side edits are to shad-gpu's script and CI job, which
@@ -110,7 +110,7 @@ nested-limits off on the device under #285.
 The cpu's accumulating sort and merge answer one zero-row batch over zero-row batches; an empty
 answer keeps its columns; q17's result section gains its header.
 
-### 5. [`grouping-id.md`](grouping-id.md) — closes [#65](../tickets/corpus-coverage.md#t65), [#55](../tickets/corpus-coverage.md#t55), [#262](../tickets/corpus-coverage.md#t262) — state: approved to build
+### 5. [`grouping-id.md`](grouping-id.md) — closes [#65](../archive/archived-tickets.md#t65), [#55](../archive/archived-tickets.md#t55), [#262](../archive/archived-tickets.md#t262) — state: done — PR #181
 
 The device's grouping-set id folds and widens as DataFusion's; walk tests prove q66's quotient and
 the two-stage DISTINCT on a device; `tpch/rollup-grouping` added; the rollup, q66 and DISTINCT

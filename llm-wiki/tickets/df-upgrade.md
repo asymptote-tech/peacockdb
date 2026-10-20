@@ -137,7 +137,7 @@ them into one.
 `Aggregate::grouping_id_type(group_exprs, max_ordinal)` widens the type by the ordinal's bits.
 `GROUPING()` masks the ordinal off, so its answer is unchanged. On 45 there is no ordinal, and
 DataFusion folds the duplicate sets itself, so the engines agree today. Belongs to the upgrade.
-Assumes #65's C++ id.
+Assumes the C++ id (`grouping_id_column`, `aggregate.cpp`).
 
 **Corpus queries:** none; no corpus query repeats a grouping set. Example, tpch, on 55:
 `select l_returnflag, sum(l_quantity) from lineitem group by grouping sets ((l_returnflag),
@@ -145,7 +145,7 @@ Assumes #65's C++ id.
 
 **Fix proposed:** with the upgrade. Each set's ordinal is known at plan time, so the wire carries
 it: append an `ordinal` to `GroupingSetMask` (`gpu_plan.fbs`), written from DataFusion's
-grouping sets. #65's `grouping_id_column` packs it above the key bits and takes the width from
+grouping sets. `grouping_id_column` (`aggregate.cpp`) packs it above the key bits and takes the width from
 the plan's declared type rather than from `nkeys`, since the width is no longer a function of
 the key count alone. The payload golden regenerates for every rollup.
 
