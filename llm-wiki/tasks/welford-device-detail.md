@@ -130,3 +130,9 @@ as #287 in corpus-coverage (93 open, next free 288), and archived #94 points at 
 `architecture.md` sentence left false. Signoff written. GPU host hard-stopped; dispatched CI follows.
 
 Dispatched CI: run 39376356448, dispatched 2026-10-20T05:42:47Z on 1defb71d.
+
+### 2026-10-20 — `done`
+
+Dispatched run 39376356448 green on 1defb71d, `GPU Tests (nebius-gpu)` and the `cudf 26.02` leg
+included; PR #184's CI green on the same head. GPU host hard-stopped. Chain K has no task left
+that can progress.
