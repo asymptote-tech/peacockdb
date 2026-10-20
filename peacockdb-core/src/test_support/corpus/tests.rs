@@ -5,7 +5,7 @@ use std::sync::Arc;
 use datafusion::arrow::array::{Float64Array, Int32Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 
-use super::{CpuOracle, cpu_oracle_mode, result_matches};
+use super::{CpuOracle, cpu_oracle_mode, invocations_in, result_matches};
 use crate::test_support::MODES;
 use crate::test_support::device_answer::{GpuResultMode, gpu_result_mode};
 
@@ -92,4 +92,34 @@ fn every_oracle_variant_is_named_by_some_line() {
             "{variant:?} is named by no corpus_query! line — delete it rather than keep it"
         );
     }
+}
+
+/// The two bracket shapes a declaration line can carry, read off one line each: a mask on
+/// the last argument, and a trailing comment with a parenthesis in it. The second is one
+/// `(tp4 only)` away on a line that already says `// #225`, and taking the line's final `)`
+/// read the comment's — reporting a second invocation on a line that has one.
+#[test]
+fn a_mask_and_a_comments_parenthesis_are_not_the_invocations_close() {
+    let masked = "corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, \
+                  duckdb_approx, data_fusion_disabled, golden_approx_std, \
+                  schema_validation_disabled(tp4_single | tp4_sized)); // #225 (tp4 only)";
+    assert_eq!(
+        invocations_in(masked, "corpus_query!", "a line"),
+        vec![vec![
+            "tpch",
+            "1",
+            "distinct_functions",
+            "all_modes",
+            "all_modes",
+            "duckdb_approx",
+            "data_fusion_disabled",
+            "golden_approx_std",
+            "schema_validation_disabled(tp4_single | tp4_sized)",
+        ]]
+    );
+    let bare = "corpus_query!(tpch, 1, q6, tp1_single, none, duckdb_divergent(205, 1), \
+                data_fusion_exact, golden_exact, schema_validation_enabled);";
+    let read = invocations_in(bare, "corpus_query!", "a line").remove(0);
+    assert_eq!(read[5], "duckdb_divergent(205, 1)");
+    assert_eq!(read[8], "schema_validation_enabled");
 }

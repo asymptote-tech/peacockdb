@@ -249,3 +249,18 @@ original rule, kept for the record.
 Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. No device run,
 no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs
 are not waited on. The C++ changes are built, not run on a device.
+
+## Completeness signoff
+
+Solved under its constraints. The lowering is as specified, and `distinct-functions` now runs it
+on a device at five modes — the first such plan any device has run, the C++ change with it. #261
+and #144 stay refused by name, and the wire's `distinct` is deprecated with no slot moved.
+
+Two shortcuts, both on #225 and both earned by a run: a schema-validation mask off at the three
+tp4 modes, where #225 refuses the outer init's Welford state, and `golden_approx_std` for one ULP
+of `stddev`. The cast-back stays pinned by a plan test, for a better reason than first given — a
+device holds `{type_id, scale}`, not a precision. Nothing else.
+
+Owed at merge: q28's and `rollup-distinct`'s device cells, off on #152, #65 and #189 with #262
+narrowed to that; #144's `Float32 → Float64` subcase; and two wiki edits nobody asked for, a
+`build-test.md` antipattern bullet and a widened `coding-style.md` re-export rule.
