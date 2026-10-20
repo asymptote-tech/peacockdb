@@ -432,14 +432,17 @@ stage that casts a narrowed `__grouping_id` to DataFusion's width. Each is a `Ca
 planner emits — the aggregate ones inside the finalize expressions, the union ones as per-branch
 projects, the expression ones at the point of use.
 
-Four stay in C++ with a reason. The loader's decimal width is the source honouring the output
+Six stay in C++ with a reason. The loader's decimal width is the source honouring the output
 schema it already declares, since cuDF's parquet reader picks the narrowest fixed_point width
 while DataFusion uses Decimal128 throughout. A count is the same shape one node up: cuDF counts
 in INT32 and the aggregate casts to the INT64 the state declares; and `date_part` the same at
 the expression, cuDF extracting every component in INT16 and the arm casting to the
-`return_type` the wire names. Hash key normalization feeds the hash alone and never reaches a
+`return_type` the wire names. A Welford init casts its argument to FLOAT64, the type cuDF's `M2`
+and `MEAN` work in, and the Welford merge casts the count to the type its cuDF's `MERGE_M2`
+accepts and back to INT64 (`kMergeM2CountType`, [#94](tickets/corpus-coverage.md#t94)); both are
+the state the plan already declares. Hash key normalization feeds the hash alone and never reaches a
 returned value — a cast that cannot change an answer is not one the plan needs to carry — and it
-is the one of the four that is not only C++: the cpu's `hash_keys` does the same widening, because
+is the one of the six that is not only C++: the cpu's `hash_keys` does the same widening, because
 the two engines must agree on a lane.
 
 The device type is `{type_id, scale}`: a decimal's precision is a label the export is told,
@@ -1275,7 +1278,7 @@ regions, the NVTX domain and the harness range),
 `table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
 `column_at`),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
-node kind that `execute_node` runs, plus `dispatch.cpp` with the `run_op` switch, and the
+node kind that `execute_node` runs, plus `dispatch.cpp` with the `run_kind` switch that `run_op` wraps, and the
 join session in `join_session`, `join_columns` and `join_residual`, which no `execute_*`
 reaches — `CudfJoin` is a leaf).
 
@@ -1298,7 +1301,7 @@ Where the ordinals come from and where they land:
 | `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
 | join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — ColumnRef only, anything else throws |
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp), [`join_residual.cpp`](../cpp/src/operators/join_residual.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
-| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), all through `column_at` |
+| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), all through `column_ordinal` |
 
 Every `ColumnRef` read in `cpp/src/` goes through `column_ordinal`, bar `build_expr`'s AST arm and
 the join-filter arms, which read an ordinal into the filter map.
@@ -1337,7 +1340,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 | `cudf::out_of_bounds_policy` | [`join_session.cpp`](../cpp/src/operators/join_session.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
-| decimal scale | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
+| decimal scale | [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
 | binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
 | hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
 | IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; each declared decimal precision set on the imported Arrow schema; a fixed_point that is not DECIMAL128 refused | unnamed columns, and every decimal labelled `decimal128(38, s)`, which the sink refuses against the narrower declaration (#187) |
@@ -1372,11 +1375,11 @@ to it.
 
 Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
-the result is compared against. The last four rows are different: a field left at its
+the result is compared against. The last five rows are different: a field left at its
 default on purpose; a pair no writer sets and no reader reads, which is the wire-format
-surface #132 is about; and two rows the C++ still reads that no plan fills — the row groups a batch
+surface #132 is about; two rows the C++ still reads that no plan fills — the row groups a batch
 loads are a per-call value and ride the call instead, and an empty `projection` means the whole
-declared schema.
+declared schema; and a deprecated pair, kept only so no slot moves.
 
 ## Node display
 

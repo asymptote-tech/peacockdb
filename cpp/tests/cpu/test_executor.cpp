@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -188,6 +189,66 @@ TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderAnOperator) {
   EXPECT_THROW(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"r", "l"}),
                std::runtime_error);
   EXPECT_TRUE(peacock::cudf_ast_can_evaluate(expr, cudf::table_view{cols}, {"l", "r"}));
+}
+
+namespace {
+
+// `wrap` builds an expression around a ColumnRef Expr. No shape here passes through
+// infer_expr_type, so the ColumnRef arm's check is the only one before build_expr's AST arm.
+using Wrap = std::function<flatbuffers::Offset<fb::Expr>(flatbuffers::FlatBufferBuilder&,
+                                                         flatbuffers::Offset<fb::Expr>)>;
+
+void expect_each_bad_ref_refused(Wrap const& wrap) {
+  struct Bad {
+    uint32_t index;
+    const char* name;
+    const char* message;
+  };
+  const Bad bads[] = {
+      {0, "c", "ColumnRef c@0 reads x at that position"},
+      {0, nullptr,
+       "ColumnRef @0 carries no name, so nothing checks it reads the column the plan meant"},
+      {1, "x", "ColumnRef x@1 is past the 1 columns its input has"},
+  };
+  std::vector<cudf::column_view> cols{typed_col(cudf::data_type{cudf::type_id::INT32})};
+  auto evaluate = [&](uint32_t index, const char* name) {
+    flatbuffers::FlatBufferBuilder b;
+    auto text = name ? b.CreateString(name) : flatbuffers::Offset<flatbuffers::String>{};
+    auto ref =
+        fb::CreateExpr(b, fb::ExprNode_ColumnRef, fb::CreateColumnRef(b, index, text).Union());
+    b.Finish(wrap(b, ref));
+    return peacock::cudf_ast_can_evaluate(flatbuffers::GetRoot<fb::Expr>(b.GetBufferPointer()),
+                                          cudf::table_view{cols}, {"x"});
+  };
+  for (auto const& bad : bads) {
+    try {
+      evaluate(bad.index, bad.name);
+      ADD_FAILURE() << "resolved: " << bad.message;
+    } catch (std::runtime_error const& e) {
+      EXPECT_STREQ(e.what(), bad.message);
+    }
+  }
+  EXPECT_TRUE(evaluate(0, "x"));
+}
+
+}  // namespace
+
+TEST(ColumnRefs, TheAstRouteResolvesABareReference) {
+  expect_each_bad_ref_refused([](auto&, auto ref) { return ref; });
+}
+
+TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderACast) {
+  expect_each_bad_ref_refused([](flatbuffers::FlatBufferBuilder& b, auto ref) {
+    auto cast = fb::CreateCastExprNode(b, ref, fb::DataType_Int64);
+    return fb::CreateExpr(b, fb::ExprNode_CastExprNode, cast.Union());
+  });
+}
+
+TEST(ColumnRefs, TheAstRouteResolvesAReferenceUnderAUnaryOperator) {
+  expect_each_bad_ref_refused([](flatbuffers::FlatBufferBuilder& b, auto ref) {
+    auto neg = fb::CreateUnaryExprNode(b, fb::UnaryOp_Negative, ref);
+    return fb::CreateExpr(b, fb::ExprNode_UnaryExprNode, neg.Union());
+  });
 }
 
 // #164: a handle's owners, columns and names are one list read by one ordinal, so a

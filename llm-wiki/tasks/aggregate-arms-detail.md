@@ -131,3 +131,29 @@ Reviewer checked the three fixture changes: fixture bugs, not an over-strict che
 
 The important and the copy nit fixed; the computed-key gtest shown red with `expr.cpp:943`
 reverted; L40S list green again. Completeness pass dispatched.
+
+## Completeness finding — the AST route's `ColumnRef` check, developer, 2026-10-20
+
+- **Finding.** `cudf_ast_can_evaluate`'s `ColumnRef` arm (`expr.cpp:437`) could not go red. It
+  returns `true` like `default:`, and `TheAstRouteResolvesAReferenceUnderAnOperator` uses a binary
+  expression, where `infer_expr_type` throws first.
+- **Fix, tests only.** Three cpu-tier gtests in `cpp/tests/cpu/test_executor.cpp`, none through
+  `infer_expr_type`: `ColumnRefs.TheAstRouteResolvesABareReference`, `…AReferenceUnderACast`
+  (to Int64, which the AST takes) and `…AReferenceUnderAUnaryOperator` (Negative). Each refuses a
+  wrong name, no name and an index past the width against one INT32 column `x`, each message
+  matched exactly, then answers true for `x@0`.
+- **Red** (only the arm's `column_ordinal` line deleted): the three new cases fail at all nine bad
+  references with "resolved: …"; `UnderAnOperator` stays green. **Green** (restored, `expr.cpp`
+  byte-identical to HEAD): `scripts/build.sh … --build` rc 0, 0 warnings; `peacock_cpu_tests`
+  24/24; `ctest -L cpu` 1/1.
+- **Counts.** C++ CPU/FFI unit 21 → 24, so C++ 207 → 210 and the grand total 5437 → 5440.
+  `build-test.md` not yet updated.
+
+### 2026-10-20 — completeness pass closed; `completeness approved`
+
+Reviewer: 2 important — the AST arm's `ColumnRef` check unguarded (three cpu-tier gtests added by a
+developer, red with the check deleted; C++ unit 24, total 5440), and stale text: the decimal-scale
+row and `aggregates.py`'s `stddev_ddof` docstring (coordinator). Analyst: none blocking or
+important; `architecture.md` corrected for the four sentences it named (decimal-scale row; the
+flat-buffer table's last rows now five; `column_ordinal` in the column-indexing row; "Six stay in
+C++", the Welford casts) and `run_kind`. Signoff written. GPU host hard-stopped.
