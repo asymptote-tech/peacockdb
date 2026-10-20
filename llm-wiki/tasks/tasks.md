@@ -227,7 +227,7 @@ component, one stats sidecar for both embedding modes, `run.py` with its goldens
 per join, three documents. The branch and its PR exist, so the coordinator picks the branch up
 rather than branching afresh; `join-optimizer-detail.md` says what is on it.
 
-### 2. [`containers.md`](containers.md) — closes [#226](../tickets/benchmarks.md#t226) — state: approved to build
+### 2. [`containers.md`](containers.md) — closes [#226](../tickets/benchmarks.md#t226) — state: building
 
 A build image and a device-run image per cuDF version (25.02, 26.02) on ghcr.io, one launcher for
 isolated ensemble instances on a fresh CPU VM, provider adapters and a device run for any GPU host
