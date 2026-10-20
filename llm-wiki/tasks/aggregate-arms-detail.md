@@ -157,3 +157,5 @@ row and `aggregates.py`'s `stddev_ddof` docstring (coordinator). Analyst: none b
 important; `architecture.md` corrected for the four sentences it named (decimal-scale row; the
 flat-buffer table's last rows now five; `column_ordinal` in the column-indexing row; "Six stay in
 C++", the Welford casts) and `run_kind`. Signoff written. GPU host hard-stopped.
+
+Dispatched CI: run 39366697102, dispatched 2026-10-20T03:53:59Z on b06924cc.
