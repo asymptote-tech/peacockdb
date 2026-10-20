@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 6550 test cases — Rust 5253, C++ 232, Python 1065.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 6594 test cases — Rust 5297, C++ 232, Python 1065.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3353 cases: `--lib` 897, `test_cpu_corpus` 2423, `test_corpus_goldens` 29, `test_cost_model` 4
+#### cpu — `--features rust-only`: no FFI, no device. 3377 cases: `--lib` 897, `test_cpu_corpus` 2447, `test_corpus_goldens` 29, `test_cost_model` 4
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2422 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2446 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -56,7 +56,7 @@ among them, and a `live_cpu` gpu oracle are exempt, and a `duckdb_none` line is 
 golden half alone, unless our side has no plan; three cases pin the exemptions and the golden
 half on its own
 
-Then the DuckDB tier, 1195 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 1215 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
@@ -71,7 +71,7 @@ enabled device cell has its `gpu-result.txt` section and no other, and the commi
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 198 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 202 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
@@ -690,11 +690,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1764 cases: `--lib -- gpu_tests::` 740, `test_gpu_corpus` 989, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1784 cases: `--lib -- gpu_tests::` 740, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 988 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 1008 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -703,7 +703,7 @@ device with every batch held to its node's declared schema through the driver's 
 and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-987 cells today. From tpch, 220: every line at every mode. From tpcds, 410: every line wherever it runs on the cpu.
+1007 cells today. From tpch, 240: every line at every mode. From tpcds, 410: every line wherever it runs on the cpu.
 `q78` compares within 1e-11 relative, since a
 float `round(x, 2)` on the device is one ulp from DataFusion's in some cells
 ([#60](archive/archived-tickets.md#t60), won't fix). `q2` does too, and those cells push its
@@ -714,7 +714,7 @@ column, and `timestamp-s-key-group` on [#264](tickets/complete-coverage.md#t264)
 pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
 with a residual, every nested-loop type, and `NOT IN` after the rewrite. Its six `sort-*` queries
-sort a nullable key descending, nulls at either end, through the merge at tp4. The 988th case is that a
+sort a nullable key descending, nulls at either end, through the merge at tp4. The 1008th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |

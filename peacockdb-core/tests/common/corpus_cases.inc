@@ -27,9 +27,8 @@ corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb(no_sort, approx), data_f
 corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
-// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but the four
-// non-inner join queries at the end of this section. The joins' own blockers, #152's side copies
-// and #220's batch splits, went with the join session.
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu. The joins'
+// own blockers, #152's side copies and #220's batch splits, went with the join session.
 corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
@@ -129,12 +128,11 @@ corpus_query!(tpch, 1, rollup_distinct, all_modes, all_modes, duckdb(sort, appro
 corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb(sort, approx), data_fusion_disabled, golden(sort, approx_std), schema_validation_enabled);
 
 // Non-inner joins written in the costly order: three that may move, and left-join-fixed, which
-// may not. Off the device on #302: no device has run them.
-// left-join-reorder is over the result cap.
-corpus_query!(tpch, 1, left_join_reorder, all_modes, none, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
-corpus_query!(tpch, 1, semi_join_reorder, all_modes, none, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
-corpus_query!(tpch, 1, anti_join_reorder, all_modes, none, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
-corpus_query!(tpch, 1, left_join_fixed, all_modes, none, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+// may not. All four run everywhere on both engines; left-join-reorder is over the result cap.
+corpus_query!(tpch, 1, left_join_reorder, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, semi_join_reorder, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(tpch, 1, anti_join_reorder, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(tpch, 1, left_join_fixed, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu. The
