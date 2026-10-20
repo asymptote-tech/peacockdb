@@ -257,7 +257,9 @@ Three rows carry the weight. **`count` merges by `sum`** — the one place where
 separately is the difference between a right and a wrong answer. **`avg` is two state columns**,
 never a mean of means. And **the Welford pair merges by `merge_m2`**, which the IR names because
 the combine is not a per-column reduction: it needs the count-weighted mean and the cross term.
-`ddof` is 1 for the sample forms and 0 for the population ones.
+`ddof` is 1 for the sample forms and 0 for the population ones. The device names every state
+column from its function's `state_names`, and a `count` at `Merge` is refused on both engines: a
+count merges by `sum`.
 
 The registry lives in `plan/mod.rs` as two enums — `AggFunc`, what SQL asked
 for, and `PlanAgg`, what a node runs. State columns are typed by `PlanAgg::state_type`
@@ -992,7 +994,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuEmitPartitions` | `CudfRepartition(Hash, 1→N)` | repartition arm, one call per batch → N handles |
 | `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin` | `CudfJoin`, a leaf | `join_build(seq, build)` once per lane, `join_probe` per probe batch, and `join_finish` at done for the five finishing types |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
-| `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's cast projects | routing in the driver, zero FFI calls |
+| `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's branch projects | routing in the driver, zero FFI calls |
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
 
 Three facts about the C++ side are what make this drivable. `execute_node` is stateless per seq
@@ -1038,17 +1040,17 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — `cudf::compute_column(tv, predicate)` for the mask, then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and LIKE/CASE/scalar functions take `build_column` instead. No expression at all is refused |
-| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial/Final/FinalPartitioned/Single/SinglePartitioned/Merge), `group_exprs`, `aggr_funcs` (each with its out decimal scale), `grouping_sets`, `mergeable_agg_state`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — `gb.aggregate(requests)` over [`groupby{keys, null_policy::INCLUDE}`](../cpp/src/operators/aggregate.cpp); with no group keys it is [`cudf::reduce`](../cpp/src/operators/aggregate.cpp) to one row; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
+| [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args`, `state_names`, `ddof`), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys it is `cudf::reduce` to one row; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
 | [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |
 | [`CudfRepartition`](../flatbuffers/gpu_plan.fbs) | `kind`, `num_partitions`, `hash_exprs` (key ordinals) | [`node_session.cpp`](../cpp/src/node_session.cpp) — `spark_hash_partition(tv, key_cols, n)`, ours rather than cuDF's murmur3, then [`cudf::slice`](../cpp/src/node_session.cpp) per partition into a view sharing the partitioned table's column owners, no copy |
 | [`CudfSortPreservingMerge`](../flatbuffers/gpu_plan.fbs) | `exprs`, `fetch` | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::merge(views, key_cols, orders, null_orders)`, k-way and order-preserving; a concat fallback with no keys or one input, which drops the fetch ([#204](tickets/corpus-coverage.md#t204)) |
-| [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`. Branches are planned independently, so one column can land a different cuDF type per branch; the planner's per-branch cast projects are what align them before the concatenate, which refuses mixed types |
+| [`CudfUnion`](../flatbuffers/gpu_plan.fbs) | `inputs`, `interleave` | [`union.cpp`](../cpp/src/operators/union.cpp) — `cudf::concatenate(views)`. Branches are planned independently, so one column can land a different cuDF type per branch; the planner's per-branch projects — a cast where a type differs, a rename where a name differs — align them before the concatenate, which refuses mixed types |
 | [`CudfLimit`](../flatbuffers/gpu_plan.fbs) | `skip`, `fetch` | [`limit.cpp`](../cpp/src/operators/limit.cpp) — `cudf::slice(tv, {skip, end})`, and the whole table returned untouched when the range covers it |
 | [`CudfWindow`](../flatbuffers/gpu_plan.fbs) | `window_exprs` (partition keys, order keys, frame bounds, out decimal scale) | [`window.cpp`](../cpp/src/operators/window.cpp) — `cudf::grouped_rolling_window(keys, arg, preceding, following, min_periods, agg)`, which preserves input row order |
 
@@ -1088,7 +1090,8 @@ semantics change with no ABI change at all.
 
 **Operators hand their columns over.** An engine running a node once per query would pay a
 deep copy once per node; this one pays it once per node per *batch*. So no operator copies
-where a move would do, bar five copies in `aggregate.cpp` that give their reason at the site:
+where a move would do, bar the Welford merge's copies in `aggregate.cpp`: `merge_m2_input` copies
+the mean and m2 into the struct cuDF reads, and each merged column is copied back out of it.
 project and window share their input's owners through `TableResult`, a filter's fused
 projection selects from the table it just filtered, the aggregate releases groupby's key tables,
 a join session moves its gathered columns into its output, and a bare `ColumnRef` evaluates to a
@@ -1164,13 +1167,11 @@ of its own (below).
 path returns. A `TableResult` is one `shared_ptr` owner and one `column_view` per column, plus
 the names: two handles may view one column, so a scatter's N partitions are row slices of one
 partitioned table and copy nothing. A column is freed when the last handle viewing it goes, and a
-slice pins its parent column rather than the whole table. Four constructors build every one of
-them — `owning` from a fresh `cudf::table`, `slice`, `select` and `with`
-([`table_result.cpp`](../cpp/src/table_result.cpp)) — or the public fields are pushed one owner,
-column and name at a time, which is what a project mixing kept and computed columns does. The
-check is therefore at the registry rather than in a constructor: `register_handle` is the only
-path to a handle number, and it refuses one of no columns or whose names or owners do not number
-its columns. `owning` refuses the same shapes earlier. Consumers read `view()`; four fetch sites
+slice pins its parent column rather than the whole table. Five constructors build every one of
+them — `owning` from a fresh `cudf::table`, `slice`, `select`, `with`, and `of` from shared parts,
+which a project and a join's two sides use ([`table_result.cpp`](../cpp/src/table_result.cpp)). The
+default constructor is private. `owning` and `of` refuse a table of no columns and one whose names
+or owners do not number its columns; the fields stay public, so `register_handle` checks again. Consumers read `view()`; four fetch sites
 copy on purpose and say why — the session's `slice_handle` and sorted-merge fetch, and the limit
 and sort operators' own fetch slices — because a view there would pin the whole batch, which is
 the memory those copies exist to give back. `NodeStats` carries only what C++ alone can measure —
@@ -1272,7 +1273,8 @@ handle registry, the multi-partition dispatch — scan-map emission, collapse, k
 hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
 regions, the NVTX domain and the harness range),
 `expr.cpp` (expression and AST building),
-`table_result.cpp` (the handle's four constructors),
+`table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
+`column_at`),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
 node kind that `execute_node` runs, plus `dispatch.cpp` with the `run_op` switch, and the
 join session in `join_session`, `join_columns` and `join_residual`, which no `execute_*`
@@ -1285,51 +1287,41 @@ resolves.
 
 ## Column indexing
 
-Nothing in the flat buffers names a column to read. Every reference is an ordinal into the
-child's output table, so a node's correctness depends on the child having produced its
-columns in exactly the order the planner assumed.
+Every reference is an ordinal into the child's output table, and a `ColumnRef` also carries the
+column's name. The C++ reads the ordinal and checks the name, so a child that produced its
+columns in another order is refused rather than read.
 
 Where the ordinals come from and where they land:
 
 | Reference | Written by | Read by |
 |---|---|---|
-| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | [`build_expr`](../cpp/src/expr.cpp) for the AST path, [`evaluate_column`](../cpp/src/expr.cpp) for the column path, which borrows the input's column rather than copying it |
+| `ColumnRef.index` in any expression | [`expr_writer.rs`](../peacockdb-core/src/wire/expr_writer.rs), off the ordinal `planner/translator/expr.rs` read from DataFusion's `Column::index()` | `column_ordinal` / `column_at` ([`column_refs.cpp`](../cpp/src/column_refs.cpp)), through [`evaluate_column`](../cpp/src/expr.cpp), `build_column` and `cudf_ast_can_evaluate` (after which `build_expr`'s AST arm reads the index alone); the column path borrows the input's column rather than copying it |
 | `projection` index lists on filter and join | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`filter.cpp`](../cpp/src/operators/filter.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) — gather by ordinal, and the name list is indexed with the same ordinal |
 | join key pairs, `on=[(l@0, r@0)]` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — ColumnRef only, anything else throws |
 | `JoinFilterColumn{side, index}` | [`join.rs`](../peacockdb-core/src/wire/join.rs) | [`expr.cpp`](../cpp/src/expr.cpp), [`join_residual.cpp`](../cpp/src/operators/join_residual.cpp) — remaps a filter-schema ordinal onto the mixed join's LEFT/RIGHT tables |
-| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) |
+| sort keys, hash keys, group keys | [`node_writer.rs`](../peacockdb-core/src/wire/node_writer.rs), [`aggregate_writer.rs`](../peacockdb-core/src/wire/aggregate_writer.rs) | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp), [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), all through `column_at` |
 
-`cpp/src/` holds 19 `->index()` reads and 32 `.column(…)` calls, so this is the engine's most
-common operation and the one with the least ceremony around it.
+Every `ColumnRef` read in `cpp/src/` goes through `column_ordinal`, bar `build_expr`'s AST arm and
+the join-filter arms, which read an ordinal into the filter map.
 
 ### What guards it, and what does not
 
-One real backstop, and it is not ours: **cuDF bounds-checks column access**.
-`table_view::column(i)` is `_columns.at(i)`, so an out-of-range ordinal throws rather than
-reading garbage, and the FFI surfaces the message. What it is not is *informative* — the
-message is `vector::at` boilerplate with no node, operator or ordinal, because the check sits
-three layers below the code that had the context. Two explicit checks in `expr.cpp` do better
-and worse: the column path throws with the ordinal and the column count, while the
-type-inference helper returns `type_id::EMPTY` and turns a bad ordinal into an unhelpful type
-error further along. One arity check, on the Final-stage aggregate, catches a state width that
-disagrees with the arity expected — width, not order. The FlatBuffers verifier checks that
-offsets and vectors are well formed and has no idea what an ordinal means.
+A `ColumnRef` is checked for its index and its name: `column_ordinal` refuses an index past the
+width (naming both), a reference with no name, and a name other than the column's (naming both),
+as the planner does in `expr_physical.rs`. A `TableResult` is built only through its
+constructors, which refuse a table whose names or owners do not number its columns;
+`register_handle` checks again because the fields are public. A union branch named otherwise is
+projected to the union's names (`cast_branch`). A scan's declared names are checked against the
+file at plan time (`survivor_metadata`). Under all of it cuDF bounds-checks column access:
+`table_view::column(i)` is `_columns.at(i)`. The FlatBuffers verifier checks only that offsets
+and vectors are well formed.
 
-Two things nothing guards, and [#164](tickets/corpus-coverage.md#t164) carries the fixes.
-
-**A column ordinal is still unchecked, though the name count is not.** `register_handle` is the
-only path to a handle number and refuses a handle whose names do not number its columns, so every
-handle a consumer can read carries one name per column; the sites indexing names with `operator[]`
-are bounded by that. What is left is
-the ordinal itself: `expr.cpp` answers `type_id::EMPTY` for an out-of-range `ColumnRef` instead of
-throwing, which turns a bad ordinal into a confusing type error further along.
-
-**Nothing checks that a child's column *order* is what the plan assumed.** The per-node golden
-records the node line, its lane and batch lists, rows and bytes — not the column list and not
-the types, and the bytes cannot help because both engines compute them from the plan's schema
-precisely so they cannot drift. So a node emitting the right columns in the wrong order gives
-identical per-node numbers on both engines, and the divergence surfaces only at the root, for
-a query whose corpus line names a result golden or an oracle.
+**A child's column order is checked through its names alone.** The per-node golden records the
+node line, its lane and batch lists, rows and bytes — not the column list and not the types, and
+the bytes cannot help because both engines compute them from the plan's schema precisely so they
+cannot drift. So a node that put a column under another column's name would give identical
+per-node numbers on both engines, and the divergence would surface only at the root, for a query
+whose corpus line names a result golden or an oracle.
 
 ## cuDF options
 
@@ -1368,13 +1360,16 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
-| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which cuDF aggregation runs, whether state columns are merged, and whether the result is state or a value — except on the keyless path, where a `stddev` name decides all three whatever the mode and a `var` name has no arm ([#216](tickets/corpus-coverage.md#t216)) |
+| `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which requests the builder makes: state from values at Partial, merged state at Merge; any other mode is refused by name — except the keyless path, which reduces a `stddev` name to a finished value and has no `var` arm ([#216](tickets/corpus-coverage.md#t216)) |
+| `AggregateFuncNode.state_names` | `aggregate_writer.rs` | `state_funcs`: each function's calls' outputs, three for a Welford | the name of every column the device emits |
+| `AggregateFuncNode.ddof` | `aggregate_writer.rs` | `AggStateColumns.ddof` | the keyless `stddev` reduction's divisor offset |
 | `CudfRepartition.hash_exprs`,<br>`num_partitions` | `node_writer.rs` | the emit node's keys and lane count | key ordinals and N for<br>`spark_hash_partition` |
 | `CudfJoin.chunk_bytes` | `join.rs` | the planner's scratch budget for one call | how many pairs the session materializes at once |
 | `AggregateFuncNode`<br>`.out_decimal_precision/scale` | `aggregate_writer.rs`, at zero | nothing: decomposition means no `avg` reaches a device, so the scale rides the finalize divide's own pair | **nothing** here, deliberately, and the writer says why |
 | `CudfScan.batch_size`,<br>`CudfCoalesceBatches`<br>`.target_batch_size` | nobody | — | **nothing** — no C++ code reads either (#132) |
 | `CudfScan.row_groups`,<br>`.batches` | nobody | — | `set_row_groups`, but no plan reaches it: every load names its own groups per call |
 | `CudfScan.projection` | nobody | — | every column of `file_schema`, which is the node's projected schema; a scan of no column sets `rows_only` and never reads it |
+| `AggregateFuncNode.alias`,<br>`CudfAggregate.mergeable_agg_state` | nobody: deprecated | — | **nothing** |
 
 Three shapes are worth separating here. Most rows carry a value the GPU must not recompute —
 decimal scales above all, since cuDF derives its own per operation and DataFusion's is what
@@ -1419,7 +1414,8 @@ scale beside it. It checks nothing — a golden records what the planner declare
 declaration is exactly what a wrong type would move. An aggregate's state is the one declared
 type derived from its producer (`PlanAgg::state_type`); a project's expression is compared
 against nothing at plan time — what the device produces for it is held to the declaration per
-batch by the test harness and the corpus's validator — and the C++ half is [#164](tickets/corpus-coverage.md#t164).
+batch by the test harness and the corpus's validator — and the C++ reader checks each reference's
+name (`column_at`).
 
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on

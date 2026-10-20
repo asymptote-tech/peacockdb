@@ -35,10 +35,9 @@ TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
     if (!expr)
       throw std::runtime_error("CudfSort: missing sort key expression");
     if (expr->node_type() == fb::ExprNode_ColumnRef) {
-      auto idx = static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index());
-      key_cols.push_back(tv.column(idx));
+      key_cols.push_back(column_at(tv, input.column_names, expr->node_as_ColumnRef()));
     } else {
-      owned_keys.push_back(build_column(expr, tv));
+      owned_keys.push_back(build_column(expr, tv, input.column_names));
       key_cols.push_back(owned_keys.back()->view());
     }
     orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);

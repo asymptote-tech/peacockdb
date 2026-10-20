@@ -37,7 +37,7 @@ tpcds,1,q35,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enab
 tpcds,1,q36,disabled,disabled,disabled,disabled,disabled,na,na,na,na,na,na,na,na,na,na,ok,window_functions top_n,32 143
 tpcds,1,q37,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n,
 tpcds,1,q38,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,
-tpcds,1,q39,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery stddev_var avg,57 225
+tpcds,1,q39,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery stddev_var avg,57
 tpcds,1,q40,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n outer_join,
 tpcds,1,q41,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n,
 tpcds,1,q42,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,
@@ -140,6 +140,7 @@ tpch,1,semi_join,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled
 tpch,1,shuffle_additive,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,
 tpch,1,shuffle_additive_avg,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg,
 tpch,1,shuffle_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,stddev_var,
+tpch,1,rollup_stddev,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,rollup stddev_var,
 pbench,1,anti_null_preserved_condition,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,anti_join corr_subquery,
 pbench,1,bool_key_group,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,,
 pbench,1,cross_empty_build,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,cross_join,

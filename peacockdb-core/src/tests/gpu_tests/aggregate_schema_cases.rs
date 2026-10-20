@@ -17,7 +17,9 @@ use super::aggregate_cases::{
     merge_over, merge_sum, planned_decimal_average, state_cut, sum_state, welford_init,
     welford_merge, welford_merge_by, welford_partial,
 };
-use super::aggregate_dimension_cases::{DATE, STRING, dispersion_finalize, welford_init_global};
+use super::aggregate_dimension_cases::{
+    DATE, STRING, dispersion_finalize, rollup_welford_init, welford_init_global,
+};
 use super::script::{Script, assert_holds_as_declared, divergences_on_device};
 use crate::plan::{AggFunc, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg, Schema};
 use crate::tests::given::{Given, columns};
@@ -178,20 +180,11 @@ operator_case! {
     }
 }
 
-/// #225 — the device names all three Welford state columns by the aggregate's alias.
-const WELFORD_RENAMED: &str = "1 stddev(f64)$count: Int64 vs stddev(f64) INT64; \
-     2 stddev(f64)$mean: Float64 vs stddev(f64) FLOAT64; \
-     3 stddev(f64)$m2: Float64 vs stddev(f64) FLOAT64";
-
-// #225 — the wire carries one alias for the folded triple, and `aggregate.cpp` names each
-// child by it; the types are the declaration's. Wanted: `None`.
+// The folded triple's three columns, each under the name the plan declares for it.
 operator_case! {
     GpuAggregate,
-    fn bug_stddev_holds_three_identically_named_columns() {
-        assert_eq!(
-            divergences_on_device(&welford_init(), Script::Accumulate(vec![input()])),
-            vec![Some(WELFORD_RENAMED.to_string())]
-        );
+    fn stddev_holds_its_three_declared_state_names() {
+        assert_holds_as_declared(&welford_init(), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -203,7 +196,7 @@ operator_case! {
         assert_eq!(
             divergences_on_device(&welford_init_global(), Script::Accumulate(vec![input()])),
             vec![Some(
-                "3 columns declared, 1 held; 0 stddev(f64)$count: Int64 vs stddev(f64) FLOAT64"
+                "3 columns declared, 1 held; 0 stddev(f64)$count: Int64 vs FLOAT64"
                     .to_string()
             )]
         );
@@ -273,6 +266,15 @@ operator_case! {
     fn grouping_sets_hold_the_uint8_grouping_id_the_plan_declares() {
         let node = grouping_sets(vec![vec![false, false], vec![false, true], vec![true, true]]);
         assert_holds_as_declared(&node, Script::Accumulate(vec![input()]));
+    }
+}
+
+// #280: the grouping-set path builds each Welford triple, and the column after them is the
+// `sum`'s own.
+operator_case! {
+    GpuAggregate,
+    fn a_rollup_with_a_stddev_a_var_and_a_sum_declares_the_state_the_device_holds() {
+        assert_holds_as_declared(&rollup_welford_init(), Script::Accumulate(vec![input()]));
     }
 }
 
@@ -382,16 +384,13 @@ operator_case! {
     }
 }
 
-// #225 — the merge's `MERGE_M2` children are named the same way. Wanted: `None`.
+// The merge's `MERGE_M2` children, named as the init's are.
 operator_case! {
     GpuAggregateBatches,
-    fn bug_stddev_merge_holds_three_identically_named_columns() {
+    fn stddev_merge_holds_its_three_declared_state_names() {
         let partial = |seed| welford_partial(AggFunc::Stddev, seed);
         let arrivals = vec![partial(1), partial(2), partial(3)];
-        assert_eq!(
-            divergences_on_device(&welford_merge(), Script::Accumulate(arrivals)),
-            vec![Some(WELFORD_RENAMED.to_string())]
-        );
+        assert_holds_as_declared(&welford_merge(), Script::Accumulate(arrivals));
     }
 }
 

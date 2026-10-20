@@ -363,9 +363,9 @@ struct NodeSession::Impl {
 
   /// Every handle a consumer can read enters here, so this is where the handle's own
   /// shape is checked: one owner and one name per column, and never zero columns — a
-  /// zero-column `table_view` reads 0 rows whatever it held. A check in `TableResult`'s
-  /// constructors cannot stand in, because its fields are public and a caller may
-  /// assemble one without calling any of them (#164).
+  /// zero-column `table_view` reads 0 rows whatever it held. `TableResult`'s constructors
+  /// check the same shape, and cannot stand in: its fields are public, so a built one can
+  /// still be changed (#164).
   uint64_t register_handle(TableResult result, RegionSink* measuring_sink, uint64_t seq) {
     if (result.columns.empty())
       throw std::runtime_error(
@@ -540,8 +540,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
           throw std::runtime_error(
               "CudfSortPreservingMerge: expression sort key not supported by the k-way "
               "merge (needs per-partition materialization) — file an increment");
-        key_cols.push_back(
-            static_cast<cudf::size_type>(expr->node_as_ColumnRef()->index()));
+        key_cols.push_back(column_ordinal(expr->node_as_ColumnRef(), owned[0].column_names));
         orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);
         null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
                                                 : cudf::null_order::AFTER);
@@ -607,7 +606,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         const fb::Expr* e = exprs->Get(i);
         if (e->node_type() != fb::ExprNode_ColumnRef)
           throw std::runtime_error("CudfRepartition: only ColumnRef hash keys supported");
-        key_cols.push_back(static_cast<cudf::size_type>(e->node_as_ColumnRef()->index()));
+        key_cols.push_back(column_ordinal(e->node_as_ColumnRef(), input.column_names));
       }
     }
 
@@ -615,7 +614,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
         input.view(), key_cols, static_cast<cudf::size_type>(n));
     // The input goes as soon as the partitioned copy exists: holding it while every
     // partition was copied out beside it cost a whole input of allocation per call (#145).
-    input = TableResult{};
+    { TableResult released = std::move(input); }
     const cudf::size_type total = parted->num_rows();
     // The N partitions share these columns, so an undrained lane keeps the whole
     // partitioned table alive — worse under skew than the copies were.
@@ -707,18 +706,19 @@ uint64_t NodeSession::execute_scan_rowgroups(uint64_t seq,
                              fb::EnumNamePlanNodeKind(node->node_type()) + ", not a CudfScan");
 
   ScopedNodeTimer timer(sink, seq, 0, call_index);
-  TableResult result;
-  try {
-    result = execute_scan(node->node_as_CudfScan(), row_groups);
-  } catch (const std::exception& e) {
-    // cuDF names neither the node nor the list it was handed, and the caller here is a
-    // partitioner's mapping — an index it cannot read is a planner defect, so the
-    // message has to carry where the request came from.
-    std::string groups;
-    for (auto rg : row_groups) groups += (groups.empty() ? "" : ", ") + std::to_string(rg);
-    throw std::runtime_error("NodeSession::execute_scan_rowgroups: seq " + std::to_string(seq) +
-                             " reading row groups [" + groups + "]: " + e.what());
-  }
+  TableResult result = [&] {
+    try {
+      return execute_scan(node->node_as_CudfScan(), row_groups);
+    } catch (const std::exception& e) {
+      // cuDF names neither the node nor the list it was handed, and the caller here is a
+      // partitioner's mapping — an index it cannot read is a planner defect, so the
+      // message has to carry where the request came from.
+      std::string groups;
+      for (auto rg : row_groups) groups += (groups.empty() ? "" : ", ") + std::to_string(rg);
+      throw std::runtime_error("NodeSession::execute_scan_rowgroups: seq " + std::to_string(seq) +
+                               " reading row groups [" + groups + "]: " + e.what());
+    }
+  }();
   timer.stop();
   auto tv = result.view();
   if (out_stats)

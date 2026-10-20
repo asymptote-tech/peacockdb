@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 // Declared, not included: the join headers moved between cuDF layouts and the
@@ -41,8 +42,10 @@ class JoinSession {
   /// The residual's conjuncts by the sides they read, once, at construction.
   void split_residual();
   /// §3.6's `hoist`: one cross conjunct's one-side operands into condition columns, so the
-  /// AST can take a comparison it otherwise refuses. False when it cannot be.
-  bool hoist(const fb::Expr* conjunct, cudf::table_view types);
+  /// AST can take a comparison it otherwise refuses. False when it cannot be. `names` is the
+  /// filter schema's, which `types` is in.
+  bool hoist(const fb::Expr* conjunct, cudf::table_view types,
+             std::vector<std::string> const& names);
   /// The filter-column map with the sides swapped, built once and owned.
   void flip_map();
   /// §3.4's row-wise matcher for the semi family: one `mixed_*` call per batch.

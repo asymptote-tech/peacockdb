@@ -2,6 +2,7 @@
 //! more at done for a lane where nothing went out, the first handed nothing.
 
 use super::*;
+use crate::plan::{AggFunc, AggStateColumns};
 
 /// A `sum(n)` init over `[k, n]`, keyed on `k` or keyless.
 fn summing_init(keyed: bool) -> GpuAggregate {
@@ -185,4 +186,104 @@ fn a_keyless_init_that_finalizes_itself_calls_the_pair_again_at_done() {
     assert_eq!(recipe.calls[3].target, recipe.calls[1].target);
     assert_eq!(recipe.calls[2].inputs, Vec::<Input>::new());
     assert_eq!(recipe.calls[3].inputs, vec![Input::PriorOutput]);
+}
+
+/// Every column the device emits is named on the wire, and a Welford's ddof rides beside its
+/// three names: a sample stddev must not reach the device reading as a population one.
+#[test]
+fn an_init_writes_each_functions_state_names_and_a_welfords_ddof() {
+    let triple = |out: &str| -> Vec<AggCall> {
+        [
+            (PlanAgg::Count, "$count"),
+            (PlanAgg::Mean, "$mean"),
+            (PlanAgg::M2, "$m2"),
+        ]
+        .into_iter()
+        .map(|(func, suffix)| AggCall {
+            func,
+            args: vec![Expr::column(1, "n")],
+            outputs: vec![Field::new(format!("{out}{suffix}"), DataType::Int64, true)],
+        })
+        .collect()
+    };
+    let mut aggs = triple("stddev(n)");
+    aggs.extend(triple("var_pop(n)"));
+    aggs.push(AggCall {
+        func: PlanAgg::Count,
+        args: vec![Expr::column(1, "n")],
+        outputs: vec![Field::new("count(n)", DataType::Int64, true)],
+    });
+    let names = [
+        "k",
+        "stddev(n)$count",
+        "stddev(n)$mean",
+        "stddev(n)$m2",
+        "var_pop(n)$count",
+        "var_pop(n)$mean",
+        "var_pop(n)$m2",
+        "count(n)",
+    ];
+    let state = Schema {
+        group_keys: vec![0],
+        agg_state: vec![
+            AggStateColumns {
+                output: "stddev(n)".into(),
+                func: AggFunc::Stddev,
+                ddof: 1,
+                positions: vec![1, 2, 3],
+            },
+            AggStateColumns {
+                output: "var_pop(n)".into(),
+                func: AggFunc::Var,
+                ddof: 0,
+                positions: vec![4, 5, 6],
+            },
+        ],
+        ..columns_of(&names)
+    };
+    let node = GpuAggregate::new(
+        Given::input(BatchLayout::MultipleBatches, &["k", "n"]),
+        AggregateBody {
+            group_by: vec![Expr::column(0, "k")],
+            grouping_sets: Vec::new(),
+            null_exprs: Vec::new(),
+            aggs,
+            finalize: None,
+        },
+        state.clone(),
+        state,
+    );
+    let mut writer = writer();
+    let recipe = aggregate(&node, &[&columns_of(&["k", "n"])], &mut writer)
+        .expect("the aggregate's payloads are writable")
+        .expect("an aggregate drives the ABI");
+    let (bytes, _) = writer.finish().expect("one root");
+    let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
+    let written = node_at(&plan, recipe.seqs()[0])
+        .expect("the walk names every kind")
+        .and_then(|node| node.node_as_cudf_aggregate())
+        .expect("the first seq is the init");
+    let funcs: Vec<(String, Vec<String>, i8)> = written
+        .aggr_funcs()
+        .expect("functions")
+        .iter()
+        .map(|f| {
+            (
+                f.name().unwrap_or_default().to_string(),
+                f.state_names()
+                    .map(|n| n.iter().map(str::to_string).collect())
+                    .unwrap_or_default(),
+                f.ddof(),
+            )
+        })
+        .collect();
+    let owned = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        funcs,
+        vec![
+            ("stddev".to_string(), owned(&names[1..4]), 1),
+            ("var_pop".to_string(), owned(&names[4..7]), 0),
+            ("count".to_string(), owned(&names[7..8]), 0),
+        ]
+    );
 }

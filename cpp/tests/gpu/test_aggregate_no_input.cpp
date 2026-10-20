@@ -55,18 +55,18 @@ flatbuffers::Offset<fb::Expr> int64_literal(flatbuffers::FlatBufferBuilder& fbb,
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, fb::CreateLiteralExpr(fbb, scalar).Union());
 }
 
-/// `func(arg)` under `alias`.
+/// `func(arg)` emitting one state column, `state`.
 flatbuffers::Offset<fb::AggregateFuncNode> func_over(flatbuffers::FlatBufferBuilder& fbb,
                                                      const char* func,
                                                      flatbuffers::Offset<fb::Expr> arg,
-                                                     const char* alias) {
+                                                     const char* state) {
   auto name = fbb.CreateString(func);
   auto args = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{arg});
-  auto out = fbb.CreateString(alias);
+  auto states = fbb.CreateVectorOfStrings({state});
   fb::AggregateFuncNodeBuilder node(fbb);
   node.add_name(name);
   node.add_args(args);
-  node.add_alias(out);
+  node.add_state_names(states);
   return node.Finish();
 }
 

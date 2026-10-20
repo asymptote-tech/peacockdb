@@ -42,13 +42,13 @@ flatbuffers::Offset<fb::PlanNode> grouping_sets_node(flatbuffers::FlatBufferBuil
     sets.push_back(fb::CreateGroupingSetMask(fbb, values));
   }
   auto count_name = fbb.CreateString("count");
-  auto count_alias = fbb.CreateString("n");
+  auto count_states = fbb.CreateVectorOfStrings({"n"});
   auto count_arg = hand::ref(fbb, 0, "k");
   auto count_args = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{count_arg});
   fb::AggregateFuncNodeBuilder count(fbb);
   count.add_name(count_name);
   count.add_args(count_args);
-  count.add_alias(count_alias);
+  count.add_state_names(count_states);
   auto count_func = count.Finish();
   auto funcs =
       fbb.CreateVector(std::vector<flatbuffers::Offset<fb::AggregateFuncNode>>{count_func});
