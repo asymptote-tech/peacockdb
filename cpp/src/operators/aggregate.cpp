@@ -2,14 +2,15 @@
 //
 // One request builder, `add_requests`, turns a function node and the node's phase into cuDF
 // requests and the state columns they fill, read where the node's args point and named from
-// its state_names (#225, #280). The grouped and grouping-set paths run it; a keyless node
-// reduces.
+// its state_names (#225, #280). The grouped and grouping-set paths run it, and so does a
+// keyless node holding a stddev or var, on one constant key; any other keyless node reduces.
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
 
 #include <cudf/groupby.hpp>
 #include <cudf/reduction.hpp>
+#include <cudf/replace.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/concatenate.hpp>
 #include <cudf/unary.hpp>
@@ -17,7 +18,9 @@
 #include <cudf/scalar/scalar_factories.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 
@@ -96,7 +99,8 @@ static cudf::column_view value_of(const fb::Expr* arg, cudf::table_view input,
 enum class StateReadback {
   AsIs,
   CountToInt64,  // cuDF's COUNT answers INT32; every count on the wire is INT64
-  MergedChild,   // one child of MERGE_M2's struct: the count widened to INT64, a moment as is
+  NullAsZero,    // a Welford init's mean or m2: NULL over a group of no valid value, 0.0 here
+  MergedChild,   // one child of MERGE_M2's struct: the count widened to INT64, a moment NullAsZero
 };
 
 struct StateColumn {
@@ -115,12 +119,10 @@ struct AggregateRequests {
   std::vector<std::unique_ptr<cudf::column>> owned;
 };
 
-/// cuDF 25.02's group_merge_m2 takes an INT32 count and rejects INT64 at runtime; 25.10
-/// reverses it (#94).
-constexpr cudf::type_id kMergeM2CountType = cudf::type_id::INT32;
-
 /// MERGE_M2's input: a Welford state's three columns as one struct, its count in
-/// kMergeM2CountType. The one place a MERGE_M2 input is built.
+/// kMergeM2CountType (plan_executor_internal.h), the type the linked cuDF takes;
+/// as_int64_count widens the merged count back to the wire's INT64, a no-op from 25.06. The one
+/// place a MERGE_M2 input is built.
 static std::unique_ptr<cudf::column> merge_m2_input(cudf::column_view count, cudf::column_view mean,
                                                     cudf::column_view m2) {
   // A struct owns its children, so the moments are copied in: per-group state (#154).
@@ -176,8 +178,8 @@ static void add_requests(const fb::AggregateFuncNode* func, AggPhase phase, cudf
         req.aggregations.push_back(cudf::make_mean_aggregation<cudf::groupby_aggregation>());
         req.aggregations.push_back(cudf::make_m2_aggregation<cudf::groupby_aggregation>());
         into.columns.push_back({state(0), r, 0, StateReadback::CountToInt64});
-        into.columns.push_back({state(1), r, 1, StateReadback::AsIs});
-        into.columns.push_back({state(2), r, 2, StateReadback::AsIs});
+        into.columns.push_back({state(1), r, 1, StateReadback::NullAsZero});
+        into.columns.push_back({state(2), r, 2, StateReadback::NullAsZero});
       } else {
         into.owned.push_back(merge_m2_input(arg(0), arg(1), arg(2)));
         req.values = into.owned.back()->view();
@@ -214,6 +216,14 @@ static std::unique_ptr<cudf::column> as_int64_count(cudf::column_view child) {
              : std::make_unique<cudf::column>(child);
 }
 
+// DataFusion's Welford state is never NULL: a group of no valid value is (0, 0.0, 0.0). cuDF
+// answers NULL there (MEAN and M2 over no valid value, MERGE_M2 where every merged count is 0),
+// so a moment's NULL is 0.0 and no MERGE_M2 downstream meets a NULL child. NaN stays NaN.
+static std::unique_ptr<cudf::column> zero_for_null(std::unique_ptr<cudf::column> moment) {
+  if (moment->null_count() == 0) return moment;
+  return cudf::replace_nulls(moment->view(), cudf::numeric_scalar<double>(0.0));
+}
+
 /// The state columns `built` declared, read out of `results`, appended in order. Reads only
 /// `built.columns`, so one `built` serves every grouping set's results.
 static void append_state_columns(AggregateRequests const& built,
@@ -229,10 +239,16 @@ static void append_state_columns(AggregateRequests const& built,
       case StateReadback::CountToInt64:
         columns.push_back(as_int64(std::move(result)));
         break;
-      case StateReadback::MergedChild:
-        // Three columns read one struct, so none can take its child over.
-        columns.push_back(as_int64_count(result->view().child(state.child)));
+      case StateReadback::NullAsZero:
+        columns.push_back(zero_for_null(std::move(result)));
         break;
+      case StateReadback::MergedChild: {
+        // Three columns read one struct, so none can take its child over.
+        auto child = result->view().child(state.child);
+        columns.push_back(state.child == 0 ? as_int64_count(child)
+                                           : zero_for_null(std::make_unique<cudf::column>(child)));
+        break;
+      }
     }
     names.push_back(state.name);
   }
@@ -348,8 +364,8 @@ static TableResult grouping_set_aggregate(const fb::CudfAggregate* agg, AggPhase
 }
 
 /// One row: `cudf::reduce` per function, its argument read through its args. A count is
-/// counted, a decimal sum is a one-group groupby, and a Welford is a finished `stddev` or a
-/// refused `var` — the keyless Welford is #216's.
+/// counted and a decimal sum is a one-group groupby. A node holding a Welford never gets here:
+/// it is keyless_welford_aggregate's.
 static TableResult keyless_aggregate(const fb::CudfAggregate* agg, AggPhase phase,
                                      cudf::table_view input,
                                      std::vector<std::string> const& names) {
@@ -383,11 +399,6 @@ static TableResult keyless_aggregate(const fb::CudfAggregate* agg, AggPhase phas
           auto [group_keys, results] = gb.aggregate(reqs);
           result = std::move(results[0].results[0]);
         }
-      } else if (name == "stddev" || name == "stddev_pop") {
-        // A finished stddev, at init and at merge alike: the keyless Welford is #216's.
-        auto ragg = cudf::make_std_aggregation<cudf::reduce_aggregation>(func->ddof());
-        auto s = cudf::reduce(values, *ragg, cudf::data_type{cudf::type_id::FLOAT64});
-        result = cudf::make_column_from_scalar(*s, 1);
       } else {
         std::unique_ptr<cudf::reduce_aggregation> ragg;
         if (name == "sum") ragg = cudf::make_sum_aggregation<cudf::reduce_aggregation>();
@@ -403,6 +414,57 @@ static TableResult keyless_aggregate(const fb::CudfAggregate* agg, AggPhase phas
   }
   return TableResult::owning(std::make_unique<cudf::table>(std::move(out_cols)),
                              std::move(out_names));
+}
+
+/// Whether any function of `agg` is a stddev or var: what sends a keyless node to the builder.
+static bool holds_a_welford(const fb::CudfAggregate* agg) {
+  if (!agg->aggr_funcs()) return false;
+  return std::any_of(agg->aggr_funcs()->begin(), agg->aggr_funcs()->end(), [](auto const* func) {
+    return func->name() && agg_kind(func->name()->str()) == AggKind::Welford;
+  });
+}
+
+// The row a routed node owes over no rows: plan/aggregates.rs's empty_state, which the identity
+// cases hold both engines to. Typed as the groupby typed its zero-row answer `no_groups`, which
+// keeps a decimal's scale, and named as it was, from state_names.
+static TableResult keyless_empty_state(const fb::CudfAggregate* agg, TableResult const& no_groups) {
+  auto one = [](cudf::scalar const& value) { return cudf::make_column_from_scalar(value, 1); };
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  for (auto const* func : *agg->aggr_funcs()) {
+    switch (agg_kind(func->name()->str())) {
+      case AggKind::Count:  // Partial only: check_shape refused a count at Merge
+        columns.push_back(one(cudf::numeric_scalar<int64_t>(0)));
+        break;
+      case AggKind::Welford:
+        columns.push_back(one(cudf::numeric_scalar<int64_t>(0)));
+        columns.push_back(one(cudf::numeric_scalar<double>(0.0)));
+        columns.push_back(one(cudf::numeric_scalar<double>(0.0)));
+        break;
+      case AggKind::Sum:
+      case AggKind::Min:
+      case AggKind::Max: {
+        // A default-constructed scalar is invalid: the NULL, at the column's type and scale.
+        auto type = no_groups.view().column(static_cast<cudf::size_type>(columns.size())).type();
+        columns.push_back(one(*cudf::make_default_constructed_scalar(type)));
+        break;
+      }
+    }
+  }
+  return TableResult::owning(std::make_unique<cudf::table>(std::move(columns)),
+                             no_groups.column_names);
+}
+
+// cuDF has M2 and MERGE_M2 for groupby only, so a keyless node holding a stddev or var runs
+// whole through the grouped builder, every row under one constant key, dropped after (#216).
+static TableResult keyless_welford_aggregate(const fb::CudfAggregate* agg, AggPhase phase,
+                                             cudf::table_view input,
+                                             std::vector<std::string> const& names) {
+  auto key = cudf::make_column_from_scalar(cudf::numeric_scalar<int32_t>(0), input.num_rows());
+  TableResult grouped = grouped_aggregate(agg, phase, {key->view()}, {"__keyless"}, input, names);
+  std::vector<cudf::size_type> state(static_cast<size_t>(grouped.num_columns() - 1));
+  std::iota(state.begin(), state.end(), 1);
+  TableResult keyless = grouped.select(state);
+  return keyless.num_rows() == 0 ? keyless_empty_state(agg, keyless) : keyless;
 }
 
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
@@ -425,7 +487,9 @@ TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
                               : ref->name()->str());
     }
   }
-  if (keys.empty()) return keyless_aggregate(agg, phase, tv, input.column_names);
+  if (keys.empty())
+    return holds_a_welford(agg) ? keyless_welford_aggregate(agg, phase, tv, input.column_names)
+                                : keyless_aggregate(agg, phase, tv, input.column_names);
   // Non-empty null_exprs, not grouping_sets, is the discriminator: a plain GROUP BY and a
   // grouping set's merge carry one all-false mask and no null_exprs.
   if (agg->null_exprs() && agg->null_exprs()->size() > 0 && agg->grouping_sets() &&

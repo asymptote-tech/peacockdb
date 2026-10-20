@@ -8709,6 +8709,36 @@ hash: f98c17d4ae8d950a93a35b1aaef34989decb8398a500665871eda9dcf7cdd754
 +---+----+---+---+
 | 0 | 0  |   |   |
 +---+----+---+---+
+== empty-dispersion-aggregates mode=tp1-single
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
+== empty-dispersion-aggregates mode=tp1-rowgroup
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
+== empty-dispersion-aggregates mode=tp4-single
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
+== empty-dispersion-aggregates mode=tp4-rowgroup
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
+== empty-dispersion-aggregates mode=tp4-sized
++----+----+
+| sd | vp |
++----+----+
+|    |    |
++----+----+
 == empty-grouped-count mode=tp1-single
 +-----+---+
 | t_k | n |

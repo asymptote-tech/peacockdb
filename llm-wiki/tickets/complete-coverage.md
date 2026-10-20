@@ -121,9 +121,9 @@ l_partkey) from lineitem group by l_returnflag;` (tpch).
   for itself. The state-layout check and the `u64` → `Int64` count cast go per call.
 - Device: `aggregate.cpp` takes the phase per function, not once per node from `agg_phase`.
 
-After [#216](corpus-coverage.md#t216): a keyless outer stage merging a Welford state meets the
-device's missing keyless Welford arm. The `bug_` test flips to a plan test and a cpu-vs-device
-case.
+The device runs a keyless Welford through the grouped request builder
+([#216](../archive/archived-tickets.md#t216)), so a keyless outer stage needs only the
+per-function phase above. The `bug_` test flips to a plan test and a cpu-vs-device case.
 
 <a id="t249"></a>
 ### #249 — the wire has no Time, Duration, Interval, Struct or List type

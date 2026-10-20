@@ -136,13 +136,16 @@ pub(crate) fn same_within_welford(
     let exact: Vec<usize> = (0..expected.num_columns())
         .filter(|i| !approximate.contains(i))
         .collect();
-    assert_same(
-        &[vec![expected.project(&exact).expect("the exact columns")]],
-        &[vec![
-            gpu.project(&exact).expect("the device's exact columns"),
-        ]],
-        Order::Any,
-    );
+    // A keyless finalize of one Welford output has no exact column, and nothing to sort by.
+    if !exact.is_empty() {
+        assert_same(
+            &[vec![expected.project(&exact).expect("the exact columns")]],
+            &[vec![
+                gpu.project(&exact).expect("the device's exact columns"),
+            ]],
+            Order::Any,
+        );
+    }
     let key_of = |b: &RecordBatch, row: usize| -> Option<Option<i32>> {
         keyed.then(|| {
             b.column(0)

@@ -27,4 +27,5 @@ mod nested_schema_cases;
 mod script;
 mod source_cases;
 mod source_schema_cases;
+mod welford_cases;
 mod whole_plan;

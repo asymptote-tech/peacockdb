@@ -188,18 +188,24 @@ operator_case! {
     }
 }
 
-// #216 — the device's keyless path has no Welford arm: it answers the one finished
-// `Float64` where the plan declares the `[count, mean, m2]` state.
+// The global Welford holds the triple the plan declares, at the init and at the merge.
 operator_case! {
     GpuAggregate,
-    fn bug_a_global_stddev_holds_one_finished_float64_where_the_plan_declares_the_welford_state() {
-        assert_eq!(
-            divergences_on_device(&welford_init_global(), Script::Accumulate(vec![input()])),
-            vec![Some(
-                "3 columns declared, 1 held; 0 stddev(f64)$count: Int64 vs FLOAT64"
-                    .to_string()
-            )]
-        );
+    fn a_global_stddev_holds_its_declared_welford_state() {
+        assert_holds_as_declared(&welford_init_global(), Script::Accumulate(vec![input()]));
+    }
+}
+
+operator_case! {
+    GpuAggregateBatches,
+    fn a_global_stddev_merge_holds_its_declared_welford_state() {
+        let partial = |seed| {
+            welford_partial(AggFunc::Stddev, seed)
+                .project(&[1, 2, 3])
+                .expect("the triple")
+        };
+        let node = welford_merge_by(false, AggFunc::Stddev, None);
+        assert_holds_as_declared(&node, Script::Accumulate(vec![partial(1), partial(2)]));
     }
 }
 

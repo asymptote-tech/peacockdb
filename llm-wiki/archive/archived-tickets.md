@@ -27,6 +27,65 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t216"></a>
+### #216 — the device's global aggregate has no Welford arm
+**Done by [`welford-device`](../tasks/welford-device.md) (chain K); awaiting merge.**
+
+A keyless `stddev` answers one finished `Float64` on the device where the plan declares the
+`[count, mean, m2]` state, so the finalize above it fails; a keyless `var` is refused outright.
+
+`aggregate.cpp`'s grouped path builds the triple through its request builder (`add_requests`);
+its keyless path (`keyless_aggregate`) reduces a `stddev` or `stddev_pop` name with
+`make_std_aggregation(func->ddof())` whatever the phase — at the init the sample stddev of the
+argument, at the merge the stddev of the state's first column, the count — and the finalize
+project refuses with `ColumnRef stddev(…)$m2@2 is past the 1 columns its input has`; a `var` name
+finds no reduction, `unsupported aggregate function: var`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t`
+are refusals on the device in every shape. Pinned in `aggregate_dimension_cases.rs` by the
+four `bug_` cases `…welford_init_answers_a_finished_stddev…`, `…keyless_welford_merge…`,
+`…global_stddev_finalize_is_refused…` and `…keyless_var_merge_is_refused…`; the init's one
+column read at the handle by `aggregate_schema_cases.rs`'s `bug_a_global_stddev_holds_…`.
+
+**Corpus query:** none yet; the simplest is `select stddev_samp(l_quantity), var_samp(l_quantity)
+from lineitem;` (tpch).
+
+**Fix proposed:** in `execute_aggregate`, a keyless node with any stddev or var runs whole through
+the grouped path on one constant `INT32` key, dropped before return — cuDF has `M2`/`MERGE_M2`
+for groupby only. The plan and recipes do not change. Empty input still answers one row, built
+per aggregator: a count 0, the rest NULL. The keyless `stddev` arm goes; its tests can assert
+`holds_as_declared`.
+
+**Closed.** A keyless node holding a `stddev` or `var` goes to `keyless_welford_aggregate`, which
+runs the grouped request builder on one constant `INT32` key and drops it; over zero rows it
+builds `empty_state`'s row. The Welford state is never NULL: the init's moments and those
+`MERGE_M2` hands back have NULL replaced by 0.0. `tpch/global-stddev` added and pbench's
+`empty-dispersion-aggregates` on, both at all five device modes.
+
+<a id="t94"></a>
+### #94 — MERGE_M2 count-child type is cuDF-version-specific
+**Done by [`welford-device`](../tasks/welford-device.md) (chain K); awaiting merge.**
+
+`merge_m2_input` (`cpp/src/operators/aggregate.cpp`) casts `valid_count` to `kMergeM2CountType`,
+INT32 for the 25.02 runtime; 25.06 and later (cuDF PR #18546) accept only INT64 or FLOAT64
+(`group_merge_m2.cu`). There is no Final arm. The
+26.02 CI leg is build-only so it stays green — this bites at the next GPU-remote cuDF bump.
+Switch or version-gate the type then; the comment marks the site.
+
+The plan never sees this type: it declares every `$count` state `Int64`, and so do the columns
+between calls. The INT32 lives inside the Merge call alone — cast in before `MERGE_M2`, widened
+back to INT64 before it returns. On 25.06 and later the count stays INT64 throughout.
+
+**Fix proposed:** gate at compile time. `cpp/CMakeLists.txt` passes `cudf_VERSION`'s major and
+minor as `PEACOCK_CUDF_VERSION_*` defines; `aggregate.cpp` picks one `constexpr` count type from
+them — INT32 before 25.06, INT64 from 25.06 — as `kMergeM2CountType`, at the one `MERGE_M2` site. No single type serves
+both versions, and each cuDF version is its own build, so no runtime probe. The gate goes when
+25.02 does.
+
+**Closed.** `kMergeM2CountType` (`plan_executor_internal.h`) is
+`merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR)` from `<cudf/version_config.hpp>`:
+`INT32` before 25.06, `INT64` from it. No CMake define, no runtime probe. Proven on 25.02 by a
+device run; the 26.02 branch is compiled by CI's 26.02 leg and not yet run on a device
+([#260](../tickets/system-hardening.md#t260)).
+
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
 **Done by [`aggregate-arms`](../tasks/aggregate-arms.md) (chain K); awaiting merge.**
