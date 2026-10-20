@@ -542,3 +542,93 @@ fn a_sort_and_a_partition_merge_that_received_nothing_emit_nothing() {
         "a merge of no lanes makes no call either"
     );
 }
+
+/// A keyless `count(v), sum(v)` over `input`, and its state.
+fn keyless_count_sum(input: Box<dyn GpuNode>) -> (Box<dyn GpuNode>, ArrowSchema) {
+    let state = schema_of(&[("count(v)", DataType::Int64), ("sum(v)", DataType::Int64)]);
+    let value = |func, out: &str| AggCall {
+        func,
+        args: vec![Expr::column(1, "v")],
+        outputs: vec![Field::new(out, DataType::Int64, true)],
+    };
+    let node = GpuAggregate::new(
+        input,
+        AggregateBody {
+            group_by: Vec::new(),
+            grouping_sets: Vec::new(),
+            null_exprs: Vec::new(),
+            aggs: vec![
+                value(PlanAgg::Count, "count(v)"),
+                value(PlanAgg::Sum, "sum(v)"),
+            ],
+            finalize: None,
+        },
+        Schema::new(Arc::new(state.clone())),
+        Schema::new(Arc::new(state.clone())),
+    );
+    (Box::new(node), state)
+}
+
+/// Over a filter that keeps nothing: the zero-row batch is released with no call, and done —
+/// nothing having gone out — calls the init's seq with no input, answering count 0, sum NULL.
+#[test]
+fn a_keyless_init_releases_a_zero_row_batch_and_answers_its_identity_row_at_done() {
+    let filter = GpuFilter::new(
+        source(),
+        greater_than(100),
+        None,
+        Schema::new(Arc::new(columns())),
+    );
+    let (tree, state) = keyless_count_sum(Box::new(filter));
+    let session = Session::open(tree.as_ref());
+    let _measuring = Measuring::on();
+    let (nothing, _) = session
+        .exec(1, &columns())
+        .exec(session.scan(&ROW_GROUPS))
+        .expect("the filter runs");
+    assert_eq!(nothing.num_rows(), 0, "the filter kept nothing");
+    let mut init = session.init(2, &state, &state);
+    let (out, stats) = init.accumulate_and_fetch(nothing).expect("accepted");
+    assert!(out.is_empty());
+    assert_eq!(made(&stats).len(), 0, "released with no call");
+    let (out, stats) = init.mark_done_and_fetch().expect("done is accepted");
+    assert_eq!(made(&stats).len(), 1, "the init's seq, handed nothing");
+    let [identity] = <[GpuBatch; 1]>::try_from(out).expect("one batch at done");
+    let row = export_of(&session, identity, &state);
+    assert_eq!(
+        rows(&row),
+        vec![vec![ScalarValue::Int64(Some(0)), ScalarValue::Int64(None)]]
+    );
+}
+
+#[test]
+fn a_keyless_init_that_answered_rows_makes_no_done_call() {
+    let (tree, state) = keyless_count_sum(source());
+    let session = Session::open(tree.as_ref());
+    let _measuring = Measuring::on();
+    let mut init = session.init(1, &state, &state);
+    let (out, _) = init
+        .accumulate_and_fetch(session.scan(&ROW_GROUPS))
+        .expect("accepted");
+    assert_eq!(out.len(), 1);
+    let (out, stats) = init.mark_done_and_fetch().expect("done is accepted");
+    assert!(out.is_empty());
+    assert_eq!(made(&stats).len(), 0);
+}
+
+/// An init built from a recipe without its done calls is refused rather than built: driven, it
+/// would answer nothing for a lane where nothing went out.
+#[test]
+fn an_init_whose_recipe_lacks_its_done_calls_is_refused() {
+    let (tree, state) = keyless_count_sum(source());
+    let session = Session::open(tree.as_ref());
+    let per_batch = session.recipe(1).calls_under(CallPattern::PerBatch);
+    let Err(refused) = GpuAccumulator::aggregate_init(session.site(), &per_batch, &state, &state)
+    else {
+        panic!("an init built from its per-batch calls alone");
+    };
+    assert!(
+        refused.to_string().contains("the same calls at done if nothing went out"),
+        "{refused}"
+    );
+}

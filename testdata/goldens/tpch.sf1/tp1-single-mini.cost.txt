@@ -466,7 +466,7 @@ peacockdb_cost=22051232
 storage_read_bytes=181904464 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter
 cuda_hash_join_bytes=193539184 # GpuHashJoin
-cuda_aggregate_bytes=129 # GpuAggregate, GpuAggregateBatches
+cuda_aggregate_bytes=86 # GpuAggregate, GpuAggregateBatches
 cuda_sort_bytes=0 # GpuSort, GpuAccumulateBatchesAndSort, GpuMergeSortedPartitions
 cuda_join_bytes=0 # GpuNestedLoopJoin, GpuCrossJoin
 cuda_window_bytes=0 # (placeholder, no node mapping)
@@ -477,7 +477,7 @@ vram_to_ram_bytes=43 # GpuUnload
 ram_to_vram_bytes=0 # (placeholder, no node mapping)
 cuda_decompress_bytes=0 # (placeholder, no node mapping)
 cuda_rle_decode_bytes=0 # (placeholder, no node mapping)
-peacockdb_cost=411818820
+peacockdb_cost=411818777
 == mixed-join
 storage_read_bytes=212846976 # GpuLoadParquet, GpuEmpty
 cuda_filter_bytes=0 # GpuFilter

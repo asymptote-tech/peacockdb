@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 5181 test cases — Rust 4603, C++ 180, Python 398.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5388 test cases — Rust 4806, C++ 184, Python 398.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2923 cases: `--lib` 820, `test_cpu_corpus` 2072, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3060 cases: `--lib` 838, `test_cpu_corpus` 2191, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2071 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2190 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -37,15 +37,11 @@ checked against plain DataFusion at `target_partitions = 1` — except under
 `data_fusion_disabled`, for a query DataFusion 45 answers wrong or refuses. Such a line checks no
 answer against DataFusion, so it must compare its whole answer with DuckDB. `tpch/distinct-functions`
 is the one: DataFusion refuses `stddev(DISTINCT)` and answers a grouped decimal `avg(DISTINCT)`
-as the plain average, and `end_to_end.rs` holds it against a hand-lowered oracle as well. 181
-lines, 178 of them running at
-the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
-[#199](tickets/corpus-coverage.md#t199), and two of
-pbench's run at the two tp1 modes only: `scalar-subquery-cross` (#199 at tp4) and
-`not-in-uncorrelated`, which tp4 refuses at plan time on [#267](tickets/corpus-coverage.md#t267).
-**3 lines are out entirely**, and they are exactly the 3 `duckdb_none` lines, all pbench's and all
-refused at plan time: `cross-empty-build` and `outer-on-true-empty` on [#282](tickets/corpus-coverage.md#t282),
-`in-is-null` on [#250](tickets/joins.md#t250). 875 cells,
+as the plain average, and `end_to_end.rs` holds it against a hand-lowered oracle as well. 187
+lines, 186 of them running at the modes each is correct at — one of pbench's runs at the two tp1
+modes only: `not-in-uncorrelated`, which tp4 refuses at plan time on
+[#267](tickets/corpus-coverage.md#t267). **1 line is out entirely**, the one `duckdb_none` line:
+pbench's `in-is-null`, refused at plan time on [#250](tickets/joins.md#t250). 927 cells,
 plus eight checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that the registry's `cpu_oracle`, `gpu_oracle` and `schema_validation` columns copy each line,
@@ -54,18 +50,18 @@ undetermined line's rows are compared only against committed files, that `duckdb
 sections are the registry's rows in both directions, `all_modes` expanding to the same cells as
 the five spelled out, and every `data_fusion_disabled` line comparing its whole answer with DuckDB
 
-Then the DuckDB tier, 1017 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 1077 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
-for `gpu-result.txt`. Today 132 lines are `duckdb_exact`, 19 `duckdb_approx`, 24
-`duckdb_fingerprint` (the over-cap sections), 3 `duckdb_none` (one side does not answer) and
+for `gpu-result.txt`. Today 140 lines are `duckdb_exact`, 19 `duckdb_approx`, 24
+`duckdb_fingerprint` (the over-cap sections), 1 `duckdb_none` (one side does not answer) and
 3 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 171 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 178 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
@@ -105,12 +101,12 @@ is off is never decoded and would arm itself when that cell is enabled
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 42 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 44 |
 |---|---|--:|
 
 SQL in, rows out: 18 queries planned and run at all five modes against DataFusion on the same
 SQL, eleven of them also at injected layouts no planner would emit, plus `in_flight_bytes` back
-to zero and holds equal releases at the end of every run — and twenty-two cases no query list
+to zero and holds equal releases at the end of every run — and twenty-four cases no query list
 can carry: that DataFusion's partial aggregate does not skip grouping here, that a relation
 DataFusion proved empty, planned alone, answers one zero-row batch that no node emitted at every mode, the call and pull
 counts a limit makes, the smallest budget a query fits in completing where the byte below it
@@ -130,9 +126,10 @@ companions, a DISTINCT argument holding NULLs, an empty keyless input answering 
 `tpch/distinct-functions` against a hand-lowered oracle through `sql_answers_match_oracle`;
 and two on an answer with no rows — an ordered query answering zero rows under its one column at
 every mode, and the empty sort's and merge's own emissions read off the run, which the answer
-cannot show. Two of the 42 are `#[ignore]`d against
+cannot show; and an aggregate beside a full outer join over an input no row survives, and a count
+over a scan no row group survives answering 0. Two of the 44 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 40 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 42 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -148,7 +145,7 @@ inexact comparison, red on a renamed and on a retyped column before it reads a v
 
 *component*
 
-| Plan rules, hand-built | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 31 |
+| Plan rules, hand-built | [a_limit_over_several_lanes_names_the_node_that_fixes_it](../peacockdb-core/src/plan/tests/mod.rs) | 32 |
 |---|---|--:|
 
 one input per rule, each built to break the rule it is aimed at: a plan that violates one is
@@ -242,6 +239,17 @@ shapes stay as they were: with `=` beside it, DataFusion keys the join itself un
 default; and `IS DISTINCT FROM`, or an expression operand, keeps the loop. Over the hand-built
 fixture
 
+| A scan of nothing | [planner::tests::empty_scan](../peacockdb-core/src/planner/tests/empty_scan.rs) | 2 |
+|---|---|--:|
+
+a scan no row group survives — every one pruned, or a file with none — plans one lane holding no
+batch at every mode, and a scan with survivors maps as before ([#282](archive/archived-tickets.md#t282))
+
+| Recipe patterns | [only_an_aggregate_init_calls_at_done_if_nothing_went_out_and_every_init_does](../peacockdb-core/src/planner/tests/recipe_patterns.rs) | 1 |
+|---|---|--:|
+
+across the corpus plans, `AtDoneIfNothingOut` belongs to every aggregate init and to nothing else
+
 | Plan goldens, tp1-single | [tpch_tp1_single](../peacockdb-core/src/planner/tests/plan_goldens.rs) | 3 |
 |---|---|--:|
 
@@ -307,7 +315,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one — plus `nested-limits`, for `CudfScan.rows_only` — so the membership grows when the mapping does; pbench's `empty-side-left-join` is the one whose `GpuEmpty` holds its slot with a stub scan — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 21 |
+| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 23 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, the joins first: the one `CudfJoin` each join
@@ -334,7 +342,7 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 117 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 123 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -354,7 +362,7 @@ a region without a call each refused, a region the clock rounded to nothing stil
 ran, and the recorded node index the post-order rather than the walk order; and a sink that
 received nothing answering one zero-row batch under its input's columns, which no node emitted
 
-| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 88 |
+| CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 91 |
 |---|---|--:|
 
 one hand-built node per executor, one hand-written expected result: the exec executors, the
@@ -435,7 +443,7 @@ canonicalization and not comet's own rule — without it `NaN` and `-NaN` split 
 device equates them at tp1. That the *kernel* follows the rule is the murmur gate's, on the
 device rung; this is the half that needs no card
 
-| Aggregate state types | [plan::aggregates::tests](../peacockdb-core/src/plan/aggregates/tests.rs) | 9 |
+| Aggregate state types | [plan::aggregates::tests](../peacockdb-core/src/plan/aggregates/tests.rs) | 10 |
 |---|---|--:|
 
 `state_type`'s table against the accumulators it was read off: each arm's DataFusion
@@ -633,11 +641,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1560 cases: `--lib -- gpu_tests::` 713, `test_gpu_corpus` 835, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1626 cases: `--lib -- gpu_tests::` 725, `test_gpu_corpus` 889, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 834 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 888 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -651,21 +659,18 @@ emits those columns),
 and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-833 cells today. From tpch, 201: every line at every mode, but for three. `q11` is off at the
-three tp4 modes and `q22` at `tp4-single`, on [#199](tickets/corpus-coverage.md#t199): a keyless
-merge over a lane that got nothing, whose identity row the cpu's section carries and the device
-does not. `mixed-join` is off on [#168](tickets/corpus-coverage.md#t168). From tpcds,
-378: every line wherever it runs on the cpu, but for five. `q32` is off at the three tp4 modes
-on #199, its keyless sum over an Inner join whose build lands in one lane of four. `q78` and `q2`
-are off on [#60](tickets/corpus-coverage.md#t60), a float `round(x, 2)` one ulp from
+887 cells today. From tpch, 205: every line at every mode but `mixed-join`, off on
+[#168](tickets/corpus-coverage.md#t168). From tpcds, 390: every line wherever it runs on the cpu,
+but for four. `q78` and `q2` are off on [#60](tickets/corpus-coverage.md#t60), a float `round(x, 2)` one ulp from
 DataFusion's. `q5` is off on [#210](tickets/corpus-coverage.md#t210), its bare decimal literal held as
 `FLOAT64`; `q39` on #225's Welford names. tpcds is where #137's NULL-key filters run on
-a device, at every tp4 cell. From pbench, 254: every line wherever it runs on the cpu, but for
-two. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` whose pattern is a
+a device, at every tp4 cell. From pbench, 292: every line wherever it runs on the cpu, but for
+three. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` whose pattern is a
 column; `timestamp-s-key-group` on
-[#264](tickets/corpus-coverage.md#t264), a cast group key. pbench is where the device meets NULL
+[#264](tickets/corpus-coverage.md#t264), a cast group key; `empty-dispersion-aggregates` on
+[#216](tickets/corpus-coverage.md#t216). pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 834th case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 888th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -696,7 +701,7 @@ from the sf40 run instead
 
 *crate integration, internal*
 
-| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 457 |
+| Operator harness | [an_unload_hands_the_whole_batch_over_on_both_backends](../peacockdb-core/src/tests/gpu_tests/harness_cases.rs), [bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device](../peacockdb-core/src/tests/gpu_tests/exec_cases.rs), [every_kind_has_a_case_or_is_a_forwarder](../peacockdb-core/src/tests/gpu_tests/coverage.rs) | 463 |
 |---|---|--:|
 
 one hand-built node over stub leaves, a script of synthetic batches, both backends through
@@ -756,7 +761,7 @@ at the merge (#225)
 
 *component*
 
-| Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs), [an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count](../peacockdb-core/src/wire/gpu_tests/mod.rs) | 25 |
+| Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs), [an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count](../peacockdb-core/src/wire/gpu_tests/mod.rs)  | 28 |
 |---|---|--:|
 
 the recipe plan driven by hand — begin_plan, the calls each recipe names, handles threaded
@@ -764,9 +769,10 @@ between them, DataFusion on the same SQL as the oracle. One partition and one ba
 aggregates, which take two so a merge happens; `avg` asserts digits, since cuDF takes a
 divide's scale from its operands where arrow takes it from the declared type. A ROLLUP is here
 because its masks and NULL placeholders are the one payload the plan line does not imply;
-`GROUPING()` over every key, a summed quotient and a two-stage DISTINCT beside `avg` and `count`
-are walked too. One read re-walks every query to check the kinds a device has run against the kinds the file
-claims, in both directions. Twelve spot-checks read what the device holds between calls, each
+`GROUPING()` over every key, a summed quotient, a two-stage DISTINCT beside `avg` and `count`, a
+keyless aggregate's identity row on a lane that saw no batch and over a scan of nothing, and no
+done call over lanes with rows are walked too. One read re-walks every query to check the kinds a
+device has run against the kinds the file claims, in both directions. Twelve spot-checks read what the device holds between calls, each
 a literal schema written from the plan before any ran — `avg`'s partial, merge and finalize,
 `sum`'s partial, the filter, the project, the inner and semi joins' session build, probe and finish, the nested
 aggregates' inner finalize and outer `max`, the rollup's partial holding the `UInt8` id the plan
@@ -784,13 +790,13 @@ what [#201](archive/archived-tickets.md#t201) was. Two of the nineteen need no d
 call and `pmod` on a negative hash, and ride here anyway, because the module is the gate and
 splits nowhere
 
-| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 39 |
+| Executors on a device | [an_aggregate_that_finalizes_runs_both_of_its_calls](../peacockdb-core/src/executor/gpu_backend/gpu_tests/exec.rs) | 42 |
 |---|---|--:|
 
 each one handed its node's recipe — the exec nodes one batch at a time (filter, project,
-per-batch sort, aggregate with and without its finalize, the export with a row range, and an
-accumulator's recipe refused), the accumulators a stream of them (coalesce, the accumulating
-sort, the state merge, the Welford merge, the mid-plan limit), and the joins what the matrix says a device
+per-batch sort, the export with a row range, and an accumulator's recipe refused), the
+accumulators a stream of them (the aggregate's init with and without its finalize, and refused
+without its done calls, coalesce, the accumulating sort, the state merge, the Welford merge, the mid-plan limit), and the joins what the matrix says a device
 runs on the session: its lifecycle, `Drop` releasing it, `owes_nothing`, the journal and region
 per call and no finish call for the four types that owe nothing at done, its residency (a
 RightSemi's distinct build keys among it) and call scratch (a LeftSemi probe's distinct keys), and
@@ -830,7 +836,7 @@ the harness's own format reader — none of which runs engine code.
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 12 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 12 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 2 |
-| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp) | shad-gpu | 91 |
+| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp) | shad-gpu | 95 |
 | Join session (C++) | the four `peacock_join_*` symbols through the C ABI alone — plan bytes in, Arrow batches up, IPC answers down — over the matrix of [join-rewrite-design.md](tasks/join-rewrite-design.md) §5.6: all nine join types against keys only, a cross residual the AST takes and one it refuses, a residual reading one side alone, a nested loop whose conjuncts are all AST-able, partly so, or not at all, and a cross join; NULL keys on both sides under either `null_equals_null`, many-to-many keys, a composite key with a NULL in its second column; a build that is absent, zero rows or all-NULL keys, a probe that is absent, one batch, or three with a zero-row batch between; a projection absent, crossing sides, or empty and refused. Left and Full pad a NULL-key build row rather than dropping it. Five cases probe three batches with a zero-row batch between, no batch matching what another did, because `matched` is an OR folded across calls and a single batch cannot tell that from the last call's answer — which is the whole of #136. Four properties no answer can show get a case each — hoisting a one-side operand keeps a nested loop off the cross product, bounded by the same join whose condition needs no hoisting plus the build's own bytes; a probe hands its gathered columns over without a copy (#154), its peak bounded by the same cuDF calls on tables of the same shape and its `net` bounded *both* ways, since an upper bound is the only thing that sees a session retaining the batch it consumed; releasing a session, and ending the plan under a live one, give back the build side's own measured bytes; each call opens exactly one region; and the two `size_type` ceilings refuse by name rather than wrapping, asked on sizes because no test host holds a table that big | [JoinSession.LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey](../cpp/tests/gpu/test_join_session.cpp), [JoinSession.HoistingKeepsANestedLoopOffTheCrossProduct](../cpp/tests/gpu/test_join_session.cpp) | shad-gpu | 53 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
 | TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | shad-gpu | 4 |

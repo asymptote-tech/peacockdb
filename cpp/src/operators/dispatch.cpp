@@ -104,6 +104,8 @@ TableResult take_input(NodeInputs* in) {
   return std::move((*in->items)[in->idx++]);
 }
 
+bool was_handed_nothing(const NodeInputs* in) { return in && in->items && in->items->empty(); }
+
 TableResult execute_one(const fb::PlanNode* node, std::vector<TableResult> inputs) {
   const size_t provided = inputs.size();
   NodeInputs in{&inputs, 0};

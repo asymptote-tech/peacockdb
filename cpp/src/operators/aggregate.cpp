@@ -155,8 +155,35 @@ static std::unique_ptr<cudf::column> grouping_id_column(const flatbuffers::Vecto
   return column(uint64_t{});
 }
 
+// The table a done call aggregates: the node's declared input at zero rows, so a keyless
+// node answers its identity row through the same reduce a batch takes, and a grouped one no
+// groups. A decimal takes its scale from the field, which the type id cannot carry.
+static TableResult zero_rows_of(const fb::CudfAggregate* agg) {
+  const auto* schema = agg->aggr_input_schema();
+  if (!schema || !schema->fields())
+    throw std::runtime_error(
+        "CudfAggregate handed no input carries no aggr_input_schema to build one from");
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  std::vector<std::string> names;
+  for (const auto* field : *schema->fields()) {
+    std::string name = field->name() ? field->name()->str() : "";
+    cudf::type_id id = fb_to_type_id(field->data_type());
+    if (id == cudf::type_id::EMPTY)
+      throw std::runtime_error("CudfAggregate handed no input: its input column `" + name +
+                               "` has no cuDF type");
+    cudf::data_type type = id == cudf::type_id::DECIMAL128
+                               ? cudf::data_type{id, -static_cast<int32_t>(field->decimal_scale())}
+                               : cudf::data_type{id};
+    columns.push_back(cudf::make_empty_column(type));
+    names.push_back(std::move(name));
+  }
+  return TableResult::owning(std::make_unique<cudf::table>(std::move(columns)), std::move(names));
+}
+
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in) {
-  auto input = take_input(in);
+  // Only an init's done call is handed nothing; a merge so handed still refuses.
+  bool done_call = was_handed_nothing(in) && agg->mode() == fb::AggregateMode_Partial;
+  auto input = done_call ? zero_rows_of(agg) : take_input(in);
   auto tv = input.view();
 
   bool is_final = (agg->mode() == fb::AggregateMode_Final ||

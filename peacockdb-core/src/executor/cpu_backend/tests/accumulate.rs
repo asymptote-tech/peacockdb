@@ -413,9 +413,7 @@ fn a_merge_that_finalizes_emits_the_finalized_row() {
 }
 
 /// The same for a merge, and the reason is not only the device: a grouped merge over no
-/// arrivals owes no groups. The shape that would owe a row — a global aggregate's identity
-/// row, count 0 rather than no row — has one lane and no scatter above it, so its lane is
-/// never the empty one.
+/// arrivals owes no groups.
 #[test]
 fn a_merge_that_received_nothing_emits_nothing() {
     let output = state_of(
@@ -783,11 +781,10 @@ fn a_merge_whose_lanes_received_nothing_emits_nothing() {
     assert!(drive_lanes(merge_sorted(2, None), vec![(0, None), (1, None)]).is_empty());
 }
 
-/// A global aggregate's lane can be empty — a mid-plan limit that dropped every batch of
-/// the one lane is how — and what it owes then is its identity row rather than no row.
-/// `count(*)` over nothing is 0, and a query asking for it gets an answer.
+/// A merge that received nothing emits nothing, keyless included: a keyless init answers its
+/// identity row at done, so the merge above it always meets a row, and no merge invents one.
 #[test]
-fn a_global_aggregate_that_received_nothing_still_owes_its_identity_row() {
+fn a_global_merge_that_received_nothing_emits_nothing() {
     let counted = Schema::new(Arc::new(
         columns(&[("count(v)", DataType::Int64)])
             .fields
@@ -814,15 +811,9 @@ fn a_global_aggregate_that_received_nothing_still_owes_its_identity_row() {
     let accumulator = CpuAccumulator::aggregate(&node, &counted.fields, ctx(), 1 << 20)
         .expect("the merge builds");
     let emitted = drive(accumulator, Vec::new());
-    assert_eq!(
-        emitted.len(),
-        1,
-        "a global aggregate answers whatever arrived"
-    );
-    assert_eq!(
-        emitted[0].record_batch().num_rows(),
-        1,
-        "and its answer is one row, not an empty batch"
+    assert!(
+        emitted.is_empty(),
+        "no merge invents a row for a lane that sent none"
     );
 }
 

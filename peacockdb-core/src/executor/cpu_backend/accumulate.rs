@@ -1,10 +1,12 @@
-//! The accumulators: the nodes that hold a lane's batches back, and the mid-plan limit,
-//! which is one by category and holds nothing at all.
+//! The accumulators: the nodes that hold a lane's batches back, and two that are accumulators
+//! by category alone — the mid-plan limit, which holds nothing, and an aggregate's init,
+//! which holds a flag.
 //!
 //! One type with a variant per behaviour, because a backend names one type for the
-//! category and what these four do differs completely. The variant is what a call site
+//! category and what these five do differs completely. The variant is what a call site
 //! reads: a coalesce that concatenates, a sort that orders the whole stream, a merge that
-//! folds state on a threshold, and a limit that forwards, slices or drops.
+//! folds state on a threshold, a limit that forwards, slices or drops, and an aggregate's
+//! init that runs per batch with rows and once more over nothing at done.
 
 use std::sync::Arc;
 
@@ -18,15 +20,15 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 
 use super::expr_physical::physical_projection;
 use super::{
-    CpuAccumulator, CpuPartitionAccumulator, aggregate_exec, declared_as, lex_ordering,
+    CpuAccumulator, CpuExec, CpuPartitionAccumulator, aggregate_exec, declared_as, lex_ordering,
     placeholder, run_node,
 };
 use crate::executor::CpuBatch;
 use crate::executor::{BackendError, CallResult, CallStats, LaneEvent};
 use crate::plan::PlanError;
 use crate::plan::{
-    GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuLimit,
-    GpuMergeSortedPartitions,
+    GpuAccumulateBatchesAndSort, GpuAggregate, GpuAggregateBatches, GpuCoalesceAllBatches,
+    GpuLimit, GpuMergeSortedPartitions,
 };
 use crate::plan::{GpuNode, RowInterval};
 use crate::plan::{Phase, finalize_columns};
@@ -37,6 +39,7 @@ pub(crate) enum State {
     Sorted(SortedRuns),
     Aggregate(AggregateBatches),
     Limit(LimitStream),
+    Init(AggregateInit),
 }
 
 impl CpuAccumulator {
@@ -102,7 +105,6 @@ impl CpuAccumulator {
             pending_bytes: 0,
             threshold: compact_bytes,
             compactions: 0,
-            grouped: !body.group_by.is_empty(),
             held: state.fields.clone(),
             output: output.fields.clone(),
             ctx,
@@ -116,12 +118,27 @@ impl CpuAccumulator {
         }))
     }
 
+    /// An aggregate's init: the exec node's operators, run per batch with rows, and once over
+    /// an empty batch of its input at done where nothing went out.
+    pub(crate) fn aggregate_init(
+        node: &GpuAggregate,
+        input: &ArrowSchema,
+        ctx: Arc<TaskContext>,
+    ) -> Result<Self, PlanError> {
+        Ok(Self::of(State::Init(AggregateInit {
+            chain: CpuExec::aggregate(node, input, ctx)?,
+            input: Arc::new(input.clone()),
+            emitted: false,
+        })))
+    }
+
     pub(crate) fn accumulate_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
         match &mut self.state {
             State::Coalesce(state) => state.accumulate_and_fetch(batch),
             State::Sorted(state) => state.accumulate_and_fetch(batch),
             State::Aggregate(state) => state.accumulate_and_fetch(batch),
             State::Limit(state) => state.accumulate_and_fetch(batch),
+            State::Init(state) => state.accumulate_and_fetch(batch),
         }
     }
 
@@ -131,6 +148,7 @@ impl CpuAccumulator {
             State::Sorted(state) => state.mark_done_and_fetch(),
             State::Aggregate(state) => state.mark_done_and_fetch(),
             State::Limit(state) => state.mark_done_and_fetch(),
+            State::Init(state) => state.mark_done_and_fetch(),
         }
     }
 }
@@ -142,9 +160,9 @@ impl CpuAccumulator {
 /// what makes them one engine here; the device's collapse answers the same way and the C++
 /// guard behind it is never reached. A lane whose one arrival was a zero-row batch holds a
 /// batch and emits it, which is how a scatter's kept empty reaches a join that owes rows
-/// (#175). A grouped merge over no arrivals owes no groups, so nothing is also its answer.
-/// The exception is a global aggregate, which owes its identity row whatever arrived — see
-/// [`AggregateBatches::mark_done_and_fetch`].
+/// (#175). A grouped merge over no arrivals owes no groups, so nothing is also its answer. A
+/// keyless merge always meets its lanes' identity rows, since a keyless init answers one at
+/// done.
 fn coalesce_or_nothing(schema: &SchemaRef, held: &[RecordBatch]) -> CallResult<Vec<CpuBatch>> {
     if held.is_empty() {
         return Ok((Vec::new(), CallStats::default()));
@@ -317,9 +335,6 @@ pub(crate) struct AggregateBatches {
     /// How many times the threshold was reached. Read by the tests, which are what pins
     /// the doubling: without it a disjoint-key aggregate compacts once per arrival.
     compactions: usize,
-    /// Whether this aggregate has group keys. A global one owes a row even for an empty
-    /// lane; a grouped one owes no groups.
-    grouped: bool,
     held: SchemaRef,
     output: SchemaRef,
     ctx: Arc<TaskContext>,
@@ -362,13 +377,11 @@ impl AggregateBatches {
         Ok(())
     }
 
-    /// A lane that received nothing usually owes nothing — but a global aggregate owes its
-    /// identity row, `count 0` rather than no row, and a mid-plan limit that dropped every
-    /// batch of its one lane is how that lane comes to be empty. So the merge runs over no
-    /// input rather than being skipped, and the operator answers: one row where there are
-    /// no group keys, none where there are.
+    /// Fold what is pending and emit the state, finalized where this node finishes the
+    /// aggregate — nothing where nothing arrived. A keyless merge's lanes each carry their
+    /// init's identity row at least, so nothing is never a keyless answer here.
     fn mark_done_and_fetch(mut self) -> CallResult<Vec<CpuBatch>> {
-        if !self.pending.is_empty() || (self.state.is_none() && !self.grouped) {
+        if !self.pending.is_empty() {
             self.compact()?;
         }
         let Some(state) = self.state else {
@@ -412,6 +425,38 @@ impl LimitStream {
 
     fn mark_done_and_fetch(self) -> CallResult<Vec<CpuBatch>> {
         Ok((Vec::new(), CallStats::default()))
+    }
+}
+
+/// An aggregate's init. A zero-row batch is dropped uncalled, so adding one changes no row;
+/// a batch with rows runs the init (and the shortcut's finalize); done runs them over an empty
+/// batch where nothing went out — DataFusion's identity row keyless, no groups grouped.
+pub(crate) struct AggregateInit {
+    chain: CpuExec,
+    input: SchemaRef,
+    emitted: bool,
+}
+
+impl AggregateInit {
+    fn accumulate_and_fetch(&mut self, batch: CpuBatch) -> CallResult<Vec<CpuBatch>> {
+        if batch.record_batch().num_rows() == 0 {
+            return Ok((Vec::new(), CallStats::default()));
+        }
+        let (out, stats) = self.chain.exec(batch)?;
+        self.emitted |= out.record_batch().num_rows() > 0;
+        Ok((vec![out], stats))
+    }
+
+    fn mark_done_and_fetch(mut self) -> CallResult<Vec<CpuBatch>> {
+        if self.emitted {
+            return Ok((Vec::new(), CallStats::default()));
+        }
+        let nothing = CpuBatch::new(RecordBatch::new_empty(self.input.clone()));
+        let (out, stats) = self.chain.exec(nothing)?;
+        match out.record_batch().num_rows() {
+            0 => Ok((Vec::new(), stats)),
+            _ => Ok((vec![out], stats)),
+        }
     }
 }
 

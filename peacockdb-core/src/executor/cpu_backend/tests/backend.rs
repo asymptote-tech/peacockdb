@@ -373,11 +373,11 @@ fn a_state_value_too_large_for_its_declared_precision_ends_the_query() {
 /// #227: a NULL where the node declares the column non-nullable is refused, naming the column
 /// and how many.
 ///
-/// Arrow's own `try_new` already refuses this when the two schemas differ — which is how
-/// #199's `count(*)` surfaces — but it names the whole pair of schemas and buries the cause in
-/// a debug dump two hundred characters long. The declaration is what the device is sent and
-/// what every node above reads, so the message a reader gets for it is the one thing standing
-/// between "this column has a NULL it may not have" and a schema diff nobody finishes.
+/// Arrow's own `try_new` already refuses this when the two schemas differ, but it names the
+/// whole pair of schemas and buries the cause in a debug dump two hundred characters long. The
+/// declaration is what the device is sent and what every node above reads, so the message a
+/// reader gets for it is the one thing standing between "this column has a NULL it may not
+/// have" and a schema diff nobody finishes.
 #[test]
 fn a_null_in_a_column_declared_non_nullable_is_refused_by_name() {
     use datafusion::arrow::array::Int32Array;
