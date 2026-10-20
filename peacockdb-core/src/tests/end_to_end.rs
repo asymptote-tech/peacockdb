@@ -650,9 +650,9 @@ async fn a_distinct_over_a_column_holding_nulls_does_not_count_the_null() {
 
 #[tokio::test]
 async fn a_keyless_distinct_over_no_rows_answers_zero() {
-    // A predicate the row-group statistics cannot prune: `ss_quantity < 0` prunes every row
-    // group and the plan is refused before it runs. This one keeps them, and every lane gets
-    // zero-row batches.
+    // A predicate the row-group statistics cannot prune, so every lane gets zero-row batches.
+    // `ss_quantity < 0` would prune the scan to no batch, which is
+    // `a_count_over_a_scan_of_nothing_answers_0`'s case.
     sql_answers_match_datafusion(
         "tpcds",
         "distinct over nothing",

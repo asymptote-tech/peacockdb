@@ -184,3 +184,15 @@ Developer fixed both code importants and every developer nit, each new test show
 build; L40S list green (plan 95, gpu lib 725, corpus 889). Coordinator: `build-test.md` counts
 (5387 / 4805 / 184; cpu 3059, `--lib` 838; gpu 1626; recipes 23; walk 28; executors 42;
 plan-executor 95) and the walk and executor prose. Completeness pass dispatched.
+
+### 2026-10-20 — completeness pass closed; `completeness approved`
+
+Reviewer: 3 important — `limit`'s doc reassigned to `aggregate_init` (round 1's fix moved the
+defect; the coordinator moved the doc back above `limit`, comment-only), `end_to_end.rs:653`'s
+stale #282 refusal (reworded), #214 (left to the human). Analyst: the same doc defect,
+`plan_goldens.rs:962` (no pbench refusal is left uncited; sentence cut), and four
+`architecture.md` sentences, fixed: the row-group mapping's one owner (`[[]]` is the loader's),
+node display (verbatim what the loader stored), memory accounting (the done call priced at zero,
+named as the exception), and the zero-row rule (a keyless merge is the one node that does not
+meet it, unreachable). Cost-report job green on HEAD; nothing pins a moved count. Signoff written.
+GPU host hard-stopped; dispatched CI follows.

@@ -122,7 +122,8 @@ to look for the difference.
 The row-group → (lane, batch) mapping is computed once, at plan time, by a pure policy function
 (`planner/translator/scan_mapping/`), and everything else consumes its output: the loader
 stores it verbatim, the plan golden renders it verbatim as `partition_groups=[…]`, validation
-checks the declared lane count against it. One fact, one owner.
+checks the declared lane count against it. One fact, one owner. The one mapping the policy
+never sees is a scan with no surviving row group: the loader writes `[[]]` itself.
 
 Survivors split into `n` contiguous chunks balanced by row count — a chunk ends where taking
 the next group would land further from its share than stopping does, rather than where the
@@ -870,7 +871,8 @@ Four things in `executor/driver/accounting.rs` are load-bearing.
 **What prices a transient is the pre-check, so pricing it is an obligation.** An accumulator's
 `scratch_bytes` on its emitting call must include the output it is about to build; the model may
 consult `&self`, which is what that permission is for. A model that returns zero there is not a
-cheap call, it is a guard switched off, and it fails open.
+cheap call, it is a guard switched off, and it fails open. One exception stands: an init's done
+call, where nothing went out, is priced at zero on both backends, for an identity row of one.
 
 **Model ≥ measured is not an invariant.** `scratch_bytes` rests on a cardinality figure for a
 join and assumed selectivity for a filter, so it will sometimes come in low. The accountant's
@@ -931,8 +933,10 @@ is not such a join.
 from any of its inputs, anywhere and in any number.** "No batch" and "a zero-row batch" are then
 the same arrival as far as rows go. Only the batch count and boundaries may differ.
 
-Every node meets the rule. A keyless init answers its identity row at done where nothing went
-out, so a lane that got no batch answers as one that got only empty ones. The limit
+Every node meets the rule but a keyless merge, which answers one row over zero-row arrivals and
+nothing over none; no plan feeds it either, since every keyless init answers a row per lane. A
+keyless init answers its identity row at done where nothing went out, so a lane that got no
+batch answers as one that got only empty ones. The limit
 ([#214](tickets/corpus-coverage.md#t214)) drops a zero-row batch on both engines, which changes
 the batch count and no row.
 
@@ -1406,7 +1410,7 @@ own line rather than leaving the number to be inferred from the sort beneath it.
 aggregate's `aggs` and `final` lists, the loader's `partition_groups`, and a limit's interval
 wherever it lives. A source renders its whole mapping as one nested structure —
 `partition_groups=[[[0,1],[2,3]],[[4],[5,6,7]]]`, lanes outermost, batches within them, row
-groups innermost — verbatim what the partitioner returned, because which batch sits in which
+groups innermost — verbatim what the loader stored, because which batch sits in which
 lane is the property worth reading and a lane count beside a batch count does not carry it.
 
 **Types are a plan fact.** The declared schema per node is what makes the explicit casts

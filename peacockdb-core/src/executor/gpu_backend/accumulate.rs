@@ -125,8 +125,6 @@ impl GpuAccumulator {
         })))
     }
 
-    /// No seq at all: a limit's bounds are runtime values, so it addresses the slice
-    /// symbol rather than a node.
     /// An aggregate's init: its calls per batch, and the same calls at done if nothing went
     /// out, the first handed nothing. Anything else is a recipe this executor would drive at
     /// the wrong moment.
@@ -162,6 +160,8 @@ impl GpuAccumulator {
         })))
     }
 
+    /// No seq at all: a limit's bounds are runtime values, so it addresses the slice
+    /// symbol rather than a node.
     pub(crate) fn limit(
         site: CallSite,
         recipe: &Recipe,
