@@ -24,6 +24,7 @@
 - [#291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins](#t291)
 - [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
 - [#295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate](#t295)
+- [#297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned](#t297)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -320,3 +321,17 @@ orders join on the estimate, and a third replan follows. q21 goes from 0.726 to 
 
 Fix: estimate a residual edge by its predicate, as the plan's estimator does, over the columns of
 the two relation sets it joins.
+
+<a id="t297"></a>
+### #297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned
+Reassembly puts the plan's null-key filter back below each shuffle of a key the plan filtered, and
+DPhyp's C_out prices joins alone, so no order's cost holds that filter.
+
+tpcds q24 at the three tp4 modes: the plan filters `ss_store_sk` and `ss_customer_sk` after the join
+with store_returns. DPhyp's order joins store_sales to store and customer first, so the filter lands
+on the store_sales shuffle (`disassembly`'s `_wired`). Against the plan the optimized run pays 187.7
+MB more filter and saves 52.6 MB of hash join, 67.1 MB of scatter and 61.6 MB of passthrough: 6.3 MB
+dearer, ratio 1.009. q54 at tp4 pays 10.8 MB more filter than its plan and stays cheaper.
+
+Fix: price a reassembled filter in DPhyp's cost, the bytes of each side shuffled on a filtered
+key, or keep the filter where the plan had it.

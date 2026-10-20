@@ -33,7 +33,7 @@ import pandas as pd
 from ..plans import engine_ir
 from ..plans.engine_expr import ColumnRef, parse_columns, parse_join_keys, parse_named_exprs
 from ..plans.engine_plan import EngineNode
-from .multijoin import replaced
+from .multijoin import keys_dropping_nulls, null_key_filter, replaced
 from .names import sourced
 from ..operators.join_types import JoinType
 from ..operators.joins import own_output
@@ -107,7 +107,7 @@ def candidates(plan: EngineNode, tables, builds: Builds) -> list[Candidate]:
 
 def _join_candidates(join, tables, builds: Builds) -> list[Candidate]:
     build, probe = join.children
-    if not _admitted(build, builds):
+    if not _admitted(join, builds):
         return []
     found = []
     for build_key, probe_key in parse_join_keys(join.fields["on"]):
@@ -174,10 +174,16 @@ def summarize(keys: pd.Series) -> KeySummary:
     return KeySummary(present.min(), present.max(), values, null)
 
 
-def _admitted(build: EngineNode, builds: Builds) -> bool:
+def _admitted(join: EngineNode, builds: Builds) -> bool:
+    """Whether `join`'s build side is filtered and joinless, or under `FILTERED_OR_JOINED` filtered or
+    joined. The planner's null-key filter below its shuffle filters nothing the join could emit, as
+    a cluster reads it."""
+    build = join.children[0]
+    wiring = null_key_filter(build, keys_dropping_nulls(join)[0])
+    filtered = any(node.kind == "GpuFilter" and node is not wiring for node in _nodes(build))
     if builds is Builds.FILTERED:
-        return _contains(build, "GpuFilter") and not _contains(build, *_JOINS)
-    return _contains(build, "GpuFilter", *_JOINS)
+        return filtered and not _contains(build, *_JOINS)
+    return filtered or _contains(build, *_JOINS)
 
 
 def _contains(node, *kinds) -> bool:

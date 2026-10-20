@@ -2,11 +2,12 @@
 DPhyp call of its cluster to the next, where its index `rN` shifts, until it is itself read back
 from memory and named as that source.
 
-A relation is its table, a memory source its name; `(f)` marks a filter over it; an aggregate is
-`agg(...)` of the cluster under it, or of what it reads where no cluster is; a table the plan
-reads more than once is numbered, `date_dim#2`, in plan order. A join is written with its build
-in brackets and its kind as SQL names it, the side an outer, semi or anti join keeps first:
-`([nation (f)] join customer) left join [orders]`. So no join reads as a right join.
+A relation is its table, a memory source its name; `(f)` marks a filter over it, the planner's
+null-key filter below a shuffle aside; an aggregate is `agg(...)` of the cluster under it, or of
+what it reads where no cluster is; a table the plan reads more than once is numbered, `date_dim#2`,
+in plan order. A join is written with its build in brackets and its kind as SQL names it, the side
+an outer, semi or anti join keeps first: `([nation (f)] join customer) left join [orders]`. So no
+join reads as a right join.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from ..operators.join_types import JoinType
 from ..plans import engine_ir
 from ..plans.engine_expr import ColumnRef, parse_columns, parse_exprs, parse_join_keys, parse_named_exprs
 from ..plans.engine_plan import EngineNode, memory_source
+from .multijoin import keys_dropping_nulls, null_key_filter
 
 #: nodes a name reads through: what they emit is their input's rows, a filter's a subset of them
 _THROUGH = frozenset({"GpuFilter", "GpuProject", "GpuCoalesceAllBatches", "GpuEmitPartitions",
@@ -62,16 +64,34 @@ def relation_name(root: EngineNode) -> str:
     return _words(root, collapsed=True).text
 
 
-def described(node: EngineNode) -> str:
-    """What `node` computes, its joins written out; a cluster under an aggregate by its id."""
-    return _words(node, collapsed=False).text
+def described(node: EngineNode, dropped: frozenset[int] = frozenset()) -> str:
+    """What `node` computes, its joins written out; a cluster under an aggregate by its id.
+    `dropped`: the keys a join above reads `node` on whose NULLs match nothing there."""
+    return _words(node, collapsed=False, dropped=dropped).text
 
 
-def _words(node: EngineNode, collapsed: bool, in_aggregate: bool = False) -> Words:
+def dropped_by_source(*roots: EngineNode) -> dict[str, frozenset[int]]:
+    """For each memory source a hash join under `roots` builds from directly, the keys of that join
+    whose NULLs match nothing on it (`multijoin.keys_dropping_nulls`)."""
+    return {join.children[0].fields["name"]: keys_dropping_nulls(join)[0]
+            for root in roots for join in _preorder(root)
+            if join.kind == "GpuHashJoin" and join.children[0].kind == "GpuMemorySource"}
+
+
+def _preorder(node: EngineNode):
+    yield node
+    for child in node.children:
+        yield from _preorder(child)
+
+
+def _words(node: EngineNode, collapsed: bool, in_aggregate: bool = False,
+           dropped: frozenset[int] = frozenset()) -> Words:
     filtered = False
+    # The planner's null-key filter drops only what the join reading `node` matches to nothing.
+    wiring = null_key_filter(node, dropped) if dropped else None
     # Both phases of an aggregate are one: the partial one under the final is read through.
     while node.kind in _THROUGH or in_aggregate and node.kind in _AGGREGATES:
-        filtered |= node.kind == "GpuFilter"
+        filtered |= node.kind == "GpuFilter" and node is not wiring
         node = node.children[0]
     words = _bare(node, collapsed)
     if not filtered:
@@ -87,7 +107,8 @@ def _bare(node: EngineNode, collapsed: bool) -> Words:
     if collapsed and node.mj is not None:
         return Words(node.mj)
     if node.kind in _JOINS or node.kind == "GpuCrossJoin":
-        build, probe = (_words(child, collapsed) for child in node.children)
+        sides = keys_dropping_nulls(node) if node.kind == "GpuHashJoin" else (frozenset(), frozenset())
+        build, probe = (_words(child, collapsed, dropped=keys) for child, keys in zip(node.children, sides))
         return joined(None if node.kind == "GpuCrossJoin" else engine_ir.join_type(node), build, probe)
     if node.kind in _AGGREGATES:
         return Words(f"agg({_words(node.children[0], True, in_aggregate=True).text})")

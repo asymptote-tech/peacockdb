@@ -99,20 +99,21 @@ is why each step has its shape.
   Survivors are re-mapped by the planner's own policy, so the pruned plan is one the planner
   would have made.
 - **Two passes of dynamic filters.** The first runs on the engine's plan and takes a build that
-  holds a filter and no join: a join there is a cluster DPhyp has not ordered yet. The second
-  runs on the plan DPhyp ordered and takes a build that holds a filter, a join or both, so a
-  restriction a reorder brought down reaches the fact scan: tpcds q58's week, a semi join over a
-  date dimension, is the fact join's build only after the reorder. A bare scan never qualifies:
-  its keys span the domain. No estimate gates a joined build: the keys it makes are what the
-  estimator misses most. tpcds q6's month of dates is estimated at 916 keys and truly 31, which
-  prune store_sales from 24 row groups to 2; q16's order numbers are estimated at 174 and truly
-  607, spread over both of catalog_returns' row groups. A source keeps its side's schema, lanes
-  and hash, so the plan stays valid, and pruning keeps any correct order correct. Nothing is
-  ordered again after the second pass; a build of the main run off its estimate still replans. A
-  candidate whose build holds another candidate's join, or a scan another candidate prunes in
-  the same round, waits a round, so its probe reads the inner build from memory and the scan
-  pruned. Clusters are named before the first pass, so a cluster a second-pass build holds keeps
-  its id, and `.optimizer.txt` names it on that build's line.
+  holds a filter and no join: a join there is a cluster DPhyp has not ordered yet. The second runs
+  on the plan DPhyp ordered and takes a build that holds a filter, a join or both, so a restriction
+  a reorder brought down reaches the fact scan: tpcds q58's week, a semi join over a date dimension,
+  is the fact join's build only after the reorder. A bare scan never qualifies: its keys span the
+  domain. Nor does a scan under the planner's null-key filter alone, which drops only NULLs the join
+  matches to nothing (tpcds q25's and q29's store_returns at tp4 pruned nothing by it). No estimate
+  gates a joined build: the keys it makes are what the estimator misses most. tpcds q6's month of
+  dates is estimated at 916 keys and truly 31, which prune store_sales from 24 row groups to 2;
+  q16's order numbers are estimated at 174 and truly 607, spread over both of catalog_returns' row
+  groups. A source keeps its side's schema, lanes and hash, so the plan stays valid, and pruning
+  keeps any correct order correct. Nothing is ordered again after the second pass; a build of the
+  main run off its estimate still replans. A candidate whose build holds another candidate's join,
+  or a scan another candidate prunes in the same round, waits a round, so its probe reads the inner
+  build from memory and the scan pruned. Clusters are named before the first pass, so a cluster a
+  second-pass build holds keeps its id, and `.optimizer.txt` names it on that build's line.
 - **Probe plans run adaptively.** A probe plan is the build side, run first by
   `replan.run_adaptive` as the main plan is: where a build inside it misses its estimate past the
   replan threshold, the probe stops, keeps what it made, and orders the rest again. A second-pass
@@ -291,10 +292,11 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
 - **Only two prototype runs compare.** The prototype's rows match the engine's where no rule
   changed the plan, but its bytes are pandas' `memory_usage(deep=True)`: decimals are float64,
   dates datetime64, integers holding NULLs float64, and another pandas version moves every
-  cost line. Its planned cost over the engine's figure has median 0.80 (tpch) and 0.85 (tpcds).
+  cost line. Its planned cost over the engine's figure has median 0.84 (tpch) and 0.85 (tpcds).
 - **Optimized is all the work.** The final plan's run, every dynamic filter's probe plan and
-  every run a replan stopped. q64's optimized `storage_read_bytes` equals its planned run's at
-  every mode, so nothing is read twice.
+  every run a replan stopped. A stopped run's scans are read again by the run after it: q64's
+  stopped runs read 272–548 MB, and its optimized `storage_read_bytes` is still below the planned
+  run's 806 MB at every mode, 393–664 MB.
 - **Memory sources are free.** A memory source hands back a build a probe or a stopped run made
   and was priced for; reading it again costs nothing by nature, not by a multiplier
   (`cost_model.FREE`), and the ram-to-vram transfer it would cost on the device is a 0.0
@@ -313,8 +315,7 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   the pushed-down limit, as `scan.cpp`'s `set_num_rows` intends (#186), while the engine's CPU
   source reads the table,
   so the planned cost is 3.4e-6 of the engine's. The prototype contributes only its own ratio.
-  Where the engine has no figure at any mode run (tpch q11 and q22, tpcds q24 and q54) there is
-  no final ratio.
+  A query the planner refuses at every mode has no final ratio.
 - **The report reads its rules from the log it links to.** Rules fired counts the multi-joins a
   call reordered or flipped, the filters applied per pass and the replans, and links each to its
   lines of `<mode>.optimizer.txt`; `cost_report.py` reads both from that file when it renders, not
@@ -322,15 +323,21 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
   section above it, and `Fired` counts calls rather than multi-joins, and no filter that narrowed
   nothing.
 
-The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and
-391 tpcds runs, dearer in none, and equal in the rest; the median ratio is 1.00 for tpch and
-0.52 for tpcds. The final ratio is within the published report's 1.4 for 35 of 41 tpch rows (18
-of the 20 numbered queries, 17 of the 21 named) and 70 of 79 tpcds rows. Over the 620 runs dynamic filters run 740 probes on the plan as written,
-narrowing 735 scans, and 165 on the order DPhyp made, narrowing 55. DPhyp is called 3,133 times,
-766 of the calls reorder and 10 stop at the budget, all tpcds q64's; orientation flips 556
-joins, and 692 replans run, probes' included, 114 more refused. Bytes do not see the prototype's
-own time: q64 replans 8 times at every mode and is cheaper at each (0.43–0.70), yet slower in
-wall time, which is Python estimation and DPhyp over 19 calls rather than anything in the plan.
+The committed run: 620 (query, mode) runs, none failed. Optimized is cheaper in 80 tpch runs and 388
+tpcds runs, dearer in 8, and equal in the rest; the median ratio is 1.00 for tpch and 0.52 for
+tpcds. The dearer eight are tpcds q16 at every mode, by 0.02 %: its probe after order narrows
+nothing, and the optimized runs pay 19,088 B more than the plan at tp1, 19,024 B of passthrough and
+64 B of hash join, and 56,976 B at tp4 (also 56,752 B more scatter and 18,864 B less filter); and
+q24 at the three tp4 modes, by 0.9 %, where the null-key filter reassembly puts on the store_sales
+shuffle costs 187.7 MB more than the plan's and the order saves 181.3 MB of hash join, scatter and
+passthrough (#297). The final ratio is within the published report's 1.4 for 37 of 43 tpch rows (20
+of the 22 numbered queries, 17 of the 21 named) and 72 of 81 tpcds rows. Over the 620 runs dynamic
+filters run 740 probes on the plan as written, narrowing 735 scans, and 165 on the order DPhyp made,
+narrowing 55. DPhyp is called 3,122 times, 771 of the calls reorder and 10 stop at the budget, all
+tpcds q64's; orientation flips 556 joins, and 689 replans run, probes' included, 120 more refused.
+Bytes do not see the prototype's own time: q64 replans 8 times at every mode and is cheaper at each
+(0.43–0.69), yet slower in wall time, which is Python estimation and DPhyp over 19 calls rather than
+anything in the plan.
 
 ## The runtime
 
@@ -392,7 +399,7 @@ The cap grows with the batches queued because the plan's shape cannot bound them
 shuffles multiply batches in the row-group modes. tpch q8 at `tp4-rowgroup` stacks six on its
 probe path: (62 source batches + 192 lanes summed over its 63 nodes) × 63 nodes is 16,002, and it
 takes 137,760 steps and 169,049 calls — the cap at its end. The same fragmentation is the full
-corpus run's tail: tpch q9's planned run at `tp4-rowgroup` takes 818 s, its optimized run 14 s.
+corpus run's tail: tpch q9's planned run at `tp4-rowgroup` takes 1,200 s, its optimized run 28 s.
 That time is the driver's Python per batch — per-row hash digests and `memory_usage(deep=True)`
 — not pandas' own operations, which is why pandas stays.
 
@@ -509,8 +516,8 @@ dataset.
 
 `scripts/exec_model/testdata/goldens/<bench>/tp1-single.cardinality.txt` holds every join's
 estimate against the engine's rows, so a moved estimate is a named line. tpcds q64 is where the
-estimator is worst: 37 joins, median q-error 4.88, 5 within 2×; the rest of tpcds is 599 joins,
-median 1.17, 74.5 % within 2×. Each half of q64 (store_sales for 1999, then 2000, 18 joins each)
+estimator is worst: 37 joins, median q-error 4.88, 5 within 2×; the rest of tpcds is 619 joins,
+median 1.21, 72.7 % within 2×. Each half of q64 (store_sales for 1999, then 2000, 18 joins each)
 misses by independence and default assumptions, none of them a correlation:
 
 | node | estimate | true | why |
@@ -524,17 +531,17 @@ misses by independence and default assumptions, none of them a correlation:
 | `ss_item_sk = i_item_sk` | 13.3 | 37 / 2 | the item overestimate half cancels the rest: q 2.77 and 6.67 |
 | the root, `cs1 ⋈ cs2` | 2.7 | 2 | q 1.33 |
 
-So three limits: no histograms, so a skewed column's range is read as uniform; a comparison of
-two aggregates, or of two columns, is the default 0.2 whatever the NDVs say; and a semi or anti
-join's residual scales the matched share as if each row had one partner. Read as one value of the
-larger NDV, `a != b` gives q64's residual 0.80 and tpcds a median of 1.23 against 1.24, and tpch
-q21's anti join goes from q 2.56 to 1.10 — two errors cancelling, not the third limit lifted. q21
-is a self-join: the matched share, 0.59, does not know that each row's own order holds a late
-line, the row itself, and `l_suppkey != l_suppkey` always rejects that pair, which independence
-cannot see. The same reading also exposes an aggregate's NDV under functional dependence (q46,
-q68: an aggregate keyed on `ss_ticket_number` with three columns it determines is estimated at
-its input, 123 thousand against 10.7 thousand). Scaling each equi-join's rows, and each side's
-matched share, by its keys' non-NULL shares fixes q93 (10.7 → 1.03); counting a join whose
+So three limits: no histograms, so a skewed column's range is read as uniform; a comparison of two
+aggregates, or of two columns, is the default 0.2 whatever the NDVs say; and a semi or anti join's
+residual scales the matched share as if each row had one partner. Read as one value of the larger
+NDV, `a != b` gives q64's residual 0.80 and, on a golden of 636 tpcds joins, moves the median
+q-error down by 0.01, and tpch q21's anti join goes from q 2.56 to 1.10 — two errors cancelling, not
+the third limit lifted. q21 is a self-join: the matched share, 0.59, does not know that each row's
+own order holds a late line, the row itself, and `l_suppkey != l_suppkey` always rejects that pair,
+which independence cannot see. The same reading also exposes an aggregate's NDV under functional
+dependence (q46, q68: an aggregate keyed on `ss_ticket_number` with three columns it determines is
+estimated at its input, 123 thousand against 10.7 thousand). Scaling each equi-join's rows, and each
+side's matched share, by its keys' non-NULL shares fixes q93 (10.7 → 1.03); counting a join whose
 q-error moves by more than 1 %, it worsens 157 tpcds joins and betters 175. q64's middle joins
 worsen most, 16.6 to 26.4, since they are under already.
 

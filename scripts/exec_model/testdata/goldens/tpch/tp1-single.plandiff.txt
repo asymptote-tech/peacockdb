@@ -523,11 +523,10 @@ plan diff
 plan diff
 --- before
 +++ after
-@@ -5,24 +5,7 @@
-         GpuAggregateBatches: group_by=[s_name@0], aggs=[sum(count(*)@1) as count(*)], final=[count(*)@1], lanes=1, batches=single, schema=[s_name:Utf8, count(*):Int64]
+@@ -6,21 +6,8 @@
            GpuAggregate: group_by=[s_name@0], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[s_name:Utf8, count(*):Int64]
              GpuHashJoin: join_type=LeftAnti, on=[(l_orderkey@1, l_orderkey@0)], filter=l_suppkey@probe:1 != l_suppkey@build:2, projection=[s_name@0], lanes=1, batches=multiple, schema=[s_name:Utf8]
--              GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
+               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
 -                GpuHashJoin: join_type=LeftSemi, on=[(l_orderkey@1, l_orderkey@0)], filter=l_suppkey@probe:1 != l_suppkey@build:2, lanes=1, batches=multiple, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
 -                  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
 -                    GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, s_nationkey@1)], projection=[s_name@1, l_orderkey@3, l_suppkey@4], lanes=1, batches=multiple, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
@@ -543,12 +542,12 @@ plan diff
 -                            GpuLoadParquet: table=supplier, projections=[s_suppkey@0, s_name@1, s_nationkey@3], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[s_suppkey:Int64, s_name:Utf8, s_nationkey:Int32]
 -                          GpuFilter: predicate=l_receiptdate@3 > l_commitdate@2, projection=[l_orderkey@0, l_suppkey@1], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
 -                            GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2, l_commitdate@11, l_receiptdate@12], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
--                  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[l_orderkey:Int64, l_suppkey:Int64]
--                    GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
-+              GpuMemorySource: name=m2, lanes=1, batches=single, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
-               GpuCoalesceAllBatches: lanes=1, batches=single, schema=[l_orderkey:Int64, l_suppkey:Int64]
-                 GpuFilter: predicate=l_receiptdate@3 > l_commitdate@2, projection=[l_orderkey@0, l_suppkey@1], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
-                   GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2, l_commitdate@11, l_receiptdate@12], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
+-                  GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
++                GpuHashJoin: join_type=Inner, on=[(l_orderkey@1, o_orderkey@0)], projection=[s_name@0, l_orderkey@1, l_suppkey@2], lanes=1, batches=multiple, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
++                  GpuMemorySource: name=m2, lanes=1, batches=single, schema=[s_name:Utf8, l_orderkey:Int64, l_suppkey:Int64]
++                  GpuMemorySource: name=m1, lanes=1, batches=single, schema=[o_orderkey:Int64]
+               GpuFilter: predicate=l_receiptdate@3 > l_commitdate@2, projection=[l_orderkey@0, l_suppkey@1], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64]
+                 GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_suppkey@2, l_commitdate@11, l_receiptdate@12], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, schema=[l_orderkey:Int64, l_suppkey:Int64, l_commitdate:Date32, l_receiptdate:Date32]
 == q22
 plan unchanged
 == aggregate-groupby

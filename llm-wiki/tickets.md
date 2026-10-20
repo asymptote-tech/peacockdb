@@ -12,14 +12,14 @@ most 25 characters and is what `scripts/ticket_widget.py` shows beside the numbe
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 297), one ID space across every file. 264–279
+New tickets take the next free number (currently 299), one ID space across every file. 264–279
 are reserved for chain J, whose next number is 268.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-117 open tickets, in file order.
+118 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -29,7 +29,7 @@ are never reused, so an old reference still resolves there.
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |
 | [`df-upgrade.md`](tickets/df-upgrade.md) | The DataFusion upgrade | 6 | #241 #23 #166 #228 #247 #257 |
 | [`memory.md`](tickets/memory.md) | Memory accounting and budgets | 7 | #182 #179 #177 #167 #229 #265 #296 |
-| [`optimizer.md`](tickets/optimizer.md) | The optimizer project | 21 | #73 #101 #140 #170 #141 #139 #147 #20 #71 #19 #16 #75 #146 #158 #142 #138 #298 #290 #291 #294 #295 |
+| [`optimizer.md`](tickets/optimizer.md) | The optimizer project | 22 | #73 #101 #140 #170 #141 #139 #147 #20 #71 #19 #16 #75 #146 #158 #142 #138 #298 #290 #291 #294 #295 #297 |
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #149 #148 #231 #232 #242 #248 #286 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 7 | #238 #13 #196 #169 #128 #244 #260 |

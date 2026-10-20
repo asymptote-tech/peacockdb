@@ -21,7 +21,7 @@ from ..plans.engine_nodes import build
 from ..plans.engine_plan import EngineNode
 from .join_order import ordered
 from .multijoin import replaced
-from .names import described, described_sources, join_words, sourced
+from .names import described, described_sources, dropped_by_source, join_words, sourced
 from .report import BuildMiss, Kept, Replan
 from ..engine.node import BackendSelector
 from ..engine.single_partition_driver import BUILD_SLOT
@@ -91,8 +91,10 @@ def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, select
         made = {}
         plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames,
                                     set() if taken is None else taken, made)
+        dropped = dropped_by_source(plan, *made.values())
         plan, orders = ordered(plan, stats, lanes, known=known)
-        kept = tuple(Kept(name, sum(len(frame) for frame in frames[name]), described(side), described_sources(side))
+        kept = tuple(Kept(name, sum(len(frame) for frame in frames[name]),
+                          described(side, dropped.get(name, frozenset())), described_sources(side))
                      for name, side in made.items())
         run.replans.append(Replan(_miss(driver.stopped, planned), kept, tuple(orders)))
 

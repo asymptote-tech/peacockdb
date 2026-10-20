@@ -116,6 +116,38 @@ def _is_null_key_shuffle(node: EngineNode, dropped_keys: frozenset[int]) -> bool
     return tested is not None and set(tested) <= hashed & dropped_keys
 
 
+def keys_dropping_nulls(join: EngineNode) -> list[frozenset[int]]:
+    """Per side, build first, the ordinals of `join`'s keys whose NULLs match nothing there: none on
+    a side whose unmatched rows are emitted, none at all where the join holds NULL equal."""
+    droppable = ((False, False) if join.fields.get("null_equals_null") == "true"
+                 else NULL_KEY_DROPPABLE[engine_ir.join_type(join)])
+    keys = parse_join_keys(join.fields["on"])
+    return [frozenset(pair[side].index for pair in keys) if drops else frozenset()
+            for side, drops in enumerate(droppable)]
+
+
+def null_key_filter(side: EngineNode, keys: frozenset[int]) -> EngineNode | None:
+    """The planner's null-key filter a join with `keys` dropped on `side` reads that side through,
+    below its shuffle; None where there is none."""
+    node, filtered = _read_through(side, keys)
+    return node if filtered else None
+
+
+def _read_through(node: EngineNode, keys: frozenset[int]) -> tuple[EngineNode, bool]:
+    """`node` read down through wiring and projects that pick columns, by a join with `keys` dropped
+    on it: the planner's null-key filter met on the way, and True, or the first node that is
+    neither, and False."""
+    while not _is_null_key_shuffle(node, keys):
+        if node.kind in _WIRING:
+            node = node.children[0]
+        elif _picks_columns(node):
+            exprs = parse_named_exprs(node.fields["exprs"])
+            node, keys = node.children[0], frozenset(exprs[k][0].index for k in keys)
+        else:
+            return node, False
+    return node.children[0], True
+
+
 def is_reorderable(node: EngineNode) -> bool:
     """A hash join of any type but mark, residual or not, as the engine runs every one. A mark
     join stays out: its mark column is no relation's. A residual on a non-inner join is read as
@@ -221,24 +253,15 @@ class _Assembly:
         """The relations under `node`, as a mask, `node`'s joins and relations collected.
         `dropped_keys`: `node`'s columns that key the join above it on a side whose NULL keys can
         match nothing, the keys the planner filters below that side's shuffle."""
-        if _is_null_key_shuffle(node, dropped_keys):
-            filtered = node.children[0]
-            found = self._collect(filtered.children[0])
-            self.nullable.update(self.lift(filtered, k) for k in null_key_columns(filtered))
+        node, filtered = _read_through(node, dropped_keys)
+        if filtered:
+            found = self._collect(node.children[0])
+            self.nullable.update(self.lift(node, k) for k in null_key_columns(node))
             return found
-        if node.kind in _WIRING:
-            return self._collect(node.children[0], dropped_keys)
-        if _picks_columns(node):
-            exprs = parse_named_exprs(node.fields["exprs"])
-            return self._collect(node.children[0], frozenset(exprs[k][0].index for k in dropped_keys))
         if is_reorderable(node):
             self.joins.append(node)
-            droppable = ((False, False) if node.fields.get("null_equals_null") == "true"
-                         else NULL_KEY_DROPPABLE[engine_ir.join_type(node)])
-            keys = parse_join_keys(node.fields["on"])
-            dropped = [frozenset(pair[side].index for pair in keys) if drops else frozenset()
-                       for side, drops in enumerate(droppable)]
-            build, probe = [self._collect(child, side) for child, side in zip(node.children, dropped)]
+            build, probe = [self._collect(child, side)
+                            for child, side in zip(node.children, keys_dropping_nulls(node))]
             edges = self._edges(node)
             self.edges += edges
             self.operators.append(_operator(node, build, probe, edges))

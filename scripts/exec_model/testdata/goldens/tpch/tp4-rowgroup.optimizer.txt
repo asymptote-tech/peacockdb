@@ -464,46 +464,76 @@ plan diff: this query's section of <mode>.plandiff.txt
 == q21
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
 names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
-MJ1: 4 relations, ordered before the run
+MJ1: 6 relations, ordered before the run
   r0 nation (f): rows 1 est, 4.1 B/row; NDV n_nationkey 1
   r1 orders (f): rows 286720 est, 8.1 B/row; NDV o_orderkey 286720
   r2 supplier: rows 10000 exact, 34.4 B/row; NDV s_suppkey 10000, s_nationkey 25
   r3 lineitem#1 (f): rows 1200243 est, 16.2 B/row; NDV l_suppkey 10000, l_orderkey 885711
+  r4 lineitem#2: rows 6001215 exact, 16.2 B/row; NDV l_orderkey 1500000
+  r5 lineitem#3 (f): rows 1200243 est, 16.2 B/row; NDV l_orderkey 885711
   edge r2-r3: r2.s_suppkey = r3.l_suppkey
   edge r1-r3: r1.o_orderkey = r3.l_orderkey
   edge r0-r2: r0.n_nationkey = r2.s_nationkey
-  plan's order (r0 (r1 (r2 r3))), build first
-  DPhyp priced 6 sets, chose (((r0 r2) r3) r1)
-  oriented (((r0 r2) r3) r1), build first
+  edge r3-r4: r3.l_orderkey = r4.l_orderkey, then a residual on r4.l_suppkey, r3.l_suppkey keeping 0.2, a semi join keeping r3's matches
+  edge r0+r1+r2+r3-r5: r3.l_orderkey = r5.l_orderkey, then a residual on r5.l_suppkey, r3.l_suppkey keeping 0.2, an anti join keeping r0+r1+r2+r3's rows without a match; applies once r0+r1+r2+r3 are joined
+  plan's order (((r0 (r1 (r2 r3))) r4) r5), build first
+  DPhyp priced 14 sets, chose (((((r0 r2) r3) r1) r4) r5)
+  oriented (((((r0 r2) r3) r1) r4) r5), build first
   join r0 x r2: 400.0 rows x 30.2 B = 12100 B
   join r0+r2 x r3: 48009.7 rows x 38.4 B = 1842373 B
   join r0+r2+r3 x r1: 9176.9 rows x 38.4 B = 352163 B
-  C_out 2206636 B; the plan's order, priced by the same estimates, 61112945 B
+  join r0+r1+r2+r3 x r4: 1835.4 rows x 38.4 B = 70433 B
+  join r0+r1+r2+r3+r4 x r5: 1618.6 rows x 22.1 B = 35812 B
+  C_out 2312881 B; the plan's order, priced by the same estimates, 61219190 B
 replan 1: the build of MJ1's join on l_orderkey = o_orderkey came out 156739 rows, est 48009.7 (q-error 3.26)
   kept as memory sources: m0 (156739 rows) = [[nation (f)] join supplier] join lineitem#1 (f)
-  MJ1: 2 relations, ordered again
+  MJ1: 4 relations, ordered again
     r0 m0: rows 156739 measured, 38.4 B/row; NDV l_orderkey 148850
     r1 orders (f): rows 286720 est, 8.1 B/row; NDV o_orderkey 286720
+    r2 lineitem#2: rows 6001215 exact, 16.2 B/row; NDV l_orderkey 1500000
+    r3 lineitem#3 (f): rows 1200243 est, 16.2 B/row; NDV l_orderkey 885711
     edge r0-r1: r0.l_orderkey = r1.o_orderkey
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r1 r0), build first
+    edge r0-r2: r0.l_orderkey = r2.l_orderkey, then a residual on r2.l_suppkey, r0.l_suppkey keeping 0.2, a semi join keeping r0's matches
+    edge r0+r1-r3: r0.l_orderkey = r3.l_orderkey, then a residual on r3.l_suppkey, r0.l_suppkey keeping 0.2, an anti join keeping r0+r1's rows without a match; applies once r0+r1 are joined
+    previous order (((r0 r1) r2) r3), build first
+    DPhyp priced 5 sets, chose (((r0 r1) r2) r3): the previous order
+    oriented (((r1 r0) r2) r3), build first
     join r1 x r0: 29960.1 rows x 38.4 B = 1149720 B
-    C_out 1149720 B; the previous order, priced by the same estimates, 1149720 B
+    join r0+r1 x r2: 5992.0 rows x 38.4 B = 229944 B
+    join r0+r1+r2 x r3: 5284.4 rows x 22.1 B = 116917 B
+    C_out 1496582 B; the previous order, priced by the same estimates, 1496582 B
     flipped: r1 builds, r0 probes
 replan 2: the build of MJ1's join on o_orderkey = l_orderkey came out 729413 rows, est 286720.0 (q-error 2.54)
   kept as memory sources: m1 (729413 rows) = orders (f)
-  MJ1: 2 relations, ordered again
+  MJ1: 4 relations, ordered again
     r0 m1: rows 729413 measured, 8.1 B/row; NDV o_orderkey 729413
     r1 m0: rows 156739 measured, 38.4 B/row; NDV l_orderkey 148850
+    r2 lineitem#2: rows 6001215 exact, 16.2 B/row; NDV l_orderkey 1500000
+    r3 lineitem#3 (f): rows 1200243 est, 16.2 B/row; NDV l_orderkey 885711
     edge r0-r1: r0.o_orderkey = r1.l_orderkey
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 76218.3 rows x 38.4 B = 2924878 B
-    C_out 2924878 B; the previous order, priced by the same estimates, 2924878 B
-replan 3: the build of a anti join on l_orderkey = l_orderkey came out 73089 rows, est 15243.7 (q-error 4.79)
-  kept as memory sources: m2 (73089 rows) = [[m1] join m0] semi join lineitem#2
+    edge r1-r2: r1.l_orderkey = r2.l_orderkey, then a residual on r2.l_suppkey, r1.l_suppkey keeping 0.2, a semi join keeping r1's matches
+    edge r0+r1-r3: r1.l_orderkey = r3.l_orderkey, then a residual on r3.l_suppkey, r1.l_suppkey keeping 0.2, an anti join keeping r0+r1's rows without a match; applies once r0+r1 are joined
+    previous order (((r0 r1) r2) r3), build first
+    DPhyp priced 5 sets, chose ((r0 (r1 r2)) r3)
+    oriented (((r1 r2) r0) r3), build first
+    join r1 x r2: 31347.8 rows x 38.4 B = 1202972 B
+    join r1+r2 x r0: 15243.7 rows x 38.4 B = 584976 B
+    join r0+r1+r2 x r3: 13443.5 rows x 22.1 B = 297437 B
+    C_out 2085384 B; the previous order, priced by the same estimates, 3807290 B
+replan 3: the build of MJ1's join on l_orderkey = o_orderkey came out 151237 rows, est 31347.8 (q-error 4.82)
+  kept as memory sources: m2 (151237 rows) = [m0] semi join lineitem#2
+  MJ1: 3 relations, ordered again
+    r0 m2: rows 151237 measured, 38.4 B/row; NDV l_orderkey 143348
+    r1 m1: rows 729413 measured, 8.1 B/row; NDV o_orderkey 729413
+    r2 lineitem#3 (f): rows 1200243 est, 16.2 B/row; NDV l_orderkey 885711
+    edge r0-r1: r0.l_orderkey = r1.o_orderkey
+    edge r0-r2: r0.l_orderkey = r2.l_orderkey, then a residual on r2.l_suppkey, r0.l_suppkey keeping 0.2, an anti join keeping r0's rows without a match
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 3 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 73542.8 rows x 38.4 B = 2822206 B
+    join r0+r1 x r2: 64857.8 rows x 22.1 B = 1434979 B
+    C_out 4257185 B; the previous order, priced by the same estimates, 4257185 B
 plan diff: this query's section of <mode>.plandiff.txt
 == q22
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row

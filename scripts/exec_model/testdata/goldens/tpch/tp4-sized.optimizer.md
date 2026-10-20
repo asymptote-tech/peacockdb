@@ -272,15 +272,15 @@ p0 = `part (f)`, 2,127 rows.
 
 ### q21 MJ1
 
-| | plan | DPhyp before the run | replan 1 |
-|---|---|---|---|
-| join tree | `[nation (f)] join ([orders (f)] join ([supplier] join lineitem#1 (f)))` | `[[[nation (f)] join supplier] join lineitem#1 (f)] join orders (f)` | `[orders (f)] join m0` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on l_orderkey = o_orderkey came out 156739 rows, est 48009.7 (q-error 3.26); flip: `orders (f)` now builds |
-| C_out | 61,112,945 B | 2,206,636 B (plan's order 61,112,945 B) | 1,149,720 B (previous order 1,149,720 B) |
+| | plan | DPhyp before the run | replan 1 | replan 2 |
+|---|---|---|---|---|
+| join tree | `[[[nation (f)] join ([orders (f)] join ([supplier] join lineitem#1 (f)))] semi join lineitem#2] anti join lineitem#3 (f)` | `[[[[[nation (f)] join supplier] join lineitem#1 (f)] join orders (f)] semi join lineitem#2] anti join lineitem#3 (f)` | `[[[orders (f)] join m0] semi join lineitem#2] anti join lineitem#3 (f)` | `[[[m0] semi join lineitem#2] join m1] anti join lineitem#3 (f)` |
+| changed by | | reordered by DPhyp | the build of MJ1's join on l_orderkey = o_orderkey came out 156739 rows, est 48009.7 (q-error 3.26); flip: `orders (f)` now builds | the build of MJ1's join on o_orderkey = l_orderkey came out 729413 rows, est 286720.0 (q-error 2.54); reordered by DPhyp |
+| C_out | 61,219,190 B | 2,312,881 B (plan's order 61,219,190 B) | 1,496,582 B (previous order 1,496,582 B) | 2,085,384 B (previous order 3,807,290 B) |
 
-Calls that left the order unchanged: replan 2 (MJ1's missed build came out 729413 rows, est 286720.0).
+Calls that left the order unchanged: replan 3 (MJ1's missed build came out 151237 rows, est 31347.8).
 
-m0 = `[[nation (f)] join supplier] join lineitem#1 (f)`, 156,739 rows.
+m0 = `[[nation (f)] join supplier] join lineitem#1 (f)`, 156,739 rows. m1 = `orders (f)`, 729,413 rows.
 
 ## q22
 

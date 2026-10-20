@@ -14,7 +14,8 @@ from ..harness import main
 from .test_cardinality import scan
 from ...optimizer.multijoin import clusters, named
 from ...optimizer.names import (
-    aliased, described, described_sources, is_aggregate_output, join_words, memory_sources, relation_name, sourced,
+    aliased, described, described_sources, dropped_by_source, is_aggregate_output, join_words, memory_sources,
+    relation_name, sourced,
 )
 from ...plans.engine_plan import parse_plans
 
@@ -106,6 +107,34 @@ def test_a_join_is_written_with_its_build_bracketed_and_the_kind_sql_gives_its_p
     nested = plan(hash_join("Inner", "k", hash_join("Inner", "k", scan("a", ["k"]), scan("b", ["k"]), "k:Int64"),
                             hash_join("LeftSemi", "k", scan("c", ["k"]), scan("d", ["k"]), "k:Int64"), "k:Int64"))
     assert described(nested) == "[[a] join b] join ([c] semi join d)"
+
+
+def shuffled(table, *, null_key):
+    """`table(k, x)` shuffled on `k`, through the planner's `k IS NOT NULL` or a query's `x = 1`."""
+    predicate = "k@0 IS NOT NULL" if null_key else "x@1 = 1"
+    return f"""GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[k@0], schema=[k:Int64, x:Int64]
+  GpuEmitPartitions: hash=[k@0], lanes=4, batches=multiple, hashed_on=[k@0], schema=[k:Int64, x:Int64]
+    GpuFilter: predicate={predicate}, {L}, schema=[k:Int64, x:Int64]
+      {scan(table, ["k", "x"])}"""
+
+
+def test_the_planner_s_null_key_filter_is_no_filter_in_a_name():
+    # As the cluster reads it: a NULL key the join drops matches nothing, so no row is filtered out.
+    join = plan(hash_join("Inner", "k", shuffled("a", null_key=True), shuffled("b", null_key=False),
+                          "k:Int64, x:Int64, k:Int64, x:Int64"))
+    assert described(join) == "[a] join b (f)"
+    # A Left join emits its build's unmatched rows: there the filter is the query's.
+    left = plan(hash_join("Left", "k", shuffled("a", null_key=True), shuffled("b", null_key=True),
+                          "k:Int64, x:Int64, k:Int64, x:Int64"))
+    assert described(left) == "[a (f)] left join b"
+    # A side named on its own takes the keys the join above it drops.
+    assert described(plan(shuffled("a", null_key=True)), frozenset({0})) == "a"
+    assert described(plan(shuffled("a", null_key=True))) == "a (f)"
+    # Those keys are the ones the join reading the side's memory source drops, found where it is.
+    source = "GpuMemorySource: name={}, lanes=1, batches=single, schema=[k:Int64]"
+    inner = plan(hash_join("Inner", "k", source.format("p0"), scan("b", ["k"]), "k:Int64"))
+    outer = plan(hash_join("Left", "k", source.format("p1"), scan("c", ["k"]), "k:Int64"))
+    assert dropped_by_source(inner, outer) == {"p0": frozenset({0}), "p1": frozenset()}
 
 
 def test_the_memory_sources_a_relation_names_are_those_outside_the_clusters_it_names_by_id():

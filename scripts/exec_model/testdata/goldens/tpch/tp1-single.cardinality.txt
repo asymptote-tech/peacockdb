@@ -1,6 +1,6 @@
 # tpch tp1-single: each join's estimate against its rows in tp1-single-mini.cpu.txt
-# 77 joins: median q-error 1.07, 70.1% within 2x
-# not run: q11 q22 scan-limit
+# 84 joins: median q-error 1.07, 70.2% within 2x
+# not run: scan-limit
 # tree differs: -
 # n: the join's place among its query's, in pre-order; joins: the joins in its subtree, itself included
 # query n kind/type joins true estimate q-error keys
@@ -55,6 +55,11 @@ q9                     5 Hash/Inner        1     319404    1200243.0     3.76  p
 q10                    1 Hash/Inner        3     114705      39158.9     2.93  n_nationkey=c_nationkey
 q10                    2 Hash/Inner        2     114705      39158.9     2.93  o_orderkey=l_orderkey
 q10                    3 Hash/Inner        1      57069      57361.7     1.01  c_custkey=o_custkey
+q11                    1 NestedLoop/Inner  5      27604       6400.0     4.31  -
+q11                    2 Hash/Inner        2      31680      32000.0     1.01  n_nationkey=s_nationkey
+q11                    3 Hash/Inner        1     800000     800000.0     1.00  s_suppkey=ps_suppkey
+q11                    4 Hash/Inner        2      31680      32000.0     1.01  n_nationkey=s_nationkey
+q11                    5 Hash/Inner        1     800000     800000.0     1.00  s_suppkey=ps_suppkey
 q12                    1 Hash/Inner        1      30988       9749.4     3.18  l_orderkey=o_orderkey
 q13                    1 Hash/Left         1    1534302    1250004.0     1.23  c_custkey=o_custkey
 q14                    1 Hash/Inner        1      75983      75202.9     1.01  p_partkey=l_partkey
@@ -77,6 +82,8 @@ q21                    2 Hash/LeftSemi     4      73089       1835.4    39.82  l
 q21                    3 Hash/Inner        3      75871       9176.9     8.27  n_nationkey=s_nationkey
 q21                    4 Hash/Inner        2    1828911     229422.4     7.97  o_orderkey=l_orderkey
 q21                    5 Hash/Inner        1    3793296    1200243.0     3.16  s_suppkey=l_suppkey
+q22                    1 NestedLoop/Inner  2       6384       2000.1     3.19  -
+q22                    2 Hash/LeftAnti     1      14086      10000.7     1.41  c_custkey=o_custkey
 rollup-over-join       1 Hash/Inner        1     150000     150000.0     1.00  n_nationkey=c_nationkey
 semi-join              1 Hash/RightSemi    1     303959     300002.0     1.01  c_custkey=o_custkey
 semi-join-reorder      1 Hash/Inner        2       4149       3999.8     1.04  n_nationkey=c_nationkey

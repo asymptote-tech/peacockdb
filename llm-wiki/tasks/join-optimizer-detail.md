@@ -35,8 +35,7 @@ fixes #236 and #237):
 
 - Task 19: the branch is five commits on master (`8e0a7d40`), each green on rust-only, the
   cost-report crate and the cheap tier; NULL equality is the plan's flag alone, and the plan reader
-  takes master's `GpuEmpty`, `Int8` and scans of no column. Red until Task 23: the prototype's
-  committed outputs and the cardinality golden (Task 19 below).
+  takes master's `GpuEmpty`, `Int8` and scans of no column (Task 19 below).
 - Task 20: every plan golden of all three datasets parses, lowers, builds and disassembles in the
   prototype, pbench's included; the answer suites pass a sample of fifteen queries at every mode
   against DuckDB, and pbench's all but its three NaN-keyed queries (#291) at every mode (Task 20
@@ -46,7 +45,12 @@ fixes #236 and #237):
   session's; orientation keeps its formula, #294, and a residual edge its flat estimate, #295.
 - Task 22: the engine side is master's with the branch's added and green on rust-only, the whole
   `test_cpu_corpus`, the cost-report crate and DPhyp; the named queries' device cells stay off on
-  #288 until the final device check (Task 22 below). Task 23 is not started.
+  #288 until the final device check (Task 22 below).
+- Task 23: the prototype's committed outputs and the cardinality golden are made again on master's
+  plans; every moved ratio is explained against the outputs before the rebase, tpcds q24 at tp4
+  dearer than planned on #297, a known exception; a build filtered only by the planner's null-key
+  filter is no dynamic-filter candidate (Task 23 below). CI on the PR and the published report's links wait
+  for a push.
 - `exec-model-corpus.yml` was dispatched on `8c846434` (run `37599528455`): the three corpus
   shards and the `call-cost` job green; the CI `S3_*` keys read the `calibration` bucket (the
   record fetched, 174,690 rows, sha256 as pinned).
@@ -85,13 +89,13 @@ fixes #236 and #237):
   committed and with `--sha` at a commit; the cost-report job renders it so and publishes it at
   `join-optimizer/` on master. Whether the published links resolve is checked after a push
   (Task 17 below).
-- Task 18: `scripts/exec_model/optimizer.md`, 285 lines, holds every rule and constant with the
+- Task 18: `scripts/exec_model/optimizer.md`, 291 lines, holds every rule and constant with the
   function that applies it; `design.md` keeps the why and points there, and the README lists it.
   Every constant in its table is checked against the code (Task 18 below).
 - `test_cardinality_corpus` compares a per-join golden since Task 5; q64's misses are a recorded
   limit, not a threshold (Task 5 below).
-- Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 488 cases), and q64 in the corpus answer,
-  reassembled and optimized suites at every mode.
+- Green otherwise: rust-only, DPhyp, the cheap tier (48 files, 521 cases), and the corpus tier's
+  four files at every mode (Task 23 below).
 - CI run `37233204588`'s GPU job failed only because a neighbour held the card (the pool could
   not be built); its re-run passed.
 - tpch q8 at `tp4-rowgroup` is green since Task 3a: 137,760 steps and 169,049 calls under a
@@ -2911,3 +2915,182 @@ rust-only `--lib` 770 passed, 2 ignored; `test_corpus_goldens` 27, `test_cost_mo
 `test_ci_coverage` 11, `test_golden_format` 43, `test_module_layout` 18; the whole
 `test_cpu_corpus`, 1984 passed; `cargo test -p cost-report` 43; `cargo test -p peacockdb-dphyp` 6.
 None failed. Every count is build-test.md's.
+
+## Task 23
+
+### The run
+
+`run.py --jobs 1`, both benches, every mode, into the committed outputs, locally: Python 3.13.0,
+pandas 3.0.6, pyarrow 25.0.1, DuckDB 1.5.4, on master's plans. 620 runs, none failed, 90 skipped
+(the 18 tpcds queries the planner refuses, at each mode), 5 h 20 min, at most 7.7 GiB resident,
+the host's available memory never under 4.2 GiB. The longest run is tpch q9's at `tp4-rowgroup`,
+20 minutes planned. `cost_report.html` renders from the committed files byte for byte, and ten of
+its links picked at random, five page anchors and five log ranges, each land on their query's
+heading or inside its section on a block's first line.
+
+### Against the outputs before the rebase
+
+Every (query, mode) against the committed outputs at `8993972e`, the branch before the rebase: the
+same 620 runs and 90 skipped. A move is a ratio that changed by 0.0005 or more; 214 moved, 47 up
+and 167 down. Each is classified by the engine's plan tree (its `.plans.txt` section without the
+recipes) and the clusters' sizes in `.optimizer.txt`.
+
+| cause | runs | moved | up / down | median Δ of a move | median ratio |
+|---|--:|--:|--:|--:|--:|
+| (a) master's plan, its NULL-key filters below a shuffle alone (#137) | 197 | 179 | 46 / 133 | −0.013 | 0.495 → 0.436 |
+| (a) master's plan, other changes | 59 | 25 | 1 / 24 | −0.018 | 0.881 → 0.881 |
+| (b) clusters, the residual rule (R2): tpcds q16, q94, tpch q21 | 15 | 10 | 0 / 10 | −0.017 | 0.994 → 0.993 |
+| (c) the conf or the accounting | 0 | 0 | — | — | — |
+| unchanged plan and clusters | 349 | 0 | — | — | 0.861 → 0.861 |
+
+- **(a), the NULL-key filters.** master's planner puts `IS NOT NULL` below each shuffle of a key
+  that can hold one, at the three tp4 modes, over 66 queries. The null-key rule (R3) reads it as
+  wiring, so no cluster changed, but each filter is charged its output, about the side it sits on.
+  In the plan as written that side is usually a fact table; the order DPhyp makes shuffles the fact
+  table less often on such a key, so reassembly's filter sits on less and the ratio falls: tpcds
+  q3 0.877 → 0.633, its plan gaining 66 MB of filter and the optimized run 0.3 MB; q8 0.226 →
+  0.199 at each tp4 mode, its plan gaining 71 MB of filter, two on `substr` zip prefixes, and the
+  optimized run 10 MB, with one replan fewer. Where the optimized run gains a larger share of the
+  planned run's new filter and shuffle bytes than its ratio, the ratio moves toward 1: 41 of the 47
+  rises are that arithmetic, q62 for one, 161 MB more planned, 51 MB optimized, 0.256 → 0.271; q68
+  rises through the shuffle bytes its filters save, not the filter bytes alone. The other six are
+  q24 and q54 at tp4, which gain more filter optimized than planned, since the new order shuffles
+  store_sales on a filtered key (#297).
+- **The same filter as a dynamic-filter build.** At tp4 the planner's `sr_customer_sk IS NOT
+  NULL` below store_returns' shuffle made store_returns a filtered build, so q25 and q29 ran a
+  first-pass probe on it that pruned nothing (store_sales 2 → 2 row groups): q25 0.121 → 0.137
+  and q29 0.208 → 0.237 at tp4-single, that probe 16.3 MB and 19.3 MB. `_admitted` now reads that
+  filter as the cluster does, through `multijoin.null_key_filter`; red first in
+  `test_the_planner_s_null_key_filter_alone_does_not_make_a_build_filtered`.
+  The joins whose build one rule admits and the other does not, in the plan as written and in
+  DPhyp's order of it with no build probed, are in tpcds q14, q17, q24, q25, q29 and q50 at the
+  three tp4 modes; those 18 ran again into the committed outputs, and only q25's and q29's sections
+  changed: q25 0.121 → 0.113 (tp4-sized 0.115 → 0.109), q29 0.208 → 0.210 (tp4-rowgroup 0.261 →
+  0.248). The probes on the plan as written are 740 again, narrowing 735 as before, and
+  `test_engine_dynamic_filters` passes both queries at the three modes. The pipeline orders the
+  plan after the first pass, with its memory sources and measured estimates, not the plan as
+  written, so that search alone does not close the other runs; their logs do. The new rule admits
+  a subset of what the old did, so a run changes only where the old rule admitted a build for a
+  null-key filter alone. Across the 620 runs every first-pass build at tp4 is a filtered `date_dim`
+  (435) or `part` (9); every second-pass build of one relation is filtered by the query (tpch q14's
+  lineitem and q5's orders, tpcds q13's store_sales, and `date_dim` in q32, q64 and q92); every
+  other second-pass build holds a join, which both rules admit. Replans and probe plans never look
+  for candidates: only the pipeline's two passes do. So no run outside the 18 changes.
+- **The same filter in the report's names.** `names.py` marked a relation `(f)` where its only
+  filter was the planner's null-key filter, so tp4's logs named a build `([p0] join store_sales#1
+  (f)) (f)` where tp1's says `[p0] join store_sales#1`. A name now reads the filter as the cluster
+  does: a join hands each side the keys it drops NULLs of, and a build named on its own takes them
+  from the join that reads its memory source (`names.dropped_by_source`); red first in
+  `test_the_planner_s_null_key_filter_is_no_filter_in_a_name`. The names feed no estimate and no
+  decision. The cluster assembly and this rule now share one walk down a side,
+  `multijoin._read_through`.
+- **(a), the rest.** Grouping-id aggregates (tpcds q5, q18, q22, q77, q80, tpch rollup-over-join),
+  rewritten projections (q38, q87, q88, q90, q96), a scan's row groups (q54), q9's cross joins now
+  nested loops, and tpch nested-limits and nested-loop-left-join, which moved by nothing. Every move
+  is at tp4, where these queries also gained NULL-key filters; at tp1 none moved.
+- **(b).** The residual semi and anti joins of q16, q94 and q21 enter their clusters, [2, 4] →
+  [6] and [4] → [6], and master dropped the coalesce between them. q21 0.767 → 0.733 at tp1 and
+  0.677 → 0.642 at tp4 (Task 21's R2 measured the rest of that move, from master's 0.726); q94
+  by 0.001–0.002; q16 1.000 → 1.0002: its probe after order narrows nothing, and the optimized
+  runs pay 19,088 B more than the plan at tp1 (19,024 B of passthrough, 64 B of hash join) and
+  56,976 B at tp4 (also 56,752 B more scatter and 18,864 B less filter).
+- **(c) and (d).** No run with the engine's plan unchanged moved. The conf's one change prices
+  `GpuEmpty` as a scan, and R4's residency and scratch move no cost, as Task 21 measured.
+
+The runs dearer than planned, none before: tpcds q16 at every mode, by 0.02 %, and q24 at the
+three tp4 modes, by 0.9 %. In q24 the null-key filter reassembly puts on the store_sales shuffle
+costs 187.7 MB more than the plan's, and the order saves 52.6 MB of hash join, 67.1 MB of scatter
+and 61.6 MB of passthrough: 6.3 MB net (#297, kept as a known exception).
+
+The sixteen largest moves, either way:
+
+| run | before → after | why |
+|---|---|---|
+| tpcds q24 tp4-single, -rowgroup, -sized | 0.756 → 1.009 | reassembly's filter on store_sales: +220 MB of filter optimized, +32 MB planned (#297) |
+| tpcds q3 tp4-single, -rowgroup, -sized | 0.877 → 0.633 | the plan's new filter on store_sales, +66 MB; +0.3 MB optimized |
+| tpcds q54 tp4-single, -rowgroup, -sized | 0.596 → 0.693 | +69 MB of filter planned, +80 MB optimized (#297) |
+| tpcds q69 tp4-single, -rowgroup, -sized | 0.655 → 0.568 | +80 MB of filter planned, +7 MB optimized |
+| tpcds q92 tp4-single, -rowgroup | 0.611 → 0.528 | +17 MB planned, +3 MB optimized |
+| tpcds q32 tp4-single, -rowgroup | 0.603 → 0.521, 0.520 | +34 MB planned, +6 MB optimized |
+
+Totals as `design.md`'s "The committed run" states them, before → after:
+
+| | before | after |
+|---|---|---|
+| runs, failed | 620, 0 | 620, 0 |
+| tpch cheaper / dearer | 80 / 0 | 80 / 0 |
+| tpcds cheaper / dearer | 391 / 0 | 388 / 8 |
+| median ratio, tpch / tpcds | 1.00 / 0.52 | 1.00 / 0.52 |
+| final ratio within 1.4, tpch | 35 of 41 (18 of 20 numbered, 17 of 21 named) | 37 of 43 (20 of 22, 17 of 21) |
+| final ratio within 1.4, tpcds | 70 of 79 | 72 of 81 |
+| probes before order, narrowing | 740, 735 | 740, 735 |
+| probes after order, narrowing | 165, 55 | 165, 55 |
+| DPhyp calls, reordering, at the budget | 3,133, 766, 10 | 3,122, 771, 10 |
+| flips | 556 | 556 |
+| replans, refused | 692, 114 | 689, 120 |
+
+The counters move with the plans: DPhyp +5 for q21 and −5 each for q16 and q94, one cluster
+where there were two, and −6 for q8, which replans once less at tp4; reorders +5, q21's; refused
++6, q76's.
+
+The final ratio gains four rows: master's engine runs tpch q11 and q22 and tpcds q24 and q54, now
+1.04, 0.71, 1.06 and 0.62. Fourteen rows' final ratios move by 0.005 or more, each at the same
+best mode and against the same DuckDB figure, by master's engine `-mini.cost.txt` figure there:
+tpch cross-join 3.640 → 3.626, nested-loop-left-join 4.733 → 4.263, q10 0.816 → 0.805, q13 1.926 →
+1.699, q21 0.767 → 0.610, rollup-over-join 0.432 → 0.426; tpcds q1 1.093 → 1.088, q14 1.842 →
+1.830, q16 0.811 → 0.691, q22 0.962 → 0.856, q23 2.756 → 2.734, q39 1.115 → 1.109, q65 1.488 →
+1.410, q94 0.698 → 0.596. Of those the prototype's own ratio moved only for q16, q94 and q21, by
+the (b) moves above. The four named non-inner queries' final ratios come from master's engine
+figures: left-join-reorder 0.31, semi-join-reorder 0.48, anti-join-reorder 0.50, left-join-fixed
+0.86, each within 0.0001 of the branch's own.
+
+### The cardinality golden
+
+`UPDATE_CANONICAL=1 test_cardinality_corpus.py`, then a plain run, 3 passed. No join that was in
+the golden moved. tpch 77 → 84 joins, median q-error 1.07 → 1.07, 70.1 % → 70.2 % within 2×: q11's
+five joins and q22's two, which master's engine now runs. tpcds 636 → 656, median 1.24 → 1.29,
+70.6 % → 69.4 %: q24's eleven joins and q54's nine, q54's all between q 42 and 516 and q24's two
+address joins 63 and 85; q9's fifteen cross joins read as nested loops, each 1 row, q 1.00.
+Outside q64 tpcds is 619 joins, median 1.21, 72.7 % within 2×.
+
+### The corpus tier
+
+`exec-model-corpus.yml`'s four files at every mode, one process at a time, against DuckDB, passed /
+failed with wall time (h:mm:ss) and peak resident (GiB):
+
+| file | tp1-single | tp1-rowgroup | tp4-single | tp4-rowgroup | tp4-sized |
+|---|---|---|---|---|---|
+| `test_engine_answers` | 124 / 0 (10:13, 8.4 GiB) | 124 / 0 (12:56, 7.8) | 124 / 0 (55:02, 6.5) | 124 / 0 (1:44:04, 6.9) | 124 / 0 (38:14, 6.3)* |
+| `test_engine_dynamic_filters` | 71 / 0 (4:59, 4.9) | 73 / 0 (5:38, 4.6) | 73 / 0 (17:35, 4.4) | 73 / 0 (13:30, 4.2)* | 75 / 0 (13:01, 4.2)* |
+| `test_engine_reassembled` | 111 / 0 (8:31, 8.2) | 111 / 0 (11:10, 5.6) | 111 / 0 (53:10, 5.1) | 111 / 0 (split)* | 111 / 0 (36:33, 4.6)* |
+| `test_engine_optimized` | 111 / 0 (8:13, 4.8) | 111 / 0 (9:54, 4.9) | 111 / 0 (35:08, 6.0) | 111 / 0 (29:08, 4.8)* | 111 / 0 (24:05, 5.8)* |
+
+None failed, and no log holds a `FAIL` or `Traceback`. The spec puts the corpus tier on shad-gpu,
+which is down, so it ran here and on a second CPU host: the cells marked * ran there, from a byte
+copy of this tree, with the same Python 3.13.0 and `pip freeze`, DPhyp library and DuckDB. The
+rest ran here: 5 h 37 min of wall time, at most 8.4 GiB resident (the answers at `tp1-single`), the
+available memory never under 2.7 GiB. The reassembled suite at `tp4-rowgroup` ran as one process
+for its first 45 tests (31:45, 4.4 GiB) and the other 66 by name over five processes; the union is
+the 111 names, none twice.
+`test_engine_dynamic_filters` takes the queries whose plan at that mode holds a dynamic-filter
+candidate, and a candidate depends on the mode's layout, so its count is the mode's: `tp1-single`
+has none for tpch q9 and q18, which the other modes have, and `tp4-sized` adds tpch q5 and q8, 71,
+73 and 75.
+
+### Proving
+
+- Cheap tier as `pipeline.yml` runs it: 48 files, 521 passed, none failed.
+- Dataset tier: the sidecar recount (4), the cardinality corpus (3, after the regeneration), the
+  ordered corpus (2) and `run.py` (1) pass.
+- `cost_report.html` from the committed files is the committed page byte for byte, 309,187 bytes;
+  ten of its links resolve.
+- The corpus tier above, every file at every mode; after the build rule's change,
+  `test_engine_dynamic_filters` again over tpcds q25 and q29 at the three tp4 modes, 6 passed.
+- `run.py` over tpcds q3, q16, q21 and q24 at `tp1-single` and `tp4-single` into a scratch
+  directory: each of the 40 sections of its five files is the committed one byte for byte.
+- After the names change and the shared walk, the whole `run.py` again, both benches and every
+  mode, on the second CPU host from a byte copy of this tree: 620 runs, none failed. Exactly the
+  twelve tp4 `.optimizer.txt` and `.optimizer.md` files differ from the run before, in 434 lines on
+  the same line numbers, each losing `(f)` marks (974 in all) and the parentheses a marked join
+  carried and nothing else; every other file, `cost_report.html` included, is byte-identical, so
+  the report's line ranges still land.

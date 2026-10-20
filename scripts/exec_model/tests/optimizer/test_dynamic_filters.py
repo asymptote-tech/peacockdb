@@ -63,10 +63,10 @@ H_SCAN = ("GpuLoadParquet: table=h, projections=[hk@0, hv@1], partition_groups=[
           f"lanes=1, batches=multiple, schema=[{', '.join(H_COLUMNS)}]")
 
 
-def plan(join_type="Inner", key="d@0", probe=FACT_SCAN, build=DIM_BUILD):
+def plan(join_type="Inner", key="d@0", probe=FACT_SCAN, build=DIM_BUILD, build_key="dk@0", fields=""):
     text = f"""== q
 GpuUnload
-  GpuHashJoin: join_type={join_type}, on=[(dk@0, {key})], projection=[v@2], lanes=1, batches=multiple, schema=[v:Int64]
+  GpuHashJoin: join_type={join_type}, on=[({build_key}, {key})], {fields}projection=[v@2], lanes=1, batches=multiple, schema=[v:Int64]
     {build}
     {probe}
 """
@@ -123,6 +123,38 @@ def test_no_candidate_on_a_bare_build_under_either_rule():
       GpuLoadParquet: table=dim, projections=[dk@0], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[dk:Int64]""")
     assert candidates(bare, tables(), Builds.FILTERED) == []
     assert candidates(bare, tables(), Builds.FILTERED_OR_JOINED) == []
+
+
+def null_key_build(*, real_filter=False):
+    """dim shuffled on `dk` through the planner's `dk IS NOT NULL`, over `y = 2000` if `real_filter`."""
+    scan = ("GpuLoadParquet: table=dim, projections=[dk@0, y@1], partition_groups=[[[0]]], lanes=1, "
+            "batches=multiple, schema=[dk:Int64, y:Int64]")
+    below = (f"GpuFilter: predicate=y@1 = 2000, lanes=1, batches=multiple, schema=[dk:Int64, y:Int64]\n"
+             f"            {scan}") if real_filter else scan
+    return f"""GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[dk@0], schema=[dk:Int64, y:Int64]
+      GpuEmitPartitions: hash=[dk@0], lanes=4, batches=multiple, hashed_on=[dk@0], schema=[dk:Int64, y:Int64]
+        GpuFilter: predicate=dk@0 IS NOT NULL, lanes=1, batches=multiple, schema=[dk:Int64, y:Int64]
+          {below}"""
+
+
+def test_the_planner_s_null_key_filter_alone_does_not_make_a_build_filtered():
+    # The filter the planner puts below a shuffle drops a NULL that matches nothing, as the
+    # cluster reads it (multijoin's null-key rule): such a build is a bare scan, under either rule.
+    bare = plan(build=null_key_build())
+    assert candidates(bare, tables(), Builds.FILTERED) == []
+    assert candidates(bare, tables(), Builds.FILTERED_OR_JOINED) == []
+    [found] = candidates(plan(build=null_key_build(real_filter=True)), tables(), Builds.FILTERED)
+    assert found.column == "d"
+    # A Left join emits its build's unmatched rows, so a filter there is the query's; so is one
+    # under a join that holds NULL equal.
+    [kept] = candidates(plan(join_type="Left", build=null_key_build()), tables(), Builds.FILTERED)
+    assert kept.column == "d"
+    [equal] = candidates(plan(build=null_key_build(), fields="null_equals_null=true, "), tables(), Builds.FILTERED)
+    assert equal.column == "d"
+    # A project that picks columns is read through, the key followed to its ordinal below.
+    picked = """GpuProject: exprs=[y@1 as y, dk@0 as dk], lanes=4, batches=single, schema=[y:Int64, dk:Int64]
+      """ + null_key_build().replace("\n", "\n  ")
+    assert candidates(plan(build=picked, build_key="dk@1"), tables(), Builds.FILTERED) == []
 
 
 def test_no_candidate_on_a_scan_of_one_row_group():
