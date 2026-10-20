@@ -33,6 +33,8 @@ fixes #236 and #237):
 
 ## Known state
 
+- The task is completing: its signoff is in the spec, and CI on the PR, a pipeline dispatch and an
+  `exec-model-corpus.yml` dispatch are pending after the push.
 - Task 19: the branch is five commits on master (`8e0a7d40`), each green on rust-only, the
   cost-report crate and the cheap tier; NULL equality is the plan's flag alone, and the plan reader
   takes master's `GpuEmpty`, `Int8` and scans of no column (Task 19 below).
@@ -2336,6 +2338,13 @@ queries; every mode, 210 runs, none failed, 2 h 41 min). Every `.cpu.txt`, `.cos
 Proving: cheap tier 48 files, 480 cases; `test_cardinality_corpus`, `test_ordered_corpus` and
 `test_run_corpus` over the sf1 tables; the samples; the full run above.
 
+### On GitHub
+
+The completeness pass fetched all ten `.optimizer.md` at `efb23d52` through GitHub's renderer
+(`application/vnd.github.html`). Each renders its tables (tpch 22, tpcds 204 at the sampled
+modes), and every anchor `cost_report.html` links to is a rendered heading id. No page has
+changed since.
+
 ## Task 17
 
 ### The links
@@ -2596,6 +2605,10 @@ The named queries take master's case format: `all_modes` on the cpu, `none` on t
 DuckDB `exact` but for left-join-reorder's `fingerprint`. Their siblings run everywhere, but no
 device has run these, and the registry wants a ticket on a cell turned off: #288, as #262 and #281
 are for theirs. Their registry rows carry it and nothing else.
+
+Read by two independent readings of the rebased branch, one over the code and CI, one over the
+goldens and the wiki. Neither compared each resolution with its conflict on its own; Task 24's move
+replays every commit and its reading compares each with the commit it replaced.
 
 ### Ticket numbers
 
@@ -3141,6 +3154,11 @@ page with master's one test added. The CSV is master's with the branch's four ro
   `#` as a comment. Commit 3's "#288. gen_duckdb_cost.sh …" and commit 7's "#296 record …" were
   lost that way on a first attempt. Each conflicted commit is made with `git commit -C <old>
   --cleanup=verbatim`, and every message but commit 3's is its old one byte for byte.
+
+Read by a reviewer: every rebased commit's change was compared with its old commit's by an
+independent reading, `git range-diff 8e0a7d40..687777e6 623073da..fa7ee6ae` and each pair's `-U0`
+patches. Commits 1, 2 and 8 are identical; the rest differ only by the resolutions above and the
+fixes to what git merged wrong, in the ticket files, `build-test.md`, the CSV and `report.html`.
 
 ### Labels
 

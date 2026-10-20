@@ -1009,10 +1009,44 @@ Consequences worth knowing before you regenerate:
   true rows from tp1-single's `-mini.cpu.txt` beside the estimate from the plan and the sidecar,
   so regenerating that `.plans.txt` or `.cpu.txt`, or a sidecar, obliges it too:
   `UPDATE_CANONICAL=1` over the sf1 tables.
+- **A plan golden answers to the prototype too.** Adding or regenerating a `<mode>.plans.txt`, of
+  any dataset, goes through these gates, and a node kind, type or expression the prototype's reader
+  (`scripts/exec_model/plans/`) does not know turns them red:
+  - the cheap tier, in the cost-report job: every section parses, every expression renders back and
+    lowers, every plan builds with the engine's layouts, every join cluster disassembles to the
+    same layout, and every other mode's joins are among tp1-single's.
+  - dataset-matrix: `test_ordered_corpus` orders every tpch and tpcds plan at every mode, and the
+    cardinality golden above is compared whole, so a new query with a join is red until rewritten.
+  - the cost-report crate: `every_registry_query_has_a_duckdb_cost` wants a `.duckdb_cost.txt` for
+    each tpch and tpcds registry row, so a new query there needs `gen_duckdb_cost.sh --gen` first.
+
+  With `PEACOCK_DPHYP_LIB` set as `scripts/exec_model/README.md` builds it; the three after the
+  loop read the sf1 tables, and `gen_duckdb_cost.sh` wants DuckDB 1.5.4 and pyarrow 19.0.1:
+
+  ```
+  for f in plans/test_engine_plan plans/test_engine_expr plans/test_engine_ir \
+           plans/test_engine_corpus optimizer/test_disassembly_corpus \
+           optimizer/test_cardinality_modes; do
+    python3 scripts/exec_model/tests/$f.py || break
+  done
+  python3 scripts/exec_model/tests/optimizer/test_ordered_corpus.py
+  UPDATE_CANONICAL=1 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+  DUCKDB=<duckdb 1.5.4> testdata/gen_duckdb_cost.sh --gen    # a new tpch or tpcds query only
+  cargo test -p cost-report every_registry_query_has_a_duckdb_cost
+  ```
 - **The engine's `<mode>-<tier>.cost.txt` is a pure function of its `.cpu.txt` and
   `cost_model.conf`** — regenerating one `.cpu.txt` obliges the sibling `.cost.txt`, and
   `test_cost_model` re-derives every one of them, so a hand-edited `.cost.txt` goes red. The
   prototype's `<mode>.costs.txt` is not: it prices runs no file holds, so only `run.py` makes it.
+- **`cost_model.conf`'s category list is read back from the prototype's committed costs.**
+  Each run's line in a `<mode>.costs.txt` names the conf's categories in order, and
+  `cost_report.py` refuses a file whose names or order differ. So renaming, adding, dropping or
+  reordering a category turns `test_cost_report.py` and the cost-report job's "Generate report"
+  step red until a full `python3 scripts/exec_model/run.py` writes them again: 620 runs, about
+  five hours at `--jobs 1`, over the sf1 tables with `PEACOCK_DPHYP_LIB`, under Python 3.13,
+  pandas 3.0.6 and pyarrow 25.0.1. Moving a node kind between existing categories raises nothing:
+  the report re-totals the bytes each category held before the move, so its figures are stale
+  until that run.
 - **A device never authors a golden.** The device tier reads the sections the cpu tier
   wrote, which is what makes a divergence a red test rather than a quietly rewritten
   expectation.

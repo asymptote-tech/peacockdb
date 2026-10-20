@@ -42,13 +42,13 @@ named queries, readable reports with links, and `optimizer.md`.
 **Files:** `testdata/gen_stats.py`, `scripts/exec_model/stats.py`, `testdata/stats/*.json`,
 the sidecar's tests.
 
-- [ ] `gen_stats.py` skips list and fixed-size-list columns; `fingerprint` becomes the row
+- [x] `gen_stats.py` skips list and fixed-size-list columns; `fingerprint` becomes the row
   count plus each kept column's footer min/max/null count, hashed — not the footer's bytes.
   `stats.py` computes the same function; a mismatch is still refused, table by table.
-- [ ] Regenerate both sidecars. Test: generating tpch from `--embeddings synthetic` and from
+- [x] Regenerate both sidecars. Test: generating tpch from `--embeddings synthetic` and from
   `--embeddings external` gives one byte-identical file. External data is per host
   (`fetch_embeddings.sh`); where it is absent the test says so and fails, it does not skip.
-- [ ] Proving: dataset tier, rust-only untouched.
+- [x] Proving: dataset tier, rust-only untouched.
 
 ### Task 2: the handwritten lowerings go
 
@@ -56,34 +56,35 @@ the sidecar's tests.
 `scripts/exec_model/{tpch,tpcds}.plans.txt`, `tests/test_tpch.py`, `tests/test_tpch_corpus.py`,
 `tests/test_tpcds.py`; edit `pipeline.yml`, `exec-model-corpus.yml`, `README.md`, `build-test.md`.
 
-- [ ] Before deleting, list every import of each file; a suite that imports a lowering for a
+- [x] Before deleting, list every import of each file; a suite that imports a lowering for a
   fixture rather than to run it gets the fixture from an engine golden or a mock plan.
-- [ ] Remove the CI steps and the `elsewhere` entries; the guard in the loop must still fail on
+- [x] Remove the CI steps and the `elsewhere` entries; the guard in the loop must still fail on
   a missing name.
-- [ ] Proving: cheap and dataset tiers green; corpus tier unchanged (it never read these).
+- [x] Proving: cheap and dataset tiers green; corpus tier unchanged (it never read these).
 
 ### Task 3: operators the engine's plans do not use go
 
 **Files:** `scripts/exec_model/operators/*`, `plan_text.py` if only the lowerings used it.
 
-- [ ] With Task 2 in, find what nothing reaches: coverage over the cheap and corpus tiers, then
+- [x] With Task 2 in, find what nothing reaches: coverage over the cheap and corpus tiers, then
   read each unreached path. Name-addressed column access and the simplified node shapes are
   the expected residue.
-- [ ] Delete them; record in the detail file what was removed and what stayed and why — it is
+- [x] Delete them; record in the detail file what was removed and what stayed and why — it is
   the input to `design.md`'s operators section.
-- [ ] Proving: all tiers, corpus at every mode.
+- [x] Proving: all tiers, corpus at every mode.
 
 ### Task 3a: the driver's step cap follows from the plan
 
 **Files:** `scripts/exec_model/partitioned_driver.py`, its tests.
 
-- [ ] `DEFAULT_MAX_STEPS` (100,000) is a fixed safety valve, and the row-group modes legitimately
-  need more: tpch q8 at `tp4-rowgroup` takes 137,760 steps and then matches DuckDB. Each step
-  moves a batch or finishes a lane, so derive the cap from the plan — source batches times nodes,
-  plus lanes times nodes — and keep it a guard against a driver that stops making progress.
-- [ ] A driver test of an honest run that passes a small fixed cap, and one that still trips
+- [x] `DEFAULT_MAX_STEPS` (100,000) is a fixed safety valve, and the row-group modes legitimately
+  need more: tpch q8 at `tp4-rowgroup` takes 137,760 steps and then matches DuckDB. The cap is
+  the calls the run owes so far, grown as batches are queued, since no static bound from the
+  plan's shape holds without being too loose to trip; it stays a guard against a driver that
+  stops making progress.
+- [x] A driver test of an honest run that passes a small fixed cap, and one that still trips
   on a run that does not progress.
-- [ ] Proving: cheap tier; `test_engine_answers.py` at `tp4-rowgroup` over the whole corpus on
+- [x] Proving: cheap tier; `test_engine_answers.py` at `tp4-rowgroup` over the whole corpus on
   shad-gpu (q8 green).
 
 ### Task 4: one folder per component
@@ -91,13 +92,13 @@ the sidecar's tests.
 **Files:** every `scripts/exec_model/*.py`, `tests/`, the two workflows, `README.md`,
 `build-test.md`'s links, `testdata/gen_stats.py` (it imports `scripts.exec_model.stats`).
 
-- [ ] Move into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
+- [x] Move into `engine/`, `plans/`, `optimizer/` as the spec lists, with relative imports
   fixed and nothing else changed; tests into `tests/{engine,operators,plans,optimizer}/` with
   `harness.py`, `corpus.py`, `mocks.py`, `rescan.py` where their users are or in `tests/`.
   `errors.py` goes where its callers are.
-- [ ] The test runner loop in `pipeline.yml` globs the subfolders; the `elsewhere` names gain
+- [x] The test runner loop in `pipeline.yml` globs the subfolders; the `elsewhere` names gain
   their folder.
-- [ ] Proving: the same test count before and after, every tier green; `git diff -M --stat`
+- [x] Proving: the same test count before and after, every tier green; `git diff -M --stat`
   shows renames with small similarity loss only.
 
 ### Task 5: cardinality per join
@@ -105,13 +106,14 @@ the sidecar's tests.
 **Files:** `tests/optimizer/test_cardinality_corpus.py`, a new golden under
 `scripts/exec_model/testdata/`, `design.md` notes.
 
-- [ ] The test writes, per (bench, mode), one line per join: query, depth, join type, true
-  rows, estimate, q-error — sorted, deterministic — and compares with the golden; an
-  `UPDATE_CANONICAL=1` run rewrites it. The aggregate thresholds go.
-- [ ] q64: find which joins miss and why (which predicates correlate; which NDV is used).
+- [x] The test writes, per bench at `tp1-single`, one line per join: query, depth, join type,
+  true rows, estimate, q-error — sorted, deterministic — and compares with the golden; an
+  `UPDATE_CANONICAL=1` run rewrites it. `test_cardinality_modes` holds every other mode's joins
+  among those. The aggregate thresholds go.
+- [x] q64: find which joins miss and why (which predicates correlate; which NDV is used).
   Fix in the estimator if the fix is general; otherwise the limit goes into `design.md` with
   the numbers. The golden is regenerated after.
-- [ ] Proving: dataset tier green in dataset-matrix.
+- [x] Proving: dataset tier green in dataset-matrix.
 
 ### Task 6: run.py, its goldens and the report
 
@@ -121,22 +123,22 @@ Two steps: 6a is `run.py`, the optimizer's report as data, `<mode>.cpu.txt` and
 **Files:** new `scripts/exec_model/run.py`, `scripts/exec_model/optimizer/report.py` (or
 beside `run.py`), `scripts/exec_model/testdata/goldens/{tpch,tpcds}/*`, `README.md`.
 
-- [ ] `run.py --bench --query --mode --jobs`: per (query, mode) one worker runs the plan
+- [x] `run.py --bench --query --mode --jobs`: per (query, mode) one worker runs the plan
   without and with the optimizer, renders `cpu.txt` from the optimized run in the engine's
   format, and returns the `.optimizer.txt` section and both runs' costs. The parent writes the
   files whole, in corpus order.
-- [ ] The optimizer reports what it did as data, not text: dynamic filters, each DPhyp call
+- [x] The optimizer reports what it did as data, not text: dynamic filters, each DPhyp call
   (input relations and edges, the sets priced, the tree), orientation flips, replans, and the
   plan before and after. `.optimizer.txt` renders that; the diff is a unified diff of the two
   plan texts.
-- [ ] Cost: the engine's per-node byte components from `cost_model.conf`, as the cost
+- [x] Cost: the engine's per-node byte components from `cost_model.conf`, as the cost
   widget computes them, over each prototype run's per-node rows and bytes. DuckDB cost from
   the committed `.duckdb_cost.txt`; the engine's from `.cost.txt`.
-- [ ] `cost_report.html`: the columns of the spec; self-contained, one file.
-- [ ] Time a full run on shad-gpu (`--jobs` at the core count). Past forty minutes, profile
+- [x] `cost_report.html`: the columns of the spec; self-contained, one file.
+- [x] Time a full run on shad-gpu (`--jobs` at the core count). Past forty minutes, profile
   with `cProfile` over a heavy tpcds query; Polars only if pandas dominates — record the
   profile in the detail file either way.
-- [ ] Proving: a unit test of the `.optimizer.txt` renderer over a small plan; `run.py` over
+- [x] Proving: a unit test of the `.optimizer.txt` renderer over a small plan; `run.py` over
   three queries at one mode in the cheap tier's time budget; the full run on shad-gpu.
 
 ### Task 7: the record to S3
@@ -146,17 +148,18 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
 `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`, `tests/optimizer/test_call_cost.py`,
 `build-test.md`.
 
-- [ ] Bucket `calibration` on the Nebius endpoint `upload_datasets.sh` uses; credentials live
-  on shad-gpu. Key `<dataset>.sf<sf>/records.tsv`; the sf40 record is already there (the
-  detail file has its sha256). The q6/q19 record in git is superseded by it and is deleted.
-- [ ] `--pull-benchmarks` uploads the record it pulled; the fetch script downloads by key into
+- [x] Bucket `calibration` on the Nebius endpoint `upload_datasets.sh` uses; credentials live
+  on shad-gpu. Key `<dataset>.sf<sf>/<sha256>.tsv`, by content since the bucket keeps no
+  versions, pinned by `testdata/calibration/records.sha256`. The q6/q19 record in git is
+  superseded and is deleted.
+- [x] `--pull-benchmarks` uploads the record it pulled; the fetch script downloads by key into
   `testdata/calibration/` (ignored). `records.tsv` is deleted from git.
-- [ ] The preamble test checks `record_header()` against a record written by the harness's own
+- [x] The preamble test checks `record_header()` against a record written by the harness's own
   writer in a temp dir, not a committed file.
-- [ ] The measured-record check in `test_call_cost` comes back, reading the fetched record,
+- [x] The measured-record check in `test_call_cost` comes back, reading the fetched record,
   in the corpus tier beside the other suites that need data; it asserts at least fifteen mode
   pairs ordered as measured.
-- [ ] Proving: rust-only and cheap tier green with no record on disk; the call-cost check on
+- [x] Proving: rust-only and cheap tier green with no record on disk; the call-cost check on
   shad-gpu with the record fetched.
 
 ### Task 8: every device-enabled query in the benchmark
@@ -165,15 +168,17 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
 `peacockdb-core/tests/peacock_gpu_benchmarks.rs`, `testdata/benchmark-results/**`,
 `build-test.md`.
 
-- [ ] Generate tpcds sf40 on shad-gpu beside tpch sf40 (`generate_testdata.sh`); the harness
+- [x] Generate tpcds sf40 on shad-gpu beside tpch sf40 (`generate_testdata.sh`); the harness
   symlinks it as it does tpch's. If generation does not fit the host, the task blocks on it
   and the tpcds cases wait.
-- [ ] One case per query enabled on the device in `corpus_cases.inc`, at its modes: the named
-  tpch queries and tpcds q82, q84, q85. The rust-only test that holds the timed set inside the
-  device-enabled set stays green.
-- [ ] Run on shad-gpu when the device is free (`nvidia-smi` first; a neighbour is #178).
+- [x] One case per query enabled on the device in `corpus_cases.inc` when the sf40 tree was
+  measured, at its modes then: 26 cases, the named tpch queries and tpcds q82, q84, q85 among
+  them. master's device column has grown since (q82, q84 and q85 at every mode, timed at
+  `tp1_single`), and widening the timed set needs a device run at sf40. The rust-only test that
+  holds the timed set inside the device-enabled set stays green.
+- [x] Run on shad-gpu when the device is free (`nvidia-smi` first; a neighbour is #178).
   Commit the trees; the records go to S3 by Task 7's path.
-- [ ] Proving: the benchmark binary's harness assertions on `gpu-tests`; the trees' trailer
+- [x] Proving: the benchmark binary's harness assertions on `gpu-tests`; the trees' trailer
   arithmetic test rust-only.
 
 ### Task 9: documents
@@ -181,20 +186,20 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
 **Files:** new `scripts/exec_model/design.md`, `scripts/exec_model/README.md`, new
 `peacockdb-dphyp/design.md`.
 
-- [ ] `design.md`: plan text → tree → estimates → dynamic filters → clusters → DPhyp →
+- [x] `design.md`: plan text → tree → estimates → dynamic filters → clusters → DPhyp →
   orientation → disassembly → adaptive run and replan; each component's shape and the
   alternative it beat; what the prototype does not model (device bytes, concurrency). Name the
   imports that run against the folders' direction — `engine/adaptive` → `plans` and
   `optimizer.observed`, `plans/engine_nodes` → `optimizer.cardinality` and `optimizer.stats` —
   and why they stay. The estimator's limits, with their numbers, are in the detail file's
   `## Task 5`.
-- [ ] `README.md`: environment (Python, pandas, pyarrow, DuckDB pin), DPhyp build and
+- [x] `README.md`: environment (Python, pandas, pyarrow, DuckDB pin), DPhyp build and
   `PEACOCK_DPHYP_LIB`, the three tiers and their data, `run.py` and its outputs, the record
   fetch.
-- [ ] `peacockdb-dphyp/design.md` within 200 lines: the Rust API and the C ABI — relation
+- [x] `peacockdb-dphyp/design.md` within 200 lines: the Rust API and the C ABI — relation
   masks, edges, the cost callback, the budget, the postfix tree, return codes — the algorithm
   in brief, the tests.
-- [ ] Proving: every command in the README run once as written.
+- [x] Proving: every command in the README run once as written.
 
 ### Task 10: forwarders cost nothing, scatters cost their bytes
 
@@ -203,26 +208,26 @@ under `scripts/calibration/`, `scripts/build-test-shadgpu.sh`, `scripts/lib/shad
 `testdata/goldens/**/*.cost.txt`, the `cost-report` crate if it names one, the exec-model
 goldens, `scripts/exec_model/design.md`.
 
-- [ ] `cuda_scatter_bytes 1.0 GpuEmitPartitions`; `cuda_forward_bytes 0.0 GpuMergePartitions,
+- [x] `cuda_scatter_bytes 1.0 GpuEmitPartitions`; `cuda_forward_bytes 0.0 GpuMergePartitions,
   GpuUnion, GpuInterleave`; `cuda_shuffle_bytes` gone. A test that a forwarder adds nothing to
   `peacockdb_cost` and a scatter adds its bytes, red before the conf moves.
-- [ ] The engine's cost goldens regenerated by the command that writes them; the cost report
+- [x] The engine's cost goldens regenerated by the command that writes them; the cost report
   builds. `run.py` over the corpus; `.costs.txt` and `cost_report.html` move.
-- [ ] `design.md`: what each side charges — DuckDB's streaming operators at zero
+- [x] `design.md`: what each side charges — DuckDB's streaming operators at zero
   (`duckdb_cost.py`'s `STREAMING_OPS`), the engine's forwarders at zero.
-- [ ] Proving: rust-only, the cost-report crate's tests, cheap tier, `run.py` full.
+- [x] Proving: rust-only, the cost-report crate's tests, cheap tier, `run.py` full.
 
 ### Task 11: join clusters are named
 
 **Files:** `scripts/exec_model/optimizer/multijoin.py`, `plans/engine_run.py`,
 `optimizer/report_text.py`, tests, goldens.
 
-- [ ] An id per cluster, `MJ<n>` per query in plan order, outermost first, carried on each join
+- [x] An id per cluster, `MJ<n>` per query in plan order, outermost first, carried on each join
   node it holds through reorder, flip and replan. `.cpu.txt` renders `mj=MJ<n>` on those join
   nodes; `.optimizer.txt` heads each DPhyp call with it.
-- [ ] Tests: a two-cluster plan numbers both and keeps the numbers across a reorder; a cross join
+- [x] Tests: a two-cluster plan numbers both and keeps the numbers across a reorder; a cross join
   carries none.
-- [ ] Proving: cheap tier, `run.py` full.
+- [x] Proving: cheap tier, `run.py` full.
 
 ### Task 12: non-inner joins reorder under TES
 
@@ -231,31 +236,32 @@ conflict detection if it earns one, `peacockdb-dphyp` only if a hyperedge it mus
 refused, new named queries in `testdata/tpch-queries/` with their registration and goldens,
 tests, goldens.
 
-- [ ] First: the named queries — the left-join one in the spec and two or three more (semi,
+- [x] First: the named queries — the left-join one in the spec and two or three more (semi,
   anti, a left join whose inner predicate reads the null-supplying side, which must not move) —
   registered as the existing named queries are, their plans in the engine's goldens.
-- [ ] CD-C over each operator: SES, TES, conflict rules; a non-inner join enters its cluster as
-  a hyperedge on its TES. Cross joins stay out.
-- [ ] Tests per operator kind: a legal reorder found, an illegal one never produced; the spec's
+- [x] CD-A over each operator: SES and TES, no conflict rules, since DPhyp cannot refuse a pair
+  without a crate change; a non-inner join enters its cluster as a hyperedge on its TES. Cross
+  joins stay out.
+- [x] Tests per operator kind: a legal reorder found, an illegal one never produced; the spec's
   query reorders to `(customer ⋈ σ(nation)) ⟕ orders`.
-- [ ] Every answer equal to DuckDB's at every mode; q58 before and after in the detail file.
-- [ ] Proving: cheap tier, corpus tier at every mode, `run.py` full.
+- [x] Every answer equal to DuckDB's at every mode; q58 before and after in the detail file.
+- [x] Proving: cheap tier, corpus tier at every mode, `run.py` full.
 
 ### Task 13: dynamic filters from any build, through unions
 
 **Files:** `scripts/exec_model/optimizer/dynamic_filters.py`, tests, goldens.
 
-- [ ] `lift` passes `GpuUnion` and `GpuInterleave`, the key mapped into every branch, each
+- [x] `lift` passes `GpuUnion` and `GpuInterleave`, the key mapped into every branch, each
   branch's scan pruned on its own footers; and a non-inner join into the side it outputs. A join
   that equates NULLs, anti and mark included, prunes nothing by a build key holding a NULL.
-- [ ] A second pass on the DPhyp-ordered plan, where a build holding a filter or a join
+- [x] A second pass on the DPhyp-ordered plan, where a build holding a filter or a join
   qualifies; memory-source names unique across passes and replans; estimates of a build that
   reads a first-pass source; a candidate inside another's build probed over its pruned scan.
-- [ ] Probe plans run adaptively: a build that misses inside one replans, its stopped runs priced
+- [x] Probe plans run adaptively: a build that misses inside one replans, its stopped runs priced
   as the main run's.
-- [ ] Tests for both, red first. tpch q5, tpcds q5 and q58 at every mode, before and after, in
+- [x] Tests for both, red first. tpch q5, tpcds q5 and q58 at every mode, before and after, in
   the detail file. Answers equal to DuckDB's.
-- [ ] Proving: cheap tier, corpus tier, `run.py` full.
+- [x] Proving: cheap tier, corpus tier, `run.py` full.
 
 ### Task 14: DuckDB's cost for the named queries
 
@@ -286,7 +292,7 @@ with Task 15: the page and the log share the report data both changed.
 - [x] `<mode>.optimizer.md` from the report data: per query, per multi-join the evolution table
   (tree / what changed it / cost, the plan's order first); the dynamic filters applied.
 - [x] A test over a report with a reorder, a flip and a replan in one cluster.
-- [ ] Proving: cheap tier, `run.py` full; the page renders on GitHub.
+- [x] Proving: cheap tier, `run.py` full; the page renders on GitHub.
 
 ### Task 17: the report links to its evidence
 
@@ -320,8 +326,9 @@ with Task 15: the page and the log share the report data both changed.
   branch's where it adds; every semantic conflict is listed in the detail file with its resolution.
 - [x] Ticket numbers master took move to free ones, every reference with them. The board's chain
   sits on master.
-- [ ] Proving: every commit builds and passes rust-only, the cost-report crate and the cheap tier,
-  except the prototype outputs Task 23 makes again; a reviewer reads every conflict resolution.
+- [x] Proving: every commit builds and passes rust-only, the cost-report crate and the cheap tier,
+  except the prototype outputs Task 23 makes again; two readings, one over the code and CI and one
+  over the goldens and the wiki, read the rebased branch whole (Task 24 compares each commit).
 
 ### Task 20: the prototype under master's execution model
 
