@@ -1358,23 +1358,24 @@ Hard-won constraints for the multi-GPU C++ path, which lives entirely in
 Both numbers the widget compares are bytes, and the point of the pairing is that they are the
 same bytes: how much data the query had to move. build-test.md has how each file is produced.
 
-**Peacock cost** is a re-reading of the execution golden rather than a second measurement:
-each node's `output_bytes` is binned into a category and multiplied by that category's weight
-from `testdata/cost_model.conf`. So **a cost total is lane-split dependent**: `output_bytes`
-carries each batch's validity and offset padding, and any change to the lane rule moves it even
-where no row, node or lane count changes. The regression gate fires on a single byte, so changing
-how a key hashes is expected to trip it. Every real category is 1.0 today, so the total is Σ
-`output_bytes`; the weights exist so a phase can be priced without moving the goldens that
-record it. Three placeholder phases sit at 0.0 and one category names no node at all — kept
-because dropping a category rewrites the line list of every committed cost golden.
+**Peacock cost** is a re-reading of the execution golden rather than a second measurement: each
+node's `output_bytes` is binned into a category and multiplied by that category's weight from
+`testdata/cost_model.conf`. So **a cost total is lane-split dependent**: `output_bytes` carries each
+batch's validity and offset padding, and any change to the lane rule moves it even where no row,
+node or lane count changes. Any growth shows as a regression, and the gate fails past 10 %
+(`REGRESSION_FAIL_PCT`); changing how a key hashes is expected to show some. Every real category is
+1.0 but one. The forwarders (`GpuMergePartitions`, `GpuUnion`, `GpuInterleave`) relabel lanes and
+hand batches on without a copy, so they sit at 0.0. The scatter (`GpuEmitPartitions`) is charged its
+bytes. The weights exist so a phase can be priced without moving the goldens that record it. Three
+placeholder phases sit at 0.0 and one category names no node at all — kept because dropping a
+category rewrites the line list of every committed cost golden.
 
-**DuckDB's cost oracle** runs each tpch and tpcds query twice — pbench has none, its queries
-being named rather than `qN` — a deterministic profile with join-filter
-pushdown off, then a pass reading only the dynamic-filter bounds — and combines them with
-parquet row-group statistics. `storage_read_total` is deliberately in the same units as a
-source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced
-columns, which is what makes the ratio apples-to-apples rather than a scan count against a
-byte count.
+**DuckDB's cost oracle** runs each tpch and tpcds query twice — pbench has none — a deterministic
+profile with join-filter pushdown off, then a pass reading only the dynamic-filter bounds — and
+combines them with parquet row-group statistics. `storage_read_total` is deliberately in the same
+units as a source node's `output_bytes`, decoded Arrow bytes of the surviving row groups' referenced
+columns, which is what makes the ratio apples-to-apples rather than a scan count against a byte
+count.
 
 **The widget** takes the query's section at the last mode its cpu run is enabled at, and
 renders green at a ratio ≤ 1.4. Directional signal, not a benchmark: nothing here is timed.

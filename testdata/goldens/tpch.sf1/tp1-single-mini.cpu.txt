@@ -918,6 +918,26 @@ GpuUnload: output_rows=1196041, output_bytes=155524935
           in_rows=[] batch_rows=[[150000]] batch_bytes=[[3187114]]
     GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1, o_orderstatus@2, o_totalprice@3, o_orderdate@4, o_orderpriority@5, o_clerk@6, o_shippriority@7, o_comment@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=195058153
       in_rows=[] batch_rows=[[1500000]] batch_bytes=[[195058153]]
+== anti-join-reorder
+early_exit=none
+GpuUnload: output_rows=1951, output_bytes=59022
+  in_rows=[[1951]] batch_rows=[[1951]] batch_bytes=[[59022]]
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=1, batches=multiple, output_rows=1951, output_bytes=59022
+    in_rows=[[1],[50004]] batch_rows=[[1951]] batch_bytes=[[59022]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=5
+      in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[5]]
+      GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, output_rows=1, output_bytes=5
+        in_rows=[[25]] batch_rows=[[1]] batch_bytes=[[5]]
+        GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=25, output_bytes=389
+          in_rows=[] batch_rows=[[25]] batch_bytes=[[389]]
+    GpuHashJoin: join_type=LeftAnti, on=[(c_custkey@0, o_custkey@0)], lanes=1, batches=multiple, output_rows=50004, output_bytes=1718893
+      in_rows=[[150000],[1500000]] batch_rows=[[50004]] batch_bytes=[[1718893]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=150000, output_bytes=5156254
+        in_rows=[[150000]] batch_rows=[[150000]] batch_bytes=[[5156254]]
+        GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=150000, output_bytes=5156254
+          in_rows=[] batch_rows=[[150000]] batch_bytes=[[5156254]]
+      GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=12187500
+        in_rows=[] batch_rows=[[1500000]] batch_bytes=[[12187500]]
 == cross-join
 early_exit=none
 GpuUnload: output_rows=125, output_bytes=22898
@@ -988,6 +1008,48 @@ GpuUnload: output_rows=1, output_bytes=43
             in_rows=[] batch_rows=[[1500000]] batch_bytes=[[36375000]]
         GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_quantity@4], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48]]], lanes=1, batches=multiple, output_rows=6001215, output_bytes=145529464
           in_rows=[] batch_rows=[[6001215]] batch_bytes=[[145529464]]
+== left-join-fixed
+early_exit=none
+GpuUnload: output_rows=2528, output_bytes=97020
+  in_rows=[[2528]] batch_rows=[[2528,0]] batch_bytes=[[97016,4]]
+  GpuProject: exprs=[c_name@1, o_orderkey@2, l_linenumber@0], lanes=1, batches=multiple, output_rows=2528, output_bytes=97020
+    in_rows=[[2528]] batch_rows=[[2528,0]] batch_bytes=[[97016,4]]
+    GpuHashJoin: join_type=Inner, on=[(l_orderkey@0, o_orderkey@1)], projection=[l_linenumber@1, c_name@2, o_orderkey@3], lanes=1, batches=multiple, output_rows=2528, output_bytes=97020
+      in_rows=[[2528],[1550004]] batch_rows=[[2528,0]] batch_bytes=[[97016,4]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=2528, output_bytes=41080
+        in_rows=[[2528]] batch_rows=[[2528]] batch_bytes=[[41080]]
+        GpuFilter: predicate=l_shipdate@2 = 1995-03-15, projection=[l_orderkey@0, l_linenumber@1], lanes=1, batches=multiple, output_rows=2528, output_bytes=41080
+          in_rows=[[122880]] batch_rows=[[2528]] batch_bytes=[[41080]]
+          GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_linenumber@3, l_shipdate@10], partition_groups=[[[22]]], lanes=1, batches=multiple, output_rows=122880, output_bytes=2503680
+            in_rows=[] batch_rows=[[122880]] batch_bytes=[[2503680]]
+      GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, o_orderkey@2], lanes=1, batches=multiple, output_rows=1550004, output_bytes=46887630
+        in_rows=[[150000],[1500000]] batch_rows=[[1500000,50004]] batch_bytes=[[45375004,1512626]]
+        GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=150000, output_bytes=4537504
+          in_rows=[[150000]] batch_rows=[[150000]] batch_bytes=[[4537504]]
+          GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=150000, output_bytes=4537504
+            in_rows=[] batch_rows=[[150000]] batch_bytes=[[4537504]]
+        GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=24375000
+          in_rows=[] batch_rows=[[1500000]] batch_bytes=[[24375000]]
+== left-join-reorder
+early_exit=none
+GpuUnload: output_rows=63551, output_bytes=1922426
+  in_rows=[[63551]] batch_rows=[[61600,1951]] batch_bytes=[[1863404,59022]]
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@1)], projection=[c_name@1, o_orderkey@3], lanes=1, batches=multiple, output_rows=63551, output_bytes=1922426
+    in_rows=[[1],[1550004]] batch_rows=[[61600,1951]] batch_bytes=[[1863404,59022]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=5
+      in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[5]]
+      GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, output_rows=1, output_bytes=5
+        in_rows=[[25]] batch_rows=[[1]] batch_bytes=[[5]]
+        GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=25, output_bytes=389
+          in_rows=[] batch_rows=[[25]] batch_bytes=[[389]]
+    GpuHashJoin: join_type=Left, on=[(c_custkey@0, o_custkey@1)], projection=[c_name@1, c_nationkey@2, o_orderkey@3], lanes=1, batches=multiple, output_rows=1550004, output_bytes=53281397
+      in_rows=[[150000],[1500000]] batch_rows=[[1500000,50004]] batch_bytes=[[51562504,1718893]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=150000, output_bytes=5156254
+        in_rows=[[150000]] batch_rows=[[150000]] batch_bytes=[[5156254]]
+        GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=150000, output_bytes=5156254
+          in_rows=[] batch_rows=[[150000]] batch_bytes=[[5156254]]
+      GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=24375000
+        in_rows=[] batch_rows=[[1500000]] batch_bytes=[[24375000]]
 == mixed-join
 early_exit=none
 GpuUnload: output_rows=1, output_bytes=43
@@ -1078,6 +1140,26 @@ GpuUnload: output_rows=303959, output_bytes=39533243
           in_rows=[] batch_rows=[[150000]] batch_bytes=[[3187114]]
     GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1, o_orderstatus@2, o_totalprice@3, o_orderdate@4, o_orderpriority@5, o_clerk@6, o_shippriority@7, o_comment@8], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=195058153
       in_rows=[] batch_rows=[[1500000]] batch_bytes=[[195058153]]
+== semi-join-reorder
+early_exit=none
+GpuUnload: output_rows=4149, output_bytes=125512
+  in_rows=[[4149]] batch_rows=[[4149]] batch_bytes=[[125512]]
+  GpuHashJoin: join_type=Inner, on=[(n_nationkey@0, c_nationkey@2)], projection=[c_custkey@1, c_name@2], lanes=1, batches=multiple, output_rows=4149, output_bytes=125512
+    in_rows=[[1],[99996]] batch_rows=[[4149]] batch_bytes=[[125512]]
+    GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=1, output_bytes=5
+      in_rows=[[1]] batch_rows=[[1]] batch_bytes=[[5]]
+      GpuFilter: predicate=n_name@1 = FRANCE, projection=[n_nationkey@0], lanes=1, batches=multiple, output_rows=1, output_bytes=5
+        in_rows=[[25]] batch_rows=[[1]] batch_bytes=[[5]]
+        GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_name@1], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=25, output_bytes=389
+          in_rows=[] batch_rows=[[25]] batch_bytes=[[389]]
+    GpuHashJoin: join_type=LeftSemi, on=[(c_custkey@0, o_custkey@0)], lanes=1, batches=multiple, output_rows=99996, output_bytes=3437368
+      in_rows=[[150000],[1500000]] batch_rows=[[99996]] batch_bytes=[[3437368]]
+      GpuCoalesceAllBatches: lanes=1, batches=single, output_rows=150000, output_bytes=5156254
+        in_rows=[[150000]] batch_rows=[[150000]] batch_bytes=[[5156254]]
+        GpuLoadParquet: table=customer, projections=[c_custkey@0, c_name@1, c_nationkey@3], partition_groups=[[[0,1]]], lanes=1, batches=multiple, output_rows=150000, output_bytes=5156254
+          in_rows=[] batch_rows=[[150000]] batch_bytes=[[5156254]]
+      GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9,10,11,12]]], lanes=1, batches=multiple, output_rows=1500000, output_bytes=12187500
+        in_rows=[] batch_rows=[[1500000]] batch_bytes=[[12187500]]
 == shuffle-additive
 early_exit=none
 GpuUnload: output_rows=4, output_bytes=213

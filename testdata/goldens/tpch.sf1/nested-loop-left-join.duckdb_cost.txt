@@ -1,0 +1,18 @@
+PROJECTION: projections=[r_regionkey, r_name, r_comment, n_nationkey, n_name, n_regionkey, n_comment], output_bytes=3876, output_rows=51, materialized=0
+  PIECEWISE_MERGE_JOIN: output_bytes=3876, output_rows=51, materialized=1180
+    TABLE_SCAN: table=nation, projections=[n_regionkey, n_nationkey, n_name, n_comment], output_bytes=1000, output_rows=25, materialized=1000, bytes_read=2442, rows_read=25
+    TABLE_SCAN: table=region, projections=[r_regionkey, r_name, r_comment], output_bytes=180, output_rows=5, materialized=180, bytes_read=425, rows_read=5
+duckdb_cost=5227
+materialization_total=2360
+storage_read_total=2867
+
+--- row-group pruning (storage reduction) ---
+nation  dyn_filter=[n_regionkey<=4]  row_groups=1/1  rows=25/25 (100.0%)  bytes_fetched=1527/1527 (100.0%)
+region  row_groups=1/1  rows=5/5 (100.0%)  bytes_fetched=441/441 (100.0%)
+pruning_bytes_fetched=1968/1968 (100.0%)
+
+--- cost breakdown ---
+PIECEWISE_MERGE_JOIN                       1180  50.0%
+TABLE_SCAN(nation)                         1000  42.4%
+TABLE_SCAN(region)                          180   7.6%
+total=2360

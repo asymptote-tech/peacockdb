@@ -99,6 +99,13 @@ corpus_query!(tpch, 1, q7, all_modes, all_modes, duckdb_exact, data_fusion_exact
 corpus_query!(tpch, 1, q8, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpch, 1, q2, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
+// Non-inner joins written in the costly order: three that may move, and left-join-fixed, which
+// may not. All four run everywhere on both engines; left-join-reorder is over the result cap.
+corpus_query!(tpch, 1, left_join_reorder, all_modes, all_modes, duckdb_fingerprint, data_fusion_exact, live_cpu, schema_validation_enabled);
+corpus_query!(tpch, 1, semi_join_reorder, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, anti_join_reorder, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpch, 1, left_join_fixed, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
 // eleven: q32 at the tp4 modes (#199), q78 and q2 (#60's `round`), q14, q18, q22, q77 and q80

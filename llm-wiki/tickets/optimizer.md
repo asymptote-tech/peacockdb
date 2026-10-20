@@ -19,6 +19,12 @@
 - [#158 (stats-answered aggregate) an aggregate DataFusion answers from statistics reaches no executor](#t158)
 - [#142 (split large batches) split large batches](#t142)
 - [#138 (ranged sorted merge) add ranged sorted merge](#t138)
+- [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
+- [#290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not](#t290)
+- [#291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins](#t291)
+- [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
+- [#295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate](#t295)
+- [#297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned](#t297)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -248,3 +254,84 @@ node that orders a whole stream emits one batch, so "stream sorted" is `BatchSor
 `SingleBatch` and is derived rather than declared. Ranged emission produces the one shape that
 breaks that — a stream ordered across several batches — so it must add `PartitionSorted` back
 and teach the limit-after-sort validation to accept it alongside the derived form.
+
+<a id="t298"></a>
+### #298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early
+`duckdb_cost.py`'s `scan_cost` reads a scan's rows as every surviving row group's (`rows_fetched`),
+so a scan a `STREAMING_LIMIT` stops is charged as read in full. tpch `scan-limit` profiles 2,048
+rows scanned of lineitem's 6,001,215, and its golden charges all 49 row groups, 1.04 GB of
+`storage_read_total`: the engine's 1.05 GB reads as a ratio of 1.01, where DuckDB read one row
+group. tpch `nested-limits` is the same through pass 1: DuckDB's default plan reads `part` by
+`rowid>=5 AND rowid<=44` (pass 2's bounds, a late-materialization semi join), pass 1 turns that
+off, and the golden charges the full 200,000-row scan, 4.83 MB of its 4.85 MB.
+
+Fix: under a `STREAMING_LIMIT`, charge the lesser of the pruned row groups and those covering
+`operator_rows_scanned`; a `rowid` range from pass 2 bounds the scan the same way. tpcds q28, q32,
+q38 and q97 hold scans under a limit too, each scanning its whole table: check their goldens
+hold, and the two tpch ratios become comparable.
+
+<a id="t290"></a>
+### #290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not
+`_matched_keys` (`scripts/exec_model/optimizer/cardinality.py`) cuts both sides' key NDV to the
+smaller side's for every join type, so what reads the key above an outer or anti join undercounts.
+A left join of 1,000 keys against 10 is 1,000 rows with key NDV 10, true 1,000; a left anti join
+is 990 rows, NDV 10. The rows are right since #289; the NDV is not. tpch q13 groups by `c_custkey`
+over `customer ⟕ orders`: the final aggregate is estimated at 99,996 groups, orders' customer
+count, against 150,000. Only an inner or semi join's output holds just the matched values; a
+preserved side keeps its own NDV, and an anti join's is at most its own less the matched ones.
+
+<a id="t291"></a>
+### #291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins
+pandas has one missing value for a float column, so the prototype reads a NaN as a NULL
+(`operators/frame.py`, "Known divergences"). DuckDB and the device equate NaN with NaN as a key; the
+prototype folds the NaN group into the NULL one and drops NaN keys from a join. pbench's
+`float32-key-group` and `float64-key-group` answer 51 groups against DuckDB's 52, and
+`float64-key-join` 772,357 rows against 779,611, at all five modes; the other 53 or 54 of pbench's
+queries match. The engine's lines for the three are commented out on #243.
+
+Fix: hold NULL apart from NaN in the prototype's frames — a nullable float dtype whose `<NA>` is the
+NULL and whose NaN is a value — from `tables.typed` through the group keys and the hash join's null
+hold-out.
+
+<a id="t294"></a>
+### #294 (orientation build term) orientation picks a build by a term that prices nothing the join session does
+Orientation picks a join's build by a term that prices nothing the session does. It builds the
+side with the lower `bytes(build) × (1 + copies × batches(probe))`, `copies` = 1, a term written
+for a build copied per probe batch. The session builds once and copies nothing, holding the build
+and its hash table (`plan::session_bytes`, 16 bytes a row); the cost model has no per-batch term
+for the probe either. The term no longer prices a copy; it stays because pricing the build as the
+session holds it measured worse.
+
+That pricing, bytes plus 16 bytes a row, won on tpch q18 at tp1-rowgroup (0.465 to 0.363) and
+tpcds q64 at tp4-rowgroup (0.549 to 0.499), but moved 23 of 130 sample runs (26 queries at five
+modes) for a net change near zero, and made tpch q9 dearer at every mode by 2–5 %. What the term
+should price — the probe's own per-batch cost beside the build's, or something else — is open.
+
+<a id="t295"></a>
+### #295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate
+DPhyp's cost model keeps DuckDB's default share, 0.2, of a join's rows for every residual edge
+(`join_order.py`, `estimator.DEFAULT`); the plan's cardinality estimate reads the same predicate
+through `estimator.selectivity` (`cardinality._joined_selectivity`). Since a non-inner join with a
+residual enters a cluster, the flat share decides orders.
+
+tpch q21: the semi join on `l_orderkey` with the residual `l_suppkey <> l_suppkey` is estimated at
+31,348 rows in the second replan and comes out at 151,237 (q-error 4.8). DPhyp runs it before the
+orders join on the estimate, and a third replan follows. q21 goes from 0.726 to 0.733 at tp1 and
+0.640 to 0.642 at tp4; tpcds q16 and q94, the sample's other residual semi joins, do not move.
+
+Fix: estimate a residual edge by its predicate, as the plan's estimator does, over the columns of
+the two relation sets it joins.
+
+<a id="t297"></a>
+### #297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned
+Reassembly puts the plan's null-key filter back below each shuffle of a key the plan filtered, and
+DPhyp's C_out prices joins alone, so no order's cost holds that filter.
+
+tpcds q24 at the three tp4 modes: the plan filters `ss_store_sk` and `ss_customer_sk` after the join
+with store_returns. DPhyp's order joins store_sales to store and customer first, so the filter lands
+on the store_sales shuffle (`disassembly`'s `_wired`). Against the plan the optimized run pays 187.7
+MB more filter and saves 52.6 MB of hash join, 67.1 MB of scatter and 61.6 MB of passthrough: 6.3 MB
+dearer, ratio 1.009. q54 at tp4 pays 10.8 MB more filter than its plan and stays cheaper.
+
+Fix: price a reassembled filter in DPhyp's cost, the bytes of each side shuffled on a filtered
+key, or keep the filter where the plan had it.

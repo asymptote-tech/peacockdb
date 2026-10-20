@@ -10,19 +10,28 @@ Why it is a separate run. The capture distorts what it measures -- +7% on a quer
 They come from two runs joined on the tuple, which is the whole reason the record carries
 a tuple rather than a node number.
 
-    scripts/create_nsys_profile.sh --metrics, which runs both commands below:
+    scripts/create_nsys_profile.sh --metrics, which runs these per case, then the merge:
     nsys profile --trace=nvtx,cuda --sample=none --cpuctxsw=none \
                  --gpu-metrics-device=0 --gpu-metrics-set=<arch> \
-                 --gpu-metrics-frequency=20000 -o cap -- <binary>
+                 --gpu-metrics-frequency=20000 -o cap -- <binary> <case's test> --exact
     nsys export --type=sqlite --force-overwrite=true -o cap.sqlite cap.nsys-rep
-    scripts/calibration/nsys_hbm.py --capture cap.sqlite --peak-bw <B/s> \
-        --record testdata/calibration/records.tsv --out hbm.tsv
+    scripts/calibration/nsys_hbm.py --capture cap.sqlite --case "tpch.sf40 q6 tp1-single" \
+        --peak-bw <B/s> --record testdata/calibration/tpch.sf40/records.tsv \
+        --record testdata/calibration/tpcds.sf40/records.tsv --out part.tsv
+    scripts/calibration/nsys_hbm.py --parts part.tsv --parts … --record … --out hbm.tsv
 
-The record is the clean run's: its coordinates and its times are what the output carries,
-and the capture supplies only bytes. The two must describe the same calls, which is checked
-both ways — a call in one and not the other means they are not the same work. Any number of
-cases may be in a capture; the harness wraps each in a named NVTX range, so which query a
-call was in is read rather than typed on a command line.
+The record is the clean run's, as published — a file per dataset, all of them given: its
+coordinates are what the output carries, and the capture supplies only bytes. The two must
+describe the same calls, which is checked both ways — a call in one and not the other means
+they are not the same work. A join without --case takes every case the capture holds; with
+it, the capture must hold that case alone and is checked against that case's rows, and the
+merge of the parts is where the record as a whole is checked. The harness wraps each case in
+a named NVTX range, so which query a call was in is read rather than typed.
+
+The output is a row per call (`record.HBM_COLUMNS`): each reading the median over the call's
+executions. Joined per execution first, against the record row with the same run_index,
+then folded — so the check above holds execution by execution, and the file is the
+record's calls long rather than its executions.
 
 Nsight's general metric set reports DRAM traffic as a percentage of the device's peak
 bandwidth, not as bytes, so bytes are the integral of that percentage over the sampling
@@ -219,22 +228,90 @@ def report_loss(keyed, rows, record_path):
     sys.exit("\n".join(lines))
 
 
+NOTES = [
+    "hbm_bytes per cuDF call, from an Nsight capture with GPU memory counters on.",
+    "A row per call: the clean record's coordinates without run_index, and each reading",
+    "  the median over `executions` executions of it. This file's times are not usable —",
+    "  a capture costs the query ~7%, a heavy scan ~11% — so it carries traffic, and the",
+    "  times come from the clean run.",
+    "device_busy_us/device_idle_us are here as a reading of this capture, not as a",
+    "  measurement to fit: idle inside a call is the device waiting through the host",
+    "  prologue, and it says whether a thin sample count is a short call or a stalled one.",
+    "samples = GPU metric samples inside the call. Under ~10 the integral is an",
+    "  estimate from too few points; a reader should weight or drop those rows.",
+]
+
+
+def call_of_row(row):
+    """A call's key in either file, the record's or this one's: its coordinates, no run."""
+    return tuple(row[c] for c in record.HBM_CALL)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--capture", required=True, help="sqlite export of the .nsys-rep")
-    ap.add_argument("--record", required=True, help="record TSV written by the same run")
+    ap.add_argument("--capture", help="sqlite export of the .nsys-rep")
+    ap.add_argument("--case", help="`<dataset>.sf<sf> <query> <mode>`: the one case the "
+                                   "capture holds, joined against that case's rows alone")
+    ap.add_argument("--parts", action="append", default=[],
+                    help="per-case outputs to merge, in place of --capture; the merge is "
+                         "checked against the whole record")
+    ap.add_argument("--record", action="append", required=True,
+                    help="record TSV of the clean run; repeat for each file it was published "
+                         "as, one per dataset")
     ap.add_argument("--out", required=True)
     ap.add_argument("--domain", default="peacockdb", help="NVTX domain holding the regions")
     ap.add_argument(
         "--peak-bw",
         type=float,
-        required=True,
-        help="device peak HBM bandwidth in bytes/s (H200 SXM: 4.8e12). Required, not "
-             "defaulted: bytes are the integral of a percentage of it, so a wrong one is "
-             "a silent scale error on every row",
+        help="device peak HBM bandwidth in bytes/s (H200 SXM: 4.8e12). Required with "
+             "--capture, not defaulted: bytes are the integral of a percentage of it, so a "
+             "wrong one is a silent scale error on every row",
     )
     args = ap.parse_args()
+    if bool(args.capture) == bool(args.parts):
+        sys.exit("one of --capture (a join) or --parts (a merge of joins), not both or neither")
+    if args.parts and (args.case or args.peak_bw is not None):
+        sys.exit("--case and --peak-bw belong to a join; --parts merges finished ones")
+    if args.capture and args.peak_bw is None:
+        sys.exit("--peak-bw is required with --capture: bytes are the integral of a "
+                 "percentage of it, so a guessed one scales every row silently")
+    _, rows = record.read_records(args.record, *TUPLE)
+    if args.parts:
+        merge(args, rows)
+    else:
+        join(args, rows)
 
+
+def merge(args, rows):
+    """The per-case joins as one file, in the record's call order, covering it exactly.
+
+    A case joined alone was checked against that case's rows only; this is where the record
+    as a whole is, both ways and naming the call, so a case whose capture never ran or a
+    part of another case set is refused rather than written as part of the corpus.
+    """
+    parts = {}
+    for path in args.parts:
+        for row in record.read_tsv(path, *record.HBM_COLUMNS):
+            if call_of_row(row) in parts:
+                sys.exit(f"{path} repeats call {call_of_row(row)}; the parts overlap")
+            parts[call_of_row(row)] = row
+    want = list(dict.fromkeys(call_of_row(r) for r in rows))
+    missing = [k for k in want if k not in parts]
+    extra = sorted(set(parts) - set(want))
+    if missing or extra:
+        sys.exit(
+            "the parts and the record do not describe the same calls: "
+            + (f"{len(missing)} record calls have no part row, first {missing[0]}. "
+               if missing else "")
+            + (f"{len(extra)} part rows are in no record, first {extra[0]}." if extra else "")
+        )
+    out = [parts[k] for k in want]
+    record.write_tsv(args.out, NOTES, record.HBM_COLUMNS,
+                     [[r[c] for c in record.HBM_COLUMNS] for r in out])
+    print(f"{len(out)} calls from {len(args.parts)} parts; wrote {args.out}")
+
+
+def join(args, rows):
     conn = sqlite3.connect(args.capture)
     dom = nvtx_names.domain_id(conn, args.domain)
     ranges = list(
@@ -268,8 +345,17 @@ def main():
             "The sampling frequency is above what it sustains; lower it and recapture."
         )
 
-    _, rows = record.read_record(args.record, *TUPLE)
     cases = cases_in(ranges)
+    if args.case:
+        # Named rather than inferred, so a capture of the wrong case is refused instead of
+        # being joined against whichever rows it happens to match.
+        named = nvtx_names.case_of(args.case)
+        held = sorted({case for _, _, case in cases})
+        if held != [named]:
+            sys.exit(f"--case is {args.case!r} and the capture holds {held}")
+        rows = [r for r in rows if tuple(r[c] for c in TUPLE[:4]) == named]
+        if not rows:
+            sys.exit(f"no record given has a row for {args.case!r}")
     # Only the call ranges, each tagged with its containing case. The `p<k>` ranges nest
     # inside them, so integrating both would count the same bytes twice — and a partition
     # cannot be priced alone anyway, its shared prologue being charged to p0. Dropped
@@ -294,7 +380,7 @@ def main():
             "recorder, or the ranges came from somewhere else"
         )
     keyed = key_calls(calls)
-    report_loss(keyed, rows, args.record)
+    report_loss(keyed, rows, ", ".join(args.record))
 
     merged = busy_union(conn)
     starts = [m[0] for m in merged]
@@ -312,46 +398,37 @@ def main():
             i += 1
         return total
 
-    # Driven by the record, so the output is in the record's order and a row is emitted
-    # for every row of the file. `report_loss` has already established the key sets are
-    # equal, so the lookup cannot miss.
-    out = []
+    # Joined per execution, against the record row with the same run_index — `report_loss`
+    # has established the key sets are equal, so the lookup cannot miss — and only then
+    # folded to a row per call, in the record's order.
+    executions = []
     for row in rows:
         a, b = keyed[row_key(row)]
         r, n = integral(read, a, b)
         w, _ = integral(write, a, b)
         busy = busy_ns(a, b)
-        out.append(
-            [row[c] for c in TUPLE]
-            + [round(r), round(w), round(r + w), n, busy // 1000, (b - a - busy) // 1000]
-        )
+        executions.append({
+            **{c: row[c] for c in record.HBM_CALL},
+            "run_index": row["run_index"],
+            "hbm_read_bytes": str(round(r)), "hbm_write_bytes": str(round(w)),
+            "hbm_bytes": str(round(r + w)), "samples": str(n),
+            "device_busy_us": str(busy // 1000), "device_idle_us": str((b - a - busy) // 1000),
+        })
+    out = record.hbm_per_call(executions)
+    record.write_tsv(args.out, NOTES, record.HBM_COLUMNS,
+                     [[r[c] for c in record.HBM_COLUMNS] for r in out])
 
-    notes = [
-        "hbm_bytes per cuDF call, from an Nsight capture with GPU memory counters on.",
-        "The coordinates are records.tsv's, and joining on all of them is the point:",
-        "  this file's times are not usable — a capture costs the query ~7%, a heavy",
-        "  scan ~11% — so it carries traffic, and the times come from a clean run.",
-        "device_busy_us/device_idle_us are here as a reading of this capture, not as a",
-        "  measurement to fit: idle inside a call is the device waiting through the host",
-        "  prologue, and it says whether a thin sample count is a short call or a stalled one.",
-        "samples = GPU metric samples inside the call. Under ~10 the integral is an",
-        "  estimate from too few points; a reader should weight or drop those rows.",
-    ]
-    columns = list(TUPLE) + ["hbm_read_bytes", "hbm_write_bytes", "hbm_bytes", "samples",
-                             "device_busy_us", "device_idle_us"]
-    record.write_tsv(args.out, notes, columns, out)
-
-    at = len(TUPLE)
-    thin = [r for r in out if r[at + 3] < 10]
-    total = sum(r[at + 2] for r in out)
-    print(f"{len(out)} calls, {total / 1e9:.2f} GB HBM, sampling period {period_ns / 1e3:.1f}us")
+    total = sum(int(r["hbm_bytes"]) for r in out)
+    thin = [r for r in out if int(r["samples"]) < 10]
+    print(f"{len(out)} calls over {len(executions)} executions, {total / 1e9:.2f} GB HBM "
+          f"a call's median summed, sampling period {period_ns / 1e3:.1f}us")
     if skipped:
         print(f"{skipped} partition ranges skipped — their bytes are inside their call's")
-    if thin:
+    if thin and total:
         print(
             f"{len(thin)} calls under 10 samples, carrying "
-            f"{sum(r[at + 2] for r in thin) / 1e9:.3f} GB "
-            f"({100 * sum(r[at + 2] for r in thin) / total:.2f}%) "
+            f"{sum(int(r['hbm_bytes']) for r in thin) / 1e9:.3f} GB "
+            f"({100 * sum(int(r['hbm_bytes']) for r in thin) / total:.2f}%) "
             "-- too few to integrate, and a reader should weight or drop them"
         )
     print(f"wrote {args.out}")

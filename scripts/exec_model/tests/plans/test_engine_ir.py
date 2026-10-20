@@ -1,0 +1,255 @@
+"""The engine's expression fields translated into the prototype's expression IR."""
+
+from __future__ import annotations
+
+if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/plans/<file>.py`
+    import pathlib as _pathlib, sys as _sys
+
+    _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
+    __package__ = "scripts.exec_model.tests.plans"
+
+import pathlib
+import re
+
+import pandas as pd
+
+from ..harness import main, raises
+from ...plans.engine_expr import AggCall
+from ...plans.engine_ir import (
+    Kind, columns, distinct_key_width, frame_names, kind_of, lower_field, residual_crosses, width_on_device,
+)
+from ...plans.engine_plan import EngineNode, read_plans
+from ...plans.goldens import engine_plan_paths
+from ...errors import EnginePlanFormatError
+from ...operators import expressions as X
+
+FIELDS = ("predicate", "filter", "exprs", "final", "group_by", "aggs", "by", "on", "hash", "projection")
+
+
+def walk(node):
+    yield node
+    for child in node.children:
+        yield from walk(child)
+
+
+def corpus_nodes():
+    paths = engine_plan_paths()
+    assert {path.parent.name for path in paths} == {"tpch.sf1", "tpcds.sf1", "pbench.sf1"}, paths
+    for path in paths:
+        for name, plan in read_plans(path).items():
+            if isinstance(plan, EngineNode):
+                for node in walk(plan):
+                    yield path, name, node
+
+
+def test_every_expression_field_in_the_goldens_lowers():
+    seen = set()
+    for path, name, node in corpus_nodes():
+        for field in FIELDS:
+            if field in node.fields:
+                lower_field(node, field)
+                seen.add(field)
+    assert seen == set(FIELDS), set(FIELDS) - seen
+
+
+# -- synthetic nodes, one rule each ------------------------------------------------------------
+
+
+def scan(*schema):
+    return EngineNode("GpuLoadParquet", {}, tuple(schema))
+
+
+def node(kind, children, schema=(), **fields):
+    return EngineNode(kind, fields, tuple(schema), list(children))
+
+
+def predicate(text, *schema):
+    return lower_field(node("GpuFilter", [scan(*schema)], predicate=text), "predicate")
+
+
+def test_a_literal_takes_the_kind_of_the_operand_across_from_it():
+    zip_code = predicate("substr(ca_zip@0, 1, 5) = 13", ("ca_zip", "Utf8"))
+    assert zip_code.right == X.Lit("13")
+    assert predicate("ss_quantity@0 > 13", ("ss_quantity", "Int32")).right == X.Lit(13)
+    assert predicate("l_discount@0 >= 0.05", ("l_discount", "Decimal128(15,2)")).right == X.Lit(0.05)
+    day = predicate("d_date@0 >= 1996-01-01", ("d_date", "Date32"))
+    assert day.right == X.Lit(pd.Timestamp("1996-01-01"))
+    shifted = predicate("(d_date@0 + `90 days`) > d_date@0", ("d_date", "Date32"))
+    assert shifted.left.right == X.Lit(pd.Timedelta(days=90))
+
+
+def test_a_literal_with_only_literals_beside_it_takes_its_output_column():
+    project = node(
+        "GpuProject", [scan(("d", "Int64"))], schema=[("bucket", "Utf8")],
+        exprs="[CASE WHEN d@0 <= 30 THEN `30 days` ELSE `31-60 days` END as bucket]",
+    )
+    [bucket] = lower_field(project, "exprs")
+    assert bucket == X.Alias(
+        X.Case(((X.Binary("<=", X.Col("d"), X.Lit(30)), X.Lit("30 days")),), X.Lit("31-60 days")), "bucket"
+    )
+    aggregate = node(
+        "GpuAggregate", [scan(("k", "Int64"), ("d", "Int64"))],
+        schema=[("k", "Int64"), ("late", "Int64")],
+        group_by="[k@0]", aggs="[sum(CASE WHEN d@1 > 30 THEN 1 ELSE 0 END) as late]",
+    )
+    [late] = lower_field(aggregate, "aggs")
+    assert late.args[0].whens[0][1] == X.Lit(1) and late.args[0].otherwise == X.Lit(0)
+
+
+def test_lowered_expressions_evaluate_over_a_frame_named_by_frame_names():
+    frame = pd.DataFrame({
+        "ca_zip": ["13000", "85669", None],
+        "d_date": pd.to_datetime(["1999-02-20", "1999-03-01", "1999-02-22"]),
+    })
+    lowered = predicate(
+        "((substr(ca_zip@0, 1, 2) = 13) OR (ca_zip@0 IS NULL)) AND ((d_date@1 + `5 days`) < 1999-03-01)",
+        ("ca_zip", "Utf8"), ("d_date", "Date32"),
+    )
+    assert lowered.evaluate(frame).fillna(False).tolist() == [True, False, True]
+
+
+def test_a_repeated_name_is_framed_by_ordinal_and_resolved_through_it():
+    assert frame_names(["a", "b", "a"]) == ["a@0", "b", "a@2"]
+    both = (("d_date_sk", "Int64"), ("x", "Int64"), ("d_date_sk", "Int64"))
+    assert predicate("d_date_sk@2 = 1", *both) == X.Binary("==", X.Col("d_date_sk@2"), X.Lit(1))
+    with raises(EnginePlanFormatError, match=r"`x@0` is `d_date_sk` there"):
+        predicate("x@0 = 1", *both)
+
+
+def test_a_join_filter_and_projection_index_build_and_probe_side_by_side():
+    join = node(
+        "GpuHashJoin", [scan(("k", "Int64"), ("v", "Int64")), scan(("k", "Int64"), ("w", "Int64"))],
+        on="[(k@0, k@0)]", filter="k@build:0 < k@probe:0", projection="[k@0, w@3]",
+    )
+    # Keys and filter name both sides as one table, where `k` is two columns; the
+    # projection indexes the join type's own output, here the same two sides.
+    assert lower_field(join, "on") == [(X.Col("k@0"), X.Col("k@2"))]
+    assert lower_field(join, "filter") == X.Binary("<", X.Col("k@0"), X.Col("k@2"))
+    assert lower_field(join, "projection") == [X.Col("k@0"), X.Col("w")]
+
+
+def test_case_forms_the_ir_lacks_are_rewritten_into_the_one_it_has():
+    project = node(
+        "GpuProject", [scan(("n", "Int64"), ("r", "Float64"))], schema=[("ratio", "Float64")],
+        exprs="[CASE n@0 WHEN 0 THEN NULL ELSE r@1 END as ratio]",
+    )
+    [ratio] = lower_field(project, "exprs")
+    [(when, then)] = ratio.inner.whens
+    assert when == X.Binary("==", X.Col("n"), X.Lit(0)) and pd.isna(then.value)
+    no_else = predicate("CASE WHEN n@0 > 1 THEN true END", ("n", "Int64"))
+    assert no_else.otherwise == X.Lit(None)
+
+
+def test_final_reads_the_aggregate_state_after_the_keys():
+    aggregate = node(
+        "GpuAggregateBatches", [scan(("k", "Utf8"), ("v", "Decimal128(15,2)"))],
+        schema=[("k", "Utf8"), ("avg(v)", "Float64")],
+        group_by="[k@0]", aggs="[sum(v@1) as avg(v)$sum, count(v@1) as avg(v)$count]",
+        final="[avg(v)$sum@1 / CAST(avg(v)$count@2 AS Float64) as avg(v)]",
+    )
+    [average] = lower_field(aggregate, "final")
+    assert average == X.Alias(
+        X.Binary("/", X.Col("avg(v)$sum"), X.Cast(X.Col("avg(v)$count"), "float64")), "avg(v)"
+    )
+    assert lower_field(aggregate, "aggs")[1] == AggCall("count", (X.Col("v"),), ("avg(v)$count",))
+
+
+def test_what_the_ir_cannot_say_is_refused_naming_the_field():
+    cases = {
+        ("1 = 1", ("a", "Int64")): r"GpuFilter predicate: literal `1` has nothing beside it",
+        ("a@0 = x1", ("a", "Int64")): r"literal `x1` does not read as integer",
+        ("a@build:0 = 1", ("a", "Int64")): r"addressed build, which this field is not",
+        ("(a@0 / b@1) > 1", ("a", "Int64"), ("b", "Int64")): r"integer division",
+        ("sha256(a@0) = 1", ("a", "Utf8")): r"`sha256` with 1 arguments has no IR counterpart",
+        ("a@0 IS DISTINCT FROM b@1", ("a", "Int64"), ("b", "Int64")): r"`IS DISTINCT FROM` has no IR",
+        ("a@0 = 1", ("a", "Time64(ns)")): r"type `Time64\(ns\)` has no kind here",
+        ("a@0 ILIKE x", ("a", "Utf8")): r"ILIKE",
+        ("CAST(a@0 AS Timestamp(Second, None)) > 1970-01-01", ("a", "Int64")):
+            r"a cast from integer to Timestamp\(Second, None\)",
+    }
+    for (text, *schema), message in cases.items():
+        with raises(EnginePlanFormatError, match=message):
+            predicate(text, *schema)
+    project = node("GpuProject", [scan(("a", "Int64"))], schema=[("b", "Int64")], exprs="[a@0]")
+    with raises(EnginePlanFormatError, match=r"GpuProject exprs: output `a` lands in `b`"):
+        lower_field(project, "exprs")
+    project = node("GpuProject", [scan(("a", "Utf8"))], schema=[("a", "Int64")], exprs="[a@0]")
+    with raises(EnginePlanFormatError, match=r"`a` is string, its column integer"):
+        lower_field(project, "exprs")
+
+
+def test_pbench_s_types_have_kinds_and_a_zoned_timestamp_has_none():
+    assert kind_of("Float32") is Kind.FLOAT
+    assert kind_of("UInt32") is Kind.INTEGER
+    for unit in ("Second", "Millisecond", "Microsecond", "Nanosecond"):
+        assert kind_of(f"Timestamp({unit}, None)") is Kind.DATE, unit
+    with raises(EnginePlanFormatError, match=r"has no kind here"):
+        kind_of('Timestamp(Second, Some("UTC"))')
+
+
+def test_a_like_against_a_column_lowers_to_a_pattern_per_row():
+    join = node(
+        "GpuNestedLoopJoin", [scan(("id", "Int32"), ("pat", "Utf8")), scan(("name", "Utf8"))],
+        filter="name@probe:0 LIKE pat@build:1",
+    )
+    assert lower_field(join, "filter") == X.LikeColumn(X.Col("name"), X.Col("pat"))
+
+
+def test_a_cast_between_timestamp_units_lowers_to_a_timestamp_cast():
+    project = node("GpuProject", [scan(("t", "Timestamp(Microsecond, None)"))],
+                   schema=[("s", "Timestamp(Second, None)")], exprs="[CAST(t@0 AS Timestamp(Second, None)) as s]")
+    assert lower_field(project, "exprs") == [X.Alias(X.TimestampCast(X.Col("t"), "s"), "s")]
+
+
+def test_a_residual_crosses_where_a_conjunct_reads_both_sides_or_neither():
+    # As `plan::distinct_key_width` decides it: pbench not-in-correlated's RightAnti holds
+    # `f_k@probe:1 IS NULL`, which reads one side and crosses nothing.
+    def join(text):
+        return node("GpuHashJoin", [scan(("a", "Int64")), scan(("b", "Int64"))], on="[(a@0, b@0)]", filter=text)
+
+    assert not residual_crosses(join("b@probe:0 IS NULL"))
+    assert not residual_crosses(join("(a@build:0 > 1) AND (b@probe:0 < 5)"))
+    assert residual_crosses(join("a@build:0 < b@probe:0"))
+    assert residual_crosses(join("(a@build:0 > 1) AND (a@build:0 < b@probe:0)"))
+
+
+def test_a_semi_join_s_distinct_key_width_is_its_keys_on_the_side_it_takes_distinct():
+    # As `plan::distinct_key_width`: the probe's keys for LeftSemi, LeftAnti and LeftMark, the
+    # build's for RightSemi and RightAnti, each at its device width; none for the other types or
+    # under a crossing residual.
+    build = scan(("a", "Int64"), ("s", "Utf8"))
+    probe = scan(("d", "Date32"), ("t", "Utf8"), ("f", "Boolean"))
+    def join(join_type, on, **fields):
+        return node("GpuHashJoin", [build, probe], join_type=join_type, on=on, **fields)
+
+    assert distinct_key_width(join("LeftSemi", "[(a@0, d@0), (s@1, t@1)]")) == 4 + 16
+    assert distinct_key_width(join("LeftMark", "[(a@0, f@2)]")) == 1
+    assert distinct_key_width(join("RightAnti", "[(a@0, d@0), (s@1, t@1)]")) == 8 + 16
+    assert distinct_key_width(join("LeftAnti", "[(a@0, d@0)]", filter="d@probe:0 IS NULL")) == 4
+    assert distinct_key_width(join("LeftAnti", "[(a@0, d@0)]", filter="a@build:0 < d@probe:0")) == 0
+    for join_type in ("Inner", "Left", "Right", "Full"):
+        assert distinct_key_width(join(join_type, "[(a@0, d@0)]")) == 0, join_type
+
+
+def test_a_column_s_device_width_is_its_fixed_width_and_16_for_a_variable_one():
+    widths = {"Boolean": 1, "Int8": 1, "UInt8": 1, "Int32": 4, "UInt32": 4, "Int64": 8, "Float32": 4,
+              "Float64": 8, "Date32": 4, "Decimal128(15,2)": 16, "Timestamp(Microsecond, None)": 8, "Utf8": 16}
+    assert {t: width_on_device(t) for t in widths} == widths
+
+
+def test_the_device_width_rule_is_the_engines():
+    # Boolean's byte and a variable-width column's 16 are the session's own; every other width
+    # is Arrow's.
+    source = (pathlib.Path(__file__).resolve().parents[4] / "peacockdb-core/src/plan/join.rs").read_text()
+    body = re.search(r"pub\(crate\) fn width_on_device\(.*?\n\}", source, re.S).group(0)
+    assert re.search(r"DataType::Boolean => (\d+),", body).group(1) == str(width_on_device("Boolean"))
+    assert re.search(r"primitive_width\(\)\.map_or\((\d+),", body).group(1) == str(width_on_device("Utf8"))
+
+
+def test_the_frame_names_of_a_schema_are_its_columns():
+    assert [c.frame for c in columns((("a", "Int64"), ("a", "Utf8")))] == ["a@0", "a@1"]
+    assert columns((("a", "Decimal128(7,2)"),))[0].kind is Kind.FLOAT
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(globals()))

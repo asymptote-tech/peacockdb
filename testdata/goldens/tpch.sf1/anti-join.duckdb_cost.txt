@@ -1,0 +1,20 @@
+PROJECTION: projections=[o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment], output_bytes=114819936, output_rows=1196041, materialized=0
+  PROJECTION: projections=[#0, #1, #2, #3, #4, #5, #6, #7, #8], output_bytes=114819936, output_rows=1196041, materialized=0
+    FILTER: output_bytes=116015977, output_rows=1196041, materialized=0
+      HASH_JOIN: join_type=MARK, conditions=[o_custkey = #0], output_bytes=145500000, output_rows=1500000, materialized=145500000
+        TABLE_SCAN: table=orders, projections=[o_custkey, o_orderkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment], output_bytes=144000000, output_rows=1500000, materialized=144000000, bytes_read=193933137, rows_read=1500000
+        TABLE_SCAN: table=customer, projections=[c_custkey], filters="c_mktsegment='BUILDING'", output_bytes=241136, output_rows=30142, materialized=241136, bytes_read=3168360, rows_read=150000
+duckdb_cost=486842633
+materialization_total=289741136
+storage_read_total=197101497
+
+--- row-group pruning (storage reduction) ---
+orders  row_groups=13/13  rows=1500000/1500000 (100.0%)  bytes_fetched=55251158/55251158 (100.0%)
+customer  filter=[c_mktsegment='BUILDING']  row_groups=2/2  rows=150000/150000 (100.0%)  bytes_fetched=658253/658253 (100.0%)
+pruning_bytes_fetched=55909411/55909411 (100.0%)
+
+--- cost breakdown ---
+HASH_JOIN                             145500000  50.2%
+TABLE_SCAN(orders)                    144000000  49.7%
+TABLE_SCAN(customer)                     241136   0.1%
+total=289741136

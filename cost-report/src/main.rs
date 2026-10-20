@@ -2,8 +2,8 @@
 //!
 //! Reads only committed goldens, so it runs in the CI CPU tier with no GPU and
 //! no executor build:
-//!   - PeacockDB Σout = Σ `output_bytes` over a query's section of the per-mode
-//!                      `.cost.txt`, at the last mode its cpu run is enabled at.
+//!   - PeacockDB Σout = the `peacockdb_cost=` total of a query's section of the
+//!                      per-mode `.cost.txt`, at the last mode its cpu run is enabled at.
 //!   - DuckDB Σout    = pipeline-breaker materialized bytes computed from the
 //!                      `<q>.duckdb_cost.txt` profiling tree.
 //!   - coverage       = what `testdata/cost-registry.csv` declares per mode, which
@@ -543,9 +543,9 @@ fn build_dataset(
     dataset_key: &str,
 ) -> Dataset {
     // Each golden carries its own explicit total footer (peacockdb_cost= /
-    // duckdb_cost=), the single source of truth for that side's number; the
-    // per-node output_bytes/materialized values above it are the contribution
-    // breakdown that sums to it. We read only the footer (`read_total`).
+    // duckdb_cost=), the single source of truth for that side's number. PeacockDB's is
+    // Σ multiplier × the category lines above it (`cost_model.conf`); DuckDB's per-node
+    // materialized values are its breakdown. We read only the footer (`read_total`).
     // Rows come from the registry CSV, not a 1..=N range, so the synthetic
     // micro-queries (aggregate_groupby, mixed_join, …) appear alongside the numbered
     // ones as the spec requires. Numbered queries sort first, by number.
@@ -565,7 +565,7 @@ fn build_dataset(
                 features: r.features.clone(),
                 tickets: r.tickets.clone(),
                 duckdb: read_total(&canon.join(format!("{stem}.duckdb_cost.txt")), "duckdb_cost="),
-                peacockdb: peacockdb_cost(canon, &r.states, &r.query),
+                peacockdb: peacockdb_cost(canon, &r.states, &stem),
             }
         })
         .collect();
@@ -611,14 +611,14 @@ fn section_lines(canon: &Path) -> SectionLines {
 fn peacockdb_cost(
     canon: &Path,
     states: &BTreeMap<String, String>,
-    query: &str,
+    stem: &str,
 ) -> Option<(String, u64)> {
     let mode = MODES.iter().rev().find(|mode| {
         let column = format!("cpu_{}", mode.replace('-', "_"));
         states.get(&column).map(String::as_str) == Some("enabled")
     })?;
     let text = std::fs::read_to_string(canon.join(format!("{mode}-{TIER}.cost.txt"))).ok()?;
-    let total = entry_total(&text, query)?;
+    let total = entry_total(&text, stem)?;
     Some((mode.to_string(), total))
 }
 
@@ -974,7 +974,8 @@ fn render_html(
     s.push_str(
         "<p class=\"caveat\"><strong>Provisional proxy, not execution cost.</strong> Both columns are \
          deterministic, measured byte sums — not wall-clock time. <em>PeacockDB Σout</em> = Σ per-operator \
-         output bytes (Arrow logical size). <em>DuckDB Σout</em> = bytes materialized at pipeline breakers; \
+         output bytes (Arrow logical size), a forwarder (merge, union, interleave) at nothing, as DuckDB's \
+         streaming operators are. <em>DuckDB Σout</em> = bytes materialized at pipeline breakers; \
          joins now count both inputs + their own output (aligned with PeacockDB), and a TABLE_SCAN counts \
          bytes_read from storage <em>plus</em> its post-filter output (mirroring PeacockDB's split scan + filter). \
          <strong>Remaining structural skew → red rows on selective queries:</strong> PeacockDB does NOT push \
@@ -1165,8 +1166,9 @@ fn render_markdown(
     let _ = write!(
         s,
         "_🔴 = ratio > {RATIO_GREEN_MAX} (PeacockDB Σout over {RATIO_GREEN_MAX}× DuckDB). Σout = measured \
-         output bytes; DuckDB side counts bytes materialized at pipeline breakers. The two engines emit \
-         different plan trees, so the ratio is a **provisional, directional-only** proxy — not a comparable \
+         output bytes, a forwarder (merge, union, interleave) at nothing; DuckDB side counts bytes \
+         materialized at pipeline breakers. The two engines emit different plan trees, so the ratio is \
+         a **provisional, directional-only** proxy — not a comparable \
          execution cost — and asserts nothing._\n"
     );
     s
@@ -1480,7 +1482,7 @@ fn render_diff_html(rows: &[DiffRow], links: &Links) -> String {
             fmt_delta(r.delta_pct()),
         );
     }
-    let _ = write!(s, "</table><p class=\"foot\">Σout = Σ per-operator output bytes (PeacockDB CPU cost). \
+    let _ = write!(s, "</table><p class=\"foot\">Σout = Σ per-operator output bytes, forwarders at nothing (PeacockDB CPU cost). \
         Every increase is a regression and shows red; CI fails only on an increase of more than \
         {REGRESSION_FAIL_PCT}% (exact integer compare). New queries with no base .cost.txt are omitted.</p></body></html>");
     s
@@ -2225,14 +2227,12 @@ mod tests {
     /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
     #[test]
     fn the_pr_comment_fits_under_the_body_cap() {
-        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
-        let registry = Registry::load(&testdata.join("cost-registry.csv"));
         let links = Links {
             repo: "asymptote-tech/peacockdb".into(),
             sha: Some("0".repeat(40)),
             tickets: TicketIndex::default(),
         };
-        let datasets = all_datasets(&testdata, &registry);
+        let datasets = committed_datasets();
         let body = render_markdown(&datasets, "https://p/", false, &links, None);
         // The margin, not just the verdict: the body grows by a row per query enabled, so
         // the number a later reader needs is how many more fit — a guard that only says
@@ -2256,9 +2256,9 @@ mod tests {
     /// The widget renders every corpus dataset, pbench included, and the three come from one
     /// constructor so `main` and the tests cannot disagree about which datasets exist.
     ///
-    /// pbench has no `qN.duckdb_cost.txt` — its queries are named, like tpch's `hash-join` —
-    /// so its rows render with no DuckDB cost, as those do. That is the state asserted here:
-    /// a section that exists and carries rows, not one that happens to be empty.
+    /// pbench has no `.duckdb_cost.txt` — `gen_duckdb_cost.sh` profiles tpch and tpcds only —
+    /// so its rows render with no DuckDB cost. That is the state asserted here: a section that
+    /// exists and carries rows, not one that happens to be empty.
     #[test]
     fn the_widget_renders_a_pbench_section_beside_the_benchmarks() {
         let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
@@ -2322,6 +2322,62 @@ mod tests {
         let html = mode_cell_html(&row, &no_links(), &sample_dataset(), ModeGroup::Plan);
         assert_eq!(html.matches('✓').count(), 4, "{html}");
         assert!(!html.contains("class=\"all\""), "{html}");
+    }
+
+    /// Every dataset as the report builds them, from the committed registry and goldens.
+    fn committed_datasets() -> Vec<Dataset> {
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        all_datasets(&testdata, &registry)
+    }
+
+    /// The registry spells a micro-query `scan_limit` and its `.cost.txt` section is
+    /// `== scan-limit`, so a lookup under the registry's spelling prices no micro-query. Only a
+    /// row with a cpu run enabled at some mode has a section to price.
+    #[test]
+    fn a_micro_query_is_priced_from_its_hyphenated_section() {
+        let datasets = committed_datasets();
+        let tpch = &datasets[0];
+        let micro: Vec<&Row> = tpch
+            .rows
+            .iter()
+            .filter(|r| r.n.is_none())
+            .filter(|r| {
+                MODES
+                    .iter()
+                    .any(|mode| r.state(&ModeGroup::Cpu.column(mode)) == "enabled")
+            })
+            .collect();
+        assert!(
+            !micro.is_empty(),
+            "the registry holds no tpch micro-query a cpu run enables"
+        );
+        let unpriced: Vec<&str> = micro
+            .iter()
+            .filter(|r| r.peacockdb.is_none())
+            .map(|r| r.query.as_str())
+            .collect();
+        assert!(
+            unpriced.is_empty(),
+            "micro-queries with no PeacockDB cost: {unpriced:?}"
+        );
+    }
+
+    /// `gen_duckdb_cost.sh` profiles every tpch and tpcds query file, so each of their registry
+    /// rows has DuckDB's cost; pbench has none, as the widget's pbench test says.
+    #[test]
+    fn every_registry_query_has_a_duckdb_cost() {
+        let missing: Vec<String> = committed_datasets()
+            .iter()
+            .filter(|d| d.label != "pbench")
+            .flat_map(|d| {
+                d.rows
+                    .iter()
+                    .filter(|r| r.duckdb.is_none())
+                    .map(|r| format!("{}/{}", d.label, r.query))
+            })
+            .collect();
+        assert!(missing.is_empty(), "no `.duckdb_cost.txt` for: {missing:?}");
     }
 
     #[test]

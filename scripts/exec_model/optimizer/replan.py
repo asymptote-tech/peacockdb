@@ -1,0 +1,133 @@
+"""The adaptive loop: run a plan; where a build comes out further than `threshold`
+times off its estimate, stop, turn every build the run has made into a `GpuMemorySource`, optimize
+the plan again with those sizes known, and run it with a new driver. Nothing but the builds had
+started, so nothing runs twice; a replan that would repeat work is refused, and the run goes on.
+
+A memory source is estimated at its true size, so a build that misses holds a scan or a join no
+source covers. The replan puts it under one and a reorder adds no join, so a run replans at most
+once per scan or join that no memory source covers when it starts.
+"""
+
+from __future__ import annotations
+
+import itertools
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from ..engine.adaptive import AdaptiveDriver, BuildDone, Extraction, hashed_names
+from .cardinality import Estimate, Estimator, estimator, measured
+from ..plans.engine_nodes import build
+from ..plans.engine_plan import EngineNode
+from .join_order import ordered
+from .multijoin import replaced
+from .names import described, described_sources, dropped_by_source, join_words, sourced
+from .report import BuildMiss, Kept, Replan
+from ..engine.node import BackendSelector
+from ..engine.single_partition_driver import BUILD_SLOT
+from .stats import Statistics
+
+DEFAULT_THRESHOLD = 2.0
+
+
+class WithMaterialized:
+    """`tables` and the frames by lane of the memory sources a replanned plan reads, by name."""
+
+    def __init__(self, tables, frames: dict[str, list[pd.DataFrame]]):
+        self._tables, self._frames = tables, frames
+
+    def __getattr__(self, name):
+        return getattr(self._tables, name)
+
+    def materialized(self, name: str) -> list[pd.DataFrame]:
+        return self._frames[name]
+
+
+@dataclass
+class AdaptiveRun:
+    results: list = field(default_factory=list)
+    #: one per plan run, the last one run to its end
+    drivers: list[AdaptiveDriver] = field(default_factory=list)
+    plans: list[EngineNode] = field(default_factory=list)
+    #: builds off their estimate where something outside the builds had started
+    refused: list[BuildMiss] = field(default_factory=list)
+    #: one per new driver: the build it stopped at, what it kept, the order made again
+    replans: list[Replan] = field(default_factory=list)
+    #: the memory sources' measured estimates, by name
+    known: dict[str, Estimate] = field(default_factory=dict)
+
+
+def run_adaptive(plan: EngineNode, stats: Statistics, tables, lanes: int, selector: BackendSelector,
+                 budget: int | None = None, threshold: float = DEFAULT_THRESHOLD,
+                 prefetch: bool = False, kept: dict | None = None, taken: set[str] | None = None) -> AdaptiveRun:
+    """`plan` run to its answer, replanned where a build is off by more than `threshold`; `lanes`
+    is the mode's, for the joins a replan makes anew. `kept` are the memory sources `plan` may
+    read — the builds dynamic filters' probe plans made — by name: (side, frames). `taken` are the
+    names other runs of the query gave their memory sources; this run's join them."""
+    run, frames = AdaptiveRun(), {name: lanes for name, (_, lanes) in (kept or {}).items()}
+    known = run.known
+    known.update(kept_estimates(kept or {}, stats))
+    while True:
+        planned = estimator(plan, stats, known)
+
+        def stops(event) -> bool:
+            if not isinstance(event, BuildDone):
+                return False
+            miss = _miss(event, planned)
+            if miss.q_error <= threshold:
+                return False
+            if driver.extraction() is None:
+                run.refused.append(miss)
+                return False
+            return True
+
+        driver = AdaptiveDriver(plan, build(plan, WithMaterialized(tables, frames)), selector, budget, stops,
+                                prefetch=prefetch)
+        run.plans.append(plan)
+        run.drivers.append(driver)
+        run.results = driver.run()
+        if driver.stopped is None:
+            return run
+        made = {}
+        plan = _with_memory_sources(plan, driver.extraction(), planned, known, frames,
+                                    set() if taken is None else taken, made)
+        dropped = dropped_by_source(plan, *made.values())
+        plan, orders = ordered(plan, stats, lanes, known=known)
+        kept = tuple(Kept(name, sum(len(frame) for frame in frames[name]),
+                          described(side, dropped.get(name, frozenset())), described_sources(side))
+                     for name, side in made.items())
+        run.replans.append(Replan(_miss(driver.stopped, planned), kept, tuple(orders)))
+
+
+def kept_estimates(kept: dict, stats: Statistics) -> dict[str, Estimate]:
+    """The measured estimates of builds kept as memory sources, by name — `kept` as
+    `dynamic_filters.apply` returns it: (the side they replace, their frames by lane), in the
+    order made, so a side that reads an earlier one from memory is estimated over it."""
+    known = {}
+    for name, (side, lanes) in kept.items():
+        known[name] = measured(estimator(side, stats, known).estimates[id(side)], lanes, hashed_names(side))
+    return known
+
+
+def _with_memory_sources(plan: EngineNode, extraction: Extraction, planned: Estimator,
+                         known: dict[str, Estimate], frames: dict, taken: set[str], made: dict[str, EngineNode]
+                         ) -> EngineNode:
+    """`plan` with each extracted build's side a memory source over its frames, laid out as the
+    side was; `known`, `frames` and `taken` gain them by name, and `made` each side. A side that is
+    one already stays."""
+    for join, lanes in extraction.builds.values():
+        side = join.children[BUILD_SLOT]
+        if side.kind == "GpuMemorySource":
+            continue
+        name = next(f"m{n}" for n in itertools.count(len(frames)) if f"m{n}" not in taken | frames.keys())
+        taken.add(name)
+        known[name] = measured(planned.estimates[id(side)], lanes, hashed_names(side))
+        frames[name] = lanes
+        made[name] = side
+        plan = replaced(plan, side, sourced(name, side))
+    return plan
+
+
+def _miss(event: BuildDone, planned: Estimator) -> BuildMiss:
+    join = event.join
+    return BuildMiss(join_words(join), event.rows, planned.estimates[id(join.children[BUILD_SLOT])].rows, join.mj)

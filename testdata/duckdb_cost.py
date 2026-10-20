@@ -520,9 +520,9 @@ def node_materialized(node: Node, warn) -> int:
     if op in BUILD_INPUT_OPS:
         return sum(c.output_bytes for c in node.children if c.op not in REREAD_OPS)
     if op in JOIN_BUILD_OPS:
-        # Align joins with PeacockDB, which (Σ over every node's output) counts both
-        # join inputs' outputs AND the join's own output. So a join contributes its
-        # OWN output_bytes plus each child's output_bytes — EXCEPT children that
+        # Align joins with PeacockDB, which (Σ over every node's output, forwarders at
+        # nothing) counts both join inputs' outputs AND the join's own output. So a join
+        # contributes its OWN output_bytes plus each child's output_bytes — EXCEPT children that
         # already count their own output in their own materialized (scans, via the
         # two-part cost; nested joins, via this same rule) or that re-read an
         # already-materialized buffer (REREAD_OPS, e.g. a DELIM_SCAN under a

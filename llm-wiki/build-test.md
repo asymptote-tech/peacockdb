@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 4938 test cases — Rust 4368, C++ 173, Python 397.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5684 test cases — Rust 4469, C++ 173, Python 1042.** The Python figure includes the 419 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,24 +23,24 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 2762 cases: `--lib` 772, `test_cpu_corpus` 1961, `test_corpus_goldens` 26, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 2812 cases: `--lib` 772, `test_cpu_corpus` 2009, `test_corpus_goldens` 27, `test_cost_model` 4
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 1960 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2008 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
 DuckDB's, the cpu's, the device's — and whether its device run is schema-validated, expanded
 to a case per (query, mode): planned, run on `CpuBackend`, validated, and the answer
-checked against plain DataFusion at `target_partitions = 1`. 177 lines, 174 of them running at
+checked against plain DataFusion at `target_partitions = 1`. 181 lines, 178 of them running at
 the modes each is correct at — `tpcds/q96`, `tpcds/q88` and `tpcds/q90` carry three disabled by
 [#199](tickets/corpus-coverage.md#t199), `tpch/scan-limit` two by [#186](tickets/corpus-coverage.md#t186), and two of
 pbench's run at the two tp1 modes only: `scalar-subquery-cross` (#199 at tp4) and
 `not-in-uncorrelated`, which tp4 refuses at plan time on [#267](tickets/corpus-coverage.md#t267).
 **3 lines are out entirely**, and they are exactly the 3 `duckdb_none` lines, all pbench's and all
 refused at plan time: `cross-empty-build` and `outer-on-true-empty` on [#282](tickets/corpus-coverage.md#t282),
-`in-is-null` on [#250](tickets/joins.md#t250). 853 cells,
+`in-is-null` on [#250](tickets/joins.md#t250). 873 cells,
 plus seven checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that the registry's `cpu_oracle`, `gpu_oracle` and `schema_validation` columns copy each line,
@@ -49,25 +49,25 @@ undetermined line's rows are compared only against committed files, that `duckdb
 sections are the registry's rows in both directions, and `all_modes` expanding to the same cells as
 the five spelled out
 
-Then the DuckDB tier, 943 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 967 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
-for `gpu-result.txt`. Today 129 lines are `duckdb_exact`, 16 `duckdb_approx`, 24
+for `gpu-result.txt`. Today 132 lines are `duckdb_exact`, 16 `duckdb_approx`, 25
 `duckdb_fingerprint` (the over-cap sections), 3 `duckdb_none` (one side does not answer) and
 5 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 157 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 161 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
 the cell flap. Read off DataFusion's plan at one partition; a sorted cut is re-run one row wider
 to read the rows either side of it. A cross join keeps its order, and a keyless aggregate
 answers one row, so neither is a hazard. Run once over every line DataFusion plans, all pass: 34 lines cut a
-sorted answer over a join, 28 of them among the 157 with a device cell, and no cut falls on a
+sorted answer over a join, 28 of them among the 161 with a device cell, and no cut falls on a
 tie
 
 | Registry ↔ CSV, cpu | [the_registry_matches_the_cpu_corpus_in_both_directions](../peacockdb-core/tests/test_cpu_corpus.rs) | 1 |
@@ -76,23 +76,26 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 26 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 27 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
 abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a
 prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and
 the tree the indentation draws. The golden is written by the run it will later check, so a file
-that contradicts itself is the only witness to a renderer that is wrong. The benchmark tree and
-the record get the same reading: every `total_us` is the sum of the `time_us` beside it, every
-committed tree reports a release build, every timed (query, mode) is enabled on a device in
-`corpus_cases.inc`, a row that lost a cell is refused, a bare `calls` row names the seq it was
-handed, and the record's preamble is what `record_header()` writes
+that contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets
+the same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree
+reports a release build, every timed (query, mode) is enabled on a device in
+`corpus_cases.inc`, and every case the list declares has its section in the committed tree. The
+record, which lives in S3, is held to its writer instead: a row that lost a cell is refused, a
+bare `calls` row names the seq it was handed, and a record the harness's own writer produces
+carries `record_header()`'s preamble, read as its readers read it
 
-| Cost-model goldens | [cost_goldens_match_and_total_is_byte_identical](../peacockdb-core/tests/test_cost_model.rs) | 3 |
+| Cost-model goldens | [cost_goldens_match_and_categories_hold_every_byte](../peacockdb-core/tests/test_cost_model.rs) | 4 |
 |---|---|--:|
 
-`.cost.txt` derivation from `.cpu.txt` × `cost_model.conf`
+`.cost.txt` derivation from `.cpu.txt` × `cost_model.conf`; a forwarder priced at nothing and a
+scatter at its bytes
 
 *crate integration, internal*
 
@@ -596,11 +599,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1486 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 765, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1529 cases: `--lib -- gpu_tests::` 709, `test_gpu_corpus` 785, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 764 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 784 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -609,7 +612,7 @@ device with every batch held to its node's declared schema through the driver's 
 [#225](tickets/corpus-coverage.md#t225), its Welford state columns named for the alias), and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-763 cells today. From tpch, 171: every line at every mode, but for six. `q11` is off at the
+783 cells today. From tpch, 191: every line at every mode, but for six. `q11` is off at the
 three tp4 modes and `q22` at `tp4-single`, on [#199](tickets/corpus-coverage.md#t199): a keyless
 merge over a lane that got nothing, whose identity row the cpu's section carries and the device
 does not. `rollup-over-join` is off on [#65](tickets/corpus-coverage.md#t65), `mixed-join` on
@@ -625,7 +628,7 @@ three. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` w
 column; `rollup-small-keys` on #65; `timestamp-s-key-group` on
 [#264](tickets/corpus-coverage.md#t264), a cast group key. pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 764th case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 784th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -633,7 +636,7 @@ device run under a regeneration writes no golden
 
 the gpu column of the registry, the other half of the pair
 
-| Corpus benchmark harness | [peacock_gpu_benchmarks](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | 11 |
+| Corpus benchmark harness | [peacock_gpu_benchmarks](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | 34 |
 |---|---|--:|
 
 the eight assertions the harness makes about its own output, run on every `gpu-tests` job
@@ -641,9 +644,9 @@ under `--skip bench_`: a mode's results go to one file per (dataset, mode), sect
 numerically, a filtered run keeping the sections it did not produce, every declared mode naming
 the queries its file will hold, the record written only when `PEACOCK_RECORD_PATH` names it and
 checked against what the plan declares before a row lands, an append under a different `# run:`
-heading refused, and `PEACOCK_BENCHMARK_CAPTURE` naming neither pass refused. The three `bench_` cases — the
-case list in `tests/common/corpus_benchmark_cases.inc` — are the sf40 measurement itself and
-run only under `--run-benchmarks` (*Corpus benchmarks*, below)
+heading refused, and `PEACOCK_BENCHMARK_CAPTURE` naming neither pass refused. The twenty-six
+`bench_` cases — the case list in `tests/common/corpus_benchmark_cases.inc` — are the sf40
+measurement itself and run only under `--run-benchmarks` (*Corpus benchmarks*, below)
 
 | GPU timing method | [events_are_free_and_land_where_they_claim](../peacockdb-core/tests/test_node_timing.rs) | 1 |
 |---|---|--:|
@@ -779,13 +782,16 @@ the harness's own format reader — none of which runs engine code.
 | Golden text format (Rust) | the one reader of the format, over strings: the differ must name what moved, what is missing and what is out of order, and a node line must yield its name, depth and fields — every golden assertion in the tree is a comparison through it. The comma traps are cases, since `on=[(a@0, b@1)]` and `Decimal128(38, 15)` each carry one inside brackets. The over-cap fingerprint round-trips here too: a column of either class, a row order that must not reach it, a mis-paired join that only the hash catches, and the triple's number format, which `testdata/test_duckdb_result.py` asserts from the Python side so the two writers' text is one | [a_section_that_moved_is_named_with_the_column_that_moved](../peacockdb-core/tests/test_golden_format.rs) | dataset-matrix (25.02 leg) | 43 |
 | CI wiring guard (Rust) | every Rust target must be named by a CI step — CI does not glob, the three lists that decide where a GPU target runs must agree, and both GPU runners must pass `--test-threads=1`, which is the whole of the single-tenant invariant inside a process and is what a device test's `unsafe { set_var }` rests on. The rungs the `--test` sweep cannot see get one assertion each: cpu (`--lib` under `rust-only`), ffi (`--lib -- ffi_tests::`), device (the staged lib binary and the loop line handing it `gpu_tests::` — shad-gpu runs prebuilt binaries, so there is no command line), plus the CLI build, which has no test target. The three runners must agree on the lib's staged name and rung too, and the rung must reach the binary through `rung_args`. The reader is scoped to the rust loop: a file-wide search passes on the comment above the command, and the C++ loop above it shares the loop variable and rightly carries no flag; and the benchmark binary runs on CI without its `bench_` cases, `--skip bench_` read off the same loop. One scripted guard rides here too, for want of anywhere else that reads the workflows: `generate_pbench.sh --check`, whose single `run:` line is all that holds pbench's committed parquet to `gen.sql`, and whose matcher rejects a commented-out line — `fold_continuations` keeps a comment verbatim, and commenting a step out is the likelier way it stops running than deleting it | [every_rust_test_target_is_named_by_ci](../peacockdb-core/tests/test_ci_coverage.rs), [each_rung_has_its_ci_line_and_the_cli_is_built](../peacockdb-core/tests/test_ci_coverage.rs), [the_three_gpu_target_lists_agree](../peacockdb-core/tests/test_ci_coverage/runners.rs) | cost-report | 11 |
 | Module layout rules (Rust) | the component walls, which the compiler mostly cannot check: where a `pub` may appear, that a subcomponent is declared `mod`, that no `super::` chain climbs out of its component, that no public signature names a type from a private module — `private_interfaces` reads a type's nominal visibility, so an unreachable type spelled `pub` passes it silently — and that no `pub` in `test_support/mod.rs` names a type from a component, which is what keeps the harness a facade and not a rename. Sibling reach is the case rustc refuses to have an opinion on at all: no visibility level means "my parent but not my siblings". One case compiles a probe crate against the built library to prove `wire::generated` is unreachable from outside, with a positive control so a probe that fails for the wrong reason cannot pass as proof. Five more rules say where test code may live: a test module is named for the build rung it needs and gated for it, in both directions; its body is a file of its own; a `#[cfg(test)]` sits on nothing but a test-module declaration; and a path compiled only under a test gate says `test` in its name. Bare `pub` is checked against `SURFACE`, the CLI's API by file and name, in both directions, so a dropped-and-added pair cannot pass a count; `pub mod` is pinned to `lib.rs`. One register remains, the items that keep a `#[cfg(test)]` because no test module can hold them, checked in the reverse direction too, so an entry outliving its reason goes red. One rule here is a task spec's rather than the style guide's, and the same kind of claim: the device corpus tier records `gpu-result.txt` ahead of both comparisons against the cpu, read as the order of three calls in `gpu_case`, because the divergence DuckDB settles is the one that makes those comparisons panic. Needs no dataset and no device | [no_public_signature_names_a_type_from_a_private_module](../peacockdb-core/tests/test_module_layout/privacy.rs), [the_device_case_records_its_answer_before_it_compares_with_the_cpu](../peacockdb-core/tests/test_module_layout/write_order.rs) | cost-report | 18 |
-| Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs) | cost-report | 41 |
+| Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history, every tpch and tpcds registry query has DuckDB's figure, every micro-query PeacockDB's, by its hyphenated section | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs) | cost-report | 43 |
+| DPhyp join enumeration (Rust) | the optimum against a brute-force DP over every split, on chains, stars, cliques, cycles and hypergraphs; the connected pairs it enumerates against the paper's closed forms; the pair budget, malformed input, and the C ABI's postfix tree | [dphyp_finds_the_brute_force_optimum_on_every_shape_up_to_six_relations](../peacockdb-dphyp/src/tests.rs), [each_connected_pair_is_enumerated_once_as_the_paper_counts](../peacockdb-dphyp/src/tests.rs) | cost-report | 6 |
 | DuckDB cost extraction (Python) | classifier / pruning / dynamic-filter logic — fails CI before generation | [scan_count_mismatch_fails_loud](../testdata/test_duckdb_cost.py), [compute_pruning_from_rowgroups](../testdata/test_duckdb_cost.py) | cost-report | 41 |
 | DuckDB result rendering (Python) | the only side that can get the result oracle's rendering wrong on its own: a timestamp must read as arrow-rs prints it (`…00.001`, not `isoformat()`'s `…00.001000`) or every row carrying one is a false divergence, and the over-cap fingerprint must be the text `test_golden_format.rs` pins, byte for byte, or the two writers compare nothing | [test_a_timestamp_renders_as_arrow_rs_prints_it](../testdata/test_duckdb_result.py), [test_both_writers_fingerprint_the_same_rows_the_same_way](../testdata/test_duckdb_result.py) | cost-report | 20 |
-| Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode against an oracle written from the SQL — the hash join and the nested loop at all nine types, each streaming its probe and answering a call as the device's join session does, a residual on every family, `null_equals_null` counted by hand, and a guard that the prototype names every join type `join_session.cpp` dispatches on — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 212 |
-| Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
-| Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
-| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, `hbm_bytes` lands on the right tuple and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_plot.py](../scripts/calibration/tests/test_plot.py) | cost-report | 12 |
+| Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode against an oracle written from the SQL — the hash join and the nested loop at all nine types, each streaming its probe and answering a call as the device's join session does, a residual on every family, `null_equals_null` counted by hand, a guard that the prototype names every join type `join_session.cpp` dispatches on, the hash table's bytes a row held to the Rust, and a residual crossing where a conjunct reads both sides — no project code. Over the committed `tpch.minimal`: `LayoutInjector`'s own guarantees (each preset a different layout, an unshuffled join's lanes kept, empty batches really emitted, a seed that reproduces), and a stream fitting a budget the collected table does not. And the optimizer's half, still without data: the engine's plan goldens of all three datasets read back, lowered and built node for node — pbench's types, `GpuEmpty`, a scan of no column, a LIKE against a column and a cast between timestamp units among them — the layout each node declares, statistics, selectivity, row estimates and C_out, every other mode's joins among the one mode the cardinality golden holds, the per-call model (a semi join's keys taken distinct per probe call at the device width, that width's rule held to the Rust), dynamic-filter candidates — a key lifted into every branch of a union and through every join type, a join equating NULLs pruning nothing by a build holding one and an anti or mark join without the flag pruning as an inner join does, a build filtered only by the planner's null-key filter no candidate, nested builds and builds over a scan another filter prunes probed after them, a second pass's names after the first's — and the second pass over toy tables: a joined build its estimate overcounts still pruning, a build that misses replanning inside its probe, a probe whose build holds its whole cluster costing no more than the plan without it, a probe's refused miss, a probe whose root is hashed on four lanes keeping that hash through its replan, and a probe with no miss equal to its side run whole; join clusters assembled, a non-inner join with a residual among them, named — their ids kept through a reorder, a flip and a replan — read through the planner's null-key filter below a shuffle, which reassembly puts back on the sides `null_key_droppable` names (that table held to the Rust), where it tests only columns the shuffle hashes and the join keys on, on a side that drops NULL keys of a join not equating them, any other filter rooting a relation, tp1 and tp4 holding the same clusters over every plan golden, and disassembled, non-inner joins in them placed by their TES — every order the conflicts admit over three relations and a sample over four, with NULLs, NULL held equal or not and residuals sampled, answering as the plan does — and the four named non-inner queries' shapes reordered over toy tables, a left join's estimate no lower than its preserved side and an anti join's above 0, build side or probe, where the key domain is wider than both key counts, the adaptive loop — its build events, the replan they stop a run for, and the memory sources it feeds the builds back through — and DPhyp through its C ABI — the files that call it need a build, the crate's `.so` named by `PEACOCK_DPHYP_LIB`. The optimizer's report of a run over toy tables, each rule recorded where it fires and nothing where it does not — each relation's rows, how they are known, width and key NDVs, an aggregate's output column, a non-inner join's type on both trees — its `.optimizer.txt` rendering, and its `.optimizer.md` page: a cluster reordered, flipped and replanned as one table of the orders that changed it, a kept one as a line, a probe's part of a cluster, legends closed over the sources they name, both passes' filters by scan and build, and the anchors GitHub gives its headings. The report's names: a relation by its table, filter and aggregate, the planner's null-key filter no filter, a table the plan reads twice numbered, an aggregate's column kept through a memory source, a join tree with its build bracketed and its kind as SQL names it, a missed join in words. A clustered join's id in the `cpu.txt` render, the answer compare `run.py` holds an optimized run to, and `run.py`'s section merge, a page's preamble and headings, corpus order, mode table, checks before any work and a failing query's section, a report no renderer can write among them. The engine's cost function read from `cost_model.conf` — a hand-priced run, the total summed and rounded as the Rust does, lines split as Rust's `lines()`, a kind the conf lacks, a memory source free, a forwarder free and a scatter charged by the committed conf, and every committed `-mini.cost.txt` derived again from its `cpu.txt` — the optimized cost as the final run's, the probe plans' and the stopped runs', and `cost_report.html` from hand-built rows: its columns, a skipped and a failed run, the ratios, a ratio other than 1.00 linking to its query's section of the mode's page, relatively or at a commit, the rules a line per mode — the multi-joins reordered, the filters applied per pass, the replans, or that the plan changed — each linking to its lines of the mode's log, and "nothing changed the plan" only where no log says it did, the summary counted by totals rather than the shown ratio, a cost file priced under another conf refused naming it; those counts and lines read from a `.optimizer.txt` section and from what `report_text` writes, a call inside a probe's replan and a replan keeping its order among them, and the committed page rendered with pandas, pyarrow and numpy blocked. A cost that raises stops DPhyp's solve with its exception. A scan's columns read once per task, and the shuffle's digests pinned per dtype | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/engine/test_scheduling.py), [test_every_join_type_matches_the_oracle](../scripts/exec_model/tests/operators/test_join_capability.py), [test_a_dphyp_call_records_its_input_the_sets_it_priced_its_tree_and_each_flip](../scripts/exec_model/tests/optimizer/test_report.py), [test_the_engine_s_cost_goldens_are_what_this_function_derives_from_their_cpu_runs](../scripts/exec_model/tests/plans/test_cost_model.py) | cost-report | 521 |
+| Exec-model statistics and estimates (Python) | the committed NDV sidecars counted again from the generated data by `gen_stats.py` and compared byte for byte, each column they list served by the reader, and every join's row estimate against the engine's own CPU run, one golden line per join. And `run.py` over two small tpch queries and a refused tpcds one, by two workers into a temp directory: each optimized answer the planned one, its three files per bench and the cost report, the engine's tree and join rows where no rule changed the plan, the optimized cost the planned one where nothing fired, and a filtered run of the query DPhyp is called for that leaves the other sections alone. And every tpch and tpcds golden plan at every mode ordered without a run (pbench has no sidecar): it builds, and no final aggregate at more than one lane meets its rows unhashed on its group keys. They ride dataset-matrix because that is where sf1 and its DuckDB are | [test_the_tpch_sidecar_is_what_gen_stats_counts_from_its_data](../scripts/exec_model/tests/optimizer/test_stats_sidecar.py), [test_tpcds_join_estimates_match_the_golden](../scripts/exec_model/tests/optimizer/test_cardinality_corpus.py), [test_run_corpus.py](../scripts/exec_model/tests/test_run_corpus.py), [test_ordered_corpus.py](../scripts/exec_model/tests/optimizer/test_ordered_corpus.py) | dataset-matrix (25.02 leg) | 10 |
+| Exec-model sidecar across embeddings (Python) | tpch sf1 generated with `--embeddings external`, counted by `gen_stats.py`, gives the committed sidecar byte for byte — the synthetic default is the dataset tier's own recount. It generates the dataset, a minute or two, and needs the embeddings cache, which no CI host may fetch; without the cache it fails rather than skips | [test_tpch_with_external_embeddings_gives_the_committed_sidecar](../scripts/exec_model/tests/optimizer/test_stats_embeddings.py) | manual — a host with the embeddings cache | 1 |
+| Exec-model engine plans (Python) | the engine's own plan goldens run by the prototype over sf1 against DuckDB: as planned (124), pruned by their dynamic filters before and after join order (73), with every join cluster disassembled and rebuilt (111), and reordered by DPhyp and oriented (111) | [test_engine_answers.py](../scripts/exec_model/tests/plans/test_engine_answers.py), [test_engine_optimized.py](../scripts/exec_model/tests/optimizer/test_engine_optimized.py) | manual — exec-model-corpus.yml, 3 shards | 419 |
+| Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
+| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one or captured under Nsight is refused naming why, with nothing written; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py) | cost-report | 29 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 15 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 2 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp) | shad-gpu | 81 |
@@ -834,10 +840,12 @@ else is generated or fetched per host. S3 is Nebius object storage, endpoint
 | TPC-H+V sf1, external vectors | 8 tables, 987 MB; GloVe 100-d + DEEP1B 96-d | ✓ | ✓ | ✓ | — | most CPU/GPU rust tests |
 | TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — | — | CI only — regenerated every run |
 | TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ | — | plan + CPU + GPU subsets |
-| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, multi-GPU (manual) |
+| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
+| TPC-DS sf40 | 24 tables, 15 GB | — | — | ✓ | — | `peacock_gpu_benchmarks` |
 | TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ | `tpcds-sf200` | no tests — S3 check, validate-large |
 | TPC-H sf200 | not generated yet | — | — | — | `tpch-sf200` | nothing yet |
 | embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ | — | generator input, not a test input |
+| calibration record | the sf40 benchmark run's per-call rows, a file per dataset: tpch 254 thousand, 26 MB; tpcds 1,060, 106 kB | — | — | — | `calibration` | `test_call_cost_measured`, `plot.py` |
 
 Paths: `testdata/{tpch.minimal,pbench.sf1,tpch.sf1,tpcds.sf1,embeddings-cache}`; sf40 and sf200 live
 outside the repo on shad-gpu, under `/home/info/peacock-datasets/testdata/`. **+V** means
@@ -862,25 +870,40 @@ sha256 matches local). Notes on the rows above:
   `--push`/`--pull` kind covers it; `fetch_embeddings.sh` is local-only and hard-guards
   against running on CI/verda/shad-gpu. Regenerate it where you need it, or ship the
   augmented parquet instead.
+- **The calibration record is fetched, not generated**, and fetched where it is used, so no host
+  column holds it. Objects are keyed by content, `<dataset>.sf<sf>/<sha256>.tsv`, and never
+  replaced. `testdata/calibration/records.sha256`, committed, names the sha256 each dataset's
+  tree was measured beside; `scripts/calibration/fetch_record.sh tpch.sf40` fetches that object
+  into `testdata/calibration/tpch.sf40/records.tsv` and checks its sha256. The aws CLI it runs
+  is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
+  CI the runner's own with the `S3_*` secrets; a dev box without credentials runs it on
+  shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
+  Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
 - **sf40 lives only on shad-gpu**, and its presence there is a hard precondition of the
   GPU job; the sf40 goldens are committed (see below), so CI compares without touching
   40 GB.
+- **tpcds sf40 is the benchmark's alone.** No CI job reads it and it is in no bucket. It was
+  made on shad-gpu beside tpch's by `generate_testdata.sh --bench tpcds --sf 40` (DuckDB
+  1.5.4, one thread): 9 min 41 s, peak RSS 60 GiB, nothing spilled. The benchmark run links
+  each sf40 dataset the case list names into its testdata, as it does tpch's.
 - verda reaches the tree through a `/media/data/peacockdb` symlink to
   `~/peacockdb`. Every test binary honours `PEACOCK_TESTDATA_DIR`, but the plain cpu mode
   of `build-test.sh` does not set it, so those binaries fall back to the build box's path.
 
 ## Golden files
 
-All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (40 files), `tpcds.sf1`
+All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (61 files), `tpcds.sf1`
 (117), `pbench.sf1` (18), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe
 payloads with a digest each. pbench's 18 are the five `.plans.txt`, the five `-mini.cpu.txt`, the
-five `-mini.cost.txt`, `mini.result.txt`, `duckdb-result.txt` and `gpu-result.txt`: its queries are
-named rather than `qN`, so it has no per-query DuckDB cost oracle. Most of each sf1 count is the per-query
-DuckDB cost oracle (22 + 99); the engine's own are 16 apiece, one plan and one execution set per
-mode. Outside that bucket sits one file per engine that answers: `duckdb-result.txt` and
-`gpu-result.txt` in all three sf1 dirs, every one of them now having a device cell on. The committed DuckDB
-profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}` (22 + 99) and
-`testdata/duckdb-dynfilters/{tpch,tpcds}` (22 + 99).
+five `-mini.cost.txt`, `mini.result.txt`, `duckdb-result.txt` and `gpu-result.txt`: `gen_duckdb_cost.sh`
+profiles tpch and tpcds only, so it has no per-query DuckDB cost oracle. Most of each sf1 count is the
+per-query DuckDB cost oracle (43 + 99), one per query file; the engine's own are 16 apiece, one plan
+and one execution set per mode. Outside that bucket sits one file per engine that answers:
+`duckdb-result.txt` and `gpu-result.txt` in all three sf1 dirs, every one of them now having a device
+cell on. The committed DuckDB profile inputs live beside them in `testdata/duckdb-profiles/{tpch,tpcds}`
+(43 + 99) and `testdata/duckdb-dynfilters/{tpch,tpcds}` (43 + 99), and the per-column statistics
+sidecars (NDV, strings' mean length) in `testdata/stats/<bench>.sf<N>.json`. The prototype's goldens
+live in its own tree, `scripts/exec_model/testdata/goldens/<bench>/`.
 
 The generator scripts live in `testdata/`.
 
@@ -891,9 +914,13 @@ The generator scripts live in `testdata/`.
 | `<mode>-<tier>.cpu.txt` | the corpus cpu tier under `UPDATE_CANONICAL=1` (merge and prune) or `PCK_UPDATE_SECTIONS=1` (merge only) — never the GPU | sf1 parquet; one file per mode, a `== <query>` section each | the corpus cpu tier writes and verifies; the device tier verifies read-only |
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
 | `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden_exact`, `golden_approx_std`, `live_cpu`); the DuckDB `duckdb_<ds>_<q>` cases |
-| `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
+| `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal); `every_registry_query_has_a_duckdb_cost` asserts each tpch and tpcds registry query has one |
 | `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle` |
 | `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |
+| `stats/<bench>.sf<N>.json` | `gen_stats.py --bench B --sf N`<br>(DuckDB: exact `count(DISTINCT)`, strings' mean `strlen`) | the parquet's flat columns. Each table records its rows and a sha256 of those columns' footer statistics (null count, min, max per row group); the reader refuses a table whose statistics moved. Data can change with none of them moving, so only a recount catches every stale NDV. Vector columns are left out, so both `--embeddings` modes give one file | `test_stats_sidecar` recounts it from the data in dataset-matrix; `test_stats_embeddings` from external embeddings, by hand |
+| `<bench>/tp1-single.cardinality.txt`, in `scripts/exec_model/testdata/goldens/` | `test_cardinality_corpus.py` with `UPDATE_CANONICAL=1` | the plan golden, `tp1-single-mini.cpu.txt`, the stats sidecar and the sf1 footers, `optimizer/cardinality.py`. One line per join: its estimate, its rows in the engine's run, the q-error | `test_cardinality_corpus` in dataset-matrix, the whole file |
+| `<bench>/<mode>.cpu.txt`, `<mode>.optimizer.txt`, `<mode>.plandiff.txt`, `<mode>.costs.txt` and `<mode>.optimizer.md`, in `scripts/exec_model/testdata/goldens/` | `scripts/exec_model/run.py`; with `--query` it rewrites only its own sections | the plan golden, the sf1 tables and sidecar, the whole optimizer, `cost_model.conf`, and pandas' byte counts. A `== <query>` section each: the optimized run in the `.cpu.txt` format plus each clustered join's `mj=`, what each rule did, the plan's diff, and both runs priced by the engine's cost function with the rules counted. The page has a `## <query>` section each, from the same report as `.optimizer.txt`: each cluster's successive orders and the dynamic filters. `.costs.txt` is not a function of the `.cpu.txt` beside it: it prices the planned run, the probe plans and the stopped runs too | nothing: generation only |
+| `cost_report.html`, in `scripts/exec_model/testdata/goldens/` | `run.py` at the end of every run, or `scripts/exec_model/cost_report.py` alone; committed with relative links | every `<bench>/<mode>.costs.txt` and `.optimizer.txt` beside it, the engine's `-mini.cost.txt` and the `<q>.duckdb_cost.txt` | the cost-report job renders it again with `--sha`, its links at the commit, and on master publishes it at `join-optimizer/` |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -944,6 +971,16 @@ testdata/{tpch,tpcds}-queries/*.sql        testdata/pbench/gen.sql
           │     coverage   every enabled device cell has its gpu-result section, and no other;
           │                and the committed file's cudf= line is 25.02's
           │
+          ├── gen_stats.py ──► stats/<bench>.sf1.json   (NDV, string length; committed)
+          │     └── test_cardinality_corpus.py, UPDATE_CANONICAL=1, with tp1-single's
+          │         .plans.txt and -mini.cpu.txt
+          │           └──► scripts/exec_model/testdata/goldens/<bench>/tp1-single.cardinality.txt
+          │
+          ├── scripts/exec_model/run.py, with each <mode>.plans.txt, the sidecar and cost_model.conf
+          │     └──► scripts/exec_model/testdata/goldens/<bench>/<mode>.cpu.txt, .optimizer.txt, .plandiff.txt, .costs.txt, .optimizer.md
+          │           └── with each -mini.cost.txt and <q>.duckdb_cost.txt
+          │                 └──► scripts/exec_model/testdata/goldens/cost_report.html
+          │
           └── gen_duckdb_cost.sh --gen  (DuckDB 1.5.4, threads=1, pyarrow 19.0.1)
                 ├── pass 1, JFP off ──► duckdb-profiles/<bench>/<q>.json     (committed)
                 ├── pass 2, JFP on  ──► duckdb-dynfilters/<bench>/<q>.json   (committed)
@@ -967,9 +1004,49 @@ Consequences worth knowing before you regenerate:
 - **Read `git diff --numstat` after any scripted edit of `cost-registry.csv`.** Python's
   `csv.writer` rewrites every line with CRLF, and the whole suite still passes: nothing in the tree
   reads the line endings. The numstat is what shows 198 lines changed where you meant 11.
-- **`.cost.txt` is a pure function of `.cpu.txt` and `cost_model.conf`** — regenerating one
-  `.cpu.txt` obliges the sibling `.cost.txt`, and `test_cost_model` re-derives every one of
-  them, so a hand-edited `.cost.txt` goes red.
+- **The prototype's cardinality goldens follow the engine's** —
+  `scripts/exec_model/testdata/goldens/<bench>/tp1-single.cardinality.txt` holds each join's
+  true rows from tp1-single's `-mini.cpu.txt` beside the estimate from the plan and the sidecar,
+  so regenerating that `.plans.txt` or `.cpu.txt`, or a sidecar, obliges it too:
+  `UPDATE_CANONICAL=1` over the sf1 tables.
+- **A plan golden answers to the prototype too.** Adding or regenerating a `<mode>.plans.txt`, of
+  any dataset, goes through these gates, and a node kind, type or expression the prototype's reader
+  (`scripts/exec_model/plans/`) does not know turns them red:
+  - the cheap tier, in the cost-report job: every section parses, every expression renders back and
+    lowers, every plan builds with the engine's layouts, every join cluster disassembles to the
+    same layout, and every other mode's joins are among tp1-single's.
+  - dataset-matrix: `test_ordered_corpus` orders every tpch and tpcds plan at every mode, and the
+    cardinality golden above is compared whole, so a new query with a join is red until rewritten.
+  - the cost-report crate: `every_registry_query_has_a_duckdb_cost` wants a `.duckdb_cost.txt` for
+    each tpch and tpcds registry row, so a new query there needs `gen_duckdb_cost.sh --gen` first.
+
+  With `PEACOCK_DPHYP_LIB` set as `scripts/exec_model/README.md` builds it; the three after the
+  loop read the sf1 tables, and `gen_duckdb_cost.sh` wants DuckDB 1.5.4 and pyarrow 19.0.1:
+
+  ```
+  for f in plans/test_engine_plan plans/test_engine_expr plans/test_engine_ir \
+           plans/test_engine_corpus optimizer/test_disassembly_corpus \
+           optimizer/test_cardinality_modes; do
+    python3 scripts/exec_model/tests/$f.py || break
+  done
+  python3 scripts/exec_model/tests/optimizer/test_ordered_corpus.py
+  UPDATE_CANONICAL=1 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+  DUCKDB=<duckdb 1.5.4> testdata/gen_duckdb_cost.sh --gen    # a new tpch or tpcds query only
+  cargo test -p cost-report every_registry_query_has_a_duckdb_cost
+  ```
+- **The engine's `<mode>-<tier>.cost.txt` is a pure function of its `.cpu.txt` and
+  `cost_model.conf`** — regenerating one `.cpu.txt` obliges the sibling `.cost.txt`, and
+  `test_cost_model` re-derives every one of them, so a hand-edited `.cost.txt` goes red. The
+  prototype's `<mode>.costs.txt` is not: it prices runs no file holds, so only `run.py` makes it.
+- **`cost_model.conf`'s category list is read back from the prototype's committed costs.**
+  Each run's line in a `<mode>.costs.txt` names the conf's categories in order, and
+  `cost_report.py` refuses a file whose names or order differ. So renaming, adding, dropping or
+  reordering a category turns `test_cost_report.py` and the cost-report job's "Generate report"
+  step red until a full `python3 scripts/exec_model/run.py` writes them again: 620 runs, about
+  five hours at `--jobs 1`, over the sf1 tables with `PEACOCK_DPHYP_LIB`, under Python 3.13,
+  pandas 3.0.6 and pyarrow 25.0.1. Moving a node kind between existing categories raises nothing:
+  the report re-totals the bytes each category held before the move, so its figures are stale
+  until that run.
 - **A device never authors a golden.** The device tier reads the sections the cpu tier
   wrote, which is what makes a divergence a red test rather than a quietly rewritten
   expectation.
@@ -1009,6 +1086,9 @@ Consequences worth knowing before you regenerate:
   row for row rather than by sums.
   Regenerating one is `PCK_UPDATE_SECTIONS=1` with a filter naming the query, as any other
   section is.
+- **`duckdb_result.py` needs the `duckdb` Python module at 1.5.4** and refuses any other. No CI
+  step installs it: `python3 -m venv <dir>`, `<dir>/bin/pip install duckdb==1.5.4`, and run the
+  script with `<dir>/bin/python`.
 
 ### Benchmark data flow
 
@@ -1016,13 +1096,18 @@ A second tree with its own producers. Nothing here is a golden — no run assert
 — so the arrows say which script writes each file rather than which test reads it.
 
 ```
-tpch.sf40 (on the GPU host, outside the repo; symlinked in as testdata/tpch.sf40)
+tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as testdata/<dataset>.sf40)
   │
   ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, event timing;
   │   build-test.sh --gpu --run-benchmarks           the same binary on a 26.02 host)
   │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
   │     └──► calibration/records.tsv                one row per cuDF call × execution
-  │           └── --pull-benchmarks brings both home
+  │           └── --pull-benchmarks brings both home  (the record gitignored), and
+  │               split_record.py: a whole, plain, passing run per dataset, or nothing
+  │                 ├──► s3://calibration/<dataset>.sf<sf>/<sha256>.tsv
+  │                 └──► calibration/records.sha256      that sha256, committed with the tree
+  │                       └── fetch_record.sh <dataset>.sf<sf>
+  │                             └──► calibration/<dataset>.sf<sf>/records.tsv   (gitignored)
   │
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
@@ -1030,13 +1115,16 @@ tpch.sf40 (on the GPU host, outside the repo; symlinked in as testdata/tpch.sf40
         │           └── nsys_calls.py × goldens/<dataset>.sf1
         │                 └──► calibration/calls.tsv   what one ABI call splits into, per case
         │
-        └── --metrics   the same cases under the memory counters; PEACOCK_BENCHMARK_CAPTURE=metrics
-              ├──► calibration/capture-metrics.sqlite  (not committed)
+        └── --metrics   the same cases under the memory counters, one capture per case;
+              │         PEACOCK_BENCHMARK_CAPTURE=metrics
+              ├──► calibration/capture-metrics.sqlite  on the host, one case's, deleted after its join
               ├──► calibration/records-metrics.tsv     stays on the host; its microseconds are unusable
-              └── nsys_hbm.py --peak-bw (capture × records.tsv)
-                    └──► calibration/hbm.tsv           hbm_bytes on records.tsv's coordinates
+              └── nsys_hbm.py --case, on the host (that capture × that case's pinned rows)
+                    └──► calibration/hbm-parts/bench_<dataset>_sf<sf>_<query>_<mode>.tsv
+                          └── nsys_hbm.py --parts (every part × every pinned record)
+                                └──► calibration/hbm.tsv   a row per call, its executions' median
 
-calibration/records.tsv + calibration/hbm.tsv
+calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.tsv
   └── plot.py ──► calibration/plots/{load,compute,spread,query,icicle,hbm}/*.png
                   calibration/plots/index.html      one call, every panel
 ```
@@ -1055,11 +1143,42 @@ What the arrows are there to make checkable:
   only a human regenerates goes stale in silence: nothing checks it against the capture it
   claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
   `plot.py` is the only thing that draws, for the same reason.
-- **The text is committed and the captures are not.** The `.benchmark.txt` tree, the three
-  `.tsv` files and every panel are in git, rewritten in place by each collection, so `git diff`
-  shows how the numbers moved. The two `.sqlite` exports are hundreds of megabytes of
-  undiffable binary that only the scripts above read; `testdata/.gitignore` is deny-by-default
-  over `calibration/` for that, and `records-metrics.tsv` is not re-included.
+- **The derived text is committed; the record and the captures are not.** The
+  `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
+  by each collection, so `git diff` shows how the numbers moved. The record is 26 MB at sf40
+  and grows with every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks`
+  writes both, and the commit that moves the tree moves the pin. The two `.sqlite` exports are
+  undiffable binary that only the scripts above read. The counters one grows ~27 MB a second
+  of run with the whole gh100 set at 20 kHz, ~100 GB over the corpus, so it is taken a case at a
+  time and never leaves the host: each case is joined there and deleted before the next, and
+  only `hbm.tsv` comes home.
+  `testdata/.gitignore` is deny-by-default over `calibration/`, re-including the pin and the
+  derived files only. `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run —
+  q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
+  The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
+  record by call, not by execution, so its three cases are drawn beside them, and it is still
+  a row per execution. The two derived files cover the twenty-six only after step 5.
+- **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the
+  call's executions, and `executions` says how many. A row per execution would be ~255
+  thousand rows and 25 MB over the corpus; a row per call is the record's 25,522 calls.
+  Nothing the file is read for is lost. Across the ten executions of the three-case capture, a
+  call with ten samples or more sits a median 2.3 % from its own median in any one execution.
+  Weighted by bytes, one execution sits 0.5 % from the ten's median. Under ten samples a call
+  moves by up to its whole value from one execution to the next, at any count. The median and
+  not the mean, since one execution in ten can read several times the others. `plot.py` folds
+  a file still a row per execution the same way, so either shape draws the same picture.
+- **A record is published whole or not at all, and keeping it is a commit.** Every pull
+  uploads under the record's own sha256, so nothing in the bucket is replaced: committing
+  `records.sha256` beside the tree keeps the run, and `git checkout` of it drops the run,
+  leaving an unused object. A run truncates the record when it starts, so a filtered run's is
+  a fraction of the full one under the same name; `split_record.py` cuts the pulled record
+  into one file per dataset and refuses the lot unless each holds exactly the (query, mode)
+  set `corpus_benchmark_cases.inc` declares, under `capture=none`. Before that, the pull
+  requires the host's record to be the one it pulled (no run started since) and the run to have
+  exited 0, since a failing case appends its rows before it panics. A refused record leaves the
+  pin as it was, and the pull exits 1 with the tree home. Only shad-gpu publishes, through
+  `build-test-shadgpu.sh`: the key names no host (#226). `build-test.sh` keeps what it pulls, and
+  nebius-gpu runs no benchmark, so while shad-gpu is down no record is published.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 
@@ -1097,9 +1216,10 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   the plan goldens, the planner's own tests and the executor contract's cpu half),
   and `test_cpu_corpus`. The `peacockdb` CLI is built here
   and not run: it has no test target, so this is the only thing that compiles it.
-  The steps needing neither the generated dataset nor a device run on the 25.02 leg alone,
-  since a rust-only test cannot see cuDF and a second leg would report the same failure twice:
-  the exec-model python, `test_cost_model`, `test_golden_format` and `test_corpus_goldens`.
+  The steps that do not need cuDF run on the 25.02 leg alone, since a rust-only test cannot see
+  cuDF and a second leg would report the same failure twice: `test_cost_model`,
+  `test_golden_format` and `test_corpus_goldens`, and the exec-model python, which reads the
+  generated sf1 tables and builds DPhyp for itself.
   `CMAKE_GENERATOR` and `RUSTFLAGS` are job-level: cargo's fingerprint includes RUSTFLAGS,
   so a step carrying its own recompiles the dependency tree, and the image has ninja and no
   make, which flatc-fork's cmake needs told. Build and run are still separate steps, and
@@ -1143,19 +1263,21 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   unused nebius-gpu (*GPU host*). GitHub reads its schedule from master only.
 - **cost-report** — the report crate and its inputs, and the cheap script tests: python
   `testdata/test_*.py` by glob (the two DuckDB generators' own tests), the
-  `scripts/exec_model/tests/test_*.py` prototype set,
-  the `scripts/calibration/tests/test_*.py` cases over a synthetic capture, the GPU host
-  script tests `scripts/gpu-host/tests/test_*.py` with `shellcheck` over the GPU host scripts
-  (*GPU host*), and `cargo test -p cost-report`. Then report generation, the PR-comment upsert
-  and the cost-regression gate against the base SHA. Every query whose PeacockDB CPU Σout grew is a
-  regression and shows 🔴 in the comment, but the job fails only on growth of more than 10%
-  (`REGRESSION_FAIL_PCT` in `cost-report/src/main.rs`), or on growth from a zero base. A change
-  to how rows split across lanes moves Σout by a few bytes of padding without changing an
-  answer, and the tolerance is what lets that through. On a master push it uploads the Pages
-  artifact. The comment has a 65,536-byte body to fit —
-  `COMMENT_MAX_BYTES` in `cost-report/src/main.rs`, asserted over the real registry — so
-  every anchor but the query cell is dropped from the markdown. The file's FIRST LINE is its
-  sentinel and the workflow reads it from there, so the string exists once.
+  `scripts/exec_model/tests/**/test_*.py` prototype set less the files its step names as run
+  elsewhere (with DPhyp built for it), the `scripts/calibration/tests/test_*.py` cases over a
+  synthetic capture, the GPU host script tests `scripts/gpu-host/tests/test_*.py` with `shellcheck`
+  over the GPU host scripts (*GPU host*), `cargo test -p cost-report` and `-p peacockdb-dphyp`. Then
+  report generation, the PR-comment upsert and the cost-regression gate against the base SHA. Every
+  query whose PeacockDB CPU Σout grew is a regression and shows 🔴 in the comment, but the job fails
+  only on growth of more than 10% (`REGRESSION_FAIL_PCT` in `cost-report/src/main.rs`), or on growth
+  from a zero base. A change to how rows split across lanes moves Σout by a few bytes of padding
+  without changing an answer, and the tolerance is what lets that through. Generation also renders
+  the prototype's `cost_report.html` from the committed files, its links at the commit, into
+  `report/join-optimizer/`. On a master push it uploads the Pages artifact, so the join optimizer's
+  page is published beside the engine's. The comment has a 65,536-byte body to fit —
+  `COMMENT_MAX_BYTES` in `cost-report/src/main.rs`, asserted over the real registry — so every
+  anchor but the query cell is dropped from the markdown. The file's FIRST LINE is its sentinel and
+  the workflow reads it from there, so the string exists once.
 - **deploy-pages** (needs cost-report; master pushes only) — publishes that artifact.
 - **s3-datasets** — reads parquet footers of the large S3 datasets over ranged GETs
   (schema, embedding dims, row counts). Skipped on fork PRs, where the secrets do not
@@ -1178,11 +1300,12 @@ prototype has to hold across that boundary, unpinned on purpose.
 
 Which Rust targets run where is not folklore — `test_ci_coverage` fails when a target
 exists that no workflow step names. Doctests are the one class outside that guard (#128).
-The two python steps need no such guard because neither names files: both glob —
-`testdata/test_*.py` and the prototype step's own pattern — and each errors when its glob
-matches nothing. Inside a prototype file the equivalent hole — a test defined below the
-`__main__` footer, which pytest collects and direct execution would not — is closed by
-`tests/harness.py`, which reads the source back and fails naming what it missed.
+The python steps need no such guard: `testdata/test_*.py`, the prototype step's
+`**/test_*.py`, and the calibration and GPU host script steps glob, and each errors when its glob
+matches nothing; the prototype step also fails on any `elsewhere` name that no longer exists, and the
+dataset-matrix step names its files, so a missing one fails it. Inside a prototype file the equivalent
+hole — a test defined below the `__main__` footer, which pytest collects and direct execution would
+not — is closed by `tests/harness.py`, which reads the source back and fails naming what it missed.
 
 ## What `rust-only` means
 
@@ -1585,18 +1708,31 @@ transcript on 2026-10-14. Reach the cloud through `gpu-host.sh`. Learn the CLI f
   success as yours. Run state lives in `$REMOTE_REPO/.run-state/gate.{sh,log,rc,id}`,
   deliberately outside `cpp/install/` — that tree is mirrored with `--delete`, so a marker
   kept there is erased by the next push.
+- **A run beside the gate's checkout** sets `PEACOCK_REMOTE_REPO=<dir>`: every phase then
+  pushes, patches, runs and pulls under that directory instead of `/home/info/peacockdb`, which
+  a measurement taken while the gate is in use must leave alone. Create `<dir>/cpp` and
+  `<dir>/testdata` first — rsync makes no parent directories, and a push into a fresh one
+  retries a hundred times before it fails.
 
 ## Benchmarks
 
 ### Corpus benchmarks — `peacock_gpu_benchmarks` (scripted)
 
-Its own case list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, and
-deliberately not the correctness gate's: the two disagree about sf on purpose. Correctness
-runs at sf1, where a wrong answer is legible in six million rows; at sf1 a query is mostly
-the host prologue, so the rows worth timing are at sf40 and the rows worth checking are not.
-A (query, mode) timed here must still be enabled on a device in `corpus_cases.inc`, and a
-rust-only test in `test_corpus_goldens` reads both files and says so. Today: tpch q6 at
-`tp1_single` and `tp4_sized`, q19 at `tp1_single`.
+Its own case list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, and deliberately not
+the correctness gate's: the two disagree about sf on purpose. Correctness runs at sf1, where a wrong
+answer is legible in six million rows; at sf1 a query is mostly the host prologue, so the rows worth
+timing are at sf40 and the rows worth checking are not. A (query, mode) timed here must still be
+enabled on a device in `corpus_cases.inc`, and a rust-only test in `test_corpus_goldens` reads both
+files and says so. The list is 26 cases, every device-enabled one when it was measured, before the
+join session turned on the rest: tpch q1, q6 and `shuffle_additive_avg` at all five modes; q17, q19,
+`aggregate_groupby`, `filter_project`, `shuffle_additive`, `shuffle_stddev` and `nested_loop_join`
+at `tp1_single`; tpcds q37, q82, q84 and q85 at `tp1_single`. `nested_loop_join` reads region and
+nation, which do not grow with sf, so its rows describe the host prologue. At the two rowgroup modes
+a scan is one call per row group, a thousand-odd per pass, so those six cases are most of the record
+— 254 thousand rows, 26 MB for tpch, too large for git; tpcds's is 1,060 rows. The records live in
+the `calibration` bucket under their sha256, and `testdata/calibration/records.sha256` names the
+ones that go with the committed tree. A full run on an empty H200 takes an hour (3,602 s), most of
+it q1 and `shuffle_additive_avg` at the rowgroup modes, ~90 s and ~44 s a pass, eleven passes each.
 
 It asserts nothing about an answer, so it can never gate a merge. Its eight harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
@@ -1613,20 +1749,28 @@ Six steps, three scripts:
 ```
 # 1. a release build of the harness into cpp/install/rust-benchmarks/ — the run refuses a debug build
 ./scripts/build-test-shadgpu.sh --build-benchmarks
-# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home
+# 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home,
+#    publish the record and pin it in records.sha256 — commit that beside the tree
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
-# or, for a run that outlives your ssh session (the suite takes tens of minutes):
+# or, for a run that outlives your ssh session (the suite takes an hour):
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
 ./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
 ./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
-# 5. the derived records: both Nsight passes, their captures, calls.tsv and hbm.tsv.
-#    No flag runs both; --trace or --metrics picks one.
+# 5. the derived records: both Nsight passes, calls.tsv and hbm.tsv, the counters a case at a
+#    time and joined onto the pinned records (fetch_record.sh <dataset>.sf<sf> for each
+#    first). No flag runs both passes; --trace or --metrics picks one.
 ./scripts/create_nsys_profile.sh
-# 6. every panel and index.html, from one call
-python3 scripts/calibration/plot.py \
-    --record testdata/calibration/records.tsv --hbm testdata/calibration/hbm.tsv \
-    --out-dir testdata/calibration/plots
+# 6. every panel and index.html, from one call: a --record per dataset
+/usr/bin/python3 scripts/calibration/plot.py \
+    --record testdata/calibration/tpch.sf40/records.tsv \
+    --record testdata/calibration/tpcds.sf40/records.tsv \
+    --hbm testdata/calibration/hbm.tsv --out-dir testdata/calibration/plots
 ```
+
+Step 4 publishes only a whole, plain run that exited 0 and is still the host's record, a file
+per dataset; it names what it refused, leaves the pin alone and exits 1. It uploads through
+shad-gpu's aws CLI, reads each object back and pins its sha256 only when that matches, so the
+pin never names an object the bucket lacks; *Benchmark data flow* has why.
 
 Steps 5 and 6 are separate scripts because they are separate measurements: a capture
 serializes what it traces and the counters pass costs several percent, so neither may write
@@ -1636,7 +1780,8 @@ Check `nvidia-smi` for a neighbour before step 3: a process holding the card inf
 number here without failing anything.
 
 **The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
-against the local `rapids` env and needs no glibc patch. The three benchmark
+against the local `rapids` env and needs no glibc patch. Its pull publishes nothing: the
+bucket's key names no host, so the records it holds are shad-gpu's. The three benchmark
 flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
 refused — one exit code cannot mean both "gate green" and "measurement completed".
 
@@ -1650,16 +1795,17 @@ refused — one exit code cannot mean both "gate green" and "measurement complet
 ```
 
 Two things the shad-gpu path handles that this one leaves to the host: `testdata/tpch.sf40`
-must already be a symlink to the dataset (the script checks it resolves and creates
-nothing), and the GPU's performance counters must be open to non-root for step 5's
-`--metrics` pass (`options nvidia NVreg_RestrictProfilingToAdminUsers=0` in
-`/etc/modprobe.d/`, then a module reload — verda-gpu has it; nsys says
-`ERR_NVGPUCTRPERM` when a host does not). The profile script's HBM defaults (`gh100`,
-4.8e12 B/s) are an H200's; another card overrides `PCK_BENCH_HBM_SET` and
-`PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with `--delete`, so a
-push from a checkout that never ran `--build-benchmarks` removes the benchmark binary from
-the host, and a push from one that never ran `--build` removes the gate's. Both hosts write
-the same files and nothing in them says which host it was ([#226](tickets/benchmarks.md#t226)).
+and `testdata/tpcds.sf40` must already be symlinks to the datasets (the script checks that
+tpch's resolves and creates nothing; a missing tpcds one fails the four tpcds cases, which run
+first), and the GPU's performance counters must be open to non-root for step 5's `--metrics`
+pass (`options nvidia NVreg_RestrictProfilingToAdminUsers=0` in `/etc/modprobe.d/`, then
+a module reload — verda-gpu has it; nsys says `ERR_NVGPUCTRPERM` when a host does not).
+The profile script's HBM defaults (`gh100`, 4.8e12 B/s) are an H200's; another card overrides
+`PCK_BENCH_HBM_SET` and `PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with
+`--delete`, so a push from a checkout that never ran `--build-benchmarks` removes the benchmark
+binary from the host, and a push from one that never ran `--build` removes the gate's. Both
+hosts write the same files and nothing in them says which host it was
+([#226](tickets/benchmarks.md#t226)).
 
 **The tree**: one file per (dataset, mode) at
 `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section
@@ -1684,7 +1830,9 @@ which would be a tree belonging to no execution. Both counts are constants in
 every file in the tree was taken at the same counts.
 `--pull-benchmarks` is additive and no push `--delete`s the directory.
 
-**The record**, `testdata/calibration/records.tsv`: one row per cuDF call — one (plan node,
+**The record**, `testdata/calibration/records.tsv` where a run's pull puts it, and
+`testdata/calibration/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the published
+one (*Datasets* says how); neither is in git. One row per cuDF call — one (plan node,
 recipe step, call index), not one node and not one output partition — for every measured
 execution, so the same call recurs once per `run_index` and the spread is data. Seventeen
 columns: `dataset sf query mode node_seq node_type lane recipe_seq recipe_kind call_index
