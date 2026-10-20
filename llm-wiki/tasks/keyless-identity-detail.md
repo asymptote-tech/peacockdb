@@ -196,3 +196,5 @@ node display (verbatim what the loader stored), memory accounting (the done call
 named as the exception), and the zero-row rule (a keyless merge is the one node that does not
 meet it, unreachable). Cost-report job green on HEAD; nothing pins a moved count. Signoff written.
 GPU host hard-stopped; dispatched CI follows.
+
+Dispatched CI: run 39350996530, dispatched 2026-10-20T01:00:35Z on 6c602488.
