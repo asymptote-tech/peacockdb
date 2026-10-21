@@ -962,8 +962,9 @@ pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
 // rename — `no_test_support_signature_names_a_component_type` holds it there.
 
 /// The whole of a cpu corpus case: plan, run, answer, and the three goldens. `mode` is the
-/// macro's ident spelling, decoded here rather than at the call site; `duckdb_oracle` the
-/// line's DuckDB spelling, whose row order the result section is written in.
+/// macro's ident spelling, decoded here rather than at the call site; `duckdb_oracle` and
+/// `gpu_oracle` the line's spellings, which decide the row order the result section is written
+/// in: the DuckDB half's where it compares, else the golden's, else sorted.
 pub async fn cpu_case(
     dataset: &str,
     sf: &str,
@@ -971,8 +972,9 @@ pub async fn cpu_case(
     mode: &str,
     cpu_oracle: &str,
     duckdb_oracle: &str,
+    gpu_oracle: &str,
 ) {
-    corpus::cpu_case(dataset, sf, query, mode, cpu_oracle, duckdb_oracle).await
+    corpus::cpu_case(dataset, sf, query, mode, cpu_oracle, duckdb_oracle, gpu_oracle).await
 }
 
 /// The whole of a device corpus case: plan, run on the device — every batch held to its

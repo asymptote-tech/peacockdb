@@ -47,14 +47,15 @@ macro_rules! corpus_query {
             $validation);
         device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg)*))?));
         cpu_cell_cases!($dataset, $sf, $query, $($cpu)|+,
-            stringify!($cpu_oracle $(($($cpu_arg)*))?), stringify!($duck $(($($duck_arg)*))?));
+            stringify!($cpu_oracle $(($($cpu_arg)*))?), stringify!($duck $(($($duck_arg)*))?),
+            stringify!($gpu_oracle $(($($gpu_arg)*))?));
     };
 }
 
 /// One test and one registration per enabled cpu mode, and none at all for `none`.
 macro_rules! cpu_cell_cases {
-    ($dataset:ident, $sf:expr, $query:ident, none, $cpu_oracle:expr, $duck:expr) => {};
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $cpu_oracle:expr, $duck:expr) => {
+    ($dataset:ident, $sf:expr, $query:ident, none, $cpu_oracle:expr, $duck:expr, $gpu_oracle:expr) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $cpu_oracle:expr, $duck:expr, $gpu_oracle:expr) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -66,6 +67,7 @@ macro_rules! cpu_cell_cases {
                         stringify!($cpu),
                         $cpu_oracle,
                         $duck,
+                        $gpu_oracle,
                     )
                     .await;
                 }

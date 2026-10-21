@@ -5,7 +5,7 @@ use std::sync::Arc;
 use datafusion::arrow::array::{Float64Array, Int32Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 
-use super::{CpuOracle, cpu_oracle_mode, result_matches};
+use super::{CpuOracle, cpu_oracle_mode, line_row_order, result_matches, result_section_body};
 use crate::test_support::device_answer::{GpuResultMode, gpu_result_mode};
 use crate::test_support::{MODES, RowOrder, registry};
 
@@ -132,4 +132,34 @@ fn a_no_sort_section_holds_the_rows_in_the_engines_order() {
         Ok(())
     );
     assert!(result_matches(&reversed, &MODES[0], RowOrder::NoSort, &answer()).is_err());
+}
+
+/// A `duckdb_none` line compares no rows with DuckDB, so the row order its section is written
+/// in is its golden's: under `golden(no_sort, exact)` the engine's, which the device is then
+/// held to row for row. The DuckDB order wins where it compares, and `live_cpu` reads none.
+#[test]
+fn a_duckdb_none_line_with_a_no_sort_golden_writes_its_section_in_engine_order() {
+    let batch = &answer()[0];
+    let engine_order = [batch.slice(1, 1), batch.slice(0, 1)];
+    let written = result_section_body(
+        &engine_order,
+        &MODES[0],
+        line_row_order("duckdb_none", "golden(no_sort, exact)"),
+    );
+    let two = written.find("| 2 ").expect("row 2");
+    let one = written.find("| 1 ").expect("row 1");
+    assert!(two < one, "the engine's order, 2 then 1:\n{written}");
+    assert_eq!(
+        line_row_order("duckdb_none", "golden(sort, exact)"),
+        RowOrder::Sort
+    );
+    assert_eq!(line_row_order("duckdb_none", "live_cpu"), RowOrder::Sort);
+    assert_eq!(
+        line_row_order("duckdb(no_sort, exact)", "live_cpu"),
+        RowOrder::NoSort
+    );
+    assert_eq!(
+        line_row_order("duckdb(sort, exact)", "golden(sort, exact)"),
+        RowOrder::Sort
+    );
 }

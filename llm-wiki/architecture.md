@@ -592,8 +592,9 @@ without a crossing conjunct also pays the batch's key bytes, for its distinct ke
 (`gpu_backend/join.rs`). At `tp4-sized` the planner writes
 `chunk_bytes` as a sixteenth of the budget, capped at 1 GiB, so the accountant and the session
 bound one call alike. The unbudgeted modes write the default, 1 GiB. The value is
-`gpu_plan.fbs`'s `JoinLimits.DefaultChunkBytes`, which Rust reads as `wire::DEFAULT_CHUNK_BYTES`
-and C++ as `fb::JoinLimits_DefaultChunkBytes`. The session refuses 0.
+`gpu_plan.fbs`'s `JoinLimits.DefaultChunkBytes`, which Rust reads as `wire::DEFAULT_CHUNK_BYTES`;
+C++ reads the field's own default, and the gtests name it `fb::JoinLimits_DefaultChunkBytes`. The
+session refuses 0.
 
 ### Where the sides run
 
@@ -928,8 +929,8 @@ pinned.
 **These rules pin execution for a given plan, not across plans.** Two plans for one query may
 legitimately return different rows where the SQL does not determine them, which is what an
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
-contract — except for a query whose plan ends in a sort, whose rows are compared in order
-(`no_sort`, build-test.md's Notes). What must hold is that one plan run twice gives the same rows in the same batches.
+contract — except where a line says `no_sort` (build-test.md's Notes say which compares that
+reaches). What must hold is that one plan run twice gives the same rows in the same batches.
 Not in the same order: a device hash or nested-loop join writes its pairs through an atomic
 cursor, so its row order varies run to run. A float reduction above one, or any on the device,
 can then move in its low bits, which is what `golden(…, approx_std)` and `duckdb(…, approx)`

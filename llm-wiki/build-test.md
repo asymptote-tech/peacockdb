@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3131 cases: `--lib` 870, `test_cpu_corpus` 2230, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3132 cases: `--lib` 871, `test_cpu_corpus` 2230, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -539,14 +539,15 @@ dataset would demonstrate nothing. Then pbench's data itself, read off the commi
 that drops one or writes a timestamp at the wrong unit goes red here rather than at the query
 somebody writes a year later
 
-| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 9 |
+| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 10 |
 |---|---|--:|
 
 the cpu helper shown failing, which is what keeps the corpus honest: a wrong row, a missing row,
 a digit past the tolerance, a section another mode wrote, and under `no_sort` a section holding
 the right rows in the wrong order; plus every `CpuOracle` and `GpuResultMode` variant being named
 by some registry row, `data_fusion` decoded through `stringify!`'s spacing, and
-`data_fusion(no_sort, …)` refused
+`data_fusion(no_sort, …)` refused; and the line's one row order, a `duckdb_none` line's being its
+golden's
 
 | Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 2 |
 |---|---|--:|
@@ -982,7 +983,7 @@ The generator scripts live in `testdata/`.
 | `recipe-payloads.txt` | `planner::tests::plan_goldens` with `UPDATE_CANONICAL=1`<br>**and** `PEACOCK_REWRITE_RECIPE_BYTES=1` | sf1 parquet, and a fixed `/tmp` symlink for the testdata root — without it the payloads carry this machine's paths and so does the digest | <sub>the_payload_golden_carries_<br>what_each_call_hands_the_executor</sub> |
 | `<mode>-<tier>.cpu.txt` | the corpus cpu tier under `UPDATE_CANONICAL=1` (merge and prune) or `PCK_UPDATE_SECTIONS=1` (merge only) — never the GPU | sf1 parquet; one file per mode, a `== <query>` section each | the corpus cpu tier writes and verifies; the device tier verifies read-only |
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
-| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Its rows are sorted, or in engine order for a query whose `duckdb_oracle` says `no_sort`. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden(sort|no_sort, exact|approx_std)`; `live_cpu` reads none); the DuckDB `duckdb_<ds>_<q>` cases |
+| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Its rows are in engine order where the line's row order is `no_sort` — its `duckdb(…)`'s where that compares rows, else its `golden(…)`'s — and sorted otherwise; `gpu-result.txt` follows the same rule. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden(sort|no_sort, exact|approx_std)`; `live_cpu` reads none); the DuckDB `duckdb_<ds>_<q>` cases |
 | `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
 | `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, rows sorted or in DuckDB's order where the registry's `duckdb_oracle` says `no_sort`, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle` |
 | `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |

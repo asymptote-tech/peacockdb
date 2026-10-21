@@ -21,8 +21,8 @@ use super::device_answer::{
 };
 use super::gpu_session::Session;
 use super::{
-    DuckdbOracle, GpuRecording, Mode, RowOrder, assert_results_match, corpus_golden,
-    gpu_schema_validator, is_validated_at, mode_named, section_holds_rows,
+    GpuRecording, Mode, RowOrder, assert_results_match, corpus_golden, gpu_schema_validator,
+    is_validated_at, mode_named, section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
@@ -30,7 +30,7 @@ use super::{
 /// assertions it is recorded ahead of — the mode's `.cpu.txt` section, and the result the
 /// declaration names. The run's own accounting is asserted first: a report that held batches
 /// it never released is a broken run rather than an answer DuckDB can settle. The recording
-/// keeps the row order the line's `duckdb_oracle` asks for.
+/// keeps the line's row order, as the cpu's section does (`corpus::line_row_order`).
 pub(crate) async fn gpu_case(
     dataset: &str,
     sf: &str,
@@ -66,7 +66,7 @@ pub(crate) async fn gpu_case(
     // DuckDB exists to settle is the one that makes them panic — #243's lane split moves an
     // aggregate's group count, which `.cpu.txt` carries — so an answer recorded after them is
     // missing in exactly the case that needs it. Held by `write_order.rs`.
-    let order = DuckdbOracle::parse(duckdb_oracle).row_order();
+    let order = corpus::line_row_order(duckdb_oracle, gpu_oracle);
     record_gpu_result(dataset, sf, query, mode, order, &batches);
     corpus_golden::assert_section(
         &corpus_golden::cpu_golden(dataset, sf, mode.name),

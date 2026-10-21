@@ -23,6 +23,8 @@ use super::{
     registry, result_text, tight, total_rows,
 };
 
+use super::device_answer::golden_row_order;
+
 #[cfg(test)]
 mod tests;
 
@@ -376,8 +378,9 @@ pub(crate) fn query_text(dataset: &str, query: &str) -> String {
 ///
 /// The oracle comparison comes first and runs whether or not this is a regenerating run —
 /// a wrong answer must never reach a golden, and freezing one is the only way this tier
-/// could record something no later run would question. `duckdb_oracle` is the line's DuckDB
-/// spelling, whose row order the result section is written in.
+/// could record something no later run would question. `duckdb_oracle` and `gpu_oracle` are
+/// the line's spellings, which decide the row order the result section is written in
+/// ([`line_row_order`]).
 pub(crate) async fn cpu_case(
     dataset: &str,
     sf: &str,
@@ -385,9 +388,10 @@ pub(crate) async fn cpu_case(
     mode: &str,
     cpu_oracle: &str,
     duckdb_oracle: &str,
+    gpu_oracle: &str,
 ) {
     let mode = mode_named(mode);
-    let order = DuckdbOracle::parse(duckdb_oracle).row_order();
+    let order = line_row_order(duckdb_oracle, gpu_oracle);
     let what = format!("{dataset}/{query} at {}", mode.name);
     let run = run_cpu(dataset, sf, query, mode).await;
     assert_answer(dataset, sf, query, mode, cpu_oracle, &run.batches).await;
@@ -415,6 +419,18 @@ pub(crate) async fn cpu_case(
     );
     if authoritative_mode(dataset, sf, query).is_some_and(|author| author.name == mode.name) {
         assert_result_section(dataset, sf, query, mode, order, &run.batches);
+    }
+}
+
+/// The one row order a line's result sections are written in, on the cpu and on the device:
+/// the DuckDB half's where it compares rows, else the golden half's — a `duckdb_none` line is
+/// still held to its section by the device — else `Sort`.
+pub(crate) fn line_row_order(duckdb_oracle: &str, gpu_oracle: &str) -> RowOrder {
+    match DuckdbOracle::parse(duckdb_oracle) {
+        DuckdbOracle::Compare { order, .. } => order,
+        DuckdbOracle::Fingerprint | DuckdbOracle::None => {
+            golden_row_order(gpu_oracle).unwrap_or(RowOrder::Sort)
+        }
     }
 }
 

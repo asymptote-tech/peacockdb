@@ -204,3 +204,25 @@ cost-report 43 + `test_source_formatting` 32; `test_corpus_goldens` 28, `test_go
 `device_answer`'s shared sort is the same function body the L40S list already ran, now called
 from `result_text`.
 - 2026-10-21: review round 1: 0 blocking, 1 important (limit arm of plan_ends_in_sort unreached — fixed with OFFSET cases, LocalLimitExec half dropped), 8 nits fixed (duckdb_none lines now checked on their golden half; one sort helper; caps; comments; #128 by the coordinator). Commit-length nit left to the squash. State completing.
+
+## Completeness pass (developer)
+
+- **One row order per line, on both writers.** `corpus::line_row_order(duckdb, gpu)`: the
+  DuckDB half's order where it compares rows, else `golden_row_order(gpu)`, else `Sort`. Before,
+  both writers read the DuckDB half alone, and `DuckdbOracle::None.row_order()` is `Sort`, so a
+  planned `duckdb_none` line whose plan ends in a sort — which the order guard holds to
+  `golden(no_sort, …)` since round 1 — wrote a sorted section that the device's correct answer
+  would then fail row for row. `cpu_case` takes the gpu spelling (`cpu_cell_cases!` passes it),
+  and `gpu_case` uses the same function. Regression
+  `a_duckdb_none_line_with_a_no_sort_golden_writes_its_section_in_engine_order`
+  (`corpus/tests.rs`) was red against a stub with the old rule (the section came out `1, 2`),
+  green after. No committed section moves: no corpus line pairs `duckdb_none` or
+  `duckdb_fingerprint` with `golden(no_sort, …)` (24 are `live_cpu`, one `golden(sort, exact)`).
+- `build-test.md`'s `<tier>.result.txt` row states the rule; `join-rewrite-design.md`'s
+  "0 means 1 GiB" now says default 1 GiB, 0 refused. `architecture.md` untouched (the
+  coordinator is editing it).
+- Evidence: `--lib` 869 passed / 2 ignored (871; build-test.md counts follow, corpus helper 10);
+  `test_cpu_corpus` 2230 passed (`--test-threads=2`); cost-report 43 + `test_source_formatting`
+  32; `scripts/cargo-cudf.sh test -p peacockdb-core --features gpu --no-run` for `--lib` and
+  `--test test_gpu_corpus`, both clean, no warnings. No GPU run: no committed line's order
+  changes, and `gpu_case` reaches the same order through the shared function.
