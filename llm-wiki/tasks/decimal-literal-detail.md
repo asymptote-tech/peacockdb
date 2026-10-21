@@ -68,3 +68,4 @@ literal arm. Nothing else in the C++ moved. Red patch: `/tmp/decimal-literal-red
 - Counts in `build-test.md`: `test_cpu_corpus` +6 (2233), `test_gpu_corpus` +5 (914),
   `peacock_plan_tests` +1 (118); grand total 5515. Each is matched by a run above.
 - 2026-10-21: developer green; committed; PR opened; state reviewing. Coordinator updated architecture.md's CudfProject row (decimal literal takes build_column).
+- 2026-10-21: review round 1: 0 blocking, 0 important, 4 nits. Coordinator fixed three (architecture.md CudfProject row framed as examples; project.cpp comment; corpus_cases.inc reflow, both comment-only). Dropped: a host-only AstRouting.CudfAstCanEvaluate case for decimal literals (cpu-tier coverage of the predicate; the GPU tier pins it). State completing; completeness pass dispatched.
