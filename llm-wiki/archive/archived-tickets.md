@@ -1428,8 +1428,9 @@ No clean verification run is on record.
 ### #60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp
 **Stale (won't fix) by [`round-tolerance`](../tasks/round-tolerance.md) (chain K); awaiting merge.**
 
-The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
-one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
+The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so some
+values come back one ulp off: `2.7800000000000002` for `2.78`. At two places that is about one
+value in twenty between 1 and 10, and none from 10 to 1000.
 `expr.cpp` calls `cudf::round(col, places, HALF_UP)`. cuDF's kernel takes `modf` and computes
 `ip + round(fp·10^p)/10^p`; DataFusion computes `(x·10^p).round()/10^p`.
 

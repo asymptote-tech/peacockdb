@@ -123,9 +123,7 @@ corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
 // one: q2 (#56). The joins' own blockers, #152's side copies and #220's batch splits, went
-// with the join session. q78 compares within 1e-11 relative: the device's `round(…, 2)` over
-// Float64 is one ulp from DataFusion's in some cells (#60, won't fix; the comment at `round`
-// in `expr.cpp`).
+// with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -180,8 +178,8 @@ corpus_query!(tpcds, 1, q76, all_modes, all_modes, duckdb_exact, data_fusion_exa
 corpus_query!(tpcds, 1, q16, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 12, by expected calls. q2 is off on the device on #56. Its device answer matches
-// the golden within 1e-11 at every mode, but its seven `round(…, 2)` columns are one ulp off
-// in some cells, which widens the rendering past the result cap: the recording is a
+// the golden within 1e-11 at every mode, but some cells of its seven `round(…, 2)` columns are
+// one ulp off, which widens the rendering past the result cap: the recording is a
 // fingerprint, and the DuckDB check on the device's side takes rows under `duckdb_approx`.
 corpus_query!(tpcds, 1, q25, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q29, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

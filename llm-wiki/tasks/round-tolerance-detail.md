@@ -17,8 +17,9 @@
   `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- --test-threads=2 tpcds_q78 tpcds_q2_ every_enabled_device_cell_has_its_gpu_result_section_and_no_other registry duckdb_tpcds_q2 device_order_tpcds_q2`
   → 33 passed, 11 failed: the ten `duckdb_gpu_tpcds_{q78,q2}_*` ("holds no section for this
   cell") and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`. Already green
-  there: `duckdb_tpcds_q78` and `duckdb_tpcds_q2` under `duckdb_approx` (the cpu side loses
-  nothing: it was `duckdb_exact`-green and `duckdb_approx` accepts every exact match),
+  there: `duckdb_tpcds_q78` and `duckdb_tpcds_q2` under `duckdb_approx` (the looser decimal
+  check the spec chose: `duckdb_approx` accepts one last-place unit on q78's decimal columns,
+  which the DataFusion check and the golden still hold exactly),
   `device_order_tpcds_q78`/`_q2`, the registry checks.
 
 ## The device recording
@@ -81,6 +82,13 @@ when only our side is fingerprinted.
   `peacock_gpu_benchmarks` 8 (`--skip bench_`), `test_node_timing` 1. Soft stop, rc 0.
 - Counts moved in `build-test.md`: `test_cpu_corpus` +6 (five `duckdb_gpu_tpcds_q78_*`, one
   `device_order_tpcds_q78`), `test_gpu_corpus` +5; one line `duckdb_exact` → `duckdb_approx`.
+- Review round 1, after the coordinator's wording edits (`expr.cpp` comment-only, #56 retitled
+  and moved under Testing, #60's rate, `corpus_cases.inc` comments): `ticket_widget.py` re-run, report
+  diff against HEAD is #56's label and title only (2 lines). `test_ci_coverage` 11,
+  `test_module_layout` 18, `cargo test -p cost-report` 41 (one existing `sha_links` dead-code
+  warning, file not on this branch), and in `test_cpu_corpus` the 10 non-cell checks, the registry
+  check, `duckdb_gpu_tpcds_q78_*`, `duckdb_tpcds_q78`/`q2`, `device_order_tpcds_q78`: all pass. The
+  index (92) and corpus-coverage's Contents match the anchors in file order. No GPU (comment-only C++).
 
 ## Drift found
 
@@ -93,3 +101,4 @@ when only our side is fingerprinted.
 
 sf40, benchmarks, Nsight: out (L40S list only).
 - 2026-10-21: developer green for q78; q2 stays off under #56 (spec Restriction: device rendering crosses the 256 KiB cap → fingerprint; duckdb_approx refuses it; fix in compare_sections is outside Scope, recorded in #56). Coordinator accepts the partial outcome the spec provides for. Committed; PR opened; state reviewing.
+- 2026-10-21: review round 1: 0 blocking, 3 important (round comment over 4 lines; #56 header named a solved shape; #56 too long), 6 nits. Coordinator applied all but the board heading's 'closes #56' (human's prose; named in the signoff). Developer regenerated report.html and ran the cheap tiers green. State completing.
