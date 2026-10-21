@@ -167,7 +167,7 @@ the device as DataFusion answers it; new pbench queries; tpch mixed-join's devic
 registry column; the report's Result stored, DuckDB (split per side where they differ), cpu ↔
 DataFusion and gpu ↔ cpu columns, each header explaining its comparison; q2's device cells on.
 
-### 15. [`desc-null-order.md`](desc-null-order.md) — closes [#202](../tickets/corpus-coverage.md#t202), [#258](../tickets/testinfra.md#t258) — state: reviewing — PR #191
+### 15. [`desc-null-order.md`](desc-null-order.md) — closes [#202](../tickets/corpus-coverage.md#t202), [#258](../tickets/testinfra.md#t258) — state: completing — PR #191
 
 The PR comment drops its Features column and shows pbench as one line; the pages stay whole. A
 descending key's `null_order` is relative to its direction, through one mapping the sort and the

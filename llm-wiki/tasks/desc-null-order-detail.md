@@ -141,3 +141,4 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
   more queries at 260 bytes a row`.
 - Also removed: the test helper `sha_links`, unused since 3c0750ee (its dead-code warning).
 - `testdata/report.html` is unchanged: the widget regenerated to a scratch path is `cmp`-identical.
+- 2026-10-21T23:57:51Z: review round 2: 0/0/1 (nit: `Markdown::tables` reads as a noun; dropped). completing: completeness reviewer + analyst dispatched.
