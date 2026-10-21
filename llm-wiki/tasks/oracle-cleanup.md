@@ -207,3 +207,16 @@ changes.
 - The order guard's predicate has unit tests: Limit over Sort, Projection over Limit over Sort,
   an unsorted query, and a line that declares `sort` over a sorted plan fails.
 - `no_core_test_reads_the_checkout` passes, and fails on a doctored read.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. Every corpus line is on the grammar; a query whose plan ends in a
+sort compares row for row, held by a guard whose two halves each go red alone, and both writers
+keep one row order per line. The registry and report carry `duckdb_oracle`. No core test reads
+the checkout beyond testdata; the source-reading tests run in cost-report's
+`test_source_formatting`, the privacy probe in `test_crate_privacy`, CI names both.
+`JoinLimits.DefaultChunkBytes` is the one 1 GiB and 0 is refused. `null_equals_null` holds on all
+nine join types on both engines; no ticket filed. Triage done. The order check found #202 on tpcds
+q34 and q71, whose device cells are off under it, as item 2 directs. Completeness: reviewer and
+analyst each 1 important (the `duckdb_none` writer order, fixed); two `architecture.md` sentences
+the branch wrote corrected. Shortcuts or bandaids: none.

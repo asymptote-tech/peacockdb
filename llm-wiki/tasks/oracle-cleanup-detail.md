@@ -226,3 +226,4 @@ from `result_text`.
   32; `scripts/cargo-cudf.sh test -p peacockdb-core --features gpu --no-run` for `--lib` and
   `--test test_gpu_corpus`, both clean, no warnings. No GPU run: no committed line's order
   changes, and `gpu_case` reaches the same order through the shared function.
+- 2026-10-21: completeness: reviewer 0/1, analyst 0/1 (same finding: duckdb_none writer order — fixed with line_row_order + regression case). architecture.md: chunk_bytes C++ sentence and no_sort determinism sentence corrected by the coordinator. Signoff written; state completeness approved.
