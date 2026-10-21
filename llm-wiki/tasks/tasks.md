@@ -158,3 +158,16 @@ the rest in cost-report's `test_source_formatting`; `chunk_bytes`'s 1 GiB in the
 
 Interval literals cross the wire as months, days and nanoseconds; date and timestamp ± interval on
 the device as DataFusion answers it; new pbench queries; tpch mixed-join's device cells on.
+
+### 14. [`oracle-columns.md`](oracle-columns.md) — closes [#56](../tickets/corpus-coverage.md#t56) — state: approved to build
+
+`duckdb(…, gpu: fingerprint)` names the device's fingerprint comparison in the line; a `stored`
+registry column; the report's Result stored, DuckDB (split per side where they differ), cpu ↔
+DataFusion and gpu ↔ cpu columns, each header explaining its comparison; q2's device cells on.
+
+### 15. [`desc-null-order.md`](desc-null-order.md) — closes [#202](../tickets/corpus-coverage.md#t202), [#258](../tickets/testinfra.md#t258) — state: approved to build
+
+The PR comment drops its Features column and shows pbench as one line; the pages stay whole. A
+descending key's `null_order` is relative to its direction, through one mapping the sort and the
+merge share; the five `bug_` pins assert agreement; six pbench queries sort on a nullable
+key; tpcds q34 and q71's device cells on.
