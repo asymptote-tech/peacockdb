@@ -92,3 +92,4 @@ when only our side is fingerprinted.
 ## Deferred
 
 sf40, benchmarks, Nsight: out (L40S list only).
+- 2026-10-21: developer green for q78; q2 stays off under #56 (spec Restriction: device rendering crosses the 256 KiB cap → fingerprint; duckdb_approx refuses it; fix in compare_sections is outside Scope, recorded in #56). Coordinator accepts the partial outcome the spec provides for. Committed; PR opened; state reviewing.
