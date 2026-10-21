@@ -155,3 +155,4 @@
   warnings. `peacockdb_core_gpu_lib gpu_tests::join_key_type_cases::a`: 40 passed, both interval
   cases among them. Full L40S list `ALL rc=0`: cpu 26, gpu 2, join session 56, plan 126, gpu lib
   741, `test_gpu_corpus` 944, benchmarks 8, node timing 1; no segfault. Soft stop 11:18Z.
+- 2026-10-21: review round 1: 0 blocking, 3 important (interval literal in CASE/function passed planning; join cases blind to the interval; build-test totals drift — coordinator fixed totals and Join session row), 6 nits fixed (#249 re-wrapped by the coordinator). State completing.
