@@ -149,7 +149,7 @@ today's path; tpcds q5's device cells on.
 `cudf::round` stays; q78 and q2 move to `golden_approx_std` and `duckdb_approx` and turn on; #60
 archived as won't fix, #56 proven by q2.
 
-### 12. [`oracle-cleanup.md`](oracle-cleanup.md) — closes [#252](../tickets/testinfra.md#t252), [#287](../tickets/corpus-coverage.md#t287) — state: approved to build
+### 12. [`oracle-cleanup.md`](oracle-cleanup.md) — closes [#252](../tickets/testinfra.md#t252), [#287](../tickets/corpus-coverage.md#t287) — state: building
 
 Oracles named for what they compare (`duckdb(sort|no_sort, …)`, `rel`, `date`), row order checked
 for `ORDER BY` queries, a `duckdb_oracle` registry column in the report; no core test reads source,
