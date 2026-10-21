@@ -156,3 +156,19 @@
   cases among them. Full L40S list `ALL rc=0`: cpu 26, gpu 2, join session 56, plan 126, gpu lib
   741, `test_gpu_corpus` 944, benchmarks 8, node timing 1; no segfault. Soft stop 11:18Z.
 - 2026-10-21: review round 1: 0 blocking, 3 important (interval literal in CASE/function passed planning; join cases blind to the interval; build-test totals drift — coordinator fixed totals and Join session row), 6 nits fixed (#249 re-wrapped by the coordinator). State completing.
+
+## Completeness pass — analyst (what is missing), 2026-10-21
+
+- Read `ENS-oracle-cleanup...ENS-interval-days` whole, against the spec, `architecture.md` and
+  `build-test.md`. 0 blocking, 0 important. Every work item, every pbench coverage bullet (checked
+  against the plans and `duckdb-result.txt`: Jan 29/30 are f_id 28/29), each Restriction refusal
+  and each Verification gtest is present. Only open item: the dispatched CI run.
+- `architecture.md` sentences this branch falsified: none.
+- Pre-existing drift, not this branch's: *cuDF options*, row "binary-op output type", says "else
+  the wider input". `binop_output_type` (expr.cpp:575-597) echoes the left operand outside
+  predicates and decimals.
+- Outside Scope, each reasoned above (file size, the pbench join-shape guard, the `date` facet):
+  `cpp/src/interval.cpp`, `test_interval_arithmetic.cpp`, `CMakeLists.txt`, the two
+  `gpu_tests` join files, `wire/tests/intervals.rs`, `test_support/mod.rs`. No ABI or facade
+  change.
+- 2026-10-21: completeness: reviewer 0/0, analyst 0/0, no architecture.md sentence falsified. Pre-existing drift fixed: architecture.md 'binary-op output type' row (left operand's type, decimal scale rule). Signoff written; state completeness approved.
