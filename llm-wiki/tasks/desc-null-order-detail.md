@@ -98,3 +98,21 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
 4. `wiki: #202 and #258 archived; pbench sorts on a nullable key`: the ticket files, the
    archive, `tickets.md`, `build-test.md`, this file.
 - 2026-10-21T23:38:57Z: developer round 1 green (CPU local; L40S ALL rc=0; 40 device cells recorded). Deviation: `--widget-md` so report.html stays whole (spec Restriction). Committed as one commit; PR #191 → ENS-oracle-columns. Reviewer round 1 dispatched.
+
+## Review round 1 (0 blocking, 2 important, 3 nits)
+
+- important 1: `cost-report/src/main.rs:2321` `the_comment_carries_no_features_column` checks only
+  the word `Features`; a Comment arm printing feature cells without the header stays green. Fix:
+  assert a feature-only code (e.g. `corr_subquery`) is absent, or every `<tr>`'s cell count
+  (colspan counted) equals its header's `<th>` count.
+- important 2: nothing guards `testdata/report.html` keeping Features and every pbench row;
+  reverting `ticket_widget.py:608` to `--md`, or running `ticket_widget.py --md` per its old usage
+  line, strips them with every test green. Fix: a test over the checked-in `report.html` — one
+  `<sub>Features</sub>` header per dataset and a `<tr id="pbench-<stem>">` per pbench registry row;
+  rename the widget's own `--md` flag (`ticket_widget.py:581`) to remove the trap.
+- nit 3: `main.rs:1153-1156` comment still says the comment and html carry the same table.
+- nit 4: `main.rs:2350` `html.contains(&r.query)` — `nl_left`, `nl_right`, `exists_null_keys`
+  are substrings of other names; match `>{}<`.
+- nit 5: `main.rs:2288` `per_row` divides by every registry row including pbench, which the
+  comment no longer renders; divide by the tabled datasets' rows and correct the detail note.
+- Taken to the developer: all five.
