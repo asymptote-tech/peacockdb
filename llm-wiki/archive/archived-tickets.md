@@ -42,6 +42,10 @@ holding rows does. q2's line is `duckdb(no_sort, exact, gpu: fingerprint)` and
 within 2.48e-14 relative of DuckDB's rows. The registry's `stored` column and the report's
 Result stored column say what each side holds.
 
+#56 was first filed for q2's CASE over a string equality inside a partial-phase sum, which the old
+Final phase re-evaluated over state, the root of [#55](#t55).
+`a_grouped_sum_of_a_case_over_a_string_equality_agrees` proves that shape.
+
 <a id="t168"></a>
 ### #168 — interval type can not be represented in the fbs ScalarValue
 **Done by [`interval-days`](../tasks/interval-days.md) (chain K); awaiting merge.**
