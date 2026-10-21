@@ -139,7 +139,7 @@ Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global
 The device lowers `CASE x WHEN v …` onto the search form's fold, NULL never matching; tpcds q39's
 device cells on.
 
-### 10. [`decimal-literal.md`](decimal-literal.md) — closes [#210](../archive/archived-tickets.md#t210) — state: completeness approved
+### 10. [`decimal-literal.md`](decimal-literal.md) — closes [#210](../archive/archived-tickets.md#t210) — state: done — PR #186
 
 A bare decimal literal leaves the AST path and is a decimal column; a CAST of one to Float64 keeps
 today's path; tpcds q5's device cells on.

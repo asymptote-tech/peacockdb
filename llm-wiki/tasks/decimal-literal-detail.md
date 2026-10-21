@@ -70,3 +70,5 @@ literal arm. Nothing else in the C++ moved. Red patch: `/tmp/decimal-literal-red
 - 2026-10-21: developer green; committed; PR opened; state reviewing. Coordinator updated architecture.md's CudfProject row (decimal literal takes build_column).
 - 2026-10-21: review round 1: 0 blocking, 0 important, 4 nits. Coordinator fixed three (architecture.md CudfProject row framed as examples; project.cpp comment; corpus_cases.inc reflow, both comment-only). Dropped: a host-only AstRouting.CudfAstCanEvaluate case for decimal literals (cpu-tier coverage of the predicate; the GPU tier pins it). State completing; completeness pass dispatched.
 - 2026-10-21: completeness: reviewer 0/1 important (architecture.md 'a binary over a string' wrong — string columns go to the AST; fixed to 'a string literal'), analyst none missing, same sentence named as the only falsified one. Signoff written; state completeness approved.
+- 2026-10-21T03:39:29Z: dispatched pipeline.yml on ENS-decimal-literal bcbc6f02e01b632ee5a8b6d7b57656b0165b28eb, run 39539775942 (final device run).
+- 2026-10-21: run 39539775942 green, GPU Tests (nebius-gpu) included. State done.
