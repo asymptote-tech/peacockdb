@@ -799,6 +799,17 @@ pub fn stored_mismatch(dataset: &str, query: &str, got: &str, want: &str) -> Opt
     registry::stored_mismatch(dataset, query, got, want)
 }
 
+/// A line's `gpu: fingerprint` against its registry `stored` cell, or `None` where the line
+/// does not declare it or the cell's gpu part is `fingerprint`.
+pub fn gpu_fingerprint_mismatch(
+    dataset: &str,
+    query: &str,
+    duckdb_oracle: &str,
+    stored: &str,
+) -> Option<String> {
+    registry::gpu_fingerprint_mismatch(dataset, query, duckdb_oracle, stored)
+}
+
 /// What `PCK_WRITE_GPU_RESULT` asks of a device run.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum GpuRecording {

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use super::golden_text::{line_difference, ordered_sections};
 use super::{
-    COMMITTED_CUDF_VERSION, CsvRow, MODES, Regeneration, SKIPPED, TIER, duckdb_oracle, fingerprint,
+    COMMITTED_CUDF_VERSION, CsvRow, MODES, Regeneration, SKIPPED, TIER, duckdb_oracle,
     golden_dir_for, registry,
 };
 
@@ -58,26 +58,17 @@ pub(crate) fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) 
 /// any side panics through [`registry::stored_cell`]; none exists today.
 pub(crate) fn stored_of(dataset: &str, sf: &str, query: &str) -> String {
     let read = |path: PathBuf| std::fs::read_to_string(path).unwrap_or_default();
-    let held = |section: &str| {
-        if section.starts_with(SKIPPED) || section.starts_with("failed:") {
-            None
-        } else if fingerprint::is_fingerprint(section) {
-            Some(registry::Stored::Fingerprint)
-        } else {
-            Some(registry::Stored::Result)
-        }
-    };
     let one = |path: PathBuf| {
         ordered_sections(&read(path))
             .into_iter()
             .find(|(name, _)| name == query)
-            .and_then(|(_, body)| held(&body))
+            .and_then(|(_, body)| registry::stored_format(&body))
     };
     let gpu: Vec<registry::Stored> =
         duckdb_oracle::gpu_result_sections(&read(gpu_result_golden(dataset, sf, None)))
             .into_iter()
             .filter(|section| section.query == query)
-            .filter_map(|section| held(&section.body))
+            .filter_map(|section| registry::stored_format(&section.body))
             .collect();
     registry::stored_cell(
         one(result_golden(dataset, sf)),

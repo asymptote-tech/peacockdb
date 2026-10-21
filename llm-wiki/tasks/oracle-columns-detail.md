@@ -63,3 +63,22 @@
 - nit 5: `test_cpu_corpus.rs:695` a line may keep `gpu: fingerprint` with every device cell off;
   require its `stored` gpu part be `fingerprint`.
 - Taken to the developer: all five (each is cheap and in code already being touched).
+
+## Developer, review round 1 fixes
+
+- **1.** `registry::stored_format(section) -> Option<Stored>` holds the marker rule;
+  `stored_of` calls it. `a_marker_is_no_section_and_a_section_is_its_format` covers four inputs.
+  Deleting the `skipped:` branch fails it at `registry/tests.rs:43`, the `failed:` branch at :44.
+- **2.** The literal is `\`-continued again. `a_stored_spelling_is_one_word_three_parts_or_na`
+  now refuses a double space in the message, and it went red on the old literal.
+- **3.** The grammar paragraph is reflowed to 96 columns. The top comment is back to its pre-task
+  length. The grammar line breaks before `[, gpu: fingerprint]`, not inside it.
+- **4.** `judge` takes `enum Side<'a> { Cpu, Device(&'a str) }`. No behaviour change.
+- **5.** `registry::gpu_fingerprint_mismatch`, called from
+  `the_registry_stored_column_matches_the_goldens_in_both_directions`, unit-tested by
+  `a_declared_gpu_fingerprint_must_be_stored`. Red input, restored after: q2 with gpu modes
+  `none`, CSV gpu cells `disabled`, ticket 56, `stored` `result`, its five gpu-result sections
+  removed. Only the stored test failed, naming q2; the other eight registry guards stayed green.
+  The same input without the new call was green, which shows the gap was real. Gotcha: a
+  disabled cell with no ticket panics in `load_csv`, so every guard goes red before the check runs.
+- `--lib` grows by 2, to 897 (build-test.md updated). No GPU run: no device answer changed.

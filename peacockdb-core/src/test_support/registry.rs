@@ -29,7 +29,7 @@ mod tests;
 
 use super::corpus::CpuOracle;
 use super::device_answer::GpuResultMode;
-use super::{CsvRow, RegistryEntry};
+use super::{CsvRow, DuckdbOracle, RegistryEntry, SKIPPED, fingerprint};
 
 /// The CSV's per-mode columns, in file order.
 ///
@@ -138,6 +138,18 @@ impl Stored {
     }
 }
 
+/// What one result section holds, or `None` for a `skipped:` or `failed:` marker, which stands
+/// in for no section.
+pub(crate) fn stored_format(section: &str) -> Option<Stored> {
+    if section.starts_with(SKIPPED) || section.starts_with("failed:") {
+        None
+    } else if fingerprint::is_fingerprint(section) {
+        Some(Stored::Fingerprint)
+    } else {
+        Some(Stored::Result)
+    }
+}
+
 /// The `stored` cell for one query: one word where every side with a section holds that
 /// format, else `cpu|duckdb|gpu` with `—` for a side with no section. `gpu` has one entry per
 /// device mode with a section, and reads `mixed` where they disagree.
@@ -159,19 +171,22 @@ pub(crate) fn stored_cell(cpu: Option<Stored>, duckdb: Option<Stored>, gpu: &[St
 /// The three sides a `stored` cell names, in its order.
 const STORED_SIDES: [&str; 3] = ["cpu", "duckdb", "gpu"];
 
+/// A `stored` cell's part per side, in [`STORED_SIDES`] order: a one-word cell is that word
+/// thrice.
+fn stored_parts(cell: &str) -> Vec<&str> {
+    match cell.split('|').collect::<Vec<_>>().as_slice() {
+        [word] => vec![word; 3],
+        many => many.to_vec(),
+    }
+}
+
 /// A registry `stored` cell against what the goldens say, or `None` where they agree. The
-/// mismatch names the first side whose part differs, a one-word cell read as that word thrice.
+/// mismatch names the first side whose part differs.
 pub(crate) fn stored_mismatch(dataset: &str, query: &str, got: &str, want: &str) -> Option<String> {
     if got == want {
         return None;
     }
-    let parts = |cell: &str| -> Vec<String> {
-        match cell.split('|').collect::<Vec<_>>().as_slice() {
-            [word] => vec![word.to_string(); 3],
-            many => many.iter().map(|part| part.to_string()).collect(),
-        }
-    };
-    let (got_parts, want_parts) = (parts(got), parts(want));
+    let (got_parts, want_parts) = (stored_parts(got), stored_parts(want));
     // Equal parts and unequal text: three parts spelled where one word serves.
     let side = match (0..3).find(|&at| got_parts.get(at) != want_parts.get(at)) {
         Some(at) => format!("{} differs", STORED_SIDES[at]),
@@ -180,6 +195,32 @@ pub(crate) fn stored_mismatch(dataset: &str, query: &str, got: &str, want: &str)
     Some(format!(
         "{dataset}/{query}: the registry says {got}, the goldens say {want} ({side})"
     ))
+}
+
+/// A line's `gpu: fingerprint` against its `stored` cell, or `None` where the line does not
+/// declare it or the gpu part is `fingerprint`. The device case alone reads the part, so a
+/// line whose device cells are off would otherwise carry it with nothing to say it is stale.
+pub(crate) fn gpu_fingerprint_mismatch(
+    dataset: &str,
+    query: &str,
+    duckdb_oracle: &str,
+    stored: &str,
+) -> Option<String> {
+    let declared = matches!(
+        DuckdbOracle::parse(duckdb_oracle),
+        DuckdbOracle::Compare {
+            gpu_fingerprint: true,
+            ..
+        }
+    );
+    let gpu = stored_parts(stored)[2];
+    (declared && gpu != "fingerprint").then(|| {
+        format!(
+            "{dataset}/{query}: the line declares `gpu: fingerprint` and the registry stores \
+             {stored}, whose gpu part is {gpu} — drop the part, or record the device's \
+             fingerprints"
+        )
+    })
 }
 
 /// A `stored` cell's grammar: `na` exactly where the row has no corpus line, else one word or
@@ -199,7 +240,9 @@ pub(crate) fn stored_spelling_is_valid(stored: &str, has_line: bool) -> Result<(
     match valid {
         true => Ok(()),
         false => Err(format!(
-            "stored is {stored:?}: a row with a corpus line says result, fingerprint or              cpu|duckdb|gpu (each result, fingerprint or —, the gpu part also mixed), and a              row without one says na"
+            "stored is {stored:?}: a row with a corpus line says result, fingerprint or \
+             cpu|duckdb|gpu (each result, fingerprint or —, the gpu part also mixed), and a \
+             row without one says na"
         )),
     }
 }

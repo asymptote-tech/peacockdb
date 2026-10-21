@@ -1,6 +1,9 @@
 //! The registry's CSV split and its `stored` column, over strings.
 
-use super::{Stored, split_csv_line, stored_cell, stored_mismatch, stored_spelling_is_valid};
+use super::{
+    Stored, gpu_fingerprint_mismatch, split_csv_line, stored_cell, stored_format, stored_mismatch,
+    stored_spelling_is_valid,
+};
 
 /// A q61 spelling: a quoted field holding commas, parentheses and doubled quotes reads back
 /// as one field, and the fields around it keep their places.
@@ -33,6 +36,19 @@ fn an_unquoted_line_splits_at_every_comma() {
 
 const R: Stored = Stored::Result;
 const F: Stored = Stored::Fingerprint;
+
+/// A `skipped:` or `failed:` marker stands in for no section, so it never makes a cell three
+/// parts; a fingerprint and a table are the two formats.
+#[test]
+fn a_marker_is_no_section_and_a_section_is_its_format() {
+    assert_eq!(stored_format("skipped: not enabled at this mode\n"), None);
+    assert_eq!(stored_format("failed: the device refused q2\n"), None);
+    assert_eq!(stored_format("fingerprint: rows=2513\ncols=8\n"), Some(F));
+    assert_eq!(
+        stored_format("mode=tp4-sized\n+---+\n| a |\n+---+\n| 1 |\n+---+\n"),
+        Some(R)
+    );
+}
 
 #[test]
 fn stored_cell_names_each_shape() {
@@ -100,6 +116,36 @@ fn a_wrong_stored_cell_names_its_side() {
     );
 }
 
+/// A line declaring `gpu: fingerprint` with its device cells off has no device section, so
+/// nothing on the device side would ever read the part: its `stored` gpu part must say
+/// `fingerprint`, and one that says anything else names the part to drop.
+#[test]
+fn a_declared_gpu_fingerprint_must_be_stored() {
+    let declared = "duckdb(no_sort, exact, gpu: fingerprint)";
+    assert_eq!(
+        gpu_fingerprint_mismatch("tpcds", "q2", declared, "result|result|fingerprint"),
+        None
+    );
+    for stored in ["result", "result|result|—", "result|result|mixed"] {
+        let said = gpu_fingerprint_mismatch("tpcds", "q2", declared, stored).expect(stored);
+        assert!(said.contains("tpcds/q2"), "{said}");
+        assert!(said.contains(&format!("stores {stored}")), "{said}");
+        assert!(said.contains("gpu: fingerprint"), "{said}");
+    }
+    for (spelled, stored) in [
+        ("duckdb(no_sort, exact)", "result"),
+        ("duckdb(no_sort, exact)", "result|result|fingerprint"),
+        ("duckdb_fingerprint", "fingerprint"),
+        ("duckdb_none", "—|result|—"),
+    ] {
+        assert_eq!(
+            gpu_fingerprint_mismatch("tpcds", "q2", spelled, stored),
+            None,
+            "{spelled}"
+        );
+    }
+}
+
 #[test]
 fn a_stored_spelling_is_one_word_three_parts_or_na() {
     for good in [
@@ -111,6 +157,8 @@ fn a_stored_spelling_is_one_word_three_parts_or_na() {
         assert_eq!(stored_spelling_is_valid(good, true), Ok(()), "{good}");
     }
     assert_eq!(stored_spelling_is_valid("na", false), Ok(()));
+    let said = stored_spelling_is_valid("rows", true).expect_err("rows");
+    assert!(!said.contains("  "), "one space between words: {said}");
     for bad in [
         "",
         "rows",

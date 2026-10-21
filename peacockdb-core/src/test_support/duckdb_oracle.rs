@@ -460,7 +460,7 @@ pub(crate) async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &s
             super::section_holds_rows(section) || fingerprint::is_fingerprint(section)
         })
         .map(|section| without_mode_line(&section));
-    judge(dataset, sf, query, oracle, ours, None).await
+    judge(dataset, sf, query, oracle, ours, Side::Cpu).await
 }
 
 /// The DEVICE's recorded answer at one mode against DuckDB's. `gpu-result.txt` is keyed by
@@ -501,21 +501,27 @@ pub(crate) async fn duckdb_gpu_case(
                 path.display()
             )
         });
-    judge(dataset, sf, query, oracle, Some(ours), Some(mode)).await
+    judge(dataset, sf, query, oracle, Some(ours), Side::Device(mode)).await
+}
+
+/// Whose answer [`judge`] holds to DuckDB's: the cpu's, which has no mode because the cpu
+/// authors the section, or the device's at one mode, which a `gpu:` part may compare apart.
+enum Side<'a> {
+    Cpu,
+    Device(&'a str),
 }
 
 /// The verdict both cases reach, with DuckDB's section read here so neither has to.
 ///
 /// `ours` is `None` where our side does not answer at all — the section is absent, or a
-/// `skipped:` marker. `mode` is `Some` only for a device cell, and names the side as well as
-/// the mode: the cpu's answer has no mode, the cpu being the one that authors the section.
+/// `skipped:` marker.
 async fn judge(
     dataset: &str,
     sf: &str,
     query: &str,
     oracle: &str,
     ours: Option<String>,
-    mode: Option<&str>,
+    side: Side<'_>,
 ) {
     let spelled = oracle;
     let oracle = DuckdbOracle::parse(spelled);
@@ -524,9 +530,9 @@ async fn judge(
     let said = match (&ours, &duckdb) {
         (Some(ours), Some(duckdb)) => {
             let kinds = corpus::output_kinds(dataset, sf, query).await;
-            match mode {
-                Some(_) => compare_device_section(&oracle, ours, duckdb, &kinds),
-                None => compare_sections(&oracle, ours, duckdb, &kinds),
+            match side {
+                Side::Cpu => compare_sections(&oracle, ours, duckdb, &kinds),
+                Side::Device(_) => compare_device_section(&oracle, ours, duckdb, &kinds),
             }
         }
         // One side does not answer, which is what `duckdb_none` is for. Under any other
@@ -543,9 +549,9 @@ async fn judge(
         )),
     };
     if let Err(said) = said {
-        let at = match mode {
-            Some(mode) => format!("the device at {mode}"),
-            None => "the cpu".to_string(),
+        let at = match side {
+            Side::Cpu => "the cpu".to_string(),
+            Side::Device(mode) => format!("the device at {mode}"),
         };
         panic!("{dataset}/{query} ({at}): {said}");
     }

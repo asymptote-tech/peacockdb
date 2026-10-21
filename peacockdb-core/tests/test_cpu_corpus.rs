@@ -10,9 +10,10 @@ use std::collections::BTreeSet;
 use peacockdb_core::test_support::{
     CorpusDeclaration, DuckdbOracle, MODES, RegistryEntry, assert_registry_matches_csv,
     authoritative_mode, cpu_case, device_order_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
-    ends_in_sort, golden_row_order, gpu_result_coverage, gpu_result_cudf_matches_path,
-    gpu_result_golden, line_order_is_right, load_csv, ordered_sections, result_golden,
-    section_holds_rows, section_of, stem, stored_mismatch, stored_of, tight,
+    ends_in_sort, golden_row_order, gpu_fingerprint_mismatch, gpu_result_coverage,
+    gpu_result_cudf_matches_path, gpu_result_golden, line_order_is_right, load_csv,
+    ordered_sections, result_golden, section_holds_rows, section_of, stem, stored_mismatch,
+    stored_of, tight,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -690,7 +691,8 @@ fn every_duckdb_result_section_has_a_registry_row_and_every_row_a_section() {
 /// corpus line's cell says what its cpu, DuckDB and device sections hold, a row with no line
 /// says `na`, and every query with a section in any of the three files has a row. The widget
 /// shows the cell, so a section that crossed the cap with the cell unchanged would tell a
-/// reader the cpu is held to rows it no longer stores.
+/// reader the cpu is held to rows it no longer stores. A line declaring `gpu: fingerprint`
+/// must store one on the device's side.
 #[test]
 fn the_registry_stored_column_matches_the_goldens_in_both_directions() {
     let rows = load_csv();
@@ -708,6 +710,12 @@ fn the_registry_stored_column_matches_the_goldens_in_both_directions() {
         }
         let want = stored_of(&row.dataset, &row.sf, &query);
         wrong.extend(stored_mismatch(&row.dataset, &query, &row.stored, &want));
+        wrong.extend(gpu_fingerprint_mismatch(
+            &row.dataset,
+            &query,
+            &row.duckdb_oracle,
+            &row.stored,
+        ));
     }
     for (dataset, sf) in registry_datasets() {
         let named: BTreeSet<String> = rows

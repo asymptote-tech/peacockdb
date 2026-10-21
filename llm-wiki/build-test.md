@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 5709 test cases — Rust 5067, C++ 232, Python 410.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5711 test cases — Rust 5069, C++ 232, Python 410.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3241 cases: `--lib` 895, `test_cpu_corpus` 2315, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3243 cases: `--lib` 897, `test_cpu_corpus` 2315, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -46,7 +46,7 @@ plus twelve checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that the registry's `duckdb_oracle`, `cpu_oracle`, `gpu_oracle` and `schema_validation` columns
 copy each line, that its `stored` column is what the three result goldens hold, in both
-directions, that a hyphenated query resolves its authority and has its result section, that
+directions, and a fingerprint on the device's side wherever the line says `gpu: fingerprint`, that a hyphenated query resolves its authority and has its result section, that
 an undetermined line's rows are compared only against committed files, that
 `duckdb-result.txt`'s sections are the registry's rows in both directions, every
 `data_fusion_disabled` line comparing its whole answer with DuckDB, and the order guard: a line
@@ -558,14 +558,15 @@ by some registry row, `data_fusion` decoded through `stringify!`'s spacing, and
 `data_fusion(no_sort, …)` refused; and the line's one row order, a `duckdb_none` line's being its
 golden's
 
-| Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 7 |
+| Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 9 |
 |---|---|--:|
 
 a quoted registry cell holding commas, parentheses and doubled quotes reads as one field, the
 same rule cost-report, `ticket_widget.py` and `duckdb_result.py` read the file by. Then the
-`stored` column: each shape of cell from the sides' formats, a side with no section left out of
-the one-word rule, a query with no section refused, a wrong cell naming the side that differs,
-and the column's spelling
+`stored` column: a `skipped:` or `failed:` marker read as no section, each shape of cell from
+the sides' formats, a side with no section left out of the one-word rule, a query with no
+section refused, a wrong cell naming the side that differs, a line declaring `gpu: fingerprint`
+whose cell stores no fingerprint on the device's side, and the column's spelling
 
 | Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 18 |
 |---|---|--:|
@@ -1085,7 +1086,9 @@ Consequences worth knowing before you regenerate:
   `mixed` for device modes that disagree; `na` for a row with no corpus line. A recording that
   moves a section across the cap moves the cell, and
   `the_registry_stored_column_matches_the_goldens_in_both_directions` names the side until it
-  does. The report shows it as Result stored.
+  does. The same test refuses a line that says `gpu: fingerprint` while its cell's gpu part is
+  anything but `fingerprint`, such as a line whose device cells are off. The report shows it as
+  Result stored.
 - **`.cost.txt` is a pure function of `.cpu.txt` and `cost_model.conf`** — regenerating one
   `.cpu.txt` obliges the sibling `.cost.txt`, and `test_cost_model` re-derives every one of
   them, so a hand-edited `.cost.txt` goes red.

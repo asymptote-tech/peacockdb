@@ -7,18 +7,17 @@
 // Modes are the five planning modes or'd together, `all_modes` for all five, or `none`; every
 // argument is written, so a query's whole coverage reads off the line. The three oracles:
 //
-//   duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>", …)][, gpu:
-//     fingerprint]) | duckdb_fingerprint | duckdb_none
+//   duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>", …)]
+//     [, gpu: fingerprint]) | duckdb_fingerprint | duckdb_none
 //   data_fusion(sort, exact|approx) | data_fusion_subset | data_fusion_disabled
 //   golden(sort|no_sort, exact|approx_std) | live_cpu
 //
 // The first argument says whether both answers are sorted before comparing; a query whose plan
 // ends in a sort says `no_sort`. `rel` and `date` name columns as our result header prints
-// them. `gpu: fingerprint` compares the device's side by fingerprint and leaves the cpu's under
-// the rest of the spelling. llm-wiki/build-test.md has what each compares. The last argument is the device run's
-// schema validation; a cell red on schema alone says
-// `schema_validation_disabled(modes)` with its ticket on the line, naming the modes it excuses
-// so the others keep the hook, or bare where it excuses every mode.
+// them. `gpu: fingerprint` compares the device's side by fingerprint. llm-wiki/build-test.md
+// has what each compares. The last argument is the device run's schema validation; a cell red
+// on schema alone says `schema_validation_disabled(modes)` with its ticket on the line, naming
+// the modes it excuses so the others keep the hook, or bare where it excuses every mode.
 // The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
 
 // --- tpch ---------------------------------------------------------------------
