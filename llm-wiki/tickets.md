@@ -19,11 +19,11 @@ are never reused, so an old reference still resolves there.
 
 ## Contents
 
-83 open tickets, in file order.
+81 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 9 | #267 #289 #202 #217 #204 #214 #227 #174 #233 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 8 | #267 #289 #217 #204 #214 #227 #174 #233 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #284 #264 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 13 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 #255 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |
@@ -33,4 +33,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #149 #148 #231 #232 #242 #248 #286 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 4 | #258 #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 3 | #178 #176 #129 |

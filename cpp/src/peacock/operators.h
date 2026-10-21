@@ -7,6 +7,7 @@
 #include "peacock/plan_types.h"
 #include "plan_executor.h"
 
+#include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
 #include <vector>
@@ -38,6 +39,11 @@ TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in);
 TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in);
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in);
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in);
+
+// The cuDF null order for one sort key, relative to its direction. The sort and the k-way
+// merge both call it: runs sorted under one mapping and merged under another break
+// cudf::merge's precondition.
+cudf::null_order null_order_of(const fb::SortExprNode* key);
 TableResult execute_union(const fb::CudfUnion* u, NodeInputs* in);
 TableResult execute_limit(const fb::CudfLimit* limit, NodeInputs* in);
 TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in);

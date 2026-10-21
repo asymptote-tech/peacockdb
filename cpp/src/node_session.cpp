@@ -542,8 +542,7 @@ void NodeSession::execute_node(uint64_t seq, const uint64_t* input_handles,
               "merge (needs per-partition materialization) — file an increment");
         key_cols.push_back(column_ordinal(expr->node_as_ColumnRef(), owned[0].column_names));
         orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);
-        null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
-                                                : cudf::null_order::AFTER);
+        null_orders.push_back(null_order_of(se));
       }
       merged = cudf::merge(views, key_cols, orders, null_orders);
       // Apply the SPM's own fetch (top-N) AFTER the global merge (-1 = unlimited).

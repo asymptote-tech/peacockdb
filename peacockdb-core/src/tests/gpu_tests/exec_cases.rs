@@ -5,9 +5,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, AsArray, BooleanArray};
-use datafusion::arrow::compute::{
-    SortColumn, SortOptions, cast, lexsort_to_indices, take_record_batch,
-};
+use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::ScalarValue;
@@ -794,43 +792,21 @@ operator_case! {
     }
 }
 
-/// `input()` ordered by arrow, for the order the device answers when it is not the plan's.
-fn input_ordered_by(i32_descending: bool, i32_nulls_first: bool) -> RecordBatch {
-    let batch = input();
-    let key = |ordinal: usize, descending: bool, nulls_first: bool| SortColumn {
-        values: batch.column(ordinal).clone(),
-        options: Some(SortOptions {
-            descending,
-            nulls_first,
-        }),
-    };
-    let keys = [
-        key(2, i32_descending, i32_nulls_first),
-        key(0, false, false),
-    ];
-    let indices = lexsort_to_indices(&keys, None).expect("ints sort");
-    take_record_batch(&batch, &indices).expect("a permutation of the batch")
-}
-
-// #202 — on a descending key the device places nulls at the end the plan did not declare:
-// `nulls_first` maps straight onto `cudf::null_order`, which cuDF applies before it flips
-// the direction.
+// A descending `i32` carrying nulls, with them first and with them last: cuDF applies a
+// key's null order before it flips the direction, so these hold the mapping to the plan.
 operator_case! {
     GpuSort,
-    fn bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device() {
+    fn a_descending_key_with_nulls_last_agrees() {
         let node = sort(vec![by(2, false, false), by(0, true, false)], None);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        gpu_answered(&outcome, input_ordered_by(true, true), Order::AsEmitted);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 
-// #202 — the other direction of the same mapping.
 operator_case! {
     GpuSort,
-    fn bug_a_descending_key_with_nulls_first_puts_them_last_on_the_device() {
+    fn a_descending_key_with_nulls_first_agrees() {
         let node = sort(vec![by(2, false, true), by(0, true, false)], None);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        gpu_answered(&outcome, input_ordered_by(true, false), Order::AsEmitted);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 

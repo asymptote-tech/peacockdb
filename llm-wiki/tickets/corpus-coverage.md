@@ -10,7 +10,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
   - [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 - [Sort / Limit](#sort--limit)
-  - [#202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
   - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
@@ -53,30 +52,6 @@ exceeds `INT32_MAX`, as the join session refuses past its `size_type` limits. Th
 25.02.
 
 ## Sort / Limit
-
-<a id="t202"></a>
-### #202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device
-
-On a descending key the device places nulls at the end the plan did not declare: `i32 DESC
-NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last.
-
-`sort.cpp` and the merge in `node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE`
-and its absence to `AFTER`, and cuDF applies that before it flips a `DESCENDING` key. Ascending
-keys are right. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
-descending gets its null rows first on the cpu and last on the device. The mapping has to be
-relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
-over sorted runs must order as the sort did, and the two sites have to move together: runs
-sorted as the plan says under a merge that reads them the other way break cuDF's merge
-precondition, and the device answers duplicated and dropped rows — a shape no plan reaches
-today, since every run the merge sees was sorted by the same mapping. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
-(`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
-and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
-
-**Corpus queries:** `tpcds/q34` (`c_preferred_cust_flag DESC NULLS FIRST`) and `tpcds/q71`
-(`ext_price DESC NULLS FIRST`), their five device cells off here. Both carry NULLs in that key,
-and the row-for-row compare `oracle-cleanup` added found them at every mode, 2026-10-21; the
-sorted compare before it could not.
-
 
 <a id="t217"></a>
 ### #217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device

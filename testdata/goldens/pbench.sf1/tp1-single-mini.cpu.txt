@@ -874,6 +874,80 @@ GpuUnload: output_rows=1, output_bytes=26
               in_rows=[[2000]] batch_rows=[[2000]] batch_bytes=[[8250]]
               GpuLoadParquet: table=dim, projections=[d_w@16], partition_groups=[[[0]]], lanes=1, batches=multiple, output_rows=2000, output_bytes=8250
                 in_rows=[] batch_rows=[[2000]] batch_bytes=[[8250]]
+== sort-desc-default
+early_exit=none
+GpuUnload: output_rows=1000, output_bytes=12250
+  in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+  GpuAccumulateBatchesAndSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+    in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+      in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=12250
+        in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sort-desc-limit
+early_exit=none
+GpuUnload: output_rows=100, output_bytes=1226
+  in_rows=[[100]] batch_rows=[[100]] batch_bytes=[[1226]]
+  GpuAccumulateBatchesAndSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], fetch=100, lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=100, output_bytes=1226
+    in_rows=[[100]] batch_rows=[[100]] batch_bytes=[[1226]]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], fetch=100, lanes=1, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=100, output_bytes=1226
+      in_rows=[[1000]] batch_rows=[[100]] batch_bytes=[[1226]]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=12250
+        in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sort-desc-nulls-first
+early_exit=none
+GpuUnload: output_rows=1000, output_bytes=12250
+  in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+  GpuAccumulateBatchesAndSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+    in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+      in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=12250
+        in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sort-desc-nulls-last
+early_exit=none
+GpuUnload: output_rows=1000, output_bytes=12250
+  in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+  GpuAccumulateBatchesAndSort: by=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+    in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+    GpuSort: by=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=multiple, sorted_on=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], output_rows=1000, output_bytes=12250
+      in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=12250
+        in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[12250]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=245000
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[245000]]
+== sort-desc-string
+early_exit=none
+GpuUnload: output_rows=1000, output_bytes=14997
+  in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[14997]]
+  GpuAccumulateBatchesAndSort: by=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], output_rows=1000, output_bytes=14997
+    in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[14997]]
+    GpuSort: by=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=multiple, sorted_on=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], output_rows=1000, output_bytes=14997
+      in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[14997]]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=14997
+        in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[14997]]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_s@13], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=299883
+          in_rows=[] batch_rows=[[20000]] batch_bytes=[[299883]]
+== sort-mixed-keys
+early_exit=none
+GpuUnload: output_rows=1000, output_bytes=12500
+  in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12500]]
+  GpuAccumulateBatchesAndSort: by=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], lanes=1, batches=single, sorted_on=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], output_rows=1000, output_bytes=12500
+    in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12500]]
+    GpuSort: by=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], lanes=1, batches=multiple, sorted_on=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], output_rows=1000, output_bytes=12500
+      in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12500]]
+      GpuProject: exprs=[f_id@0, f_kb@2, f_k@1], lanes=1, batches=multiple, output_rows=1000, output_bytes=12500
+        in_rows=[[1000]] batch_rows=[[1000]] batch_bytes=[[12500]]
+        GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=1, batches=multiple, output_rows=1000, output_bytes=12500
+          in_rows=[[20000]] batch_rows=[[1000]] batch_bytes=[[12500]]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_kb@3], partition_groups=[[[0,1,2,3,4,5,6,7,8,9]]], lanes=1, batches=multiple, output_rows=20000, output_bytes=250000
+            in_rows=[] batch_rows=[[20000]] batch_bytes=[[250000]]
 == sparse-build-anti
 early_exit=none
 GpuUnload: output_rows=13257, output_bytes=107714
