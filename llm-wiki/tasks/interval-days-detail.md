@@ -125,3 +125,4 @@
   `test_gpu_corpus` 944, `peacock_gpu_benchmarks` 8 (3 `bench_` skipped), `test_node_timing` 1;
   no segfault in any log. `cost-report` rerun after the gpu-case edit: 43 + 32. Soft stop 10:22Z.
 - Deferred, as the L40S list always defers: sf40 binaries, `--run-benchmarks`, Nsight, H200.
+- 2026-10-21: developer green (CPU local; L40S list ALL rc=0). DuckDB returns µs TIMESTAMP for every timestamp/date ± interval; ms/us/ns cells identical as text, so no timestamp() facet; date() added to FACETS. Outside Scope: new cpp/src/interval.cpp and cpp/tests/gpu/test_interval_arithmetic.cpp (file-size limit), CMakeLists, two gpu join case files (pbench join-shape guard). Possible pre-existing drift: build-test.md Join session row says 54, binary runs 56. Committed; PR opened; state reviewing.

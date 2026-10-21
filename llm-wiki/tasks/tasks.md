@@ -156,7 +156,7 @@ for `ORDER BY` queries, a `duckdb_oracle` registry column in the report; no core
 the rest in cost-report's `test_source_formatting`; `chunk_bytes`'s 1 GiB in the fbs; a
 `null_equals_null` audit; a ticket triage.
 
-### 13. [`interval-days.md`](interval-days.md) — closes [#168](../tickets/corpus-coverage.md#t168) — state: building
+### 13. [`interval-days.md`](interval-days.md) — closes [#168](../archive/archived-tickets.md#t168) — state: reviewing
 
 Interval literals cross the wire as months, days and nanoseconds; date and timestamp ± interval on
 the device as DataFusion answers it; new pbench queries; tpch mixed-join's device cells on.
