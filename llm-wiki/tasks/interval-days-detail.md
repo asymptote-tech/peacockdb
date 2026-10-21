@@ -172,3 +172,5 @@
   `gpu_tests` join files, `wire/tests/intervals.rs`, `test_support/mod.rs`. No ABI or facade
   change.
 - 2026-10-21: completeness: reviewer 0/0, analyst 0/0, no architecture.md sentence falsified. Pre-existing drift fixed: architecture.md 'binary-op output type' row (left operand's type, decimal scale rule). Signoff written; state completeness approved.
+- 2026-10-21T11:43:38Z: dispatched pipeline.yml on ENS-interval-days 531ea3eca82cbd909128538e2ae8d9f664a9bf6a, run 39594088714 (final device run).
+- 2026-10-21: run 39594088714 green, GPU Tests (nebius-gpu) included. State done.
