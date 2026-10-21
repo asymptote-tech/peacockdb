@@ -58,3 +58,16 @@ task's either: that query's cells stay off and #60 stays open with the measureme
   the dispatched `GPU Tests (nebius-gpu)` CI job green.
 - The detail file records each device cell that differs from the golden, with the largest
   relative gap, so the archived #60 says how big the gap was.
+
+## Signoff (2026-10-21)
+
+Partly solved. q78 is on at all five device modes under `golden_approx_std` and `duckdb_approx`:
+5 of its 1000 cells sit one ulp from the golden, the largest 1.76e-16 relative. #60 is archived as
+won't fix with that measurement, and the comment at `round` names the gap. No engine change.
+Not met: q2's half of Verification and closing #56. q2's device answer is right, but `round`'s
+ulp widens its rendering past the 256 KiB result cap, the recording becomes a fingerprint, and
+`duckdb_approx` refuses it. That is a scope gap, not the Restriction's case: the fix is in
+`test_support/duckdb_oracle.rs`, outside Scope, and #56 now carries it. The board's "closes #56"
+is the human's wording and is stale. Shortcuts: the cpu-side DuckDB check on q78's decimals now
+allows one last-place unit, as the spec chose. Completeness: reviewer 0/0, analyst 1 important
+(this scope gap); no `architecture.md` sentence falsified.

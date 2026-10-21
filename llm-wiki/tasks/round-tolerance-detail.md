@@ -102,3 +102,18 @@ when only our side is fingerprinted.
 sf40, benchmarks, Nsight: out (L40S list only).
 - 2026-10-21: developer green for q78; q2 stays off under #56 (spec Restriction: device rendering crosses the 256 KiB cap → fingerprint; duckdb_approx refuses it; fix in compare_sections is outside Scope, recorded in #56). Coordinator accepts the partial outcome the spec provides for. Committed; PR opened; state reviewing.
 - 2026-10-21: review round 1: 0 blocking, 3 important (round comment over 4 lines; #56 header named a solved shape; #56 too long), 6 nits. Coordinator applied all but the board heading's 'closes #56' (human's prose; named in the signoff). Developer regenerated report.html and ran the cheap tiers green. State completing.
+
+## Completeness pass, "what is missing" (analyst, 2026-10-21)
+
+- q2's "inferred" root cause is now re-emulated, not inferred. A throwaway script applies cuDF's
+  `ip + round(fp·100)/100` to every round cell of `mini.result.txt` (N recovered from the golden).
+  On q78 it reproduces the device exactly: the same five `ratio` cells, largest 1.76e-16, and a
+  rendered section of 20,071 bytes (recorded: 20,072 with its newline). On q2: 301 of 17,591 round
+  cells move one ulp (r4 147, the seventh column 56, r1 49, r2 49; r3, r5 and r6 none). Largest gap
+  1.95e-16. The padded rendering grows from 261,767 to 367,481 bytes, over the 262,144 cap.
+- So q2 is red *because of* `round`, through the cap and `compare_sections`' refusal. Neither
+  Restriction clause names that case: the outcome is a Scope gap. #56's proposed fix is sound:
+  `compare_over_cap` already takes `(fingerprint, rows)`.
+- #56's original shape keeps device coverage across merges: q43 and q59 both
+  `sum(CASE WHEN d_day_name='Sunday' …)`, on at every device mode.
+- 2026-10-21: completeness: reviewer 0/0; analyst 1 important — q2's miss is a Scope gap, not the Restriction (q2 red because of round, via the harness). Coordinator accepts the partial outcome; widening Scope to land the duckdb_oracle.rs fix is the human's call. Signoff written; state completeness approved.
