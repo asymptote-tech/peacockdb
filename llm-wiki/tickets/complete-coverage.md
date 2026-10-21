@@ -127,22 +127,24 @@ per-function phase above. The `bug_` test flips to a plan test and a cpu-vs-devi
 
 <a id="t249"></a>
 ### #249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type
-The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs:14-39`) stops at the four `Timestamp`
-variants, and `serialize_schema` used to map any Arrow type it could not name to `Null` without
-saying so. Most device nodes take a column's type from the data, so such a
+The fbs `DataType` enum (`flatbuffers/gpu_plan.fbs`) has no Time, Duration, Struct or List
+member, and its one interval member types a literal, never a column. `serialize_schema` used to
+map any Arrow type it could not name to `Null` without saying so. Most device nodes take a column's type from the data, so such a
 column usually passes through unnoticed; where the device builds a column from the declared
 schema — a join's NULL pads and empty or absent sides, a typed NULL literal — it meets a `Null`
 field and either refuses at run time or builds the wrong type, depending on the mode and the data.
 
-Related: [#168](corpus-coverage.md#t168) (an interval literal cannot cross; proposes
-`DurationDays`), [#224](scalars.md#t224) (an integer-to-date cast needs a duration type), and
+Related: [#224](scalars.md#t224) (an integer-to-date cast needs a duration type), and
 [#245](joins.md#t245) (a nested key cannot cross a shuffle).
 
 **Half done by [`repartition-keys`](../tasks/repartition-keys.md)**: the four `Timestamp` variants
 are in the fbs, and `serialize_schema` now returns a `PlanError` for a type it cannot name, so the
 gap shows as a plan-time refusal naming the type rather than as a wrong pad. `Timestamp` is off
 the list in this ticket's title; `Time`, `Duration`, `Interval`, `Struct` and `List` are what is
-left to add.
+left to add. An interval literal crosses since [`interval-days`](../tasks/interval-days.md), for a
+date or naive timestamp ± it alone. An interval column, interval-by-number arithmetic, an interval
+comparison, and an interval on a zoned timestamp or a `Date64` are refused at plan time, naming
+this ticket.
 
 **Corpus queries:** none in tpch or tpcds, and none in pbench yet. The two pbench queries
 written for this ticket — an interval column carried through a join

@@ -1279,7 +1279,8 @@ copies together.
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
 hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
 regions, the NVTX domain and the harness range),
-`expr.cpp` (expression and AST building),
+`expr.cpp` (expression and AST building), `interval.cpp` (a date or timestamp ± an interval
+literal, the column path's one interval arm),
 `table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
 `column_at`),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
@@ -1367,6 +1368,7 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
+| `ScalarValue.interval_months`,<br>`.interval_days`, `.interval_nanos` | `serialize.rs` | any of DataFusion's three interval literals, as one `IntervalMonthDayNano`; `expr_writer.rs` refuses it anywhere but a date or naive timestamp ± it (#249) | arrow's `add_month_day_nano` in [`interval.cpp`](../cpp/src/interval.cpp): months by `add_calendrical_months`, clamped to the month's end, then days, then nanoseconds — floored to a timestamp's unit, whole days toward zero on a date |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which requests the builder makes: state from values at Partial, merged state at Merge; any other mode is refused by name |
 | `AggregateFuncNode.state_names` | `aggregate_writer.rs` | `state_funcs`: each function's calls' outputs, three for a Welford | the name of every column the device emits |
 | `AggregateFuncNode.ddof` | `aggregate_writer.rs` | `AggStateColumns.ddof` | carried for the plan; no device code reads it, since the finalize is a project |

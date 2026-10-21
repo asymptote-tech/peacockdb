@@ -67,7 +67,8 @@ so they are out of scope; their rows keep `32 143`.
   GpuUnion` unchanged.
 - `planner::DateDayArithmetic`, a `FunctionRewrite` before `TypeCoercion`: `Date32 ± integer`
   becomes `CAST(CAST(d AS Int32) ± CAST(n AS Int32) AS Date32)`, days, DuckDB's meaning. Every
-  piece crosses the wire. It avoids intervals because of #168.
+  piece crosses the wire. It was written to avoid intervals while
+  [#168](../archive/archived-tickets.md#t168) kept them off the wire.
 
 Tests: a `bug_` test per rule on a plain session (a two-branch union with a selected constant;
 `select date '2000-01-01' + 5`), red the day DataFusion no longer needs the rule; a planner test

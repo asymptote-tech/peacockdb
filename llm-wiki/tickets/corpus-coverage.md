@@ -14,8 +14,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
   - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
-- [Scalars](#scalars)
-  - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
 - [Testing](#testing)
   - [#56 (q2 fingerprinted answer) `duckdb(…, approx)` refuses q2's over-cap device recording](#t56)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
@@ -143,39 +141,6 @@ nothing sees the difference in rows.
 
 **Fix proposed:** a zero-row batch inside the interval is forwarded as it is; the three pins go
 green as `same` cases.
-
-## Scalars
-
-<a id="t168"></a>
-### #168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue
-
-The wire's `ScalarValue` (`flatbuffers/gpu_plan.fbs`) has no interval type, so a plan holding an
-interval literal cannot cross to the device.
-
-`testdata/tpch-queries/mixed-join.sql` joins on `l_shipdate <= o_orderdate + INTERVAL '90' DAY`.
-The interval is added to a column, so constant folding cannot remove it. Every other corpus
-interval folds into a date before the plan is written. `expr_writer.rs` refuses the literal with
-`unsupported scalar value: IntervalMonthDayNano(...) (#168)`, and the whole plan fails. The plan
-golden shows `not runnable: ... (#168) at #3`. `plan_goldens.rs` pins it both ways:
-`NOT_RUNNABLE` names mixed-join, and the uncrossable set must be exactly it. The wire test
-`a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where` pins the refusal. The legacy
-serializer refused the same literal, so the device has never run this query.
-
-**Corpus queries:** `tpch/mixed-join`, its device cells off at all five modes
-(`corpus_cases.inc`: "cannot cross to a device"). The cpu runs it at all five.
-
-**Fix proposed:** carry a whole-day interval as a day duration. Append `DurationDays` to
-`DataType`, after `Decimal128`, so no ordinal moves; its value rides `int_val`.
-`serialize_scalar_value` (`wire/serialize.rs`) writes `IntervalMonthDayNano(0, d, 0)` and
-`IntervalDayTime(d, 0)` as `DurationDays(d)`. An interval with months or a sub-day part stays
-refused under this ticket: a month is not a fixed number of days. In `expr.cpp`, the literal arm
-builds a `cudf::duration_scalar<duration_D>`, and the type map sends `DurationDays` to
-`DURATION_DAYS`. The inner join's residual goes through `build_column`, and the type mismatch
-already routes `date + duration` to `cudf::binary_operation`, which adds `TIMESTAMP_DAYS` and
-`DURATION_DAYS` natively. `binop_output_type` echoes the left operand; it must pick the
-timestamp side, so `90 days + date` answers a date. Unconfirmed on a build. Then `NOT_RUNNABLE`
-and the uncrossable set go empty, the wire test takes a month interval, the golden line becomes
-a plan, and mixed-join's device cells turn on.
 
 ## Testing
 

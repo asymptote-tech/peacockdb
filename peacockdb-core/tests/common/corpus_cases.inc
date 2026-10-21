@@ -27,9 +27,8 @@ corpus_query!(tpch, 1, q1, all_modes, all_modes, duckdb(no_sort, approx), data_f
 corpus_query!(tpch, 1, q14, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q19, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q12, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
-// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu, but one:
-// mixed-join (#168). The joins' own blockers, #152's side copies
-// and #220's batch splits, went with the join session.
+// THE DEVICE COLUMN. Every tpch line runs on the device wherever it runs on the cpu. The joins'
+// own blockers, #152's side copies and #220's batch splits, went with the join session.
 corpus_query!(tpch, 1, q13, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q15, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, q17, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
@@ -70,7 +69,8 @@ corpus_query!(tpch, 1, nested_loop_join, all_modes, all_modes, duckdb(sort, exac
 // one lane. shuffle-stddev and nested-loop-left-join run everywhere on both engines, and so
 // does nested-limits, whose region scan reads no column and answers its rows as
 // `__rowmarker__` (#63) — on and not yet proven on a device, as scan-limit's cells are.
-// mixed-join's `none` means "cannot cross to a device" — #168's interval `ScalarValue`.
+// mixed-join's residual adds an interval literal to a date, which the device does as
+// DataFusion does (`add_interval`).
 corpus_query!(tpch, 1, shuffle_additive_avg, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, shuffle_stddev, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, approx), golden(sort, approx_std), schema_validation_enabled);
 // rollup-stddev puts a Welford under a grouping set, which neither benchmark has; the grouping-set
@@ -79,7 +79,7 @@ corpus_query!(tpch, 1, rollup_stddev, all_modes, all_modes, duckdb(sort, approx)
 // global-stddev is the keyless Welford, which no other query has: the device runs it through the
 // grouped request builder on one constant key (#216).
 corpus_query!(tpch, 1, global_stddev, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, approx), golden(sort, approx_std), schema_validation_enabled);
-corpus_query!(tpch, 1, mixed_join, all_modes, none, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(tpch, 1, mixed_join, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, nested_loop_left_join, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpch, 1, nested_limits, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 
@@ -317,6 +317,14 @@ corpus_query!(pbench, 1, in_is_null, none, none, duckdb_none, data_fusion(sort, 
 corpus_query!(pbench, 1, indf_full_join, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(pbench, 1, inner_join_hot_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, int8_key_group, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+// The six interval queries: a date or timestamp ± an interval literal on the device. DuckDB answers
+// `date ± interval` as a timestamp, so `date` compares those columns by their date part.
+corpus_query!(pbench, 1, interval_days_filter, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, interval_join_keyed, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, interval_join_keyless, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, interval_mixed_units, all_modes, all_modes, duckdb(no_sort, exact, date("dt")), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, interval_month_clamp, all_modes, all_modes, duckdb(no_sort, exact, date("next_month", "prev_month")), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, interval_where, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(pbench, 1, left_join_null_keys, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, left_join_residual, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, like_column_pattern, all_modes, none, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);

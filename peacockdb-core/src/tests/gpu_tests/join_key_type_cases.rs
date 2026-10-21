@@ -3,19 +3,23 @@
 //! key column has matches, repeats where its values are few, misses in the probe's last 24 and a
 //! NULL on each side — the widest NULL stride is 71. The floats' fifth rows hold -0.0 and the NaNs, which the cpu keys by bits
 //! and the device by value (#243, pinned in `join_cases.rs`), so a float case leaves those
-//! rows out of both sides and keys on the values the two engines agree on.
+//! rows out of both sides and keys on the values the two engines agree on. Last, the two pbench
+//! interval residuals over the same sides' `d`: a keyed one and a keyless one the session hoists.
 
 use std::sync::Arc;
 
 use datafusion::arrow::array::BooleanArray;
 use datafusion::arrow::compute::filter_record_batch;
-use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+use datafusion::arrow::datatypes::{DataType, Field, IntervalMonthDayNano, Schema as ArrowSchema};
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::JoinType;
+use datafusion::common::{JoinType, ScalarValue};
 
 use super::join_cases::{output_over, script};
 use super::script::run_both;
-use crate::plan::{BatchLayout, GpuHashJoin, GpuNode, Schema};
+use crate::plan::{
+    BatchLayout, BinaryOp, Expr, GpuHashJoin, GpuNestedLoopJoin, GpuNode, JoinFilterColumn,
+    JoinSide, Schema,
+};
 use crate::tests::compare::Order;
 use crate::tests::given::Given;
 use crate::tests::synthetic::{key_types, key_types_schema, prefixed};
@@ -45,14 +49,15 @@ fn side(rows: usize, key: usize, prefix: &str) -> RecordBatch {
     prefixed(&batch, prefix)
 }
 
+fn leaf(prefix: &str, batches: BatchLayout) -> Box<dyn GpuNode> {
+    Given::of(
+        Schema::new(Arc::new(ArrowSchema::new(fields(prefix)))),
+        batches,
+    )
+}
+
 /// Both engines join on column `key` of each side and answer alike.
 fn joins_alike_on(join_type: JoinType, key: usize) {
-    let leaf = |prefix: &str, batches: BatchLayout| -> Box<dyn GpuNode> {
-        Given::of(
-            Schema::new(Arc::new(ArrowSchema::new(fields(prefix)))),
-            batches,
-        )
-    };
     let output = output_over(join_type, fields("b_"), fields("p_"));
     let node = GpuHashJoin::new(
         leaf("b_", BatchLayout::SingleBatch),
@@ -112,4 +117,90 @@ keyed_on! {
 #[test]
 fn every_key_types_column_but_the_id_is_keyed_on() {
     assert_eq!(key_types_schema().fields().len(), 1 + 19);
+}
+
+const DATE: u32 = 8;
+
+/// `d` plus an interval literal, over the filter's own schema at `ordinal`.
+fn date_plus(ordinal: u32, name: &str, months: i32, days: i32) -> Expr {
+    Expr::binary(
+        Expr::column(ordinal, name),
+        BinaryOp::Plus,
+        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+            IntervalMonthDayNano::new(months, days, 0),
+        ))),
+        DataType::Date32,
+    )
+}
+
+fn both_dates() -> Vec<JoinFilterColumn> {
+    vec![
+        JoinFilterColumn {
+            side: JoinSide::Build,
+            index: DATE,
+        },
+        JoinFilterColumn {
+            side: JoinSide::Probe,
+            index: DATE,
+        },
+    ]
+}
+
+// pbench's interval-join-keyed: `p_d <= b_d + 1 month` beside a key on `k32`.
+operator_case! {
+    GpuHashJoin,
+    fn an_inner_join_with_an_interval_residual_agrees() {
+        let residual = Expr::binary(
+            Expr::column(1, "p_d"),
+            BinaryOp::LtEq,
+            date_plus(0, "b_d", 1, 0),
+            DataType::Boolean,
+        );
+        let node = GpuHashJoin::new(
+            leaf("b_", BatchLayout::SingleBatch),
+            leaf("p_", BatchLayout::MultipleBatches),
+            JoinType::Inner,
+            vec![(3, 3)],
+            Some(residual),
+            both_dates(),
+            false,
+            None,
+            Schema::new(Arc::new(ArrowSchema::new(output_over(
+                JoinType::Inner,
+                fields("b_"),
+                fields("p_"),
+            )))),
+        );
+        let sides = script(Some(side(72, 3, "b_")), vec![side(96, 3, "p_")]);
+        run_both(&node, sides).same(Order::Any);
+    }
+}
+
+// pbench's interval-join-keyless: `b_d + 7 days < p_d`, whose left operand the session hoists
+// onto the build side, learning its type from a zero-row table.
+operator_case! {
+    GpuNestedLoopJoin,
+    fn a_nested_loop_join_on_an_interval_condition_agrees() {
+        let condition = Expr::binary(
+            date_plus(0, "b_d", 0, 7),
+            BinaryOp::Lt,
+            Expr::column(1, "p_d"),
+            DataType::Boolean,
+        );
+        let node = GpuNestedLoopJoin::new(
+            leaf("b_", BatchLayout::SingleBatch),
+            leaf("p_", BatchLayout::MultipleBatches),
+            JoinType::Inner,
+            condition,
+            both_dates(),
+            None,
+            Schema::new(Arc::new(ArrowSchema::new(output_over(
+                JoinType::Inner,
+                fields("b_"),
+                fields("p_"),
+            )))),
+        );
+        let sides = script(Some(side(24, 0, "b_")), vec![side(32, 0, "p_")]);
+        run_both(&node, sides).same(Order::Any);
+    }
 }

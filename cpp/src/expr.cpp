@@ -100,6 +100,10 @@ cudf::type_id fb_to_type_id(fb::DataType dt) {
       return cudf::type_id::TIMESTAMP_MICROSECONDS;
     case fb::DataType_TimestampNanosecond:
       return cudf::type_id::TIMESTAMP_NANOSECONDS;
+    // cuDF has no interval type. EMPTY sends a binary holding one to the column path, where
+    // `shift_by_interval` is its only arm.
+    case fb::DataType_IntervalMonthDayNano:
+      return cudf::type_id::EMPTY;
     default:                      return cudf::type_id::EMPTY;
   }
 }
@@ -143,7 +147,7 @@ static cudf::ast::ast_operator fb_to_ast_op(fb::BinaryOp op) {
 /// flag set and its value fields unused, and the scalar is built invalid so cuDF treats it
 /// as a null of `type`. One reader, so a null cannot be a zero on one path and a null on
 /// the other.
-static bool literal_is_valid(const fb::ScalarValue* sv) { return !sv->is_null(); }
+bool literal_is_valid(const fb::ScalarValue* sv) { return !sv->is_null(); }
 
 /// `cudf::ast::literal` has four constructors and none of them takes a `cudf::scalar&`, so
 /// the concrete type has to be recovered. Dispatching on the scalar's own `type()` rather
@@ -361,6 +365,8 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr, cudf::table_view cons
       auto is_float = [](cudf::type_id t) {
         return t == cudf::type_id::FLOAT32 || t == cudf::type_id::FLOAT64;
       };
+      // A date or timestamp ± interval answers in the date's type, on either side.
+      if (is_interval_literal(b->left())) return rt;
       if (is_float(lt) || is_float(rt)) return cudf::type_id::FLOAT64;
       if (lt == cudf::type_id::DECIMAL128 || rt == cudf::type_id::DECIMAL128)
         return cudf::type_id::DECIMAL128;
@@ -597,6 +603,10 @@ static std::unique_ptr<cudf::column> build_column_binary(const fb::BinaryExprNod
                                                          std::vector<std::string> const& names) {
   auto* lhs = bin->left();
   auto* rhs = bin->right();
+
+  if (is_interval_literal(lhs) || is_interval_literal(rhs))
+    return shift_by_interval(bin, table, names);
+
   auto op = fb_to_binop(bin->op());
 
   // Decimal division: cuDF's fixed_point DIV yields scale s_l-s_r (0 for two

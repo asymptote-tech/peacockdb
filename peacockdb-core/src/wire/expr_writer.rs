@@ -30,11 +30,10 @@ pub(crate) fn write_expr<'a>(
             (fb::ExprNode::ColumnRef, column.as_union_value())
         }
         Expr::Literal(value) => {
-            // The ticket rides the message because it is what a reader of a golden gets:
-            // the wire's `ScalarValue` has no interval, and one corpus residual adds one to
-            // a column, so folding never reaches it (#168).
+            // The ticket rides the message because it is what a reader of a golden gets. The
+            // wire still has no Time, Duration, Struct or List literal (#249).
             let scalar = serialize_scalar_value(b, value)
-                .map_err(|why| PlanError::Unsupported(format!("{why} (#168)")))?;
+                .map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))?;
             let literal = fb::LiteralExpr::create(
                 b,
                 &fb::LiteralExprArgs {
@@ -49,6 +48,7 @@ pub(crate) fn write_expr<'a>(
             right,
             out_type,
         } => {
+            refuse_interval_off_the_device_arm(left, *op, right, out_type)?;
             let left = write_expr(b, left)?;
             let right = write_expr(b, right)?;
             // The declared decimal output travels with the op: cuDF derives its own
@@ -184,6 +184,34 @@ pub(crate) fn write_expr<'a>(
             node: Some(node),
         },
     ))
+}
+
+/// The device adds an interval literal to a date or a naive timestamp and does nothing else
+/// with one (`add_interval`, `cpp/src/expr.cpp`), so every other use is refused here, where
+/// the plan golden says so (#249). A zoned timestamp is refused because arrow adds months and
+/// days in its zone and the device has none; a `Date64` because the device holds it as
+/// milliseconds and would floor a sub-day part DataFusion drops.
+fn refuse_interval_off_the_device_arm(
+    left: &Expr,
+    op: BinaryOp,
+    right: &Expr,
+    out_type: &DataType,
+) -> Result<(), PlanError> {
+    let is_interval =
+        |e: &Expr| matches!(e, Expr::Literal(v) if matches!(v.data_type(), DataType::Interval(_)));
+    let (on_left, on_right) = (is_interval(left), is_interval(right));
+    if !on_left && !on_right {
+        return Ok(());
+    }
+    let shifts_a_date = matches!(out_type, DataType::Date32 | DataType::Timestamp(_, None))
+        && (op == BinaryOp::Plus || (op == BinaryOp::Minus && !on_left));
+    if shifts_a_date {
+        return Ok(());
+    }
+    Err(PlanError::Unsupported(format!(
+        "an interval literal under {op:?} answering {out_type:?}: the device runs only a date or \
+         naive timestamp ± interval (#249)"
+    )))
 }
 
 /// Precision and scale, or `(0, 0)`, which the wire reads as "not a decimal".
