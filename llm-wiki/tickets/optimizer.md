@@ -20,6 +20,9 @@
 - [#142 (split large batches) split large batches](#t142)
 - [#138 (ranged sorted merge) add ranged sorted merge](#t138)
 - [#298 (DuckDB scan under limit) the DuckDB oracle charges a full scan under a limit DuckDB stops early](#t298)
+- [#299 (DuckDB oracle accounting) the DuckDB oracle undercounts: a column a scan only filters on, a string's content, a merge join's output](#t299)
+- [#300 (outer-join filter infer) a filter on an outer join's preserved side is not inferred onto the other side through the join's equality](#t300)
+- [#301 (prototype pandas widths) the prototype measures its runs in pandas bytes, so its costs and the final ratio carry a per-query width error into the port](#t301)
 - [#290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not](#t290)
 - [#291 (prototype NaN as NULL) the prototype holds a float NaN as a NULL, so a NaN key groups with NULLs and never joins](#t291)
 - [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
@@ -37,13 +40,111 @@ stats (#19, the load-bearing prereq), runtime filters (#16).
 **Priority: post-MVP**
 
 DataFusion inlines every CTE reference and peacock re-scans each copy. Worst: tpcds q23
-(CTEs ×5/×3/×2 → 6 scans), q4/q11 (`year_total` ×6/×4), q31; tpch q15 (`revenue0` ×2),
-q2. Direction: CTE materialization or physical CSE; at minimum make the cost model aware.
+(CTEs ×5/×3/×2 → 6 scans), q4/q11 (`year_total` ×6/×4, though pushdown makes the copies
+cheap: see below), q31, q2 (`wscs` ×2), q59 (`wss` ×2),
+q65 (the `sa`/`sc` subquery ×2, written twice without a `WITH`); tpch q15 (`revenue0` ×2). Direction: CTE materialization or physical CSE; at minimum make the cost model aware.
 
 The mechanism a materialized CTE needs — one producer, N consumers of the same batch
 stream — is the one [#16](#t16) has to build first for dynamic filters, and it is cheap in
 a streamed-batch model and expensive in a single-resident-table one. Sequence them
 that way round.
+
+**What it costs after join-optimizer.** Four queries' final ratios in `cost_report.html` remain
+above 1.4, and in each one, most of the gap is a CTE computed again per reference. DuckDB builds
+each CTE once (`CTE` / `CTE_SCAN` in its profile). The join order can't remove the copy:
+optimized ÷ planned is 1.00 for tpcds q2 and q59. Figures below are tp1-single, from
+`scripts/exec_model/testdata/goldens/{tpch,tpcds}/tp1-single.{cpu,costs}.txt` and
+`testdata/goldens/*/<q>.duckdb_cost.txt`. "One copy" means the optimized cost minus the
+duplicate subtree's nodes, an estimate.
+
+| query | final ratio | duplicated CTE | per copy | optimized | one copy | DuckDB |
+|---|---|---|---|---|---|---|
+| tpch q15 | 2.03 | `revenue0` ×2 | lineitem load 11.8 MB, filter 5.4 MB, aggregate | 36.1 MB | ≈ 18.6 MB | 25.4 MB |
+| tpcds q2 | 2.53 | `wscs` ×2 | ws ∪ cs load 34.6 MB, ⋈ date_dim 67 MB, project 67 MB | 420 MB | ≈ 210 MB | 209 MB |
+| tpcds q59 | 1.98 | `wss` ×2 | store_sales load 69 MB, ⋈ date_dim 108 MB, project 108 MB | 587 MB | ≈ 293 MB | 347 MB |
+| tpcds q23 | 2.73 | `frequent_ss_items` ×2 | ss ⋈ date_dim ⋈ item 86 MB, project 86 MB, 1.49M-group aggregate on `substr(i_item_desc)` 89 MB → 52 rows | 1.95 GB | — | 818 MB |
+
+With one copy, q15, q2 and q59 come in at or below DuckDB's cost (≈ 0.75, 1.0, 0.85). In q2
+and q59 the fact table joins only date_dim in each copy, and no dynamic filter narrows the
+fact scan (q59's month filter applies only after the aggregate). DuckDB's dynamic filters
+prune nothing there either.
+
+q23 still costs more with one copy of `frequent_ss_items`, ≈ 1.55 GB, about 1.9× DuckDB. Two
+causes outside this ticket remain:
+- `best_ss_customer` (the corpus's text) has `FROM store_sales, customer, max_store_sales` and
+  `HAVING sum(...) > 0.5 * max(tpcds_cmax)`, so the 1-row `max_store_sales` is crossed in
+  below the group-by, in both engines. Ours crosses it onto the 2.75M store_sales ⋈ customer
+  rows: 88 MB of cross join per copy, 176 MB of `cuda_join_bytes` for the two. DuckDB's join
+  order crosses it onto customer, 100k rows (`CROSS_PRODUCT` 2.4 MB), before the hash join with
+  store_sales. A cross join is a wall to our multi-join (`optimizer.md`, "Walls"), so DPhyp
+  never places it.
+- Projections charged as passthrough: 536 MB in q23. DuckDB streams projections at nothing.
+
+tpcds q14 (1.83) and q31 (1.89) also have duplicated CTEs, but reuse alone does not close
+their gap. The figures below are tp1-rowgroup, the mode their final ratio comes from.
+Optimized includes the probe plans and the stopped runs.
+
+| query | final ratio | engine ÷ prototype planned | optimized | DuckDB |
+|---|---|---|---|---|
+| tpcds q14 | 1.83 | 1.14 | 1.25 GB | 782 MB |
+| tpcds q31 | 1.89 | 1.29 | 113 MB | 77.3 MB |
+
+| component | q14 ours | q14 DuckDB | q31 ours | q31 DuckDB |
+|---|---|---|---|---|
+| storage + scan | 442 MB | 333 MB | 49.9 MB | 43.6 MB |
+| hash join | 438 MB | 356 MB | 30.2 MB | 25.3 MB |
+| passthrough | 366 MB | 0 | 32.5 MB | 0 |
+| aggregate | 8.5 MB | 91 MB | 0.8 MB | 8.4 MB |
+
+- **q14:** `cross_items` and `avg_sales` are inlined once per channel. The plan reads each
+  fact table 7 times: 3 for `avg_sales`, 3 for `cross_items`, 1 for the channel. It also
+  reads item 15 times and date_dim 21 times. DuckDB builds each CTE once and reads each fact
+  table 3 times. The three replans keep each channel's `avg_sales` aggregate and semi-join
+  build as memory sources, but the stopped runs that produce them still pay 543 MB. That cost
+  shows up in storage and hash join, about 190 MB more than DuckDB together. Passthrough,
+  366 MB, is the largest single excess.
+- **q31:** DataFusion pushes each reference's `d_qoy` / `d_year` filter into its own copy of
+  `ss` and `ws`. The 6 copies are therefore not identical, and a plain CSE would not match
+  them. Each copy prunes its fact table to one quarter: store_sales 3/24 row groups, with
+  group 23 read by all three copies. DuckDB pushes the OR of the references' filters
+  (`d_qoy IN (1,2,3) AND d_year = 2000`) into the one shared CTE, reading 5/24 row groups,
+  then filters per reference. Reuse here would need the same: the OR of the consumers'
+  predicates pushed into the shared producer. The copies cost little: storage is 6 MB over
+  DuckDB's, hash join 5 MB over. Most of the gap is 32.5 MB of passthrough. The 1.29 engine ÷
+  prototype factor then raises a prototype ratio of 1.47 to the final 1.89.
+
+tpcds q65 (final ratio 1.41, at tp1-rowgroup) has no `WITH`. The subquery that sums
+store_sales by store and item is written twice: once as `sc`, and once inside `sb`, which
+averages it per store. DuckDB finds the two copies identical on its own: its profile has one
+store_sales scan under a `CTE` node, read by 2 `CTE_SCAN`s. We read store_sales twice
+(`store_sales#1`, `#2`), each pruned by its own dynamic filter to 6/24 row groups, and join and
+aggregate each copy. The replan keeps the joined result as a memory source, but the stopped run
+pays for both copies. Against the prototype, q65 is at 1.12 (89.9 MB vs 80.2 MB). The engine ÷
+prototype factor of 1.26 raises that past the 1.4 line. Physical CSE would catch q65 where
+CTE-only reuse would not.
+
+tpcds q4 (final ratio 1.49, at tp1-single) is listed above as a worst case, but once DataFusion
+has pushed its filters down, duplication costs it little. `year_total` is a union of the three
+channels, and it is referenced 6 times, each with its own `sale_type` and `dyear` filter.
+DataFusion pushes both into each copy: `sale_type` keeps one branch of the union, `dyear` one
+year. Each dynamic filter then prunes that copy's fact table to the year. So each fact table is
+read twice, once per year. We read store_sales 6 + 7 row groups, catalog_sales 4 + 3 and
+web_sales 2 + 2. DuckDB builds the CTE once over both years and reads 11, 6 and 3. The
+duplicated work is only the row groups both years share. A CTE built once would read about the
+same, and building it before the per-reference filters would read more. q4 is at 1.33 against
+the prototype (1.12 GB vs 844 MB), times 1.12 engine ÷ prototype. By component:
+
+| component | ours | DuckDB |
+|---|---|---|
+| storage + scan | 246 MB | 336 MB |
+| hash join | 404 MB | 332 MB |
+| aggregate | 42 MB | 176 MB |
+| passthrough | 430 MB | 0 |
+
+The passthrough is the whole gap, and this ticket does not reach it. q11 has the same shape
+(`year_total` ×4, two channels). Reuse for a CTE whose references filter it differently has to
+keep each reference's filter pushed into the shared producer, as DuckDB does for q31. Otherwise
+it reads more than the copies do.
 
 <a id="t140"></a>
 ### #140 (broadcast joins) broadcast joins (1:N partition broadcast)
@@ -269,6 +370,170 @@ Fix: under a `STREAMING_LIMIT`, charge the lesser of the pruned row groups and t
 `operator_rows_scanned`; a `rowid` range from pass 2 bounds the scan the same way. tpcds q28, q32,
 q38 and q97 hold scans under a limit too, each scanning its whole table: check their goldens
 hold, and the two tpch ratios become comparable.
+
+<a id="t299"></a>
+### #299 (DuckDB oracle accounting) the DuckDB oracle undercounts: a column a scan only filters on, a string's content, a merge join's output
+`duckdb_cost.py` charges a DuckDB scan's `storage_read_total` as the decoded bytes of the columns
+it references, in the row groups that survive: `compute_scan_pruning` takes `Projections ∪
+filter_columns(Filters) ∪ filter_columns(dyn_filter)`. A filter DuckDB evaluates inside the scan
+does not emit its column, so a column used only by the filter counts only if `filter_columns`
+finds it. `filter_columns` takes an identifier followed by `>=`, `<=`, `>`, `<` or `=`, or one
+inside `CAST(… AS`. It finds nothing in `o_comment !~~ '…'` (NOT LIKE), `p_name ~~ '…'` (LIKE),
+`prefix(p_type, …)`, `contains(…)`, `suffix(…)`, `x IS NULL`, `x IS NOT NULL`, `x IN (…)` or
+`x != 5`. (`<>` works only because its `<` matches.) When the table has no parquet
+statistics, `scan_cost` falls back to rows read × the scan's output row width, which leaves out
+every filter-only column whatever the operator. The engine's `GpuLoadParquet` charges every column
+it loads, filter columns included. So the two sides are measured on different bases exactly where
+a filter is not a plain comparison, and DuckDB's cost reads low.
+
+Corpus queries the committed goldens undercount:
+
+| query | column left out | filter | size, est. |
+|---|---|---|---|
+| tpch q13 | `orders.o_comment` | NOT LIKE | ≈ 85 MB, measured: DuckDB's `bytes_read` 24.4 MB (2 key columns), the prototype's load 108.8 MB |
+| tpch q9 | `part.p_name` | LIKE | ≈ 7 MB (200k × ~33 B) |
+| tpch q2 | `part.p_type` | LIKE / `suffix` | ≈ 5 MB (200k × ~25 B) |
+| tpch q16 | `supplier.s_comment` | NOT LIKE | ≈ 0.6 MB |
+| tpcds q76 | `ss_store_sk`, `ws_ship_customer_sk`, `cs_ship_addr_sk` | IS NULL | ≈ 40 MB |
+| tpcds q44 | `ss_addr_sk` | IS NULL | ≈ 23 MB |
+
+tpch q13's final ratio in `cost_report.html` is 1.70, and the optimizer changes nothing: the plan
+already has DuckDB's shape. All of the gap is `o_comment`. With it counted, DuckDB's cost is
+≈ 179 MB, and the ratio is ≈ 0.86 on the engine's figure, ≈ 0.92 on the prototype's. The other
+rows have smaller shares, and every ratio they appear in reads high by them.
+
+**A string's content is not counted where DuckDB materialises it.** The materialised side of
+the cost (`node_materialized`) is DuckDB's `output_bytes`, its `result_set_size`. That counts a
+string as its 16-byte `string_t` header, whatever its length. It also counts an integer at
+DuckDB's own width (int32 4 B). The storage side counts Arrow bytes, offsets plus content
+(`compute_pruning`'s decoded bytes), and so does the engine for every node. In tpch
+`cross-join` (`SELECT * FROM region, nation`), DuckDB's `CROSS_PRODUCT` is 9,500 B for 125
+rows, 76 B/row (3 ints × 4 + 4 strings × 16). The engine's `GpuCrossJoin` is 22,898 B,
+183 B/row, because `r_comment` and `n_comment` run ~70–110 characters. DuckDB's scans show the
+same split: nation 40 B/row materialised (4 + 16 + 4 + 16), 2,442 B read. Every query whose
+pipeline breakers carry strings reads low on DuckDB's side by their content: joins and
+aggregates carrying names, addresses and comments (tpch q2, q10, q18), and string group keys
+(tpcds q23's `substr(i_item_desc, 1, 30)`).
+
+**A piecewise merge join is charged its inputs, not its output.** For an inequality join DuckDB
+plans `PIECEWISE_MERGE_JOIN`, which `duckdb_cost.py` puts in `BUILD_INPUT_OPS` with the
+aggregates and sorts: it is charged its children's `output_bytes`. `HASH_JOIN`,
+`NESTED_LOOP_JOIN` and `CROSS_PRODUCT` (`JOIN_BUILD_OPS`) are charged their own output plus
+any non-scan child's. The engine charges its `GpuNestedLoopJoin` its output. tpch
+`nested-loop-join` and `nested-loop-left-join` (`region` against `nation` on `<` / `>`): DuckDB
+charges the merge join 1,180 B, its two inputs, against its 3,800 / 3,876 B output. The engine
+charges 9,041 / 9,477 B.
+
+Together with the string widths, these two are most of the three named queries' ratios in
+`cost_report.html`: cross-join 3.63, nested-loop-join 4.10, nested-loop-left-join 4.26. All
+three plans have DuckDB's shape.
+
+Fix:
+- Take a filter's columns as every identifier in the `Filters` / `dyn_filter` string that names a
+  column of the scanned table, read from the parquet schema `compute_pruning` already opens.
+  Today the column is taken only from the left of a comparison. Ranges for pruning still come
+  from `parse_range_filters`; only the referenced set grows.
+- The no-statistics fallback: add the filter-only columns' widths, or warn that the read is
+  short.
+- Strings: price a materialising operator's string columns as Arrow does, offsets plus content.
+  The 16-byte header leaves the content out. The content can come from the parquet column's
+  decoded size per row (already read for storage), carried up by column name through the
+  operators that pass the column on. A string an operator computes (`substr`, `concat`) has no
+  stored size: use the profile's own size for it, and say so. Decide whether integers move to
+  the engine's 8 B in the same change, and record it in `design.md` beside "Forwarders are
+  free on both sides".
+- Merge join: move `PIECEWISE_MERGE_JOIN` from `BUILD_INPUT_OPS` to `JOIN_BUILD_OPS`, charged
+  its output plus its non-scan children's, as the other joins are. Check whether
+  `IE_JOIN`, `ASOF_JOIN` and `POSITIONAL_JOIN` appear in any committed profile, and place them
+  the same way.
+- Tests in `test_duckdb_cost.py` beside `test_filter_columns_includes_cast`: one per filter form
+  above, q13's orders scan charged with `o_comment`, a string-carrying cross product charged its
+  content, and a merge join charged its output.
+- Regenerate with `gen_duckdb_cost.sh --extract-only` (needs the sf1 parquet under `testdata/`),
+  then `cost_report.html`. The filter fix moves only the six rows above. The string fix moves
+  every query that materialises a string, so list the ratios that cross 1.4 either way.
+
+<a id="t300"></a>
+### #300 (outer-join filter infer) a filter on an outer join's preserved side is not inferred onto the other side through the join's equality
+tpcds q78 filters `ss_sold_year = 2000` and left-joins `ws` and `cs` on `ws_sold_year =
+ss_sold_year` and `cs_sold_year = ss_sold_year`, plus item and customer keys. A row of `ws` or
+`cs` from another year can never match, so `ws_sold_year = 2000` and `cs_sold_year = 2000` hold
+on the right sides. Each year is a group key of its CTE, `d_year`, so the filter can go on down
+to date_dim and, as a dynamic filter, to each fact table's `*_sold_date_sk`. DuckDB infers this:
+its profile has date_dim `filter=[d_year=2000]` three times. It prunes store_sales to 7/24 row
+groups, web_sales to 2/6 and catalog_sales to 3/12, and aggregates one year per channel.
+
+Our plan carries the filter into `ss` only. The dynamic filter on the plan as written has a
+single candidate, `d_date_sk -> store_sales` (24 → 7 row groups): the other two date_dim reads
+hold no predicate. `ws` aggregates every year (`m1`, 647,541 rows, `d_year` NDV 6), and
+`catalog_sales` is loaded whole, 1,441,548 rows and 80.7 MB at tp1-rowgroup. Then it goes
+through the catalog_returns join, the `IS NULL` filter, the date_dim join and the aggregate, a
+year's worth of work done ~4 times over. q78's final ratio is 1.82 at tp1-rowgroup: 1.37
+against the prototype (1.20 GB vs 875 MB), times 1.34 engine ÷ prototype. Cutting ws and cs to
+one year saves ≈ 0.5–0.6 GB of the prototype's 1.2 GB, an estimate from the per-node bytes,
+which puts q78 under DuckDB.
+
+The join-order work can't do this: DPhyp reorders the joins it is given, and the dynamic filter
+needs a filtered build to start from. The rule: for `L ⟕ R ON L.a = R.b` with a filter `f(L.a)`
+on L (above the join or pushed into L), add `f(R.b)` to R. For `L ⟗ R` add nothing. For an
+inner join add it both ways (DataFusion's filter pushdown may already do the inner case; check).
+Then the existing pushdown carries it through R's aggregate, where `b` is a group key, down to
+the scan.
+
+Fix: the inference, in a logical rewrite before physical planning or upstream in DataFusion's
+`PushDownFilter`. Tests: q78's plan has a `d_year = 2000` filter under each of the three CTEs,
+and its answer is unchanged against DuckDB at every mode. Sweep the corpus for other outer joins
+whose preserved side carries an equality filter on a join key, and check the goldens of each
+query whose plan moves.
+
+<a id="t301"></a>
+### #301 (prototype pandas widths) the prototype measures its runs in pandas bytes, so its costs and the final ratio carry a per-query width error into the port
+The prototype's decisions are priced in the engine's widths. `optimizer/cost.py`'s `row_width`
+sizes a column as `type_structural_size` does: Decimal128 16 B, Date32 4 B, a string's offset 4 B
+plus its mean length from the sidecar, ⅛ B of null bitmap. Its runs are measured in pandas
+bytes: an operator's output is `memory_usage(index=False, deep=True)` (`operators/source.py`,
+`operators/joins.py`), and `plans/cost_model.py` prices those bytes. Per value:
+
+| type | prototype run | engine |
+|---|---|---|
+| decimal | 8 (float64) | 16 (decimal128) |
+| date | 8 (datetime64) | 4 (date32) |
+| string | len + 8 (large_string offsets) | len + 4 |
+| int64 | 8 | 8 |
+| null bitmap | 0 | ⅛ per column |
+
+These rules reproduce the loads exactly: tpch q1's lineitem is 58 B/row in the prototype and
+78.875 in the engine (4 decimals, 2 one-character strings, a date). tpch q15's supplier is
+899,771 B against 784,783.
+
+How much the error scales a query depends on its column mix. That is why the prototype's
+planned cost over the engine's has median 0.85 (`design.md`) but a wide spread. tpcds q5 reads
+only int keys and decimals: ×1.52 at its scans, ×1.68 at its union projections (4 decimal
+columns of 6), ×1.58 overall, 762 MB engine against 482 MB prototype. So the prototype puts q5's
+optimized run at 0.99 of DuckDB's cost, and the final ratio puts it at 1.56. Every figure taken
+from a prototype run is off by the query's own factor: `.costs.txt`, the
+probe and stopped shares, the measured comparisons a rule was kept or dropped on (orientation
+priced as the session holds it, tpch q9), the 1.4 line's colours. The final ratio, E × (O / P) /
+D, cancels the factor only where it is uniform across the plan. A rule that removes
+decimal-heavy work and keeps string-heavy work, or the reverse, is projected wrong by the ratio
+of the two parts' factors.
+
+When the optimizer is rewritten into the engine:
+- Measure in the engine's bytes, which the engine's own run gives for free. Don't port
+  `memory_usage(deep=True)` or anything that sizes a batch from a pandas frame. A memory
+  source's size and a probe's or stopped run's cost come from the engine's batches.
+- Retire the projection. The final ratio becomes the engine's optimized cost over DuckDB's,
+  E_opt / D, with no O / P.
+- Re-measure every decision the prototype kept on a measured byte comparison, on the engine's
+  runs over the same sample. Decimal-heavy and string-heavy queries first: tpcds q5, q2 and q59
+  (decimal), and tpch q13 and q9 (strings). Write down any that turn around.
+- Pin it: a test that a scan's measured output bytes equal `row_width` × rows for a
+  statistics-exact relation (a scan with no filter). Estimate and measurement then share one unit.
+
+Until then, read a prototype figure next to its query's engine ÷ prototype factor (E / P in
+`cost_report.html`). Separate from this: the engine holds TPC-DS's `decimal(7,2)` as decimal128,
+16 B, where DuckDB materialises it as int32, 4 B (24 B/row against the engine's 48.5 for q5's
+store_sales). Part of every decimal-heavy ratio is that choice in the engine, not the plan.
 
 <a id="t290"></a>
 ### #290 (outer/anti join key NDV) an outer or anti join's key NDV is cut to the other side's, though its rows are not
