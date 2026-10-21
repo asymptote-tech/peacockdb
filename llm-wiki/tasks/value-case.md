@@ -52,3 +52,13 @@ The value form only. Nothing else in `build_column_case` changes. No cpu golden 
   agreement case with a string THEN, and a second with a NULL comparand row.
 - q39 green at all five device modes on nebius-gpu, DuckDB's device comparison included. The final
   device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. The value form lowers onto the search form's `copy_if_else` fold;
+NULL never matches and the first match wins, pinned by two gtests and two cpu-vs-device agreement
+cases that were red with the fix reversed. q39 is on at all five device modes; #57 is archived.
+Completeness: reviewer 0 blocking/0 important, analyst no omissions, no `architecture.md` sentence
+falsified. Shortcuts or bandaids: none. Notes: q39's corpus cells prove no regression rather than
+the new semantics (both its WHENs are literals); most of the `report.html` diff is catch-up from
+earlier chain-K registry edits; this spec's `#t57` link now points at an archived ticket.

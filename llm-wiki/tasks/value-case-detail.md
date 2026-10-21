@@ -75,3 +75,4 @@ before building: 24 GB free of 96. Card idle. cuDF lib: `~/data/miniforge3/envs/
   `--gtest_list_tests` lists 117 tests, both `CaseValueForm` cases among them. No GPU rerun, since
   a function moved within one translation unit changes no behaviour.
 - 2026-10-21: review round 1: 0 blocking, 1 important (report.html stale vs q39's gpu-result lines; regenerated), 3 nits fixed (helper moved; #289 order and #60 label by the coordinator). round-tolerance-impl.md:101 calls #60's label malformed — fixed here, so that note is stale. State completing; completeness reviewer + analyst dispatched.
+- 2026-10-21: completeness: reviewer 0/0, analyst none missing, no architecture.md sentence falsified. Pre-existing drift fixed: architecture.md CudfFilter row (build_column fallback). Not fixed, pre-existing: build-test.md:829 / plans_tpcds.py docstring claim the exec-model corpus covers every non-window TPC-DS query (q39 is not in it). Signoff written; state completeness approved.
