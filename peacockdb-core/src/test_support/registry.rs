@@ -121,6 +121,89 @@ pub(crate) const DECLARATION_COLUMNS: [&str; 4] = [
     "schema_validation",
 ];
 
+/// What one side's result section holds; a side with no section, or a `skipped:` or
+/// `failed:` marker, has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stored {
+    Result,
+    Fingerprint,
+}
+
+impl Stored {
+    fn word(self) -> &'static str {
+        match self {
+            Stored::Result => "result",
+            Stored::Fingerprint => "fingerprint",
+        }
+    }
+}
+
+/// The `stored` cell for one query: one word where every side with a section holds that
+/// format, else `cpu|duckdb|gpu` with `—` for a side with no section. `gpu` has one entry per
+/// device mode with a section, and reads `mixed` where they disagree.
+pub(crate) fn stored_cell(cpu: Option<Stored>, duckdb: Option<Stored>, gpu: &[Stored]) -> String {
+    let gpu_part = match gpu {
+        [] => None,
+        [first, rest @ ..] if rest.iter().all(|mode| mode == first) => Some(first.word()),
+        _ => Some("mixed"),
+    };
+    let parts = [cpu.map(Stored::word), duckdb.map(Stored::word), gpu_part];
+    let present: BTreeSet<&str> = parts.iter().flatten().copied().collect();
+    match present.len() {
+        0 => panic!("stored_cell: no section on any side — a corpus line nobody answers"),
+        1 => present.into_iter().next().expect("one format").to_string(),
+        _ => parts.map(|part| part.unwrap_or("—")).join("|"),
+    }
+}
+
+/// The three sides a `stored` cell names, in its order.
+const STORED_SIDES: [&str; 3] = ["cpu", "duckdb", "gpu"];
+
+/// A registry `stored` cell against what the goldens say, or `None` where they agree. The
+/// mismatch names the first side whose part differs, a one-word cell read as that word thrice.
+pub(crate) fn stored_mismatch(dataset: &str, query: &str, got: &str, want: &str) -> Option<String> {
+    if got == want {
+        return None;
+    }
+    let parts = |cell: &str| -> Vec<String> {
+        match cell.split('|').collect::<Vec<_>>().as_slice() {
+            [word] => vec![word.to_string(); 3],
+            many => many.iter().map(|part| part.to_string()).collect(),
+        }
+    };
+    let (got_parts, want_parts) = (parts(got), parts(want));
+    // Equal parts and unequal text: three parts spelled where one word serves.
+    let side = match (0..3).find(|&at| got_parts.get(at) != want_parts.get(at)) {
+        Some(at) => format!("{} differs", STORED_SIDES[at]),
+        None => format!("write it as {want}"),
+    };
+    Some(format!(
+        "{dataset}/{query}: the registry says {got}, the goldens say {want} ({side})"
+    ))
+}
+
+/// A `stored` cell's grammar: `na` exactly where the row has no corpus line, else one word or
+/// three parts, each `result`, `fingerprint` or `—`, the gpu part also `mixed`.
+pub(crate) fn stored_spelling_is_valid(stored: &str, has_line: bool) -> Result<(), String> {
+    let format = |part: &str| matches!(part, "result" | "fingerprint");
+    let valid = match (has_line, stored.split('|').collect::<Vec<_>>().as_slice()) {
+        (false, _) => stored == "na",
+        (true, [word]) => format(word),
+        (true, [cpu, duckdb, gpu]) => {
+            (format(cpu) || *cpu == "—")
+                && (format(duckdb) || *duckdb == "—")
+                && (format(gpu) || matches!(*gpu, "—" | "mixed"))
+        }
+        _ => false,
+    };
+    match valid {
+        true => Ok(()),
+        false => Err(format!(
+            "stored is {stored:?}: a row with a corpus line says result, fingerprint or              cpu|duckdb|gpu (each result, fingerprint or —, the gpu part also mixed), and a              row without one says na"
+        )),
+    }
+}
+
 /// One CSV line's fields, RFC 4180: a field may be quoted, and `""` inside quotes is one `"`.
 /// A writer quotes a field only where it holds a comma or a quote — an oracle spelling with
 /// arguments — and the three other readers (`cost-report`, `ticket_widget.py`,
@@ -175,7 +258,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
     let expect: Vec<&str> = ["dataset", "sf", "query"]
         .into_iter()
         .chain(COLUMNS)
-        .chain(["plan_status", "features", "tickets"])
+        .chain(["plan_status", "features", "tickets", "stored"])
         .chain(DECLARATION_COLUMNS)
         .collect();
     assert_eq!(
@@ -282,7 +365,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         );
         // What the query's `corpus_query!` line says, copied for the widget. A query with
         // no line — it does not plan — has `na` in all four, and only such a query does.
-        let declared: Vec<&str> = f[6 + COLUMNS.len()..].to_vec();
+        let declared: Vec<&str> = f[7 + COLUMNS.len()..].to_vec();
         let (duckdb_oracle, cpu_oracle, gpu_oracle, schema_validation) =
             (declared[0], declared[1], declared[2], declared[3]);
         // The accepted keywords are the ones `cpu_oracle_mode` and `gpu_result_mode` decode.
@@ -304,6 +387,10 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         if !all_na {
             super::DuckdbOracle::parse(duckdb_oracle);
         }
+        let stored = f[6 + COLUMNS.len()];
+        if let Err(said) = stored_spelling_is_valid(stored, !all_na) {
+            panic!("{}:{}: {said}", path.display(), i + 2);
+        }
         rows.push(CsvRow {
             dataset: f[0].to_string(),
             sf: f[1].to_string(),
@@ -312,6 +399,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             plan_status: plan_status.to_string(),
             features,
             tickets,
+            stored: stored.to_string(),
             duckdb_oracle: duckdb_oracle.to_string(),
             cpu_oracle: cpu_oracle.to_string(),
             gpu_oracle: gpu_oracle.to_string(),

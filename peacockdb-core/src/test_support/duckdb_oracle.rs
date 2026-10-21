@@ -27,7 +27,8 @@ pub(crate) fn tight(spelled: &str) -> String {
 
 /// What `parse` accepts, for its refusals.
 const GRAMMAR: &str = "duckdb(sort|no_sort, exact|approx|rel(<tol>, \"<column>\", …)\
-                       [, date(\"<column>\", …)])|duckdb_fingerprint|duckdb_none";
+                       [, date(\"<column>\", …)][, gpu: fingerprint])|duckdb_fingerprint|\
+                       duckdb_none";
 
 /// The spelling a `corpus_query!` line writes, as `stringify!` hands it over — whitespace
 /// included, which [`tight`] takes out everywhere but inside a quoted column name.
@@ -43,9 +44,21 @@ pub(crate) fn parse(spelled: &str) -> DuckdbOracle {
     let Some(args) = call_arguments(&compact, "duckdb") else {
         unknown()
     };
-    let (order, values, rest) = match args.as_slice() {
-        [order, values, rest @ ..] if rest.len() <= 1 => (*order, *values, rest),
+    let (order, values, mut rest) = match args.as_slice() {
+        [order, values, rest @ ..] if rest.len() <= 2 => (*order, *values, rest),
         _ => unknown(),
+    };
+    // `gpu:` is the last argument or absent, so a `date(…)` after it is refused as unknown.
+    let gpu_fingerprint = match rest.split_last() {
+        Some((last, before)) if last.starts_with("gpu:") => {
+            match &last["gpu:".len()..] {
+                "fingerprint" => {}
+                other => panic!("{spelled}: gpu: takes fingerprint only, got `{other}`"),
+            }
+            rest = before;
+            true
+        }
+        _ => false,
     };
     let order = match order {
         "sort" => RowOrder::Sort,
@@ -71,12 +84,13 @@ pub(crate) fn parse(spelled: &str) -> DuckdbOracle {
             Some(columns) if !columns.is_empty() => column_names(spelled, &columns),
             _ => unknown(),
         },
-        _ => unreachable!("at most one argument after the values"),
+        _ => unknown(),
     };
     DuckdbOracle::Compare {
         order,
         values,
         dates,
+        gpu_fingerprint,
     }
 }
 
@@ -199,6 +213,7 @@ pub(crate) fn compare_sections(
             order,
             values,
             dates,
+            ..
         } => (*order, values, dates),
     };
 
@@ -238,6 +253,37 @@ pub(crate) fn compare_sections(
     match order {
         RowOrder::Sort => same_multiset(&ours, &duck, &rules),
         RowOrder::NoSort => same_sequence(&ours, &duck, &rules),
+    }
+}
+
+/// The device's section against DuckDB's: [`compare_sections`], except that the line's
+/// `gpu: fingerprint` decides whether the device's side is a fingerprint, in both directions,
+/// so no fingerprinted comparison happens without the line naming it.
+pub(crate) fn compare_device_section(
+    oracle: &DuckdbOracle,
+    ours: &str,
+    duckdb: &str,
+    kinds: &[CellKind],
+) -> Result<(), String> {
+    let declared = matches!(
+        oracle,
+        DuckdbOracle::Compare {
+            gpu_fingerprint: true,
+            ..
+        }
+    );
+    match (declared, fingerprint::is_fingerprint(ours)) {
+        (true, true) => fingerprint::compare_over_cap(ours, duckdb, DUCKDB_FLOAT_TOLERANCE),
+        (true, false) => Err(
+            "the line declares `gpu: fingerprint` and the device's section holds rows — drop \
+             `gpu: fingerprint`"
+                .to_string(),
+        ),
+        (false, true) if matches!(oracle, DuckdbOracle::Compare { .. }) => Err(
+            "the device's section is fingerprinted (over the cap) — declare `gpu: fingerprint`"
+                .to_string(),
+        ),
+        _ => compare_sections(oracle, ours, duckdb, kinds),
     }
 }
 
@@ -478,7 +524,10 @@ async fn judge(
     let said = match (&ours, &duckdb) {
         (Some(ours), Some(duckdb)) => {
             let kinds = corpus::output_kinds(dataset, sf, query).await;
-            compare_sections(&oracle, ours, duckdb, &kinds)
+            match mode {
+                Some(_) => compare_device_section(&oracle, ours, duckdb, &kinds),
+                None => compare_sections(&oracle, ours, duckdb, &kinds),
+            }
         }
         // One side does not answer, which is what `duckdb_none` is for. Under any other
         // oracle it is the line that is wrong, and the line says which answer it expected.

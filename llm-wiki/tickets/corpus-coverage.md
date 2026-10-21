@@ -15,7 +15,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
   - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
 - [Testing](#testing)
-  - [#56 (q2 fingerprinted answer) `duckdb(…, approx)` refuses q2's over-cap device recording](#t56)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
   - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
@@ -143,28 +142,6 @@ nothing sees the difference in rows.
 green as `same` cases.
 
 ## Testing
-
-<a id="t56"></a>
-### #56 (q2 fingerprinted answer) `duckdb(…, approx)` refuses q2's over-cap device recording
-
-tpcds q2's device answer is right, and its five gpu cells stay off because the DuckDB check
-cannot read how it is recorded. Registry row 3 tags `56`.
-
-**Measured on an L40S (round-tolerance, 2026-10-21).** Under `golden(…, approx_std)` q2 passed at all
-five device modes against `mini.result.txt`, in memory; the five recordings are identical. The
-cpu's q2 section is 261,767 bytes, just under the 256 KiB result cap. Some cells of the device's
-seven `round(…, 2)` columns print one ulp longer ([#60](../archive/archived-tickets.md#t60)), a
-column is padded to its widest cell, and the device's rendering crosses the cap. So
-`gpu-result.txt` gets a fingerprint, which `duckdb(…, approx)` refuses ("declare
-duckdb_fingerprint"); `duckdb_fingerprint` refuses the cpu's side, which holds rows. One
-`duckdb_oracle` per line serves neither. The fingerprint agrees with DuckDB's rows: 2513 rows,
-each column's sum, min and max within 2.5e-14 relative at every mode.
-
-**Fix proposed:** in `compare_sections` (`test_support/duckdb_oracle.rs`), let `duckdb(…, approx)`
-fall back to `compare_over_cap` for the device's recording only (`duckdb_gpu_case`), keeping the
-cpu side's refusal. Then q2's line takes `duckdb(…, approx)` and `golden(…, approx_std)`, its sections
-are recorded, and #56 is done. The CASE-over-string-equality shape #56 was first filed for is
-proven by `a_grouped_sum_of_a_case_over_a_string_equality_agrees`.
 
 <a id="t227"></a>
 ### #227 (schema nullability tests) Check schema nullability in tests

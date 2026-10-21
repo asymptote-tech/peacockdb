@@ -13,10 +13,12 @@ as one standalone HTML page:
 - every mode glyph links to the query's section for that mode: the plan in `<mode>.plans.txt`,
   the cpu run in `<mode>-mini.cpu.txt`, the device answer in `gpu-result.txt` (a glyph standing
   for all five modes links the last one's);
-- each query's three oracles before the plan columns — DuckDB, cpu, gpu — and its schema
-  validation after the gpu ones, from the registry's `duckdb_oracle`, `cpu_oracle`,
-  `gpu_oracle` and `schema_validation` columns, or from `corpus_cases.inc` on a tree whose
-  registry has none;
+- four columns after Query, from the registry's `stored`, `duckdb_oracle`, `cpu_oracle` and
+  `gpu_oracle` columns: what each side's section stores, then the DuckDB, cpu ↔ DataFusion and
+  gpu ↔ cpu comparisons, each header saying what its comparison does on hover; a stored cell
+  whose sides differ, and a DuckDB cell with `gpu: fingerprint`, divide into labelled halves.
+  The schema validation follows the gpu modes. A tree whose registry has no oracle columns reads
+  the oracles off `corpus_cases.inc`;
 - every query name links to its SQL, and every DuckDB Σout to its `<q>.duckdb_cost.txt`;
 - a by-ticket table first: each cited ticket, its title, and per dataset the queries citing it, each
   linking to that query's row;
@@ -64,6 +66,12 @@ DATASETS = {
     "pbench": ("testdata/goldens/pbench.sf1", "testdata/pbench-queries"),
 }
 REGISTRY_NAME = {"TPC-H": "tpch", "TPC-DS": "tpcds", "pbench": "pbench"}
+# What a fingerprint comparison checks (`test_support/fingerprint.rs`), for `duckdb_fingerprint`
+# and for a `duckdb(…)` line's `gpu: fingerprint` part alike.
+FINGERPRINT_HOW = ("Compared by fingerprint: the row count; each column's count of values; each "
+                   "float column's sum, min and max within 1e-11 relative; every other column, "
+                   "decimals included, through a SHA-256 over all rows' cells, exactly. Row order "
+                   "is not checked.")
 # What each oracle compares, as `test_support/duckdb_oracle.rs` (DuckDB), `corpus.rs` (cpu) and
 # `device_answer.rs` (gpu) do it. A spelling is `name(order, values[, date(...)])` or a bare name.
 ORACLE_HOW = {
@@ -82,14 +90,35 @@ ORACLE_HOW = {
     "golden exact": "Every cell equal as text.",
     "golden approx_std": "Numeric cells within 1e-11 relative, for stddev and var, and for a "
                          "float round to p > 0 places (#60).",
-    "duckdb_fingerprint": "Both answers are over the size cap: row count, per-column counts and "
-                          "sums, and a hash.",
+    "duckdb_fingerprint": "Both stored answers are over the size cap. " + FINGERPRINT_HOW,
     "duckdb_none": "Nothing to compare: one of the two does not answer this query.",
     "data_fusion_subset": "For an unordered LIMIT: the row count must match and the rows must be "
                           "a sub-multiset of DataFusion's unlimited answer.",
     "data_fusion_disabled": "No comparison: DataFusion answers this query wrong; DuckDB holds it.",
     "live_cpu": "Compared with a cpu run at the same mode, since no committed answer can serve "
                 "(over the size cap, or rows the SQL does not determine).",
+}
+
+
+# What one side's stored section holds, a `stored` cell's word or part.
+STORED_HOW = {
+    "result": "The stored section holds the rows.",
+    "fingerprint": "The answer is over the 256 KiB cap: the stored section holds its fingerprint.",
+    "—": "No section is stored for this side.",
+    "mixed": "The device modes stored different formats.",
+}
+# Each declaration column's header, and what its comparison does in general.
+HEADER_HOW = {
+    "Result stored": "What each side's committed section holds: the rows, or a fingerprint over "
+                     "the 256 KiB cap. The cpu's answer must equal its own section text for text: "
+                     "the same rows in the line's row order with no tolerance, or the same "
+                     "fingerprint text. Split into cpu, DuckDB and gpu where the sides differ.",
+    "DuckDB": "The cpu's stored answer, and each device mode's stored answer, against DuckDB's "
+              "(duckdb-result.txt). A split cell means the two sides compare differently.",
+    "cpu ↔ DataFusion": "The cpu's answer at each mode against a live DataFusion run at "
+                        "target_partitions = 1.",
+    "gpu ↔ cpu": "The device's answer, in memory, against the cpu's stored section (golden) or a "
+                 "live cpu run at the same mode (live_cpu).",
 }
 
 
@@ -142,10 +171,21 @@ def oracle_view(spelled: str) -> tuple:
     return short, " ".join(l for l in lines if l)
 
 
+def split_gpu(spelled: str) -> tuple:
+    """A DuckDB spelling without its `gpu: fingerprint` part, and the part's value: q2's
+    `duckdb(no_sort, exact, gpu: fingerprint)` is `("duckdb(no_sort, exact)", "fingerprint")`,
+    and every other spelling is itself and `None`."""
+    name, args = call(spelled)
+    if name == "duckdb" and args and args[-1].replace(" ", "").startswith("gpu:"):
+        return f"duckdb({', '.join(args[:-1])})", args[-1].partition(":")[2].strip()
+    return spelled, None
+
+
 def declarations(root: Path) -> dict:
-    """(dataset, query) -> (duckdb oracle, cpu oracle, gpu oracle, schema validation). From the
-    registry's own columns where it has them, the DuckDB one `None` on a registry older than its
-    column; else from `corpus_cases.inc`, whose lines end in the four."""
+    """(dataset, query) -> (stored, duckdb oracle, cpu oracle, gpu oracle, schema validation).
+    From the registry's own columns where it has them, `stored` and the DuckDB oracle `None` on a
+    registry older than their column; else from `corpus_cases.inc`, whose lines end in the four
+    declarations and say nothing of what is stored."""
     out = {}
     path = root / "testdata" / "cost-registry.csv"
     rows = list(csv.reader(path.read_text().splitlines())) if path.exists() else []
@@ -154,34 +194,61 @@ def declarations(root: Path) -> dict:
         at = {c: header.index(c) for c in header}
         for f in rows[1:]:
             if len(f) == len(header) and f[at["cpu_oracle"]] != "na":
+                stored = f[at["stored"]] if "stored" in at else None
                 duck = f[at["duckdb_oracle"]] if "duckdb_oracle" in at else None
                 out[(f[at["dataset"]], f[at["query"]])] = (
-                    duck, f[at["cpu_oracle"]], f[at["gpu_oracle"]], f[at["schema_validation"]])
+                    stored, duck, f[at["cpu_oracle"]], f[at["gpu_oracle"]],
+                    f[at["schema_validation"]])
         return out
     inc = root / "peacockdb-core" / "tests" / "common" / "corpus_cases.inc"
     text = inc.read_text() if inc.exists() else ""
     for m in re.finditer(r"^corpus_query!\((.*)\);", text, re.M):
         a = split_top(m.group(1))
-        out[(a[0], a[2])] = (a[-4], a[-3], a[-2], a[-1].replace("schema_validation_", ""))
+        out[(a[0], a[2])] = (None, a[-4], a[-3], a[-2],
+                             a[-1].replace("schema_validation_", ""))
     return out
 
 
 def declared_cells(decl) -> tuple:
-    """The three oracle cells, DuckDB first, and the schema validation cell: each the spelling
-    shortened, the full spelling and what it compares on hover."""
+    """The four cells after Query — what is stored, then the DuckDB, cpu and gpu oracles — and
+    the schema validation cell: each the spelling shortened, with what it means on hover. A cell
+    whose sides differ is one `<td>` of labelled halves, each with its own hover text."""
     dash = '<td class="decl">—</td>'
     if decl is None:
-        return dash * 3, dash
-    duck, cpu, gpu, validation = decl
+        return dash * 4, dash
+    stored, duck, cpu, gpu, validation = decl
 
-    def cell(spelled, cls=""):
-        if spelled is None:
+    def plain(short, tip):
+        return f'<td class="decl" title="{html.escape(tip)}">{html.escape(short)}</td>'
+
+    def split(halves):
+        return '<td class="decl split">' + "".join(
+            f'<span class="half" title="{html.escape(tip)}"><sub>{label}</sub> '
+            f'{html.escape(short)}</span>' for label, short, tip in halves) + "</td>"
+
+    def oracle(spelled):
+        return dash if spelled is None else plain(*oracle_view(spelled))
+
+    def stored_cell():
+        if stored is None:
             return dash
-        short, tip = oracle_view(spelled)
-        return f'<td class="decl{cls}" title="{html.escape(tip)}">{html.escape(short)}</td>'
+        parts = stored.split("|")
+        if len(parts) == 1:
+            return plain(stored, STORED_HOW.get(stored, stored))
+        return split([(label, part, STORED_HOW.get(part, part))
+                      for label, part in zip(("cpu", "DuckDB", "gpu"), parts)])
+
+    def duck_cell():
+        base, device = split_gpu(duck) if duck else (duck, None)
+        if device is None:
+            return oracle(duck)
+        short, tip = oracle_view(base)
+        return split([("cpu", short, tip),
+                      ("gpu", device, f"gpu: {device}: the device's answers are over the size "
+                                      f"cap. {FINGERPRINT_HOW}")])
 
     off = " off" if validation == "disabled" else ""
-    return (cell(duck) + cell(cpu) + cell(gpu),
+    return (stored_cell() + duck_cell() + oracle(cpu) + oracle(gpu),
             f'<td class="decl{off}" title="{html.escape(validation)}">{html.escape(validation)}</td>')
 
 
@@ -377,13 +444,14 @@ def rewrite_table(label: str, slug: str, table: str, root: Path, blob: str, inde
         f'<th class="m{" first" if i == 0 else " last" if i == len(MODES) - 1 else ""}" '
         f'title="{mode}">{short}</th>' for i, (short, mode) in enumerate(MODES)) * 3
     span = lambda h: h.replace("<th>", f'<th colspan="{len(MODES)}">')
-    side = lambda t: f'<th rowspan="2"><sub>{t}</sub></th>'
+    side = lambda t, how="": (f'<th rowspan="2"{how}><sub>{html.escape(t)}</sub></th>')
+    compared = lambda t: side(t, f' title="{html.escape(HEADER_HOW[t])}"')
     new_header = (heads[0].replace("<th>", '<th rowspan="2">')
-                  + side("DuckDB oracle") + side("cpu oracle") + side("gpu oracle")
+                  + "".join(compared(t) for t in HEADER_HOW)
                   + "".join(span(h) for h in heads[1:4]) + side("schema validation")
                   + "".join(h.replace("<th>", '<th rowspan="2">') for h in heads[4:]))
     table = table.replace(header, f"<tr>{new_header}</tr>\n<tr>{modes}</tr>", 1)
-    width = 1 + 3 + 3 * len(MODES) + 1 + len(heads) - 4
+    width = 1 + len(HEADER_HOW) + 3 * len(MODES) + 1 + len(heads) - 4
     tail = ""
     for title, rows in (("Window functions — refused at planning", window),
                         ("DataFusion upgrade — refused at planning, a different fix proposed",
@@ -483,6 +551,7 @@ def render(md: str, root: Path, blob: str, index: dict, repo: str, source: str) 
  td.g a {{ color: inherit; display: block; }}
  td.decl {{ font-size: 12px; white-space: nowrap; color: #424a53; }}
  td.decl.off {{ background: #ffebe9; }}
+ td.decl.split .half {{ display: block; }}
  th.m {{ font-size: 11px; font-weight: normal; padding: 2px; }}
  tr.group th {{ text-align: left; background: #eaeef2; padding-top: 8px; }}
 </style></head><body>

@@ -12,7 +12,7 @@ use peacockdb_core::test_support::{
     authoritative_mode, cpu_case, device_order_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
     ends_in_sort, golden_row_order, gpu_result_coverage, gpu_result_cudf_matches_path,
     gpu_result_golden, line_order_is_right, load_csv, ordered_sections, result_golden,
-    section_holds_rows, section_of, stem, tight,
+    section_holds_rows, section_of, stem, stored_mismatch, stored_of, tight,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -684,6 +684,57 @@ fn every_duckdb_result_section_has_a_registry_row_and_every_row_a_section() {
              testdata/duckdb_result.py --dataset {dataset}`"
         );
     }
+}
+
+/// The registry's `stored` column against the three result goldens, in both directions: each
+/// corpus line's cell says what its cpu, DuckDB and device sections hold, a row with no line
+/// says `na`, and every query with a section in any of the three files has a row. The widget
+/// shows the cell, so a section that crossed the cap with the cell unchanged would tell a
+/// reader the cpu is held to rows it no longer stores.
+#[test]
+fn the_registry_stored_column_matches_the_goldens_in_both_directions() {
+    let rows = load_csv();
+    let mut wrong: Vec<String> = Vec::new();
+    for row in &rows {
+        let query = stem(&row.query);
+        if row.cpu_oracle == "na" {
+            if row.stored != "na" {
+                wrong.push(format!(
+                    "{}/{query}: no corpus line, and the registry says {} — write na",
+                    row.dataset, row.stored
+                ));
+            }
+            continue;
+        }
+        let want = stored_of(&row.dataset, &row.sf, &query);
+        wrong.extend(stored_mismatch(&row.dataset, &query, &row.stored, &want));
+    }
+    for (dataset, sf) in registry_datasets() {
+        let named: BTreeSet<String> = rows
+            .iter()
+            .filter(|row| row.dataset == dataset && row.sf == sf)
+            .map(|row| stem(&row.query))
+            .collect();
+        for path in [
+            result_golden(&dataset, &sf),
+            duckdb_golden(&dataset, &sf),
+            gpu_result_golden(&dataset, &sf, None),
+        ] {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for (header, _) in ordered_sections(&text) {
+                let query = header.split(" mode=").next().unwrap_or(&header).to_string();
+                if !named.contains(&query) {
+                    wrong.push(format!(
+                        "{}: a section for {query} and no registry row",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// Every (dataset, sf) the registry holds, so a dataset a later task adds is covered by the

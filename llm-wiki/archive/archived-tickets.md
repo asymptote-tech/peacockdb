@@ -27,6 +27,21 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t56"></a>
+### #56 — `duckdb(…, approx)` refuses q2's over-cap device recording
+**Done by [`oracle-columns`](../tasks/oracle-columns.md) (chain K); awaiting merge.**
+
+tpcds q2's device answer was right, and its five gpu cells were off because no DuckDB spelling
+served both sides. The device prints some `round(…, 2)` cells one ulp longer
+([#60](#t60)), so its rendering crosses the 256 KiB cap and `gpu-result.txt` holds a
+fingerprint, while the cpu's section holds rows. `duckdb(…)` now takes a last part,
+`gpu: fingerprint`, which compares the device's section by fingerprint and leaves the cpu's under
+the rest of the spelling; without it a fingerprinted device section fails, and with it one
+holding rows does. q2's line is `duckdb(no_sort, exact, gpu: fingerprint)` and
+`golden(no_sort, approx_std)`, its five device cells are on, and each mode's float triples are
+within 2.48e-14 relative of DuckDB's rows. The registry's `stored` column and the report's
+Result stored column say what each side holds.
+
 <a id="t168"></a>
 ### #168 — interval type can not be represented in the fbs ScalarValue
 **Done by [`interval-days`](../tasks/interval-days.md) (chain K); awaiting merge.**
@@ -1698,9 +1713,9 @@ identical: 5 of its 1000 cells differ from the golden, all in `ratio`, and every
 `2.53`, `1.64` and `1.91` come back as `2.7800000000000002`, `1.3599999999999999`,
 `2.5300000000000002`, `1.6400000000000001` and `1.9100000000000001`. The largest relative gap is
 1.76e-16, at `2.53`. q78 is on at all five device modes. tpcds q2 meets the
-golden within 1e-11 at all five modes too, but stays off on
-[#56](../tickets/corpus-coverage.md#t56): the one-ulp cells widen its recording past the result
-cap, and its DuckDB check cannot take the fingerprint that leaves. `round` over Float32 is #221.
+golden within 1e-11 at all five modes too, but stayed off on [#56](#t56) until
+`oracle-columns`: the one-ulp cells widen its recording past the result cap, and its DuckDB check
+could not take the fingerprint that leaves. `round` over Float32 is #221.
 
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
