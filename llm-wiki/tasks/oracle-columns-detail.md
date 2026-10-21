@@ -84,3 +84,5 @@
 - `--lib` grows by 2, to 897 (build-test.md updated). No GPU run: no device answer changed.
 - 2026-10-21T22:20:43Z: review round 2 clean (0/0/0). completing: completeness reviewer + analyst dispatched.
 - 2026-10-21T22:31:24Z: completeness: reviewer 0/0; analyst 1 important (archived #56 lost its first shape) + two build-test.md sentences — all fixed by the coordinator. completeness approved.
+- 2026-10-21T22:31:31Z: dispatched pipeline.yml on ENS-oracle-columns 2be936e9752e405ebdb7bc089e7eacb4defe6b51: run 39687116996. Waiting for GPU Tests (nebius-gpu) and the PR's CI.
+- 2026-10-21T22:59:46Z: run 39687116996 green (GPU Tests (nebius-gpu) included), PR #190 checks green. Hard stop. done.
