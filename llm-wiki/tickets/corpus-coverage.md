@@ -17,7 +17,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
-  - [#210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column](#t210)
   - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
   - [#60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
@@ -194,23 +193,6 @@ already routes `date + duration` to `cudf::binary_operation`, which adds `TIMEST
 timestamp side, so `90 days + date` answers a date. Unconfirmed on a build. Then `NOT_RUNNABLE`
 and the uncrossable set go empty, the wire test takes a month interval, the golden line becomes
 a plan, and mixed-join's device cells turn on.
-
-<a id="t210"></a>
-### #210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column
-
-cuDF's AST has no fixed-point literal, so `ast_scalar` (`expr.cpp`) rewrites a `Decimal128`
-literal as a scaled double before the one scalar builder; under a `CAST(… AS Float64)` that is
-the type the plan asked for, but a bare or unary-wrapped decimal literal is AST-able too, and
-`SELECT 1.5 FROM t` then computes a `FLOAT64` column on the device where the plan declares
-`Decimal128(2, 1)` — and since `decimal-precision-at-export` the export refuses it by name rather
-than answering it, the AST path still computing a double. Same class as
-[#191](../archive/archived-tickets.md#t191): a declared type produced as another. Pre-existing, carried
-through `typed-nulls.md` by that spec's own instruction, and pinned by
-`bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` (`gpu_tests/exec_cases.rs`);
-the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on its
-`Decimal128` row. **Corpus queries:** `tpcds/q5`, whose `0.00 as return_amt` and `net_loss` the
-schema hook refuses as FLOAT64 at every mode. The likely fix is `cudf_ast_can_evaluate` refusing
-a bare decimal literal as it already refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
 
 <a id="t56"></a>
 ### #56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum

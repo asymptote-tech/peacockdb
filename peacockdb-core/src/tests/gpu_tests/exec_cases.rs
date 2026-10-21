@@ -425,23 +425,17 @@ operator_case! {
     }
 }
 
-// #210 — a bare decimal literal is AST-able and cuDF's AST has no fixed-point literal, so
-// the device computes a Float64 column where the plan declares the decimal, and the export,
-// told the declared precision, refuses it by name as a column that is not a decimal.
+// cuDF's AST has no fixed-point literal, so a bare decimal literal takes the column path,
+// which builds the declared fixed point, and the export's precision check passes it.
 operator_case! {
     GpuProject,
-    fn bug_a_bare_decimal_literal_is_a_float64_column_on_the_device() {
+    fn a_bare_decimal_literal_agrees() {
         let one_and_a_half = Expr::Literal(ScalarValue::Decimal128(Some(15), 3, 1));
         let node = project(vec![
             keep_id(),
             (one_and_a_half, "one_and_a_half", DataType::Decimal128(3, 1)),
         ]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        let why = outcome.gpu_refuses();
-        assert!(
-            why.contains("column one_and_a_half is not a decimal but was given precision 3"),
-            "{why}"
-        );
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 

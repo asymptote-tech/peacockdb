@@ -2204,6 +2204,42 @@ TEST(Literals, ADecimalLiteralStillCarriesItsScaledValue) {
   }
 }
 
+/// `CAST(1.5 AS target)`, the literal a Decimal128(2, 1).
+static flatbuffers::Offset<fb::Expr> cast_one_and_a_half(flatbuffers::FlatBufferBuilder& fbb,
+                                                         fb::DataType target) {
+  return make_cast_expr(
+      fbb, make_decimal_literal(fbb, /*hi=*/0, /*lo=*/15, /*precision=*/2, /*scale=*/1), target);
+}
+
+TEST(Literals, ACastDecimalLiteralStaysOnTheAst) {
+  // A bare decimal literal takes the column path, but under a cast the AST takes, ast_scalar's
+  // scaled double is the value the cast asks for. Both the AST's CAST_TO_INT64 and arrow
+  // truncate, so the Int64 answer is 1.
+  for (auto target : {fb::DataType_Float64, fb::DataType_Int64}) {
+    const char* name = fb::EnumNameDataType(target);
+    flatbuffers::FlatBufferBuilder alone;
+    alone.Finish(cast_one_and_a_half(alone, target));
+    EXPECT_TRUE(peacock::cudf_ast_can_evaluate(
+        flatbuffers::GetRoot<fb::Expr>(alone.GetBufferPointer()), cudf::table_view{}, {}))
+        << name;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    WholePlan plan(nation_project(fbb, cast_one_and_a_half(fbb, target), "cast"));
+    auto view = plan.result().view().column(0);
+    ASSERT_EQ(view.size(), 25) << name;
+    EXPECT_EQ(view.null_count(), 0) << name;
+    for (cudf::size_type row = 0; row < 25; ++row) {
+      if (target == fb::DataType_Float64) {
+        ASSERT_EQ(view.type().id(), cudf::type_id::FLOAT64);
+        EXPECT_DOUBLE_EQ(get_scalar_value<double>(view, row), 1.5) << "row " << row;
+      } else {
+        ASSERT_EQ(view.type().id(), cudf::type_id::INT64);
+        EXPECT_EQ(get_scalar_value<int64_t>(view, row), 1) << "row " << row;
+      }
+    }
+  }
+}
+
 // --- a cast whose target is one of the wire's timestamp types -----------------
 //
 // repartition-keys gave the wire TimestampSecond..TimestampNanosecond, so fb_to_type_id maps
@@ -2270,9 +2306,9 @@ TEST(PlanExecutor, CastToEveryWireTimestampUnit) {
 
 TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
   // One row per fb::DataType, each a bare `NULL::T` project. `answer` is the cuDF type of
-  // the null column that comes back (a decimal crosses as a scaled double, so FLOAT64;
-  // strings go through build_column, the rest through build_expr), or empty where
-  // build_scalar has no arm and the refusal must name the type.
+  // the null column that comes back (strings and decimals go through build_column, the rest
+  // through build_expr), or empty where build_scalar has no arm and the refusal must name
+  // the type.
   struct Case {
     fb::DataType type;
     std::optional<cudf::type_id> answer;
@@ -2289,8 +2325,9 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_LargeUtf8, id::STRING}, {fb::DataType_Binary, {}},
       {fb::DataType_LargeBinary, {}},    {fb::DataType_Date32, id::TIMESTAMP_DAYS},
       {fb::DataType_Date64, {}},
-      // #210: the declared decimal comes back as a double on this path.
-      {fb::DataType_Decimal128, id::FLOAT64},
+      // The AST has no fixed-point literal, so a decimal one takes the column path, which
+      // builds the declared fixed point.
+      {fb::DataType_Decimal128, id::DECIMAL128},
       // The four units carry a timestamp column's type, and fb_to_type_id maps them, but
       // build_scalar has no timestamp arm beyond Date32 — so a literal refuses, as Date64's
       // does. A row flips to an answer with that arm, not with a wider column type.
