@@ -1106,6 +1106,13 @@ enum Markdown {
     Whole,
 }
 
+impl Markdown {
+    /// Whether this rendering gives `d` a table. The comment gives pbench its summary line.
+    fn tables(self, d: &Dataset) -> bool {
+        self == Markdown::Whole || d.label != "pbench"
+    }
+}
+
 fn render_markdown(
     shape: Markdown,
     datasets: &[Dataset],
@@ -1140,7 +1147,7 @@ fn render_markdown(
     s.push('\n');
 
     for d in datasets {
-        if shape == Markdown::Comment && d.label == "pbench" {
+        if !shape.tables(d) {
             let _ = write!(
                 s,
                 "**pbench** — {}/{} GPU-operational; its rows are on the full report. {}\n\n",
@@ -1150,10 +1157,9 @@ fn render_markdown(
             );
             continue;
         }
-        // The same table as the html's, in what markdown allows: no row background, so the
-        // ratio cell carries the flag, and no hover, so the mode order is above the table.
-        // A table that lands in one rendering and not the other is the failure to expect
-        // here — the html is what a person looks at and this is what the review reads.
+        // The html's table in what markdown allows: no row background, so the ratio cell
+        // carries the flag, and no hover, so the mode order is above the table. The comment
+        // drops the Features column; `Whole` keeps it, and the html always has it.
         let _ = write!(
             s,
             "<details><summary>{} — {}/{} GPU-operational</summary>\n\n",
@@ -1639,11 +1645,6 @@ mod tests {
     /// costs render as plain text. Tests that assert bare glyph output use this.
     fn dry_links() -> Links {
         Links { repo: "o/r".to_string(), sha: None, tickets: TicketIndex::default() }
-    }
-
-    /// A `Links` WITH a sha, so link-emitting paths are exercised.
-    fn sha_links() -> Links {
-        Links { repo: "o/r".to_string(), sha: Some("abc123".to_string()) , tickets: TicketIndex::default() }
     }
 
     /// Build a Row for tests. `modes` maps each mode column to its state; anything
@@ -2285,7 +2286,8 @@ mod tests {
         // the number a later reader needs is how many more fit — a guard that only says
         // "green" is one nobody can plan against.
         let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
-        let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
+        let tabled = datasets.iter().filter(|d| Markdown::Comment.tables(d));
+        let per_row = body.len() / tabled.map(|d| d.rows.len()).sum::<usize>().max(1);
         println!(
             "{} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries at \
              {per_row} bytes a row",
@@ -2315,10 +2317,27 @@ mod tests {
         (datasets, body)
     }
 
+    /// No Features header, and no row wider than its header: a feature cell printed without its
+    /// header leaves the word out and still shifts every row's Tickets cell one column right.
     #[test]
     fn the_comment_carries_no_features_column() {
         let (_, body) = the_real_comment();
         assert!(!body.contains("Features"), "{body}");
+        let width = |cell: &str| -> usize {
+            match cell.strip_prefix(" colspan=\"") {
+                Some(rest) => rest[..rest.find('"').unwrap()].parse().unwrap(),
+                None => 1,
+            }
+        };
+        for table in body.split("<table>").skip(1) {
+            let table = &table[..table.find("</table>").unwrap()];
+            let mut rows = table.split("<tr>").skip(1);
+            let header = rows.next().unwrap().matches("<th>").count();
+            for row in rows {
+                let cells: usize = row.split("<td").skip(1).map(width).sum();
+                assert_eq!(cells, header, "a row with {cells} cells under {header} headers: {row}");
+            }
+        }
     }
 
     #[test]
@@ -2347,7 +2366,8 @@ mod tests {
         assert!(html.contains("<th>Features</th>"), "the page lost its Features column");
         let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
         for r in &pbench.rows {
-            assert!(html.contains(&r.query), "the page lost pbench's `{}` row", r.query);
+            let cell = format!(">{}<", r.query);
+            assert!(html.contains(&cell), "the page lost pbench's `{}` row", r.query);
         }
     }
 
@@ -2363,6 +2383,27 @@ mod tests {
         let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
         for r in &pbench.rows {
             assert!(md.contains(&format!(">{}<", r.query)), "no `{}` row", r.query);
+        }
+    }
+
+    /// The checked-in `testdata/report.html` is the widget's page over the `--widget-md` tables.
+    /// Laid out from the comment's markdown instead, it loses the Features column and every
+    /// pbench row while each test above stays green.
+    #[test]
+    fn the_checked_in_report_keeps_features_and_every_pbench_row() {
+        let (datasets, _) = the_real_comment();
+        let report = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/report.html");
+        let page = std::fs::read_to_string(&report).unwrap();
+        assert_eq!(
+            page.matches("<sub>Features</sub></th>").count(),
+            datasets.len(),
+            "testdata/report.html wants one Features header per dataset; regenerate it with \
+             `python3 scripts/ticket_widget.py`"
+        );
+        let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
+        for r in &pbench.rows {
+            let row = format!("<tr id=\"pbench-{}\">", r.stem());
+            assert!(page.contains(&row), "testdata/report.html has no `{row}`");
         }
     }
 

@@ -32,7 +32,7 @@ The short description is the parenthesised part of a ticket header,
 
     scripts/ticket_widget.py                          # this tree -> testdata/report.html
     scripts/ticket_widget.py --root ../other-checkout --wiki llm-wiki=master --wiki ../other-checkout/llm-wiki=ENS-x
-    scripts/ticket_widget.py --md widget.md           # skip cargo, render existing --widget-md tables
+    scripts/ticket_widget.py --widget-md widget.md    # skip cargo, render existing --widget-md tables
 
 `testdata/report.html` is checked in, and a commit that changes `testdata/cost-registry.csv`
 regenerates it. It prints no machine path, sha or time, so the same tree always writes the same
@@ -578,7 +578,9 @@ def main() -> int:
                     help="wiki the tickets are read from, linked at REF (default --ref); repeat to "
                          "fall back to another, the first to hold a number winning "
                          "(default: <root>/llm-wiki)")
-    ap.add_argument("--md", type=Path, help="existing `cost-report --widget-md` tables; skips cargo")
+    ap.add_argument("--widget-md", type=Path,
+                    help="existing `cost-report --widget-md` tables, never its comment `--md`; "
+                         "skips cargo")
     ap.add_argument("--repo", default=DEFAULT_REPO)
     ap.add_argument("--ref", default="master", help="branch or sha the ticket links point at")
     ap.add_argument("--blob", default="master",
@@ -597,8 +599,8 @@ def main() -> int:
         p = Path(path).resolve()
         return p.relative_to(root).as_posix() if p.is_relative_to(root) else str(path)
 
-    if args.md:
-        md, source = args.md.read_text(), f"Tables from {shown(args.md)}"
+    if args.widget_md:
+        md, source = args.widget_md.read_text(), f"Tables from {shown(args.widget_md)}"
     else:
         with tempfile.TemporaryDirectory() as tmp:
             md_path = Path(tmp) / "widget.md"

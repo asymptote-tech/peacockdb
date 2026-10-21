@@ -12,8 +12,9 @@
 
 - Before: `64808 bytes of 65536, 728 spare — about 2 more queries at 301 bytes a row`.
 - After Task 1, before the six rows: `37343 bytes of 65536, 28193 spare — about 162 more
-  queries at 173 bytes a row`. (The per-row figure divides by every registry row, pbench's
-  included, which the comment no longer renders; it understates the rows that fit.)
+  queries at 173 bytes a row`. That per-row figure divided by every registry row, pbench's
+  included, which the comment no longer renders, so it overstated the rows that fit. Review
+  round 1 (nit 5) divides by the tabled datasets' rows only; see "Developer, review round 1".
 - **Plan gap found and closed.** `scripts/ticket_widget.py` builds `testdata/report.html` from
   cost-report's `--md` comment, not from `render_html`. Shrinking the comment alone took the
   Features column and all of pbench off the checked-in page (`report.html` lost 256 lines on the
@@ -60,7 +61,8 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
 
   `sort-mixed-keys` fails on its second key only: its first, ascending, was already right.
 - The size test on the final tree (six rows in, `202` struck from eight rows): `37317 bytes of
-  65536, 28219 spare — about 167 more queries at 168 bytes a row`.
+  65536, 28219 spare — about 167 more queries at 168 bytes a row`. The per-row figure is
+  pbench-diluted; corrected in review round 1 to `about 108 more queries at 260 bytes a row`.
 
 ### The device after the fix (green build)
 
@@ -116,3 +118,26 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
 - nit 5: `main.rs:2288` `per_row` divides by every registry row including pbench, which the
   comment no longer renders; divide by the tabled datasets' rows and correct the detail note.
 - Taken to the developer: all five.
+
+## Developer, review round 1
+
+- important 1: `the_comment_carries_no_features_column` also counts every comment row's cells,
+  colspan counted, against its header's `<th>`s. Red: the Comment arm printing
+  `<td><sub>{features}</sub></td>` failed it (`a row with 9 cells under 8 headers`) while its
+  old word check, still its first line, passed.
+- important 2: `the_checked_in_report_keeps_features_and_every_pbench_row` reads
+  `testdata/report.html`: one `<sub>Features</sub></th>` per dataset, and
+  `<tr id="pbench-<stem>">` per pbench registry row. Red: the page regenerated the old way
+  (`cost-report --md comment.md`, then `ticket_widget.py --md comment.md`, 320 → 214 lines,
+  0 pbench rows) failed on the Features count; the good page with one pbench row id removed
+  failed on that row. The page was restored byte-identical. The widget's flag is now
+  `--widget-md`; `test_the_old_md_flag_is_refused_before_the_page_is_written` was red (exit 0)
+  before the rename. No caller used the widget's `--md`: the workflow's two `--md` are
+  cost-report's own comment flag, unchanged.
+- nit 3: the comment above the markdown table says the comment drops Features.
+- nit 4: the html page test matches `>{query}<`.
+- nit 5: `Markdown::tables` says which datasets a rendering tables; `render_markdown` and the
+  size test both use it. The margin now prints `37317 bytes of 65536, 28219 spare — about 108
+  more queries at 260 bytes a row`.
+- Also removed: the test helper `sha_links`, unused since 3c0750ee (its dead-code warning).
+- `testdata/report.html` is unchanged: the widget regenerated to a scratch path is `cmp`-identical.
