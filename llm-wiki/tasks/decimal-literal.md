@@ -59,3 +59,14 @@ section other than q5's that moves is a finding to explain, not to accept.
   answer today.
 - q5 green at all five device modes on nebius-gpu, DuckDB's device comparison included; the
   dispatched `GPU Tests (nebius-gpu)` CI job green.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. `cudf_ast_can_evaluate` refuses a bare `Decimal128` literal, so the
+column path builds a `fixed_point_scalar` of the declared scale; one directly under a cast to
+`Float64` or `Int64` stays on the AST and answers as before. Red then green: the walk row,
+`a_bare_decimal_literal_agrees` and q5's cells; q5 on at all five device modes, only its sections
+added to `gpu-result.txt`; #210 archived. Completeness: reviewer 0 blocking, 1 important (the
+coordinator's own `architecture.md` wording, corrected); analyst no omissions. Shortcuts or
+bandaids: none. Kept by design: the cast arm's scaled double, which can sit one ulp from arrow at
+scale 2 and above. Not added: a host-only routing case for the predicate (the GPU tier pins it).
