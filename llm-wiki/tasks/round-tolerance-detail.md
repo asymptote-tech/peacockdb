@@ -117,3 +117,5 @@ sf40, benchmarks, Nsight: out (L40S list only).
 - #56's original shape keeps device coverage across merges: q43 and q59 both
   `sum(CASE WHEN d_day_name='Sunday' …)`, on at every device mode.
 - 2026-10-21: completeness: reviewer 0/0; analyst 1 important — q2's miss is a Scope gap, not the Restriction (q2 red because of round, via the harness). Coordinator accepts the partial outcome; widening Scope to land the duckdb_oracle.rs fix is the human's call. Signoff written; state completeness approved.
+- 2026-10-21T05:11:53Z: dispatched pipeline.yml on ENS-round-tolerance b849fa2fbd434e0ebb3e879c47890287532a5ac5, run 39548193937 (final device run).
+- 2026-10-21: run 39548193937 green, GPU Tests (nebius-gpu) included. State done.
