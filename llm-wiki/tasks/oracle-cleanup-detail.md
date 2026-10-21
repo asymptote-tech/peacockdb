@@ -170,3 +170,4 @@ Plan tasks done in the working tree (the coordinator commits; nothing is committ
   widget's old-registry case, and `coding-style.md`'s antipattern case naming `ticket_is_open`.
   `scripts/rewrite_oracles.py` is still in the tree: it is to go in a commit of its own after the
   one that adds it, which only the coordinator can make.
+- 2026-10-21: developer green (CPU local; L40S list twice ALL rc=0). Device found #202 on tpcds q34 and q71 under no_sort (DESC NULLS FIRST nulls last) — cells off under #202, as the spec's item 2 directs. null_equals_null audit: holds everywhere. Committed (rewrite script in its own commit, then deleted); PR opened; state reviewing.
