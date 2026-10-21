@@ -365,8 +365,6 @@ static cudf::type_id infer_expr_type(const fb::Expr* expr, cudf::table_view cons
       auto is_float = [](cudf::type_id t) {
         return t == cudf::type_id::FLOAT32 || t == cudf::type_id::FLOAT64;
       };
-      // A date or timestamp ± interval answers in the date's type, on either side.
-      if (is_interval_literal(b->left())) return rt;
       if (is_float(lt) || is_float(rt)) return cudf::type_id::FLOAT64;
       if (lt == cudf::type_id::DECIMAL128 || rt == cudf::type_id::DECIMAL128)
         return cudf::type_id::DECIMAL128;

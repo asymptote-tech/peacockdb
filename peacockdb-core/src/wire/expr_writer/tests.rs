@@ -497,9 +497,18 @@ fn a_stddev_finalize_writes_with_its_sqrt_under_the_case() {
     );
 }
 
+/// `value` as the operand of `d + value`, the one place the writer takes an interval literal.
 fn interval_parts(value: ScalarValue) -> (bool, fb::DataType, i32, i32, i64) {
-    let bytes = written(&Expr::Literal(value));
-    let scalar = read(&bytes)
+    let bytes = written(&Expr::binary(
+        column(0, "d"),
+        BinaryOp::Plus,
+        Expr::Literal(value),
+        DataType::Date32,
+    ));
+    let binary = read(&bytes).node_as_binary_expr_node().unwrap();
+    let scalar = binary
+        .right()
+        .unwrap()
         .node_as_literal_expr()
         .unwrap()
         .value()

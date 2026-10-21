@@ -126,3 +126,32 @@
   no segfault in any log. `cost-report` rerun after the gpu-case edit: 43 + 32. Soft stop 10:22Z.
 - Deferred, as the L40S list always defers: sf40 binaries, `--run-benchmarks`, Nsight, H200.
 - 2026-10-21: developer green (CPU local; L40S list ALL rc=0). DuckDB returns µs TIMESTAMP for every timestamp/date ± interval; ms/us/ns cells identical as text, so no timestamp() facet; date() added to FACETS. Outside Scope: new cpp/src/interval.cpp and cpp/tests/gpu/test_interval_arithmetic.cpp (file-size limit), CMakeLists, two gpu join case files (pbench join-shape guard). Possible pre-existing drift: build-test.md Join session row says 54, binary runs 56. Committed; PR opened; state reviewing.
+
+## Review round 1
+
+- **Interval literal outside the shape (important 1).** Red first, at SQL level over pbench
+  (`wire/tests/intervals.rs`): DataFusion plans `f_dt + CASE WHEN f_id % 2 = 0 THEN INTERVAL '1'
+  DAY ELSE INTERVAL '2' DAY END` and `date_bin(INTERVAL '1 hour', f_ts_us)` as the reviewer
+  assumed, and `attach_recipes` wrote both (2 FAILED: `Ok(RecipePlan …)`). Fix: `write_expr`'s
+  Literal arm refuses an interval literal naming #249; the Binary arm writes the interval operand
+  of an accepted shape itself through `write_literal` (`write_operand`,
+  `shifts_a_date_by_a_literal`). The three round-trip tests now read the literal as `d + value`'s
+  right operand. Green: `wire::` 55 passed; `--lib` 876 + 2 ignored.
+- **Join cases that could not tell (important 2).** Counted over the same generator, rust-only
+  scratch test (deleted): keyed `p_d + 30 days < b_d + 1 month` is 35 rows; 3 with both intervals
+  dropped, 59 with only the days or with a month as 31 days. Keyless `b_d + 7 days > p_d` is 410;
+  386 dropped. The old conditions gave 59 and 334 either way. Both cases now assert those counts
+  after `same`. On nebius-gpu: 2 passed.
+- **Nits.** `serialize/tests.rs` comment and message; `add_interval` placed in `interval.cpp` in
+  the writer's doc and the gtest file's header; the walk row names `shift_by_interval`;
+  `filter_over_scan`'s doc moved to the refusal test, closures renamed `before_one_nanosecond`
+  and `shifted_before_a_date`; the no-op `infer_expr_type` line dropped; the two interval joins
+  pinned in `PBENCH_JOINS`.
+- build-test.md over the coordinator's header: lib 878, wire::tests row 31, Rust 5038, total 5673.
+- CPU rerun (`/tmp/K-cpu-suite.sh`): lib 876 + 2 ignored, `test_cpu_corpus` 2308,
+  `test_corpus_goldens` 28, `test_cost_model` 3, cost-report 43 + 32. No golden moved, so no
+  `gpu-result.txt` or report regeneration.
+- nebius-gpu after round 1 (C++ changed: the dropped `infer_expr_type` line): build EXIT 0, no
+  warnings. `peacockdb_core_gpu_lib gpu_tests::join_key_type_cases::a`: 40 passed, both interval
+  cases among them. Full L40S list `ALL rc=0`: cpu 26, gpu 2, join session 56, plan 126, gpu lib
+  741, `test_gpu_corpus` 944, benchmarks 8, node timing 1; no segfault. Soft stop 11:18Z.

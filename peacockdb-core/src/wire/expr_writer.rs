@@ -4,6 +4,7 @@
 //! aggregate carries its own finalize rather than leaving the arithmetic to the C++.
 
 use datafusion::arrow::datatypes::DataType;
+use datafusion::common::ScalarValue;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use super::generated::peacock::plan as fb;
@@ -29,28 +30,24 @@ pub(crate) fn write_expr<'a>(
             );
             (fb::ExprNode::ColumnRef, column.as_union_value())
         }
-        Expr::Literal(value) => {
-            // The ticket rides the message because it is what a reader of a golden gets. The
-            // wire still has no Time, Duration, Struct or List literal (#249).
-            let scalar = serialize_scalar_value(b, value)
-                .map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))?;
-            let literal = fb::LiteralExpr::create(
-                b,
-                &fb::LiteralExprArgs {
-                    value: Some(scalar),
-                },
-            );
-            (fb::ExprNode::LiteralExpr, literal.as_union_value())
+        // An interval reaches the wire only as the operand the Binary arm writes itself: the
+        // device has no other place to put one, inside a CASE or as a function's argument.
+        Expr::Literal(value) if is_interval(value) => {
+            return Err(PlanError::Unsupported(
+                "an interval literal outside a date or naive timestamp ± interval (#249)"
+                    .to_string(),
+            ));
         }
+        Expr::Literal(value) => return write_literal(b, value),
         Expr::Binary {
             left,
             op,
             right,
             out_type,
         } => {
-            refuse_interval_off_the_device_arm(left, *op, right, out_type)?;
-            let left = write_expr(b, left)?;
-            let right = write_expr(b, right)?;
+            let shifts = shifts_a_date_by_a_literal(left, *op, right, out_type)?;
+            let left = write_operand(b, left, shifts)?;
+            let right = write_operand(b, right, shifts)?;
             // The declared decimal output travels with the op: cuDF derives its own
             // fixed-point result scale, division most visibly, and the C++ reproduces
             // DataFusion's from these two rather than re-deriving the coercion.
@@ -186,27 +183,66 @@ pub(crate) fn write_expr<'a>(
     ))
 }
 
-/// The device adds an interval literal to a date or a naive timestamp and does nothing else
-/// with one (`add_interval`, `cpp/src/expr.cpp`), so every other use is refused here, where
-/// the plan golden says so (#249). A zoned timestamp is refused because arrow adds months and
-/// days in its zone and the device has none; a `Date64` because the device holds it as
-/// milliseconds and would floor a sub-day part DataFusion drops.
-fn refuse_interval_off_the_device_arm(
+/// A literal as a whole wire expression. The ticket rides a refusal because it is what a reader
+/// of a golden gets: the wire still has no Time, Duration, Struct or List literal (#249).
+fn write_literal<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    value: &ScalarValue,
+) -> Result<WIPOffset<fb::Expr<'a>>, PlanError> {
+    let scalar = serialize_scalar_value(b, value)
+        .map_err(|why| PlanError::Unsupported(format!("{why} (#249)")))?;
+    let literal = fb::LiteralExpr::create(
+        b,
+        &fb::LiteralExprArgs {
+            value: Some(scalar),
+        },
+    );
+    Ok(fb::Expr::create(
+        b,
+        &fb::ExprArgs {
+            node_type: fb::ExprNode::LiteralExpr,
+            node: Some(literal.as_union_value()),
+        },
+    ))
+}
+
+fn is_interval(value: &ScalarValue) -> bool {
+    matches!(value.data_type(), DataType::Interval(_))
+}
+
+/// A binary's operand: an interval literal is written here when `shifts` accepted it, since
+/// `write_expr` refuses one standing anywhere else.
+fn write_operand<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    operand: &Expr,
+    shifts: bool,
+) -> Result<WIPOffset<fb::Expr<'a>>, PlanError> {
+    match operand {
+        Expr::Literal(value) if shifts && is_interval(value) => write_literal(b, value),
+        _ => write_expr(b, operand),
+    }
+}
+
+/// Whether this binary shifts a date or a naive timestamp by an interval literal operand, the
+/// one interval shape the device runs (`add_interval`, `cpp/src/interval.cpp`); `false` where no
+/// operand is an interval literal. Any other binary over one is refused, naming #249: a zoned
+/// timestamp because arrow adds months and days in its zone and the device has none; a `Date64`
+/// because the device holds it as milliseconds and would floor a sub-day part DataFusion drops.
+fn shifts_a_date_by_a_literal(
     left: &Expr,
     op: BinaryOp,
     right: &Expr,
     out_type: &DataType,
-) -> Result<(), PlanError> {
-    let is_interval =
-        |e: &Expr| matches!(e, Expr::Literal(v) if matches!(v.data_type(), DataType::Interval(_)));
-    let (on_left, on_right) = (is_interval(left), is_interval(right));
+) -> Result<bool, PlanError> {
+    let literal_interval = |e: &Expr| matches!(e, Expr::Literal(v) if is_interval(v));
+    let (on_left, on_right) = (literal_interval(left), literal_interval(right));
     if !on_left && !on_right {
-        return Ok(());
+        return Ok(false);
     }
     let shifts_a_date = matches!(out_type, DataType::Date32 | DataType::Timestamp(_, None))
         && (op == BinaryOp::Plus || (op == BinaryOp::Minus && !on_left));
     if shifts_a_date {
-        return Ok(());
+        return Ok(true);
     }
     Err(PlanError::Unsupported(format!(
         "an interval literal under {op:?} answering {out_type:?}: the device runs only a date or \

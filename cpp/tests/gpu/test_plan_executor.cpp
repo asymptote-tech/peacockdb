@@ -2336,7 +2336,7 @@ TEST(Literals, EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot) {
       {fb::DataType_TimestampMicrosecond, {}},
       {fb::DataType_TimestampNanosecond, {}},
       // An interval is a literal and never a column: cuDF has no interval type, so it is an
-      // operand of `add_interval` alone and a bare one is refused by name.
+      // operand of `shift_by_interval` alone and a bare one is refused by name.
       {fb::DataType_IntervalMonthDayNano, {}},
   };
   // The list is a copy of the enum; this is what makes it fail by count when the enum

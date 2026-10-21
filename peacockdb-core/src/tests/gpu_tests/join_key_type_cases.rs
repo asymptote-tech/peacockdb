@@ -14,6 +14,7 @@ use datafusion::arrow::datatypes::{DataType, Field, IntervalMonthDayNano, Schema
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::{JoinType, ScalarValue};
 
+use super::aggregate_cases::rows;
 use super::join_cases::{output_over, script};
 use super::script::run_both;
 use crate::plan::{
@@ -146,13 +147,22 @@ fn both_dates() -> Vec<JoinFilterColumn> {
     ]
 }
 
-// pbench's interval-join-keyed: `p_d <= b_d + 1 month` beside a key on `k32`.
+/// The answer's rows, once both engines agree on them.
+fn agreed_rows(node: &dyn GpuNode, sides: super::script::Script) -> usize {
+    let outcome = run_both(node, sides);
+    outcome.same(Order::Any);
+    rows(outcome.gpu.as_ref().expect("the device answers"))
+}
+
+// pbench's interval-join-keyed, with an interval on both sides: `p_d + 30 days < b_d + 1 month`
+// beside a key on `k32`. 35 rows; 3 with both intervals dropped, 59 with only the days, 59 with
+// a month taken as 31 days — so the count says the device applied both, and the month as one.
 operator_case! {
     GpuHashJoin,
     fn an_inner_join_with_an_interval_residual_agrees() {
         let residual = Expr::binary(
-            Expr::column(1, "p_d"),
-            BinaryOp::LtEq,
+            date_plus(1, "p_d", 0, 30),
+            BinaryOp::Lt,
             date_plus(0, "b_d", 1, 0),
             DataType::Boolean,
         );
@@ -172,18 +182,19 @@ operator_case! {
             )))),
         );
         let sides = script(Some(side(72, 3, "b_")), vec![side(96, 3, "p_")]);
-        run_both(&node, sides).same(Order::Any);
+        assert_eq!(agreed_rows(&node, sides), 35);
     }
 }
 
-// pbench's interval-join-keyless: `b_d + 7 days < p_d`, whose left operand the session hoists
-// onto the build side, learning its type from a zero-row table.
+// pbench's interval-join-keyless: `b_d + 7 days > p_d`, whose left operand the session hoists
+// onto the build side, learning its type from a zero-row table. 410 rows; 386 with the interval
+// dropped.
 operator_case! {
     GpuNestedLoopJoin,
     fn a_nested_loop_join_on_an_interval_condition_agrees() {
         let condition = Expr::binary(
             date_plus(0, "b_d", 0, 7),
-            BinaryOp::Lt,
+            BinaryOp::Gt,
             Expr::column(1, "p_d"),
             DataType::Boolean,
         );
@@ -201,6 +212,6 @@ operator_case! {
             )))),
         );
         let sides = script(Some(side(24, 0, "b_")), vec![side(32, 0, "p_")]);
-        run_both(&node, sides).same(Order::Any);
+        assert_eq!(agreed_rows(&node, sides), 410);
     }
 }

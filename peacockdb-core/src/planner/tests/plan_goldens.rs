@@ -778,6 +778,17 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     ("exists-or-mark", "GpuHashJoin: join_type=LeftMark"),
     ("mark-cross-residual", "GpuHashJoin: join_type=LeftMark"),
     ("not-in-under-or", "GpuHashJoin: join_type=LeftMark"),
+    // An interval literal in a keyed residual, and in a keyless condition whose left operand
+    // the session hoists.
+    (
+        "interval-join-keyed",
+        "GpuHashJoin: join_type=Inner, on=[(d_k@0, f_k@0)], filter=f_dt@probe:1 <= (d_dt@build:1 \
+         + `1 mons`)",
+    ),
+    (
+        "interval-join-keyless",
+        "GpuNestedLoopJoin: join_type=Inner, filter=(f_dt@build:0 + `7 days`) < d_dt@probe:0",
+    ),
 ];
 
 #[test]

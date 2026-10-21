@@ -1,5 +1,5 @@
-/// A date or timestamp column ± an interval literal, on the column path (`add_interval`,
-/// expr.cpp). Every expected value is DataFusion 45's answer to the SQL in the comment beside
+/// A date or timestamp column ± an interval literal, on the column path (`shift_by_interval`,
+/// interval.cpp). Every expected value is DataFusion 45's answer to the SQL in the comment beside
 /// it: arrow's `add_month_day_nano` is the rule, applied months, then days, then nanoseconds.
 
 #include "hand_tables.hpp"

@@ -28,6 +28,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 mod aggregate_init;
+mod intervals;
 
 /// An input whose layout and schema the test writes. A recipe function is handed its
 /// node and the schemas that node declares it consumes, so that is all a case needs to
@@ -787,12 +788,7 @@ fn a_finalize_that_does_not_fill_the_declared_output_is_refused() {
     );
 }
 
-/// A literal the wire still cannot carry, in a node with an input — so the walk has something
-/// to lose. The failure mode it guards is structural: a placeholder that dropped the inputs its
-/// node had taken would leave them unreachable, and the tree would then be shorter than the
-/// numbering.
-///
-/// A leaf would prove nothing here — the counts agree either way when nothing was taken.
+/// A filter over a one-group scan of `o_orderdate`, its predicate built over that column.
 fn filter_over_scan(predicate: impl FnOnce(Expr) -> Expr) -> GpuFilter {
     let scan = crate::plan::ScanMetadata {
         file: "/orders.parquet".to_string(),
@@ -818,9 +814,15 @@ fn filter_over_scan(predicate: impl FnOnce(Expr) -> Expr) -> GpuFilter {
     )
 }
 
+/// A literal the wire still cannot carry, in a node with an input — so the walk has something
+/// to lose. The failure mode it guards is structural: a placeholder that dropped the inputs its
+/// node had taken would leave them unreachable, and the tree would then be shorter than the
+/// numbering.
+///
+/// A leaf would prove nothing here — the counts agree either way when nothing was taken.
 #[test]
 fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
-    let at_noon = |column| {
+    let before_one_nanosecond = |column| {
         Expr::binary(
             column,
             BinaryOp::Lt,
@@ -828,7 +830,8 @@ fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
             DataType::Boolean,
         )
     };
-    let refused = attach_recipes(&filter_over_scan(at_noon), DEFAULT_CHUNK_BYTES)
+    let node = filter_over_scan(before_one_nanosecond);
+    let refused = attach_recipes(&node, DEFAULT_CHUNK_BYTES)
         .err()
         .expect("the wire has no time literal, so this plan cannot be built");
     let said = refused.to_string();
@@ -844,7 +847,7 @@ fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
 /// `int_val` would print.
 #[test]
 fn fb_text_prints_an_interval_literal_as_its_three_parts() {
-    let ninety_days_later = |column| {
+    let shifted_before_a_date = |column| {
         let later = Expr::binary(
             column,
             BinaryOp::Plus,
@@ -856,7 +859,7 @@ fn fb_text_prints_an_interval_literal_as_its_three_parts() {
         let cutoff = Expr::Literal(ScalarValue::Date32(Some(9000)));
         Expr::binary(later, BinaryOp::Lt, cutoff, DataType::Boolean)
     };
-    let node = filter_over_scan(ninety_days_later);
+    let node = filter_over_scan(shifted_before_a_date);
     let recipes = attach_recipes(&node, DEFAULT_CHUNK_BYTES).expect("an interval literal crosses");
     let filter = recipes.get(1).expect("the filter, above its load").seqs()[0];
     let bytes = recipes.bytes();
