@@ -60,3 +60,18 @@ before building: 24 GB free of 96. Card idle. cuDF lib: `~/data/miniforge3/envs/
 **Local CPU, after the rsync.** `test_cpu_corpus --test-threads=2`: 2227 passed, 0 failed.
 `test_module_layout` 18, `test_ci_coverage` 11, `test_corpus_goldens` 28, `test_cost_model` 3,
 `cargo test -p cost-report` 41: all pass. No plan golden moved; no cpu golden moved.
+- 2026-10-21: developer green (see above); committed, PR #185 → ENS-welford-device; state reviewing. Reviewer round 1 dispatched.
+
+## Developer, review round 1 (2026-10-21)
+
+- **report.html regenerated after the q39 sections landed** (`python3 scripts/ticket_widget.py`).
+  The first regeneration ran before the rsync brought `gpu-result.txt` home, so its anchors were
+  stale. Against HEAD, 50 rows change, each classified by a script over the old and new pages:
+  q39's gpu ✔ gains `#L11569`; 46 later TPC-DS rows shift their anchors by exactly +1240, q40
+  through q99; and #60's new label "(round off by one ulp)" appears in three rows: the by-ticket
+  row, q2 and q78. Nothing else moves. Lesson: run the widget after the rsync.
+- **`make_int32_literal` moved** beside `make_int64_literal`, body unchanged. Proof is the
+  compile: `cmake --build cpp/build --target peacock_plan_tests` rc 0, no warnings, and
+  `--gtest_list_tests` lists 117 tests, both `CaseValueForm` cases among them. No GPU rerun, since
+  a function moved within one translation unit changes no behaviour.
+- 2026-10-21: review round 1: 0 blocking, 1 important (report.html stale vs q39's gpu-result lines; regenerated), 3 nits fixed (helper moved; #289 order and #60 label by the coordinator). round-tolerance-impl.md:101 calls #60's label malformed — fixed here, so that note is stale. State completing; completeness reviewer + analyst dispatched.

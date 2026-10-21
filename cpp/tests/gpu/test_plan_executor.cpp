@@ -101,6 +101,17 @@ static flatbuffers::Offset<fb::Expr> make_int64_literal(
   return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
 }
 
+/// Build an Expr wrapping an Int32 literal, field by field as above.
+static flatbuffers::Offset<fb::Expr> make_int32_literal(flatbuffers::FlatBufferBuilder& fbb,
+                                                        int32_t val) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Int32);
+  sb.add_int_val(val);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
 /// Build an Expr wrapping a Float64 literal.
 static flatbuffers::Offset<fb::Expr> make_float64_literal(
     flatbuffers::FlatBufferBuilder& fbb, double val) {
@@ -836,16 +847,6 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
 // Each WHEN is the condition `x = v` in the search form's fold. The comparand is NULL at
 // row 4, `1` is a WHEN twice, and the WHENs hold a NULL literal and the comparand's own
 // column, so the first match winning and a NULL never matching each show in a row.
-
-static flatbuffers::Offset<fb::Expr> make_int32_literal(flatbuffers::FlatBufferBuilder& fbb,
-                                                        int32_t val) {
-  fb::ScalarValueBuilder sb(fbb);
-  sb.add_type(fb::DataType_Int32);
-  sb.add_int_val(val);
-  auto sv = sb.Finish();
-  auto lit = fb::CreateLiteralExpr(fbb, sv);
-  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
-}
 
 /// `CASE k WHEN 1 THEN 'one' WHEN 1 THEN 'again' WHEN 2 THEN NULL WHEN NULL THEN 'null'
 /// WHEN r_regionkey THEN 'self' [ELSE 'other'] END` over region, where `k` is r_regionkey

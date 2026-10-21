@@ -19,7 +19,7 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
   - [#210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column](#t210)
   - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
-  - [#60 (round() `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
+  - [#60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
@@ -237,7 +237,7 @@ not a plan's merges across lanes. The complete proof is `tpcds/q2` enabled at ev
 #152 lands; green there, archive #56 and drop `56` from registry row 3.
 
 <a id="t60"></a>
-### #60 (round() `round(x, p > 0)` on the device differs from DataFusion by one ulp
+### #60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp
 
 The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
 one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
