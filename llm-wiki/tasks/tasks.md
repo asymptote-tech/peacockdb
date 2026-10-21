@@ -144,7 +144,7 @@ device cells on.
 A bare decimal literal leaves the AST path and is a decimal column; a CAST of one to Float64 keeps
 today's path; tpcds q5's device cells on.
 
-### 11. [`round-tolerance.md`](round-tolerance.md) — closes [#60](../tickets/corpus-coverage.md#t60), [#56](../tickets/corpus-coverage.md#t56) — state: approved to build
+### 11. [`round-tolerance.md`](round-tolerance.md) — closes [#60](../tickets/corpus-coverage.md#t60), [#56](../tickets/corpus-coverage.md#t56) — state: building
 
 `cudf::round` stays; q78 and q2 move to `golden_approx_std` and `duckdb_approx` and turn on; #60
 archived as won't fix, #56 proven by q2.
