@@ -48,3 +48,4 @@
   `peacock_gpu_benchmarks` 8 (3 `bench_` skipped), `test_node_timing` 1, `peacock_plan_tests`
   126, `peacock_join_session_tests` 56, `peacock_cpu_tests` 26, `peacock_gpu_tests` 2. Soft stop
   rc=0. Deferred as always: sf40 binaries, benchmarks, Nsight.
+- 2026-10-21T21:47:45Z: developer round 1 green (CPU local, L40S list ALL rc=0, q2 at five modes). Committed, PR #190 → ENS-interval-days. Developer agent id ad97cfef0817e87fa (this run only). Reviewer round 1 dispatched.
