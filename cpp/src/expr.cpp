@@ -728,6 +728,12 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(const fb::ScalarFunc
   // semantics (f64::round, half away from zero), and cudf::round has no
   // DECIMAL128 overload though our scan widens every decimal to DECIMAL128.
   // `places`, when given, must be an integer literal.
+  // For places > 0, cudf::round rounds in two steps (modf, then the fraction)
+  // where DataFusion computes (x·10^p).round()/10^p in one, so about one value
+  // in twenty at or above 1.0 comes back one ulp apart: 2.7800000000000002 for
+  // 2.78. #60, won't fix: a bit-identical answer costs three cuDF passes or a
+  // custom kernel. The corpus compares those queries within 1e-11 relative
+  // (golden_approx_std, duckdb_approx).
   if (name == "round") {
     if (args->size() < 1 || args->size() > 2)
       throw std::runtime_error("round expects 1 or 2 args");

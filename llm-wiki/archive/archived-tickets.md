@@ -1424,6 +1424,30 @@ No clean verification run is on record.
 
 ## Stale or obsolete
 
+<a id="t60"></a>
+### #60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp
+**Stale (won't fix) by [`round-tolerance`](../tasks/round-tolerance.md) (chain K); awaiting merge.**
+
+The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
+one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
+`expr.cpp` calls `cudf::round(col, places, HALF_UP)`. cuDF's kernel takes `modf` and computes
+`ip + round(fp·10^p)/10^p`; DataFusion computes `(x·10^p).round()/10^p`.
+
+**Won't fix.** A bit-identical answer needs three cuDF passes and two temporary columns, or a
+custom kernel ([fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6)). Neither is
+worth one ulp. The engine keeps `cudf::round`, the comment at `round` in `expr.cpp` says so, and the
+corpus compares such a query within 1e-11 relative (`golden_approx_std`, `duckdb_approx`).
+
+**Measured on an L40S (2026-10-21).** tpcds q78 at all five device modes, all five recordings
+identical: 5 of its 1000 cells differ from the golden, all in `ratio`, and every other cell
+(integer and decimal columns included) matches as text. Each is exactly one ulp: `2.78`, `1.36`,
+`2.53`, `1.64` and `1.91` come back as `2.7800000000000002`, `1.3599999999999999`,
+`2.5300000000000002`, `1.6400000000000001` and `1.9100000000000001`. The largest relative gap is
+1.76e-16, at `2.53`. q78 is on at all five device modes. tpcds q2 meets the
+golden within 1e-11 at all five modes too, but stays off on
+[#56](../tickets/corpus-coverage.md#t56): the one-ulp cells widen its recording past the result
+cap, and its DuckDB check cannot take the fingerprint that leaves. `round` over Float32 is #221.
+
 <a id="t55"></a>
 ### #55 — q66: two-phase decimal aggregate ignores the partial-phase divisor cast
 **Stale, proven by [`grouping-id`](../tasks/grouping-id.md) (chain K); awaiting merge.**

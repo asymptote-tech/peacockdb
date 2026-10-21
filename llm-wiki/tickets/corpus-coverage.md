@@ -18,7 +18,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
   - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
-  - [#60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
@@ -207,43 +206,32 @@ Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `cudf
 which compares strings, and a merge reads state columns by reference.
 
 **Corpus queries:** `tpcds/q2`, whose `sum(CASE WHEN d_day_name = 'Sunday' …)` repeats the shape
-per weekday. Its five gpu cells are off, on [#60](#t60)'s `round` as measured: every per-node
-section matches the cpu's and the answer's sums agree, so nothing of this shape showed; registry row
-3 tags `56 60`. The harness test's comment counts the shape 48 times
-in the corpus.
+per weekday. The harness test's comment counts the shape 48 times in the corpus. Its five gpu
+cells are off on this ticket; registry row 3 tags `56`.
 
-**Fix proposed:** likely fixed already. `a_grouped_sum_of_a_case_over_a_string_equality_agrees`
-(`src/tests/gpu_tests/aggregate_dimension_cases.rs`) runs this shape through a device
-`GpuAggregate` and matches the CPU, green since 2026-09-16. It covers the init alone, one operator,
-not a plan's merges across lanes. The complete proof is `tpcds/q2` enabled at every gpu mode once
-#152 lands; green there, archive #56 and drop `56` from registry row 3.
+**Measured on an L40S (round-tolerance, 2026-10-21).** Under `golden_approx_std`, q2 passed at all
+five device modes: the device's answer matches `mini.result.txt` within 1e-11 relative, in
+memory. All five recordings are identical. So nothing of this shape is wrong on the device.
 
-<a id="t60"></a>
-### #60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp
+What keeps the cells off is the record, not the answer. The cpu's q2 section is 261,768 bytes,
+just under the 256 KiB result cap. The device's seven `round(…, 2)` columns differ from the
+cpu's in some cells, within 1e-11 ([#60](../archive/archived-tickets.md#t60)'s one ulp, won't fix;
+which cells, the fingerprint cannot say). One longer printed cell widens its column on every one
+of the 2513 rows, and the device's rendering crosses the cap. So `gpu-result.txt` holds a
+fingerprint for q2, and `duckdb_approx` refuses a fingerprinted section ("declare
+duckdb_fingerprint"). `duckdb_fingerprint` would judge the device's side, but it refuses the cpu's
+side, where both sections hold rows. One `duckdb_oracle` per line cannot serve both. The
+fingerprint itself agrees with DuckDB's rows: same row count, and each column's sum, min and max
+within 3e-14 relative at every mode.
 
-The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
-one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
-
-`expr.cpp` calls `cudf::round(col, places, HALF_UP)` for any `places`. cuDF's kernel takes `modf`
-and computes `ip + round(fp·10^p)/10^p`; DataFusion computes `(x·10^p).round()/10^p`. `fl(0.78)`
-puts `2 + fl(0.78)` on a midpoint of the result grid, and ties-to-even takes the upper double.
-Re-emulated over q78's committed answer, exactly five `ratio` cells split under `golden_exact`;
-q2 takes the same kernel seven times per row. This ticket used to describe an anti join and memory
-pressure on q78 ([`reports/corpus-fixes.md` fix 6](../reports/corpus-fixes.md#fix6) found neither), and called `round` proven by q54.
-
-**Corpus queries:** tpcds q78 and q2, every gpu cell off on this ticket. Measured on an L40S
-(join-backend's task 14): q78 differs from the golden in exactly the five `ratio` cells at all
-five modes, `2.7800000000000002` among them, and DuckDB says `2.78`; q2 matches every per-node
-section and differs in its answer, its row count and column sums agreeing to the printed digit. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
-from nation;` (tpch): two rows differ on the device today.
-
-**Fix proposed:** [fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6), in `expr.cpp`. `places == 0` keeps
-`cudf::round(·, 0, HALF_UP)`. Otherwise multiply by a FLOAT64 scalar `10^|p|` (exact for p ≤ 22;
-`1/10^|p|` for a negative p), `cudf::round(·, 0, HALF_UP)`, divide: bit-identical to DataFusion.
-The comment beside it names which kernel agrees. The cpu relays `round` to DataFusion,
-untouched; no golden moves. Test: a walk test `ROUND_PLACES` running the query above at
-`ONE_LANE`, red on two rows today; `scripts/exec_model/operators/expressions.py`'s docstring.
-Registry: q78's row drops `60`. `round` over Float32 is #221.
+**Fix proposed:** a harness change, not an engine one. `compare_sections`
+(`test_support/duckdb_oracle.rs`) lets `duckdb_approx` fall back to `compare_over_cap` within
+`DUCKDB_FLOAT_TOLERANCE` when only our side is fingerprinted. Then q2's line becomes
+`all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_approx_std`, its five
+`gpu-result.txt` sections are recorded, #56 is archived as done, and `56` leaves registry row 3.
+`a_grouped_sum_of_a_case_over_a_string_equality_agrees`
+(`src/tests/gpu_tests/aggregate_dimension_cases.rs`) already runs this shape through a device
+`GpuAggregate` and matches the CPU.
 
 <a id="t251"></a>
 ### #251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up

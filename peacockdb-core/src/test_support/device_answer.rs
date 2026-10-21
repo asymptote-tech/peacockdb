@@ -15,8 +15,9 @@ use super::{GpuRecording, batches_to_sorted_str, result_text};
 #[cfg(test)]
 mod tests;
 
-/// `golden_approx_std`'s tolerance: the Welford merge reassociates its sums and drifts a few
-/// ULP from a single-partition pass.
+/// `golden_approx_std`'s tolerance. Two things drift a few ULP from DataFusion's answer: the
+/// Welford merge reassociates its sums against a single-partition pass, and the device's
+/// `round(x, p > 0)` rounds in two steps where DataFusion rounds in one (#60).
 const STDDEV_TOLERANCE: f64 = 1e-11;
 
 /// cuDF's `version_config.hpp` as `build.rs` found it under `$CUDF_ROOT`, and empty in a build
@@ -67,7 +68,8 @@ pub(crate) fn cudf_version() -> String {
 pub(crate) enum GpuResultMode {
     /// The committed section, text for text — one section serving every mode.
     GoldenExact,
-    /// The committed section within [`STDDEV_TOLERANCE`] on every numeric cell.
+    /// The committed section within [`STDDEV_TOLERANCE`] on every numeric cell: for stddev
+    /// and var, and for a float `round` to `p > 0` places.
     GoldenApproxStddev,
     /// A cpu run at the SAME mode, for a query whose section cannot serve five modes.
     LiveCpu,
