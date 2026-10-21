@@ -161,7 +161,7 @@ the rest in cost-report's `test_source_formatting`; `chunk_bytes`'s 1 GiB in the
 Interval literals cross the wire as months, days and nanoseconds; date and timestamp ± interval on
 the device as DataFusion answers it; new pbench queries; tpch mixed-join's device cells on.
 
-### 14. [`oracle-columns.md`](oracle-columns.md) — closes [#56](../tickets/corpus-coverage.md#t56) — state: approved to build
+### 14. [`oracle-columns.md`](oracle-columns.md) — closes [#56](../tickets/corpus-coverage.md#t56) — state: building
 
 `duckdb(…, gpu: fingerprint)` names the device's fingerprint comparison in the line; a `stored`
 registry column; the report's Result stored, DuckDB (split per side where they differ), cpu ↔
