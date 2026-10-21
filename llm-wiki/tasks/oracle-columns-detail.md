@@ -49,3 +49,17 @@
   126, `peacock_join_session_tests` 56, `peacock_cpu_tests` 26, `peacock_gpu_tests` 2. Soft stop
   rc=0. Deferred as always: sf40 binaries, benchmarks, Nsight.
 - 2026-10-21T21:47:45Z: developer round 1 green (CPU local, L40S list ALL rc=0, q2 at five modes). Committed, PR #190 → ENS-interval-days. Developer agent id ad97cfef0817e87fa (this run only). Reviewer round 1 dispatched.
+
+## Review round 1 (0 blocking, 1 important, 4 nits)
+
+- important: `corpus_golden.rs:61-62` `held` — the rule that a `skipped:`/`failed:` section counts
+  as no section cannot go red (deleting it keeps every test green). Fix: a named
+  `pub(crate) fn stored_format(section) -> Option<Stored>` in `registry.rs`, unit-tested with a
+  `skipped:` section, a `failed:` section, a fingerprint and a table; `stored_of` calls it.
+- nit 2: `registry.rs:202` error literal lost its `\` continuations (217-byte line, runs of spaces).
+- nit 3: `corpus_cases.inc:17-18` grammar paragraph not reflowed (113 chars), top comment grew.
+- nit 4: `duckdb_oracle.rs:518,528` `judge`'s trailing `Option<&str>` now selects the algorithm;
+  use `enum Side<'a> { Cpu, Device(&'a str) }`.
+- nit 5: `test_cpu_corpus.rs:695` a line may keep `gpu: fingerprint` with every device cell off;
+  require its `stored` gpu part be `fingerprint`.
+- Taken to the developer: all five (each is cheap and in code already being touched).
