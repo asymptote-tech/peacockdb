@@ -103,7 +103,7 @@ timeout 600 $G stop
   `fb::CreateCaseExprNode(fbb, expr, arms, else)`.
 - Produces: no new symbol.
 
-- [ ] **Step 1: Write the gtest** `CaseValueForm.MatchesFirstNullNeverAndElseOrNull`.
+- [x] **Step 1: Write the gtest** `CaseValueForm.MatchesFirstNullNeverAndElseOrNull`.
   - **The plan:** a project over `region`, whose `r_regionkey` is Int32 0..4. The comparand is
     `CASE WHEN r_regionkey = 4 THEN NULL::Int32 ELSE r_regionkey END`, so row 4 holds a NULL
     comparand of the same type.
@@ -120,14 +120,14 @@ timeout 600 $G stop
     - Row 2: WHEN 2 maps to NULL, ahead of the self-match.
     - Row 4: the comparand is NULL, so nothing matches, the NULL WHEN included.
   - **A second plan, the same without ELSE:** the same rows, except row 4 is NULL.
-- [ ] **Step 2: Write the Rust agreement cases**, replacing
+- [x] **Step 2: Write the Rust agreement cases**, replacing
   `bug_a_value_case_is_refused_on_the_device`:
   - `a_value_case_agrees`: `CASE key WHEN lit_i32(1) THEN 'one' WHEN lit_i32(2) THEN 'two' ELSE
     'other' END` over `input()`, where `key` is Int32 0..6 and NULL every 11th row. Then
     `run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted)`.
   - `a_value_case_without_else_answers_null`: the same with no ELSE. The NULL-`key` rows and
     the rows matching nothing answer NULL on both engines.
-- [ ] **Step 3: Implement** `build_column_case`'s value form.
+- [x] **Step 3: Implement** `build_column_case`'s value form.
   - Delete the throw and its comment.
   - Build `auto comparand = evaluate_column(c->expr(), table, names);` once.
   - Per WHEN, the condition is `cudf::binary_operation(comparand.view(), <when>,
@@ -136,23 +136,23 @@ timeout 600 $G stop
     otherwise.
   - The backward `copy_if_else` fold is unchanged and takes these conditions. A comment says
     that a null condition is false in `copy_if_else`, which is what keeps SQL's rule.
-- [ ] **Step 4: Edit `plan/mod.rs`'s doc** so `PlanError::Unsupported` no longer lists "a
+- [x] **Step 4: Edit `plan/mod.rs`'s doc** so `PlanError::Unsupported` no longer lists "a
   value-form CASE (#57)". Fix `expressions.py:354`'s sentence to say the device answers the
   value form.
-- [ ] **Step 5: Turn q39's cells on.**
+- [x] **Step 5: Turn q39's cells on.**
   - Its line: `all_modes, none` → `all_modes, all_modes`.
   - Every comment in the include that names q39's device cells or #57 says what is true now.
   - Its registry row: the five `gpu_*` cells `enabled`, and `57` struck from `tickets`. The
     oracle columns stay `data_fusion_approximate,golden_approx_std`.
   - Then `python3 scripts/ticket_widget.py`.
-- [ ] **Step 6: Run locally:**
+- [x] **Step 6: Run locally:**
   - `cargo test --features rust-only -p peacockdb-core --lib`;
   - `cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus -- device_order_tpcds_q39`,
     which checks the order hazard with no GPU;
   - compile `--features gpu --no-run`.
 
   Expected: PASS.
-- [ ] **Step 7: The device, red then green** (*Device cycle*, `FIX=cpp/src/expr.cpp`).
+- [x] **Step 7: The device, red then green** (*Device cycle*, `FIX=cpp/src/expr.cpp`).
   - **Red build:** these must fail on `value-form CASE not supported`:
     - `$R cpp/install/bin/peacock_plan_tests --gtest_filter='CaseValueForm.*'` (2 tests ran);
     - `$R cpp/install/rust-tests/peacockdb_core_gpu_lib --test-threads=1 gpu_tests::exec_cases::a_value_case`.
@@ -165,10 +165,10 @@ timeout 600 $G stop
 
     A cell that fails still records its section, because the case records before it asserts.
     Such a cell goes back off under a ticket, and its section is removed.
-- [ ] **Step 8: Run locally** `--test test_cpu_corpus` (rust-only), which holds the
+- [x] **Step 8: Run locally** `--test test_cpu_corpus` (rust-only), which holds the
   `duckdb_gpu_tpcds_q39_*` cases and
   `every_enabled_device_cell_has_its_gpu_result_section_and_no_other`. Expected: PASS.
-- [ ] **Step 9: Archive #57 (value-form CASE)** under Done, and update the index and
+- [x] **Step 9: Archive #57 (value-form CASE)** under Done, and update the index and
   `build-test.md` (the counts, and the "but for four" passage).
 - [ ] **Step 10: Commit**, in two commits:
   - `expr: the device answers a value-form CASE (#57)`: the C++, the gtest, `exec_cases.rs`,

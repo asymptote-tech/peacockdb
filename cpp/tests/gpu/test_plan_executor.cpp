@@ -11,6 +11,7 @@
 #include <cudf/binaryop.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
+#include <cudf/copying.hpp>
 #include <cudf/fixed_point/fixed_point.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/rolling.hpp>
@@ -828,6 +829,105 @@ TEST(PlanExecutor, ProjectSqrtThroughTheColumnPath) {
     EXPECT_NEAR(get_scalar_value<double>(col, row), std::sqrt(double(row)), 1e-12)
         << "row " << row;
   }
+}
+
+// --- CaseValueForm: `CASE x WHEN v THEN … END` on the column path -----------
+//
+// Each WHEN is the condition `x = v` in the search form's fold. The comparand is NULL at
+// row 4, `1` is a WHEN twice, and the WHENs hold a NULL literal and the comparand's own
+// column, so the first match winning and a NULL never matching each show in a row.
+
+static flatbuffers::Offset<fb::Expr> make_int32_literal(flatbuffers::FlatBufferBuilder& fbb,
+                                                        int32_t val) {
+  fb::ScalarValueBuilder sb(fbb);
+  sb.add_type(fb::DataType_Int32);
+  sb.add_int_val(val);
+  auto sv = sb.Finish();
+  auto lit = fb::CreateLiteralExpr(fbb, sv);
+  return fb::CreateExpr(fbb, fb::ExprNode_LiteralExpr, lit.Union());
+}
+
+/// `CASE k WHEN 1 THEN 'one' WHEN 1 THEN 'again' WHEN 2 THEN NULL WHEN NULL THEN 'null'
+/// WHEN r_regionkey THEN 'self' [ELSE 'other'] END` over region, where `k` is r_regionkey
+/// with its 4 made NULL.
+static std::vector<uint8_t> region_value_case(flatbuffers::FlatBufferBuilder& fbb, bool with_else) {
+  auto path = fbb.CreateString(parquet_path("region"));
+  auto paths = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{path});
+  auto schema = make_schema(fbb, {
+                                     {"r_regionkey", fb::DataType_Int32},
+                                     {"r_name", fb::DataType_Utf8},
+                                     {"r_comment", fb::DataType_Utf8},
+                                 });
+  auto scan = fb::CreateCudfScan(fbb, paths, schema);
+  auto scan_node = make_plan_node(fbb, fb::PlanNodeKind_CudfScan, scan.Union());
+
+  auto at_four = make_binary_expr(fbb, make_col_ref(fbb, 0, "r_regionkey"), fb::BinaryOp_Eq,
+                                  make_int32_literal(fbb, 4));
+  auto nulled_arm =
+      fb::CreateCaseWhenThen(fbb, at_four, make_null_literal(fbb, fb::DataType_Int32));
+  auto nulled_arms =
+      fbb.CreateVector(std::vector<flatbuffers::Offset<fb::CaseWhenThen>>{nulled_arm});
+  auto nulled = fb::CreateCaseExprNode(fbb, /*expr=*/flatbuffers::Offset<fb::Expr>{}, nulled_arms,
+                                       make_col_ref(fbb, 0, "r_regionkey"));
+  auto comparand = fb::CreateExpr(fbb, fb::ExprNode_CaseExprNode, nulled.Union());
+
+  std::vector<flatbuffers::Offset<fb::CaseWhenThen>> arms;
+  arms.push_back(
+      fb::CreateCaseWhenThen(fbb, make_int32_literal(fbb, 1), make_string_literal(fbb, "one")));
+  arms.push_back(
+      fb::CreateCaseWhenThen(fbb, make_int32_literal(fbb, 1), make_string_literal(fbb, "again")));
+  arms.push_back(fb::CreateCaseWhenThen(fbb, make_int32_literal(fbb, 2),
+                                        make_null_literal(fbb, fb::DataType_Utf8)));
+  arms.push_back(fb::CreateCaseWhenThen(fbb, make_null_literal(fbb, fb::DataType_Int32),
+                                        make_string_literal(fbb, "null")));
+  arms.push_back(fb::CreateCaseWhenThen(fbb, make_col_ref(fbb, 0, "r_regionkey"),
+                                        make_string_literal(fbb, "self")));
+  auto arms_off = fbb.CreateVector(arms);
+  auto otherwise = with_else ? make_string_literal(fbb, "other") : flatbuffers::Offset<fb::Expr>{};
+  auto made = fb::CreateCaseExprNode(fbb, comparand, arms_off, otherwise);
+  auto word = fb::CreateExpr(fbb, fb::ExprNode_CaseExprNode, made.Union());
+
+  auto exprs = fbb.CreateVector(std::vector<flatbuffers::Offset<fb::Expr>>{word});
+  auto alias = fbb.CreateString("word");
+  auto aliases = fbb.CreateVector(std::vector<flatbuffers::Offset<flatbuffers::String>>{alias});
+  auto proj = fb::CreateCudfProject(fbb, exprs, aliases, scan_node);
+  return finish_plan(fbb, make_plan_node(fbb, fb::PlanNodeKind_CudfProject, proj.Union()));
+}
+
+/// Row `row` of a string column, or nullopt where it is NULL.
+static std::optional<std::string> nullable_string_at(cudf::column_view const& col,
+                                                     cudf::size_type row) {
+  auto s = cudf::get_element(col, row);
+  if (!s->is_valid()) return std::nullopt;
+  return static_cast<cudf::string_scalar const&>(*s).to_string();
+}
+
+static void expect_words(std::vector<uint8_t> const& buf,
+                         std::vector<std::optional<std::string>> const& expected) {
+  WholePlan plan(buf);
+  const auto& result = plan.result();
+  ASSERT_EQ(result.num_columns(), 1);
+  ASSERT_EQ(result.num_rows(), static_cast<cudf::size_type>(expected.size()));
+  auto col = result.view().column(0);
+  ASSERT_EQ(col.type().id(), cudf::type_id::STRING);
+  for (cudf::size_type row = 0; row < col.size(); ++row) {
+    EXPECT_EQ(nullable_string_at(col, row), expected[row]) << "row " << row;
+  }
+}
+
+// Row 1: the first `1` wins over the second and over the self-match. Row 2: WHEN 2 maps to
+// NULL ahead of the self-match. Row 4: a NULL comparand matches nothing, the NULL WHEN
+// included, and falls to ELSE.
+TEST(CaseValueForm, TheFirstMatchWinsAndNullNeverMatches) {
+  flatbuffers::FlatBufferBuilder fbb;
+  expect_words(region_value_case(fbb, /*with_else=*/true),
+               {"self", "one", std::nullopt, "self", "other"});
+}
+
+TEST(CaseValueForm, WithoutElseAnUnmatchedRowIsNull) {
+  flatbuffers::FlatBufferBuilder fbb;
+  expect_words(region_value_case(fbb, /*with_else=*/false),
+               {"self", "one", std::nullopt, "self", std::nullopt});
 }
 
 // --- AggregateMode_Merge: state in, state out -------------------------------

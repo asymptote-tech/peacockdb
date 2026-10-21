@@ -18,7 +18,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
   - [#210 (AST decimal literal) a bare decimal literal on the AST path comes back as a Float64 column](#t210)
-  - [#57 (value-form CASE) the device refuses a value-form CASE](#t57)
   - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
   - [#60 (round() `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
@@ -212,33 +211,6 @@ the walk `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` names it on
 `Decimal128` row. **Corpus queries:** `tpcds/q5`, whose `0.00 as return_amt` and `net_loss` the
 schema hook refuses as FLOAT64 at every mode. The likely fix is `cudf_ast_can_evaluate` refusing
 a bare decimal literal as it already refuses a decimal operand, so the column path builds a real `fixed_point_scalar`.
-
-<a id="t57"></a>
-### #57 (value-form CASE) the device refuses a value-form CASE
-`build_column_case` (`cpp/src/expr.cpp`) throws `value-form CASE not supported in column path`
-for any `CASE x WHEN v THEN …`. The search form, `CASE WHEN x = v THEN …`, folds through
-`copy_if_else` and works. `bug_a_value_case_is_refused_on_the_device`
-(`src/tests/gpu_tests/exec_cases.rs`) pins the refusal, and `plan/mod.rs` lists it among the
-known refusals.
-
-Filed as a wrong answer: the value form came back all-0 or all-null, so it was reverted to a
-throw. [`reports/corpus-fixes.md` (fix 7)](../reports/corpus-fixes.md#fix7) found that a misdiagnosis. The gtest built every Int64
-literal as 0, because `CreateScalarValue`'s second parameter is `is_null`, and the lowering had
-run q39 correctly at 8f471cc0. The guard stayed on that false measurement.
-
-**Corpus queries:** `tpcds/q39` — `CASE mean WHEN 0 THEN NULL ELSE stdev/mean END` in a project
-and `CASE mean WHEN 0 THEN 0 ELSE stdev/mean END > 1` in a filter, each twice per plan (the CTE is
-read twice). All five gpu cells are off, and registry row 40 tags `57`.
-
-**Fix proposed:** [fix 7 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix7), about 20 lines in `build_column_case`.
-Delete the throw and build the comparand once. Each WHEN becomes `binary_operation(comparand,
-when, EQUAL, BOOL8)`, with a scalar fast path for a literal WHEN, feeding the search form's fold
-unchanged. A NULL never matches, since `copy_if_else` reads a null condition as false, and the
-first match wins. No wire or ABI change, no golden moves. Proof: a gtest in
-`cpp/tests/gpu/test_plan_executor.cpp` whose comparand holds a NULL and a WHEN maps to NULL, now
-that `make_int64_literal` and `make_null_literal` build real values; the `bug_` case turned into
-a cpu-vs-device agreement; `tpcds/q39` enabled at tp1-single on shad-gpu. Drop the #57 clause
-from `plan/mod.rs` and `57` from registry row 40 in the same change.
 
 <a id="t56"></a>
 ### #56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum

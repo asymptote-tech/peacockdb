@@ -32,6 +32,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -787,12 +788,6 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(const fb::ScalarFunc
 static std::unique_ptr<cudf::column> build_column_case(const fb::CaseExprNode* c,
                                                        cudf::table_view const& table,
                                                        std::vector<std::string> const& names) {
-  // Search-form CASE only. Value-form (`CASE x WHEN v THEN t END`) survives
-  // DataFusion's rewrites and does reach here (only TPC-DS q39, itself disabled
-  // for stddev ULP, #54), but a copy_if_else fold on the comparand came back
-  // wrong on the GPU, so it is withheld: implement with a GPU test under #57.
-  if (c->expr())
-    throw std::runtime_error("value-form CASE not supported in column path");
   auto* whens = c->when_thens();
   if (!whens || whens->size() == 0)
     throw std::runtime_error("CASE has no WHEN/THEN pairs");
@@ -809,9 +804,29 @@ static std::unique_ptr<cudf::column> build_column_case(const fb::CaseExprNode* c
     result = cudf::make_column_from_scalar(*null_scalar, last_then.view().size());
   }
 
+  // The value form (`CASE x WHEN v …`) folds the same way on the conditions `x = v`. A NULL
+  // x or v makes the condition NULL, and copy_if_else reads a NULL condition as false, so a
+  // NULL never matches, as SQL has it.
+  std::optional<EvaluatedColumn> comparand;
+  if (c->expr()) comparand = evaluate_column(c->expr(), table, names);
+  auto condition = [&](const fb::Expr* when) -> EvaluatedColumn {
+    if (!comparand) return evaluate_column(when, table, names);
+    cudf::data_type bool8{cudf::type_id::BOOL8};
+    if (when->node_type() == fb::ExprNode_LiteralExpr) {
+      auto value = build_scalar(when->node_as_LiteralExpr()->value());
+      return {
+          cudf::binary_operation(comparand->view(), *value, cudf::binary_operator::EQUAL, bool8),
+          {}};
+    }
+    auto value = evaluate_column(when, table, names);
+    return {cudf::binary_operation(comparand->view(), value.view(), cudf::binary_operator::EQUAL,
+                                   bool8),
+            {}};
+  };
+
   for (cudf::size_type i = static_cast<cudf::size_type>(whens->size()) - 1; i >= 0; --i) {
     auto* wt = whens->Get(static_cast<flatbuffers::uoffset_t>(i));
-    auto cond = evaluate_column(wt->when(), table, names);
+    auto cond = condition(wt->when());
     auto then = evaluate_column(wt->then(), table, names);
     result = cudf::copy_if_else(then.view(), result->view(), cond.view());
   }
