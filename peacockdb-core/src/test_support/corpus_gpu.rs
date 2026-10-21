@@ -21,21 +21,23 @@ use super::device_answer::{
 };
 use super::gpu_session::Session;
 use super::{
-    GpuRecording, Mode, assert_results_match, corpus_golden, gpu_schema_validator, is_validated_at,
-    mode_named, section_holds_rows,
+    DuckdbOracle, GpuRecording, Mode, RowOrder, assert_results_match, corpus_golden,
+    gpu_schema_validator, is_validated_at, mode_named, section_holds_rows,
 };
 
 /// The whole of a device corpus case: plan, run on the device with the schema validator
 /// installed where the declaration asks for it, record the answer, then the two read-only
 /// assertions it is recorded ahead of — the mode's `.cpu.txt` section, and the result the
 /// declaration names. The run's own accounting is asserted first: a report that held batches
-/// it never released is a broken run rather than an answer DuckDB can settle.
+/// it never released is a broken run rather than an answer DuckDB can settle. The recording
+/// keeps the row order the line's `duckdb_oracle` asks for.
 pub(crate) async fn gpu_case(
     dataset: &str,
     sf: &str,
     query: &str,
     mode: &str,
     gpu_oracle: &str,
+    duckdb_oracle: &str,
     validation: &str,
 ) {
     let mode = mode_named(mode);
@@ -64,7 +66,8 @@ pub(crate) async fn gpu_case(
     // DuckDB exists to settle is the one that makes them panic — #243's lane split moves an
     // aggregate's group count, which `.cpu.txt` carries — so an answer recorded after them is
     // missing in exactly the case that needs it. Held by `write_order.rs`.
-    record_gpu_result(dataset, sf, query, mode, &batches);
+    let order = DuckdbOracle::parse(duckdb_oracle).row_order();
+    record_gpu_result(dataset, sf, query, mode, order, &batches);
     corpus_golden::assert_section(
         &corpus_golden::cpu_golden(dataset, sf, mode.name),
         query,
@@ -82,7 +85,14 @@ pub(crate) async fn gpu_case(
 /// Which file, if any, is [`GpuRecording`]'s — never `UPDATE_CANONICAL` or
 /// `PCK_UPDATE_SECTIONS`, which own the cpu's goldens and which
 /// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly.
-fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches: &[RecordBatch]) {
+fn record_gpu_result(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &Mode,
+    order: RowOrder,
+    batches: &[RecordBatch],
+) {
     let version = match gpu_recording() {
         GpuRecording::No => return,
         GpuRecording::Committed => None,
@@ -94,7 +104,7 @@ fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches:
     let cudf = cudf_version();
     corpus_golden::recording_cudf_suits_the_path(&cudf, version.as_deref())
         .unwrap_or_else(|said| panic!("{dataset}/{query}: {said}"));
-    let (body, _over_cap) = corpus::rendered_or_fingerprint(batches);
+    let (body, _over_cap) = corpus::rendered_or_fingerprint(batches, order);
     corpus_golden::merge_mode_section(
         &corpus_golden::gpu_result_golden(dataset, sf, version.as_deref()),
         dataset,
@@ -108,7 +118,7 @@ fn record_gpu_result(dataset: &str, sf: &str, query: &str, mode: &Mode, batches:
 
 /// The two conditions that decide which authority is available, and the check that the
 /// declaration named the right one. Derivable is why a CHECK can exist, never why the value
-/// would be absent: a `golden_exact` where the section is a marker is a test that fails on
+/// would be absent: a `golden(…)` where the section is a marker is a test that fails on
 /// correct behaviour, and a `live_cpu` where a committed section serves spends a device-side
 /// cpu run on a comparison a file makes faster and harder.
 fn assert_oracle_suits_the_golden(

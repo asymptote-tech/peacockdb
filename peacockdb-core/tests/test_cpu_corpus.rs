@@ -8,10 +8,11 @@
 use std::collections::BTreeSet;
 
 use peacockdb_core::test_support::{
-    CorpusDeclaration, DuckdbOracle, MODES, Mode, RegistryEntry, assert_registry_matches_csv,
-    authoritative_mode, corpus_lines, cpu_case, device_order_case, duckdb_case, duckdb_golden,
-    duckdb_gpu_case, gpu_result_coverage, gpu_result_cudf_matches_path, gpu_result_golden,
-    load_csv, ordered_sections, result_golden, section_holds_rows, section_of, stem,
+    CorpusDeclaration, DuckdbOracle, MODES, RegistryEntry, assert_registry_matches_csv,
+    authoritative_mode, cpu_case, device_order_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
+    ends_in_sort, golden_row_order, gpu_result_coverage, gpu_result_cudf_matches_path,
+    gpu_result_golden, line_order_is_right, load_csv, ordered_sections, result_golden,
+    section_holds_rows, section_of, stem, tight,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -33,13 +34,27 @@ macro_rules! corpus_query {
         corpus_query!($dataset, $sf, $query, $($cpu)|+,
             tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
     };
-    ($dataset:ident, $sf:expr, $query:ident, none, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
-        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle, $validation);
-        device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
+    // Each oracle is stringified whole here, outside the repetition over the modes: inside
+    // it, rustc refuses an argument list that repeats once against modes that repeat five
+    // times. The helpers take the spellings as expressions.
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+,
+     $duck:ident $(($($duck_arg:tt)*))?, $cpu_oracle:ident $(($($cpu_arg:tt)*))?,
+     $gpu_oracle:ident $(($($gpu_arg:tt)*))?, $validation:ident $(($($vmode:ident)|+))?) => {
+        declare_corpus_query!($dataset, $sf, $query,
+            stringify!($duck $(($($duck_arg)*))?),
+            stringify!($cpu_oracle $(($($cpu_arg)*))?),
+            stringify!($gpu_oracle $(($($gpu_arg)*))?),
+            $validation);
+        device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg)*))?));
+        cpu_cell_cases!($dataset, $sf, $query, $($cpu)|+,
+            stringify!($cpu_oracle $(($($cpu_arg)*))?), stringify!($duck $(($($duck_arg)*))?));
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {
-        declare_corpus_query!($dataset, $sf, $query, stringify!($duck $(($($duck_arg),*))?), $cpu_oracle, $gpu_oracle, $validation);
-        device_cell_cases!($dataset, $sf, $query, $($gpu)|+, stringify!($duck $(($($duck_arg),*))?));
+}
+
+/// One test and one registration per enabled cpu mode, and none at all for `none`.
+macro_rules! cpu_cell_cases {
+    ($dataset:ident, $sf:expr, $query:ident, none, $cpu_oracle:expr, $duck:expr) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $cpu_oracle:expr, $duck:expr) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -49,7 +64,8 @@ macro_rules! corpus_query {
                         stringify!($sf),
                         &stringify!($query).replace('_', "-"),
                         stringify!($cpu),
-                        stringify!($cpu_oracle),
+                        $cpu_oracle,
+                        $duck,
                     )
                     .await;
                 }
@@ -73,15 +89,15 @@ macro_rules! corpus_query {
 /// oracles is a property of the line rather than of a run, and DuckDB answers whether or
 /// not we do.
 macro_rules! declare_corpus_query {
-    ($dataset:ident, $sf:expr, $query:ident, $duck:expr, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
+    ($dataset:ident, $sf:expr, $query:ident, $duck:expr, $cpu_oracle:expr, $gpu_oracle:expr, $validation:ident) => {
         inventory::submit! {
             CorpusDeclaration {
                 dataset: stringify!($dataset),
                 sf: stringify!($sf),
                 query: stringify!($query),
                 duckdb_oracle: $duck,
-                cpu_oracle: stringify!($cpu_oracle),
-                gpu_oracle: stringify!($gpu_oracle),
+                cpu_oracle: $cpu_oracle,
+                gpu_oracle: $gpu_oracle,
                 schema_validation: stringify!($validation),
             }
         }
@@ -178,7 +194,7 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 /// cells check the plan, the run and the goldens and no answer. What holds the answer is the
 /// line's `duckdb_<q>` case, which reads the committed authority section against DuckDB's, and
 /// every mode's run is held to that section. So its oracle must compare the whole answer: a
-/// `duckdb_none` or a `duckdb_divergent` would give the next line to copy the keyword unchecked
+/// `duckdb_none` would give the next line to copy the keyword unchecked
 /// modes and an unverified first golden, with nothing red. The exact count makes growing the
 /// set a decision rather than a copy. Nothing else needs verifying: the holder is the case the
 /// line itself expands to, so it cannot be renamed away from it, and its section is held by
@@ -187,14 +203,14 @@ fn every_device_cell_has_a_cpu_cell_at_the_same_mode() {
 fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
     let mut checked = 0;
     for declared in inventory::iter::<CorpusDeclaration> {
-        if declared.cpu_oracle != "data_fusion_disabled" {
+        if tight(declared.cpu_oracle) != "data_fusion_disabled" {
             continue;
         }
         checked += 1;
         assert!(
             matches!(
                 DuckdbOracle::parse(declared.duckdb_oracle),
-                DuckdbOracle::Exact | DuckdbOracle::Approx | DuckdbOracle::Fingerprint
+                DuckdbOracle::Compare { .. } | DuckdbOracle::Fingerprint
             ),
             "{}/{}: data_fusion_disabled compares no cpu answer, and its duckdb_oracle {} \
              compares no whole answer either, so nothing holds it",
@@ -209,10 +225,76 @@ fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
     );
 }
 
+/// What the order guard finds wrong with one line: its `duckdb(…)` and its `golden(…)` each say
+/// `no_sort` exactly when the query's plan ends in a sort. A fingerprinted or `duckdb_none`
+/// line compares no rows with DuckDB and is skipped whole; a `live_cpu` gpu oracle has no
+/// order of its own.
+async fn order_findings(declared: &CorpusDeclaration) -> Vec<String> {
+    let duckdb = DuckdbOracle::parse(declared.duckdb_oracle);
+    if !matches!(duckdb, DuckdbOracle::Compare { .. }) {
+        return Vec::new();
+    }
+    let query = stem(declared.query);
+    let ends = ends_in_sort(declared.dataset, declared.sf, &query).await;
+    let spelled = [
+        ("duckdb", Some(duckdb.row_order())),
+        ("golden", golden_row_order(declared.gpu_oracle)),
+    ];
+    spelled
+        .into_iter()
+        .filter_map(|(which, order)| {
+            let why = line_order_is_right(order?, ends).err()?;
+            Some(format!("  {}/{query} ({which}): {why}", declared.dataset))
+        })
+        .collect()
+}
+
+/// Every line whose query's plan ends in a sort compares its rows in order, against DuckDB
+/// and, live on the device, against the cpu's section — and no other line does.
+///
+/// Read off DataFusion's plan at one partition: the root a sort, or a limit or a projection
+/// over one. A line declaring `sort` there passes a wrong row order; one declaring `no_sort`
+/// elsewhere fails on an order no SQL fixed.
+#[tokio::test]
+async fn every_line_whose_query_ends_in_a_sort_says_no_sort() {
+    let mut wrong: Vec<String> = Vec::new();
+    for declared in inventory::iter::<CorpusDeclaration> {
+        wrong.extend(order_findings(declared).await);
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} lines spell the wrong row order:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// tpch q11 ends in `ORDER BY value DESC` and is over the cap, so DuckDB's side is a
+/// fingerprint, which has no row order: the guard skips it rather than asking for `no_sort`.
+/// The same line spelled `duckdb(sort, exact)` is one the guard would refuse.
+#[tokio::test]
+async fn the_order_guard_skips_a_fingerprinted_section() {
+    let q11 = inventory::iter::<CorpusDeclaration>
+        .into_iter()
+        .find(|d| d.dataset == "tpch" && d.query == "q11")
+        .expect("tpch q11 is declared");
+    assert_eq!(
+        DuckdbOracle::parse(q11.duckdb_oracle),
+        DuckdbOracle::Fingerprint
+    );
+    assert!(ends_in_sort("tpch", "1", "q11").await, "q11 ends in a sort");
+    assert!(order_findings(q11).await.is_empty());
+    let compared = CorpusDeclaration {
+        duckdb_oracle: "duckdb(sort, exact)",
+        ..*q11
+    };
+    assert_eq!(order_findings(&compared).await.len(), 1);
+}
+
 /// The two oracles of one line have to suit each other, and both directions are asserted
 /// rather than trusted.
 ///
-/// A `golden_exact` where no committed section can serve fails on correct behaviour: the
+/// A `golden(…)` where no committed section can serve fails on correct behaviour: the
 /// result is over the cap and holds a fingerprint instead of its rows. A `live_cpu` where a
 /// section does serve spends a device-side cpu run on a comparison a committed file makes
 /// faster and harder. One question, asked both ways, and the same one `corpus_gpu`'s
@@ -231,7 +313,7 @@ fn each_declarations_two_oracles_suit_each_other() {
             continue;
         }
         let section = section_of(&result_golden(declared.dataset, declared.sf), &query);
-        // Read off what is committed, not off `cpu_oracle`. A `golden_exact` on a
+        // Read off what is committed, not off `cpu_oracle`. A `golden(sort, exact)` on a
         // `data_fusion_subset` line is the extra claim that our own five modes agree, which only
         // the device golden compare tests. `tpch/scan-limit`'s do: #186 cut it on one lane over
         // the covering prefix in order, so its five plans are identical. Measured 2026-10-09,
@@ -239,7 +321,7 @@ fn each_declarations_two_oracles_suit_each_other() {
         // The guard above excludes the query no mode enables, so a section standing in for
         // its rows here stands in for them because the cap kept them out.
         let needs_live = !section_holds_rows(&section);
-        let says_live = declared.gpu_oracle == "live_cpu";
+        let says_live = tight(declared.gpu_oracle) == "live_cpu";
         if needs_live && !says_live {
             wrong.push(format!(
                 "{}/{query}: gpu_oracle is {} where the committed section is a marker, \
@@ -261,11 +343,11 @@ fn each_declarations_two_oracles_suit_each_other() {
 /// A line whose rows are undetermined compares them against COMMITTED files, and only there.
 ///
 /// `data_fusion_subset` says DataFusion may answer a different ten rows per run, so
-/// `duckdb_exact` over it looks like a latent flake and is not one — in the `duckdb_<q>`
+/// `duckdb(sort, exact)` over it looks like a latent flake and is not one — in the `duckdb_<q>`
 /// case, which reads the committed `mini.result.txt` authority against the committed
 /// `duckdb-result.txt`, both holding `lineitem`'s first ten rows in file order. Only a
 /// regeneration moves that. `duckdb_gpu_<q>_<mode>` applies the same oracle to the device's
-/// RECORDED answer, which has that footing only where the line is `golden_exact`: the device
+/// RECORDED answer, which has that footing only where the line is `golden(sort, exact)`: the device
 /// case then holds the recorded rows to the committed section at every mode, so the answer
 /// DuckDB judges is the committed one again. Since #186 our five modes cut scan-limit on one
 /// lane over the covering prefix in order, which is what lets its device cells be on. A line
@@ -275,16 +357,17 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
     let rows = load_csv();
     let mut checked = 0;
     for declared in inventory::iter::<CorpusDeclaration> {
-        if declared.cpu_oracle != "data_fusion_subset" {
+        if tight(declared.cpu_oracle) != "data_fusion_subset" {
             continue;
         }
         checked += 1;
-        // Weakening is not an option a reader should reach for: of the five oracles
-        // `duckdb_approx` still wants the same multiset, `duckdb_divergent` wants an open
-        // ticket and columns that really differ, `duckdb_fingerprint` wants an over-cap
-        // section, and `duckdb_none` fails by construction while both sides answer.
+        // Weakening is not an option a reader should reach for: `duckdb_fingerprint` wants an
+        // over-cap section, and `duckdb_none` fails by construction while both sides answer.
         assert!(
-            matches!(declared.duckdb_oracle, "duckdb_exact" | "duckdb_approx"),
+            matches!(
+                DuckdbOracle::parse(declared.duckdb_oracle),
+                DuckdbOracle::Compare { .. }
+            ),
             "{}/{}: its rows are undetermined and its duckdb_oracle is {} — the comparison is \
              against two committed files, so it compares rows or it compares nothing",
             declared.dataset,
@@ -316,11 +399,12 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
             .map(|mode| mode.name)
             .collect();
         assert!(
-            live.is_empty() || declared.gpu_oracle == "golden_exact",
+            live.is_empty() || tight(declared.gpu_oracle) == "golden(sort,exact)",
             "{}/{}: its rows are undetermined, its device cells at {live:?} are on and its \
              gpu_oracle is {}, so duckdb_gpu_* holds the device's RECORDED answer to {} — ten \
              unordered rows no committed section pins. Hold the device to the committed \
-             section with golden_exact, compare the row count alone, or leave the cells off.",
+             section with golden(sort, exact), compare the row count alone, or leave the cells \
+             off.",
             declared.dataset,
             stem(declared.query),
             declared.gpu_oracle,
@@ -330,7 +414,7 @@ fn an_undetermined_lines_rows_are_compared_only_against_committed_files() {
     assert_eq!(checked, 1, "tpch scan-limit is the only undetermined line");
 }
 
-/// The registry's last three columns are a copy of each `corpus_query!` line's oracles and
+/// The registry's last four columns are a copy of each `corpus_query!` line's oracles and
 /// schema validation, held to the lines in both directions: every line's row says what the
 /// line says, and every row that names an oracle has a line. The widget reads the copy, so a
 /// line edited without its row would show a reader an oracle no test uses.
@@ -355,11 +439,17 @@ fn the_registry_carries_each_lines_oracles_and_schema_validation() {
             )),
             Some(row) => {
                 let got = (
-                    row.cpu_oracle.as_str(),
-                    row.gpu_oracle.as_str(),
-                    row.schema_validation.as_str(),
+                    tight(&row.duckdb_oracle),
+                    tight(&row.cpu_oracle),
+                    tight(&row.gpu_oracle),
+                    row.schema_validation.clone(),
                 );
-                let want = (line.cpu_oracle, line.gpu_oracle, validation);
+                let want = (
+                    tight(line.duckdb_oracle),
+                    tight(line.cpu_oracle),
+                    tight(line.gpu_oracle),
+                    validation.to_string(),
+                );
                 if got != want {
                     wrong.push(format!(
                         "{}/{}: the line says {want:?}, the row {got:?}",
@@ -374,8 +464,8 @@ fn the_registry_carries_each_lines_oracles_and_schema_validation() {
         if named && !declared.contains(&(row.dataset.as_str(), row.sf.as_str(), row.query.as_str()))
         {
             wrong.push(format!(
-                "{}/{}: the row names {} / {} and no corpus_query! line declares it",
-                row.dataset, row.query, row.cpu_oracle, row.gpu_oracle
+                "{}/{}: the row names {} / {} / {} and no corpus_query! line declares it",
+                row.dataset, row.query, row.duckdb_oracle, row.cpu_oracle, row.gpu_oracle
             ));
         }
     }
@@ -454,74 +544,21 @@ fn a_hyphenated_query_resolves_its_authority_and_has_its_result_section() {
     );
 }
 
-/// `all_modes` expands to the same cells as the five spelled out, in either position — and
-/// a line whose five cells are on says `all_modes` rather than respelling them.
-///
-/// Three places read the sugar: this binary's macro, the device binary's, and
-/// `benchmark.rs::modes()`, which parses the include as text. None of them writes
-/// `cost-registry.csv`, so the CSV is what the claim is checked against. For the cpu
-/// position the inventory is a third witness —
-/// `the_registry_matches_the_cpu_corpus_in_both_directions` ties what this binary actually
-/// expanded to the same CSV — and the gpu position is read off the CSV alone here, since
-/// `inventory` collects per linked binary and the device registrations are in the other one.
-#[test]
-fn all_modes_expands_to_the_five_in_either_position() {
-    let five: BTreeSet<String> = MODES.iter().map(Mode::ident).collect();
-    let rows = load_csv();
-    let mut checked = 0;
-    for line in corpus_lines() {
-        let (dataset, query) = (&line[0], &line[2]);
-        let row = rows
-            .iter()
-            .find(|row| &row.dataset == dataset && &row.query == query)
-            .unwrap_or_else(|| panic!("{dataset}/{query} is declared and not in the registry"));
-        for (position, prefix) in [(3, "cpu_"), (4, "gpu_")] {
-            let argument = &line[position];
-            let declared: BTreeSet<String> = match argument.as_str() {
-                "none" => BTreeSet::new(),
-                "all_modes" => five.clone(),
-                named => named.split('|').map(|m| m.trim().to_string()).collect(),
-            };
-            let live: BTreeSet<String> = MODES
-                .iter()
-                .map(Mode::ident)
-                .filter(|mode| {
-                    row.states
-                        .get(&format!("{prefix}{mode}"))
-                        .is_some_and(|state| state == "enabled" || state == "skip")
-                })
-                .collect();
-            assert_eq!(
-                declared, live,
-                "{dataset}/{query}: the line's {prefix}modes are {argument} and the registry \
-                 says {live:?}"
-            );
-            assert!(
-                live != five || argument == "all_modes",
-                "{dataset}/{query}: the line spells all five {prefix}modes out — say all_modes"
-            );
-            checked += 1;
-        }
-    }
-    assert_eq!(
-        checked,
-        corpus_lines().len() * 2,
-        "both positions of every line"
-    );
-}
-
-/// Every `DuckdbOracle` variant is named by some line, so a variant the corpus does not use
-/// is deleted rather than carried. The three oracle enums are each held to the lines this
+/// Every facet of the DuckDB grammar is named by some line, so one the corpus does not use is
+/// deleted rather than carried. Read off the registry's copy of each line's oracle, which the
+/// test above holds to the lines. The three oracle grammars are each held to the lines this
 /// way — `every_oracle_variant_is_named_by_some_line` does the other two.
 #[test]
 fn every_duckdb_oracle_is_named_by_some_line() {
-    for variant in DuckdbOracle::ALL {
-        let name = variant.name();
+    let named: BTreeSet<&str> = load_csv()
+        .iter()
+        .filter(|row| row.duckdb_oracle != "na")
+        .flat_map(|row| DuckdbOracle::parse(&row.duckdb_oracle).facets())
+        .collect();
+    for facet in DuckdbOracle::FACETS {
         assert!(
-            inventory::iter::<CorpusDeclaration>
-                .into_iter()
-                .any(|declared| DuckdbOracle::parse(declared.duckdb_oracle).name() == name),
-            "{name} is named by no corpus_query! line — delete it rather than keep it"
+            named.contains(facet),
+            "{facet} is named by no corpus_query! line — delete it rather than keep it"
         );
     }
 }

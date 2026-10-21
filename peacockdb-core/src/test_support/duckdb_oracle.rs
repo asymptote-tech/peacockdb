@@ -5,83 +5,173 @@
 mod tests;
 
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 
 use super::{
-    CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, corpus, corpus_golden, fingerprint, result_text,
+    CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, corpus, corpus_golden,
+    fingerprint, result_text,
 };
 
-/// The keyword a `corpus_query!` line writes, as `stringify!` hands it over — whitespace
-/// included, since `stringify!(duckdb_divergent(243, 1))` spaces its arguments out.
+/// A spelling with its whitespace removed outside double quotes, so `stringify!`'s spacing
+/// (`duckdb (sort , exact)`) and the registry's compare equal while a quoted column name keeps
+/// its spaces.
+pub(crate) fn tight(spelled: &str) -> String {
+    let mut quoted = false;
+    spelled
+        .chars()
+        .filter(|&c| {
+            quoted ^= c == '"';
+            quoted || c == '"' || !c.is_whitespace()
+        })
+        .collect()
+}
+
+/// What `parse` accepts, for its refusals.
+const GRAMMAR: &str = "duckdb(sort|no_sort, exact|approx|rel(<tol>, \"<column>\", …)\
+                       [, date(\"<column>\", …)])|duckdb_fingerprint|duckdb_none";
+
+/// The spelling a `corpus_query!` line writes, as `stringify!` hands it over — whitespace
+/// included, which [`tight`] takes out everywhere but inside a quoted column name.
 pub(crate) fn parse(spelled: &str) -> DuckdbOracle {
-    let tight: String = spelled.chars().filter(|c| !c.is_whitespace()).collect();
-    // Decoded through `ALL`, as `cpu_oracle_mode` and `gpu_result_mode` decode theirs: the
-    // accepted set and the list those tests hold to the corpus are then one list.
-    for variant in DuckdbOracle::ALL {
-        let name = variant.name();
-        let parameterized = matches!(variant, DuckdbOracle::Divergent { .. });
-        match (parameterized, arguments(&tight, name), tight == name) {
-            // The bare name reaches `divergent` too, for its "takes a ticket first".
-            (true, Some(args), _) => return divergent(spelled, &args),
-            (true, None, true) => return divergent(spelled, &[]),
-            (false, _, true) => return variant,
-            _ => {}
-        }
+    let unknown =
+        || -> ! { panic!("corpus_query!: unknown duckdb_oracle '{spelled}' (expected {GRAMMAR})") };
+    let compact = tight(spelled);
+    match compact.as_str() {
+        "duckdb_fingerprint" => return DuckdbOracle::Fingerprint,
+        "duckdb_none" => return DuckdbOracle::None,
+        _ => {}
     }
-    let known: Vec<&str> = DuckdbOracle::ALL.iter().map(|o| o.name()).collect();
-    panic!(
-        "corpus_query!: unknown duckdb_oracle '{spelled}' (expected {}; duckdb_divergent \
-         takes (<ticket>[, <positions>]))",
-        known.join("|")
-    )
+    let Some(args) = call_arguments(&compact, "duckdb") else {
+        unknown()
+    };
+    let (order, values, rest) = match args.as_slice() {
+        [order, values, rest @ ..] if rest.len() <= 1 => (*order, *values, rest),
+        _ => unknown(),
+    };
+    let order = match order {
+        "sort" => RowOrder::Sort,
+        "no_sort" => RowOrder::NoSort,
+        _ => panic!("{spelled}: the first argument is the row order, sort|no_sort"),
+    };
+    let values = match values {
+        "exact" => Values::Exact,
+        "approx" => Values::Approx,
+        _ => match call_arguments(values, "rel") {
+            Some(rel) if rel.len() >= 2 => Values::Rel {
+                tolerance: rel[0].parse().unwrap_or_else(|_| {
+                    panic!("{spelled}: rel's tolerance `{}` is not a number", rel[0])
+                }),
+                columns: column_names(spelled, &rel[1..]),
+            },
+            _ => unknown(),
+        },
+    };
+    let dates = match rest {
+        [] => Vec::new(),
+        [date] => match call_arguments(date, "date") {
+            Some(columns) if !columns.is_empty() => column_names(spelled, &columns),
+            _ => unknown(),
+        },
+        _ => unreachable!("at most one argument after the values"),
+    };
+    DuckdbOracle::Compare {
+        order,
+        values,
+        dates,
+    }
 }
 
-fn divergent(spelled: &str, args: &[&str]) -> DuckdbOracle {
-    assert!(
-        !args.is_empty() && !args[0].is_empty(),
-        "{spelled}: duckdb_divergent takes a ticket first"
-    );
-    DuckdbOracle::Divergent {
-        ticket: number(spelled, args[0]) as u32,
-        columns: args[1..].iter().map(|a| number(spelled, a)).collect(),
-    }
+/// Each argument a double-quoted column name, the quotes taken off. A position is refused:
+/// columns are named as our result header prints them, which a reader can check.
+fn column_names(spelled: &str, arguments: &[&str]) -> Vec<String> {
+    arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .strip_prefix('"')
+                .and_then(|name| name.strip_suffix('"'))
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{spelled}: `{argument}` — rel and date names columns by name, a string \
+                         literal as our result header prints it"
+                    )
+                })
+                .to_string()
+        })
+        .collect()
 }
 
-/// The arguments of `prefix(a, b, …)` in already-tightened text, or `None` when the text is
-/// not that call at all. An empty list is `Some(&[""])`, which the caller rejects by name.
-fn arguments<'a>(tight: &'a str, prefix: &str) -> Option<Vec<&'a str>> {
-    let inner = tight
+/// The arguments of `prefix(a, b, …)` in tightened text, split at the commas outside
+/// parentheses and quotes, or `None` when the text is not that call.
+fn call_arguments<'a>(compact: &'a str, prefix: &str) -> Option<Vec<&'a str>> {
+    let inner = compact
         .strip_prefix(prefix)?
         .strip_prefix('(')?
         .strip_suffix(')')?;
-    Some(inner.split(',').collect())
+    let mut parts = Vec::new();
+    let (mut depth, mut quoted, mut start) = (0usize, false, 0);
+    for (at, c) in inner.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            '(' if !quoted => depth += 1,
+            ')' if !quoted => depth = depth.checked_sub(1)?,
+            ',' if !quoted && depth == 0 => {
+                parts.push(&inner[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[start..]);
+    Some(parts)
 }
 
-fn number(spelled: &str, argument: &str) -> usize {
-    argument
-        .parse()
-        .unwrap_or_else(|_| panic!("{spelled}: `{argument}` is not a number"))
+/// How one column's cells are held: as text, by our declared type ([`cell_equal`]), or within
+/// a relative tolerance whatever the type.
+#[derive(Clone, Copy)]
+enum Rule {
+    Kind(CellKind),
+    Rel(f64),
+}
+
+impl Rule {
+    /// Whether the pairing key reads this column as a number, so a cell inside the tolerance
+    /// cannot reorder the rows.
+    fn is_numeric(self) -> bool {
+        !matches!(self, Rule::Kind(CellKind::Exact))
+    }
+
+    fn holds(self, ours: &str, duck: &str) -> bool {
+        match self {
+            Rule::Kind(kind) => cell_equal(kind, ours, duck),
+            Rule::Rel(tolerance) => {
+                ours == duck
+                    || matches!(
+                        (ours.parse::<f64>(), duck.parse::<f64>()),
+                        (Ok(a), Ok(b)) if (a - b).abs() <= tolerance * a.abs().max(b.abs())
+                    )
+            }
+        }
+    }
 }
 
 /// Two rendered sections held to what the line's oracle asks of them, by column position.
 ///
 /// `ours` is a `mini.result.txt` or `gpu-result.txt` body with its `mode=` line taken off,
 /// `duckdb` the `duckdb-result.txt` body, `kinds[i]` column `i`'s class from our declared
-/// output schema, and `tickets_open` what decides whether a declared divergence still has a
-/// ticket somebody can read. An `Err` rather than a panic, so `Divergent` can use the same
-/// comparison as a predicate.
+/// output schema. `rel` and `date` find their columns by name in OUR header. An `Err` rather
+/// than a panic, so the negative cases can show each comparison failing.
 pub(crate) fn compare_sections(
     oracle: &DuckdbOracle,
     ours: &str,
     duckdb: &str,
     kinds: &[CellKind],
-    tickets_open: &dyn Fn(u32) -> bool,
 ) -> Result<(), String> {
     let (ours_fp, duck_fp) = (
         fingerprint::is_fingerprint(ours),
         fingerprint::is_fingerprint(duckdb),
     );
-    match oracle {
+    let (order, values, dates) = match oracle {
         DuckdbOracle::Fingerprint => {
             if !ours_fp && !duck_fp {
                 return Err(
@@ -99,16 +189,20 @@ pub(crate) fn compare_sections(
                     .to_string(),
             );
         }
-        _ if ours_fp || duck_fp => {
-            return Err(format!(
-                "{}: the section is fingerprinted (over the cap) — declare duckdb_fingerprint",
-                oracle.name()
-            ));
+        DuckdbOracle::Compare { .. } if ours_fp || duck_fp => {
+            return Err(
+                "the section is fingerprinted (over the cap) — declare duckdb_fingerprint"
+                    .to_string(),
+            );
         }
-        _ => {}
-    }
+        DuckdbOracle::Compare {
+            order,
+            values,
+            dates,
+        } => (*order, values, dates),
+    };
 
-    let (ours, duck) = (table(ours), table(duckdb));
+    let (ours, mut duck) = (table(ours), table(duckdb));
     // A width difference is an engine that dropped a column, under every oracle.
     if ours.width != duck.width {
         return Err(format!(
@@ -123,71 +217,69 @@ pub(crate) fn compare_sections(
             duck.rows.len()
         ));
     }
-    let every: Vec<usize> = (0..ours.width).collect();
-    if let DuckdbOracle::Divergent { ticket, columns } = oracle
-        && let Some(past) = columns.iter().find(|column| **column >= ours.width)
-    {
-        return Err(format!(
-            "duckdb_divergent(#{ticket}) names column {past} and the answer has {} — the \
-             positions are 0-based and this line's are out of range",
-            ours.width
-        ));
-    }
-    let stopped = |what: String| {
-        Err(format!(
-            "declared divergent on #{} and {what} stopped diverging — the line is now \
-             duckdb_approx, and the ticket may be closeable",
-            match oracle {
-                DuckdbOracle::Divergent { ticket, .. } => *ticket,
-                _ => unreachable!("only a divergence stops diverging"),
-            }
-        ))
+    let mut rules: Vec<Rule> = match values {
+        Values::Exact => vec![Rule::Kind(CellKind::Exact); ours.width],
+        Values::Approx | Values::Rel { .. } => kinds.iter().copied().map(Rule::Kind).collect(),
     };
-    match oracle {
-        DuckdbOracle::Exact => same_multiset(&ours, &duck, &every, None),
-        DuckdbOracle::Approx => same_multiset(&ours, &duck, &every, Some(kinds)),
-        DuckdbOracle::Divergent { ticket, columns } if columns.is_empty() => {
-            if same_multiset(&ours, &duck, &every, Some(kinds)).is_ok() {
-                return stopped("the row set".to_string());
-            }
-            open_ticket(*ticket, tickets_open)
+    if let Values::Rel { tolerance, columns } = values {
+        for at in ours.positions(columns, "rel")? {
+            rules[at] = Rule::Rel(*tolerance);
         }
-        DuckdbOracle::Divergent { ticket, columns } => {
-            let undeclared: Vec<usize> = every
-                .iter()
-                .copied()
-                .filter(|c| !columns.contains(c))
-                .collect();
-            same_multiset(&ours, &duck, &undeclared, Some(kinds))?;
-            // EACH named column, not the set: a column that came right while its neighbour
-            // still diverges is a line to narrow, and the set as a whole would hide it.
-            for &column in columns {
-                if same_multiset(&ours, &duck, &[column], Some(kinds)).is_ok() {
-                    return stopped(format!("column {column}"));
-                }
+    }
+    // DuckDB's cell cut to its date part before anything reads it, so the time can neither
+    // fail a cell nor reorder the rows the pairing sorts.
+    for at in ours.positions(dates, "date")? {
+        for row in &mut duck.rows {
+            if let Some((date, _time)) = row[at].split_once('T') {
+                row[at] = date.to_string();
             }
-            open_ticket(*ticket, tickets_open)
         }
-        DuckdbOracle::Fingerprint | DuckdbOracle::None => unreachable!("returned above"),
+    }
+    match order {
+        RowOrder::Sort => same_multiset(&ours, &duck, &rules),
+        RowOrder::NoSort => same_sequence(&ours, &duck, &rules),
     }
 }
 
-/// A divergence is declared against a ticket somebody is reading, or it is declared against
-/// nothing: an archived number excuses a defect no list holds.
-fn open_ticket(ticket: u32, tickets_open: &dyn Fn(u32) -> bool) -> Result<(), String> {
-    match tickets_open(ticket) {
-        true => Ok(()),
-        false => Err(format!(
-            "#{ticket} is not open, so this divergence is declared against a ticket nobody is \
-             reading"
-        )),
+/// The two row lists paired by position, each column compared under its [`Rule`].
+///
+/// Row for row with no tie rule: on 2026-10-20 no corpus answer compared this way had rows
+/// tying on its sort keys (tpch q11 does, and is a fingerprint).
+fn same_sequence(ours: &Table, duck: &Table, rules: &[Rule]) -> Result<(), String> {
+    for (at, (o, d)) in ours.rows.iter().zip(&duck.rows).enumerate() {
+        same_row(at, o, d, rules, &ours.header)?;
     }
+    Ok(())
 }
 
-/// A rendered table's width and its data rows as cells.
+/// A rendered table: its header's names, its width and its data rows as cells.
 struct Table {
+    header: Vec<String>,
     width: usize,
     rows: Vec<Vec<String>>,
+}
+
+impl Table {
+    /// The position of each named column in this header, or an error naming the one that is
+    /// not there, or there twice, and the names that are.
+    fn positions(&self, names: &[String], what: &str) -> Result<Vec<usize>, String> {
+        names
+            .iter()
+            .map(|name| {
+                let at: Vec<usize> = (0..self.header.len())
+                    .filter(|&i| &self.header[i] == name)
+                    .collect();
+                match at.as_slice() {
+                    [one] => Ok(*one),
+                    _ => Err(format!(
+                        "{what} names column \"{name}\", which our header has {} times: {}",
+                        at.len(),
+                        self.header.join(", ")
+                    )),
+                }
+            })
+            .collect()
+    }
 }
 
 fn table(rendered: &str) -> Table {
@@ -199,38 +291,54 @@ fn table(rendered: &str) -> Table {
             .collect(),
         false => Vec::new(),
     };
+    let width = result_text::rendered_width(rendered);
+    let header = match width {
+        0 => Vec::new(),
+        _ => lines
+            .get(1)
+            .map(|line| result_text::split_cells(line))
+            .unwrap_or_default(),
+    };
     Table {
-        width: result_text::rendered_width(rendered),
+        header,
+        width,
         rows,
     }
 }
 
-/// The two row lists projected onto `columns` and paired, each kept column compared with
-/// [`cell_equal`]. `kinds = None` holds every cell to its text.
+/// The two row lists paired, each column compared under its [`Rule`].
 ///
 /// Paired by sorting, since neither side's rendering fixes an order the other shares: the
-/// key is the EXACT cells as text and then the approximate ones as numbers, so a cell within
+/// key is the text columns as text and then the numeric ones as numbers, so a cell within
 /// the tolerance cannot reorder the rows and break the pairing a looser comparison exists to
 /// allow.
-fn same_multiset(
-    ours: &Table,
-    duck: &Table,
-    columns: &[usize],
-    kinds: Option<&[CellKind]>,
+fn same_multiset(ours: &Table, duck: &Table, rules: &[Rule]) -> Result<(), String> {
+    let mut ours_keyed = keyed(&ours.rows, rules);
+    let mut duck_keyed = keyed(&duck.rows, rules);
+    ours_keyed.sort_by(compare_keys);
+    duck_keyed.sort_by(compare_keys);
+    for (at, (o, d)) in ours_keyed.iter().zip(&duck_keyed).enumerate() {
+        same_row(at, o.row, d.row, rules, &ours.header)?;
+    }
+    Ok(())
+}
+
+/// One pair of rows under the column rules, the first cell that differs named by its
+/// position and its name in our header.
+fn same_row(
+    at: usize,
+    ours: &[String],
+    duck: &[String],
+    rules: &[Rule],
+    header: &[String],
 ) -> Result<(), String> {
-    let mut ours = keyed(&ours.rows, columns, kinds);
-    let mut duck = keyed(&duck.rows, columns, kinds);
-    ours.sort_by(compare_keys);
-    duck.sort_by(compare_keys);
-    for (at, (ours, duck)) in ours.iter().zip(&duck).enumerate() {
-        for &column in columns {
-            let kind = kinds.map_or(CellKind::Exact, |kinds| kinds[column]);
-            let (a, b) = (&ours.row[column], &duck.row[column]);
-            if !cell_equal(kind, a, b) {
-                return Err(format!(
-                    "row {at}, column {column}: ours `{a}`, DuckDB `{b}`"
-                ));
-            }
+    for (column, rule) in rules.iter().enumerate() {
+        let (a, b) = (&ours[column], &duck[column]);
+        if !rule.holds(a, b) {
+            let name = header.get(column).map_or("", String::as_str);
+            return Err(format!(
+                "row {at}, column {column} ({name}): ours `{a}`, DuckDB `{b}`"
+            ));
         }
     }
     Ok(())
@@ -243,19 +351,13 @@ struct Keyed<'a> {
     row: &'a [String],
 }
 
-fn keyed<'a>(
-    rows: &'a [Vec<String>],
-    columns: &[usize],
-    kinds: Option<&[CellKind]>,
-) -> Vec<Keyed<'a>> {
+fn keyed<'a>(rows: &'a [Vec<String>], rules: &[Rule]) -> Vec<Keyed<'a>> {
     rows.iter()
         .map(|row| {
             let mut text = String::new();
             let mut numbers = Vec::new();
-            for &column in columns {
-                let cell = &row[column];
-                let approximate = kinds.is_some_and(|kinds| kinds[column] != CellKind::Exact);
-                match (approximate, cell.parse::<f64>()) {
+            for (cell, rule) in row.iter().zip(rules) {
+                match (rule.is_numeric(), cell.parse::<f64>()) {
                     (true, Ok(value)) => numbers.push(value),
                     _ => {
                         text.push_str(cell);
@@ -369,13 +471,14 @@ async fn judge(
     ours: Option<String>,
     mode: Option<&str>,
 ) {
-    let oracle = DuckdbOracle::parse(oracle);
+    let spelled = oracle;
+    let oracle = DuckdbOracle::parse(spelled);
     let duckdb = section(&corpus_golden::duckdb_golden(dataset, sf), query)
         .filter(|section| !section.starts_with("failed:") && !section.starts_with(super::SKIPPED));
     let said = match (&ours, &duckdb) {
         (Some(ours), Some(duckdb)) => {
             let kinds = corpus::output_kinds(dataset, sf, query).await;
-            compare_sections(&oracle, ours, duckdb, &kinds, &ticket_is_open)
+            compare_sections(&oracle, ours, duckdb, &kinds)
         }
         // One side does not answer, which is what `duckdb_none` is for. Under any other
         // oracle it is the line that is wrong, and the line says which answer it expected.
@@ -383,11 +486,11 @@ async fn judge(
         (None, _) => Err(format!(
             "we do not answer this query and the line says {} — move it to duckdb_none, or \
              enable a mode",
-            oracle.name()
+            tight(spelled)
         )),
         (_, None) => Err(format!(
             "DuckDB does not answer this query and the line says {} — move it to duckdb_none",
-            oracle.name()
+            tight(spelled)
         )),
     };
     if let Err(said) = said {
@@ -483,45 +586,6 @@ pub(crate) fn gpu_result_sections(text: &str) -> Vec<GpuResultSection> {
                 mode: mode.to_string(),
                 body,
             }
-        })
-        .collect()
-}
-
-/// Whether `llm-wiki/tickets/` still holds this ticket.
-///
-/// An archived one lives in `llm-wiki/archive/archived-tickets.md`, which is NOT read: a
-/// divergence declared against a ticket somebody closed is a divergence nobody is tracking,
-/// and the line should have moved when the fix landed.
-pub(crate) fn ticket_is_open(number: u32) -> bool {
-    static OPEN: OnceLock<BTreeSet<u32>> = OnceLock::new();
-    OPEN.get_or_init(|| {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki/tickets");
-        let mut open = BTreeSet::new();
-        let entries = std::fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
-        for entry in entries {
-            let path = entry.expect("a ticket file").path();
-            if path.extension().is_some_and(|e| e == "md") {
-                let text = std::fs::read_to_string(&path)
-                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-                open.extend(anchors(&text));
-            }
-        }
-        assert!(!open.is_empty(), "{}: no ticket anchors", dir.display());
-        open
-    })
-    .contains(&number)
-}
-
-/// Every `<a id="tNN">` anchor in a ticket file. Every match rather than the first: a file
-/// holds dozens, and the anchor is what the cost widget links a ticket by.
-fn anchors(text: &str) -> Vec<u32> {
-    text.lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("<a id=\"t")?
-                .split_once('"')
-                .and_then(|(number, _)| number.parse().ok())
         })
         .collect()
 }

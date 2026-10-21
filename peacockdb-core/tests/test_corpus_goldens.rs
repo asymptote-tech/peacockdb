@@ -163,7 +163,7 @@ fn a_cleared_bit_turns_a_real_section_into_a_marker() {
 /// in that order.
 ///
 /// Several sites read a section's FIRST line as "does this hold rows", `corpus_gpu` among
-/// them, so a mode line ahead of the fingerprint would let a `golden_exact` device case
+/// them, so a mode line ahead of the fingerprint would let a `golden(…)` device case
 /// compare against nothing. The body is built from the writer's own ingredients rather than
 /// hand-formatted, which is what leaves that ordering asserted here and not in a twin.
 #[test]

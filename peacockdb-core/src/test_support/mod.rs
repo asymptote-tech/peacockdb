@@ -374,8 +374,10 @@ pub struct CsvRow {
     pub plan_status: String,
     pub features: Vec<String>,
     pub tickets: Vec<String>,
-    /// The `corpus_query!` line's two oracles and its schema validation (`enabled|disabled`),
-    /// copied here so the widget can show them; all three `na` for a query with no line.
+    /// The `corpus_query!` line's three oracles, each its full spelling, and its schema
+    /// validation (`enabled|disabled`), copied here so the widget can show them; all four `na`
+    /// for a query with no line.
+    pub duckdb_oracle: String,
     pub cpu_oracle: String,
     pub gpu_oracle: String,
     pub schema_validation: String,
@@ -484,64 +486,117 @@ pub fn assert_results_match(
 
 // --- the DuckDB oracle ----------------------------------------------------------
 
-/// What a `corpus_query!` line asks of DuckDB's answer, written first among its oracles.
-///
-/// Every variant compares the line's section of `duckdb-result.txt` with the same query's
-/// section of `mini.result.txt` (the cpu) or `gpu-result.txt` (the device) BY COLUMN
-/// POSITION: the two engines name their output columns differently and a name is not an
-/// answer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DuckdbOracle {
-    /// Rows as a multiset, every cell equal as rendered.
+/// Whether both answers' rows are sorted before they are compared. Written first in every
+/// `duckdb(…)` and `golden(…)` spelling; `data_fusion(…)` accepts `sort` only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowOrder {
+    /// Both sides sorted, then paired: the query's answer has no order to check.
+    Sort,
+    /// Row for row, in the engine's order: the query's plan ends in a sort.
+    NoSort,
+}
+
+/// How a `duckdb(…)` line compares a cell, its second argument.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Values {
+    /// Every cell equal as rendered.
     Exact,
     /// A decimal cell within one unit in our last rendered place, a float cell within
     /// [`DUCKDB_FLOAT_TOLERANCE`] relative, every other cell exactly.
     Approx,
-    /// `ticket` must be open and the named columns must still differ; the row count and
-    /// every column NOT named still compare as [`DuckdbOracle::Approx`] does. No columns
-    /// means a row-level divergence, where only the width and the row count are checked.
-    Divergent { ticket: u32, columns: Vec<usize> },
-    /// Both sides are over the cap and hold a fingerprint instead of their rows.
+    /// The named columns within `tolerance`, relative to the larger magnitude, whatever our
+    /// cell's type; every other column as [`Values::Approx`]. For a known numeric divergence,
+    /// so it takes no ticket.
+    Rel {
+        tolerance: f64,
+        columns: Vec<String>,
+    },
+}
+
+/// What a `corpus_query!` line asks of DuckDB's answer, written first among its oracles.
+///
+/// It compares the line's section of `duckdb-result.txt` with the same query's section of
+/// `mini.result.txt` (the cpu) or `gpu-result.txt` (the device) BY COLUMN POSITION: the two
+/// engines name their output columns differently and a name is not an answer. `rel` and
+/// `date` name the columns they apply to, as our result header prints them.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DuckdbOracle {
+    /// `duckdb(<order>, <values>[, date("<column>", …)])`. A `dates` column's DuckDB cell is
+    /// compared by its date part: DuckDB answers `date ± interval` as a timestamp where
+    /// DataFusion answers a date.
+    Compare {
+        order: RowOrder,
+        values: Values,
+        dates: Vec<String>,
+    },
+    /// `duckdb_fingerprint`: both sides are over the cap and hold a fingerprint.
     Fingerprint,
-    /// Nothing to compare: one of the two does not answer this query.
+    /// `duckdb_none`: nothing to compare, one of the two does not answer this query.
     None,
 }
 
 impl DuckdbOracle {
-    /// The five, each naming its own spelling below — variants rather than strings, as
-    /// [`CpuOracle::ALL`] and [`GpuResultMode::ALL`] are, and [`DuckdbOracle::parse`] decodes
-    /// THROUGH this list: a sixth variant left out of it is then a variant no line can name,
-    /// rather than one `every_duckdb_oracle_is_named_by_some_line` never sees. That test holds
-    /// the list to the lines, so a variant nothing uses is deleted rather than kept.
-    ///
-    /// `Divergent`'s ticket here is a placeholder nobody reads — the list is used for the
-    /// names, and a line's real ticket comes off its argument.
-    pub const ALL: [DuckdbOracle; 5] = [
-        Self::Exact,
-        Self::Approx,
-        Self::Divergent {
-            ticket: 0,
-            columns: Vec::new(),
-        },
-        Self::Fingerprint,
-        Self::None,
+    /// Every facet some corpus line must name, so one nothing uses is deleted rather than
+    /// carried (`every_duckdb_oracle_is_named_by_some_line`). `date` is not here until a line
+    /// writes it; its negative cases hold it meanwhile.
+    pub const FACETS: [&'static str; 7] = [
+        "sort",
+        "no_sort",
+        "exact",
+        "approx",
+        "rel",
+        "fingerprint",
+        "none",
     ];
 
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Exact => "duckdb_exact",
-            Self::Approx => "duckdb_approx",
-            Self::Divergent { .. } => "duckdb_divergent",
-            Self::Fingerprint => "duckdb_fingerprint",
-            Self::None => "duckdb_none",
-        }
-    }
-
-    /// The keyword as a line writes it. Exhaustive: an unknown spelling panics naming the
-    /// accepted set, rather than falling through to whichever comparison is laxest.
+    /// The spelling as a line writes it. Exhaustive: an unknown spelling panics naming the
+    /// grammar, rather than falling through to whichever comparison is laxest.
     pub fn parse(spelled: &str) -> Self {
         duckdb_oracle::parse(spelled)
     }
+
+    /// The order a `Compare` line asks for; `Sort` for the two that compare no rows.
+    pub fn row_order(&self) -> RowOrder {
+        match self {
+            Self::Compare { order, .. } => *order,
+            Self::Fingerprint | Self::None => RowOrder::Sort,
+        }
+    }
+
+    /// The [`Self::FACETS`] this spelling names, plus `date` where it has one.
+    pub fn facets(&self) -> Vec<&'static str> {
+        match self {
+            Self::Compare {
+                order,
+                values,
+                dates,
+            } => {
+                let mut facets = vec![
+                    match order {
+                        RowOrder::Sort => "sort",
+                        RowOrder::NoSort => "no_sort",
+                    },
+                    match values {
+                        Values::Exact => "exact",
+                        Values::Approx => "approx",
+                        Values::Rel { .. } => "rel",
+                    },
+                ];
+                if !dates.is_empty() {
+                    facets.push("date");
+                }
+                facets
+            }
+            Self::Fingerprint => vec!["fingerprint"],
+            Self::None => vec!["none"],
+        }
+    }
+}
+
+/// A spelling with its whitespace removed outside double quotes: how every comparison of an
+/// oracle spelling — a line's `stringify!` against the registry's copy — is made.
+pub fn tight(spelled: &str) -> String {
+    duckdb_oracle::tight(spelled)
 }
 
 /// What a result section holds instead of its rows when the rendering reached the cap:
@@ -596,21 +651,13 @@ pub enum CellKind {
 
 /// Two rendered sections held to what a line's oracle asks of them, BY COLUMN POSITION —
 /// the two engines name an aggregate's output differently and a name is not an answer.
-/// `tickets_open` decides whether a declared divergence still names a ticket somebody reads.
 pub fn compare_sections(
     oracle: &DuckdbOracle,
     ours: &str,
     duckdb: &str,
     kinds: &[CellKind],
-    tickets_open: &dyn Fn(u32) -> bool,
 ) -> Result<(), String> {
-    duckdb_oracle::compare_sections(oracle, ours, duckdb, kinds, tickets_open)
-}
-
-/// Whether `llm-wiki/tickets/` still holds this ticket. `llm-wiki/archive/` is not read: a
-/// divergence declared against an archived number excuses a defect no list holds.
-pub fn ticket_is_open(number: u32) -> bool {
-    duckdb_oracle::ticket_is_open(number)
+    duckdb_oracle::compare_sections(oracle, ours, duckdb, kinds)
 }
 
 /// The cpu's committed answer against DuckDB's, under the oracle the line names. One case
@@ -623,6 +670,24 @@ pub async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &str) {
 /// cell, so a mode-dependent device answer meets DuckDB rather than only the last mode's.
 pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, oracle: &str) {
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
+}
+
+/// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection.
+/// Such a line says `no_sort`.
+pub async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> bool {
+    order_hazard::ends_in_sort(dataset, sf, query).await
+}
+
+/// The row order a `golden(…)` gpu oracle spells, or `None` for `live_cpu`, which compares
+/// against a live cpu run and has no order of its own.
+pub fn golden_row_order(gpu_oracle: &str) -> Option<RowOrder> {
+    device_answer::golden_row_order(gpu_oracle)
+}
+
+/// What a line's spelled row order must be, given whether its plan ends in a sort: `no_sort`
+/// exactly when it does.
+pub fn line_order_is_right(order: RowOrder, ends_in_sort: bool) -> Result<(), String> {
+    order_hazard::line_order_is_right(order, ends_in_sort)
 }
 
 /// A line with a device cell, refused if its answer rests on an order a device join does not
@@ -649,7 +714,7 @@ pub fn gpu_result_coverage(
     duckdb_oracle::gpu_result_coverage(path, enabled, text)
 }
 
-/// `golden_approx_std`'s tolerance (`corpus_gpu.rs`), for FLOAT cells only. A decimal cell
+/// `golden(…, approx_std)`'s tolerance (`device_answer.rs`), for FLOAT cells only. A decimal cell
 /// gets one unit in its declared scale's last place instead: measured cpu-vs-DuckDB decimal
 /// differences reach 1.2e-5 relative on tpch q1, so a relative bound cannot serve both.
 pub const DUCKDB_FLOAT_TOLERANCE: f64 = 1e-11;
@@ -897,15 +962,23 @@ pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
 // rename — `no_test_support_signature_names_a_component_type` holds it there.
 
 /// The whole of a cpu corpus case: plan, run, answer, and the three goldens. `mode` is the
-/// macro's ident spelling, decoded here rather than at the call site.
-pub async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_oracle: &str) {
-    corpus::cpu_case(dataset, sf, query, mode, cpu_oracle).await
+/// macro's ident spelling, decoded here rather than at the call site; `duckdb_oracle` the
+/// line's DuckDB spelling, whose row order the result section is written in.
+pub async fn cpu_case(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    cpu_oracle: &str,
+    duckdb_oracle: &str,
+) {
+    corpus::cpu_case(dataset, sf, query, mode, cpu_oracle, duckdb_oracle).await
 }
 
 /// The whole of a device corpus case: plan, run on the device — every batch held to its
 /// node's declared schema where `validation` says `schema_validation_enabled` — then the
 /// two read-only assertions: the mode's `.cpu.txt` section, and the result the declaration
-/// names.
+/// names. The recorded answer keeps the row order `duckdb_oracle` asks for.
 #[cfg(not(feature = "rust-only"))]
 pub async fn gpu_case(
     dataset: &str,
@@ -913,32 +986,25 @@ pub async fn gpu_case(
     query: &str,
     mode: &str,
     gpu_oracle: &str,
+    duckdb_oracle: &str,
     validation: &str,
 ) {
-    corpus_gpu::gpu_case(dataset, sf, query, mode, gpu_oracle, validation).await
+    corpus_gpu::gpu_case(
+        dataset,
+        sf,
+        query,
+        mode,
+        gpu_oracle,
+        duckdb_oracle,
+        validation,
+    )
+    .await
 }
 
 /// Which mode authors `.result.txt`: the last mode the query declares, in the fixed
 /// sequence of five.
 pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'static Mode> {
     corpus::authoritative_mode(dataset, sf, query)
-}
-
-/// The arguments of every `name(…)` invocation in a case list, one vector per line, split
-/// at the commas OUTSIDE parentheses so `duckdb_divergent(243, 1)` stays one argument.
-/// What every reader of `corpus_cases.inc` as text shares.
-pub fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
-    corpus::macro_invocations(path, name)
-}
-
-/// The same reader over a text rather than a file, so a test can hand it single lines.
-pub fn macro_invocations_in(text: &str, name: &str) -> Vec<Vec<String>> {
-    corpus::invocations_in(text, name, "a line")
-}
-
-/// The `corpus_query!` lines of the include both corpus binaries read.
-pub fn corpus_lines() -> Vec<Vec<String>> {
-    corpus::corpus_lines()
 }
 
 /// `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`.

@@ -26,6 +26,7 @@ use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
 use datafusion::physical_plan::{ExecutionPlan, collect};
 
+use super::RowOrder;
 use super::corpus::{query_text, session_for};
 
 #[cfg(test)]
@@ -63,6 +64,43 @@ pub(crate) async fn hazard_in(ctx: &SessionContext, sql: &str) -> Option<String>
         }
     }
     None
+}
+
+/// Whether the plan's answer is a sort's output: the root a sort, or a limit or a node that
+/// keeps positions over one, recursively. Such a query's rows are compared in order, so its
+/// line says `no_sort`.
+pub(crate) fn plan_ends_in_sort(plan: &Arc<dyn ExecutionPlan>) -> bool {
+    let any = plan.as_any();
+    let passes =
+        keeps_positions(plan.as_ref()) || any.is::<GlobalLimitExec>() || any.is::<LocalLimitExec>();
+    ordering_of(plan.as_ref()).is_some()
+        || (passes && plan.children().into_iter().any(plan_ends_in_sort))
+}
+
+/// [`plan_ends_in_sort`] over `query`'s plan at one partition, the plan `hazard_in` reads.
+pub(crate) async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> bool {
+    let ctx = session_for(dataset, sf, 1).await;
+    let plan = ctx
+        .sql(&query_text(dataset, query))
+        .await
+        .unwrap_or_else(|why| panic!("{dataset}/{query} does not plan: {why}"))
+        .create_physical_plan()
+        .await
+        .unwrap_or_else(|why| panic!("{dataset}/{query} has no physical plan: {why}"));
+    plan_ends_in_sort(&plan)
+}
+
+/// `no_sort` exactly when the plan ends in a sort, as the order guard asks of every line.
+pub(crate) fn line_order_is_right(order: RowOrder, ends_in_sort: bool) -> Result<(), String> {
+    match (order, ends_in_sort) {
+        (RowOrder::NoSort, true) | (RowOrder::Sort, false) => Ok(()),
+        (RowOrder::Sort, true) => {
+            Err("the plan ends in a sort, so its rows are compared in order: say no_sort".into())
+        }
+        (RowOrder::NoSort, false) => {
+            Err("the plan ends in no sort, so its row order is no answer: say sort".into())
+        }
+    }
 }
 
 /// A device join: one whose emission order is not reproducible.

@@ -224,7 +224,7 @@ struct JoinSpec {
   bool null_equals_null = false;
   std::vector<SField> build_schema, probe_schema;
   std::optional<std::vector<uint32_t>> projection;
-  uint64_t chunk_bytes = 0;
+  uint64_t chunk_bytes = fb::JoinLimits_DefaultChunkBytes;
 };
 
 static flatbuffers::Offset<fb::Expr> named_col(flatbuffers::FlatBufferBuilder& f, uint32_t i,
@@ -511,6 +511,51 @@ TEST(JoinSession, NullEqualsNullMatchesNullKeysForEveryType) {
       EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
     ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
     // The one build row matched its NULL twin, so nothing is left to pad or to keep.
+    if (c.finish)
+      EXPECT_EQ(s.rows(out), sorted(*c.finish)) << fb::EnumNameJoinType(c.t);
+    else
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
+  }
+}
+
+// The other half of `null_equals_null`: under `false` a NULL key matches nothing for every
+// type, so each answers as if the two rows had different keys — the same answers the cpu
+// backend gives (`cpu_null_keys_follow_null_equals_null_for_every_type`).
+TEST(JoinSession, NullKeysMatchNothingForEveryTypeWhenNullsAreNotEqual) {
+  struct C {
+    fb::JoinType t;
+    Rows probe;
+    std::optional<Rows> finish;
+  };
+  for (auto const& c :
+       std::vector<C>{{fb::JoinType_Inner, {}, std::nullopt},
+                      {fb::JoinType_Left, {}, Rows{"NULL|n|NULL|NULL"}},
+                      {fb::JoinType_Right, {"NULL|NULL|NULL|99"}, std::nullopt},
+                      {fb::JoinType_Full, {"NULL|NULL|NULL|99"}, Rows{"NULL|n|NULL|NULL"}},
+                      {fb::JoinType_LeftSemi, {}, Rows{}},
+                      {fb::JoinType_LeftAnti, {}, Rows{"NULL|n"}},
+                      {fb::JoinType_LeftMark, {}, Rows{"NULL|n|false"}},
+                      {fb::JoinType_RightSemi, {}, std::nullopt},
+                      {fb::JoinType_RightAnti, {"NULL|99"}, std::nullopt}}) {
+    auto spec = typed(c.t);
+    ASSERT_FALSE(spec.null_equals_null);
+    Session s(make_plan(spec));
+    uint64_t j = 0, out = 0;
+    ASSERT_EQ(
+        peacock_join_build(s.exec(), 0, s.upload({i32("b_k", {std::nullopt}), utf8("b_v", {"n"})}),
+                           &j, nullptr),
+        0)
+        << s.error();
+    ASSERT_EQ(
+        peacock_join_probe(s.exec(), j, s.upload({i32("p_k", {std::nullopt}), i64("p_w", {99})}),
+                           &out, nullptr),
+        0)
+        << s.error();
+    if (is_build_side_semi(c.t))
+      EXPECT_EQ(out, 0u) << fb::EnumNameJoinType(c.t);
+    else
+      EXPECT_EQ(s.rows(out), sorted(c.probe)) << fb::EnumNameJoinType(c.t);
+    ASSERT_EQ(peacock_join_finish(s.exec(), j, &out, nullptr), 0) << s.error();
     if (c.finish)
       EXPECT_EQ(s.rows(out), sorted(*c.finish)) << fb::EnumNameJoinType(c.t);
     else
@@ -981,7 +1026,9 @@ TEST(JoinSession, ASemiJoinWithTwoCrossConjunctsAndsThemAtTheAstLevel) {
     bool decimals;
     uint64_t chunk_bytes;
   };
-  for (auto const& form : std::vector<Form>{{false, 0}, {true, 0}, {true, 16}}) {
+  for (auto const& form : std::vector<Form>{{false, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, 16}}) {
     for (auto const& [t, want] : std::vector<std::pair<fb::JoinType, Rows>>{
              {fb::JoinType_LeftSemi, {"1|5|20"}},
              {fb::JoinType_LeftMark, {"1|5|8|false", "1|5|20|true"}}}) {
@@ -1043,7 +1090,8 @@ TEST(JoinSession, ASemiJoinWithTwoCrossConjunctsAndsThemAtTheAstLevel) {
 /// No keys, condition `p_v < b_v`: filter schema [Probe 0, Build 1]. `decimals` swaps in
 /// the same comparison over decimals, which the AST refuses, so `A` is empty and the
 /// chunked cross of indices answers instead.
-static JoinSpec nested(fb::JoinType t, bool decimals, uint64_t chunk_bytes = 0) {
+static JoinSpec nested(fb::JoinType t, bool decimals,
+                       uint64_t chunk_bytes = fb::JoinLimits_DefaultChunkBytes) {
   JoinSpec s{.type = t,
              .build_schema = {{"b_id", fb::DataType_Int32},
                               {"b_v", fb::DataType_Int32},
@@ -1088,7 +1136,9 @@ TEST(JoinSession, ANestedLoopAnswersEveryTypeOnTheAstAndOffIt) {
     bool decimals;
     uint64_t chunk_bytes;
   };
-  for (auto const& form : std::vector<Form>{{false, 0}, {true, 0}, {true, 16}}) {
+  for (auto const& form : std::vector<Form>{{false, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, 16}}) {
     for (auto const& c : cases) {
       Session s(make_plan(nested(c.t, form.decimals, form.chunk_bytes)));
       uint64_t j = 0, out = 0;
@@ -1303,6 +1353,17 @@ TEST(JoinSession, APredicateFreeOuterJoinIsNotACrossJoin) {
   EXPECT_NE(s.error().find("literal true"), std::string::npos) << s.error();
 }
 
+// A zero chunk budget is refused by name: a mode with no budget leaves the field out and
+// reads the 1 GiB default, so a 0 can only be a writer that meant something else.
+TEST(JoinSession, AZeroChunkBudgetIsRefusedByName) {
+  auto spec = cross_spec();
+  spec.chunk_bytes = 0;
+  Session s(make_plan(spec));
+  uint64_t j = 0;
+  EXPECT_NE(peacock_join_build(s.exec(), 0, s.upload({i32("b_id", {1})}), &j, nullptr), 0);
+  EXPECT_NE(s.error().find("chunk_bytes"), std::string::npos) << s.error();
+}
+
 // --- Task 8: hoisting one-side operands into columns (§3.6's `hoist`) -------
 
 static flatbuffers::Offset<fb::Expr> fn1(flatbuffers::FlatBufferBuilder& f, const char* name,
@@ -1355,7 +1416,7 @@ TEST(JoinSession, ANestedLoopHoistsAOneSideOperandAndRunsOnTheAst) {
 // Both operands hoisted and the comparison still a decimal one, which the AST refuses: the
 // condition stays in `R` and the chunked cross of indices answers it (#215).
 TEST(JoinSession, ANestedLoopWhoseHoistedComparisonIsStillRefusedTakesTheCross) {
-  for (uint64_t chunk_bytes : {uint64_t{0}, uint64_t{16}}) {
+  for (uint64_t chunk_bytes : {uint64_t{fb::JoinLimits_DefaultChunkBytes}, uint64_t{16}}) {
     JoinSpec spec{
         .type = fb::JoinType_Left,
         .build_schema = {{"b_id", fb::DataType_Int32}, {"b_d", fb::DataType_Decimal128, 15, 2}},
@@ -1397,7 +1458,9 @@ TEST(JoinSession, AKeyedSemiJoinAnswersTheSameWithAHoistedConjunctOrThePairsPath
     bool decimal_second;
     uint64_t chunk_bytes;
   };
-  for (auto const& form : std::vector<Form>{{false, 0}, {true, 0}, {true, 16}}) {
+  for (auto const& form : std::vector<Form>{{false, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, fb::JoinLimits_DefaultChunkBytes},
+                                            {true, 16}}) {
     for (auto const& [t, want] : std::vector<std::pair<fb::JoinType, Rows>>{
              {fb::JoinType_LeftSemi, {"1|x|5"}},
              {fb::JoinType_LeftMark, {"1|x|5|true", "1|y|50|false"}}}) {
@@ -1947,7 +2010,7 @@ TEST(JoinSession, ANestedLoopSplitsItsConjunctsBetweenTheAstAndTheColumns) {
       {fb::JoinType_RightSemi, {"3", "7"}, std::nullopt},
       {fb::JoinType_RightAnti, {"12"}, std::nullopt},
   };
-  for (uint64_t chunk_bytes : {uint64_t{0}, uint64_t{16}})
+  for (uint64_t chunk_bytes : {uint64_t{fb::JoinLimits_DefaultChunkBytes}, uint64_t{16}})
     for (auto const& c : cases) {
       JoinSpec spec{.type = c.t,
                     .build_schema = {{"b_id", fb::DataType_Int32}, {"b_v", fb::DataType_Int32}},

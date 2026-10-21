@@ -399,7 +399,8 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   `cargo test --features rust-only -p peacockdb-core` runs the whole CPU execution
   suite, not just the golden tier.
 - **No regression in test coverage** unless a human explicitly authorized it.
-  `test_ci_coverage.rs` must be kept up to date and include all necessary coverage.
+  cost-report's `test_source_formatting` (its `ci_coverage.rs`) must be kept up to date and
+  include all necessary coverage.
   **One exception — flaky tests:** if you hit a flaky test, prove it is flaky (repeated
   runs / signature analysis), disable it, and add a ticket to `llm-wiki/tickets/testinfra.md`. No
   human authorization needed for that.
@@ -426,8 +427,8 @@ reasoning. Anchors: `llm-wiki/architecture.md` (invariants) and `llm-wiki/build-
   the diff. They sit on top of the anchors below, not in place of them.
 - **A guard that cannot go red is not a guard.** For any test or CI gate the diff touches,
   work out what would have to break for it to fail and whether that is still reachable —
-  this class presents as a green test, not a red one. `tests/test_ci_coverage.rs` is the
-  worked example, and its own unit tests are the pattern: each false-coverage mode it must
+  this class presents as a green test, not a red one. cost-report's `test_source_formatting/ci_coverage.rs` is
+  the worked example, and its own unit tests are the pattern: each false-coverage mode it must
   never regress into is pinned as a case. Construct the input that should turn a guard red
   and show that it does.
 - **Primary task — coverage-gap analysis:** new public surface without tests; deleted or

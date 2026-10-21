@@ -7,9 +7,61 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RunMeta, SKIPPED, macro_invocations,
-    macro_invocations_in, ordered_sections, record_header, rows_match_the_recipes, testdata_root,
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RunMeta, SKIPPED, ordered_sections,
+    record_header, rows_match_the_recipes, testdata_root,
 };
+
+/// One `corpus_query_benchmark!` line: the query and its timed modes as written.
+struct TimedDeclaration {
+    dataset: &'static str,
+    query: &'static str,
+    modes: &'static str,
+}
+
+inventory::collect!(TimedDeclaration);
+
+/// One `corpus_query!` line's device modes and its schema-validation mask, as written. The
+/// registry cannot serve the mask: its `schema_validation` column holds only
+/// `enabled|disabled`.
+struct LineDeclaration {
+    dataset: &'static str,
+    query: &'static str,
+    gpu_modes: &'static str,
+    mask: &'static str,
+}
+
+inventory::collect!(LineDeclaration);
+
+// Both lists compiled in rather than read: a staged binary runs where the checkout is not.
+macro_rules! corpus_query_benchmark {
+    ($dataset:ident, $sf:expr, $query:ident, $($modes:tt)+) => {
+        inventory::submit! {
+            TimedDeclaration {
+                dataset: stringify!($dataset),
+                query: stringify!($query),
+                modes: stringify!($($modes)+),
+            }
+        }
+    };
+}
+
+macro_rules! corpus_query {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+,
+     $duck:ident $(($($duck_arg:tt)*))?, $cpu_oracle:ident $(($($cpu_arg:tt)*))?,
+     $gpu_oracle:ident $(($($gpu_arg:tt)*))?, $validation:ident $(($($vmode:tt)*))?) => {
+        inventory::submit! {
+            LineDeclaration {
+                dataset: stringify!($dataset),
+                query: stringify!($query),
+                gpu_modes: stringify!($($gpu)|+),
+                mask: concat!("" $(, stringify!($($vmode)*))?),
+            }
+        }
+    };
+}
+
+include!("../common/corpus_benchmark_cases.inc");
+include!("../common/corpus_cases.inc");
 
 /// Every `.benchmark.txt` the tree holds.
 ///
@@ -290,31 +342,22 @@ fn a_bare_calls_row_names_the_seq_it_was_handed() {
 /// The two lists are separate on purpose — they disagree about sf — so nothing but this
 /// compares them. A mode a query is not enabled at fails at plan time on the GPU host,
 /// tens of minutes into a run, having measured nothing.
-///
-/// Read as text rather than through the inventories: `corpus_cases.inc` is expanded only
-/// by the two corpus binaries, and a rust-only build links neither.
 #[test]
 fn every_timed_case_is_enabled_on_a_device() {
-    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common");
-    let timed = macro_invocations(
-        &cases.join("corpus_benchmark_cases.inc"),
-        "corpus_query_benchmark!",
-    );
-    let corpus = macro_invocations(&cases.join("corpus_cases.inc"), "corpus_query!");
+    let timed: Vec<&TimedDeclaration> = inventory::iter::<TimedDeclaration>.into_iter().collect();
     assert!(!timed.is_empty(), "the benchmark list declares nothing");
-
-    for args in &timed {
-        let (dataset, query) = (args[0].as_str(), args[2].as_str());
-        let enabled = corpus
-            .iter()
-            .find(|line| line[0] == dataset && line[2] == query)
+    for case in timed {
+        let (dataset, query) = (case.dataset, case.query);
+        let line = inventory::iter::<LineDeclaration>
+            .into_iter()
+            .find(|line| line.dataset == dataset && line.query == query)
             .unwrap_or_else(|| {
                 panic!("{dataset}/{query} is timed and is not in the corpus at all")
             });
-        // The fifth argument is the device column; `none` means the query is enabled at no
-        // mode there, which reads as an empty set rather than as a mode called none.
-        let on_device = modes(&enabled[4]);
-        for mode in modes(&args[3]) {
+        // `none` means the query is enabled at no device mode, which reads as an empty set
+        // rather than as a mode called none.
+        let on_device = modes(line.gpu_modes);
+        for mode in modes(case.modes) {
             assert!(
                 on_device.contains(&mode),
                 "{dataset}/{query} is timed at {mode} and corpus_cases.inc enables it on a \
@@ -326,22 +369,20 @@ fn every_timed_case_is_enabled_on_a_device() {
 
 /// Every schema-validation mask entry against its own line's device modes.
 ///
-/// On the text side because the decoder cannot see this: `is_validated_at` is asked only
-/// about a mode a run actually reached, so an entry written for a cell that is off is never
-/// decoded, and arms itself the day that cell is enabled. q28 and `tpch/rollup-distinct` are
-/// the next two lines a mask will be written for and both are off at every device mode, so
-/// the shape is one ticket away. This reader sees every declaration either way.
+/// On the declaration side because the decoder cannot see this: `is_validated_at` is asked
+/// only about a mode a run actually reached, so an entry written for a cell that is off is
+/// never decoded, and arms itself the day that cell is enabled. This reader sees every
+/// declaration either way.
 #[test]
 fn every_mask_entry_is_one_of_its_lines_device_modes() {
-    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common");
-    let corpus = macro_invocations(&cases.join("corpus_cases.inc"), "corpus_query!");
-    assert!(!corpus.is_empty(), "the corpus list declares nothing");
-    let dead: Vec<String> = corpus
+    let lines: Vec<&LineDeclaration> = inventory::iter::<LineDeclaration>.into_iter().collect();
+    assert!(!lines.is_empty(), "the corpus list declares nothing");
+    let dead: Vec<String> = lines
         .iter()
-        .flat_map(|args| {
-            dead_mask_entries(args)
+        .flat_map(|line| {
+            dead_mask_entries(line.gpu_modes, line.mask)
                 .into_iter()
-                .map(move |entry| format!("  {}/{}: {entry}", args[0], args[2]))
+                .map(move |entry| format!("  {}/{}: {entry}", line.dataset, line.query))
         })
         .collect();
     assert!(
@@ -355,70 +396,44 @@ fn every_mask_entry_is_one_of_its_lines_device_modes() {
 /// The two shapes that reader has to call dead, and the three it must not.
 ///
 /// The last three are what keep it from reading nothing at all: a mask whose entries are its
-/// own modes, the same under `all_modes`, and a keyword with no mask, which is most of the
+/// own modes, the same under `all_modes`, and a line with no mask, which is most of the
 /// corpus.
 #[test]
 fn a_mask_entry_its_line_never_runs_on_a_device_is_dead() {
-    let read = |line: &str| dead_mask_entries(&macro_invocations_in(line, "corpus_query!")[0]);
-    let line = |gpu: &str, validation: &str| {
-        format!(
-            "corpus_query!(tpch, 1, distinct_functions, tp1_single, {gpu}, duckdb_approx, \
-             data_fusion_disabled, golden_approx_std, {validation});"
-        )
-    };
     assert_eq!(
-        read(&line(
-            "tp1_single",
-            "schema_validation_disabled(tp4_single)"
-        )),
+        dead_mask_entries("tp1_single", "tp4_single"),
         ["tp4_single"]
     );
     assert_eq!(
-        read(&line(
-            "none",
-            "schema_validation_disabled(tp4_single | tp1_single)"
-        )),
+        dead_mask_entries("none", "tp4_single | tp1_single"),
         ["tp4_single", "tp1_single"]
     );
-    assert!(
-        read(&line(
-            "tp1_single | tp4_single",
-            "schema_validation_disabled(tp4_single)"
-        ))
-        .is_empty()
-    );
-    assert!(
-        read(&line(
-            "all_modes",
-            "schema_validation_disabled(tp4_single | tp4_rowgroup | tp4_sized)"
-        ))
-        .is_empty()
-    );
-    assert!(read(&line("tp1_single", "schema_validation_enabled")).is_empty());
+    assert!(dead_mask_entries("tp1_single | tp4_single", "tp4_single").is_empty());
+    assert!(dead_mask_entries("all_modes", "tp4_single | tp4_rowgroup | tp4_sized").is_empty());
+    assert!(dead_mask_entries("tp1_single", "").is_empty());
 }
 
 /// The mask entries a declaration names that its own device modes do not include.
 ///
-/// A keyword with no mask has none, and a `none` device column makes every entry one:
-/// there is no cell for the exemption to apply to. Whether an entry is a mode at all stays
-/// `mask_names`' check, at run time, where it protects a hand-built string too.
-fn dead_mask_entries(args: &[String]) -> Vec<String> {
-    let Some((_, mask)) = args[8].split_once('(') else {
+/// No mask has none, and a `none` device column makes every entry one: there is no cell for
+/// the exemption to apply to. Whether an entry is a mode at all stays `mask_names`' check, at
+/// run time, where it protects a hand-built string too.
+fn dead_mask_entries(gpu_modes: &str, mask: &str) -> Vec<String> {
+    if mask.trim().is_empty() {
         return Vec::new();
-    };
-    let on_device = modes(&args[4]);
-    mask.trim_end_matches(')')
-        .split('|')
+    }
+    let on_device = modes(gpu_modes);
+    mask.split('|')
         .map(|entry| entry.trim().to_string())
         .filter(|entry| !on_device.contains(entry))
         .collect()
 }
 
-/// A `mode1 | mode2` argument as a set. `none` is the empty set, `all_modes` the five —
-/// this reader parses the include as text, so the macro's sugar has to be expanded here too
-/// or `all_modes` reads as a mode of that name and nothing is enabled.
+/// A `mode1 | mode2` argument as a set. `none` is the empty set, `all_modes` the five: the
+/// argument is the line's text, so the macro's sugar has to be expanded here too or
+/// `all_modes` reads as a mode of that name and nothing is enabled.
 fn modes(argument: &str) -> BTreeSet<String> {
-    match argument {
+    match argument.trim() {
         "none" => BTreeSet::new(),
         "all_modes" => MODES.iter().map(Mode::ident).collect(),
         named => named.split('|').map(|m| m.trim().to_string()).collect(),

@@ -6,21 +6,24 @@ engine and checked against DataFusion, so a defect the two share passes every ti
 what the same queries answer on DuckDB, over the same sf1 parquet.
 
 Rendered in the shape of `mini.result.txt` so the two read side by side: one `== <query>` section
-per query in `testdata/<dataset>-queries/`, a `+---+` table with its data rows sorted as text, and
-the same 262144-byte cap. A query DuckDB refuses gets `failed: <first line of the error>`. There
+per query in `testdata/<dataset>-queries/`, a `+---+` table with its data rows sorted as text —
+in DuckDB's own order for a query whose registry `duckdb_oracle` says `no_sort` — and the same
+262144-byte cap. A query DuckDB refuses gets `failed: <first line of the error>`. There
 is no `mode=` line: DuckDB has no planning modes. Cells: NULL is empty, a decimal keeps its scale,
 a float is Python's shortest round-trip form, a date is ISO.
 
 The session takes DataFusion's two rules that would otherwise be divergences of convention rather
 than of answers: NULLs last ascending and first descending, and integer `/` truncating.
 
-Deterministic: threads=1, and rows are sorted after rendering.
+Deterministic: threads=1, and rows are sorted after rendering unless the query's answer is
+ordered by its SQL.
 
 Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
     python3 testdata/duckdb_result.py [--dataset tpch|tpcds|pbench] [--only q1,q2]
 """
 
 import argparse
+import csv
 import datetime
 import decimal
 import hashlib
@@ -166,7 +169,9 @@ def fingerprint(names, types, rows):
     return "\n".join(out) + "\n"
 
 
-def render(names, rows):
+def render(names, rows, keep_order=False):
+    """The table, its data rows sorted as text — or in DuckDB's order under `keep_order`, for a
+    query whose line says `no_sort`."""
     cells = [[cell(v) for v in row] for row in rows]
     widths = [len(n) for n in names]
     for row in cells:
@@ -174,8 +179,24 @@ def render(names, rows):
             widths[i] = max(widths[i], len(c))
     border = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
     line = lambda values: "| " + " | ".join(v.ljust(w) for v, w in zip(values, widths)) + " |"
-    body = sorted(line(r) for r in cells)
+    body = [line(r) for r in cells]
+    if not keep_order:
+        body.sort()
     return "\n".join([border, line(names), border, *body, border]) + "\n"
+
+
+def ordered_queries(dataset, registry=ROOT / "cost-registry.csv"):
+    """The query stems of `dataset` whose registry `duckdb_oracle` says `no_sort`: their rows
+    are compared in order, so their sections keep DuckDB's. Read with the csv module, so a
+    quoted spelling holding commas is one cell."""
+    with open(registry, newline="") as f:
+        rows = list(csv.DictReader(f))
+    tight = lambda s: "".join(s.split())
+    return {
+        row["query"].replace("_", "-")
+        for row in rows
+        if row["dataset"] == dataset and tight(row["duckdb_oracle"]).startswith("duckdb(no_sort,")
+    }
 
 
 def query_order(path):
@@ -243,6 +264,7 @@ def generate(dataset, only):
     con.execute("SET integer_division=true")
     for table in sorted(data.glob("*.parquet")):
         con.execute(f"CREATE VIEW {table.stem} AS SELECT * FROM read_parquet('{table}')")
+    ordered = ordered_queries(dataset)
     out = []
     for query in queries:
         out.append(f"== {query.stem}\n")
@@ -255,7 +277,7 @@ def generate(dataset, only):
             out.append(f"failed: {str(error).splitlines()[0]}\n")
             print(f"{dataset}/{query.stem}: failed", file=sys.stderr)
             continue
-        table = render(names, rows)
+        table = render(names, rows, keep_order=query.stem in ordered)
         if len(table.encode()) >= CAP:
             out.append(fingerprint(names, types, rows))
         else:

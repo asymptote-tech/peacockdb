@@ -6,7 +6,8 @@ use std::sync::Arc;
 use datafusion::arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
 use datafusion::execution::context::{SessionConfig, SessionContext};
 
-use super::hazard_in;
+use super::{hazard_in, line_order_is_right, plan_ends_in_sort};
+use crate::test_support::RowOrder;
 
 /// `a(k, v)` and `b(k, w)`, joined one to one on `k`. `w` ties on its first two rows, so
 /// `ORDER BY w` cuts between two rows whose `v` differ after one row, and not after two.
@@ -139,4 +140,40 @@ async fn an_offset_through_a_projection_inside_a_tie_is_a_hazard() {
     let sql = "SELECT a.v FROM a JOIN b ON a.k = b.k ORDER BY b.w OFFSET 2";
     let why = hazard_in(&ctx, sql).await;
     assert!(why.is_some_and(|why| why.contains("tie")));
+}
+
+/// Whether the plan ends in a sort, read through a limit and a projection: an `ORDER BY`, the
+/// same under a `LIMIT`, a projection over a sorted, limited subquery, and a `GROUP BY` with no
+/// sort at all.
+#[tokio::test]
+async fn plan_ends_in_sort_reads_through_limit_and_projection() {
+    let ctx = tables();
+    let ends = |sql: &'static str| {
+        let ctx = ctx.clone();
+        async move {
+            let plan = ctx
+                .sql(sql)
+                .await
+                .expect("plans")
+                .create_physical_plan()
+                .await
+                .expect("a physical plan");
+            plan_ends_in_sort(&plan)
+        }
+    };
+    assert!(ends("SELECT k, w FROM b ORDER BY w").await);
+    assert!(ends("SELECT k, w FROM b ORDER BY w LIMIT 2").await);
+    assert!(ends("SELECT k + 1 AS j FROM (SELECT k, w FROM b ORDER BY w LIMIT 2) s").await);
+    assert!(!ends("SELECT w, count(*) FROM b GROUP BY w").await);
+}
+
+/// The guard's decision in both failing directions: `sort` over a plan that ends in a sort,
+/// and `no_sort` over one that does not.
+#[test]
+fn a_line_declaring_sort_over_a_sorted_plan_fails() {
+    let said = line_order_is_right(RowOrder::Sort, true).expect_err("sort over a sorted plan");
+    assert!(said.contains("say no_sort"), "{said}");
+    assert!(line_order_is_right(RowOrder::NoSort, false).is_err());
+    assert_eq!(line_order_is_right(RowOrder::NoSort, true), Ok(()));
+    assert_eq!(line_order_is_right(RowOrder::Sort, false), Ok(()));
 }

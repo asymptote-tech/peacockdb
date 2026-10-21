@@ -7,7 +7,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 ## Contents
 
 - [Aggregates](#aggregates)
-  - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
   - [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
   - [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 - [Sort / Limit](#sort--limit)
@@ -17,32 +16,13 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
-  - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Testing](#testing)
-  - [#56 (q2 fingerprinted answer) `duckdb_approx` refuses q2's over-cap device recording](#t56)
+  - [#56 (q2 fingerprinted answer) `duckdb(…, approx)` refuses q2's over-cap device recording](#t56)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
   - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
-  - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
-  - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
-  - [#287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for](#t287)
 
 ## Aggregates
-
-<a id="t264"></a>
-### #264 (computed group key) the device refuses a group key that is not a bare column
-`CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
-(`execute_aggregate`, `cpp/src/operators/aggregate.cpp`) for any group expression that is not a `ColumnRef`, so
-`GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on the
-device, at every mode. The cpu answers. The planner does not lower a group expression into a
-project below the aggregate, and the recipe hands the expression through as it stands — so the
-smallest fix is a planner one, and the device needs no new arm.
-
-**Corpus queries:** `pbench/timestamp-s-key-group`
-(`GROUP BY arrow_cast(f_ts_s, 'Timestamp(Second, None)')`), its five device cells off here. Not on
-[#240](../archive/archived-tickets.md#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
-three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
-until this ticket had a number.
 
 <a id="t267"></a>
 ### #267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4
@@ -85,8 +65,7 @@ NULLS LAST` comes back nulls first, and `DESC NULLS FIRST` comes back nulls last
 
 `sort.cpp` and the merge in `node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE`
 and its absence to `AFTER`, and cuDF applies that before it flips a `DESCENDING` key. Ascending
-keys are right, which is why every corpus ORDER BY has agreed: no cell's descending key carries
-a null. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
+keys are right. DataFusion's default for `DESC` is nulls first, so a query sorting a nullable column
 descending gets its null rows first on the cpu and last on the device. The mapping has to be
 relative to the direction — `BEFORE` when `nulls_first == asc` — at both sites, since a merge
 over sorted runs must order as the sort did, and the two sites have to move together: runs
@@ -95,6 +74,11 @@ precondition, and the device answers duplicated and dropped rows — a shape no 
 today, since every run the merge sees was sorted by the same mapping. Pinned by `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device`
 (`gpu_tests/exec_cases.rs`), the two `…_descending_key_nulls_first_puts_them_last…` merge pins
 and `…_over_runs_each_carrying_a_null_duplicates_and_drops_rows…` (`gpu_tests/accumulate_cases.rs`).
+
+**Corpus queries:** `tpcds/q34` (`c_preferred_cust_flag DESC NULLS FIRST`) and `tpcds/q71`
+(`ext_price DESC NULLS FIRST`), their five device cells off here. Both carry NULLs in that key,
+and the row-for-row compare `oracle-cleanup` added found them at every mode, 2026-10-21; the
+sorted compare before it could not.
 
 
 <a id="t217"></a>
@@ -193,48 +177,27 @@ timestamp side, so `90 days + date` answers a date. Unconfirmed on a build. Then
 and the uncrossable set go empty, the wire test takes a month interval, the golden line becomes
 a plan, and mixed-join's device cells turn on.
 
-<a id="t251"></a>
-### #251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up
-
-DataFusion cuts a decimal division at the scale it declared for the result rather than rounding,
-and we follow it. The truncated value then feeds the rest of the expression, so the answer is
-wrong in digits it printed.
-
-Two shapes, measured against DuckDB by #235's comparison. `(x / y) * 100` multiplies the
-truncation by a hundred: tpcds q58's `ss_dev` is `103.719200` against `103.71926462…`, and q61's
-ratio `51.82319100` against `51.82319145…` — 45 to 97 units in our last rendered place.
-`sum(x / y)` adds one truncation per row: q66's twelve `*_per_sq_foot` columns are 1 to 2 units
-short. A quotient nothing consumes stays inside its scale — tpch q1's `avg_qty` is `25.522005`
-against `25.522005853…` — so it is the expression around the division that loses the digits.
-
-**Corpus queries:** `tpcds/q58` (columns 2, 4, 6), `tpcds/q61` (column 2) and `tpcds/q66`
-(columns 20-31), each `duckdb_divergent(251, ...)` in `corpus_cases.inc`.
-
-**Fix proposed:** round the quotient at its declared scale, or widen the scale a division
-declares so the next operand has digits to spend. Either departs from DataFusion's convention,
-so the decision comes before the code.
-
 ## Testing
 
 <a id="t56"></a>
-### #56 (q2 fingerprinted answer) `duckdb_approx` refuses q2's over-cap device recording
+### #56 (q2 fingerprinted answer) `duckdb(…, approx)` refuses q2's over-cap device recording
 
 tpcds q2's device answer is right, and its five gpu cells stay off because the DuckDB check
 cannot read how it is recorded. Registry row 3 tags `56`.
 
-**Measured on an L40S (round-tolerance, 2026-10-21).** Under `golden_approx_std` q2 passed at all
+**Measured on an L40S (round-tolerance, 2026-10-21).** Under `golden(…, approx_std)` q2 passed at all
 five device modes against `mini.result.txt`, in memory; the five recordings are identical. The
 cpu's q2 section is 261,767 bytes, just under the 256 KiB result cap. Some cells of the device's
 seven `round(…, 2)` columns print one ulp longer ([#60](../archive/archived-tickets.md#t60)), a
 column is padded to its widest cell, and the device's rendering crosses the cap. So
-`gpu-result.txt` gets a fingerprint, which `duckdb_approx` refuses ("declare
+`gpu-result.txt` gets a fingerprint, which `duckdb(…, approx)` refuses ("declare
 duckdb_fingerprint"); `duckdb_fingerprint` refuses the cpu's side, which holds rows. One
 `duckdb_oracle` per line serves neither. The fingerprint agrees with DuckDB's rows: 2513 rows,
 each column's sum, min and max within 2.5e-14 relative at every mode.
 
-**Fix proposed:** in `compare_sections` (`test_support/duckdb_oracle.rs`), let `duckdb_approx`
+**Fix proposed:** in `compare_sections` (`test_support/duckdb_oracle.rs`), let `duckdb(…, approx)`
 fall back to `compare_over_cap` for the device's recording only (`duckdb_gpu_case`), keeping the
-cpu side's refusal. Then q2's line takes `duckdb_approx` and `golden_approx_std`, its sections
+cpu side's refusal. Then q2's line takes `duckdb(…, approx)` and `golden(…, approx_std)`, its sections
 are recorded, and #56 is done. The CASE-over-string-equality shape #56 was first filed for is
 proven by `a_grouped_sum_of_a_case_over_a_string_equality_agrees`.
 
@@ -314,112 +277,3 @@ unnoticed there. Found by `reports/hacks-audit.md` §6.
 return `PlanError::Invalid` naming the node and both counts, in the style of `declared_width`'s
 message. Test, in `plan/validate/tests.rs`: a hand-built sort declaring one column over a
 two-column source is refused, and the same sort declaring both columns passes.
-
-<a id="t253"></a>
-### #253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths
-
-`duckdb_divergent(<ticket>, <positions>)` is how a corpus line records a difference the oracle
-found and a ticket explains. It reaches the per-line cpu comparison and nothing else, so two
-paths can find a divergence and have no way to say so. Both block tasks already on chain J's
-board.
-
-**A device answer that differs from DuckDB while the cpu's matches.** One `duckdb_oracle` per
-line serves the cpu case and every `duckdb_gpu_<query>_<mode>` case, and the two values a
-developer has both go red: `duckdb_exact` fails the device case, and `duckdb_divergent` fails
-the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
-diverging". An empty position list does the same at the row level. So the only green options are
-to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
-keyed by mode for in the first place — a lane split or a shuffle defect shows per mode.
-
-**An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
-column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
-"declare `duckdb_fingerprint`" — the error text at `test_support/fingerprint.rs` says
-`duckdb_divergent does not reach this path`. So an over-cap answer is all or nothing: one
-SHA-256 over the rendered rows either matches or the line cannot be green at all.
-[`join-backend`](../tasks/join-backend.md) turns tpch q11's cpu cells on, and DuckDB's side of
-q11 is already a 27,604-row fingerprint with no approximate column, so that task is the first to
-hold a fingerprint nobody has compared.
-
-A third shape reaches the same door: the two writers classing one column differently — a decimal
-on our side against a double on DuckDB's, which the [`duckdb-oracle`](../tasks/duckdb-oracle.md)
-spec's step 3 asks to be approximate and which cannot be, since neither writer can see the
-other's declared type and a fingerprint no longer holds the rows to rehash. Today that is a hard
-error naming both classifiers. No committed section has the shape.
-
-**Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
-give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
-a triple or a per-column exemption can carry a known difference while `rows` and the remaining
-columns stay checked.
-
-**2026-10-09: `stale-cells` ran and produced no instance.** It was named here as the first task
-that could, and its sixteen device cells all matched DuckDB, so the first half is still a shape
-nothing has exhibited. The harness was deliberately not widened there: the task's restriction was
-the sixteen cells, and a device-only divergence would have stayed off under this ticket.
-
-**pbench moved the deadline, and widened both halves.** pbench landed ahead of `stale-cells`,
-and the next task to build was `repartition-keys` — which owns `uint-key-group`, a
-`duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
-on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
-fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is
-`live_cpu` because the answer is over the cap; and the first half — a device answer diverging
-while the cpu's matches — now has 27 pbench rows in reach, all of them DuckDB-green on the cpu
-already, in a dataset that exists to make the device differ.
-
-**Decided, 2026-10-08, so that whoever implements it need not re-litigate it.** Two changes, both
-additive, neither touching a line that is green today:
-
-- **`duckdb_divergent` gains a side**, written as a trailing non-numeric component:
-  `duckdb_divergent(<ticket>, <positions…>[, <side>])` where the side is `both`, `cpu` or `device`.
-  Positions are variadic — `duckdb_oracle.rs`'s `divergent` maps all of `args[1..]` through
-  `number`, and `corpus_cases.inc:178` writes thirteen components — so the side cannot be the third
-  one. A last component that parses as a number, or no last component at all, means `both`, which
-  is today's meaning and leaves every existing line alone. The named columns must still differ **on the side
-  named** and must still agree on the other, so a cell that stops diverging on the device fails
-  exactly as one that stops diverging on the cpu does today. That is what makes the variant worth
-  having: it narrows the claim rather than waiving it.
-- **`duckdb_fingerprint` gains the optional ticket and column list** `duckdb_divergent` already
-  carries: `duckdb_fingerprint(<ticket>, <positions>)`. `rows` and every column not named stay
-  checked — the `nonnull` counts, the triples, and the hash recomputed over the exact columns the
-  line does not except. A hash cannot be recomputed from a fingerprint, so an excepted column
-  means both writers must leave it out of their hash, which makes the exception a property of the
-  section rather than of the comparison: the writers read the line's exceptions. That is the part
-  that costs work, and it is why this is a ticket and not a line edit.
-
-Rejected: a tenth `corpus_query!` argument for a separate device oracle. It doubles the oracle
-column on all 176 lines to express something four or five of them need, and a line's coverage
-stops reading off the line. Also rejected: classing every decimal approximate so the fingerprint
-needs no exception — it takes 1.5M rows of `o_totalprice` out of row-for-row checking, which is
-the thing the fingerprint exists to do.
-
-<a id="t254"></a>
-### #254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing
-
-[#235](../archive/archived-tickets.md#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
-and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
-`result_matches` were split out of their panicking wrappers and are driven by negative cases.
-`CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited` (`test_support/corpus.rs`),
-which runs a live DataFusion query and takes no injectable answer, so nothing hands it a wrong
-one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
-
-One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
-not determined — so the exposure is small and the fix is the same shape as the other two: split
-the comparison from the query, and hand the split a doctored answer that is not a subset.
-
-<a id="t287"></a>
-### #287 (row order unchecked) no corpus compare checks the order an `ORDER BY` asks for
-
-Every corpus compare sorts both answers' rows before comparing them. `batches_to_sorted_str`
-(`test_support/result_text.rs`) pretty-prints a result and sorts its data lines, and the cpu
-oracles (`data_fusion_*`) and the device's (`golden_*`, `live_cpu`) all compare that text. So a
-query that ends in `ORDER BY` and answers the right rows in the wrong order passes on both
-engines. An ordering bug is caught only where it changes which rows survive, as under
-`ORDER BY … LIMIT n`. [#202](#t202), a descending key's nulls on the wrong end on the device, is
-one that an order-blind compare misses wherever no limit cuts the misplaced rows.
-
-**Corpus queries:** every query whose answer DataFusion orders at the root — most of TPC-H and
-TPC-DS end in `ORDER BY`.
-
-**Fix proposed:** where the oracle's physical plan has a sort at its root, keep the multiset
-compare and add an order check: our rows must be non-decreasing in the sort's keys, with their
-directions and null placement. Ties stay free, so a stable and an unstable sort both pass. The
-same check serves both engines, since the device compares against the cpu's answer.

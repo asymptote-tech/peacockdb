@@ -19,13 +19,13 @@ are never reused, so an old reference still resolves there.
 
 ## Contents
 
-92 open tickets, in file order.
+85 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 16 | #264 #267 #289 #202 #217 #204 #214 #168 #251 #56 #227 #174 #233 #253 #254 #287 |
-| [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #255 #284 |
-| [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 12 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 11 | #267 #289 #202 #217 #204 #214 #168 #56 #227 #174 #233 |
+| [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #284 #264 |
+| [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 13 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 #255 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |
 | [`df-upgrade.md`](tickets/df-upgrade.md) | The DataFusion upgrade | 6 | #241 #23 #166 #228 #247 #257 |
 | [`memory.md`](tickets/memory.md) | Memory accounting and budgets | 6 | #182 #179 #177 #167 #229 #265 |
@@ -33,4 +33,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #149 #148 #231 #232 #242 #248 #286 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 7 | #266 #263 #258 #252 #178 #176 #129 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 4 | #258 #178 #176 #129 |

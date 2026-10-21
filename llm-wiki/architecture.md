@@ -591,7 +591,9 @@ residual's per-row width, chunked at `chunk_bytes`. A LeftSemi, LeftAnti or Left
 without a crossing conjunct also pays the batch's key bytes, for its distinct keys
 (`gpu_backend/join.rs`). At `tp4-sized` the planner writes
 `chunk_bytes` as a sixteenth of the budget, capped at 1 GiB, so the accountant and the session
-bound one call alike; the unbudgeted modes write 0, which the session reads as 1 GiB.
+bound one call alike. The unbudgeted modes write the default, 1 GiB. The value is
+`gpu_plan.fbs`'s `JoinLimits.DefaultChunkBytes`, which Rust reads as `wire::DEFAULT_CHUNK_BYTES`
+and C++ as `fb::JoinLimits_DefaultChunkBytes`. The session refuses 0.
 
 ### Where the sides run
 
@@ -926,10 +928,12 @@ pinned.
 **These rules pin execution for a given plan, not across plans.** Two plans for one query may
 legitimately return different rows where the SQL does not determine them, which is what an
 unordered `LIMIT` is. Results are compared row-sorted, so emission order is not part of the
-contract. What must hold is that one plan run twice gives the same rows in the same batches.
+contract — except for a query whose plan ends in a sort, whose rows are compared in order
+(`no_sort`, build-test.md's Notes). What must hold is that one plan run twice gives the same rows in the same batches.
 Not in the same order: a device hash or nested-loop join writes its pairs through an atomic
 cursor, so its row order varies run to run. A float reduction above one, or any on the device,
-can then move in its low bits, which is what `golden_approx_std` and `duckdb_approx` exist for.
+can then move in its low bits, which is what `golden(…, approx_std)` and `duckdb(…, approx)`
+exist for.
 A selection by position above such a join — a limit with no sort between, or a sorted cut
 between tied rows that differ — would keep different rows per run, so no device cell is enabled
 over one (`test_support/order_hazard.rs`). A cross join emits build-row-major on both engines and
@@ -1046,7 +1050,7 @@ field with no consumer reads as a knob (#132).
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — the mask from `cudf::compute_column(tv, predicate)`, or from `build_column` when the AST cannot take the predicate (LIKE, CASE, a scalar function), then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and what `cudf_ast_can_evaluate` refuses takes `build_column` instead — among others LIKE, CASE, a scalar function, a binary with a decimal operand or a string literal, and a decimal literal not directly under a cast to `Float64` or `Int64`. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args` and `state_names`; its `ddof` is read by nobody, since the finalize is a project), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys and no `stddev` or `var` it is `cudf::reduce` to one row; a keyless node holding one runs the groupby on one constant key, dropped after; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
-| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; 0 is 1 GiB) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
+| [`CudfJoin`](../flatbuffers/gpu_plan.fbs) | `join_type` (the nine), `keys`, `filter` + `filter_columns` (residual), `null_equals_null`, `build_schema` / `probe_schema` (an absent side's types, and a pad's), `projection`, `chunk_bytes` (the pair scratch budget per call; default `JoinLimits.DefaultChunkBytes`, 1 GiB; 0 refused) | [`join_session.cpp`](../cpp/src/operators/join_session.cpp) — a leaf `execute_node` refuses: the tables arrive through `peacock_join_build` and `_probe`, which hold one `cudf::hash_join` or `distinct_hash_join` across every batch where the join has keys and its residual does not take the `mixed_*` path. Pairs come from `hash_join::inner_join` / `left_join` sized by their `*_size` twins, rows from `distinct_hash_join::left_join`, `mixed_left_semi_join` or `conditional_left_semi_join`, and the keyless arms from `conditional_inner_join` / `conditional_left_join`, `cross_join` where there is no condition either, or a chunked cross of index columns. Anti is semi's complement everywhere; no `full_join` and no `*_anti_join` form is called |
 | [`CudfSort`](../flatbuffers/gpu_plan.fbs) | `exprs` (`asc`, `nulls_first` per key), `fetch`, `preserve_partitioning` | [`sort.cpp`](../cpp/src/operators/sort.cpp) — `cudf::sorted_order(keys, orders, null_orders)` then `cudf::gather`, and [`cudf::slice`](../cpp/src/operators/sort.cpp) when `fetch` makes it a top-N — read as none at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | [`CudfCoalesceBatches`](../flatbuffers/gpu_plan.fbs) | `target_batch_size` — **read by nobody** (#132) | [`dispatch.cpp`](../cpp/src/operators/dispatch.cpp) — `execute_passthrough`: the child's table, untouched. A GPU node is one materialized table, so there is no batching to do |
 | [`CudfCoalescePartitions`](../flatbuffers/gpu_plan.fbs) | nothing | [`node_session.cpp`](../cpp/src/node_session.cpp) — `cudf::concatenate(views)` over the input partitions; a single input has nothing to collapse and passes through |

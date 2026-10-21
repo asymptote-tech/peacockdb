@@ -6,7 +6,6 @@
 //! off one line per query rather than two lists that can disagree.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use datafusion::arrow::array::RecordBatch;
@@ -19,9 +18,9 @@ use crate::plan_text::render_run;
 use crate::planner;
 
 use super::{
-    CellKind, CostModel, MODES, Mode, Regeneration, ResultDigest, assert_results_match,
-    batches_to_sorted_str, corpus_golden, data_dir_for, fingerprint, mode_named, queries_dir_for,
-    registry, result_text, total_rows,
+    CellKind, CostModel, DuckdbOracle, MODES, Mode, Regeneration, ResultDigest, RowOrder,
+    assert_results_match, corpus_golden, data_dir_for, fingerprint, mode_named, queries_dir_for,
+    registry, result_text, tight, total_rows,
 };
 
 #[cfg(test)]
@@ -94,7 +93,7 @@ pub(crate) async fn run_cpu(dataset: &str, sf: &str, query: &str, mode: &Mode) -
 /// The answer against plain DataFusion at `target_partitions = 1`, asked whichever of the
 /// four ways this query's declaration names. Runs on every case, regenerating or not: a
 /// wrong answer must not reach a golden, and this is the check that stops it — for the three
-/// that compare. `DataFusionDisabled` compares nothing and stops nothing, so for a query
+/// that compare. `Disabled` compares nothing and stops nothing, so for a query
 /// declaring it the answer is held by the line's DuckDB oracle, which
 /// `a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb`
 /// (`tests/test_cpu_corpus.rs`) holds to one that compares.
@@ -110,11 +109,9 @@ pub(crate) async fn assert_answer(
     match cpu_oracle_mode(oracle) {
         // Nothing to compare against: the query's answer is held by a test naming its own
         // oracle, not by this session.
-        CpuOracle::DataFusionDisabled => {}
-        CpuOracle::DataFusionSubset => {
-            assert_subset_of_unlimited(dataset, sf, query, batches, &what).await
-        }
-        CpuOracle::DataFusionExact => {
+        CpuOracle::Disabled => {}
+        CpuOracle::Subset => assert_subset_of_unlimited(dataset, sf, query, batches, &what).await,
+        CpuOracle::SortExact => {
             let expected = oracle_digest(dataset, sf, query, &what).await;
             let actual = result_text::digest_of(batches);
             if expected != actual {
@@ -379,9 +376,18 @@ pub(crate) fn query_text(dataset: &str, query: &str) -> String {
 ///
 /// The oracle comparison comes first and runs whether or not this is a regenerating run —
 /// a wrong answer must never reach a golden, and freezing one is the only way this tier
-/// could record something no later run would question.
-pub(crate) async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, cpu_oracle: &str) {
+/// could record something no later run would question. `duckdb_oracle` is the line's DuckDB
+/// spelling, whose row order the result section is written in.
+pub(crate) async fn cpu_case(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &str,
+    cpu_oracle: &str,
+    duckdb_oracle: &str,
+) {
     let mode = mode_named(mode);
+    let order = DuckdbOracle::parse(duckdb_oracle).row_order();
     let what = format!("{dataset}/{query} at {}", mode.name);
     let run = run_cpu(dataset, sf, query, mode).await;
     assert_answer(dataset, sf, query, mode, cpu_oracle, &run.batches).await;
@@ -408,7 +414,7 @@ pub(crate) async fn cpu_case(dataset: &str, sf: &str, query: &str, mode: &str, c
         &cost,
     );
     if authoritative_mode(dataset, sf, query).is_some_and(|author| author.name == mode.name) {
-        assert_result_section(dataset, sf, query, mode, &run.batches);
+        assert_result_section(dataset, sf, query, mode, order, &run.batches);
     }
 }
 
@@ -433,20 +439,20 @@ pub(crate) fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option
     })
 }
 
-/// An answer as a result section holds it: the rendered table, or the fingerprint an answer
-/// over the cap leaves, with `true` for the second. The caller puts the `mode=` line where
-/// its own file wants it.
+/// An answer as a result section holds it: the rendered table, its rows in `order`, or the
+/// fingerprint an answer over the cap leaves, with `true` for the second. The caller puts the
+/// `mode=` line where its own file wants it.
 ///
 /// Sized before it is built, and the cells alone are a lower bound on the table: an answer
 /// far above the cap is never rendered into one string, sorted and then discarded for being
 /// too large. Under the bound it is rendered once and measured exactly, so the cap still
 /// means the same bytes it always did. The fingerprint reads the cells and never the padded
 /// table, so it costs the cells either way.
-pub(crate) fn rendered_or_fingerprint(batches: &[RecordBatch]) -> (String, bool) {
+pub(crate) fn rendered_or_fingerprint(batches: &[RecordBatch], order: RowOrder) -> (String, bool) {
     if result_text::exceeds_rendered_size(batches, RESULT_GOLDEN_MAX_BYTES) {
         return (fingerprint::fingerprint_of(batches), true);
     }
-    let rendered = batches_to_sorted_str(batches);
+    let rendered = result_text::batches_to_str(batches, order);
     match rendered.len() >= RESULT_GOLDEN_MAX_BYTES {
         true => (fingerprint::fingerprint_of(batches), true),
         false => (format!("{rendered}\n"), false),
@@ -459,13 +465,14 @@ pub(crate) fn rendered_or_fingerprint(batches: &[RecordBatch]) -> (String, bool)
 ///
 /// Either stand-in for the rows keeps FIRST position and `mode=` follows it: several readers
 /// take a section's first line as "does this hold rows", so a mode line ahead of the
-/// fingerprint would let a `golden_exact` declaration pass against a section with nothing to
+/// fingerprint would let a `golden(…)` declaration pass against a section with nothing to
 /// compare.
 fn assert_result_section(
     dataset: &str,
     sf: &str,
     query: &str,
     mode: &Mode,
+    order: RowOrder,
     batches: &[RecordBatch],
 ) {
     let path = corpus_golden::result_golden(dataset, sf);
@@ -478,40 +485,50 @@ fn assert_result_section(
             sf,
             &columns,
             query,
-            &result_section_body(batches, mode),
+            &result_section_body(batches, mode, order),
         );
         return;
     }
     // Verified through the comparison the negative tests drive, so what they prove failing
     // on a wrong answer is the code this case runs.
-    result_matches(&corpus_golden::section_of(&path, query), mode, batches)
-        .unwrap_or_else(|said| panic!("{}: `{query}`'s result moved — {said}", path.display()));
+    result_matches(
+        &corpus_golden::section_of(&path, query),
+        mode,
+        order,
+        batches,
+    )
+    .unwrap_or_else(|said| panic!("{}: `{query}`'s result moved — {said}", path.display()));
 }
 
-/// A result section as this tier writes it: the mode that wrote it, and the rows — or the
-/// fingerprint an answer over the cap leaves, with the author after it.
-pub(crate) fn result_section_body(batches: &[RecordBatch], mode: &Mode) -> String {
-    match rendered_or_fingerprint(batches) {
+/// A result section as this tier writes it: the mode that wrote it, and the rows in `order` —
+/// or the fingerprint an answer over the cap leaves, with the author after it.
+pub(crate) fn result_section_body(batches: &[RecordBatch], mode: &Mode, order: RowOrder) -> String {
+    match rendered_or_fingerprint(batches, order) {
         (fingerprint, true) => format!("{fingerprint}mode={}\n", mode.name),
         (rendered, false) => format!("mode={}\n{rendered}", mode.name),
     }
 }
 
-/// The answer against a committed result section. `Err(what moved)` rather than a panic, so
-/// a doctored section can show the comparison failing without a file to doctor.
+/// The answer against a committed result section, text for text in `order` — under `no_sort`
+/// a row out of place is a moved section. `Err(what moved)` rather than a panic, so a doctored
+/// section can show the comparison failing without a file to doctor.
 pub(crate) fn result_matches(
     section: &str,
     mode: &Mode,
+    order: RowOrder,
     batches: &[RecordBatch],
 ) -> Result<(), String> {
-    let body = result_section_body(batches, mode);
+    let body = result_section_body(batches, mode, order);
     match section == body {
         true => Ok(()),
         false => Err(super::line_difference(section, &body)),
     }
 }
 
-/// What a corpus case's answer is compared against.
+/// What a corpus case's answer is compared against: `data_fusion(sort, exact|approx)`,
+/// `data_fusion_subset` or `data_fusion_disabled`. `data_fusion` takes `sort` only — its oracle
+/// runs live at one partition, and an order it happens to produce is no answer — and writes it
+/// anyway, so every line's oracles read the same way.
 ///
 /// Three variants run the same oracle — plain DataFusion at `target_partitions = 1` — and
 /// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
@@ -522,25 +539,25 @@ pub(crate) fn result_matches(
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.
-    DataFusionExact,
+    SortExact,
     /// 1e-12 relative tolerance on Float64 columns. Only for queries whose sole
     /// divergence from the oracle is float summation reassociation: a run at more than one
     /// lane sums in a different association order than DataFusion's single-lane pass,
     /// drifting ~1 ULP. The cost golden stays exact either way — a ULP does not change a
     /// float's byte width — so this loosens the result compare and nothing else.
-    DataFusionApproximate,
+    SortApprox,
     /// The count and the containment, for a query whose SQL does not determine which
     /// rows come back — an unordered `LIMIT n OFFSET m`. What it does determine is asked
     /// of the same session: the count is `max(0, min(n, |unlimited| - m))` and the rows
     /// are a sub-MULTISET of the unlimited answer, compared as a multiset because set
     /// membership passes a run that returned one row twice where the oracle has it once.
-    DataFusionSubset,
+    Subset,
     /// No compare at all: for a query DataFusion 45 answers wrong or refuses, so there is no
     /// oracle to ask. What holds the answer instead is the line's DuckDB oracle, which must
     /// compare (`a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb`,
     /// `tests/test_cpu_corpus.rs`) — the cells still check the plan, the run and the goldens,
     /// and the answer is DuckDB's to check.
-    DataFusionDisabled,
+    Disabled,
 }
 
 impl CpuOracle {
@@ -549,41 +566,39 @@ impl CpuOracle {
     /// lines, so a variant nothing uses is deleted rather than kept, and `cpu_oracle_mode`
     /// decodes a keyword through it rather than spelling the set a second time.
     pub(crate) const ALL: [CpuOracle; 4] = [
-        CpuOracle::DataFusionExact,
-        CpuOracle::DataFusionApproximate,
-        CpuOracle::DataFusionSubset,
-        CpuOracle::DataFusionDisabled,
+        CpuOracle::SortExact,
+        CpuOracle::SortApprox,
+        CpuOracle::Subset,
+        CpuOracle::Disabled,
     ];
 
     /// The keyword a `corpus_query!` line writes for this oracle.
     pub(crate) fn keyword(self) -> &'static str {
         match self {
-            CpuOracle::DataFusionExact => "data_fusion_exact",
-            CpuOracle::DataFusionApproximate => "data_fusion_approximate",
-            CpuOracle::DataFusionSubset => "data_fusion_subset",
-            CpuOracle::DataFusionDisabled => "data_fusion_disabled",
+            CpuOracle::SortExact => "data_fusion(sort, exact)",
+            CpuOracle::SortApprox => "data_fusion(sort, approx)",
+            CpuOracle::Subset => "data_fusion_subset",
+            CpuOracle::Disabled => "data_fusion_disabled",
         }
     }
 
     /// The `rel_tol` handed to the result compare. `None` = exact.
     pub(crate) fn rel_tol(self) -> Option<f64> {
         match self {
-            CpuOracle::DataFusionExact
-            | CpuOracle::DataFusionSubset
-            | CpuOracle::DataFusionDisabled => None,
-            CpuOracle::DataFusionApproximate => Some(1e-12),
+            CpuOracle::SortExact | CpuOracle::Subset | CpuOracle::Disabled => None,
+            CpuOracle::SortApprox => Some(1e-12),
         }
     }
 }
 
-/// Map a `corpus_query!` oracle keyword to its [`CpuOracle`]. An unknown keyword panics
-/// naming the accepted set rather than falling through to the exact compare, which would
-/// make a typo read as the strictest oracle and pass. Decoded through
-/// [`CpuOracle::ALL`], so the accepted set and the list the `ALL` test holds are one.
+/// Map a `corpus_query!` oracle spelling to its [`CpuOracle`], through `stringify!`'s spacing.
+/// An unknown spelling panics naming the accepted set rather than falling through to the
+/// exact compare, which would make a typo read as the strictest oracle and pass. Decoded
+/// through [`CpuOracle::ALL`], so the accepted set and the list the `ALL` test holds are one.
 pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
     CpuOracle::ALL
         .into_iter()
-        .find(|oracle| oracle.keyword() == keyword)
+        .find(|oracle| tight(oracle.keyword()) == tight(keyword))
         .unwrap_or_else(|| {
             let known: Vec<&str> = CpuOracle::ALL.iter().map(|o| o.keyword()).collect();
             panic!(
@@ -592,81 +607,6 @@ pub(crate) fn cpu_oracle_mode(keyword: &str) -> CpuOracle {
             )
         })
 }
-
-/// The arguments of every `name(…)` invocation in a case list, one vector per line.
-///
-/// The include is expanded only by the two corpus binaries, so every other reader of a
-/// line's coverage — the benchmark list's agreement check, the oracle `ALL` tests — reads it
-/// as text through here rather than growing a parser of its own. By PATH, read here, because
-/// two case lists reach it and a malformed line has to say which file it is in.
-pub(crate) fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    invocations_in(&text, name, &path.display().to_string())
-}
-
-/// The same over the text, so a line's shapes can be read without a file.
-///
-/// The trailing comment goes first and the close is the suffix, because neither end is a
-/// lone parenthesis: the last argument may carry a schema-validation mode mask's parens, and
-/// a comment naming a ticket may carry its own. Hunting the final `)` found whichever came
-/// last, which is the comment's as soon as one has a bracket in it.
-pub(crate) fn invocations_in(text: &str, name: &str, at: &str) -> Vec<Vec<String>> {
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let body = line.trim();
-        let body = body
-            .split_once("//")
-            .map_or(body, |(before, _)| before.trim());
-        let Some(rest) = body.strip_prefix(name) else {
-            continue;
-        };
-        let opened = rest
-            .strip_prefix('(')
-            .unwrap_or_else(|| panic!("{at}: {line:?} does not open"));
-        let arguments = opened
-            .strip_suffix(");")
-            .unwrap_or_else(|| panic!("{at}: {line:?} does not close"));
-        assert!(
-            !arguments.contains(");"),
-            "{at}: {line:?} carries more than one invocation"
-        );
-        out.push(split_arguments(arguments));
-    }
-    out
-}
-
-/// An argument list split at the commas OUTSIDE parentheses, so `duckdb_divergent(243, 1)`
-/// stays one argument. A plain `split(',')` reads it as two and shifts every argument after
-/// it, which is how a reader of the include starts naming the wrong column.
-fn split_arguments(list: &str) -> Vec<String> {
-    let mut out = vec![String::new()];
-    let mut depth = 0usize;
-    for c in list.chars() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                out.push(String::new());
-                continue;
-            }
-            _ => {}
-        }
-        out.last_mut()
-            .expect("an argument under construction")
-            .push(c);
-    }
-    out.iter().map(|a| a.trim().to_string()).collect()
-}
-
-/// The `corpus_query!` lines of `tests/common/corpus_cases.inc`, the file both corpus
-/// binaries include.
-pub(crate) fn corpus_lines() -> Vec<Vec<String>> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_CASES);
-    macro_invocations(&path, "corpus_query!")
-}
-
-/// Where the declaration list lives, relative to the crate: one spelling for every reader.
-pub(crate) const CORPUS_CASES: &str = "tests/common/corpus_cases.inc";
 
 /// Our DECLARED output type per column, as the DuckDB comparison's cell kinds.
 ///

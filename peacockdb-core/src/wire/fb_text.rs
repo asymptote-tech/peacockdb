@@ -151,7 +151,8 @@ pub(crate) fn payload_text(node: &fb::PlanNode<'_>, indent: &str) -> String {
             if let Some(projection) = join.projection() {
                 field("projection", ordinals(projection.iter()));
             }
-            if join.chunk_bytes() > 0 {
+            // The default is what every unbudgeted mode writes, and the buffer leaves it out.
+            if join.chunk_bytes() != fb::JoinLimits::DefaultChunkBytes.0 {
                 field("chunk_bytes", join.chunk_bytes().to_string());
             }
         }

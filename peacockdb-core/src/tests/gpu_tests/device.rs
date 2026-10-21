@@ -31,7 +31,7 @@ pub(crate) struct Device {
 
 impl Device {
     pub(crate) fn open(node: &dyn GpuNode) -> Self {
-        Self::with_join_scratch(node, 0)
+        Self::with_join_scratch(node, crate::wire::DEFAULT_CHUNK_BYTES)
     }
 
     /// `open` with every join's pairs held to `bytes` a call, where `open`'s 0 is the

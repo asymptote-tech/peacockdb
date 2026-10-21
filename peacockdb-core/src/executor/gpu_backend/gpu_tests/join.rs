@@ -11,7 +11,7 @@ use crate::executor::{AbiTarget, Backend, Executor, GpuBackend, GpuContext, Node
 use crate::plan::{BatchLayout, GpuEmitPartitions, GpuHashJoin, JoinFilterColumn, JoinSide};
 use crate::tests::given::Given;
 use crate::wire::FbKind;
-use crate::wire::attach_recipes;
+use crate::wire::{DEFAULT_CHUNK_BYTES, attach_recipes};
 use datafusion::arrow::datatypes::TimeUnit;
 use datafusion::common::JoinType;
 use peacockdb_ffi::raw::peacock_join_finish;
@@ -51,7 +51,7 @@ fn self_join(
 /// The join's executor, at post-order 2 — after its two leaves — as `executors_for` builds
 /// it: keyed, no residual, the session's own chunk.
 fn session_join(session: &Session, join_type: JoinType, output: &ArrowSchema) -> GpuJoinExec {
-    let scratch = PairScratch::new(true, &[], &columns(), &columns(), 0);
+    let scratch = PairScratch::new(true, &[], &columns(), &columns(), DEFAULT_CHUNK_BYTES);
     GpuJoinExec::new(
         session.site(),
         session.recipe(2),
@@ -121,7 +121,8 @@ fn a_session_probed_three_times_answers_each() {
 fn backend_join(session: &Session, tree: &dyn GpuNode) -> GpuJoinExec {
     let ctx = GpuContext {
         executor: session.executor,
-        recipes: attach_recipes(tree, 0).expect("every node's payload is writable"),
+        recipes: attach_recipes(tree, DEFAULT_CHUNK_BYTES)
+            .expect("every node's payload is writable"),
     };
     match GpuBackend::executors_for(&ctx, tree, 2, 0) {
         Ok(NodeExecutors::Join(join)) => join,
@@ -292,7 +293,13 @@ fn a_left_join_with_a_timestamp_probe_column_finished_without_a_probe_batch_pads
         Schema::new(Arc::new(out.clone())),
     ));
     let session = Session::open(tree.as_ref());
-    let scratch = PairScratch::new(true, &[], &columns(), stamped().fields.as_ref(), 0);
+    let scratch = PairScratch::new(
+        true,
+        &[],
+        &columns(),
+        stamped().fields.as_ref(),
+        DEFAULT_CHUNK_BYTES,
+    );
     let (probing, _) = GpuJoinExec::new(
         session.site(),
         session.recipe(2),
@@ -353,7 +360,13 @@ fn a_right_join_whose_lane_got_no_build_batch_pads_a_timestamp_build_column() {
         .target
         .expect("a scan addresses its node")
         .0;
-    let scratch = PairScratch::new(true, &[], stamped().fields.as_ref(), &columns(), 0);
+    let scratch = PairScratch::new(
+        true,
+        &[],
+        stamped().fields.as_ref(),
+        &columns(),
+        DEFAULT_CHUNK_BYTES,
+    );
     let (mut probing, _) = GpuJoinExec::new(
         session.site(),
         session.recipe(2),
@@ -532,7 +545,7 @@ fn a_join_calls_pair_scratch_is_the_sessions_chunked_formula() {
             index: 1,
         },
     ];
-    let keyed = PairScratch::new(true, &filter, &columns(), &columns(), 0);
+    let keyed = PairScratch::new(true, &filter, &columns(), &columns(), DEFAULT_CHUNK_BYTES);
     assert_eq!(
         keyed.bytes(4, 10),
         10 * (8 + 16 + 8),
@@ -544,7 +557,7 @@ fn a_join_calls_pair_scratch_is_the_sessions_chunked_formula() {
         1000,
         "40 pairs at 32 bytes, held to the chunk"
     );
-    let cross = PairScratch::new(false, &[], &columns(), &columns(), 0);
+    let cross = PairScratch::new(false, &[], &columns(), &columns(), DEFAULT_CHUNK_BYTES);
     assert_eq!(
         cross.bytes(4, 10),
         40 * 8,
