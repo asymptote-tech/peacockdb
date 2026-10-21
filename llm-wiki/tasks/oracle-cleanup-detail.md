@@ -203,3 +203,4 @@ cost-report 43 + `test_source_formatting` 32; `test_corpus_goldens` 28, `test_go
 --no-run` built clean, no warnings. No GPU run: the device-side edits are two comments, and
 `device_answer`'s shared sort is the same function body the L40S list already ran, now called
 from `result_text`.
+- 2026-10-21: review round 1: 0 blocking, 1 important (limit arm of plan_ends_in_sort unreached — fixed with OFFSET cases, LocalLimitExec half dropped), 8 nits fixed (duckdb_none lines now checked on their golden half; one sort helper; caps; comments; #128 by the coordinator). Commit-length nit left to the squash. State completing.
