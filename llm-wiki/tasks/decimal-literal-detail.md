@@ -67,3 +67,4 @@ literal arm. Nothing else in the C++ moved. Red patch: `/tmp/decimal-literal-red
   test_node_timing 1. Soft stop, rc 0. Deferred, per the dispatch: sf40, benchmarks.
 - Counts in `build-test.md`: `test_cpu_corpus` +6 (2233), `test_gpu_corpus` +5 (914),
   `peacock_plan_tests` +1 (118); grand total 5515. Each is matched by a run above.
+- 2026-10-21: developer green; committed; PR opened; state reviewing. Coordinator updated architecture.md's CudfProject row (decimal literal takes build_column).
