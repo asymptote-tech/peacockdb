@@ -12,20 +12,20 @@ most 25 characters and is what `scripts/ticket_widget.py` shows beside the numbe
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 288), one ID space across every file. 264–279
+New tickets take the next free number (currently 290), one ID space across every file. 264–279
 are reserved for chain J, whose next number is 268.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-107 open tickets, in file order.
+108 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
 | [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 33 | #225 #216 #94 #280 #199 #55 #65 #62 #264 #267 #202 #217 #204 #214 #205 #168 #210 #57 #56 #60 #251 #186 #282 #227 #164 #174 #233 #234 #262 #281 #253 #254 #287 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 8 | #239 #195 #161 #144 #261 #249 #283 #255 |
-| [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 11 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 |
+| [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 12 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |
 | [`df-upgrade.md`](tickets/df-upgrade.md) | The DataFusion upgrade | 6 | #241 #23 #166 #228 #247 #257 |
 | [`memory.md`](tickets/memory.md) | Memory accounting and budgets | 6 | #182 #179 #177 #167 #229 #265 |

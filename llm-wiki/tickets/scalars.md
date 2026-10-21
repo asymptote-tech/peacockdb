@@ -16,6 +16,7 @@ Tickets related to scalars and functions. These tickets are tied to a milestone 
 - [#200 (Date64 on the wire) a Date64 comes back as a type the wire cannot name](#t200)
 - [#162 (refused expressions) expression forms the planner refuses](#t162)
 - [#230 (GROUPING() key subset) GROUPING() over a subset or reordering of the rollup keys is refused on the device](#t230)
+- [#288 (decimal division digits) a decimal division keeps four more digits and truncates, so later arithmetic prints wrong digits](#t288)
 
 <a id="t224"></a>
 ### #224 (int to date cast) the device cannot cast an integer to a date
@@ -177,3 +178,43 @@ building `numeric_scalar<uintN_t>`, and `BitwiseShiftLeft`/`BitwiseShiftRight` m
 `cudf::binary_operator::SHIFT_LEFT`/`SHIFT_RIGHT` on the column path. The AST has no shift
 operator, so a shift routes to the column path. After #65, whose id the arithmetic reads. Test:
 the example query on both engines, and a gtest per operator.
+
+<a id="t288"></a>
+### #288 (decimal division digits) a decimal division keeps four more digits and truncates, so later arithmetic prints wrong digits
+
+`Decimal(p1,s1) / Decimal(p2,s2)` answers scale `s1 + 4`, and the digits past it are cut, not
+rounded. That is DataFusion's rule: arrow-rs `arrow-arith/src/numeric.rs`, unchanged from our
+DataFusion 45 (arrow 54.2.1) to DataFusion main (55.1.0, arrow 60.0.0). Both our engines follow
+it, since the plan's types are DataFusion's. The device rescales the numerator to land on the
+declared scale (`cpp/src/expr.cpp`).
+
+The quotient alone is within its scale. The error shows when later arithmetic moves the cut
+digits up. tpcds q58's `ss_dev`, `ss_item_rev / ((ss+cs+ws)/3) * 100`:
+
+- the quotient is `Decimal(…,6)`: `1.037192`, where the value is `1.0371926462…`;
+- `* 100` keeps scale 6: `103.719200`. DuckDB answers `103.71926462…`.
+
+q61 is the same shape (`51.823191` against `51.82319145`). q66 sums a quotient per row, so the
+error adds up row by row.
+
+**Other engines.** DataFusion's comment says it follows Postgres and MySQL. Neither truncates:
+
+- MySQL: scale `s1 + div_precision_increment` (4 by default), rounded.
+- Postgres: at least 16 significant digits, rounded.
+- Spark: scale `max(6, s1 + p2 + 1)`; past precision 38 the scale is cut but kept at 6 or more;
+  rounded half up. q58 under this rule is `Decimal(38,10)`, `103.71926462`, DuckDB's digits.
+- DuckDB: a decimal division answers a `DOUBLE`.
+
+Upstream: [apache/datafusion#7301](https://github.com/apache/datafusion/issues/7301) asks for a
+Spark-compatible mode. It is open, and untouched since 2023-08. Comet's `spark-expr` crate has
+Spark's division as a function of its own.
+
+**Corpus queries:** `tpcds/q58` (`ss_dev`, `cs_dev`, `ws_dev`), `tpcds/q61` (its ratio) and
+`tpcds/q66` (the twelve `*_per_sq_foot` columns). Their DuckDB comparison holds the named columns
+to `rel(1e-5, …)` ([`oracle-cleanup`](../tasks/oracle-cleanup.md)); the largest gap is 1.0e-6
+relative, on q58. This ticket replaces [#251](../archive/archived-tickets.md#t251).
+
+**Fix proposed:** a division scale that rounds and keeps enough digits, Spark's or Postgres's. The
+rule must be the same on the cpu and the device. DataFusion stays the cpu oracle, so the corpus
+oracle has to move with it: either the oracle runs the same rule, or these queries compare
+against DuckDB only. That choice comes before the code.

@@ -131,3 +131,30 @@ name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
 
 A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
 Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.
+
+### 9. [`value-case.md`](value-case.md) — closes [#57](../tickets/corpus-coverage.md#t57) — state: approved to build
+
+The device lowers `CASE x WHEN v …` onto the search form's fold, NULL never matching; tpcds q39's
+device cells on.
+
+### 10. [`decimal-literal.md`](decimal-literal.md) — closes [#210](../tickets/corpus-coverage.md#t210) — state: approved to build
+
+A bare decimal literal leaves the AST path and is a decimal column; a CAST of one to Float64 keeps
+today's path; tpcds q5's device cells on.
+
+### 11. [`round-tolerance.md`](round-tolerance.md) — closes [#60](../tickets/corpus-coverage.md#t60), [#56](../tickets/corpus-coverage.md#t56) — state: approved to build
+
+`cudf::round` stays; q78 and q2 move to `golden_approx_std` and `duckdb_approx` and turn on; #60
+archived as won't fix, #56 proven by q2.
+
+### 12. [`oracle-cleanup.md`](oracle-cleanup.md) — closes [#252](../tickets/testinfra.md#t252), [#287](../tickets/corpus-coverage.md#t287) — state: approved to build
+
+Oracles named for what they compare (`duckdb(sort|no_sort, …)`, `rel`, `date`), row order checked
+for `ORDER BY` queries, a `duckdb_oracle` registry column in the report; no core test reads source,
+the rest in cost-report's `test_source_formatting`; `chunk_bytes`'s 1 GiB in the fbs; a
+`null_equals_null` audit; a ticket triage.
+
+### 13. [`interval-days.md`](interval-days.md) — closes [#168](../tickets/corpus-coverage.md#t168) — state: approved to build
+
+Interval literals cross the wire as months, days and nanoseconds; date and timestamp ± interval on
+the device as DataFusion answers it; new pbench queries; tpch mixed-join's device cells on.
