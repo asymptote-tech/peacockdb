@@ -97,3 +97,4 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
    `report.html`, `architecture.md`.
 4. `wiki: #202 and #258 archived; pbench sorts on a nullable key`: the ticket files, the
    archive, `tickets.md`, `build-test.md`, this file.
+- 2026-10-21T23:38:57Z: developer round 1 green (CPU local; L40S ALL rc=0; 40 device cells recorded). Deviation: `--widget-md` so report.html stays whole (spec Restriction). Committed as one commit; PR #191 → ENS-oracle-columns. Reviewer round 1 dispatched.
