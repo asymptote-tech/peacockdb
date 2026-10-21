@@ -71,23 +71,25 @@ pub(crate) async fn hazard_in(ctx: &SessionContext, sql: &str) -> Option<String>
 /// line says `no_sort`.
 pub(crate) fn plan_ends_in_sort(plan: &Arc<dyn ExecutionPlan>) -> bool {
     let any = plan.as_any();
-    let passes =
-        keeps_positions(plan.as_ref()) || any.is::<GlobalLimitExec>() || any.is::<LocalLimitExec>();
+    // At one partition a limit is a `GlobalLimitExec`, kept only where an offset stops it
+    // folding into the sort's fetch.
+    let passes = keeps_positions(plan.as_ref()) || any.is::<GlobalLimitExec>();
     ordering_of(plan.as_ref()).is_some()
         || (passes && plan.children().into_iter().any(plan_ends_in_sort))
 }
 
-/// [`plan_ends_in_sort`] over `query`'s plan at one partition, the plan `hazard_in` reads.
-pub(crate) async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> bool {
+/// [`plan_ends_in_sort`] over `query`'s plan at one partition, the plan `hazard_in` reads, or
+/// why there is no such plan.
+pub(crate) async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> Result<bool, String> {
     let ctx = session_for(dataset, sf, 1).await;
     let plan = ctx
         .sql(&query_text(dataset, query))
         .await
-        .unwrap_or_else(|why| panic!("{dataset}/{query} does not plan: {why}"))
+        .map_err(|why| format!("{dataset}/{query} does not plan: {why}"))?
         .create_physical_plan()
         .await
-        .unwrap_or_else(|why| panic!("{dataset}/{query} has no physical plan: {why}"));
-    plan_ends_in_sort(&plan)
+        .map_err(|why| format!("{dataset}/{query} has no physical plan: {why}"))?;
+    Ok(plan_ends_in_sort(&plan))
 }
 
 /// `no_sort` exactly when the plan ends in a sort, as the order guard asks of every line.

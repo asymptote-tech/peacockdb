@@ -34,8 +34,8 @@ impl Device {
         Self::with_join_scratch(node, crate::wire::DEFAULT_CHUNK_BYTES)
     }
 
-    /// `open` with every join's pairs held to `bytes` a call, where `open`'s 0 is the
-    /// session's 1 GiB: what a case about chunking the pairs needs.
+    /// `open` with every join's pairs held to `bytes` a call, where `open` takes the 1 GiB
+    /// default: what a case about chunking the pairs needs.
     pub(crate) fn with_join_scratch(node: &dyn GpuNode, bytes: u64) -> Self {
         let recipes = attach_recipes(node, bytes).expect("every node's payload is writable");
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();

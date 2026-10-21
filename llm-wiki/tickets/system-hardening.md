@@ -48,7 +48,7 @@ designing: nothing yet says a thousand-node plan is a shape this mode should pro
 
 <a id="t128"></a>
 ### #128 (doctests unrun) Doctests run nowhere, and the meta guard cannot see them
-No step in `pipeline.yml` passes `--doc`, and `test_ci_coverage.rs` enumerates `--test`
+No step in `pipeline.yml` passes `--doc`, and cost-report's `test_source_formatting/ci_coverage.rs` enumerates `--test`
 targets plus `--lib`, so a doctest is invisible to the guard whose whole job is finding
 targets CI does not run. The crate has none today: the one it had documented an entry point
 that no longer exists.

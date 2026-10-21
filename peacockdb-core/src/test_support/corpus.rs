@@ -526,16 +526,14 @@ pub(crate) fn result_matches(
 }
 
 /// What a corpus case's answer is compared against: `data_fusion(sort, exact|approx)`,
-/// `data_fusion_subset` or `data_fusion_disabled`. `data_fusion` takes `sort` only — its oracle
-/// runs live at one partition, and an order it happens to produce is no answer — and writes it
-/// anyway, so every line's oracles read the same way.
+/// `data_fusion_subset` or `data_fusion_disabled`. `sort` is the only order: the oracle runs live
+/// at one partition, and an order it happens to produce is no answer.
 ///
-/// Three variants run the same oracle — plain DataFusion at `target_partitions = 1` — and
-/// what differs is what is asked of it: the whole answer, the whole answer to a tolerance,
-/// or the count and the containment where the SQL determines no more than those. That is
-/// why it is an argument rather than a second kind of case. The fourth asks nothing of it,
-/// because for that query DataFusion is wrong; it belongs here for the same reason, and what
-/// holds the answer in its place is the line's DuckDB oracle rather than this file.
+/// Three variants run the same oracle — plain DataFusion at `target_partitions = 1` — and what
+/// differs is what is asked of it: the whole answer, the whole answer to a tolerance, or the
+/// count and the containment where the SQL determines no more than those, which is why it is an
+/// argument rather than a second kind of case. The fourth asks nothing of it, because for that
+/// query DataFusion is wrong, and the line's DuckDB oracle holds the answer instead.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CpuOracle {
     /// Exact sorted-string equality. The default.

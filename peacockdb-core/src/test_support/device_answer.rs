@@ -187,7 +187,7 @@ pub(crate) fn device_answer_matches(
     // A `no_sort` line's section is written in engine order, so a `sort` comparison sorts
     // the section's rows as it sorts the device's.
     let golden = match order {
-        RowOrder::Sort => sorted_rendering(rows.trim_end()),
+        RowOrder::Sort => result_text::sorted_rendering(rows.trim_end()),
         RowOrder::NoSort => rows.trim_end().to_string(),
     };
     match (order, approx_std) {
@@ -204,21 +204,6 @@ pub(crate) fn device_answer_matches(
                 .map_err(|said| format!("{said}, written at {author}"))
         }
     }
-}
-
-/// A rendering with its data rows sorted, as [`batches_to_str`] sorts them under
-/// [`RowOrder::Sort`].
-fn sorted_rendering(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() <= 4 {
-        return text.to_string();
-    }
-    let mut data = lines[3..lines.len() - 1].to_vec();
-    data.sort_unstable();
-    let mut out = lines[..3].to_vec();
-    out.extend(data);
-    out.push(lines[lines.len() - 1]);
-    out.join("\n")
 }
 
 /// The header's names and the data rows as cells.

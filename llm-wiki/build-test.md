@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3128 cases: `--lib` 869, `test_cpu_corpus` 2228, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3131 cases: `--lib` 870, `test_cpu_corpus` 2230, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2227 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2229 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -42,7 +42,7 @@ lines, 188 of them running at the modes each is correct at — one of pbench's r
 modes only: `not-in-uncorrelated`, which tp4 refuses at plan time on
 [#267](tickets/corpus-coverage.md#t267). **1 line is out entirely**, the one `duckdb_none` line:
 pbench's `in-is-null`, refused at plan time on [#250](tickets/joins.md#t250). 937 cells,
-plus nine checks
+plus eleven checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that the registry's `duckdb_oracle`, `cpu_oracle`, `gpu_oracle` and `schema_validation` columns
 copy each line, that a hyphenated query resolves its authority and has its result section, that
@@ -51,7 +51,9 @@ an undetermined line's rows are compared only against committed files, that
 `data_fusion_disabled` line comparing its whole answer with DuckDB, and the order guard: a line
 says `no_sort`, in its `duckdb(…)` and its `golden(…)`, exactly when its query's plan at one
 partition ends in a sort (under any limit or projection) — a fingerprinted line, tpch q11
-among them, and a `live_cpu` gpu oracle are exempt
+among them, and a `live_cpu` gpu oracle are exempt, and a `duckdb_none` line is held by its
+golden half alone, unless our side has no plan; three cases pin the exemptions and the golden
+half on its own
 
 Then the DuckDB tier, 1099 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
@@ -552,7 +554,7 @@ by some registry row, `data_fusion` decoded through `stringify!`'s spacing, and
 a quoted registry cell holding commas, parentheses and doubled quotes reads as one field, the
 same rule cost-report, `ticket_widget.py` and `duckdb_result.py` read the file by
 
-| Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 17 |
+| Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 18 |
 |---|---|--:|
 
 what the order tier refuses, over two four-row tables: a limit over a hash join, over an
@@ -561,8 +563,8 @@ that differ, at the fetch and at the offset — the whole tie read, past the row
 and an offset read through a projection to a sort with no fetch. And what it lets through: a
 limit over a cross join of scans, over no join, over a keyless aggregate; a cut between rows
 that do not tie, or inside a tie of one row repeated; a tie over no join. Plus the order
-guard's predicate: a plan ends in a sort through a limit and a projection and a `GROUP BY` does
-not, and a line declaring `sort` over a sorted plan, or `no_sort` over an unsorted one, fails
+guard's predicate: a plan ends in a sort through a projection, and through a limit an offset
+keeps above the sort (a bare `LIMIT` folds into the sort's fetch), and a `GROUP BY` does not, and a line declaring `sort` over a sorted plan, or `no_sort` over an unsorted one, fails
 
 | Sink divergence message | [executor::errors::tests](../peacockdb-core/src/executor/errors/tests.rs) | 3 |
 |---|---|--:|

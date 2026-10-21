@@ -363,7 +363,7 @@ fn a_budgeted_join_carries_its_chunk_budget() {
     assert_eq!(
         join_scratch_bytes(&huge),
         DEFAULT_CHUNK_BYTES,
-        "never past the session's own default"
+        "never past the default"
     );
 
     let node = join(JoinType::Inner, false, None);

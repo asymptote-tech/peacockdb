@@ -171,3 +171,35 @@ Plan tasks done in the working tree (the coordinator commits; nothing is committ
   `scripts/rewrite_oracles.py` is still in the tree: it is to go in a commit of its own after the
   one that adds it, which only the coordinator can make.
 - 2026-10-21: developer green (CPU local; L40S list twice ALL rc=0). Device found #202 on tpcds q34 and q71 under no_sort (DESC NULLS FIRST nulls last) — cells off under #202, as the spec's item 2 directs. null_equals_null audit: holds everywhere. Committed (rewrite script in its own commit, then deleted); PR opened; state reviewing.
+
+## Review round 1 (developer)
+
+1. **important — the limit arm was reached by no case.** Confirmed: with `|| GlobalLimitExec ||
+   LocalLimitExec` removed, the old `plan_ends_in_sort_reads_through_limit_and_projection`
+   still passed (a bare `LIMIT` folds into `SortExec`'s fetch). New
+   `plan_ends_in_sort_reads_through_a_limit_that_keeps_an_offset`: `ORDER BY w LIMIT 1 OFFSET 1`
+   (root asserted `GlobalLimitExec`) and a projection over `(… LIMIT 2 OFFSET 1)` (root
+   `ProjectionExec`, child `GlobalLimitExec`). Red with the limit arm removed (fails at the
+   first `plan_ends_in_sort` assertion), green restored. The `LocalLimitExec` arm is gone: at one
+   partition, the only plan `ends_in_sort` reads, no case reaches it; a comment says so.
+2. Stale comments: `tests/gpu_tests/device.rs` (`open` takes the 1 GiB default),
+   `gpu_backend/gpu_tests/join.rs` (the default 1 GiB chunk), and the `wire/tests.rs` message.
+3. **`duckdb_none`: checked, not exempted.** `order_findings` reads a `duckdb_none` line's golden
+   half; `ends_in_sort` now returns `Result<bool, String>`, and only a `duckdb_none` line whose
+   query has no plan is skipped (our side is then the one that does not answer). The one real
+   such line, pbench `in-is-null`, does not plan (#250), so it is skipped; a compared line with
+   no plan would be a finding. Pinned by `the_order_guard_reads_a_duckdb_none_lines_golden_half`
+   (tpch q3 spelled `duckdb_none` + `golden(sort, exact)` → one "(golden)" finding; red when
+   `duckdb_none` skips the line whole). build-test.md says it.
+4. `the_order_guard_holds_the_golden_half_on_its_own`: tpch q3 with `golden(sort, exact)` →
+   exactly one "(golden)" finding; red with the golden half dropped from `order_findings`.
+5. Comment caps: `CpuOracle`'s doc is 9 lines; `rust_only_targets`' exclusion comment 4.
+6. `result_text::sorted_rendering` is the one sort: `batches_to_str` and `device_answer_matches`
+   both call it; `device_answer.rs`'s copy is gone.
+Counts now: `--lib` 870 (868 + 2 ignored), `test_cpu_corpus` 2230, order hazard 18.
+Evidence: `--lib` 868 passed / 2 ignored; `test_cpu_corpus` 2230 passed (`--test-threads=2`);
+cost-report 43 + `test_source_formatting` 32; `test_corpus_goldens` 28, `test_golden_format` 41;
+`CUDF_ROOT=…/rapids-cuda-12.2 scripts/cargo-cudf.sh test -p peacockdb-core --lib --features gpu
+--no-run` built clean, no warnings. No GPU run: the device-side edits are two comments, and
+`device_answer`'s shared sort is the same function body the L40S list already ran, now called
+from `result_text`.

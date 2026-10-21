@@ -226,18 +226,24 @@ fn a_line_asking_datafusion_nothing_compares_its_answer_with_duckdb() {
 }
 
 /// What the order guard finds wrong with one line: its `duckdb(…)` and its `golden(…)` each say
-/// `no_sort` exactly when the query's plan ends in a sort. A fingerprinted or `duckdb_none`
-/// line compares no rows with DuckDB and is skipped whole; a `live_cpu` gpu oracle has no
-/// order of its own.
+/// `no_sort` exactly when the query's plan ends in a sort. A fingerprinted line has no row
+/// order and is skipped whole; a `live_cpu` gpu oracle has no order of its own. `duckdb_none`
+/// compares no rows with DuckDB, so only its golden half is read — and not where our side is
+/// the one that does not answer, the query having no plan to read.
 async fn order_findings(declared: &CorpusDeclaration) -> Vec<String> {
-    let duckdb = DuckdbOracle::parse(declared.duckdb_oracle);
-    if !matches!(duckdb, DuckdbOracle::Compare { .. }) {
-        return Vec::new();
-    }
+    let duckdb = match DuckdbOracle::parse(declared.duckdb_oracle) {
+        DuckdbOracle::Fingerprint => return Vec::new(),
+        DuckdbOracle::None => None,
+        compared => Some(compared.row_order()),
+    };
     let query = stem(declared.query);
-    let ends = ends_in_sort(declared.dataset, declared.sf, &query).await;
+    let ends = match ends_in_sort(declared.dataset, declared.sf, &query).await {
+        Ok(ends) => ends,
+        Err(_) if duckdb.is_none() => return Vec::new(),
+        Err(why) => return vec![format!("  {why}")],
+    };
     let spelled = [
-        ("duckdb", Some(duckdb.row_order())),
+        ("duckdb", duckdb),
         ("golden", golden_row_order(declared.gpu_oracle)),
     ];
     spelled
@@ -282,13 +288,62 @@ async fn the_order_guard_skips_a_fingerprinted_section() {
         DuckdbOracle::parse(q11.duckdb_oracle),
         DuckdbOracle::Fingerprint
     );
-    assert!(ends_in_sort("tpch", "1", "q11").await, "q11 ends in a sort");
+    assert_eq!(
+        ends_in_sort("tpch", "1", "q11").await,
+        Ok(true),
+        "q11 ends in a sort"
+    );
     assert!(order_findings(q11).await.is_empty());
     let compared = CorpusDeclaration {
         duckdb_oracle: "duckdb(sort, exact)",
         ..*q11
     };
     assert_eq!(order_findings(&compared).await.len(), 1);
+}
+
+/// The golden half is held on its own: tpch q3 ends in a sort, and its line spelled with
+/// `golden(sort, exact)` and its DuckDB half left right is one finding, the golden one.
+#[tokio::test]
+async fn the_order_guard_holds_the_golden_half_on_its_own() {
+    let q3 = declared("tpch", "q3");
+    assert!(order_findings(q3).await.is_empty());
+    let sorted = CorpusDeclaration {
+        gpu_oracle: "golden(sort, exact)",
+        ..*q3
+    };
+    let found = order_findings(&sorted).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("(golden)"), "{found:?}");
+}
+
+/// A `duckdb_none` line compares no rows with DuckDB, but where we answer, its device compare
+/// is a golden one and its golden half is held: tpch q3 spelled `duckdb_none` with
+/// `golden(sort, exact)` is one golden finding. pbench's `in-is-null`, the one real
+/// `duckdb_none` line, does not plan (#250), so it has no order to hold.
+#[tokio::test]
+async fn the_order_guard_reads_a_duckdb_none_lines_golden_half() {
+    let none = CorpusDeclaration {
+        duckdb_oracle: "duckdb_none",
+        gpu_oracle: "golden(sort, exact)",
+        ..*declared("tpch", "q3")
+    };
+    let found = order_findings(&none).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("(golden)"), "{found:?}");
+    let in_is_null = declared("pbench", "in_is_null");
+    assert_eq!(
+        DuckdbOracle::parse(in_is_null.duckdb_oracle),
+        DuckdbOracle::None
+    );
+    assert!(ends_in_sort("pbench", "1", "in-is-null").await.is_err());
+    assert!(order_findings(in_is_null).await.is_empty());
+}
+
+fn declared(dataset: &str, query: &str) -> &'static CorpusDeclaration {
+    inventory::iter::<CorpusDeclaration>
+        .into_iter()
+        .find(|d| d.dataset == dataset && d.query == query)
+        .unwrap_or_else(|| panic!("{dataset}/{query} is declared"))
 }
 
 /// The two oracles of one line have to suit each other, and both directions are asserted

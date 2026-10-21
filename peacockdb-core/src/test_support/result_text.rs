@@ -343,9 +343,19 @@ pub(crate) fn results_match(
 /// it is for the small ones: a caller with a large result wants `results_agree`.
 pub(crate) fn batches_to_str(batches: &[RecordBatch], order: RowOrder) -> String {
     let formatted = pretty_format_batches(batches).unwrap().to_string();
-    let lines: Vec<&str> = formatted.lines().collect();
-    if order == RowOrder::NoSort || lines.len() <= 4 {
-        return formatted;
+    match order {
+        RowOrder::Sort => sorted_rendering(&formatted),
+        RowOrder::NoSort => formatted,
+    }
+}
+
+/// A rendered table with its data rows sorted as text, header and borders kept: what
+/// [`batches_to_str`] makes of a [`RowOrder::Sort`] answer, and what a section written in
+/// engine order is sorted by before a `sort` comparison reads it.
+pub(crate) fn sorted_rendering(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= 4 {
+        return text.to_string();
     }
     let mut data = lines[3..lines.len() - 1].to_vec();
     data.sort_unstable();

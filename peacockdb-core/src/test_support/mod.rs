@@ -672,9 +672,9 @@ pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, o
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
 }
 
-/// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection.
-/// Such a line says `no_sort`.
-pub async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> bool {
+/// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection —
+/// or why it has no plan. Such a line says `no_sort`.
+pub async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> Result<bool, String> {
     order_hazard::ends_in_sort(dataset, sf, query).await
 }
 

@@ -287,11 +287,10 @@ rust_only_targets() {
       base=$(basename "$f" .rs)
       # File-level gate => needs cmake; excluded from the rust-only set.
       grep -qF '#![cfg(not(feature = "rust-only"))]' "$f" && continue
-      # EXCLUSION, for a measured reason rather than taste: test_ffi compiles under
-      # rust-only but yields ZERO tests — the whole file is behind one cfg. Staging it
-      # ships a binary that runs nothing, which reads as coverage.
-      # test_crate_privacy invokes rustc against the crate's rlib, which a staged binary's host
-      # does not have.
+      # Excluded for measured reasons: test_ffi compiles under rust-only to ZERO tests (one
+      # cfg covers the file), so staging it ships a run of nothing that reads as coverage;
+      # test_crate_privacy invokes rustc against the crate's rlib, which a staged binary's
+      # host does not have.
       case "$base" in
         test_ffi | test_crate_privacy) continue ;;
       esac

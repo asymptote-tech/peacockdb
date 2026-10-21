@@ -49,7 +49,7 @@ fn self_join(
 }
 
 /// The join's executor, at post-order 2 — after its two leaves — as `executors_for` builds
-/// it: keyed, no residual, the session's own chunk.
+/// it: keyed, no residual, the default 1 GiB chunk.
 fn session_join(session: &Session, join_type: JoinType, output: &ArrowSchema) -> GpuJoinExec {
     let scratch = PairScratch::new(true, &[], &columns(), &columns(), DEFAULT_CHUNK_BYTES);
     GpuJoinExec::new(
