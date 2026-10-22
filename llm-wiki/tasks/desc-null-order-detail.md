@@ -166,3 +166,5 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
   `../tickets/testinfra.md#t258`. Both anchors are gone now. Entries 7–14 point at
   `../archive/archived-tickets.md#tNN`.
 - 2026-10-22T00:08:37Z: completeness: reviewer 0/0, analyst 0/0 (both noted #202/#258 board links; fixed). completeness approved.
+- 2026-10-22T00:08:44Z: dispatched pipeline.yml on ENS-desc-null-order 9770b1d8fe4828bb9f48dec5ce7c0672c020af7f: run 39697888906.
+- 2026-10-22T00:35:09Z: run 39697888906 green (GPU Tests (nebius-gpu) included), PR #191 checks green. Hard stop. done.
