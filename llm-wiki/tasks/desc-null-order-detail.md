@@ -142,3 +142,27 @@ The tree with the fix reversed (`git diff -R` of `sort.cpp`, `node_session.cpp`,
 - Also removed: the test helper `sha_links`, unused since 3c0750ee (its dead-code warning).
 - `testdata/report.html` is unchanged: the widget regenerated to a scratch path is `cmp`-identical.
 - 2026-10-21T23:57:51Z: review round 2: 0/0/1 (nit: `Markdown::tables` reads as a noun; dropped). completing: completeness reviewer + analyst dispatched.
+
+## Completeness pass — analyst (what is missing), 2026-10-22
+
+- Read `ENS-oracle-columns...ENS-desc-null-order` as one change, against the spec, the impl plan,
+  `architecture.md` and `build-test.md`. 0 blocking, 0 important. Every work item, Scope row and
+  Verification bullet is present, except the final dispatched run, which comes after this pass.
+- No third null-order site. `cudf::sorted_order` (sort.cpp) and `cudf::merge` (node_session.cpp)
+  are the only cuDF ordering calls in `cpp/src`. `window.cpp` reads DataFusion's upstream sort.
+  The Rust gpu backend sorts nothing on the host, and the exec-model prototype's
+  `na_position` was SQL-absolute already.
+- Every pbench `sort-*` plan reaches the merge at the three tp4 modes. `sort-desc-limit` carries
+  `fetch=100` on the sort and on the merge. Every registry and `build-test.md` count checks out
+  against the registry and `corpus_cases.inc`: cells 997/987, pbench 357, tpcds 410, the oracle
+  counts summing to 201, and 48 `#[test]` in `cost-report/src/main.rs`.
+- Readers of the comment: `pipeline.yml` reads only the sentinel line, and `ticket_widget.py`
+  moved to `--widget-md`. PR #191's live comment has no Features column and has the pbench
+  summary line. No old pin name or `#202`/`#258` code comment is left.
+- `architecture.md` sentences this branch falsified: none. The *cuDF options* row is rewritten
+  and true.
+- `build-test.md` sentences left false: none.
+- Below the bar: `tasks.md` entry 15 still links `../tickets/corpus-coverage.md#t202` and
+  `../tickets/testinfra.md#t258`. Both anchors are gone now. Entries 7–14 point at
+  `../archive/archived-tickets.md#tNN`.
+- 2026-10-22T00:08:37Z: completeness: reviewer 0/0, analyst 0/0 (both noted #202/#258 board links; fixed). completeness approved.

@@ -118,3 +118,14 @@ Component-level API: none. No wire, ABI or facade change.
   has its summary line and no query row; cost-report's html page still has the Features header
   and a pbench row; `the_pr_comment_fits_under_the_body_cap` green with the six rows in, its
   printed margin in the detail file.
+
+## Completeness signoff (2026-10-22)
+
+Solved under its constraints. `null_order_of` maps a key's nulls relative to its direction, and
+`GpuSort` and the merge both call it, changed in one commit; it is the only engine change. The
+five pins assert device–cpu agreement and two `DESC NULLS LAST` cases fill the gap. q34, q71 and
+six pbench sorts pass at all five device modes; before the fix all 40 cells failed. The PR comment
+drops Features and collapses pbench; `report.html` and cost-report's page stay whole, guarded.
+Completeness reviewer and analyst: none. Shortcuts or bandaids: none. One step outside the Scope
+table: `ticket_widget.py` reads a new `--widget-md` output, since it built the page from the
+comment.
