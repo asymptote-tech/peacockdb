@@ -164,10 +164,12 @@ the library compiles against 12.9 and links mostly against 12.2.
   CUDA runtime symbol (`nm -D --defined-only`, a `T` symbol named `cuda…` or `__cuda…`). It
   passes today on both versions' FFI `libpeacock_gpu.so`. Its test is
   `scripts/env/tests/test_no_static_cudart.py`.
-- **The driver.** The library carries SASS for sm_80 and sm_90 and PTX for compute_80. A card
-  with neither SASS, the L40S (sm_89) among them, JIT-compiles the PTX, and PTX from nvcc 12.9
-  needs a driver at CUDA 12.9's minimum. So for the 25.02 image, Task 7's old-driver check must
-  use 12.9's minimum, not 12.2's.
+- **The driver.** The library carries SASS for sm_80 and sm_90 and PTX for compute_80 and
+  compute_90, PTX ISA 8.8 (read off the fatbin of both staged copies in Task 3). An sm_80 cubin runs
+  on every 8.x device, so the L40S (sm_89) runs SASS and JIT-compiles nothing; the A100 and the
+  H100/H200 have exact SASS. Only a card of another major (Blackwell, say) JIT-compiles the PTX,
+  which needs a driver of CUDA 12.9 or later. The driver each image needs is set by its cudart
+  (Task 3).
 - **Open.** This follows the native nebius-gpu build and is not changed here. nebius-gpu sets the
   same prefix path, so its libraries are probably the 12.2 env's too, and its headers come from
   its nvcc wrapper's toolkit. Comparing its `cpp/build/build.ninja` and `CMakeCache.txt` with the
@@ -466,3 +468,197 @@ The last two are the images now on the host. The others are deleted.
 - **26.02 (`518effa3`).** `test_image_any_user.py` passes. Its FFI, gpu and rust-only results
   stand on `ae80842c`, whose toolchain layers this image keeps.
 
+
+## Task 3: the run image — decisions
+
+State: both images are built from a dirty tree (`7bc901f27790-dirty`), so they have no commit
+tag and are not pushed.
+
+**What `/opt/cudf` holds.** `docker/runtime-spec.sh <spec>` prints the spec's header and every
+package line verbatim, less:
+- compilers and their parts: `cuda-nvcc*`, `cuda-crt*`, `cuda-nvvm*`, `ld_impl_linux-64`;
+- `-dev`, `-static` (and their `_linux-64` halves), `-headers`, `-headers-only`, `cuda-cccl*`,
+  `cuda-profiler-api`, `nlohmann_json`, `dlpack`;
+- Python: `python`, `python_abi` and every package with a `py` build string (cudf, pylibcudf,
+  cupy, numba, pyarrow, rmm's Python half …).
+
+25.02 keeps 107 of 167 packages, 26.02 114 of 181. A micromamba explicit install resolves nothing,
+so the prefix is exactly that list; the build checks the count and that no `bin/python` exists.
+The prefix stage then deletes every `*.a`: runtime packages ship static archives too
+(`libcuvs_static.a` alone is 990 MB; 18 files, 1.2 GB in 25.02). Headers inside runtime packages
+(`include/`, 90 MB) stay: cuDF's JIT may read them, and nothing here proves it does not.
+- **Shared libraries in the dropped packages.** Read off the build image's `conda-meta/*.json`:
+  the `-dev` packages carry only unversioned symlinks (`libcudart.so`, `libcufile.so`,
+  `libcublas.so` …); `cuda-nvvm-impl` carries `libnvvm.so.4`, which nvcc and numba use; 26.02's
+  `ucxx` Python package carries `libucxx_python.so`. The names the kept libraries could `dlopen`
+  (strings of libcudf, libkvikio, libcuvs, libnvcomp, librmm, libcufile, libnvJitLink) are
+  versioned (`libcufile.so.0`, `libcublas.so.12`, `libnvcomp.so.4` …) or resolve in neither image:
+  - `libnvrtc.so` and `libnvJitLink.so` (libcudf): no `cuda-nvrtc-dev` or `libnvjitlink-dev` in
+    either spec;
+  - `libcufile_rdma.so` (libcufile, beside `libcufile_rdma.so.1`, which is kept): the rdma library
+    itself needs `libibverbs.so.1`, `libmlx5.so.1` and `librdmacm.so.1`, in neither image;
+  - `libnvvm.so` (25.02's libnvJitLink): the build image has it under `nvvm/lib64/`, on no search
+    path.
+- **The CUDA runtime** is the prefix's `cuda-cudart`: 12.2.140 in 25.02, 12.9.79 in 26.02, at
+  `/opt/cudf/lib/libcudart.so.12`. The driver (`libcuda.so.1`) is the host's, mounted by the NVIDIA
+  Container Toolkit under `--gpus all`. Nothing shipped has it as `NEEDED`: libcudf and libnvcomp
+  `dlopen` it, which is why `ldd` resolves everything in an image with no driver.
+
+**RUNPATH, measured (drift from the Task 2 notes and the plan).** CMake writes
+`-rpath /opt/cudf/lib` into the build tree's `libpeacock_gpu.so` only. The installed copy
+(`cpp/install/lib`, what is shipped) has no RUNPATH, and neither have the rust test binaries.
+So in the run image everything resolves through `LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib`,
+which `run-tests.sh` gives the binaries alone, as `gpu-host-test.sh` does on nebius-gpu.
+`libstdc++.so.6` and `libgcc_s.so.1` come from `install/lib` (the copies the install bundles),
+glibc from the image. The prefix stays at `/opt/cudf` for parity with the build image; its own
+libraries find each other through `$ORIGIN`.
+
+**The driver minimum, per image:** label `peacockdb.driver-minimum`, from the pins
+`DRIVER_MINIMUM_25_02=535.104.05` and `DRIVER_MINIMUM_26_02=575.57.08`, the `GCC_25_02` pattern:
+a version stage each, chosen by `FROM run-${CUDF}`.
+- **What sets it: the cudart.** Both libraries carry SASS for sm_80 and sm_90 (Task 2's "The
+  driver"), and an sm_80 cubin runs on every 8.x device, so the A100, H100, H200 and L40S
+  JIT-compile none of our PTX. libcudf carries SASS for 70–120. What remains is the runtime: the
+  driver that ships with the CUDA release of the image's cudart.
+- **25.02: cudart 12.2.140 is CUDA 12.2 Update 2** (Table 1 of
+  `docs.nvidia.com/cuda/archive/12.2.2/cuda-toolkit-release-notes/`, "CUDA 12.2 Update 2
+  Component Versions"), whose Table 3 gives >= 535.104.05 on Linux x86_64.
+- **26.02: cudart 12.9.79 is CUDA 12.9 Update 1** (Table 1 of
+  `docs.nvidia.com/cuda/archive/12.9.1/cuda-toolkit-release-notes/`), whose Table 3 gives
+  >= 575.57.08 (12.9 GA: 575.51.03).
+- Field evidence for 25.02: shad-gpu runs these nvcc-12.9 binaries against the 25.02 env on
+  driver 535.247.01 with the cuda-12.5 compat libraries.
+- `test_run_image.py` reads each spec's `cuda-cudart` line and holds the pin to a table of
+  cudart → toolkit driver, so a spec whose cudart moves fails until its minimum does.
+- **The PTX condition, for Task 7.** A card whose compute capability major is neither 8 nor 9
+  (Blackwell, say) has no matching SASS and JIT-compiles our PTX, ISA 8.8 from nvcc 12.9.86. The
+  CUDA Compatibility guide's "Minor Version Compatibility" page: applications that compile device
+  code to PTX will not work on older drivers. Such a card needs >= 575.51.03 for either image.
+  Task 7's check compares `nvidia-smi --query-gpu=driver_version` with the label, and for such a
+  card with 575.51.03 as well.
+
+**`/opt/run/run-tests.sh <list|filter|bench>`** (`docker/run-tests.sh`), the entrypoint:
+- `list` is `gpu-host-test.sh`'s list: every `bin/peacock_*_tests` but the sf40 pair; every
+  `rust-tests/*` with `--nocapture --test-threads=1`, `gpu_tests::` for `peacockdb_core_gpu_lib`,
+  `--skip bench_` for `peacock_gpu_benchmarks`. Every binary runs after a failure. A non-zero exit,
+  a signal (named: `SIGSEGV`), `Segmentation fault|core dumped` in a log, or 0 tests fails the run.
+- `filter` is the list with `PCK_TEST_FILTER` on every rust binary but the lib, as
+  `gpu-host-test.sh` does. One deliberate difference: a narrowed binary that runs 0 tests does not
+  fail; the filter matching no test in any narrowed binary does (as `build-test-shadgpu.sh`
+  judges a filtered run). `gpu-host-test.sh` fails each narrowed binary that matches nothing,
+  which makes nearly every filtered run red. The lib still fails on 0 tests.
+- `list` refuses a set `PCK_TEST_FILTER` and `filter` an empty one, so the mode is stated, never
+  implied by the environment.
+- `bench` mirrors `build-test-shadgpu.sh`'s benchmark script: `rust-benchmarks/peacock_gpu_benchmarks`,
+  `PEACOCK_RECORD_PATH=<testdata>/calibration/records.tsv`, `PEACOCK_TPCH_VEC_PARAMS`,
+  `benchmark-results/` created; red on a failure or on 0 passed. The dataset links of the old path
+  are not here: Task 7 decides how the data is mounted.
+- **The record is never dropped.** `record.rs` writes its header only into a fresh file, so the
+  record must start empty. The old path deletes it at every start; here a record with rows (an
+  earlier segment of a long run, or a rerun) is refused, naming it: pull it home, then remove it.
+  An empty one is removed.
+- Exit 2, one line, before any binary runs: a bad mode, no `lib/libpeacock_gpu.so`, an empty
+  C++ or rust list, `filter` with no rust binary but the lib, no benchmark binary, an unpulled
+  record, testdata not a writable directory.
+- An exit above 128 is named as a signal only when `kill -l` knows the number (`exit 255` reads
+  "exited 255").
+- The only `LD_LIBRARY_PATH=` is on `run_binary`'s command line, and nothing is exported: with the
+  prefix on bash's own path, bash loads the prefix's `libtinfo`. A static test holds it, and another
+  that the sf40 pair, the lib's rung and the `--skip bench_` target are `gpu-host-test.sh`'s.
+- Logs go to the terminal and to a `mktemp -d` in the container; Task 7 captures stdout. No third
+  mount.
+
+**The image.** A `prefix` stage (ubuntu:24.04, curl, micromamba) creates `/opt/cudf`; the
+final stage is `run-<cudf>` (ubuntu:24.04 with its driver label) with the prefix copied in, `run-tests.sh`, and the default user
+`peacock` (uid 1000), WORKDIR `/tmp`, no global `LD_LIBRARY_PATH`. No apt layer, curl or
+micromamba in the final image. The run image's context is narrowed by
+`docker/run.Dockerfile.dockerignore` to the specs, `runtime-spec.sh` and `run-tests.sh`. image.sh
+passes every pin to both Dockerfiles; `test_image.py` now asks only that some Dockerfile declares
+each pin.
+
+## Task 3: what was built and verified
+
+**Inputs, staged in each build image the way `build-test-shadgpu.sh --build` stages them**
+(`--network none --cpuset-cpus 0-3 --memory 10g`; worktree at `/work` read-only, the primary
+checkout's `third_party/cudf` at `43505bb9`, the cargo target at `/cache/target/cudf`, the
+registry and ccache from `/build/peacock/containers/`):
+- `scripts/build.sh --configure`, `--build`, `--install` into `cpp/install`: 145 s (25.02), 165 s
+  (26.02), from configured build trees.
+- 25.02: `test_gpu_corpus`, `test_node_timing`, `peacock_gpu_benchmarks` (`--test`) and the lib
+  (`--lib`, staged as `peacockdb_core_gpu_lib`), each `cargo test --no-run --features gpu`, path
+  read off cargo's json lines. All four were fresh in Task 2's target: 12 s.
+- 26.02: the same four from `26.02/keep/rust-tests/`, renamed to their target names.
+- Every staged rust binary `strip --strip-debug`, as `--push-binaries` does: about 110–120 MB each.
+- Result: `/build/peacock/containers/<v>/install` (549 MB each), linked as
+  `/build/peacock/containers/staged/cudf-<v>`, the `PEACOCK_STAGED_INSTALLS` the image tests read.
+  The 25.02 cargo target (16 GB) is deleted.
+
+**Images.**
+
+| image ID | cuDF | size | wall time | note |
+|---|---|---|---|---|
+| `29b4b139` | 25.02 | 6.27 GB | 242 s | first build, cold prefix; with the static archives; deleted |
+| `d7bf7329` | 25.02 | 5.09 GB | 48 s | `*.a` deleted (the create layer cached) |
+| `a2806c31` | 26.02 | 6.17 GB | 256 s | cold prefix; deleted |
+| `ec9eca70` | 25.02 | 5.09 GB | 373 s | round 1: per-version driver label, N8, the new `run-tests.sh`; cold prefix |
+| `1a4cd591` | 26.02 | 6.17 GB | 251 s | the same for 26.02 |
+| `8d283e66` | 25.02 | 5.09 GB | 2 s | round 2: the record message; only the script layer rebuilt |
+| `f753b6cf` | 26.02 | 6.17 GB | under 1 s | the same for 26.02 |
+
+Every image but the last two is deleted. The two on the host are `8d283e66` (label 535.104.05) and
+`f753b6cf` (label 575.57.08).
+
+`/opt/cudf` is 4.7 GB in 25.02 and 5.8 GB in 26.02 (6.8 GB in the 25.02 build image).
+
+**Tests, round 0** (before review). `PEACOCK_STAGED_INSTALLS=/build/peacock/containers/staged`:
+- `test_run_image.py`: 9 passed. Both versions: `no-static-cudart.sh` passes on the staged
+  `libpeacock_gpu.so`; `ldd` in the run image (`--network none`, the library path
+  `run-tests.sh` gives) over `libpeacock_gpu.so`, the six `bin/peacock_*_tests` and the four rust
+  binaries finds no `not found`. With `/opt/cudf/lib` taken out of the path the test goes red on
+  `libcudf.so`, `libarrow.so.1900` and `libcudart.so.12`.
+- `test_run_tests.py`: 18 passed, as uid 4242 with no network, over fake binaries. Each of five
+  rules taken out of a copy of the script (zero tests, the segfault grep, the sf40 skip, the
+  lib's rung, the fresh record) turns at least one test red.
+- `test_image.py` 18, `test_pins.py` 3, and the rest of `scripts/env/tests/` green.
+- `shellcheck` is not installed on the developer host; `bash -n` only.
+
+**Open, for Task 7.**
+- No device run here: nothing proves the `dlopen`s (`libcuda.so.1`, nvrtc, cufile) succeed under
+  `--gpus all`.
+- Neither image (nor the build image) has `/usr/share/zoneinfo`; the prefix's `tzdata` is under
+  `/opt/cudf/share/zoneinfo`. The native hosts have the system one.
+- The PTX condition above, for a card of another major.
+- `gpu.sh … pull` must move the record aside on the host after copying it: a copied record still
+  has rows, so `bench` refuses the next segment until it is gone.
+- For Task 4's `build-test.md` notes: a hand-run `docker run --entrypoint <binary>` needs
+  `-e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib`, since the shipped binaries carry no
+  RUNPATH.
+
+## Task 3: review round 1
+
+- I1: the driver minimum rested on a false premise (the L40S JITs nothing, above). Two pins, each
+  image its own, the test reading the spec's cudart. The Task 2 note is corrected.
+- I2: `bench` refuses a record with rows instead of deleting it.
+- Nits: `filter` with only the lib refused; a refusal test for read-only testdata; an exit above
+  128 that is no signal named as an exit; `judge` takes the status and the zero-tests check is a
+  call of its own (`require_tests`); the two static tests above; the header at ten lines; the
+  `dlopen` names above.
+- N8: micromamba's package cache (`/tmp/mamba`, 8.7 GB of BuildKit cache for 26.02) and the `*.a`
+  deletion are folded into the create `RUN`, so neither reaches a cached layer.
+- The behaviour tests of `test_run_tests.py` now mount the working tree's `docker/run-tests.sh`
+  over the image's, so they test the script without a rebuild;
+  `test_both_images_carry_the_committed_script` holds the images to it.
+- Rebuilt once `/build` had room (table above). Every file in `scripts/env/tests/` is green on
+  them: `test_run_image.py` 9, `test_run_tests.py` 24, `test_image.py` 18, `test_pins.py` 3 and
+  the other six files.
+- **What N8 saved.** The create step's BuildKit record is now the size of the prefix it leaves:
+  5.01 GB for 25.02, 6.09 GB for 26.02, the same as the `COPY --from=prefix` layer. Before, 26.02's
+  record was 8.71 GB, so 2.6 GB less for 26.02. 25.02's earlier records (the create with the package
+  cache and the archives, then a separate `*.a` deletion on top) were pruned before they were
+  measured. The image sizes do not change, since the final stage only ever copied `/opt/cudf`.
+- Round 2: `test_both_images_carry_the_committed_script` also runs each image's own entrypoint,
+  unmounted, as uid 4242 with no network: `--help` exits 0 with the usage, a bare run exits 2 with
+  one line. The rung check requires exactly one rung line in `gpu-host-test.sh`. The record refusal
+  says "pull it home, then remove it". All ten files green again on `8d283e66` and `f753b6cf`.
+- `docker builder prune --filter id=<record>` removes nothing on this Docker (29.1.3), so the
+  superseded images' cache records go only with a prune of all unused cache.

@@ -214,10 +214,29 @@ def test_push_dry_run_pushes_nothing():
         assert not [c for c in r.calls if c[0] == "push"], r.calls
 
 
-def test_the_run_kind_is_refused_for_now():
-    r = run("build", "run", "25.02", "--dry-run")
-    assert r.returncode == 2 and len(r.stderr.strip().splitlines()) == 1, (r.returncode, r.stderr)
-    assert "run.Dockerfile" in r.stderr, r.stderr
+def test_run_build_args():
+    for cudf in ["25.02", "26.02"]:
+        r = run("build", "run", cudf, "--dry-run")
+        assert r.returncode == 0, r.stderr
+        line = build_line(r)
+        args = flag_values(line, "--build-arg")
+        assert f"CUDF={cudf}" in args, args
+        missing = [f"{k}={v}" for k, v in read_pins().items() if f"{k}={v}" not in args]
+        assert not missing, f"pins.env values not passed as build args: {missing}"
+        assert f"{REGISTRY}/peacockdb-run:cudf-{cudf}" in flag_values(line, "-t"), line
+        assert flag_values(line, "-f") == [str(REPO / "docker" / "run.Dockerfile")], line
+        assert f"org.opencontainers.image.version=cudf-{cudf}" in flag_values(line, "--label"), line
+        assert line[-1] == str(REPO), line
+        assert r.calls == [], f"a dry run called docker: {r.calls}"
+
+
+def test_run_push_pushes_both_run_tags():
+    with Repo() as repo:
+        name = f"{REGISTRY}/peacockdb-run:cudf-26.02"
+        images = {name: "sha256:aaa", f"{name}-{repo.sha}": "sha256:aaa"}
+        r = run("push", "run", "26.02", script=repo.script, images=images)
+        assert r.returncode == 0, r.stderr
+        assert [c for c in r.calls if c[0] == "push"] == [["push", f"{name}-{repo.sha}"], ["push", name]], r.calls
 
 
 def test_bad_arguments_fail_in_one_line():
@@ -239,19 +258,24 @@ def test_help():
 MACHINE_PINS = {"CLAUDE_CODE_VERSION", "SUPERPOWERS_VERSION", "SUPERPOWERS_SHA"}
 
 
-def test_the_dockerfile_declares_every_pin_but_the_machine_s():
-    text = (REPO / "docker" / "build.Dockerfile").read_text()
-    declared = set(re.findall(r"^ARG (\w+)", text, re.M))
+def test_the_dockerfiles_declare_every_pin_but_the_machine_s():
+    """image.sh passes every pin to both Dockerfiles and BuildKit is silent about an unused one, so
+    a pin neither declares is a pin nothing reads."""
+    declared = {kind: set(re.findall(r"^ARG (\w+)", (REPO / "docker" / f"{kind}.Dockerfile").read_text(), re.M))
+                for kind in ["build", "run"]}
     assert MACHINE_PINS <= set(read_pins()), "pins.env lost a machine pin"
-    missing = sorted((set(read_pins()) - MACHINE_PINS | {"CUDF", "CUDF_SUBMODULE"}) - declared)
-    assert not missing, f"build.Dockerfile never declares: {missing}"
-    assert not declared & MACHINE_PINS, f"build.Dockerfile declares machine pins: {declared & MACHINE_PINS}"
+    missing = sorted((set(read_pins()) - MACHINE_PINS | {"CUDF", "CUDF_SUBMODULE"}) - (declared["build"] | declared["run"]))
+    assert not missing, f"no Dockerfile declares: {missing}"
+    assert "CUDF" in declared["run"], "run.Dockerfile never declares CUDF"
+    for kind, names in declared.items():
+        assert not names & MACHINE_PINS, f"{kind}.Dockerfile declares machine pins: {names & MACHINE_PINS}"
 
 
 def test_no_claude_code_is_installed_in_the_image():
-    text = (REPO / "docker" / "build.Dockerfile").read_text()
-    found = re.findall(r"claude\.ai/install\.sh|claude plugin|@anthropic-ai/claude-code", text)
-    assert not found, f"build.Dockerfile installs Claude Code: {found}"
+    for kind in ["build", "run"]:
+        text = (REPO / "docker" / f"{kind}.Dockerfile").read_text()
+        found = re.findall(r"claude\.ai/install\.sh|claude plugin|@anthropic-ai/claude-code", text)
+        assert not found, f"{kind}.Dockerfile installs Claude Code: {found}"
 
 
 if __name__ == "__main__":
