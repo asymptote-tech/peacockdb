@@ -19,6 +19,8 @@ PINS = {
     "GCC_25_02": "12",
     "GCC_26_02": "14",
     "NVCC_VERSION": r"12\.9\.86",
+    "DRIVER_MINIMUM_25_02": r"535\.104\.05",
+    "DRIVER_MINIMUM_26_02": r"575\.57\.08",
     "CMAKE_VERSION": r"4\.2\.3",
     "CMAKE_SHA256": SHA256,
     "NINJA_VERSION": r"1\.12\.1",

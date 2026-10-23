@@ -133,14 +133,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   shipped `cpp/install`), `/peacock/testdata` (rw); entry `/opt/run/run-tests.sh <list|bench|filter>`
   that sets `LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib` for the binaries only.
 
-- [ ] **Step 0:** `scripts/env/no-static-cudart.sh` (Task 2) runs on every `libpeacock_gpu.so`
+- [x] **Step 0:** `scripts/env/no-static-cudart.sh` (Task 2) runs on every `libpeacock_gpu.so`
   this task's test takes, so a library pulling a second CUDA runtime in fails here.
-- [ ] **Step 1: failing test** `test_run_image.py::test_every_needed_library_resolves` — given
+- [x] **Step 1: failing test** `test_run_image.py::test_every_needed_library_resolves` — given
   `ldd` output of `libpeacock_gpu.so` and each staged binary run in the image (captured by the
   test via `docker run --entrypoint ldd`), no line reads `not found`.
-- [ ] **Step 2:** write the Dockerfile (micromamba create from the spec minus build-only
+- [x] **Step 2:** write the Dockerfile (micromamba create from the spec minus build-only
   packages), build both versions, run the test against binaries built in Task 2's image.
-- [ ] **Step 3:** record both images' sizes; commit.
+- [x] **Step 3:** record both images' sizes; commit.
 
 ### Task 4: publish
 

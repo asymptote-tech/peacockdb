@@ -28,11 +28,7 @@ done
 [ ${#positional[@]} -eq 3 ] || die "want <build|push> <build|run> <cudf>, got: ${positional[*]:-nothing}"
 verb=${positional[0]} kind=${positional[1]} cudf=${positional[2]}
 case "$verb" in build|push) ;; *) die "unknown command $verb: build or push" ;; esac
-case "$kind" in
-  build) ;;
-  run) die "the run image has no Dockerfile yet (docker/run.Dockerfile, Task 3)" ;;
-  *) die "unknown image kind $kind: build or run" ;;
-esac
+case "$kind" in build|run) ;; *) die "unknown image kind $kind: build or run" ;; esac
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 known=$(cd "$root/docker/conda" && ls cudf-*.spec | sed 's/^cudf-//; s/\.spec$//' | tr '\n' ' ')
