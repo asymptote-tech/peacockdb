@@ -91,6 +91,13 @@ OUTDIR="${SCRIPT_DIR}/${BENCH}.sf${SF}"
 DUCKDB_TEMP_DIR="${DUCKDB_TEMP_DIR:-${SCRIPT_DIR}/.tmp}"
 mkdir -p "$DUCKDB_TEMP_DIR"
 
+# The tpch/tpcds extensions are looked up in PEACOCK_DUCKDB_EXTENSION_DIR when it is set — the build
+# image's pre-installed copies, found whatever the home is — else in DuckDB's default under the home.
+EXTENSION_DIR_SQL=""
+if [ -n "${PEACOCK_DUCKDB_EXTENSION_DIR:-}" ]; then
+  EXTENSION_DIR_SQL=$'\n'"SET extension_directory='${PEACOCK_DUCKDB_EXTENSION_DIR}';"
+fi
+
 if [ -d "$OUTDIR" ]; then
   echo "Directory $OUTDIR already exists, skipping generation."
   echo "Run testdata/clean_testdata.sh first to regenerate."
@@ -261,7 +268,7 @@ CREATE TEMP TABLE glove AS
   $DUCKDB :memory: <<SQL
 PRAGMA threads=1;
 .bail on
-SET temp_directory='${DUCKDB_TEMP_DIR}';
+SET temp_directory='${DUCKDB_TEMP_DIR}';${EXTENSION_DIR_SQL}
 INSTALL tpch;
 LOAD tpch;
 CALL dbgen(sf=${SF});
@@ -298,7 +305,7 @@ else
   $DUCKDB :memory: <<SQL
 PRAGMA threads=1;
 .bail on
-SET temp_directory='${DUCKDB_TEMP_DIR}';
+SET temp_directory='${DUCKDB_TEMP_DIR}';${EXTENSION_DIR_SQL}
 INSTALL tpcds;
 LOAD tpcds;
 CALL dsdgen(sf=${SF});

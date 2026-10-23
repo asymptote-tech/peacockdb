@@ -23,17 +23,20 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 
 ## Global constraints
 
-- No secret in any image layer; the images are public. Keys only at `docker run` time.
+- No secret in any image layer; the images are public. Logins and keys come from the machine at
+  `docker run` time. Claude Code is never in an image: the machine's install is mounted.
 - Never edit `pipeline.yml`, `exec-model-corpus.yml`, `scripts/nebius.sh`, `nebius-sync.sh`,
   `nebius-test.sh`, `scripts/nebius/*`, `build-test-shadgpu.sh`, `scripts/lib/shadgpu-env.sh`.
 - No new script or image names a machine ID, an address, `/home/<user>/…` or a provider; the
-  provider lives only in `scripts/env/host/<provider>.sh`.
+  provider lives only in `scripts/env/host/<provider>.sh`, its CLI binary in the build image with
+  no configuration.
 - Pins, verbatim: cuDF 25.02 from nebius-gpu's `rapids-cuda-12.2` (libcudf 25.02.02, Arrow
   19.0.1), cuDF 26.02 from its `rapids-26.02`; gcc-12 (25.02), gcc-14 (26.02); nvcc 12.9;
   cmake 4.2.3; ninja 1.12.1; DuckDB CLI 1.5.4; Python 3.13, pandas 3.0.6, pyarrow 25.0.1,
   duckdb 1.5.4; Rust stable ≥ 1.85, one version pinned; Claude Code one version pinned,
   `DISABLE_AUTOUPDATER=1`; CUDA architectures `80;90` unchanged.
-- Agents run as a non-root user in the image (uid 1000, `peacock`).
+- Agents run as a non-root user: the machine user's uid:gid (`docker run --user`). The image works
+  for any uid; its default user is `peacock` (uid 1000).
 - Build artefacts on the developer's host only under `/build`, never `/home`.
 - Every new script has a `--help` and exits non-zero with a one-line reason on a missing input.
 - The new tests (`scripts/env/tests/`) run locally and in the build image; wiring them into the
@@ -41,8 +44,9 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 
 ## Review focus
 
-1. A keys file missing one value: the launcher refuses to start and names the value, never starts
-   an ensemble that fails an hour later on `gh` or `claude` auth. → Task 6, `test_up_refuses_missing_key`.
+1. A machine where Claude Code or gh is not logged in, or a needed key is missing: the launcher
+   refuses to start and names what is missing, never starts an ensemble that fails an hour later on
+   auth. → Task 6, `test_up_refuses_missing_login`, `test_up_refuses_missing_key`.
 2. A second instance started with the same name as a running one: refused, never two containers on
    one worktree volume. → Task 6, `test_up_refuses_duplicate_instance`.
 3. A GPU host whose driver is older than the run image's CUDA needs: the run stops before
@@ -90,30 +94,31 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 **Interfaces:**
 - Consumes: Task 1's `pins.env` and specs.
 - Produces: image `ghcr.io/asymptote-tech/peacockdb-build:cudf-<v>` (and `:cudf-<v>-<git sha>`);
-  inside: `CUDF_ROOT=/opt/cudf`, user `peacock` (uid 1000), `/opt/prefetch` holding the CPM cache
-  (`CPM_SOURCE_CACHE`), rapids-cmake and flatbuffers sources, DuckDB extensions under
-  `/opt/duckdb-ext`, the Python venv at `/opt/venv`, `claude` with the `superpowers` plugin
-  installed in the image's user scope.
+  inside: `CUDF_ROOT=/opt/cudf`, default user `peacock` (uid 1000) and any uid under `--user`,
+  `/opt/prefetch` holding the CPM cache (`CPM_SOURCE_CACHE`), rapids-cmake and flatbuffers sources,
+  DuckDB extensions under `/opt/duckdb-ext` (`PEACOCK_DUCKDB_EXTENSION_DIR`, read by
+  `generate_testdata.sh`), the Python venv at `/opt/venv`. No Claude Code and no plugin: both are the
+  machine's (Task 6).
 
-- [ ] **Step 1: failing test** `test_image.py::test_build_args` — `image.sh build build 25.02
+- [x] **Step 1: failing test** `test_image.py::test_build_args` — `image.sh build build 25.02
   --dry-run` prints a `docker build` line with `--build-arg CUDF=25.02`, every `pins.env` value as a
   build arg, tag `ghcr.io/asymptote-tech/peacockdb-build:cudf-25.02`; refuses `cudf 25.10`.
-- [ ] **Step 2:** write the Dockerfile: base `ubuntu:24.04`; apt toolchain; micromamba creates
+- [x] **Step 2:** write the Dockerfile: base `ubuntu:24.04`; apt toolchain; micromamba creates
   `/opt/cudf` from the spec; cmake/ninja tarballs; rustup at `RUST_VERSION`; DuckDB zip; venv;
-  `npm i -g @anthropic-ai/claude-code@$CLAUDE_CODE_VERSION`; gh; aws; the plugin; a prefetch stage
+  gh; aws; a prefetch stage
   that configures the C++ build once (`scripts/build.sh --configure` against `/opt/cudf`) and keeps
   only the fetched sources; `INSTALL tpch; INSTALL tpcds;` into `/opt/duckdb-ext`.
-- [ ] **Step 3:** `image.sh build build 25.02` on the developer's host (BuildKit cache under
+- [x] **Step 3:** `image.sh build build 25.02` on the developer's host (BuildKit cache under
   `/build`); record image size in the detail file.
-- [ ] **Step 4: verify, network off** — in `docker run --network none` with the tree mounted:
+- [x] **Step 4: verify, network off** — in `docker run --network none` with the tree mounted:
   `cargo test -p peacockdb-core --features rust-only --lib` green; the FFI build (`cargo build -p
   peacockdb-core`) and `cargo build --features gpu --tests` compile; `generate_testdata.sh --bench
   tpch` at sf1 succeeds. Paste counts into the detail file.
-- [ ] **Step 5: verify byte-identity** — the cheap Python tier (48 files, 521 passed) and
+- [x] **Step 5: verify byte-identity** — the cheap Python tier (48 files, 521 passed) and
   `scripts/exec_model/run.py --bench tpch --query q3 q5 --mode tp1-single` into a temp dir,
   diffed against the committed sections: identical.
-- [ ] **Step 6:** the same for `26.02` (Steps 3–4; Step 5 is 25.02's alone).
-- [ ] **Step 7:** commit.
+- [x] **Step 6:** the same for `26.02` (Steps 3–4; Step 5 is 25.02's alone).
+- [x] **Step 7:** commit.
 
 ### Task 3: the run image
 
@@ -128,6 +133,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   shipped `cpp/install`), `/peacock/testdata` (rw); entry `/opt/run/run-tests.sh <list|bench|filter>`
   that sets `LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib` for the binaries only.
 
+- [ ] **Step 0:** `scripts/env/no-static-cudart.sh` (Task 2) runs on every `libpeacock_gpu.so`
+  this task's test takes, so a library pulling a second CUDA runtime in fails here.
 - [ ] **Step 1: failing test** `test_run_image.py::test_every_needed_library_resolves` — given
   `ldd` output of `libpeacock_gpu.so` and each staged binary run in the image (captured by the
   test via `docker run --entrypoint ldd`), no line reads `not found`.
@@ -140,7 +147,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 **Files:**
 - Create: `.github/workflows/images.yml` — `workflow_dispatch` only, inputs `kind`, `cudf`; builds
   with `image.sh` and pushes with `GITHUB_TOKEN` (`packages: write`)
-- Modify: `llm-wiki/build-test.md` — pulling and running the images, the hosts, the keys file
+- Modify: `llm-wiki/build-test.md` — pulling and running the images
 
 - [ ] **Step 1:** until the workflow is on master (GitHub dispatches only workflows the default
   branch holds), publish with `image.sh push` from the developer's host, with a token holding
@@ -169,33 +176,60 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 ### Task 6: the CPU-VM launcher and isolated instances
 
 **Files:**
-- Create: `scripts/env/up.sh` — `up.sh <instance> --keys <file> [--chain <c>] [--cudf 25.02]`;
-  `down.sh <instance>`; `scripts/env/bootstrap-vm.sh` (installs Docker on Ubuntu if missing)
+- Create: `scripts/env/bootstrap-vm.sh` — prepares the machine once: Docker if missing, Claude Code
+  at `CLAUDE_CODE_VERSION` with the `superpowers` plugin at `SUPERPOWERS_VERSION` and
+  `DISABLE_AUTOUPDATER=1` set for the machine user, gh at `GH_VERSION` from the same tarball as the
+  image and at the same path, `/usr/local/bin/gh` (`gh auth setup-git` writes that absolute path
+  into `~/.gitconfig`, and the container must resolve it),
+  the repository cloned, sf1 generated and the embeddings fetched (both with the build image, into
+  the machine's directories); it ends by printing the two logins left to do by hand
+- Create: `scripts/env/up.sh` — `up.sh <instance> [--chain <c>] [--cudf 25.02] [--env <file>]`;
+  `down.sh <instance>`
 - Create: `scripts/env/tests/test_up.py`
 - Modify: `llm-wiki/build-test.md` — a "Containers" section
 
 **Interfaces:**
 - Consumes: Task 2's image, Task 5's fetch.
-- Produces: per instance `<i>`: volumes `peacock-<i>-work` (clone + worktrees, mounted at
-  `/work/<i>` so absolute `.git` paths never collide), `peacock-<i>-target`, `peacock-<i>-claude`
-  (`CLAUDE_CONFIG_DIR`); shared: `peacock-sf1` (ro after first generation), `peacock-embeddings`
-  (ro), `peacock-cargo-registry`, `peacock-ccache`. Keys file keys: `CLAUDE_CODE_OAUTH_TOKEN
-  GH_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY` required; `GPU_SSH_KEY_FILE` and
-  `PROVIDER_*` optional.
+- Produces: per instance `<i>`: a worktree of the machine's clone, and the clone's `.git`
+  read-write, both at their machine paths inside the container, so the worktree's `.git` pointer
+  resolves and commits land; a target volume `peacock-<i>-target`. From the machine, read-only: the
+  Claude Code install at its machine path (its plugin and marketplace records hold absolute
+  paths, and `~/.local/bin/claude` links into `~/.local/share/claude/versions/<v>`), sf1, the
+  embeddings, cargo's registry (filled by `bootstrap-vm.sh` with `cargo fetch` in the build image;
+  read-only is what makes it safe to share, since cargo's package lock `$CARGO_HOME/.package-cache`
+  is outside it and per container). Read-write: Claude's config and session data as a directory —
+  `CLAUDE_CONFIG_DIR` set to one directory on the machine and in the container, not a single-file
+  mount of `~/.claude.json` (a file replaced by rename leaves a bind mount on the old inode) —
+  gh's config, ccache. HOME is the machine user's home path and writable in the container (Docker
+  creates a mount point's missing parents as root): Claude and gh write `~/.cache`, `~/.local/state`.
+  Git's identity and gh's credential helper come from the machine's `~/.gitconfig`, mounted
+  read-only. For the GPU steps a chain runs: the ssh key to GPU hosts, mounted read-only at the
+  path `GPU_SSH_KEY_FILE` names; `~/.config/peacock/hosts/` (Task 7's host files) read-only; a
+  provider CLI's config read-only where that provider is used. The container runs with
+  `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. `--env <file>` carries the values that
+  are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` required, `GPU_SSH_KEY_FILE` and a provider's values optional.
+  The registry is read-only, so a `Cargo.lock` that names a crate the machine lacks would fail
+  every build: `up.sh` runs `cargo fetch` for the instance's worktree in the build image, with the
+  registry writable for that one step only, before it starts the instance.
 
-- [ ] **Step 1: failing tests** (fake `docker` on `PATH` recording argv):
-  `test_up_refuses_missing_key` (exit 2, stderr names `GH_TOKEN`);
-  `test_up_refuses_duplicate_instance`; `test_up_mounts_per_instance_volumes` (two instances →
-  disjoint `-work`/`-target`/`-claude` volumes, the same shared ones, shared ones `:ro` except
-  ccache and the first sf1 run); `test_up_never_passes_keys_as_args` (no key value in argv; only
-  `--env-file`).
-- [ ] **Step 2:** implement; first start clones the public repo, generates sf1 once into the
-  shared volume, fetches embeddings, and with `--chain` starts `scripts/ensemble-watchdog.sh <c>` in
-  a worktree.
+- [ ] **Step 1: failing tests** (fakes on `PATH` recording argv): `test_up_refuses_missing_login`
+  (no Claude credentials, or `gh auth status` failing → exit 2, stderr names which);
+  `test_up_refuses_missing_key` (`--env` file without one of the two S3 keys → exit 2, stderr
+  names it); `test_up_fetches_before_it_starts` (the one writable-registry step precedes the
+  instance, and the instance's mount is `:ro`); `test_up_commits_from_the_container` (a commit made in the instance's
+  worktree inside the container lands in the machine's clone, with the machine's git identity);
+  `test_up_refuses_duplicate_instance`; `test_up_mounts_per_instance` (two instances → disjoint
+  worktrees and target volumes, the same machine mounts, the data and the Claude install `:ro`,
+  the GPU ssh key, the host files and a provider's config `:ro`);
+  `test_up_runs_as_the_machine_user` (`--user` is the caller's uid:gid, never 0);
+  `test_up_never_passes_keys_as_args` (no key value in argv; only `--env-file`).
+- [ ] **Step 2:** implement; with `--chain`, `scripts/ensemble-watchdog.sh <c>` starts in the
+  instance's worktree inside the container.
 - [ ] **Step 3: verify on a fresh VM** (a verda or nebius CPU VM the human creates): from nothing,
-  `bootstrap-vm.sh && up.sh a --keys k && up.sh b --keys k`; both build rust-only at once;
-  `docker system df` shows one image copy; in each, `claude --version`, `gh auth status` and the
-  ensemble's first coordinator turn on a scratch chain. Record wall times in the detail file.
+  `bootstrap-vm.sh`, the two logins, `up.sh a && up.sh b`; both build rust-only at once; `docker
+  system df` shows one image copy; in each, `claude --version`, `gh auth status` and the
+  ensemble's first coordinator turn on a scratch chain, with no login asked. Record wall times.
 - [ ] **Step 4:** commit.
 
 ### Task 7: host adapters and the device run
@@ -210,8 +244,10 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Consumes: Tasks 2–3 images.
 - Produces: host file keys `PROVIDER=ssh|nebius HOST USER KEY [PASSWORD_FIRST_LOGIN=1]
   [INSTANCE_ID]`; `prepare` installs its own key on a password-only host, then Docker + NVIDIA
-  Container Toolkit if missing, then `docker pull` the run image; `ship` rsyncs `cpp/install` and
-  the needed testdata to `~/peacock/<instance>/` (instance-named, never the old path's dirs);
+  Container Toolkit if missing, puts the data on the machine once (sf1 generated in the build
+  image there, sf40 from S3 or generated — skipped when present and its checksum holds), then
+  `docker pull` the run image; `ship` rsyncs `cpp/install` and the query files to
+  `~/peacock/<instance>/` (instance-named, never the old path's dirs), never the data;
   `run` executes the run image with `--gpus all`; `pull` brings `benchmark-results/`, the record
   and logs home.
 
