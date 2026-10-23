@@ -4,7 +4,7 @@ and, in the built image, that every library the shipped binaries need resolves.
 The spec and pin tests are cheap. The rest need the run images (`scripts/env/image.sh build run
 <cudf>`) and a staged install per version: `PEACOCK_STAGED_INSTALLS` names a directory holding
 `cudf-<v>/`, each a `cpp/install` with `rust-tests/` beside `bin/` and `lib/`, built in that
-version's build image (llm-wiki/tasks/containers-detail.md, Task 3).
+version's build image.
 """
 import os
 import pathlib

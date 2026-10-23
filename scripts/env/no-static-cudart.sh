@@ -2,7 +2,7 @@
 # Fail when a shared library defines CUDA runtime symbols, which means a static cudart was linked
 # into it. In the 25.02 build image nvcc 12.9 puts its own cudart_static on the link line beside
 # the prefix's 12.2 libcudart.so, so a runtime call that only 12.9 has would bind to the static
-# copy instead of failing to link (llm-wiki/tasks/containers-detail.md, "the CUDA mix").
+# copy instead of failing to link.
 #
 #   no-static-cudart.sh <lib.so>...      e.g. the FFI build's libpeacock_gpu.so
 set -euo pipefail

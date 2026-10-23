@@ -1,8 +1,8 @@
 # check=skip=InvalidDefaultArgInFrom
 # The build image for one cuDF version: every build mode (rust-only, the FFI build, --features gpu,
 # the staged test and benchmark binaries) and the agents that drive them. Built by
-# scripts/env/image.sh, which passes every docker/pins.env line as a build arg; decisions and
-# sizes are in llm-wiki/tasks/containers-detail.md. No secret, host, user home or provider is in
+# scripts/env/image.sh, which passes every docker/pins.env line as a build arg; its use and size
+# are in llm-wiki/build-test.md, "Images". No secret, host, user home or provider is in
 # any layer: the image is public, which is also why Claude Code is not in it (the machine's install
 # is mounted). It runs as any uid: nothing is found through HOME, and what a tool writes is
 # world-writable in the container's own layer or under /tmp.

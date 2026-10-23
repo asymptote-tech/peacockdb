@@ -662,3 +662,127 @@ Every image but the last two is deleted. The two on the host are `8d283e66` (lab
   says "pull it home, then remove it". All ten files green again on `8d283e66` and `f753b6cf`.
 - `docker builder prune --filter id=<record>` removes nothing on this Docker (29.1.3), so the
   superseded images' cache records go only with a prune of all unused cache.
+
+## Task 4: publishing
+
+State: everything up to the push. Nothing is pushed, and no package exists on ghcr.io yet.
+
+**The images, rebuilt from the clean tree at `c0c7b9cd`.** `image.sh build` for each kind and
+version: every step a cache hit, so only the image config changed (the revision label, and the
+commit tag). Each image's layers are those of its predecessor: 15 for a build image, 6 for a run
+image, compared by `RootFS.Layers`. The predecessors are deleted.
+
+| image | ID | tags | revision | driver label |
+|---|---|---|---|---|
+| build 25.02 | `a891af1b594d` | `cudf-25.02`, `cudf-25.02-c0c7b9cdc210` | `c0c7b9cdc210` | — |
+| build 26.02 | `a93e558c529c` | `cudf-26.02`, `cudf-26.02-c0c7b9cdc210` | `c0c7b9cdc210` | — |
+| run 25.02 | `226ff85bf54d` | `cudf-25.02`, `cudf-25.02-c0c7b9cdc210` | `c0c7b9cdc210` | 535.104.05 |
+| run 26.02 | `2299865830b7` | `cudf-26.02`, `cudf-26.02-c0c7b9cdc210` | `c0c7b9cdc210` | 575.57.08 |
+
+`image.sh push <kind> <v> --dry-run` prints, for each, `docker push` of the commit tag and then of
+the version tag, and exits 0. Every file in `scripts/env/tests/` is green on these four (the run
+image tests with `PEACOCK_STAGED_INSTALLS=/build/peacock/containers/staged`).
+
+**The commit tag must be HEAD's at the push.** `c0c7b9cdc210` is Task 3's commit. Once Task 4 is
+committed, `image.sh push` refuses until the images are built again at the new HEAD, from a clean
+tree. That rebuild is all cache hits and takes seconds.
+
+**What one build holds on disk at once, measured on the developer host.** BuildKit's records
+(`docker buildx du --verbose`), and the download size of each spec's packages (`Content-Length`
+of every URL):
+- build image: the create step leaves a 7.48 GB layer (25.02) or 7.19 GB (26.02). While it runs,
+  micromamba's downloads sit beside it: 2.56 GB (25.02 spec 2.48 GB, nvcc's 21 packages 0.08 GB),
+  2.76 GB (26.02). Peak about 10.6 GB for either version; the image is 10.0 or 9.74 GB.
+- run image: the prefix stage's layer is 5.01 GB (25.02) or 6.09 GB (26.02), and the final stage
+  copies it, so the build holds it twice: 10.0 GB and 12.2 GB. The create step's own peak is lower
+  (25.02: 5.01 GB, plus 1.2 GB of archives and 2.23 GB of downloads, both deleted in the step).
+- So the largest is the 26.02 run image, 12.2 GB.
+- Not measured: a runner whose Docker keeps images in the containerd store also keeps the
+  compressed blobs. This host uses overlay2, where a push compresses as it streams.
+
+**The runner-disk finding.** GitHub documents 14 GB of disk for a standard Linux runner, and the
+OS and the preinstalled tools share it with Docker. 12.2 GB does not fit beside them with any
+margin, and the build images' 10.6 GB barely. So every job frees the disk first: it removes the
+preinstalled Android SDK, .NET, GHC, ghcup and CodeQL, and prunes the preinstalled images. Then it
+measures what is free under Docker's data root and stops with an error below 16 GB. The step
+prints `df -h /` before freeing, so the first run records what a runner really has. If a run stops
+there, the images that did not fit are pushed by `image.sh push` from a host, and the workflow
+comment and build-test.md must then say which.
+
+**images.yml.**
+- Dispatch only. Inputs `kind` (build, run, all) and `cudf` (25.02, 26.02, all), both `choice`.
+- One job per image, from a matrix over the inputs: `all` expands to the other choices through
+  `fromJSON`, in the matrix itself, so no planning job is needed. `fail-fast: false`.
+- `permissions: contents: read, packages: write` at the top; no job widens it. The token is
+  `github.token`; no secret is named. `docker login ghcr.io` reads it from stdin.
+- The checkout takes no submodules: `image.sh` reads `third_party/cudf`'s commit from the index.
+- `concurrency: images`, queued, since two runs would push the same tags. `timeout-minutes: 120`.
+- `actions/checkout@v4`, pinned as every other workflow here pins it.
+- If the job's push is denied, the package (first pushed from a host) needs this repository given
+  the Write role under its "Manage Actions access".
+- GitHub can dispatch it only once master holds it. A dispatch then runs the workflow and the
+  commit of the ref it names (`--ref`, master by default), and moves `:cudf-<v>`.
+
+**The test**, `scripts/env/tests/test_images_workflow.py`, 11 cases.
+- The build image has no YAML parser, and the tests run there too, so the test carries a reader
+  for the block subset the workflows use. It fails on any line it does not read. On images.yml it
+  agrees with PyYAML except that it keeps `false` as text.
+- Red first: 10 failed on the missing file; the reader's own case passed.
+- The disk gate is run, not read: the step's script under fake `sudo`, `docker` and `df`. Short
+  by 1 GB, it fails naming both numbers; at the threshold it passes, and the freeing comes before
+  the measurement.
+- Each of these mutations of images.yml turned one case red: a `push` trigger, `packages: read`,
+  `need_gb=12`, the gate's `exit 1` removed, `all` expanding to one kind, `actions/checkout@main`,
+  the `rm -rf` removed, the prune removed, `docker build` in place of `image.sh build`.
+- Green locally (11 passed), and in the 25.02 build image as uid 4242 with no network.
+- `test_ci_coverage`, which reads every workflow, is green with images.yml in place: 11 passed
+  (`--features rust-only`, target under `/build`).
+
+**build-test.md** gains "Images" and an `images.yml` line under CI structure. Its counts had never
+held `scripts/env/tests/` (100 cases in 11 files after round 1) or `scripts/gpu-host/tests/` (104 in
+6 files, by the files' own harness, which the cost-report job runs). Both are rows now: Python 1246,
+the total 5888, the header the sum of the rows.
+
+**What remains for the push** (Task 4 Step 1, the human's token):
+1. commit Task 4, then rebuild the four images at that HEAD from a clean tree;
+2. `gh auth refresh -s write:packages`, `gh auth token | docker login ghcr.io -u <user> --password-stdin`;
+3. `scripts/env/image.sh push <kind> <v>` for the four;
+4. set the two packages public; give this repository Write under their Actions access if a
+   workflow push is later denied;
+5. on a host with no ghcr.io credentials, `docker pull` each of the eight tags.
+- **ghcr.io's limits, for the push.** ghcr.io caps a layer at 10 GB and times out a layer's upload,
+  and each layer goes up in one upload. The largest is the build image's conda layer, 7.48 GB
+  uncompressed (25.02); it is pushed compressed, and on a slow link it is the one at risk. A push
+  that dies there is rerun: `docker push` skips the layers the registry already holds.
+
+## Task 4: review round 1
+
+- **Dispatch wording**: images.yml, build-test.md (CI structure, "Images") now say GitHub can
+  dispatch it only once master holds it, and a dispatch runs the ref it names and moves
+  `:cudf-<v>`.
+- **The step shapes are pinned.** The job's keys are exactly `name runs-on timeout-minutes strategy
+  defaults env steps`; the steps are checkout (`uses`, `with`), "Free the disk" and "Build"
+  (`name`, `run`), "Push" (`name`, `env`, `run`), so no `if` or `continue-on-error` anywhere.
+  Push's whole `run` is pinned, `--password-stdin` included. No `run` may match
+  `\bdocker\s+(image\s+)?(build|push)\b|\bbuildx\b`.
+- Red on each mutation: `docker image push …` added to "Free the disk"; `docker login -p
+  "$GH_TOKEN"`; `continue-on-error: true` and `if: false` on "Free the disk"; a job-level
+  `if: false`; `persist-credentials: true`; `need_gb=13`; the GiB arithmetic; the driver print
+  removed. The earlier set (a `push` trigger, `docker build`, `exit 1` removed, the prune removed)
+  is still red.
+- **filter** in build-test.md: every rust binary but `peacockdb_core_gpu_lib` narrowed, the C++
+  suites and the lib's device rung whole, red when the filter matches nothing in the narrowed
+  binaries (`run_list` in `docker/run-tests.sh`).
+- **Pointers**: images.yml, the test and both Dockerfiles point at build-test.md "Images", which
+  now holds the disk basis; the detail link is gone. Two older pointers into this file remain,
+  `scripts/env/no-static-cudart.sh:5` ("the CUDA mix") and `scripts/env/tests/test_run_image.py:7`
+  (Task 3): their content is not in build-test.md.
+- **Counts**: the GPU host scripts row (104, cost-report) and the image row (100); the header
+  names the image tests as run by hand.
+- Nits: "a card newer than compute capability 9.x"; the reader refuses a tab in the indent and a
+  value starting with `{ & * ! > | % @` or a backquote, and a case feeds it eight bad inputs;
+  `need_gb` and the measured sizes are both GB of 10^9 bytes (`df -B1`, divided by 10^9), with a
+  3 GB margin pinned (`MARGIN_GB`); the step prints docker's storage driver; the checkout has
+  `persist-credentials: false`; "Manage Actions access" is conditional on a denied push.
+- The workflow test is 15 cases now. The Dockerfile changes are comments, so the images'
+  layers do not move.
