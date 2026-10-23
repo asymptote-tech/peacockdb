@@ -1,8 +1,8 @@
 # check=skip=InvalidDefaultArgInFrom
 # The run image for one cuDF version: the runtime of the environment the binaries were built
 # against, and nothing to build with. Built by scripts/env/image.sh, which passes every
-# docker/pins.env line as a build arg; decisions and sizes are in
-# llm-wiki/tasks/containers-detail.md. The binaries are mounted at /peacock/install and the data at
+# docker/pins.env line as a build arg; its use and size are in
+# llm-wiki/build-test.md, "Images". The binaries are mounted at /peacock/install and the data at
 # /peacock/testdata (docker/run-tests.sh). The CUDA driver is the host's, mounted by the NVIDIA
 # Container Toolkit under `docker run --gpus all`. No secret, host or user home is in any layer.
 # No default: without --build-arg CUDF the last FROM names no stage and the build stops (line 1).

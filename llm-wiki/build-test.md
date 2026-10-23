@@ -886,6 +886,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one or captured under Nsight is refused naming why, with nothing written; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py) | cost-report | 29 |
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py) | cost-report | 170 |
+| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 100 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 26 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 2 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249 | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp) | shad-gpu | 126 |
@@ -1386,6 +1387,8 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   pair is out on an L40S.
 - **nebius-watch.yml** — hourly and on dispatch: the hourly checker, which hard-stops an
   unused nebius-gpu (*Nebius host*). GitHub reads its schedule from master only.
+- **images.yml** — on dispatch only: builds and publishes the build and run images (*Images*).
+  GitHub can dispatch it only once master holds it.
 - **cost-report** — the report crate and its inputs, and the cheap script tests: python
   `testdata/test_*.py` by glob (the two DuckDB generators' own tests), the report widget's
   `scripts/test_ticket_widget.py`, the `scripts/exec_model/tests/**/test_*.py` prototype set
@@ -1872,6 +1875,97 @@ transcript on 2026-10-14. Reach the cloud through `nebius.sh`. Learn the CLI fro
   a measurement taken while the gate is in use must leave alone. Create `<dir>/cpp` and
   `<dir>/testdata` first — rsync makes no parent directories, and a push into a fresh one
   retries a hundred times before it fails.
+
+## Images
+
+Two images per cuDF version, built from `docker/` and published on `ghcr.io/asymptote-tech/`.
+`<v>` is a version with a committed spec in `docker/conda/`: 25.02 or 26.02. Sizes are docker's,
+in GB of 10^9 bytes.
+
+| image | holds | size (25.02, 26.02) |
+|---|---|---|
+| `peacockdb-build:cudf-<v>` | every build mode: rust-only, the FFI build, `--features gpu`, the staged binaries | 10.0 GB, 9.74 GB |
+| `peacockdb-run:cudf-<v>` | the runtime of the same cuDF and `run-tests.sh`; nothing to build with | 5.09 GB, 6.17 GB |
+
+Each image carries two tags. `:cudf-<v>` is the latest published. `:cudf-<v>-<commit>` names the
+commit it was built from, 12 hex digits; the label `org.opencontainers.image.revision` holds the
+same commit. Pulling needs no login: `docker pull ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02`.
+No image holds a secret, a host or Claude Code. Both run as any uid: pass
+`--user "$(id -u):$(id -g)"`. The default user is `peacock`, uid 1000, never root.
+
+### The build image
+
+- `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the nebius-gpu environment the
+  committed device answers came from. Its `bin/` is not on PATH.
+- nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (26.02) as `CC`/`CXX`, cmake, ninja, rust,
+  ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
+- DuckDB 1.5.4 with its tpch and tpcds extensions in `/opt/duckdb-ext`. The image sets
+  `PEACOCK_DUCKDB_EXTENSION_DIR`, so `generate_testdata.sh` installs them offline.
+- Python 3.13 in `/opt/venv`, exactly `docker/venv.lock`: the versions the committed costs ran on.
+- git, gh, ssh, rsync, jq, aws and nebius, with no configuration.
+- What a configure fetches is prefetched: rapids-cmake, flatbuffers and gtest. With the tree's
+  `third_party/cudf` checked out and a cargo registry mounted at `/opt/rust/cargo/registry` (filled
+  once by `cargo fetch` with the network on), the build and data generation run under
+  `--network none`.
+- HOME is not writable for a uid the image does not know. Set `-e HOME=<a mounted directory>`
+  when a tool needs one.
+
+### The run image
+
+The binaries and data are mounted, never in the image:
+
+    docker run --rm --gpus all --user "$(id -u):$(id -g)" \
+      -v <staged cpp/install>:/peacock/install:ro -v <testdata>:/peacock/testdata \
+      ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02 list
+
+- `/peacock/install` is a staged `cpp/install`, built in the build image of the same version:
+  `lib/libpeacock_gpu.so`, `bin/peacock_*_tests`, `rust-tests/` and, for `bench`,
+  `rust-benchmarks/`. Read-only.
+- `/peacock/testdata` is the repository's `testdata/` with its datasets. Read-write: a run writes
+  `benchmark-results/` and the calibration record.
+- The entrypoint is `/opt/run/run-tests.sh <list|filter|bench>`. `list` is the L40S list, by
+  `gpu-host-test.sh`'s rules. `filter` runs the list with every rust binary but
+  `peacockdb_core_gpu_lib` narrowed by `-e PCK_TEST_FILTER=<f>`; the C++ suites and the lib's
+  device rung run whole. Beyond the usual failures, it fails when the filter matches no test in the
+  narrowed binaries. `bench` runs the benchmark binary and refuses a
+  `calibration/records.tsv` that still has rows: pull it home, then remove it.
+- Exit 0 is green, 1 a binary failed, ran no test or crashed, 2 a bad argument or input.
+- **The driver.** The label `peacockdb.driver-minimum` is the oldest driver the image's CUDA
+  runtime runs on: 535.104.05 for 25.02, 575.57.08 for 26.02. Read it with
+  `docker image inspect --format '{{index .Config.Labels "peacockdb.driver-minimum"}}' <image>`
+  and compare it with `nvidia-smi --query-gpu=driver_version --format=csv,noheader`. A card newer
+  than compute capability 9.x JIT-compiles the PTX and needs 575.51.03 or later with either image.
+- **A binary run by hand** needs the library path: the shipped binaries carry no RUNPATH. Add
+  `--entrypoint /peacock/install/bin/<binary>`,
+  `-e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib` and
+  `-e PEACOCK_TESTDATA_DIR=/peacock/testdata`.
+
+### Rebuilding and publishing
+
+- `scripts/env/image.sh build <build|run> <v>` builds from the working tree. `--dry-run` prints
+  the `docker build` line instead.
+- **The commit tag comes only from a clean tree**: `git status --porcelain` empty, untracked files
+  included. A dirty build gets `:cudf-<v>` alone and the revision `<commit>-dirty`.
+- `scripts/env/image.sh push <build|run> <v>` pushes both tags. It refuses unless HEAD's commit
+  tag exists locally and `:cudf-<v>` is the same image. So: commit, build, push.
+- **From a host**, docker must be logged in to ghcr.io with a token holding `write:packages`:
+  `gh auth refresh -s write:packages`, then
+  `gh auth token | docker login ghcr.io -u <github user> --password-stdin`. A package pushed for
+  the first time can be private: check its visibility in its settings and set it public.
+- **From GitHub**, `.github/workflows/images.yml`:
+  `gh workflow run images.yml -f kind=<build|run|all> -f cudf=<v|all>`. GitHub can dispatch it
+  only once master holds it. A dispatch runs the workflow and the commit of the ref it names
+  (`--ref`, master by default), and moves `:cudf-<v>`. One job per image, pushing with the job's
+  own token. If the job's push is denied, give this repository the Write role under the package's
+  "Manage Actions access".
+- **The runner's disk.** A standard runner has 14 GB. The largest build holds 12.2 GB at once:
+  the 26.02 run image holds its 6.09 GB prefix twice, in its stage and in the final copy. A build
+  image peaks at about 10.6 GB, its 7.5 GB conda layer beside micromamba's downloads. So a job
+  first removes the runner's preinstalled SDKs, and stops if less than 16 GB is left.
+- The tests are `scripts/env/tests/`, each run as `python3 <file>`, locally or in the build image.
+  No CI step runs them. `test_image_any_user.py`, `test_run_image.py` and `test_run_tests.py` need
+  the images built; `test_run_image.py` also a staged install per version, named by
+  `PEACOCK_STAGED_INSTALLS=<dir holding cudf-<v>/>`.
 
 ## Benchmarks
 
