@@ -5,20 +5,24 @@ Kind: production
 **This task closes [#226](../tickets/benchmarks.md#t226).** Standing up a machine is slow and paid
 for by the hour: a CPU host gets uv, Python 3.13, a venv and an rsync of the tree and the data by
 hand; a GPU host gets a user, two conda environments (~14 GB) and ssh access by hand. This task
-makes both a pulled image and one command: on a fresh VM, a file of keys and one script bring up
-a container in which the agent ensemble runs, and on a fresh GPU machine, ssh access and one
-script run the device tiers or the benchmark in a container and bring the results home. Its first
+makes both a pulled image and one command: on a fresh VM, one script prepares the machine once —
+the repository, Claude Code, gh and the data, logged in once by hand — and brings up containers in
+which the agent ensemble runs; on a fresh GPU machine, ssh access and one script run the device
+tiers or the benchmark in a container over data kept on the machine and bring the results home. Its first
 real use is the benchmark of every device-enabled query on an 80 GB A100 or H100, each result
 file naming the device it came from.
 
 ## Done when
 
-1. A fresh CPU VM: one script and a keys file bring up a container with the keys in place and sf1
-   generated, and the ensemble starts on a chain. Nothing else is done by hand.
+1. A fresh CPU VM: one script installs Docker, Claude Code and gh on the machine, clones the
+   repository and generates sf1 there; after one login to Claude Code and to gh, and a keys file
+   for what is not a login (S3, a provider's values, the ssh key to GPU hosts), one command brings
+   up a container in which the ensemble starts on a chain. Nothing else is done by hand.
 2. A fresh GPU machine of any provider, created by hand: given ssh access, one script installs
-   Docker and the NVIDIA Container Toolkit if they are missing, pulls the run image, mounts the
-   binaries (built in the build image) and the data, runs the device tests or the benchmark, and
-   brings the results home.
+   Docker and the NVIDIA Container Toolkit if they are missing, puts the data on the machine once
+   (sf1 generated, sf40 from S3 or generated), pulls the run image, mounts the binaries (built in
+   the build image) and the data, runs the device tests or the benchmark, and brings the results
+   home. A later run on the same machine fetches nothing it already holds.
 3. The benchmark of every tpch and tpcds query the registry enables on the device, at sf40, on an
    A100 or H100 80 GB, is committed, each file naming its device, driver, CUDA, cuDF and host.
 4. A build image and a run image for each of cuDF 25.02 and 26.02 are public on
@@ -38,43 +42,50 @@ chosen at run time, not by image:
 - DuckDB CLI exactly 1.5.4; Python 3.13 with pandas 3.0.6, pyarrow 25.0.1, numpy, matplotlib and
   duckdb 1.5.4 for `scripts/exec_model` — the committed costs depend on these bytes;
 - git, gh, ssh, rsync, jq, curl, aws CLI, and provider CLIs as tools with no data in them;
-- for agentic development: Claude Code at a pinned version with updates off, and the
-  `superpowers@claude-plugins-official` plugin the project's agents start from;
 - everything a build or data generation fetches at run time today, fetched at image build:
   rapids-cmake, gtest (CPM), flatbuffers (FetchContent), DuckDB's `tpch` and `tpcds` extensions.
   A fresh VM then needs only the registry and S3.
 
-Agents run as an ordinary user: `claude --dangerously-skip-permissions`, as
-`scripts/ensemble-watchdog.sh` runs it, refuses root.
+Claude Code is not in the image: it is proprietary and the images are public. It is installed on
+the machine, with the `superpowers@claude-plugins-official` plugin the project's agents start from,
+and the container runs the machine's install, mounted read-only, with its configuration and
+session data mounted from the machine. gh's login is the machine's too. A login therefore happens
+once per machine, never per container. The container's user has the machine user's uid, so what it
+writes into a mount is the machine user's; it is never root, since
+`claude --dangerously-skip-permissions`, as `scripts/ensemble-watchdog.sh` runs it, refuses root.
 
 **Run image, one per cuDF version.** The runtime of the same cuDF — libcudf, rmm, Arrow 19 and
 their dependencies, the CUDA runtime — and nothing to build with. The binaries and testdata are
 mounted; testdata read-write, since a run writes `benchmark-results/` and its record. It runs on
 any host with an NVIDIA driver and `docker run --gpus all`.
 
-**No secret is in any layer**: the images are public. Keys come at run time from a file outside
-the image (`--env-file`) or read-only mounts: `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN` (with
-`workflow` scope, or git over ssh), the ssh key to GPU hosts, the S3 keys, and a provider's values
-only where that provider is used.
+**No secret is in any layer**: the images are public. What a container needs comes from the
+machine at run time, by mount or `--env-file`: the Claude Code and gh logins, the ssh key to GPU
+hosts, the S3 keys, and a provider's values only where that provider is used.
 
 ## Several instances on one VM
 
-As many as the VM holds, each isolated: its own clone or worktree, target directories, Claude
-session data (`CLAUDE_CONFIG_DIR` on a volume) and ensemble state. What never changes is on disk
-once: the image layers, shared copy-on-write, and read-only volumes for sf1, the embeddings and
-cargo's downloaded crates; ccache may be one shared directory. Two instances never collide on a
+As many as the VM holds, each isolated: its own worktree of the machine's clone, target
+directories and ensemble state. What never changes is on disk once: the image layers, shared
+copy-on-write, and the machine's sf1, embeddings and cargo's downloaded crates, mounted read-only;
+ccache may be one shared directory. The Claude Code install and logins are the machine's, shared by
+every instance. Two instances never collide on a
 path: not in a worktree's absolute `.git` pointer, not in the directory a remote host is synced
 into.
 
 ## Data
 
-sf1 is generated in the container. The external embeddings (GloVe, DEEP1B, ~1.1 GB, fetched today
-by `fetch_embeddings.sh` from outside sites) go to S3 once and come from there, so vector queries
-answer as they do on the developers' hosts. sf40 comes from S3 where a bucket holds it.
+Data lives on the machine and is mounted into containers; a container start fetches nothing. sf1
+is generated once per machine (with the build image's DuckDB and extensions). The external
+embeddings (GloVe, DEEP1B, ~1.1 GB, fetched today by `fetch_embeddings.sh` from outside sites) go
+to S3 once and come from there, so vector queries answer as they do on the developers' hosts. sf40
+comes from S3 where a bucket holds it. Which other files are kept on the machine and mounted is
+settled as the work finds them.
 
 ## Hosts, of any provider
 
-Neither the images nor the new scripts name a machine, an address, a user's home or a provider.
+Neither the images nor the new scripts name a machine, an address, a user's home or a provider;
+a provider's CLI binary may ship in the build image, with no configuration in it.
 Machines are created by hand; the tooling gets ssh access — host, user and key, or a password for
 a first login, after which it installs its own key. Everything provider-specific is a thin adapter
 behind one interface, `start / stop / status / ip / ssh`; where a provider has no API worth using,
@@ -113,6 +124,7 @@ whether tpcds sf40 (15 GB, in no bucket) is generated on the GPU machine or put 
 | `scripts/env/` | new: image build and publish, the CPU-VM launcher, the host adapters, GPU-host bootstrap, the device run, its tests |
 | `.github/workflows/images.yml` | new, dispatch only: builds and publishes the images. The test pipeline is untouched |
 | `testdata/fetch_embeddings.sh`, S3 | the embeddings from S3 |
+| `testdata/generate_testdata.sh` | DuckDB's extensions from a directory named by an environment variable; unchanged when it is unset |
 | benchmark harness (`peacockdb-core/src/test_support/corpus_benchmark.rs`, `tests/peacock_gpu_benchmarks.rs`, `tests/test_corpus_goldens/benchmark.rs`, `tests/common/corpus_benchmark_cases.inc`), the record scripts under `scripts/calibration/` | the registry-driven case set, provenance, the per-device tree |
 | `testdata/benchmark-results/` | the H200 files under `h200/`; the new device's results |
 | `llm-wiki/build-test.md`, `llm-wiki/tickets/benchmarks.md`, `llm-wiki/tasks/verify-26.02.md` | how to use the images and hosts; #226 closed; the reconciled layout |
