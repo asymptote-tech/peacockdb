@@ -872,6 +872,13 @@ pub(crate) fn cpu_schema_validator<'a>(index: &'a PlanIndex<'a>) -> OutputHook<'
     schema_validation::cpu_schema_validator(index)
 }
 
+/// The declaration that switches the hook on, decoded per mode. The device corpus is its
+/// only caller, so it carries that caller's gate; the decoder's own tests reach it directly.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn is_validated_at(declared: &str, mode: &Mode, what: &str) -> bool {
+    schema_validation::is_validated_at(declared, mode, what)
+}
+
 // --- a corpus case ----------------------------------------------------------------
 // What the two corpus binaries call, and all they call: dataset, scale factor, query, the
 // mode's macro spelling and the oracle keyword, as strings. The plan, the run report and
@@ -911,6 +918,11 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
 /// What every reader of `corpus_cases.inc` as text shares.
 pub fn macro_invocations(path: &Path, name: &str) -> Vec<Vec<String>> {
     corpus::macro_invocations(path, name)
+}
+
+/// The same reader over a text rather than a file, so a test can hand it single lines.
+pub fn macro_invocations_in(text: &str, name: &str) -> Vec<Vec<String>> {
+    corpus::invocations_in(text, name, "a line")
 }
 
 /// The `corpus_query!` lines of the include both corpus binaries read.
