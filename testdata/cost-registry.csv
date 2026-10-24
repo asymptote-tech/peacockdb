@@ -3,7 +3,7 @@ tpcds,1,q1,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabl
 tpcds,1,q2,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery,56 60,data_fusion_exact,golden_exact,enabled
 tpcds,1,q3,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q4,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,,data_fusion_exact,golden_exact,enabled
-tpcds,1,q5,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,rollup top_n outer_join,210,data_fusion_exact,golden_exact,enabled
+tpcds,1,q5,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,rollup top_n outer_join,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q6,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery avg top_n,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q7,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,avg top_n,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q8,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n,,data_fusion_exact,golden_exact,enabled

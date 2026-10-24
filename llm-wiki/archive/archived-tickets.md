@@ -45,6 +45,21 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t210"></a>
+### #210 — a bare decimal literal on the AST path comes back as a Float64 column
+**Done by [`decimal-literal`](../tasks/decimal-literal.md) (chain K); awaiting merge.**
+
+cuDF's AST has no fixed-point literal, so `ast_scalar` (`cpp/src/expr.cpp`) carries a `Decimal128`
+literal as a scaled double. `cudf_ast_can_evaluate` accepted a bare one too, so `SELECT 1.5 FROM t`
+computed a `FLOAT64` column where the plan declares `Decimal128(2, 1)`, and the export refused it.
+
+The literal arm now refuses a decimal literal, so the column path builds a real
+`fixed_point_scalar`. The cast arm keeps one directly under a cast to `Float64` or `Int64` on the
+AST, where the scaled double is the value the cast asks for. Proof:
+`Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` and
+`Literals.ACastDecimalLiteralStaysOnTheAst` (`test_plan_executor.cpp`), `a_bare_decimal_literal_agrees`
+(`gpu_tests/exec_cases.rs`), and `tpcds/q5` on at all five device modes.
+
 <a id="t57"></a>
 ### #57 — the device refuses a value-form CASE
 **Done by [`value-case`](../tasks/value-case.md) (chain K); awaiting merge.**
@@ -336,7 +351,7 @@ the cast; the fix below covers both.
 **Corpus queries:** every corpus plan with a grouping-set id: `tpch/rollup-over-join`,
 `tpch/rollup-distinct`, tpcds q5, q14, q18, q22, q77, q80, and `pbench/rollup-small-keys`. All but q5 reach it on a device, all five
 device cells of each off here, the validator refusing the width at the first `GpuAggregate`; q5
-meets [#210](../tickets/corpus-coverage.md#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
+meets [#210](#t210) first. None is off on #189 or #206 any more: the shuffle stopped hashing the
 id and the kernel has its boolean arm. The value shows only through `GROUPING()`, and q70 and q86, its corpus users, are
 window queries that never run. Simplest (from [`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14)):
 `select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*) from nation
@@ -359,7 +374,7 @@ id; independent of it.
 highest, into the width DataFusion declares, and refuses past 64 keys; the exec model folds the
 same way. Cells turned on at all five modes: `rollup-over-join`, `rollup-distinct`,
 `rollup-grouping`, q14, q18, q22, q77, q80 and `rollup-small-keys`. q5 stays off on
-[#210](../tickets/corpus-coverage.md#t210).
+[#210](#t210).
 
 <a id="t262"></a>
 ### #262 — a DISTINCT under a grouping set has no device cell

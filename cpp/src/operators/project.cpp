@@ -43,7 +43,7 @@ TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in) {
         auto& ast = build_expr(expr, ctx);
         made = cudf::compute_column(tv, ast);
       } else {
-        // Contains LIKE / CASE / ScalarFunction — column-producing path.
+        // Not AST-able (cudf_ast_can_evaluate): column-producing path.
         made = build_column(expr, tv, input.column_names);
       }
       std::shared_ptr<cudf::column const> owner{std::move(made)};
