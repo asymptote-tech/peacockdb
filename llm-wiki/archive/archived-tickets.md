@@ -27,6 +27,24 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t174"></a>
+### #174 (two clamps, one rule) — two clamps for one rule, and nothing compares them
+**Done 2026-10-21 by [`guard-checks`](../tasks/guard-checks.md), on `ENS-guard-checks` (PR #170); awaiting merge.**
+
+A limit's row range was clamped by `RowRange::clamp` on the cpu and by C++ `clamp_row_range` on
+the device, each with its own cases, and the driver's mock kept a third copy. Both suites now read
+one case table, `testdata/fixtures/row-range-clamp.txt`: the fourteen old cases, deduplicated.
+`MockUnload::unload` calls `RowRange::clamp`, so the driver's limit tests run the shipped rule.
+The two clamps agree on every case, so no divergence ticket was needed.
+
+<a id="t233"></a>
+### #233 (pass-through col count) — the plan validator does not check that a pass-through node keeps its input's column count
+**Done 2026-10-21 by [`guard-checks`](../tasks/guard-checks.md), on `ENS-guard-checks` (PR #170); awaiting merge.**
+
+`types_across_the_edge` (`plan/validate.rs`) zipped a pass-through node's fields with its input's,
+so a sort declaring three columns over five passed. It now compares the two field counts before
+the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
+
 <a id="t155"></a>
 ### #155 — umbrella: join execution through a wider C and FlatBuffers API
 **Done 2026-10-14 by [`join-backend`](../tasks/join-backend.md), on [`join-session-cpp`](../tasks/join-session-cpp.md)'s session; awaiting merge.**
@@ -960,6 +978,20 @@ adds `tpch.minimal`, `tpch-vec-queries`, `generate_testdata.sh`), so the two alr
 No clean verification run is on record.
 
 ## Stale or obsolete
+
+<a id="t214"></a>
+### #214 (limit drops empty batch) — a limit drops a zero-row batch on both backends
+A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
+Both `LimitStream`s cut with `RowInterval::range_of` (`plan/interval.rs`), which answers `None`
+when `start < stop` is false — always, at `n_rows == 0` — so the batch is released as if outside
+the interval. Joins read no batch as an empty side, so what still sees the difference is #199's
+keyless aggregate: `limit → global aggregate` over zero survivors loses its identity row.
+
+**Stale 2026-10-23.** Not a defect of its own. Dropping a zero-row batch changes no output row,
+which is what `architecture.md` requires of a node ("a zero-row batch and no batch are the same
+arrival"). The one wrong answer it led to is [#199](../tickets/corpus-coverage.md#t199)'s: a keyless
+aggregate owes one row whatever arrived, and #199's fix covers a limit that sends nothing. Its three
+`bug_` pins in `gpu_tests/harness_cases.rs` were dropped with it.
 
 <a id="t256"></a>
 ### #256 — a scan whose row groups all prune is refused as an invalid plan

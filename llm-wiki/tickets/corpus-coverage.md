@@ -22,7 +22,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#202 (desc sort null order) a descending sort key puts its nulls on the wrong end on the device](#t202)
   - [#217 (sort fetch 0) a sort with `fetch 0` keeps every row on the device](#t217)
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
-  - [#214 (limit drops empty batch) a limit drops a zero-row batch on both backends](#t214)
   - [#205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches](#t205)
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
@@ -37,8 +36,6 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
 - [Testing](#testing)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#164 (unchecked cuDF ordinal) a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws](#t164)
-  - [#174 (two clamps, one rule) two clamps for one rule, and nothing compares them](#t174)
-  - [#233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count](#t233)
   - [#234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them](#t234)
   - [#262 (DISTINCT device cells) the DISTINCT lowering's device cells have never run](#t262)
   - [#281 (limits/sorts gpu cells) limits' and empty-sorts' device cells have never run](#t281)
@@ -170,7 +167,8 @@ A second site, on both backends: the single-node shortcut (`translator/aggregate
 keyless `GpuAggregate` over a single-batch input. When no batch arrives the node is never called
 (`single_partition.rs:192,248-251`) and no row comes out — symmetric, so the cpu-vs-device
 comparison cannot see it. A `GpuLimit` keeps its input's single-batch layout, so a limit over a
-sort, merge or coalesce feeds it, and #214's dropped batch lands here. The rule for both sites is
+sort, merge or coalesce feeds it, and a limit that drops a zero-row batch
+([#214](../archive/archived-tickets.md#t214), stale) leaves it nothing. The rule for both sites is
 one: a keyless aggregate answers one row whatever arrived.
 
 **Corpus queries:** tpcds q96, q88 and q90, and `pbench/scalar-subquery-cross`, at `tp4-single`,
@@ -191,7 +189,7 @@ from `decomposition()` (`plan/aggregates.rs`), which gains an empty-input value 
 finalizes it (count 0, the rest NULL); a merge never meets no arrival, and its count sums to 0,
 not NULL. Every aggregate sequence starts with a `GpuAggregate` (`aggregate_sequence`, its only
 builder), so the init covers them all. The driver owes the done call to every lane, one that saw
-no batch included — today such a lane gets no call. Sources of nothing below the init (#214's
+no batch included — today such a lane gets no call. Sources of nothing below the init ([#214](../archive/archived-tickets.md#t214)'s
 limit, #205's sort, the joins) need no fix of their own for this; between init and merge a keyless
 sequence only collapses lanes, which keeps the one-row batch. The cpu's `!self.grouped` clause, which
 merges over nothing, goes, and the twelve #180 cells turn on at the tp4 modes.
@@ -415,22 +413,6 @@ rows.
 both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` to
 `min(fetch, rows)`. One slice for every path. The two `bug_` pins become green `same` cases, and
 `architecture.md`'s three notes on this exception drop.
-
-<a id="t214"></a>
-### #214 (limit drops empty batch) a limit drops a zero-row batch on both backends
-
-A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
-Both `LimitStream`s cut with `RowInterval::range_of` (`plan/interval.rs`), which answers `None`
-when `start < stop` is false — always, at `n_rows == 0` — so the batch is released as if outside
-the interval. Pinned by `bug_a_stream_of_one_zero_row_batch_is_dropped_on_both` and its two
-neighbours (`gpu_tests/harness_cases.rs`). Joins read no batch as an empty side, so what still
-sees the difference is #199's keyless aggregate: `limit → global aggregate` over zero survivors
-loses its identity row.
-
-**Corpus query:** none.
-
-**Fix proposed:** a zero-row batch inside the interval is forwarded as it is; the three pins go
-green as `same` cases.
 
 <a id="t205"></a>
 ### #205 (cpu sort over empty) the cpu's accumulating sort and merge answer nothing over zero-row batches
@@ -747,62 +729,6 @@ surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-sch
 to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
 half is closed — `register_handle`, the only path to a handle number, refuses a handle whose names
 do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
-
-<a id="t174"></a>
-### #174 (two clamps, one rule) two clamps for one rule, and nothing compares them
-A limit keeps a row range of each batch, and the two backends clamp that range in their own code.
-`RowRange::clamp` (`peacockdb-core/src/executor/row_range.rs`) returns `(offset, length)`; its one
-caller is `CpuUnload::unload`. C++ `clamp_row_range` (`cpp/src/node_session.cpp`) returns
-`(begin, end)`; `slice_handle` and `peacock_result_from_handle` share it. The rule is one: `begin =
-min(offset, n)`, `take = min(length, n − begin)`, the subtraction keeping the `u64::MAX` to-the-end
-sentinel from overflowing.
-
-No test reads both. The four Rust cases (`executor/row_range/tests.rs`) and the ten C++ cases
-(`cpp/tests/cpu/test_executor.cpp`, `ClampRowRange`) each prove one side, in shapes that cannot be
-compared as written. Both docs name the risk: the two answering differently "would be a divergence
-no test of either one alone could see". They agree today, line for line. The claim that landed
-with the second clamp, "RowRange::clamp is now the one clamp", is what this corrects.
-
-A third copy sits in the driver's test mock: `MockUnload::unload`
-(`executor/driver/tests/mock.rs`) clamps with its own `min` arithmetic rather than calling
-`RowRange::clamp`. Every row count in `driver/tests/limit.rs` is a fact about that private copy,
-so the driver's limit tests would stay green if the shipped clamp broke
-(`reports/hacks-audit.md` §7).
-
-**Fix proposed:** one case table both suites read, the instrument `src/tests/executor_cases.rs`
-already is for operators. A text file of `offset length rows → begin end` lines, `max` spelling
-the sentinel, beside the gtest in `cpp/tests/cpu/`. The Rust test embeds it with `include_str!`
-and checks `RowRange::clamp` after mapping `(offset, length)` to `(offset, offset + length)`. The
-`ClampRowRange` gtest reads it through a path CMake passes as a compile definition. The fourteen
-existing cases move into the file, deduplicated, and the per-side literals go. Both run on the cpu
-tier, with no FFI and no device. A case added once then reaches both clamps, and a drift on
-either side fails that side's test on the shared line. And the mock's copy goes:
-`MockUnload::unload` calls `rows.clamp(batch.rows as u64)`, so the driver's limit tests run the
-production rule. One line; `driver/tests/limit.rs`'s counts stay as they are.
-
-<a id="t233"></a>
-### #233 (pass-through col count) the plan validator does not check that a pass-through node keeps its input's column count
-
-A node that carries its input's columns — Sort, CoalesceAllBatches, AccumulateBatchesAndSort,
-Limit, MergePartitions, EmitPartitions, MergeSortedPartitions — passes `validate` while declaring
-fewer or more columns than its input has. A Filter without a projection is not among them:
-`declared_width` checks it against its input.
-
-`declared_width` (`plan/validate.rs`) checks the column count only for the nodes that compute a
-width, and hands these kinds to `types_across_the_edge`. That function zips the node's fields with
-its input's and compares the pairs, and `zip` stops at the shorter list: a sort declaring three
-columns over a five-column input passes both checks. Unreachable from the planner, whose
-constructors derive these schemas from their input. The gap is open to the other callers:
-`validate` is public so that a test rewriting a planned tree (`plan/tests/layout_injection.rs`,
-the validator's own tests) runs the planner's check, and a rewrite that drops a column goes
-unnoticed there. Found by `reports/hacks-audit.md` §6.
-
-**Corpus queries:** none; no planned tree has the shape.
-
-**Fix proposed:** in `types_across_the_edge`, compare the two field counts before the zip and
-return `PlanError::Invalid` naming the node and both counts, in the style of `declared_width`'s
-message. Test, in `plan/validate/tests.rs`: a hand-built sort declaring one column over a
-two-column source is refused, and the same sort declaring both columns passes.
 
 <a id="t234"></a>
 ### #234 (limit counted twice) a mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them

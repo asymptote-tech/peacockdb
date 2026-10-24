@@ -853,9 +853,9 @@ The rule is not met yet. Known breaks:
 
 - A keyless aggregate owes one row over any input, and emits none over no batch
   ([#199](tickets/corpus-coverage.md#t199)).
-- Producers that drop a zero-row batch expose the break above: the limit
-  ([#214](tickets/corpus-coverage.md#t214)) and the cpu's accumulating sort and merge
-  ([#205](tickets/corpus-coverage.md#t205)).
+- Producers that drop a zero-row batch expose the break above: the cpu's accumulating sort and
+  merge ([#205](tickets/corpus-coverage.md#t205)). The limit drops one too, and that is no break
+  of its own ([#214](archive/archived-tickets.md#t214), stale).
 
 A new node meets the rule by construction: what it owes over an empty input, it owes over no
 input.
