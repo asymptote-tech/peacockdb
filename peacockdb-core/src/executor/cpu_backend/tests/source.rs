@@ -72,7 +72,6 @@ fn loader(projection: Vec<u32>, partition_groups: Vec<Vec<Vec<u32>>>) -> GpuLoad
         projection,
         partition_groups,
         &scan,
-        None,
         columns(&fields),
     )
 }
@@ -208,7 +207,6 @@ fn a_column_the_file_holds_in_another_type_is_refused_rather_than_cast() {
         vec![0, 1],
         vec![vec![vec![0]]],
         &scan,
-        None,
         columns(&[("k", DataType::Utf8), ("v", DataType::Int32)]),
     );
     let NodeExecutors::Source(source) =
@@ -249,7 +247,6 @@ fn a_scan_of_no_column_answers_the_rowmarker_per_row() {
         Vec::new(),
         vec![vec![vec![0], vec![1, 2]]],
         &scan,
-        None,
         Schema::rowmarker(),
     );
     let NodeExecutors::Source(mut source) =

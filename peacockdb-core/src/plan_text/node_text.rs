@@ -82,9 +82,6 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
                 "partition_groups={}",
                 nested(&load.partition_groups)
             ));
-            if let Some(limit) = load.limit {
-                fields.push(format!("limit={limit}"));
-            }
         }
         NodeRef::Filter(filter) => {
             fields.push(format!("predicate={}", expr_text(&filter.predicate)));

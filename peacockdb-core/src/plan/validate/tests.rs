@@ -656,7 +656,6 @@ fn scan_of_no_column(schema: Schema) -> Box<dyn GpuNode> {
         Vec::new(),
         vec![vec![vec![0]]],
         &scan,
-        None,
         schema,
     ))
 }

@@ -50,7 +50,6 @@ pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Bo
                 load.projection.clone(),
                 load.partition_groups.clone(),
                 &scan,
-                load.limit,
                 schema_of(node),
             ))
         }
@@ -201,10 +200,10 @@ pub(crate) fn lanes_of(node: &dyn GpuNode) -> usize {
 /// several of these fields appear in no corpus query at all.
 pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
     vec![
-        source(Some(7)),
+        second_source(),
         other_source(),
         Box::new(GpuFilter::new(
-            source(None),
+            source(),
             column(0, "k"),
             Some(vec![1]),
             one_column(),
@@ -216,7 +215,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             other_columns(),
         )),
         Box::new(GpuProject::new(
-            source(None),
+            source(),
             vec![NamedExpr::new(column(1, "v"), "v")],
             one_column(),
         )),
@@ -228,12 +227,12 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             ],
             other_columns(),
         )),
-        Box::new(GpuSort::new(source(None), vec![key(0)], Some(9))),
+        Box::new(GpuSort::new(source(), vec![key(0)], Some(9))),
         Box::new(GpuSort::new(other_source(), vec![key(1)], None)),
-        Box::new(GpuCoalesceAllBatches::new(source(None))),
+        Box::new(GpuCoalesceAllBatches::new(source())),
         Box::new(GpuCoalesceAllBatches::new(other_source())),
         Box::new(GpuAccumulateBatchesAndSort::new(
-            source(None),
+            source(),
             vec![key(0)],
             Some(4),
         )),
@@ -244,7 +243,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         // A limit with both ends, and a pure offset — the form that never satisfies.
         Box::new(GpuLimit::new(
-            source(None),
+            source(),
             RowInterval {
                 skip: 3,
                 fetch: Some(11),
@@ -260,7 +259,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         // An aggregate with a finalize, grouping sets and their null expressions, over the
         // Welford triple — the widest body there is — against a keyless sum with none.
         Box::new(GpuAggregate::new(
-            source(None),
+            source(),
             welford_body(true),
             state(),
             one_column(),
@@ -272,7 +271,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             one_column(),
         )),
         Box::new(GpuAggregateBatches::new(
-            source(None),
+            source(),
             welford_body(true),
             state(),
             one_column(),
@@ -286,8 +285,8 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         // A join carrying its residual, the filter's own column map, NULL = NULL and a
         // projection; and one carrying none of them.
         Box::new(GpuHashJoin::new(
-            source(None),
-            source(Some(7)),
+            source(),
+            second_source(),
             JoinType::LeftSemi,
             vec![(0, 1)],
             Some(column(0, "f")),
@@ -307,7 +306,7 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         Box::new(GpuHashJoin::new(
             other_source(),
-            source(None),
+            source(),
             JoinType::Inner,
             vec![(0, 0)],
             None,
@@ -317,20 +316,20 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             other_columns(),
         )),
         Box::new(GpuCrossJoin::new(
-            source(None),
-            source(Some(7)),
+            source(),
+            second_source(),
             Some(vec![1, 2]),
             columns(),
         )),
         Box::new(GpuCrossJoin::new(
             other_source(),
-            source(None),
+            source(),
             None,
             other_columns(),
         )),
         Box::new(GpuNestedLoopJoin::new(
-            source(None),
-            source(Some(7)),
+            source(),
+            second_source(),
             JoinType::Left,
             column(0, "f"),
             vec![JoinFilterColumn {
@@ -342,19 +341,19 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         Box::new(GpuNestedLoopJoin::new(
             other_source(),
-            source(None),
+            source(),
             JoinType::Inner,
             column(1, "f"),
             Vec::new(),
             None,
             other_columns(),
         )),
-        Box::new(GpuMergePartitions::new(source(None))),
+        Box::new(GpuMergePartitions::new(source())),
         Box::new(GpuMergePartitions::new(other_source())),
-        Box::new(GpuEmitPartitions::new(source(None), vec![1], 4)),
+        Box::new(GpuEmitPartitions::new(source(), vec![1], 4)),
         Box::new(GpuEmitPartitions::new(other_source(), vec![0], 2)),
         Box::new(GpuMergeSortedPartitions::new(
-            sorted(source(None), key(0)),
+            sorted(source(), key(0)),
             vec![key(0)],
             Some(6),
         )),
@@ -363,24 +362,21 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
             vec![key(1)],
             None,
         )),
+        Box::new(GpuUnion::new(vec![source(), second_source()], columns())),
         Box::new(GpuUnion::new(
-            vec![source(None), source(Some(7))],
-            columns(),
-        )),
-        Box::new(GpuUnion::new(
-            vec![other_source(), source(None), source(Some(7))],
+            vec![other_source(), source(), second_source()],
             other_columns(),
         )),
         Box::new(GpuInterleave::new(
-            vec![scattered(source(None), 2), scattered(source(Some(7)), 2)],
+            vec![scattered(source(), 2), scattered(second_source(), 2)],
             columns(),
         )),
         Box::new(GpuInterleave::new(
-            vec![scattered(other_source(), 3), scattered(source(None), 3)],
+            vec![scattered(other_source(), 3), scattered(source(), 3)],
             other_columns(),
         )),
         Box::new(GpuUnload::new(
-            source(None),
+            source(),
             Some(RowInterval {
                 skip: 2,
                 fetch: Some(8),
@@ -394,7 +390,17 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
 
 /// Two lanes, three row groups between them, and a column that holds a NULL beside one
 /// that does not — the loader's fields that no plan line prints.
-pub(crate) fn source(limit: Option<usize>) -> Box<dyn GpuNode> {
+pub(crate) fn source() -> Box<dyn GpuNode> {
+    source_named("part")
+}
+
+/// [`source`] under another table and file, so a node with two children of one schema has
+/// children a rebuild could tell apart, and a swap of them shows.
+fn second_source() -> Box<dyn GpuNode> {
+    source_named("partsupp")
+}
+
+fn source_named(table: &str) -> Box<dyn GpuNode> {
     let groups: Vec<RowGroupMeta> = (0..3)
         .map(|index| RowGroupMeta {
             index,
@@ -403,16 +409,15 @@ pub(crate) fn source(limit: Option<usize>) -> Box<dyn GpuNode> {
         })
         .collect();
     let scan = ScanMetadata {
-        file: "/part.parquet".to_string(),
+        file: format!("/{table}.parquet"),
         groups,
         can_be_null: vec![false, true],
     };
     Box::new(GpuLoadParquet::new(
-        "part".to_string(),
+        table.to_string(),
         vec![0, 1],
         vec![vec![vec![0], vec![1]], vec![vec![2]]],
         &scan,
-        limit,
         columns(),
     ))
 }
@@ -435,7 +440,6 @@ fn other_source() -> Box<dyn GpuNode> {
         vec![0, 2],
         vec![vec![vec![4]]],
         &scan,
-        Some(3),
         other_columns(),
     ))
 }
