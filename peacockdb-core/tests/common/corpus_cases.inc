@@ -122,8 +122,8 @@ corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, 
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// three: q78 and q2 (#60's `round`) and q5 (#210's decimal literal). The
-// joins' own blockers, #152's side copies and #220's batch splits, went with the join session.
+// two: q78 and q2 (#60's `round`). The joins' own blockers, #152's side copies and #220's
+// batch splits, went with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -188,10 +188,9 @@ corpus_query!(tpcds, 1, q59, all_modes, all_modes, duckdb_approx, data_fusion_ex
 
 // T19 batch 13, by expected calls. q54's nested-loop join projects, which the cpu applies.
 // On the device q78 is off on #60: five `ratio` cells, `round(…, 2)` over Float64, one ulp
-// from DataFusion's and DuckDB's at every mode. q5 is off on #210: its `0.00` literals come back
-// FLOAT64, and the schema hook refuses them. The other three run everywhere.
+// from DataFusion's and DuckDB's at every mode. The other four run everywhere.
 corpus_query!(tpcds, 1, q78, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q5, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+corpus_query!(tpcds, 1, q5, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q54, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q95, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q38, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

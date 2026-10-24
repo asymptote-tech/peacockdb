@@ -335,6 +335,12 @@ static bool is_string_like_literal(const fb::Expr* expr) {
   }
 }
 
+static bool is_decimal_literal(const fb::Expr* expr) {
+  if (expr->node_type() != fb::ExprNode_LiteralExpr) return false;
+  auto* sv = expr->node_as_LiteralExpr()->value();
+  return sv && sv->type() == fb::DataType_Decimal128;
+}
+
 // Best-effort static type of an expression, resolved against the input table
 // (column refs need the schema). Used only to decide AST-ability; a bad reference
 // throws, and EMPTY is left for shapes we can't infer, which callers treat conservatively.
@@ -405,11 +411,11 @@ bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table,
     case fb::ExprNode_ScalarFunctionExprNode:
       return false;
     case fb::ExprNode_LiteralExpr:
-      // A standalone string/binary literal can't go through compute_column
-      // (it allocates fixed-width output); route it to build_column, which
-      // broadcasts the scalar. Numeric literals stay AST-able. Literals inside
-      // binary ops are classified by the BinaryExprNode arm below, not here.
-      return !is_string_like_literal(expr);
+      // A standalone string/binary literal can't go through compute_column (it allocates
+      // fixed-width output), and the AST has no fixed-point literal (#210); build_column
+      // broadcasts the scalar instead. Literals inside binary ops are classified by the
+      // BinaryExprNode arm below, not here.
+      return !is_string_like_literal(expr) && !is_decimal_literal(expr);
     case fb::ExprNode_BinaryExprNode: {
       auto* b = expr->node_as_BinaryExprNode();
       // cuDF AST has no string ops; string literal on either side forces the
@@ -447,7 +453,10 @@ bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table,
       auto target = fb_to_type_id(expr->node_as_CastExprNode()->target_type());
       if (target != cudf::type_id::INT64 && target != cudf::type_id::FLOAT64)
         return false;
-      return cudf_ast_can_evaluate(expr->node_as_CastExprNode()->expr(), table, names);
+      // A decimal literal the literal arm refuses (#210) is still AST-able here: ast_scalar's
+      // scaled double is the value this cast asks for.
+      auto* operand = expr->node_as_CastExprNode()->expr();
+      return is_decimal_literal(operand) || cudf_ast_can_evaluate(operand, table, names);
     }
     default:
       return true;
