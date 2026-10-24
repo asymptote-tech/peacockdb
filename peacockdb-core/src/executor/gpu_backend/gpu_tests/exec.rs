@@ -1,5 +1,5 @@
-//! The exec executors: filter, project, the per-batch sort, the aggregate with and
-//! without its finalize, and the export's row range.
+//! The exec executors — filter, project, the per-batch sort — the chain an aggregate's init is
+//! built from, with and without its finalize, and the export's row range.
 
 use super::*;
 

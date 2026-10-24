@@ -984,8 +984,8 @@ async fn a_predicate_free_inner_nested_loop_merges_its_probe() {
 
 /// pbench's `outer-on-true-empty`, `tiny LEFT JOIN empty ON true`, as DataFusion swaps it: a
 /// predicate-free Right nested loop whose build side has no row. The empty side is `tiny`
-/// filtered by what no footer statistic prunes, since a scan whose row groups all prune is
-/// refused (#282). DuckDB answers every `tiny` row, padded: eight.
+/// filtered by what no footer statistic prunes, so the build is a batch of no rows rather than
+/// no batch. DuckDB answers every `tiny` row, padded: eight.
 #[tokio::test]
 async fn a_predicate_free_outer_nested_loop_pads_its_preserved_side() {
     use datafusion::arrow::array::{Array, AsArray};

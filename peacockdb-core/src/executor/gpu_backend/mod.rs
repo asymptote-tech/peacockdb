@@ -43,7 +43,7 @@ use crate::executor::{Region, RowRange};
 use crate::plan::PlanError;
 use crate::wire::{AbiSymbol, CallPattern, FbKind, Input, Recipe, Seq};
 
-/// A `BatchAccumulator` node's executor. What it holds between calls is one of four
+/// A `BatchAccumulator` node's executor. What it holds between calls is one of five
 /// things, and `accumulate` owns them: a public variant would hand a caller the state a
 /// private module keeps.
 pub(crate) struct GpuAccumulator {
@@ -127,8 +127,8 @@ pub(crate) struct LaneRead {
 pub(crate) struct GpuExec {
     site: CallSite,
     calls: Vec<(Seq, FbKind)>,
-    /// What every call but the last produces. `None` where the node makes one call, which
-    /// is every exec node but an aggregate with a finalize.
+    /// What every call but the last produces. `None` where the chain is one call, which is
+    /// every chain but an aggregate init's with a finalize.
     intermediate: Option<SchemaRef>,
     schema: SchemaRef,
 }
@@ -206,14 +206,26 @@ impl GpuExec {
         // The session is this executor's, not the batch's: a batch carries the pointer so
         // that dropping it can release its handle, and every batch reaching a node was
         // drawn from the session the node was built against.
+        let input = Consumed::of(&batch);
+        let (_, handle) = batch.consume();
+        self.chain(vec![vec![handle]], input)
+    }
+
+    /// The same calls with the first handed no input at all: an aggregate's done call, which
+    /// aggregates the zero-row table its node's declared input describes.
+    pub(crate) fn exec_over_nothing(&mut self) -> CallResult<GpuBatch> {
+        self.chain(Vec::new(), Consumed::default())
+    }
+
+    /// The calls in order, `first` into the first and each output into the next.
+    fn chain(&self, first: Vec<Vec<u64>>, mut input: Consumed) -> CallResult<GpuBatch> {
         let mut calls = AbiCalls::armed(node_timing_on());
-        // Only the first call reads a batch this side priced; every later one reads the
-        // one before it, whose price this loop computed.
-        let mut input = Consumed::of(&batch);
-        let (_, mut handle) = batch.consume();
+        // Only the first call reads what the caller priced; every later one reads the one
+        // before it, whose price this loop computed.
+        let mut handles = first;
         let mut last = (0u64, 0u64);
         for (position, (seq, kind)) in self.calls.iter().enumerate() {
-            let (out, stats) = execute_node(self.site, *seq, *kind, &[vec![handle]])?;
+            let (out, stats) = execute_node(self.site, *seq, *kind, &handles)?;
             let out_bytes = priced(stats, self.out_schema(position));
             calls.record(AbiCall {
                 seq: *seq,
@@ -224,7 +236,7 @@ impl GpuExec {
                 out_rows: stats.rows,
                 out_bytes,
             });
-            handle = out;
+            handles = vec![vec![out]];
             input = Consumed {
                 rows: stats.rows,
                 bytes: out_bytes,
@@ -239,7 +251,7 @@ impl GpuExec {
         Ok((
             GpuBatch::new(
                 self.site.executor,
-                handle,
+                handles[0][0],
                 seq,
                 last.0 as usize,
                 last.1 as usize,

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, AsArray, Int64Array, UInt8Array};
+use datafusion::arrow::array::{ArrayRef, Int64Array, UInt8Array};
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -16,7 +16,7 @@ use super::aggregate_cases::{
     GroupKey, KEY, body, call, cpu_slot, gpu_slot, init, init_by, input, merge_by, merge_over,
     state_cut, welford_init_aggs, welford_merge_by, welford_partial, welford_state_by,
 };
-use super::script::{Outcome, Script, run_both};
+use super::script::{Outcome, Script, each_answers, run_both};
 use crate::plan::{
     AggCall, AggFunc, AggSpec, BatchLayout, BinaryOp, Expr, GpuAggregate, NamedExpr, PlanAgg,
     Schema, finalize,
@@ -53,7 +53,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_a_date_agrees() {
         let node = init_by(&[DATE], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input_twice()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input_twice()])).same(Order::Any);
     }
 }
 
@@ -61,7 +61,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_an_int64_agrees() {
         let node = init_by(&[ID], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input_twice()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input_twice()])).same(Order::Any);
     }
 }
 
@@ -69,7 +69,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_a_string_agrees() {
         let node = init_by(&[STRING], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -77,7 +77,7 @@ operator_case! {
     GpuAggregate,
     fn a_sum_grouped_on_an_int32_and_a_string_agrees() {
         let node = init_by(&[KEY, STRING], vec![sum_i64()]);
-        run_both(&node, Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&node, Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -143,14 +143,14 @@ fn count_star() -> AggCall {
 operator_case! {
     GpuAggregate,
     fn a_grouped_count_star_agrees() {
-        run_both(&init(true, vec![count_star()]), Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&init(true, vec![count_star()]), Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_global_count_star_agrees() {
-        run_both(&init(false, vec![count_star()]), Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&init(false, vec![count_star()]), Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -160,7 +160,7 @@ operator_case! {
     GpuAggregate,
     fn a_grouped_count_of_an_all_null_group_agrees() {
         let aggs = vec![call(PlanAgg::Count, Expr::column(1, "key"), "count(key)", DataType::Int64)];
-        run_both(&init(true, aggs), Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&init(true, aggs), Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -178,7 +178,7 @@ operator_case! {
             DataType::Int64,
         );
         let aggs = vec![call(PlanAgg::Sum, product, "sum(i64 * i32)", DataType::Int64)];
-        run_both(&init(true, aggs), Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&init(true, aggs), Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
@@ -199,29 +199,32 @@ operator_case! {
             else_expr: Some(Box::new(Expr::Literal(ScalarValue::Int64(Some(0))))),
         };
         let aggs = vec![call(PlanAgg::Sum, case, "sum(case)", DataType::Int64)];
-        run_both(&init(true, aggs), Script::Exec(vec![input()])).same(Order::Any);
+        run_both(&init(true, aggs), Script::Accumulate(vec![input()])).same(Order::Any);
     }
 }
 
-// Empty inputs, each its own case: `count(*)` over a zero-row batch.
+// Empty inputs, each its own case: `count(*)` over a zero-row batch, which the init
+// releases uncalled. Grouped, it owes no groups and answers nothing.
 operator_case! {
     GpuAggregate,
-    fn a_grouped_count_star_over_zero_rows_is_zero_rows_on_both() {
-        run_both(&init(true, vec![count_star()]), Script::Exec(vec![synthetic(0, 1)]))
-            .same(Order::Any);
+    fn a_grouped_count_star_over_a_zero_row_batch_answers_nothing_on_both() {
+        let outcome =
+            run_both(&init(true, vec![count_star()]), Script::Accumulate(vec![synthetic(0, 1)]));
+        let nothing = vec![Vec::new(); 2];
+        each_answers(&outcome, &nothing, &nothing);
     }
 }
 
 operator_case! {
     GpuAggregate,
     fn a_global_count_star_over_zero_rows_keeps_its_identity_row() {
-        run_both(&init(false, vec![count_star()]), Script::Exec(vec![synthetic(0, 1)]))
+        run_both(&init(false, vec![count_star()]), Script::Accumulate(vec![synthetic(0, 1)]))
             .same(Order::Any);
     }
 }
 
-// Every merge arm with rows to fold. A keyless merge is `cudf::reduce`'s arm, which only
-// #199's no-arrival pin drove; the grouped `Min` and `Max` arms had no case at all. A count
+// Every merge arm with rows to fold. A keyless merge is `cudf::reduce`'s arm; the grouped
+// `Min` and `Max` arms had no case at all. A count
 // merges by `Sum` in every plan (`sum(count(*))`), so the keyless sum case is its merge.
 
 fn keyless_states(column: usize, name: &str, ty: DataType) -> Script {
@@ -377,8 +380,8 @@ operator_case! {
     }
 }
 
-// Empty inputs, each its own case: #199 is the no-arrival pin, this is its zero-row
-// neighbour.
+// Empty inputs, each its own case: `a_global_merge_over_no_arrival_answers_nothing_on_both`
+// is the no-arrival case, this its zero-row neighbour.
 operator_case! {
     GpuAggregateBatches,
     fn a_keyless_sum_merge_over_zero_row_arrivals_agrees() {
@@ -411,7 +414,7 @@ pub(crate) fn welford_init_global() -> GpuAggregate {
 operator_case! {
     GpuAggregate,
     fn bug_a_global_welford_init_answers_a_finished_stddev_on_the_device() {
-        let outcome = run_both(&welford_init_global(), Script::Exec(vec![input()]));
+        let outcome = run_both(&welford_init_global(), Script::Accumulate(vec![input()]));
         let why = outcome.gpu_refuses();
         assert!(why.contains("3 declared precisions for a table of 1 columns"), "{why}");
         assert_eq!(cpu_slot(&outcome, 0).num_columns(), 3, "the cpu emits the triple");

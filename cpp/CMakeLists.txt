@@ -208,7 +208,8 @@ add_test(NAME peacock_gpu_tests COMMAND peacock_gpu_tests)
 set_tests_properties(peacock_gpu_tests PROPERTIES LABELS "gpu")
 
 # Plan executor GPU tests — executes FlatBuffer plans against testdata Parquet files
-add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp tests/gpu/test_grouping_id.cpp)
+add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp tests/gpu/test_grouping_id.cpp
+  tests/gpu/test_aggregate_no_input.cpp)
 target_include_directories(peacock_plan_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src

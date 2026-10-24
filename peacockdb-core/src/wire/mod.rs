@@ -168,6 +168,9 @@ pub(crate) enum CallPattern {
     PerProbeBatch,
     /// Once, when the node's input is complete.
     AtDone,
+    /// Once, when the node's input is complete, and only on a lane where no call of this
+    /// node answered a row: an aggregate init's identity row, its seqs handed nothing first.
+    AtDoneIfNothingOut,
     /// Every time the accumulation compacts, and once more at done.
     PerCompaction,
     /// The two batches that straddle an interval's ends; a batch wholly inside is
@@ -185,6 +188,7 @@ impl CallPattern {
             Self::JoinBuild => "",
             Self::PerProbeBatch => "per probe batch",
             Self::AtDone => "at done",
+            Self::AtDoneIfNothingOut => "at done, if nothing went out",
             Self::PerCompaction => "per compaction and at done",
             Self::PerStraddlingBatch => "per straddling batch",
             Self::PerHandle => "per handle",
@@ -256,12 +260,26 @@ impl Recipe {
         Self { calls }
     }
 
-    /// The seqs this node addresses, in the order it emits them.
+    /// The seqs this node addresses, in the order it emits them. A seq a recipe calls under
+    /// two patterns appears twice.
     pub(crate) fn seqs(&self) -> Vec<Seq> {
         self.calls
             .iter()
             .filter_map(|call| call.target.map(|(seq, _)| seq))
             .collect()
+    }
+
+    /// The calls made under `when`, in order, as a recipe of their own: what an executor
+    /// driving one phase of a node builds from. Only the GPU backend asks.
+    #[cfg(not(feature = "rust-only"))]
+    pub(crate) fn calls_under(&self, when: CallPattern) -> Recipe {
+        Recipe::of(
+            self.calls
+                .iter()
+                .filter(|call| call.when == when)
+                .cloned()
+                .collect(),
+        )
     }
 }
 

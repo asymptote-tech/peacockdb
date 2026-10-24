@@ -210,3 +210,15 @@ finished `stddev`, a refused `var` (#216, welford-device).
 
 As the chain header says: one sync per task to its host, with as many back-to-back builds as its
 red/green pairs need, the red build first.
+
+## Completeness signoff
+
+Solved under its constraints. Every aggregate init is a batch accumulator answering its identity
+row at done where nothing went out, on both engines; a scan of nothing is one lane with no batch;
+the six pbench queries and every `199` and `282` cell run, `empty-dispersion-aggregates` off on
+the device on #216 as planned. Final pass: no blocking; the importants were comments and
+`architecture.md` sentences, fixed. Shortcuts named: an init's done call is priced at zero bytes
+(an identity row of one); a keyless merge still answers nothing over no arrival, unreachable since
+every init answers per lane; seven `cuda_aggregate_bytes` rises (the identity rows) accepted by the
+coordinator, not pre-accepted on the board. Spec drift: pbench plans `tiny` four ways at every
+tp4 mode. Left for the human: #214 now names no wrong row; `empty_state` is test-only code.

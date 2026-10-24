@@ -247,3 +247,47 @@ fn a_float_avg_finalize_is_the_bare_divide() {
         "{expr:?}"
     );
 }
+
+/// What an init aggregator owes over no rows is a value of the type its state column
+/// declares — over every argument type `state_type` accepts, and refused where it refuses.
+#[test]
+fn an_empty_state_is_a_value_of_the_type_state_type_declares() {
+    let inits = [
+        PlanAgg::Sum,
+        PlanAgg::Min,
+        PlanAgg::Max,
+        PlanAgg::Count,
+        PlanAgg::Mean,
+        PlanAgg::M2,
+    ];
+    for agg in inits {
+        for input in [Int32, Int64, Float64, Decimal128(15, 2), Date32] {
+            match (agg.state_type(&input), agg.empty_state(&input)) {
+                (Ok(declared), Ok(value)) => {
+                    assert_eq!(value.data_type(), declared, "{agg:?} over {input}")
+                }
+                (Err(_), Err(_)) => {}
+                (declared, value) => {
+                    panic!("{agg:?} over {input}: state_type {declared:?}, empty_state {value:?}")
+                }
+            }
+        }
+    }
+    assert_eq!(
+        PlanAgg::Count.empty_state(&Utf8).unwrap(),
+        ScalarValue::Int64(Some(0))
+    );
+    for welford in [PlanAgg::Mean, PlanAgg::M2] {
+        assert_eq!(
+            welford.empty_state(&Float64).unwrap(),
+            ScalarValue::Float64(Some(0.0)),
+            "{welford:?}: DataFusion's variance state over no rows is (0, 0.0, 0.0)"
+        );
+    }
+    for nullable in [PlanAgg::Sum, PlanAgg::Min, PlanAgg::Max] {
+        assert!(
+            nullable.empty_state(&Decimal128(15, 2)).unwrap().is_null(),
+            "{nullable:?}"
+        );
+    }
+}

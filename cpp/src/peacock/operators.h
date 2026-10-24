@@ -50,6 +50,11 @@ TableResult execute_window(const fb::CudfWindow* win, NodeInputs* in);
 // executes a node.
 TableResult take_input(NodeInputs* in);
 
+// Whether the call handed this node no input at all — an aggregate init's done call, made
+// for a lane where no batch went out. Only execute_aggregate asks; every other operator
+// resolves its child through take_input, which refuses.
+bool was_handed_nothing(const NodeInputs* in);
+
 // `inputs` BY VALUE: execute_one owns them for the duration of the call and hands
 // a NodeInputs pointing at that local down the chain.
 TableResult execute_one(const fb::PlanNode* node, std::vector<TableResult> inputs);

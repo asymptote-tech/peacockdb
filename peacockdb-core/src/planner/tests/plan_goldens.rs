@@ -960,9 +960,7 @@ fn absolute_path_in(line: &str) -> Option<usize> {
 /// pointing at nothing.
 ///
 /// It does not require that a refusal name one: `not runnable` must, a `refused:` line need
-/// not. Three pbench sections cite nothing (`plan node EmptyExec` twice, `no surviving row
-/// groups` once) and carry their tickets on the registry row instead; adding the citation is
-/// an engine change that task's spec did not allow.
+/// not, and carries its ticket on the registry row instead.
 ///
 /// Both lists: a ticket keeps its number when it closes and moves to the archive, so
 /// reading only the open one would turn this red for a refusal whose blocker was fixed
