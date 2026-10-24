@@ -2009,6 +2009,123 @@ GpuUnload: estimated_max_resident_size=440000
               GpuProject: estimated_max_resident_size=19244
                 GpuFilter: estimated_max_resident_size=48112
                   GpuLoadParquet: estimated_max_resident_size=48112, source_bytes=12028, target_batch_bytes=12028, amplification=7.2
+== sort-desc-default
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#3 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#2 CudfSort, batch)
+      GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuMergeSortedPartitions: estimated_max_resident_size=280000
+    GpuSort: estimated_max_resident_size=293864
+      GpuFilter: estimated_max_resident_size=293864
+        GpuLoadParquet: estimated_max_resident_size=293864, source_bytes=239101, target_batch_bytes=239101, amplification=4.0
+== sort-desc-limit
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], fetch=100, lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], fetch=100, lanes=4, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#3 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#2 CudfSort, batch)
+      GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuMergeSortedPartitions: estimated_max_resident_size=280000
+    GpuSort: estimated_max_resident_size=293864
+      GpuFilter: estimated_max_resident_size=293864
+        GpuLoadParquet: estimated_max_resident_size=293864, source_bytes=239101, target_batch_bytes=239101, amplification=4.0
+== sort-desc-nulls-first
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+    GpuSort: by=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[f_k@1 desc nulls_first, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#3 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#2 CudfSort, batch)
+      GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuMergeSortedPartitions: estimated_max_resident_size=280000
+    GpuSort: estimated_max_resident_size=293864
+      GpuFilter: estimated_max_resident_size=293864
+        GpuLoadParquet: estimated_max_resident_size=293864, source_bytes=239101, target_batch_bytes=239101, amplification=4.0
+== sort-desc-nulls-last
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+    GpuSort: by=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[f_k@1 desc nulls_last, f_id@0 asc nulls_last], schema=[f_id:Int64, f_k:Int32]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#3 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#2 CudfSort, batch)
+      GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=280000, certain=0
+GpuUnload: estimated_max_resident_size=280000
+  GpuMergeSortedPartitions: estimated_max_resident_size=280000
+    GpuSort: estimated_max_resident_size=293864
+      GpuFilter: estimated_max_resident_size=293864
+        GpuLoadParquet: estimated_max_resident_size=293864, source_bytes=239101, target_batch_bytes=239101, amplification=4.0
+== sort-desc-string
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], schema=[f_id:Int64, f_s:Utf8]
+    GpuSort: by=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[f_s@1 desc nulls_last, f_id@0 asc nulls_last], schema=[f_id:Int64, f_s:Utf8]
+      GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_s:Utf8]
+        GpuLoadParquet: table=fact, projections=[f_id@0, f_s@13], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_s:Utf8]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#3 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#2 CudfSort, batch)
+      GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuMergeSortedPartitions: estimated_max_resident_size=360000
+    GpuSort: estimated_max_resident_size=361224
+      GpuFilter: estimated_max_resident_size=361224
+        GpuLoadParquet: estimated_max_resident_size=361224, source_bytes=293932, target_batch_bytes=293932, amplification=4.0
+== sort-mixed-keys
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], lanes=1, batches=single, sorted_on=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], schema=[f_id:Int64, f_kb:Boolean, f_k:Int32]
+    GpuSort: by=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], lanes=4, batches=multiple, sorted_on=[f_kb@1 asc nulls_last, f_k@2 desc nulls_first, f_id@0 desc nulls_first], schema=[f_id:Int64, f_kb:Boolean, f_k:Int32]
+      GpuProject: exprs=[f_id@0, f_kb@2, f_k@1], lanes=4, batches=multiple, schema=[f_id:Int64, f_kb:Boolean, f_k:Int32]
+        GpuFilter: predicate=(f_id@0 % 20) = 0, lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32, f_kb:Boolean]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_k@1, f_kb@3], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_id:Int64, f_k:Int32, f_kb:Boolean]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#4 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#3 CudfSort, batch)
+      GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
+        GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=320000, certain=0
+GpuUnload: estimated_max_resident_size=320000
+  GpuMergeSortedPartitions: estimated_max_resident_size=320000
+    GpuSort: estimated_max_resident_size=300360
+      GpuProject: estimated_max_resident_size=300360
+        GpuFilter: estimated_max_resident_size=300360
+          GpuLoadParquet: estimated_max_resident_size=300360, source_bytes=244398, target_batch_bytes=244398, amplification=4.0
 == sparse-build-anti
 GpuUnload
   GpuHashJoin: join_type=RightAnti, on=[(t_k@0, f_k@1)], projection=[f_id@0], lanes=4, batches=multiple, schema=[f_id:Int64]

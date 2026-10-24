@@ -5,23 +5,9 @@ Tests, CI, hosts, testdata etc
 
 ## Contents
 
-- [#258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left](#t258)
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
-
-<a id="t258"></a>
-### #258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left
-`the_pr_comment_fits_under_the_body_cap` holds the cost widget's PR comment under GitHub's
-65,536-byte body cap. After pbench it was 63,339 bytes: 2,197 to spare, about six corpus rows.
-[#255](scalars.md#t255)'s three queries are already owed.
-
-**Two options**, measured in the pbench task:
-
-- take the Features column out of the comment (about 9 KB; the page keeps it);
-- collapse pbench in the comment to its summary line, with the rows on the page only.
-
-The first changes what every reviewer sees in every comment, so a human chooses.
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault

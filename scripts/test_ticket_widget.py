@@ -9,6 +9,7 @@ Run: python3 scripts/test_ticket_widget.py
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -95,6 +96,24 @@ class Registry(unittest.TestCase):
         self.assertEqual(oracles.count("<td"), 4)
         self.assertEqual(oracles.count(">—</td>"), 4)
         self.assertIn(">—</td>", validation)
+
+
+class Flags(unittest.TestCase):
+    def test_the_old_md_flag_is_refused_before_the_page_is_written(self):
+        """`--md` once took cost-report's markdown, and the comment's `--md` strips Features and
+        pbench from the page. The widget's input is `--widget-md`, so the old line fails."""
+        script = pathlib.Path(__file__).with_name("ticket_widget.py")
+        with tempfile.TemporaryDirectory() as scratch:
+            md, out = pathlib.Path(scratch) / "comment.md", pathlib.Path(scratch) / "report.html"
+            md.write_text("")
+            old = subprocess.run([sys.executable, str(script), "--md", str(md), "--out", str(out)],
+                                 capture_output=True, text=True)
+            self.assertEqual(old.returncode, 2, old.stderr)
+            self.assertIn("--md", old.stderr)
+            self.assertFalse(out.exists())
+        usage = subprocess.run([sys.executable, str(script), "--help"],
+                               capture_output=True, text=True).stdout
+        self.assertIn("--widget-md", usage)
 
 
 class Columns(unittest.TestCase):

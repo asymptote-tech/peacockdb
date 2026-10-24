@@ -128,9 +128,8 @@ corpus_query!(tpch, 1, rollup_distinct, all_modes, all_modes, duckdb(sort, appro
 corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb(sort, approx), data_fusion_disabled, golden(sort, approx_std), schema_validation_enabled);
 
 // --- tpcds --------------------------------------------------------------------
-// THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// two: q34 and q71, off on #202 (desc sort null order). The joins' own blockers, #152's side
-// copies and #220's batch splits, went with the join session.
+// THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu. The
+// joins' own blockers, #152's side copies and #220's batch splits, went with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
@@ -149,7 +148,7 @@ corpus_query!(tpcds, 1, q82, all_modes, all_modes, duckdb(no_sort, exact), data_
 corpus_query!(tpcds, 1, q48, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q21, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q93, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
-corpus_query!(tpcds, 1, q34, all_modes, none, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled); // device: #202, `c_preferred_cust_flag DESC NULLS FIRST` answers its nulls last
+corpus_query!(tpcds, 1, q34, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q84, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 
 // T19 batch 8, tpcds, chosen by expected executor calls rather than plan size: row groups scanned
@@ -179,7 +178,7 @@ corpus_query!(tpcds, 1, q46, all_modes, all_modes, duckdb(no_sort, exact), data_
 // T19 batch 11, by expected calls. All five run everywhere on both engines, q66 among them:
 // #55's divisor cast never showed on the device.
 corpus_query!(tpcds, 1, q68, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
-corpus_query!(tpcds, 1, q71, all_modes, none, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled); // device: #202, `ext_price DESC NULLS FIRST` answers its nulls last
+corpus_query!(tpcds, 1, q71, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q66, all_modes, all_modes, duckdb(no_sort, rel(1e-5, "jan_sales_per_sq_foot", "feb_sales_per_sq_foot", "mar_sales_per_sq_foot", "apr_sales_per_sq_foot", "may_sales_per_sq_foot", "jun_sales_per_sq_foot", "jul_sales_per_sq_foot", "aug_sales_per_sq_foot", "sep_sales_per_sq_foot", "oct_sales_per_sq_foot", "nov_sales_per_sq_foot", "dec_sales_per_sq_foot")), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q76, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q16, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
@@ -353,6 +352,12 @@ corpus_query!(pbench, 1, right_join_null_keys, all_modes, all_modes, duckdb_fing
 corpus_query!(pbench, 1, right_join_residual, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, rollup_small_keys, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(pbench, 1, scalar_subquery_cross, all_modes, all_modes, duckdb(sort, approx), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_desc_default, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_desc_limit, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_desc_nulls_first, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_desc_nulls_last, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_desc_string, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(pbench, 1, sort_mixed_keys, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_anti, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_full, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
 corpus_query!(pbench, 1, sparse_build_right, all_modes, all_modes, duckdb_fingerprint, data_fusion(sort, exact), live_cpu, schema_validation_enabled);
