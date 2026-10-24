@@ -11,7 +11,7 @@ here; the scan-limit divergence in particular is #186 and is not repeated.
 
 Ordered worst first, by what it costs a reader who has to trust the code.
 
-**Pruned 2026-09-28, 2026-10-08 and 2026-10-09.** Findings fixed since, or made obsolete by later
+**Pruned 2026-09-28, 2026-10-08, 2026-10-09 and 2026-10-23.** Findings fixed since, or made obsolete by later
 work, are cut; a finding half fixed keeps only its open half. The numbers are the original
 ones, since tickets cite them. Line numbers are the audit's and have drifted; search by
 symbol.
@@ -55,7 +55,7 @@ approximation named at the site.
 ## Shape problems
 
 Nothing below behaves wrongly today. Each one costs a reader who has to decide whether a
-rule still holds. §5's join half, §11 and one §12 bullet are under Joins.
+rule still holds.
 
 ### 4. An untested arm for a coalesce that carries a fetch at the root
 
@@ -67,38 +67,13 @@ has that coalesce as its root, and the comment is corrected. The open half is th
 and worse for being live: nothing reaches the arm, because above one partition that query is
 refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no test asks for it.
 
-### 5 (aggregate half). The executor derives ddof from the aggregate's name
-
-Folded into [#225](../archive/archived-tickets.md#t225), whose fix makes the wire change it needs.
-
-`cpp/src/operators/aggregate.cpp:42`: `stddev_ddof` derives the
-ddof from the aggregate's *name*, while the Rust side already computed it as data
-(`plan/aggregates.rs:17`, `AggSpec.ddof`, carried into `AggStateColumns.ddof`). The wire has
-no ddof field, so the executor re-derives from a string what the planner already knows.
-
-Antipattern: a model of what another component does where the answer could be read directly.
-
-Fix: send the ddof on the wire for `execute_aggregate` to read rather than parsing the name.
-
-### 10. Aggregate name decoding in C++ is wider than the writer, and not exhaustive
-
-`make_agg` (`aggregate.cpp:76`) and `make_reduce_agg` (`:118`) accept two casings of every name
-and four spellings of mean, and `is_stddev_name`/`is_var_name` (`:27`, `:35`) accept six and
-five. The Rust writer emits ten lowercase spellings and no others (`plan/aggregate.rs:99` and
-`:115`). Every uppercase arm is dead. Worse, `is_stddev_name` returns `false` rather than throwing
-on a spelling it does not know, so a name drift routes a stddev down the plain-aggregate path
-instead of failing — the one decode in the file that is not exhaustive.
-
-Fix: narrow the name sets to what the writer emits, and make an unmatched name throw everywhere
-rather than in two of four functions.
-
 ### 12. Small ones, no fix needed beyond a line
 
 - `driver/scheduler.rs:26` keeps `lane_count` solely for a `debug_assert!`; in a release build
   a bad index writes into the next node's flags. Either the check is worth an `assert!` or the
   field should go. (The doc now says debug builds only.)
-- `driver/single_partition.rs:169` has the same shape: `select`'s precondition is a
-  `debug_assert!`, and in release a lane that cannot step gets `LaneCall::NoBuild`.
+- `driver/single_partition.rs:183` has the same shape: `select`'s precondition is a
+  `debug_assert!`, and in release a lane that cannot step is handed a call anyway.
 - `wire/writer.rs:117` — `reduce` returns `Result` and never returns `Err`.
 - `plan/validate.rs:179` — `declared_width` returns `Ok(())` for any node the registry does
   not know, "a hand-built one under test". Production validation with a hole shaped like a
@@ -109,12 +84,7 @@ rather than in two of four functions.
   schemas; the state columns after them are in different orders by design
   (`decompose`'s comment at `:143` says so). Nothing checks that the keys are below
   `key_columns`.
-- `planner/memory_estimation.rs:275` — `key_width` uses `filter_map(... .get(ordinal))`, so
-  an out-of-range key ordinal silently contributes zero width instead of failing.
-
 ## The tests
-
-### Tests that would not catch the bug they exist for
 
 ### Assertions looser than the claim above them
 
@@ -140,12 +110,6 @@ rather than in two of four functions.
   time as* a probe batch, so the number to assert is `4096 + 80`.
 - `driver/tests/memory.rs:125` — `assert!(four.peak_bytes >= one.peak_bytes)`. Four lanes
   hold four batches; `>=` passes on a driver that ran the lanes one at a time.
-- `driver/tests/flow.rs:222` — `assert!(count(&report, CallKind::ReleaseUnwanted) > 0)`. The
-  probe side produced two batches, so the number is 2.
-- `driver/tests/failure.rs:162` and `budget.rs:27` — `holds > 0` and `peak_bytes > 0` are
-  guards against a vacuous test rather than claims, and they say so in their messages. Those
-  are fine as written.
-
 ## What I did not read
 
 Named so the next reader knows the edges.
@@ -175,17 +139,9 @@ Named so the next reader knows the edges.
 
 A second reading of the same tree at 5fed63f2, looking only for code that exists because of a
 known defect. Not the defects — #175, #173, #183, #187, #198, #152 — but the branches, fields,
-fixtures and goldens that grew around them. Two were given as the pattern: the CPU accumulator's
-empty arm at `cpu_backend/accumulate.rs:139` and the device collapse's at
-`gpu_backend/accumulate.rs:210`. Neither is repeated below except where it leads somewhere.
-
-Ordered by what a fix has to undo, worst first. Items 4, 8, 9, 10 and 13 are under Joins.
-
-### 1. The driver still drops an empty scatter output under a join that owes nothing
-
-**Resolved by join-backend.** The drop is unconditional: `feeds_owing_build` and its exception
-are gone, and a join answers a lane with no build batch through `set_build(None)`. #199's half,
-a keyless aggregate's identity row over a lane that received nothing, is still open.
+fixtures and goldens that grew around them. Every finding it made is resolved: join-backend
+removed the join ones, and keyless-identity closed #199, the open half of the first. What it did
+not read stays below.
 
 ### What I did not read
 
@@ -203,25 +159,3 @@ a keyless aggregate's identity row over a lane that received nothing, is still o
   duplicates the capability rules and deserves a pass of its own against `plan/join.rs`.
 - The goldens were counted, not read. Whether any golden records a *result* that is a workaround
   rather than an answer is a question this pass did not ask, and it is the one I would ask next.
-
-## Joins
-
-Every join finding from the passes above, gathered here. **All are resolved by join-backend**,
-which put both engines' joins on the session. Numbers are the original ones, since tickets cite
-them: plain numbers from the shape problems, "Propping-up" ones from the second pass.
-
-- **5.** The Rust copy of the C++'s hardcoded `EQUAL` list is gone with `planner/nulls.rs`. Every
-  join type honours `null_equals_null` on both engines.
-- **11.** `finish_without_keys` is gone. A finish over no probe batch is the session's ordinary
-  finish.
-- **12 (join bullet).** `wire/join.rs` reads no capability, so the `expect` is gone.
-- **Propping-up 4.** `without_build` and the cpu's `Calls` are gone. A lane with no build batch
-  calls `set_build(None)` on both engines (#212).
-- **Propping-up 8.** The mock's `empty_build_owes_its_probe` is gone. The mock reads its type.
-- **Propping-up 9.** `copy_of` and `build_copy` are gone. A session keeps its build table, so no
-  handle is copied (#152).
-- **Propping-up 10.** The recipe walk has no copy inputs left to conflate, no one-probe-batch
-  assert and no join refusals. It still plans at `OneBatchPerLane`, for the reason its header
-  gives.
-- **Propping-up 13.** No golden spells `build copy` or `batch copy`, and exec_model's
-  `copy_handle` is gone with `recipe.py`.
