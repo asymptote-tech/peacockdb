@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3110 cases: `--lib` 846, `test_cpu_corpus` 2233, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3116 cases: `--lib` 846, `test_cpu_corpus` 2239, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2232 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2238 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -50,18 +50,18 @@ undetermined line's rows are compared only against committed files, that `duckdb
 sections are the registry's rows in both directions, `all_modes` expanding to the same cells as
 the five spelled out, and every `data_fusion_disabled` line comparing its whole answer with DuckDB
 
-Then the DuckDB tier, 1104 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 1109 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
-for `gpu-result.txt`. Today 140 lines are `duckdb_exact`, 21 `duckdb_approx`, 24
+for `gpu-result.txt`. Today 139 lines are `duckdb_exact`, 22 `duckdb_approx`, 24
 `duckdb_fingerprint` (the over-cap sections), 1 `duckdb_none` (one side does not answer) and
 3 `duckdb_divergent`. Three more cases: every oracle name is used by some line, every
 enabled device cell has its `gpu-result.txt` section and no other, and the committed
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 183 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 184 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
@@ -642,11 +642,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1662 cases: `--lib -- gpu_tests::` 736, `test_gpu_corpus` 914, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1667 cases: `--lib -- gpu_tests::` 736, `test_gpu_corpus` 919, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 913 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 918 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -655,16 +655,18 @@ device with every batch held to its node's declared schema through the driver's 
 and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-912 cells today. From tpch, 215: every line at every mode but `mixed-join`, off on
-[#168](tickets/corpus-coverage.md#t168). From tpcds, 400: every line wherever it runs on the cpu,
-but for two. `q78` and `q2` are off on [#60](tickets/corpus-coverage.md#t60), a float `round(x, 2)` one ulp from
-DataFusion's. tpcds is where #137's NULL-key filters run on
+917 cells today. From tpch, 215: every line at every mode but `mixed-join`, off on
+[#168](tickets/corpus-coverage.md#t168). From tpcds, 405: every line wherever it runs on the cpu,
+but for one. `q2` is off on [#56](tickets/corpus-coverage.md#t56): its device recording is a
+fingerprint, which its DuckDB check cannot take. `q78` compares within 1e-11 relative, since a
+float `round(x, 2)` on the device is one ulp from DataFusion's in some cells
+([#60](archive/archived-tickets.md#t60), won't fix). tpcds is where #137's NULL-key filters run on
 a device, at every tp4 cell. From pbench, 297: every line wherever it runs on the cpu, but for
 two. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` whose pattern is a
 column, and `timestamp-s-key-group` on [#264](tickets/corpus-coverage.md#t264), a cast group key.
 pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 913th case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 918th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -1548,7 +1550,7 @@ transcript on 2026-10-14. Reach the cloud through `gpu-host.sh`. Learn the CLI f
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
   (forwarded to every staged binary; the gpu lib binary takes it inside its `gpu_tests::`
   rung, as the exact names `--list` reports under both) — two or three queries prove the path as well as
-  913 do, and a full `--update-canonical` run rewrites every golden on the remote and
+  918 do, and a full `--update-canonical` run rewrites every golden on the remote and
   pulls the whole set back into a git working tree, where an unrelated diff can ride
   home in an unrelated commit. Note that a binary whose tests all filter out runs zero
   tests and passes, so say which binaries actually executed; and a filter naming a query
