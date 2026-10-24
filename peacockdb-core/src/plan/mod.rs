@@ -568,20 +568,22 @@ pub(crate) enum Phase {
 }
 
 /// One aggregator as both engines name it: the SQL name the executor knows, the call whose
-/// arguments it reads, and the output column it fills.
+/// arguments it reads, and the state columns it fills.
 ///
-/// Order is load-bearing and not cosmetic. A state-shaped input is read positionally, by a
-/// cursor walking each aggregate's state width, so an aggregate listed out of order reads
-/// another one's columns. Everything but the Welford triple is one of ours to one SQL name;
-/// the triple folds into the `stddev`/`var` it decomposes, at the position of the first of
-/// its three, because neither engine has an `m2` of its own.
+/// Order is load-bearing for the cpu backend, which builds one DataFusion aggregate per entry
+/// and reads their state in this order. Everything but the Welford triple is one of ours to
+/// one SQL name; the triple folds into the `stddev`/`var` it decomposes, at the position of
+/// the first of its three, because neither engine has an `m2` of its own.
 pub(crate) struct StateFunc<'a> {
     pub(crate) name: &'static str,
     pub(crate) call: &'a AggCall,
+    /// The SQL output name: the cpu backend's DataFusion alias.
     pub(crate) alias: String,
-    /// Whether this one is a folded triple, which is what makes its state three columns
-    /// wide rather than one.
-    pub(crate) welford: bool,
+    /// Every state column this function emits, as the plan declares them: its calls' outputs,
+    /// three for a folded Welford triple, one otherwise. The device names its columns from these.
+    pub(crate) state_names: Vec<String>,
+    /// `AggStateColumns::ddof` for a Welford triple, 0 for every other function.
+    pub(crate) ddof: u32,
 }
 
 /// The aggregators and the optional `final` list every aggregate node carries. A node

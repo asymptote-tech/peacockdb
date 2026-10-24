@@ -125,43 +125,36 @@ fn a_merge_folds_the_partials_its_init_produced() {
         ("k", DataType::Utf8),
         ("sum(v)", DataType::Int64),
     ])));
-    let summing = |column: u32| AggregateBody {
+    // The init sums the source's `v`, and the merge the state's `sum(v)`: both at ordinal 1.
+    let summing = |name: &str| AggregateBody {
         group_by: vec![Expr::column(0, "k")],
         grouping_sets: Vec::new(),
         null_exprs: Vec::new(),
         aggs: vec![AggCall {
             func: PlanAgg::Sum,
-            args: vec![Expr::column(
-                column,
-                if column == 1 { "v" } else { "sum(v)" },
-            )],
+            args: vec![Expr::column(1, name)],
             outputs: vec![Field::new("sum(v)", DataType::Int64, true)],
         }],
         finalize: None,
     };
     let init = GpuAggregate::new(
         source_per_row_group(),
-        summing(1),
+        summing("v"),
         state.clone(),
         state.clone(),
     );
     let tree: Box<dyn GpuNode> = Box::new(GpuAggregateBatches::new(
         Box::new(init),
-        summing(1),
+        summing("sum(v)"),
         state.clone(),
         state.clone(),
     ));
     let session = Session::open(tree.as_ref());
     let out = schema_of(&[("k", DataType::Utf8), ("sum(v)", DataType::Int64)]);
     let mut partial = session.exec(1, &out);
-    let mut merge = GpuAccumulator::aggregate(
-        session.site(),
-        session.recipe(2),
-        &out,
-        &out,
-        NO_COMPACTION,
-    )
-    .expect("the merge builds");
+    let mut merge =
+        GpuAccumulator::aggregate(session.site(), session.recipe(2), &out, &out, NO_COMPACTION)
+            .expect("the merge builds");
     for group in ROW_GROUPS {
         let (state, _) = partial
             .exec(session.scan(&[group]))
@@ -460,14 +453,9 @@ fn a_welford_triple_merges_as_one_aggregate_on_the_device() {
     let session = Session::open(tree.as_ref());
     let out = state.fields.as_ref().clone();
     let mut partial = session.exec(1, &out);
-    let mut merge = GpuAccumulator::aggregate(
-        session.site(),
-        session.recipe(2),
-        &out,
-        &out,
-        NO_COMPACTION,
-    )
-    .expect("the merge builds");
+    let mut merge =
+        GpuAccumulator::aggregate(session.site(), session.recipe(2), &out, &out, NO_COMPACTION)
+            .expect("the merge builds");
     for group in ROW_GROUPS {
         let (partials, _) = partial
             .exec(session.scan(&[group]))
@@ -628,7 +616,9 @@ fn an_init_whose_recipe_lacks_its_done_calls_is_refused() {
         panic!("an init built from its per-batch calls alone");
     };
     assert!(
-        refused.to_string().contains("the same calls at done if nothing went out"),
+        refused
+            .to_string()
+            .contains("the same calls at done if nothing went out"),
         "{refused}"
     );
 }

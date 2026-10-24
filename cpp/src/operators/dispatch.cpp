@@ -32,56 +32,57 @@ static const char* plan_node_kind_name(fb::PlanNodeKind k) {
   }
 }
 
+// The op a node's kind names. Each op resolves its children through `take_input`, which
+// hands back an input the caller already made resident.
+static TableResult run_kind(const fb::PlanNode* node, NodeInputs* in) {
+  switch (node->node_type()) {
+    case fb::PlanNodeKind_CudfScan:
+      return execute_scan(node->node_as_CudfScan());
+    case fb::PlanNodeKind_CudfFilter:
+      return execute_filter(node->node_as_CudfFilter(), in);
+    case fb::PlanNodeKind_CudfProject:
+      return execute_project(node->node_as_CudfProject(), in);
+    case fb::PlanNodeKind_CudfAggregate:
+      return execute_aggregate(node->node_as_CudfAggregate(), in);
+    case fb::PlanNodeKind_CudfSort:
+      return execute_sort(node->node_as_CudfSort(), in);
+    case fb::PlanNodeKind_CudfCoalesceBatches:
+    case fb::PlanNodeKind_CudfCoalescePartitions:
+    case fb::PlanNodeKind_CudfRepartition:
+    case fb::PlanNodeKind_CudfSortPreservingMerge:
+      return execute_passthrough(in);
+    case fb::PlanNodeKind_CudfUnion:
+      return execute_union(node->node_as_CudfUnion(), in);
+    case fb::PlanNodeKind_CudfLimit:
+      return execute_limit(node->node_as_CudfLimit(), in);
+    case fb::PlanNodeKind_CudfWindow:
+      return execute_window(node->node_as_CudfWindow(), in);
+    case fb::PlanNodeKind_CudfJoin:
+      throw std::runtime_error(
+          "CudfJoin runs through peacock_join_build/probe/finish, not execute_node");
+    default:
+      throw std::runtime_error("unsupported PlanNodeKind: " + std::to_string(node->node_type()));
+  }
+}
 
-// Run one node's op (the dispatch switch). Each op resolves its children through
-// `take_input`, which hands back an input the caller already made resident.
+// Run one node's op, its errors tagged with the node's kind.
 static TableResult run_op(const fb::PlanNode* node, NodeInputs* in) {
   if (!node) throw std::runtime_error("null PlanNode");
 
   const char* kind = plan_node_kind_name(node->node_type());
   PCK_TRACE("enter %s", kind);
 
-  TableResult result;
-  try {
-    switch (node->node_type()) {
-      case fb::PlanNodeKind_CudfScan:
-        result = execute_scan(node->node_as_CudfScan()); break;
-      case fb::PlanNodeKind_CudfFilter:
-        result = execute_filter(node->node_as_CudfFilter(), in); break;
-      case fb::PlanNodeKind_CudfProject:
-        result = execute_project(node->node_as_CudfProject(), in); break;
-      case fb::PlanNodeKind_CudfAggregate:
-        result = execute_aggregate(node->node_as_CudfAggregate(), in); break;
-      case fb::PlanNodeKind_CudfSort:
-        result = execute_sort(node->node_as_CudfSort(), in); break;
-      case fb::PlanNodeKind_CudfCoalesceBatches:
-        result = execute_passthrough(in); break;
-      case fb::PlanNodeKind_CudfCoalescePartitions:
-        result = execute_passthrough(in); break;
-      case fb::PlanNodeKind_CudfRepartition:
-        result = execute_passthrough(in); break;
-      case fb::PlanNodeKind_CudfSortPreservingMerge:
-        result = execute_passthrough(in); break;
-      case fb::PlanNodeKind_CudfUnion:
-        result = execute_union(node->node_as_CudfUnion(), in); break;
-      case fb::PlanNodeKind_CudfLimit:
-        result = execute_limit(node->node_as_CudfLimit(), in); break;
-      case fb::PlanNodeKind_CudfWindow:
-        result = execute_window(node->node_as_CudfWindow(), in); break;
-      case fb::PlanNodeKind_CudfJoin:
-        throw std::runtime_error(
-            "CudfJoin runs through peacock_join_build/probe/finish, not execute_node");
-      default:
-        throw std::runtime_error(
-            "unsupported PlanNodeKind: " + std::to_string(node->node_type()));
+  TableResult result = [&] {
+    try {
+      return run_kind(node, in);
+    } catch (const std::exception& e) {
+      std::string msg = e.what();
+      if (msg.find("[in ") == std::string::npos) {
+        throw std::runtime_error(std::string("[in ") + kind + "] " + msg);
+      }
+      throw;
     }
-  } catch (const std::exception& e) {
-    std::string msg = e.what();
-    if (msg.find("[in ") == std::string::npos) {
-      throw std::runtime_error(std::string("[in ") + kind + "] " + msg);
-    }
-    throw;
-  }
+  }();
 
   debug_sync(kind);
   if (debug_enabled()) {

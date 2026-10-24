@@ -45,6 +45,102 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t164"></a>
+### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
+**Done by [`aggregate-arms`](../tasks/aggregate-arms.md) (chain K); awaiting merge.**
+
+The C++ half of [#135](../archive/archived-tickets.md#t135), which the planner
+closed on the Rust side by checking a reference's name against the field at its position.
+
+`expr.cpp` ~L349 returns `type_id::EMPTY` for an out-of-range `ColumnRef` instead of throwing,
+turning a bad ordinal into a confusing type error further along. The third closure #135 named is
+unstarted and belongs here too: a per-node type check in the GPU tiers, the only thing that would
+surface a wrong-order subtree before the root. 2026-09-17: chain B's `device-schema-harness` and
+`driver-output-hook` are that check for the operator and corpus tiers — every device batch held
+to its node's names and `{type_id, scale}`; the C++ item above stands. 2026-10-09: the name-count
+half is closed — `register_handle`, the only path to a handle number, refuses a handle whose names
+do not number its columns, so the check holds however the handle was built (`refcounted-scatter`).
+
+**Closed.** Every `TableResult` is built through a constructor that refuses names or owners that
+do not number its columns. `column_ordinal` / `column_at` (`cpp/src/column_refs.cpp`) resolve
+every `ColumnRef` read, refusing an index past the width, a missing name and a name other than
+the column's. `infer_expr_type` throws rather than answering `EMPTY`. A union branch named
+otherwise is projected (`cast_branch`), and a scan's declared names are checked against the file
+at plan time. Every device corpus cell ran under the check; none was refused.
+
+<a id="t225"></a>
+### #225 — the device names every Welford state column by the same alias
+**Done by [`aggregate-arms`](../tasks/aggregate-arms.md) (chain K); awaiting merge.**
+
+The plan declares a `stddev` or `var` state as `<out>$count`, `<out>$mean`, `<out>$m2`; the
+device holds all three under `<out>`, at the init and at the merge alike, the types as declared.
+
+The wire folds the triple into one `AggregateFuncNode` with one `alias` (`plan/aggregate.rs`,
+`state_funcs`, `welford: true`), and `aggregate.cpp`'s Partial and Merge arms push each child
+under it. No answer is wrong today: the merge packs the triple by offset and the finalize reads
+it by ordinal; a reader resolving a state column by name would take the wrong one. The fix is
+the three names on the wire, or the suffixes appended in `aggregate.cpp`. Pinned by
+`bug_stddev_holds_three_identically_named_columns` (the init) and
+`bug_stddev_merge_holds_three_identically_named_columns` (the merge)
+in `gpu_tests/aggregate_schema_cases.rs`. 2026-09-17: the corpus's schema validator refuses
+`tpch/shuffle-stddev` at its `GpuAggregate` on these names, so its row says
+`schema_validation_disabled`; the cells stay enabled and their values match. 2026-10-09: five of
+them now, `stale-cells` having turned on the four device modes that a closed #183 still held off.
+Validation was off for all five, so that run says nothing about the names and the refusal still
+stands at every mode; the row keeps no `225` only because no cell of it is off.
+
+**Corpus queries:** `tpch/shuffle-stddev` and `tpch/distinct-functions` (schema validation
+only). distinct-functions reaches this at its DISTINCT lowering's outer init, and only at the
+three tp4 modes — at the two tp1 modes that stage finalizes in one node and emits no state — so
+its line excuses those three by name and keeps the hook at the other two. `tpcds/q39` at every
+mode, refused at its first `GpuAggregate`, its cells off here; `tpcds/q17` at the two tp1 modes,
+refused the same way, runs there with the hook masked.
+
+**Fix proposed:** add `state_names: [string]` to `AggregateFuncNode`. `state_funcs` fills it
+from the owner's `positions` in the state schema. `aggregate.cpp`'s Partial and Merge arms name
+the triple from it; the Final arm, which answers one column, already names it right. Not
+suffixes in C++: `$count`/`$mean`/`$m2` is DataFusion's convention, and a second copy drifts. Then both `bug_` tests expect `None`.
+
+In the same append, a `ddof: int8` beside `state_names`, which `state_funcs` fills from
+`AggStateColumns.ddof`. `aggregate.cpp` reads it where it now calls `stddev_ddof(func_name)`, and
+that helper, which re-derives from the aggregate's name what the planner already holds, goes.
+Not wrong today: every name the writer emits maps to the right ddof. It rides along because this
+is the wire change it needs (`reports/hacks-audit.md` §5, aggregate half).
+
+**Closed.** `state_funcs` fills `AggregateFuncNode.state_names` from each function's calls'
+outputs, three for a Welford, and `execute_aggregate` names every state column from it; `ddof`
+rides the wire too and `stddev_ddof` is gone. `tpch/shuffle-stddev`, `tpcds/q17` at tp1 and
+`tpch/distinct-functions` at tp4 run with the schema hook on; q39 stays off on
+[#57](../tickets/corpus-coverage.md#t57).
+
+<a id="t280"></a>
+### #280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three
+**Done by [`aggregate-arms`](../tasks/aggregate-arms.md) (chain K); awaiting merge.**
+
+A `stddev` or `var` under `ROLLUP`, `CUBE` or `GROUPING SETS` is refused on the device; the cpu
+answers it.
+
+The wire folds the init's three Welford calls (`Count`, `Mean`, `M2`) into one
+`AggregateFuncNode` and sets `mergeable_agg_state`. `execute_aggregate`'s grouped path honours
+the flag and emits `[count, mean, m2]` (`aggregate.cpp:615-632`). Its grouping-set path
+(`:363-423`) predates it: one request per function node through `make_agg`, which for a stddev
+name is cuDF's `STD` and for a var name `VARIANCE`, one finished column per group. The plan
+declares three state columns, so the export against the declared schema refuses the node, or the
+finalize project above finds `ColumnRef index 2 out of range`; a function after it in the node
+reads a shifted column. Found by the 2026-10-08 column-indexing audit; no test reaches it.
+
+**Corpus query:** none: no tpch or tpcds query has the shape. Simplest: `select l_returnflag,
+l_linestatus, stddev_samp(l_quantity), var_pop(l_quantity) from lineitem group by rollup
+(l_returnflag, l_linestatus);` (tpch).
+
+**Fix proposed:** one request builder for the grouped and grouping-set paths, so the
+grouping-set path builds the Welford triple the grouped one does; the query above added as
+`tpch/rollup-stddev`. Both in aggregate-arms, chain K.
+
+**Closed.** One request builder, `add_requests`, serves the grouped and the grouping-set paths,
+so a Welford under a grouping set emits the triple. `tpch/rollup-stddev` added, on at all five
+device modes with the schema hook on.
+
 <a id="t199"></a>
 ### #199 — a global aggregate over no arrival drops its identity row
 **Done by [`keyless-identity`](../tasks/keyless-identity.md) (chain K); awaiting merge.**
@@ -228,7 +324,7 @@ saying so.
 passed 2026-10-09; `tpch/nested-limits`' five pass on master's rows-only scan (2026-10-16).
 empty-sorts' four accumulate cases passed 2026-10-09, the mixed-lane merge among them.
 `tpcds/q17`'s five device cells passed 2026-10-19 and are on, its two tp1 cells with the schema
-hook masked on [#225](../tickets/corpus-coverage.md#t225).
+hook masked on [#225](#t225).
 
 <a id="t205"></a>
 ### #205 — the cpu's accumulating sort and merge answer nothing over zero-row batches

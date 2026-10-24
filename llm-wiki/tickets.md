@@ -19,11 +19,11 @@ are never reused, so an old reference still resolves there.
 
 ## Contents
 
-97 open tickets, in file order.
+94 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 20 | #225 #216 #94 #280 #264 #267 #202 #217 #204 #168 #210 #57 #56 #60 #251 #227 #164 #253 #254 #287 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 17 | #216 #94 #264 #267 #202 #217 #204 #168 #210 #57 #56 #60 #251 #227 #253 #254 #287 |
 | [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #255 #284 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 12 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |

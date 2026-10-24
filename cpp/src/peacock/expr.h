@@ -18,6 +18,7 @@
 #include <cudf/utilities/span.hpp>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace peacock {
@@ -55,9 +56,10 @@ inline JoinFilterColMap col_map_of(const flatbuffers::Vector<const fb::JoinFilte
 cudf::ast::expression& build_expr(const fb::Expr* expr, ExprContext& ctx,
                                   const JoinFilterColMap* col_map = nullptr);
 
-// Materialize an expression into a column (the non-AST path).
-std::unique_ptr<cudf::column> build_column(const fb::Expr* expr,
-                                           cudf::table_view const& table);
+// Materialize an expression into a column (the non-AST path). `names` is the table's: every
+// ColumnRef resolves through column_at.
+std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_view const& table,
+                                           std::vector<std::string> const& names);
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 

@@ -23,7 +23,7 @@ namespace peacock {
 /// `view()`; one that needs an owning column copies at that site and says why.
 ///
 /// Never zero columns: a `table_view` of none reads as 0 rows whatever it held, which is
-/// why the plan carries an explicit placeholder column instead. `owning` refuses it.
+/// why the plan carries an explicit placeholder column instead. Every constructor refuses it.
 struct TableResult {
   std::vector<std::shared_ptr<cudf::column const>> owners;  // owners[i] keeps columns[i]'s
                                                             // buffers alive; two entries may
@@ -39,6 +39,16 @@ struct TableResult {
   TableResult slice(cudf::size_type begin, cudf::size_type end) const;      // shares owners
   TableResult select(std::vector<cudf::size_type> const& ordinals) const;   // shares owners
   TableResult with(std::unique_ptr<cudf::column> column, std::string name) const;  // appends
+  /// `owning`'s check over parts: for a table assembled from columns other handles own (a
+  /// project's shared columns, a join's two sides). Refuses parts of different lengths, and
+  /// no columns: every reader indexes owners, columns and names by one ordinal (#164).
+  static TableResult of(std::vector<std::shared_ptr<cudf::column const>> owners,
+                        std::vector<cudf::column_view> columns,
+                        std::vector<std::string> column_names);
+
+ private:
+  // Only the constructors above make an empty one to fill, so no site builds around them.
+  TableResult() = default;
 };
 
 /// Per-node actual costs returned across the FFI. The byte formula lives ONLY in

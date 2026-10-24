@@ -460,7 +460,8 @@ fn drop_null_keys_below_shuffle(side: Box<dyn GpuNode>, keys: &[u32]) -> Box<dyn
 /// Union branches are planned independently, so one column can arrive as a different
 /// type per branch. The cast is a node rather than something the executor does behind
 /// the plan's back (#41), and it is the same rule as everywhere else: every cast is
-/// explicit.
+/// explicit. A branch named otherwise than the union is projected too, its references
+/// renamed: nothing re-checks a forwarder's names on the device.
 pub(crate) fn branches<'a>(
     t: &Translator,
     inputs: impl Iterator<Item = &'a Arc<dyn ExecutionPlan>>,
@@ -479,11 +480,13 @@ pub(crate) fn cast_branch(
     schema: &ArrowSchema,
     declared: &ArrowSchema,
 ) -> Box<dyn GpuNode> {
+    // A type that differs needs a cast, and a name that differs a rename: a union forwards its
+    // branches' batches as they are, and the node above reads them by the union's names.
     let differs = schema
         .fields()
         .iter()
         .zip(declared.fields().iter())
-        .any(|(field, out)| field.data_type() != out.data_type());
+        .any(|(field, out)| field.data_type() != out.data_type() || field.name() != out.name());
     if !differs {
         return branch;
     }
