@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 5669 test cases — Rust 5034, C++ 232, Python 403.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 5707 test cases — Rust 5065, C++ 232, Python 410.** The Python figure includes the 93 corpus queries, which only a manual dispatch runs. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,11 +23,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3217 cases: `--lib` 878, `test_cpu_corpus` 2308, `test_corpus_goldens` 28, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3243 cases: `--lib` 897, `test_cpu_corpus` 2315, `test_corpus_goldens` 28, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2307 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2314 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -42,10 +42,11 @@ lines, 194 of them running at the modes each is correct at — one of pbench's r
 modes only: `not-in-uncorrelated`, which tp4 refuses at plan time on
 [#267](tickets/corpus-coverage.md#t267). **1 line is out entirely**, the one `duckdb_none` line:
 pbench's `in-is-null`, refused at plan time on [#250](tickets/joins.md#t250). 967 cells,
-plus eleven checks
+plus twelve checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
 that the registry's `duckdb_oracle`, `cpu_oracle`, `gpu_oracle` and `schema_validation` columns
-copy each line, that a hyphenated query resolves its authority and has its result section, that
+copy each line, that its `stored` column is what the three result goldens hold, in both
+directions, and a fingerprint on the device's side wherever the line says `gpu: fingerprint`, that a hyphenated query resolves its authority and has its result section, that
 an undetermined line's rows are compared only against committed files, that
 `duckdb-result.txt`'s sections are the registry's rows in both directions, every
 `data_fusion_disabled` line comparing its whole answer with DuckDB, and the order guard: a line
@@ -55,12 +56,13 @@ among them, and a `live_cpu` gpu oracle are exempt, and a `duckdb_none` line is 
 golden half alone, unless our side has no plan; three cases pin the exemptions and the golden
 half on its own
 
-Then the DuckDB tier, 1140 of the count and the only independent oracle over the answers
+Then the DuckDB tier, 1145 of the count and the only independent oracle over the answers
 ([#235](archive/archived-tickets.md#t235)): one `duckdb_<ds>_<q>` case per line comparing
 `mini.result.txt` with `duckdb-result.txt` by column position under the line's
 `duckdb_oracle`, and one `duckdb_gpu_<ds>_<q>_<mode>` per enabled device cell doing the same
 for `gpu-result.txt`. Today 73 lines are `duckdb(sort, exact)`, 72 `duckdb(no_sort, exact)` (two
-of them with `date(…)`, pbench's `interval-mixed-units` and `interval-month-clamp`), 11
+of them with `date(…)`, pbench's `interval-mixed-units` and `interval-month-clamp`, and one with
+`gpu: fingerprint`, tpcds q2), 11
 `duckdb(sort, approx)`, 11 `duckdb(no_sort, approx)`, 3 `duckdb(no_sort, rel(1e-5, …))` (tpcds
 q58, q61 and q66, #288's decimal division digits), 24 `duckdb_fingerprint` (the over-cap
 sections) and 1 `duckdb_none` (one side does not answer). Three more cases: every facet of the
@@ -69,7 +71,7 @@ enabled device cell has its `gpu-result.txt` section and no other, and the commi
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the order tier, 189 of the count: one `device_order_<ds>_<q>` case per line with a device
+Then the order tier, 190 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
 or nested-loop join on the device emits its rows in a different order each run. So a limit with
 no sort between it and such a join, or a sorted cut between two tied rows that differ, would make
@@ -493,7 +495,7 @@ whatever another cuDF recorded rather than carrying it under this one's stamp; r
 the path, both ways; refused where two such lines disagree; and the same rule at the writer, so a
 26.02 cycle told to record the committed file fails before it writes
 
-| DuckDB oracle | [test_support::duckdb_oracle::tests](../peacockdb-core/src/test_support/duckdb_oracle/tests.rs) | 35 |
+| DuckDB oracle | [test_support::duckdb_oracle::tests](../peacockdb-core/src/test_support/duckdb_oracle/tests.rs) | 47 |
 |---|---|--:|
 
 the grammar parsed — each order and value, `rel` taking a column name with spaces, dots and
@@ -504,7 +506,10 @@ our last place; `rel` passing inside its tolerance, failing just outside it on a
 on an unnamed one at `approx`; `date` comparing DuckDB's timestamp by its date part, failing on
 another day and pairing rows by the date under `sort`; a column name the header lacks, or holds
 twice, failing by name; a fingerprinted section and the fingerprint oracle each refusing the
-other, and `duckdb_none` refusing two sections that both exist. Plus the
+other, and `duckdb_none` refusing two sections that both exist. Then `gpu: fingerprint`: parsed
+last and with `fingerprint` only, refused on the two bare oracles; a fingerprinted device section
+compared under it and failing without it, a device section of rows failing under it, and the
+cpu's fingerprinted section still refused on its line. Plus the
 `gpu-result.txt` coverage rule both ways, over a file handed in as text: a cell with no section
 and a section no cell enables each failing, and an absent file passing where no cell is
 enabled
@@ -553,11 +558,15 @@ by some registry row, `data_fusion` decoded through `stringify!`'s spacing, and
 `data_fusion(no_sort, …)` refused; and the line's one row order, a `duckdb_none` line's being its
 golden's
 
-| Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 2 |
+| Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 9 |
 |---|---|--:|
 
 a quoted registry cell holding commas, parentheses and doubled quotes reads as one field, the
-same rule cost-report, `ticket_widget.py` and `duckdb_result.py` read the file by
+same rule cost-report, `ticket_widget.py` and `duckdb_result.py` read the file by. Then the
+`stored` column: a `skipped:` or `failed:` marker read as no section, each shape of cell from
+the sides' formats, a side with no section left out of the one-word rule, a query with no
+section refused, a wrong cell naming the side that differs, a line declaring `gpu: fingerprint`
+whose cell stores no fingerprint on the device's side, and the column's spelling
 
 | Order hazard | [test_support::order_hazard::tests](../peacockdb-core/src/test_support/order_hazard/tests.rs) | 18 |
 |---|---|--:|
@@ -678,11 +687,11 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1694 cases: `--lib -- gpu_tests::` 738, `test_gpu_corpus` 944, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 1699 cases: `--lib -- gpu_tests::` 738, `test_gpu_corpus` 949, `peacock_gpu_benchmarks` 11, `test_node_timing` 1
 
 *crate integration, external*
 
-| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 943 |
+| Corpus, device | [test_gpu_corpus](../peacockdb-core/tests/test_gpu_corpus.rs) | 948 |
 |---|---|--:|
 
 the same `corpus_query!` lines read from the other side: each enabled (query, mode) runs on a
@@ -691,19 +700,19 @@ device with every batch held to its node's declared schema through the driver's 
 and asserts,
 read-only, against the section the cpu authored — plan shape, `in_rows`, the per-batch lists
 and the bytes — plus the result where `gpu_oracle` names a golden.
-942 cells today. From tpch, 220: every line at every mode. From tpcds, 395: every line wherever it runs on the cpu,
-but for three. `q2` is off on [#56](tickets/corpus-coverage.md#t56): its device recording is a
-fingerprint, which its DuckDB check cannot take. `q34` and `q71` are off on
+947 cells today. From tpch, 220: every line at every mode. From tpcds, 400: every line wherever it runs on the cpu,
+but for two. `q34` and `q71` are off on
 [#202](tickets/corpus-coverage.md#t202): a `DESC NULLS FIRST` key carrying NULLs comes back with
 them last, which the row-for-row compare shows. `q78` compares within 1e-11 relative, since a
 float `round(x, 2)` on the device is one ulp from DataFusion's in some cells
-([#60](archive/archived-tickets.md#t60), won't fix). tpcds is where #137's NULL-key filters run on
+([#60](archive/archived-tickets.md#t60), won't fix). `q2` does too, and those cells push its
+recording over the cap, so its DuckDB check on the device's side is `gpu: fingerprint`. tpcds is where #137's NULL-key filters run on
 a device, at every tp4 cell. From pbench, 327: every line wherever it runs on the cpu, but for
 two. `like-column-pattern` is off on [#246](tickets/joins.md#t246), a `LIKE` whose pattern is a
 column, and `timestamp-s-key-group` on [#264](tickets/complete-coverage.md#t264), a cast group key.
 pbench is where the device meets NULL
 join keys on both sides, an empty build lane under Right, Full and RightAnti, every join type
-with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 943rd case is that a
+with a residual, every nested-loop type, and `NOT IN` after the rewrite. The 948th case is that a
 device run under a regeneration writes no golden
 
 | Registry ↔ CSV, device | [the_registry_matches_the_gpu_corpus_in_both_directions](../peacockdb-core/tests/test_gpu_corpus.rs) | 1 |
@@ -867,7 +876,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs), [every_refusal_names_a_ticket_that_exists](../cost-report/src/main.rs), [a_registry_row_with_a_quoted_oracle_parses](../cost-report/src/main.rs) | cost-report | 42 |
 | DuckDB cost extraction (Python) | classifier / pruning / dynamic-filter logic — fails CI before generation | [scan_count_mismatch_fails_loud](../testdata/test_duckdb_cost.py), [compute_pruning_from_rowgroups](../testdata/test_duckdb_cost.py) | cost-report | 41 |
 | DuckDB result rendering (Python) | the only side that can get the result oracle's rendering wrong on its own: a timestamp must read as arrow-rs prints it (`…00.001`, not `isoformat()`'s `…00.001000`) or every row carrying one is a false divergence, and the over-cap fingerprint must be the text `test_golden_format.rs` pins, byte for byte, or the two writers compare nothing; a `no_sort` query's rows kept in DuckDB's order, read off a quoted registry cell | [test_a_timestamp_renders_as_arrow_rs_prints_it](../testdata/test_duckdb_result.py), [test_both_writers_fingerprint_the_same_rows_the_same_way](../testdata/test_duckdb_result.py), [test_render_keeps_order_when_asked](../testdata/test_duckdb_result.py) | cost-report | 22 |
-| Report widget's registry reader (Python) | a quoted oracle cell is one field, a registry older than `duckdb_oracle` still renders, and the include fallback reads a line on the grammar | [test_a_quoted_oracle_cell_is_one_field](../scripts/test_ticket_widget.py) | cost-report | 3 |
+| Report widget (Python) | the registry read — a quoted oracle cell is one field, a registry older than `duckdb_oracle` or `stored` still renders, and the include fallback reads a line on the grammar — and the four columns after Query: Result stored (the registry's `stored`), DuckDB, cpu ↔ DataFusion and gpu ↔ cpu, each header's hover text saying what its comparison does. q2's stored and DuckDB cells divide into labelled halves, a one-word cell does not, a row with no line keeps four cells, and the fingerprint's text says what it compares | [test_a_quoted_oracle_cell_is_one_field](../scripts/test_ticket_widget.py), [test_q2s_two_cells_split](../scripts/test_ticket_widget.py) | cost-report | 10 |
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode against an oracle written from the SQL — the hash join and the nested loop at all nine types, each streaming its probe and answering a call as the device's join session does, a residual on every family, `null_equals_null` counted by hand, and a guard that the prototype names every join type `join_session.cpp` dispatches on — no project code | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/test_scheduling.py), [test_every_join_type_matches_the_oracle](../scripts/exec_model/tests/test_join_capability.py) | cost-report | 213 |
 | Exec-model prototype, TPC-H plan shapes (Python) | the same drivers over real sf1 tables under a live resident budget, each plan re-run at every layout `LayoutInjector` can produce; needs the generated dataset, so it rides dataset-matrix rather than cost-report | [test_the_accumulator_is_what_makes_the_budget_bind](../scripts/exec_model/tests/test_tpch.py), [test_every_layout_gives_the_same_shuffled_join](../scripts/exec_model/tests/test_tpch.py) | dataset-matrix (25.02 leg) | 19 |
 | Exec-model corpus (Python) | every TPC-H query and every TPC-DS query the engine runs that needs no window function, lowered by hand and run over whole sf1 tables at three layouts each — TPC-H against a pandas oracle per query, TPC-DS against DuckDB running the query's own text. Minutes, not seconds, so manual dispatch | [test_corpus_q21_suppliers_who_kept_orders_waiting](../scripts/exec_model/tests/test_tpch_corpus.py), [plans_tpcds.py](../scripts/exec_model/tests/plans_tpcds.py) | manual — exec-model-corpus.yml, 3 shards | 93 |
@@ -901,18 +910,23 @@ Notes
   `golden(sort|no_sort, exact|approx_std)` | `live_cpu` on the device,
   `data_fusion(sort, exact|approx)` | `data_fusion_subset` | `data_fusion_disabled` against
   DataFusion, and `duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>",
-  …)])` | `duckdb_fingerprint` | `duckdb_none` against DuckDB. The first argument says whether
+  …)][, gpu: fingerprint])` | `duckdb_fingerprint` | `duckdb_none` against DuckDB. The first argument says whether
   both answers are sorted before comparing. `exact` is every cell equal; DuckDB's `approx` is a
   decimal within one unit in our last place and a float within 1e-11 relative, DataFusion's 1e-12
   relative, and `approx_std` 1e-11 relative on every numeric cell. `rel` holds the named columns
   to its tolerance relative to the larger magnitude, for a known numeric divergence, and takes no
-  ticket; `date` compares the named columns' DuckDB timestamps by their date part. Columns are
+  ticket; `date` compares the named columns' DuckDB timestamps by their date part. `gpu:
+  fingerprint` compares the device's sections by fingerprint, for a query whose device rendering
+  alone crosses the cap, and leaves the cpu's under the rest of the spelling. Neither side falls
+  back silently: a fingerprinted device section without the part fails, and so does one holding
+  rows with it. Columns are
   named as our result header prints them. Each grammar is held to the lines by an `ALL` or
   `FACETS` test, so a value nothing uses is deleted rather than carried.
 - **Row order is compared for an `ORDER BY` query.** The cpu at its authoring mode: its
   rendering equals the committed section text for text, and that section meets DuckDB's row for
-  row. The device at every mode through `golden(no_sort, …)`, and against DuckDB as of the last
-  recording of `gpu-result.txt`. The other four cpu modes are compared through `data_fusion`
+  row, except under `duckdb_fingerprint`. The device at every mode through `golden(no_sort, …)`,
+  and against DuckDB as of the last recording of `gpu-result.txt`, except under
+  `gpu: fingerprint` (tpcds q2), whose fingerprint carries no order. The other four cpu modes are compared through `data_fusion`
   only, and `live_cpu` compares as a multiset, so both stay order-blind. There is no tie rule: no
   corpus answer compared row for row has rows tying on its sort keys.
 - The crate has no doctest today, so `--doc` runs nothing. The gap #128 names is still open:
@@ -989,10 +1003,10 @@ The generator scripts live in `testdata/`.
 | `recipe-payloads.txt` | `planner::tests::plan_goldens` with `UPDATE_CANONICAL=1`<br>**and** `PEACOCK_REWRITE_RECIPE_BYTES=1` | sf1 parquet, and a fixed `/tmp` symlink for the testdata root — without it the payloads carry this machine's paths and so does the digest | <sub>the_payload_golden_carries_<br>what_each_call_hands_the_executor</sub> |
 | `<mode>-<tier>.cpu.txt` | the corpus cpu tier under `UPDATE_CANONICAL=1` (merge and prune) or `PCK_UPDATE_SECTIONS=1` (merge only) — never the GPU | sf1 parquet; one file per mode, a `== <query>` section each | the corpus cpu tier writes and verifies; the device tier verifies read-only |
 | `<mode>-<tier>.cost.txt` | derived from the sibling `.cpu.txt` **section**, × `cost_model.conf` | that `.cpu.txt`, `cost_model.conf` | the corpus cpu tier + `test_cost_model`, which re-derives every section independently |
-| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Its rows are in engine order where the line's row order is `no_sort` — its `duckdb(…)`'s where that compares rows, else its `golden(…)`'s — and sorted otherwise; `gpu-result.txt` follows the same rule. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden(sort|no_sort, exact|approx_std)`; `live_cpu` reads none); the DuckDB `duckdb_<ds>_<q>` cases |
+| `<tier>.result.txt` | the last mode a query declares, under either variable; a run without that mode leaves the section alone. Its rows are in engine order where the line's row order is `no_sort` — its `duckdb(…)`'s where that compares rows, else its `golden(…)`'s — and sorted otherwise; `gpu-result.txt` follows the same rule. Over the 262144-byte cap the section holds a **fingerprint** instead of its rows | sf1 parquet; one section per query, its `mode=` line naming the author | the corpus cpu tier; the device tier where `gpu_oracle` names a golden (`golden(sort|no_sort, exact|approx_std)`; `live_cpu` reads none); the DuckDB `duckdb_<ds>_<q>` cases; `the_registry_stored_column_matches_the_goldens_in_both_directions` |
 | `<q>.duckdb_cost.txt` | `gen_duckdb_cost.sh --gen`<br>(DuckDB 1.5.4, `threads=1`, pyarrow 19.0.1) | committed pass-1 profiles ∩ pass-2 dynamic-filter bounds ∩ parquet row-group stats | the cost-report widget (directional signal, not a test) |
-| `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, rows sorted or in DuckDB's order where the registry's `duckdb_oracle` says `no_sort`, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle` |
-| `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases and `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` |
+| `duckdb-result.txt` | `testdata/duckdb_result.py`<br>(DuckDB 1.5.4, `threads=1`); timestamps rendered as arrow-rs prints them, rows sorted or in DuckDB's order where the registry's `duckdb_oracle` says `no_sort`, and a **fingerprint** over the cap | sf1 parquet, the query text in `<bench>-queries/` | `test_cpu_corpus`'s `duckdb_<ds>_<q>` cases, per the line's `duckdb_oracle`; `the_registry_stored_column_matches_the_goldens_in_both_directions` |
+| `gpu-result.txt` | the corpus **device** tier under `PCK_WRITE_GPU_RESULT=1`, **before** it asserts, so an answer the cpu rejects is still recorded; one section per (query, mode), a fingerprint over the cap; `--pull-results` brings it home. A record, never an authority | sf1 parquet, the device's cuDF — the committed file holds cuDF 25.02's answers and says so in a `cudf=` first line, read from `$CUDF_ROOT`'s `version_config.hpp` at build time. It was recorded on nebius-gpu's L40S, not shad-gpu, which was down; the stamp carries the cuDF and not the card, so a regenerator on a third card has only this sentence to tell it the baseline moved. `PCK_WRITE_GPU_RESULT=<v>` writes `gpu-result-<v>.txt` beside it, gitignored | the `duckdb_gpu_<ds>_<q>_<mode>` cases , `every_enabled_device_cell_has_its_gpu_result_section_and_no_other` and `the_registry_stored_column_matches_the_goldens_in_both_directions` |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -1038,7 +1052,7 @@ testdata/{tpch,tpcds}-queries/*.sql        testdata/pbench/gen.sql
           │     └──► duckdb-result.txt   (one section per query; a fingerprint over the cap)
           │
           │   test_cpu_corpus, rust-only (CI), per the line's duckdb_oracle
-          │   (exact | approx | divergent(ticket, cols) | fingerprint | none):
+          │   (exact | approx | rel | date | gpu: fingerprint | fingerprint | none):
           │     duckdb_<ds>_<q>             <tier>.result.txt ↔ duckdb-result.txt
           │     duckdb_gpu_<ds>_<q>_<mode>  gpu-result.txt   ↔ duckdb-result.txt
           │     coverage   every enabled device cell has its gpu-result section, and no other;
@@ -1067,6 +1081,15 @@ Consequences worth knowing before you regenerate:
 - **Read `git diff --numstat` after any scripted edit of `cost-registry.csv`.** Python's
   `csv.writer` rewrites every line with CRLF, and the whole suite still passes: nothing in the tree
   reads the line endings. The numstat is what shows 198 lines changed where you meant 11.
+- **The registry's `stored` column says what each side's result section holds**, after
+  `tickets`: `result` or `fingerprint` where every side with a section agrees, else
+  `cpu|duckdb|gpu` with `—` for a side with none (`skipped:` and `failed:` count as none) and
+  `mixed` for device modes that disagree; `na` for a row with no corpus line. A recording that
+  moves a section across the cap moves the cell, and
+  `the_registry_stored_column_matches_the_goldens_in_both_directions` names the side until it
+  does. The same test refuses a line that says `gpu: fingerprint` while its cell's gpu part is
+  anything but `fingerprint`, such as a line whose device cells are off. The report shows it as
+  Result stored.
 - **`.cost.txt` is a pure function of `.cpu.txt` and `cost_model.conf`** — regenerating one
   `.cpu.txt` obliges the sibling `.cost.txt`, and `test_cost_model` re-derives every one of
   them, so a hand-edited `.cost.txt` goes red.
@@ -1107,7 +1130,7 @@ Consequences worth knowing before you regenerate:
   writer keeps a section the registry still enables and drops one it does not, so a cell turned
   off loses its section on the next recording cycle — read the diff for a disappearance too.
 - **An over-cap result section is a fingerprint**, written by both result writers and
-  compared under `duckdb_fingerprint`: `rows=`, each column's `nonnull` and — where the
+  compared under `duckdb_fingerprint`, or on the device's side alone under `gpu: fingerprint`: `rows=`, each column's `nonnull` and — where the
   column is a declared float — its `sum`/`min`/`max`, then a SHA-256 over the rest. A float
   is the one type the two engines print to their own precision; a decimal renders at its
   declared scale on both sides, so it is hashed. That is what makes an over-cap join checked

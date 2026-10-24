@@ -7,17 +7,17 @@
 // Modes are the five planning modes or'd together, `all_modes` for all five, or `none`; every
 // argument is written, so a query's whole coverage reads off the line. The three oracles:
 //
-//   duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>", …)])
-//     | duckdb_fingerprint | duckdb_none
+//   duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>", …)]
+//     [, gpu: fingerprint]) | duckdb_fingerprint | duckdb_none
 //   data_fusion(sort, exact|approx) | data_fusion_subset | data_fusion_disabled
 //   golden(sort|no_sort, exact|approx_std) | live_cpu
 //
 // The first argument says whether both answers are sorted before comparing; a query whose plan
 // ends in a sort says `no_sort`. `rel` and `date` name columns as our result header prints
-// them. llm-wiki/build-test.md has what each compares. The last argument is the device run's
-// schema validation; a cell red on schema alone says
-// `schema_validation_disabled(modes)` with its ticket on the line, naming the modes it excuses
-// so the others keep the hook, or bare where it excuses every mode.
+// them. `gpu: fingerprint` compares the device's side by fingerprint. llm-wiki/build-test.md
+// has what each compares. The last argument is the device run's schema validation; a cell red
+// on schema alone says `schema_validation_disabled(modes)` with its ticket on the line, naming
+// the modes it excuses so the others keep the hook, or bare where it excuses every mode.
 // The first twenty are the smallest plans carrying no ticket; the rest of the corpus is T19.
 
 // --- tpch ---------------------------------------------------------------------
@@ -129,8 +129,8 @@ corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb(sort, ap
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// one: q2 (#56). The joins' own blockers, #152's side copies and #220's batch splits, went
-// with the join session.
+// two: q34 and q71, off on #202 (desc sort null order). The joins' own blockers, #152's side
+// copies and #220's batch splits, went with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
@@ -184,14 +184,14 @@ corpus_query!(tpcds, 1, q66, all_modes, all_modes, duckdb(no_sort, rel(1e-5, "ja
 corpus_query!(tpcds, 1, q76, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q16, all_modes, all_modes, duckdb(sort, exact), data_fusion(sort, exact), golden(sort, exact), schema_validation_enabled);
 
-// T19 batch 12, by expected calls. q2 is off on the device on #56. Its device answer matches
-// the golden within 1e-11 at every mode, but some cells of its seven `round(…, 2)` columns are
-// one ulp off, which widens the rendering past the result cap: the recording is a
-// fingerprint, and the DuckDB check on the device's side takes rows under `approx`.
+// T19 batch 12, by expected calls. All five run everywhere on both engines. The device prints
+// some cells of q2's seven `round(…, 2)` columns one ulp longer (#60), which widens its
+// rendering past the result cap: its section is a fingerprint, so its DuckDB check on the
+// device's side is by fingerprint and its golden check within 1e-11 relative.
 corpus_query!(tpcds, 1, q25, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q29, all_modes, all_modes, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 corpus_query!(tpcds, 1, q90, all_modes, all_modes, duckdb(no_sort, approx), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
-corpus_query!(tpcds, 1, q2, all_modes, none, duckdb(no_sort, exact), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
+corpus_query!(tpcds, 1, q2, all_modes, all_modes, duckdb(no_sort, exact, gpu: fingerprint), data_fusion(sort, exact), golden(no_sort, approx_std), schema_validation_enabled);
 corpus_query!(tpcds, 1, q59, all_modes, all_modes, duckdb(no_sort, approx), data_fusion(sort, exact), golden(no_sort, exact), schema_validation_enabled);
 
 // T19 batch 13, by expected calls. q54's nested-loop join projects, which the cpu applies.
