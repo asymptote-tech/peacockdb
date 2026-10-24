@@ -18,6 +18,2346 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/desc-null-order.md -->
+
+**Merged 2026-10-23 as PR #191, chain K's task, one commit `3710a704`, merged into master by `09cb4bb6`.**
+
+# A descending sort key puts its nulls where the plan says on the device
+
+Kind: production
+
+**This task closes [#202](../tickets/corpus-coverage.md#t202)** (desc sort null order) **and
+[#258](../tickets/testinfra.md#t258)** (PR comment headroom). Fifteenth of chain K, after oracle-columns. Its corpus lines use oracle-cleanup's `no_sort`
+grammar, which is what found the defect.
+
+## Why
+
+- **The device gets a descending key's nulls backwards.** `i32 DESC NULLS LAST` comes back with
+  its nulls first, and `DESC NULLS FIRST` with its nulls last. Ascending keys are right.
+- **The cause is one mapping, at two sites.** `cpp/src/operators/sort.cpp` and the merge in
+  `cpp/src/node_session.cpp` map `nulls_first` to `cudf::null_order::BEFORE` and its absence to
+  `AFTER`. cuDF applies `null_order` before it flips a `DESCENDING` key, so on a descending key
+  `BEFORE` puts nulls last.
+- **Two corpus queries are gated on it.** tpcds q34 (`c_preferred_cust_flag DESC NULLS FIRST`)
+  and q71 (`ext_price DESC NULLS FIRST`) both carry nulls in that key. Their five device cells are
+  off under #202. The human expects both to turn on.
+- **The PR comment has no room for six more rows.** `the_pr_comment_fits_under_the_body_cap`
+  holds cost-report's PR comment under GitHub's 65,536-byte body cap. At chain K's tip it is about
+  64.8 KB; six pbench rows take it to about 66.6 KB (the analyst's estimate, 2026-10-21). #258
+  offered two remedies and left the choice to the human, who chose both.
+
+## The work
+
+1. **One mapping, relative to the direction.** `BEFORE` when `nulls_first == asc`, else `AFTER`.
+   - Both sites call one function, so they cannot drift apart (my call; its name and header are
+     the builder's).
+   - **The two sites change in one commit.** Runs sorted one way under a merge that reads them
+     the other way break cuDF's merge precondition, and the device answers duplicated and
+     dropped rows. Today no plan reaches that shape, because both sites share the wrong mapping.
+   - A comment at the function says why the mapping depends on the direction.
+2. **The five pins become agreement tests.** Each loses its `bug_` prefix and its name says what
+   now holds. Each asserts the device matches the cpu:
+   - `bug_a_descending_key_with_nulls_last_puts_them_first_on_the_device` and
+     `bug_a_descending_key_with_nulls_first_puts_them_last_on_the_device`
+     (`gpu_tests/exec_cases.rs`, `GpuSort`)
+   - `bug_an_accumulating_sort_on_a_descending_key_nulls_first_puts_them_last_on_the_device`
+   - `bug_a_merge_on_a_descending_key_nulls_first_puts_them_last_on_the_device`
+   - `bug_a_merge_on_a_descending_key_nulls_first_over_runs_each_carrying_a_null_duplicates_and_drops_rows_on_the_device`
+
+   The last three are in `gpu_tests/accumulate_cases.rs`. The `nulls_flipped` helper goes if
+   nothing else uses it.
+3. **Two new cases fill the gaps.** `GpuSort` already covers `DESC NULLS FIRST` and
+   `DESC NULLS LAST` through its two pins. The accumulating sort and the merge cover only
+   `DESC NULLS FIRST` on a nullable key: their `…_on_a_descending_key_agrees` tests sort on
+   `id`, which has no nulls. Each gets a `DESC NULLS LAST` case on a nullable key.
+4. **q34 and q71 turn on at all five device modes.** Their lines take `all_modes` for the
+   device and drop the `#202` comment. Registry rows 35 and 72 drop `202`. Their
+   `gpu-result.txt` sections are recorded on nebius-gpu. The oracles stay as they are:
+   `duckdb(no_sort, exact)` and `golden(no_sort, exact)`.
+5. **Six pbench queries sort on a nullable key.** No pbench query sorts today. Each reads
+   `fact` filtered to `f_id % 20 = 0`: 1,000 rows across all ten row groups, so the tp4 and
+   rowgroup modes reach the merge, and about 5% of `f_k` is null. Each breaks ties on `f_id`, so
+   `no_sort` compares a fully determined order. Each answer is about 15 KB, far under the
+   256 KiB cap, since a fingerprint cannot check order.
+
+   | query | `ORDER BY` | what it catches |
+   |---|---|---|
+   | `sort-desc-nulls-first` | `f_k DESC NULLS FIRST, f_id` | q34's and q71's shape |
+   | `sort-desc-nulls-last` | `f_k DESC NULLS LAST, f_id` | the other half of the defect |
+   | `sort-desc-default` | `f_k DESC, f_id` | DataFusion's default for `DESC`, nulls first |
+   | `sort-desc-string` | `f_s DESC NULLS LAST, f_id` | a string key |
+   | `sort-mixed-keys` | `f_kb NULLS LAST, f_k DESC NULLS FIRST, f_id DESC` | mixed directions, nulls in two keys |
+   | `sort-desc-limit` | `f_k DESC NULLS FIRST, f_id LIMIT 100` | the sort with a fetch |
+
+   - Each selects its sort keys and `f_id`, nothing else.
+   - **Oracles:** `duckdb(no_sort, exact)`, `data_fusion(sort, exact)`, `golden(no_sort, exact)`,
+     at all five modes on both engines.
+   - **`sort-desc-limit`'s cut must fall past the nulls.** The builder counts the filtered nulls
+     with DuckDB and records it in the detail file. If 100 does not exceed it, the limit rises
+     to the count plus 50.
+   - **Run on the device before the fix.** The detail file records which of the six fail there
+     and how. A query that passes before the fix stays in, as coverage, and the detail file
+     says so.
+   - Float keys are out: NaN ordering is a separate question from #202.
+6. **The PR comment makes room, and the pages stay whole** (#258). In cost-report's
+   `render_markdown` only:
+   - **No Features column.** Its header and its cells go from the comment's tables.
+   - **pbench collapses to its summary line:** "pbench — X/Y GPU-operational", pointing at the
+     full report, with no table. TPC-H and TPC-DS keep their tables.
+   - **Both pages are unchanged and complete:** `testdata/report.html` (`ticket_widget.py`) and
+     cost-report's html page keep the Features column and every pbench row.
+   - This lands before the six pbench rows, so the size test never goes red.
+7. **#202 and #258 are archived as done**, each rewritten to what was built.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/operators/sort.cpp`, `cpp/src/node_session.cpp`, and the header the shared mapping lives in | the mapping |
+| `peacockdb-core/src/tests/gpu_tests/exec_cases.rs`, `accumulate_cases.rs` | the five pins renamed and asserting agreement; the two new `DESC NULLS LAST` cases |
+| `peacockdb-core/tests/common/corpus_cases.inc` | q34 and q71 on the device; the six pbench lines |
+| `testdata/pbench-queries/sort-*.sql`, `testdata/goldens/pbench.sf1/*` | the six queries and every golden they add: plans, cost, cpu, result, DuckDB, gpu |
+| `testdata/cost-registry.csv`, `testdata/report.html`, `testdata/goldens/tpcds.sf1/gpu-result.txt` | q34 and q71; the six pbench rows |
+| `cost-report/src/main.rs` | `render_markdown`: no Features column, pbench as its summary line; the tests |
+| `llm-wiki/tickets/corpus-coverage.md`, `tickets/testinfra.md`, `archive/archived-tickets.md`, `tickets.md`, `build-test.md` | #202 and #258 archived; test names and counts; what the comment holds |
+| `llm-wiki/architecture.md` | "## cuDF options": the `cudf::null_order` row describes the shared mapping; its #202 link goes |
+
+Component-level API: none. No wire, ABI or facade change.
+
+## Restriction
+
+- Only the null-order mapping changes in the engine.
+- Only the PR comment shrinks. Neither html page loses a column or a row.
+- If q34 or q71 is still red for another reason, that query's cells stay off under a new ticket
+  with the measurement, and #202 still closes on the operator tests.
+
+## Verification
+
+- `gpu_tests::` green on nebius-gpu, the five renamed tests and the new cases included.
+- q34, q71 and the six pbench queries green at all five device modes, their DuckDB device cases
+  included; the six green at all five cpu modes.
+- The dispatched `GPU Tests (nebius-gpu)` CI job green.
+- The cpu tiers green; the cost-report job shows no regression.
+- cost-report tests: the comment has no Features header or cell; pbench's part of the comment
+  has its summary line and no query row; cost-report's html page still has the Features header
+  and a pbench row; `the_pr_comment_fits_under_the_body_cap` green with the six rows in, its
+  printed margin in the detail file.
+
+## Completeness signoff (2026-10-22)
+
+Solved under its constraints. `null_order_of` maps a key's nulls relative to its direction, and
+`GpuSort` and the merge both call it, changed in one commit; it is the only engine change. The
+five pins assert device–cpu agreement and two `DESC NULLS LAST` cases fill the gap. q34, q71 and
+six pbench sorts pass at all five device modes; before the fix all 40 cells failed. The PR comment
+drops Features and collapses pbench; `report.html` and cost-report's page stay whole, guarded.
+Completeness reviewer and analyst: none. Shortcuts or bandaids: none. One step outside the Scope
+table: `ticket_widget.py` reads a new `--widget-md` output, since it built the page from the
+comment.
+
+---
+
+<!-- archived from llm-wiki/tasks/oracle-columns.md -->
+
+**Merged 2026-10-23 as PR #190, chain K's task, one commit `97db3127`, merged into master by `ffb15ec7`.**
+
+# Every fingerprint is visible in the line, the registry and the report; q2 on the device
+
+Kind: production
+
+**This task closes [#56](../tickets/corpus-coverage.md#t56)** (q2 fingerprinted answer).
+Fourteenth of chain K, after interval-days. It builds on oracle-cleanup's oracle grammar and on
+round-tolerance's q2 measurement.
+
+## Why
+
+- **q2's device answer is right and its cells are off.** Round-tolerance measured it on an L40S:
+  q2 passes `golden(no_sort, approx_std)` at all five device modes. But the device prints some
+  `round(…, 2)` cells one ulp longer ([#60](../archive/archived-tickets.md#t60)), and a column is
+  padded to its widest cell. So the device's rendering grows from 261,767 to about 367,481 bytes,
+  over the 262,144-byte cap, and `gpu-result.txt` holds a fingerprint.
+- **No spelling serves both sides of q2.** The cpu's section holds rows and the device's holds a
+  fingerprint. `duckdb(…)` refuses the device's fingerprint, and `duckdb_fingerprint` refuses the
+  cpu's rows. One `duckdb_oracle` per line names one comparison for both sides.
+- **A silent fallback would hide the comparison.** Letting `duckdb(…)` fall back to the
+  fingerprint would make q2 green, but its line would still read as a row comparison. The human
+  wants what each comparison does to be readable from the `corpus_query!` line, the registry and
+  `testdata/report.html`, for q2 and for the 24 lines that declare `duckdb_fingerprint`.
+- **The report does not say what is stored.** Whether a section holds rows or a fingerprint
+  decides how the cpu is held to its own committed answer, and no column says it. The
+  fingerprint's hover text is also incomplete: it says "row count, per-column counts and sums,
+  and a hash", and omits min and max, the tolerance, which columns are summed, and that row
+  order is not checked.
+
+## The work
+
+1. **`duckdb(…)` takes an optional device part: `gpu: fingerprint`.**
+   - **Spelling.** It comes last, after any `date(…)`:
+     `duckdb(no_sort, exact, gpu: fingerprint)`. `fingerprint` is the only value it takes; the
+     parser refuses any other by name, and refuses the part on `duckdb_fingerprint` and
+     `duckdb_none`.
+   - **The cpu case ignores it.** `duckdb_<ds>_<q>` compares the cpu's section under the rest of
+     the spelling, as today. A fingerprinted cpu section under `duckdb(…)` is still refused with
+     "declare duckdb_fingerprint".
+   - **The device case honours it.** `duckdb_gpu_<ds>_<q>_<mode>` under `gpu: fingerprint`
+     compares the device's section with `fingerprint::compare_over_cap` at
+     `DUCKDB_FLOAT_TOLERANCE`. The row order, the values rule, `rel` and `date` do not apply on
+     that side, since a fingerprint carries none of them.
+   - **It is never silent.** Under `gpu: fingerprint`, a device section that holds rows fails,
+     naming the part to drop. Without it, a fingerprinted device section fails with "declare
+     `gpu: fingerprint`". So the line always says which comparison the device side gets.
+2. **q2 turns on at all five device modes.** Its line becomes
+   `duckdb(no_sort, exact, gpu: fingerprint)`, `data_fusion(sort, exact)`,
+   `golden(no_sort, approx_std)`. Its five `gpu-result.txt` sections are recorded on nebius-gpu.
+   Registry row 3 drops `56`. The cpu side stays `exact` against DuckDB, as it passes today.
+3. **The registry gains a `stored` column**, after `tickets` and before `duckdb_oracle`.
+   - **Value.** One word, `result` or `fingerprint`, when every side that has a section has that
+     format. A side with no section, or a `skipped:` marker, is left out of that rule, so a query
+     with its device cells off reads `result`. Otherwise three parts, `cpu|duckdb|gpu`, e.g.
+     `result|result|fingerprint` for q2, with `—` for a side that has no section. A gpu part
+     whose device modes disagree is `mixed`; none do today. A row that is not a corpus line (its
+     oracle columns `na`) reads `na`, even where `duckdb-result.txt` has a section for it.
+     (These are my calls.)
+   - **Source.** `.result.txt` (the cpu's), `duckdb-result.txt` and `gpu-result.txt`, read from
+     `testdata/goldens/`. A test holds the column to the three files in both directions, beside
+     `the_registry_matches_the_cpu_corpus_in_both_directions`.
+   - **Readers.** Every reader of the CSV accepts the new column: `registry.rs`, cost-report's
+     `Registry::load`, `ticket_widget.py` and `duckdb_result.py`. `duckdb_result.py`'s `no_sort`
+     reader keeps working on a spelling with `gpu: fingerprint`.
+4. **The report's columns after Query:**
+
+   | column | was | the cell |
+   |---|---|---|
+   | Result stored | — (new) | the registry's `stored`; split into cpu, DuckDB and gpu halves where it has three parts |
+   | DuckDB | DuckDB oracle | the `duckdb_oracle` spelling, shortened as today; split into a cpu and a gpu half where the line has `gpu: fingerprint` (q2: `no_sort exact` \| `fingerprint`) |
+   | cpu ↔ DataFusion | cpu oracle | unchanged |
+   | gpu ↔ cpu | gpu oracle | unchanged |
+
+   The mode groups, schema validation and the columns after them stay as they are.
+
+   **A split cell is one `<td>` divided inside**, not a sub-column: each of the four is one
+   column, and only q2's two cells divide. Each half carries its own hover text and a label
+   (cpu, DuckDB, gpu) visible in the cell. Each header spans both header rows (`rowspan="2"`), as the oracle headers do today.
+5. **Hover text, in two layers.**
+   - **Each first-row header** says what the column's comparison does in general.
+     - Result stored: what a section holds, and that the cpu's answer must equal its stored
+       section text for text: the same rows in the line's row order with no tolerance, or the
+       same fingerprint text.
+     - DuckDB: the cpu's stored answer and each device mode's stored answer, each against
+       DuckDB's; a split cell means the two sides compare differently.
+     - cpu ↔ DataFusion: the cpu's answer against a live DataFusion run at one partition.
+     - gpu ↔ cpu: the device's answer in memory against the cpu's stored section (`golden`) or a
+       live cpu run at the same mode (`live_cpu`).
+   - **Each cell** keeps its spelling's hover text from `ORACLE_HOW`. The fingerprint's text is
+     rewritten to say exactly what is compared: the row count; each column's count of values;
+     each float column's sum, min and max within 1e-11 relative; every other column, decimals
+     included, through a SHA-256 over all rows' cells, exactly; row order not checked. The same
+     text serves `duckdb_fingerprint` and `gpu: fingerprint`.
+6. **The wiki says it.** `build-test.md` describes `gpu: fingerprint`, the `stored` column and
+   the report's columns. #56 is archived as done, its text rewritten to what was built.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/test_support/duckdb_oracle.rs` and its `tests.rs` | the `gpu:` part: parse, refusals, the device case's comparison |
+| `peacockdb-core/src/test_support/registry.rs` and its `tests.rs` | the `stored` column |
+| `peacockdb-core/src/test_support/mod.rs` | `DuckdbOracle::Compare`'s flag, `FACETS`, the `stored_of` wrapper |
+| `peacockdb-core/src/test_support/corpus_golden.rs` | `stored_of`, read from the three goldens |
+| `peacockdb-core/tests/test_cpu_corpus.rs` | the `stored` column held to the goldens |
+| `peacockdb-core/tests/common/corpus_cases.inc` | q2's line |
+| `testdata/cost-registry.csv`, `testdata/report.html` | the `stored` column, q2's row |
+| `testdata/goldens/tpcds.sf1/gpu-result.txt` | q2's five sections |
+| `testdata/duckdb_result.py`, `testdata/test_duckdb_result.py` | the new column; `no_sort` read past `gpu:` |
+| `cost-report/src/main.rs` | `Registry::load` and its test fixture |
+| `scripts/ticket_widget.py`, `scripts/test_ticket_widget.py` | the columns, the split cells, the header and cell hover text |
+| `llm-wiki/build-test.md`, `llm-wiki/tickets/corpus-coverage.md`, `archive/archived-tickets.md`, `tickets.md` | the grammar, the column, the report; #56 archived; counts |
+
+Component-level API: none. No engine, wire or ABI change.
+
+## Restriction
+
+- No engine change.
+- No fingerprint falls back silently: every fingerprinted comparison is named by its line.
+- The cap, both writers and the fingerprint's format stay as they are.
+- `duckdb_fingerprint`, `duckdb_none` and the other oracles keep their spellings and meaning.
+- Per-node, plan and cost goldens get no report column.
+
+## Verification
+
+- The cpu corpus, `--lib`, `test_corpus_goldens`, cost-report and the Python tiers green.
+- q2 green at all five device modes on nebius-gpu, its DuckDB cases included; the dispatched
+  `GPU Tests (nebius-gpu)` CI job green.
+- Negative cases:
+  - a fingerprinted device section under `duckdb(…)` without `gpu:` fails, naming the part;
+  - a device section holding rows under `gpu: fingerprint` fails;
+  - a fingerprinted cpu section under `duckdb(…, gpu: fingerprint)` is still refused;
+  - `gpu:` with a value other than `fingerprint`, or on `duckdb_fingerprint`, is refused;
+  - a `stored` cell that disagrees with the files fails, naming the side.
+- Widget tests: q2's two split cells, a one-word `stored` cell, and each header's hover text.
+- `testdata/report.html` regenerated with `python3 scripts/ticket_widget.py` in the commit that
+  changes the registry.
+
+## Completeness signoff (2026-10-21)
+
+Solved under its constraints. `duckdb(…, gpu: fingerprint)` parses last, is refused on the bare
+oracles and with any other value, and the device side fails in both directions, so no
+fingerprint falls back silently. q2 is on at all five device modes, recorded on nebius-gpu. The
+registry's `stored` column is held to the three goldens both ways, including a stale
+`gpu: fingerprint` line; every CSV reader takes it; the report shows the four columns with
+q2's split cells. No engine change. Completeness reviewer: none; analyst: archived #56's original
+shape restored, two build-test.md sentences corrected by the coordinator. Shortcuts or bandaids:
+none.
+
+---
+
+<!-- archived from llm-wiki/tasks/interval-days.md -->
+
+**Merged 2026-10-23 as PR #189, chain K's task, one commit `98b6b0be`, merged into master by `c21d223e`.**
+
+# Date and timestamp arithmetic with an interval literal runs on the device
+
+Kind: production
+
+**This task closes [#168](../tickets/corpus-coverage.md#t168)** (interval literal on wire). Thirteenth
+of chain K, after oracle-cleanup, whose oracle grammar its corpus lines use.
+
+## Why
+
+The wire's `ScalarValue` (`flatbuffers/gpu_plan.fbs`) has no interval type. A plan that adds an
+interval literal to a column cannot cross to the device: `serialize_scalar_value`
+(`wire/serialize.rs`) refuses it. Constant folding removes every other corpus interval. tpch
+mixed-join's `o_orderdate + INTERVAL '90' DAY` does not fold, so its device cells are off at all
+five modes. Only whole days are needed for mixed-join. This task carries the whole literal anyway,
+because a month is an ordinary SQL interval and the device can do month arithmetic.
+
+## The work
+
+1. **An interval literal crosses the wire as three parts.** `DataType` gains
+   `IntervalMonthDayNano`, appended last so no existing value's number moves. `ScalarValue` gains
+   `interval_months: int32`, `interval_days: int32` and `interval_nanos: int64`.
+   `IntervalYearMonth` and `IntervalDayTime` literals are written as the same type, converted to
+   months, days and nanoseconds. A typed NULL interval crosses with `is_null`.
+2. **The device answers `date or timestamp ± interval literal`** exactly as DataFusion does
+   (arrow `add_month_day_nano`):
+   - The order is months first, then days, then nanoseconds.
+   - Months use `cudf::datetime::add_calendrical_months`. A day past the month's end clamps to
+     its last day, so Jan 31 + 1 month is Feb 28, or Feb 29 in a leap year.
+   - Days and nanoseconds are added as cuDF durations.
+   - On a date, the sub-day part counts in whole days, truncated toward zero, as chrono does, so
+     `date + 12 hours` is the same date.
+   - On a timestamp, nanoseconds convert to the column's unit as arrow converts them.
+   - Subtraction negates all three parts.
+   - `interval + date` answers a date: the timestamp side gives the type, never the left
+     operand.
+3. **Where it runs.** An interval operand never takes the AST path. `fb_to_type_id` maps the
+   new type to `EMPTY`, since cuDF has no interval type, and an `EMPTY` operand already sends a
+   binary operation to the column path. `build_column_binary` gains the arm. A join residual
+   reaches the same arm through `build_column`, and so does a hoisted keyless residual, which
+   calls it on a zero-row table to learn the type, so the arm answers at zero rows.
+   `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot` gains a row that refuses the
+   interval as an AST literal, by name.
+4. **The refusals go.** `NOT_RUNNABLE` (`planner/tests/plan_goldens.rs`) becomes empty, and
+   the uncrossable set with it. mixed-join's plan golden line becomes a plan.
+   `a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where` (`wire/tests.rs`) takes a
+   payload the wire still cannot carry, and names it.
+5. **pbench gains queries over `fact`'s date and timestamps** (`f_dt`, `f_ts_ms`, `f_ts_us`,
+   `f_ts_ns`). Between them they must reach:
+   - months, with the month-end clamp and a leap day;
+   - days, and a negative interval;
+   - a mixed interval (`'1 month 2 days 3 hours'`) on a date and on a timestamp;
+   - subtraction;
+   - an interval in a filter's predicate, as an aggregate's argument, and in a join residual,
+     keyed and keyless;
+   - the months-then-days order, through dates where the two orders disagree (Jan 29 and 30).
+
+   No interval expression is a group key, since the device refuses a computed group key
+   (#264).
+
+   **The SQL is the plain query.** DuckDB answers `date ± interval` as a `TIMESTAMP` (measured
+   with 1.5.4), where DataFusion answers a date. That is declared on the corpus line with
+   oracle-cleanup's `date("<column>")`, which compares DuckDB's cell by its date part. No query
+   carries a cast for DuckDB's sake.
+
+   **Timestamps are measured first.** DuckDB may answer `TIMESTAMP_MS` or `TIMESTAMP_NS ±
+   interval` as a microsecond `TIMESTAMP`, where DataFusion keeps the column's unit. If the
+   values agree and only the printed form differs, this task adds `timestamp("<column>")` to the
+   grammar, next to `date`: DuckDB's cell compares as the same instant. The measurement goes in
+   the detail file either way.
+
+   **What stays out of pbench.** DuckDB floors a negative sub-day part on a date
+   (`date '2024-03-10' − 12 hours` is 2024-03-09), where DataFusion truncates toward zero. That
+   case is tested in the gtests only, so the DuckDB comparison is not asked about a difference
+   of convention. The seconds unit is gtest-only too: parquet has no seconds unit, so `f_ts_s`
+   reads as microseconds in DataFusion.
+
+   **Where the edge cases come from.** `f_dt` spans 2024, so the month-end and leap-day cases
+   come from it. The `f_ts_*` values lie in the first minutes of 2024-01-01. Changing `gen.sql`
+   moves every pbench golden and is out of scope. Each query is a corpus line with cpu and
+   device cells at all five modes, a registry row, and a `duckdb-result.txt` section.
+
+## Corpus
+
+`tpch/mixed-join`: its five device cells turn on. `168` leaves its row. The new pbench queries
+land on, on both engines. All of them record `gpu-result.txt` sections at every mode.
+
+## Scope
+
+| path | change |
+|---|---|
+| `flatbuffers/gpu_plan.fbs` | `DataType::IntervalMonthDayNano`; three `ScalarValue` fields |
+| `peacockdb-core/src/wire/serialize.rs`, `wire/expr_writer.rs`, `wire/fb_text.rs`, `wire/tests.rs`, `wire/attach.rs`, `wire/mod.rs` | write the literal; the zoned and `Date64` refusal; its text; the refusal test; stale #168 text |
+| `peacockdb-core/src/test_support/corpus_golden/tests.rs` | a fixture that used mixed-join's disabled cell moves to one that stays off |
+| `cpp/src/expr.cpp`, `cpp/src/peacock/expr.h` | the type map, the literal, the AST refusal, the arithmetic arm |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the arithmetic gtests; the `Literals` walk row |
+| `peacockdb-core/src/planner/tests/plan_goldens.rs`, `testdata/goldens/*/*.plans.txt` | `NOT_RUNNABLE` empty; mixed-join's plan |
+| `peacockdb-core/src/test_support/duckdb_oracle.rs` and its tests, `scripts/ticket_widget.py` | `timestamp("<column>")`, only if the measurement asks for it |
+| `testdata/pbench-queries/`, `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`, `testdata/report.html`, `testdata/goldens/{tpch,pbench}.sf1/*` | the new queries; mixed-join on |
+| `llm-wiki/architecture.md`, `build-test.md`, `tickets/`, `archive/archived-tickets.md`, `tickets.md` | the wire type; counts; #168 archived |
+
+Component-level API: the wire format. `DataType` gains `IntervalMonthDayNano` (appended), and
+`ScalarValue` gains three fields. No C ABI symbol or facade change.
+
+## Restriction
+
+- Interval literals in date and timestamp `+` and `-`. These stay refused at plan time under
+  [#249](../tickets/complete-coverage.md#t249) (wire nested/time types), by name:
+  - an interval column;
+  - interval-by-number arithmetic and interval comparisons;
+  - an interval on a timestamp with a time zone, since arrow does months and days in the zone
+    and the device has none;
+  - an interval on a `Date64`, since the device holds it as a millisecond timestamp and would
+    floor a sub-day part that DataFusion drops.
+- No cpu golden moves except mixed-join's plan line and the new queries' sections.
+
+## Verification
+
+- Wire tests: each of the three DataFusion interval literal types round-trips into the three
+  parts; a NULL interval has `is_null`.
+- gtests over a hand-built date and timestamp column:
+  - Jan 31 + 1 month in a leap and a non-leap year;
+  - Mar 31 − 1 month;
+  - `date + 36 hours` and `date − 12 hours`;
+  - a mixed interval on each timestamp unit, seconds included;
+  - `interval + date`.
+
+  Each expected value is written from DataFusion's answer to the same SQL.
+- The new pbench queries and mixed-join green at all five device modes on nebius-gpu, DuckDB's
+  device comparison included, and on the cpu. The dispatched `GPU Tests (nebius-gpu)` CI job is
+  green.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. An interval literal crosses the wire as months, days and
+nanoseconds (`IntervalMonthDayNano` appended); the device adds months with the month-end clamp,
+then days, then nanoseconds, as arrow does, in a new `interval.cpp`. Only a date or naive
+timestamp ± a literal reaches the wire; every other interval use, a CASE or function argument
+included, is refused at plan time naming #249. `NOT_RUNNABLE` is empty, tpch mixed-join is on at
+all five device modes, six pbench queries cover the spec's list on both engines, and DuckDB's
+timestamp answers compare through `date(…)` (no `timestamp(…)` facet needed: measured). #168
+archived. Completeness: reviewer 0/0, analyst 0/0; no `architecture.md` sentence falsified.
+Shortcuts or bandaids: none. `interval.cpp` is proven on cuDF 25.02; 26.02 only by CI's build leg.
+
+---
+
+<!-- archived from llm-wiki/tasks/oracle-cleanup.md -->
+
+**Merged 2026-10-23 as PR #188, chain K's task, one commit `272819bd`, merged into master by `a9fbbe6d`.**
+
+# Oracles that say what they compare, tests that never read Rust source, and a ticket triage
+
+Kind: production
+
+**This task closes [#252](../tickets/testinfra.md#t252)** (checkout reads remotely) **and
+[#287](../tickets/corpus-coverage.md#t287)** (row order unchecked). Twelfth of chain K, after
+round-tolerance; interval-days follows it and uses its grammar. It archives #251, #253, #254, #263
+and #266 as well, which it makes moot rather than fixes.
+
+## Why
+
+- **Oracle names hide the comparison.** Every row oracle sorts both answers as text before
+  comparing them: `duckdb_exact`, `data_fusion_exact`, `golden_exact` and their approximate twins.
+  So "exact" does not mean exact, and no oracle checks the row order of an `ORDER BY` query.
+- **#251's lines record a tolerance as a divergence.** q58, q61 and q66 differ from DuckDB only in
+  the digits a decimal division truncates ([#288](../tickets/scalars.md#t288)): at most 1.0e-6
+  relative (q58), measured 2026-10-20. Calling that a divergence keeps them under a ticket.
+- **Tests read the checkout.** `ticket_is_open`, `corpus_lines` and `macro_invocations` read
+  files at run time, so a staged test binary fails on a remote host (#252). A tickets-only
+  commit can also turn tests red while CI skips them (#263).
+- **Constants.** `chunk_bytes`'s 1 GiB is spelled three times by hand: `1 << 30` in
+  `wire/mod.rs`, `DEFAULT_CHUNK_BYTES` in `gpu_backend/join.rs`, and `1ull << 30` in
+  `join_residual.cpp`.
+
+## The work
+
+1. **One oracle grammar.** Every `corpus_query!` line takes:
+
+       duckdb(sort|no_sort, exact|approx|rel(<tol>, "<column>", …)[, date("<column>", …)])
+       data_fusion(sort, exact|approx)
+       golden(sort|no_sort, exact|approx_std)
+
+   - **The first argument says whether both answers are sorted before comparing.**
+     `data_fusion` accepts `sort` only; it is written anyway, so every line reads the same.
+     `golden(no_sort, …)` compares the device's live answer row for row against the cpu's
+     committed section, which a `no_sort` line writes in engine order.
+   - **`exact` and `approx` keep today's meaning.** `duckdb`'s `approx` is one unit in our last
+     place for a decimal and 1e-11 relative for a float. `data_fusion`'s is 1e-12 relative.
+     `golden`'s `approx_std` is `STDDEV_TOLERANCE`, 1e-11 relative on every numeric cell.
+   - **`rel(<tol>, "<column>", …)`** is new, for a known numeric divergence. It takes no ticket.
+     The named columns must agree within `tol`, relative to the larger magnitude, whether our
+     cell is a float or a decimal. Every other column compares as `approx`.
+   - **`date("<column>", …)`** is new, for a difference of type convention. DuckDB answers
+     `date ± interval` as a timestamp where DataFusion answers a date. A named column's DuckDB
+     cell compares by its date part.
+   - **Columns are named as our result header prints them**, as string literals. Positions are
+     refused. DuckDB's timestamp cells read `2024-02-29T00:00:00` (`duckdb_result.py`'s
+     format), and `date` compares the part before the `T`.
+   - **These keep their spellings:** `duckdb_fingerprint`, `duckdb_none`, `data_fusion_subset`,
+     `data_fusion_disabled` and `live_cpu`. They are not settings of the two axes.
+     `schema_validation_disabled(<modes>)` is untouched.
+   - **`duckdb_divergent` is deleted.** Chain K's empty-sorts removed its two #205 lines, and
+     item 3 turns #251's three into `rel`, so nothing uses it.
+2. **`no_sort` compares row for row.** A line whose query's plan ends in a sort (under any limit
+   or projection) declares `duckdb(no_sort, …)`, and `golden(no_sort, …)` where its gpu oracle
+   is a golden. A guard test enforces both. A fingerprinted line is exempt, and so is a
+   `live_cpu` one.
+   - **No tie rule.** A comment at the comparison says it is safe because no corpus answer
+     compared row for row has tied rows. Measured on 2026-10-20 with DuckDB 1.5.4: 90 lines are
+     fully ordered, and the one query with ties, tpch q11, is a fingerprint.
+   - **Writers keep order.** The writers of `duckdb-result.txt`, `*mini.result.txt` and
+     `gpu-result.txt` keep the engine's row order for those queries and keep sorting the rest.
+     Fingerprints are unchanged.
+   - **What reaches the order check.**
+     - The cpu: at the mode that authors its result section, on every run: its rendering must
+       equal the committed section text for text, and that section meets DuckDB's row for row.
+       The other four cpu modes are compared only through `data_fusion`, so they stay
+       order-blind.
+     - The device: at every mode, on every run, through `golden(no_sort, …)`; and against DuckDB
+       as of the last recording of `gpu-result.txt`.
+     - What else stays order-blind: `live_cpu`.
+   - **A real order defect is filed, not fixed.** A cell that comes back in the wrong order is
+     turned off under its ticket (#202 and #204 are the known ones), and its line keeps
+     `no_sort`.
+3. **The corpus moves to the grammar**, by a script, `scripts/rewrite_oracles.py`, which is
+   deleted again at the end of the task. q58, q61 and q66 end in `ORDER BY`, so they become
+   `duckdb(no_sort, rel(1e-5, …))`, with #251's columns by name.
+4. **The registry gains a `duckdb_oracle` column, and the report shows it.**
+   - The column comes before `cpu_oracle` and is held to the lines like the other two.
+   - All three columns hold the line's full spelling, CSV-quoted where it has commas or quotes.
+     Every reader of the CSV parses quoted fields before any cell is written quoted:
+     `registry.rs`, cost-report's `Registry::load`, `ticket_widget.py` and `duckdb_result.py`.
+   - `testdata/report.html` gets a DuckDB oracle column, placed immediately before the existing
+     cpu oracle column: DuckDB, cpu, gpu. Like those, it shows a shortened keyword
+     (`sort exact`, `no_sort approx`, `rel 1e-5`) with the full spelling and what it compares on
+     hover, and for `rel` and `date`, the columns.
+   - `scripts/ticket_widget.py`'s `ORACLE_HOW` moves to the grammar for all three oracles. Its
+     fallback for a registry without oracle columns parses the new grammar, and a registry
+     without `duckdb_oracle` still renders.
+5. **No peacockdb-core test reads the checkout beyond testdata.**
+   - `ticket_is_open` and its test `an_archived_ticket_is_not_open_and_a_listed_one_is` go.
+   - `corpus_lines()`, `macro_invocations()` and `all_modes_expands_to_the_five_in_either_position` go.
+   - `every_oracle_variant_is_named_by_some_line` and
+     `every_duckdb_oracle_is_named_by_some_line` read the registry.
+   - `every_timed_case_is_enabled_on_a_device` and
+     `every_mask_entry_is_one_of_its_lines_device_modes` (`test_corpus_goldens/benchmark.rs`)
+     stop parsing the includes at run time. That binary compiles `corpus_benchmark_cases.inc`
+     and `corpus_cases.inc` in, through its own `corpus_query_benchmark!` and `corpus_query!`,
+     each line submitting its modes and its schema-validation mask as text. The registry
+     cannot serve the mask, since it holds only `enabled|disabled`.
+   - `every_refusal_names_a_ticket_that_exists` moves from `planner/tests/plan_goldens.rs` to
+     cost-report, which is never staged: `--lib` is staged and `llm-wiki/` is not. cost-report's
+     `the_index_reads_the_anchors_of_every_wiki_file` and
+     `the_widget_renders_a_pbench_section_beside_the_benchmarks` stay where they are.
+6. **Source-reading tests move to `cost-report/tests/test_source_formatting.rs`.**
+   - **What moves:** `test_module_layout` and its submodules (except the privacy probe below),
+     `test_ci_coverage` with `runners.rs`, and `no_declaration_carries_a_block_left_behind_by_a_split`
+     from `test_golden_format`.
+   - **A new guard:** `test_source_formatting` gains
+     `no_core_test_reads_the_checkout`. It fails on any `CARGO_MANIFEST_DIR` read in
+     `peacockdb-core/src` or `peacockdb-core/tests` outside `test_support/testdata.rs` and
+     `build.rs`.
+   - **CI and staging:** CI runs it by name, `cargo test -p cost-report --test
+     test_source_formatting`, since `test_ci_coverage` counts a target as run only when its CI
+     line names it. `INTENTIONALLY_NOT_IN_CI` follows. `build-test.sh`'s `repo_root` classifier
+     goes, since cost-report is never staged.
+   - **The privacy probe stays in core.** `a_private_module_is_unreachable_from_outside_the_crate`
+     moves to its own binary, `test_crate_privacy`: it reads no source, but it compiles snippets
+     against the `peacockdb_core` rlib, and cost-report keeps depending on nothing. It is kept
+     off remote staging by name.
+   - `scripts/exec_model/tests/test_join_capability.py` stays as it is.
+7. **`coding-style.md` says it.** A test does not read the checkout at run time beyond
+   testdata, and a line list it needs is compiled in. cost-report, never staged, is the
+   exception: its tests may read the ticket files, and its `test_source_formatting` may read
+   source. The places that name `test_module_layout` follow the move.
+8. **`chunk_bytes`'s 1 GiB lives in `gpu_plan.fbs`.**
+   - **The schema:** `enum JoinLimits : ulong { DefaultChunkBytes = 1073741824 }`, with the
+     field default `chunk_bytes: uint64 = 1073741824`. A test holds the two equal.
+   - **The code:** the planner's cap (`wire/mod.rs`), the Rust executor and `join_residual.cpp`
+     use the generated constant. No hand-written copy remains.
+   - **Zero is refused.** A mode with no budget leaves the field out, and the session refuses 0
+     with a `std::runtime_error` naming `chunk_bytes`, as its other refusals do.
+   - **Every caller that passes 0 today** passes the default instead: the device test harnesses
+     and the gtests.
+   - The comments in `gpu_plan.fbs` and `architecture.md` follow.
+9. **Audit `null_equals_null`.**
+   - **The claim:** `gpu_plan.fbs` and `architecture.md` say "Every type honours
+     `null_equals_null` on both engines".
+   - **The check:** all nine join types, on the cpu backend and the device session. The answer
+     per type and engine goes in the detail file, with the test that shows it. A type with no
+     test showing it gets one.
+   - **A failure is filed, not fixed.** A type or engine that does not honour it gets a ticket,
+     and the claim names the exception.
+10. **Ticket triage**, in `llm-wiki/tickets/`, `archive/archived-tickets.md` and the
+    `tickets.md` index:
+    - #251 (decimal quotient scale): archived, replaced by
+      [#288](../tickets/scalars.md#t288) (decimal division digits), filed 2026-10-20.
+    - #253 (DuckDB divergence record) and #254 (untestable subset oracle): archived as stale.
+    - #263 (tickets-only CI skip): archived as won't fix, both halves. The second half's
+      workaround (close and reopen the PR) is kept in the archived text.
+    - #266 (archived ticket accepted): archived as stale, since `ticket_is_open` is gone.
+    - #252 (checkout reads remotely): archived as done.
+    - #287 (row order unchecked): archived as done, its text rewritten to what was built (item 2).
+      The ticket's proposed monotonic key check was not taken.
+    - #255 (nested column panic) moves to `scalars.md`. #264 (computed group key) moves to
+      `complete-coverage.md`. Every link to either follows.
+    - #258 (PR comment headroom): shortened to the problem and the two options.
+    - #256, already archived as stale: a line saying it is a duplicate of #282 (scan with no row
+      groups).
+
+    `testdata/report.html` is regenerated in the same commit as any registry or ticket move.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/tests/common/corpus_cases.inc` | every line on the grammar |
+| `peacockdb-core/tests/test_cpu_corpus.rs`, `test_gpu_corpus.rs` | the macros parse the grammar; the dropped and moved tests; the order guard |
+| `peacockdb-core/tests/test_corpus_goldens.rs`, `test_corpus_goldens/benchmark.rs` | the timed and mask checks off the registry |
+| `peacockdb-core/src/test_support/{mod.rs,corpus.rs,duckdb_oracle.rs,device_answer.rs,corpus_gpu.rs,result_text.rs,registry.rs}` and their `tests` | oracle types, `no_sort`, `rel`, `date`, ordered writers; `ticket_is_open`, `corpus_lines`, `macro_invocations` and `Divergent` gone |
+| `peacockdb-core/src/planner/tests/plan_goldens.rs` | the refusal-ticket test moved out |
+| `peacockdb-core/tests/test_gpu_corpus.rs` (the `golden_exact` literal in `a_device_run_under_a_regeneration_writes_no_golden`) | the new spelling |
+| `peacockdb-core/src/test_support/order_hazard.rs` | `plan_ends_in_sort`, reusing its plan walk |
+| `peacockdb-core/tests/test_module_layout*`, `test_ci_coverage*`, `test_golden_format.rs`; new `test_crate_privacy.rs` | moved out |
+| `cost-report/tests/test_source_formatting.rs` (+ modules), `cost-report/src/main.rs` | the moved tests; quoted-CSV parsing; the refusal-ticket test |
+| `testdata/duckdb_result.py`, `testdata/test_duckdb_result.py`, `testdata/goldens/*/{duckdb-result.txt,*mini.result.txt,gpu-result.txt}` | row order kept for `no_sort` queries; quoted CSV |
+| `testdata/cost-registry.csv`, `testdata/report.html`, `scripts/ticket_widget.py` | the `duckdb_oracle` column |
+| `flatbuffers/gpu_plan.fbs`, `peacockdb-core/src/wire/{mod.rs,fb_text.rs,tests.rs}`, `executor/gpu_backend/{join.rs,backend.rs,exec.rs}`, `gpu_tests/`, `cpp/src/operators/{join_residual.cpp,join_residual.h,join_session.cpp}`, `cpp/tests/gpu/test_join_session.cpp` | `JoinLimits`; 0 refused; every 0 caller |
+| `cpu_backend/tests/join.rs`, `cpp/tests/gpu/test_join_session.cpp` | the `null_equals_null` tests the audit adds |
+| `scripts/build-test.sh`, `.github/workflows/pipeline.yml` | the moved binaries; the widget's Python test |
+| `llm-wiki/coding-style.md`, `build-test.md`, `architecture.md`, `prompts.md`, `tickets.md`, `tickets/`, `archive/archived-tickets.md` | the rule, the grammar, row order, `chunk_bytes`, the audit, the triage, the moved binaries' names |
+
+Component-level API: the wire format changes. `JoinLimits` is new in `gpu_plan.fbs`;
+`CudfJoin.chunk_bytes` defaults to 1 GiB and 0 is refused. No facade, trait or C ABI symbol
+changes.
+
+## Restriction
+
+- No engine behaviour changes except refusing `chunk_bytes = 0`.
+- A `null_equals_null` defect is filed, not fixed.
+- Wall-time benchmarks and sf40 are out.
+
+## Verification
+
+- The cpu corpus, `--lib`, `test_corpus_goldens` and cost-report tiers green, on verda when it
+  is up.
+- `gpu-result.txt` regenerated on nebius-gpu for the `no_sort` queries. `gpu_tests::` and the
+  join-session gtests green there, since every `chunk_bytes = 0` caller changed. The final
+  device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+- Negative cases:
+  - `no_sort` fails on two swapped rows.
+  - `rel` fails just outside its tolerance on a named column, and on an unnamed one at
+    `approx`.
+  - An unknown column name in `rel` or `date` fails by name.
+  - `date` fails on a different day.
+  - A zero `chunk_bytes` is refused by name.
+- The order guard's predicate has unit tests: Limit over Sort, Projection over Limit over Sort,
+  an unsorted query, and a line that declares `sort` over a sorted plan fails.
+- `no_core_test_reads_the_checkout` passes, and fails on a doctored read.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. Every corpus line is on the grammar; a query whose plan ends in a
+sort compares row for row, held by a guard whose two halves each go red alone, and both writers
+keep one row order per line. The registry and report carry `duckdb_oracle`. No core test reads
+the checkout beyond testdata; the source-reading tests run in cost-report's
+`test_source_formatting`, the privacy probe in `test_crate_privacy`, CI names both.
+`JoinLimits.DefaultChunkBytes` is the one 1 GiB and 0 is refused. `null_equals_null` holds on all
+nine join types on both engines; no ticket filed. Triage done. The order check found #202 on tpcds
+q34 and q71, whose device cells are off under it, as item 2 directs. Completeness: reviewer and
+analyst each 1 important (the `duckdb_none` writer order, fixed); two `architecture.md` sentences
+the branch wrote corrected. Shortcuts or bandaids: none.
+
+---
+
+<!-- archived from llm-wiki/tasks/round-tolerance.md -->
+
+**Merged 2026-10-23 as PR #187, chain K's task, one commit `8f054f5c`, merged into master by `00d0f95f`.**
+
+# q78 and q2 on the device, compared within a float tolerance
+
+Kind: production
+
+**This task closes [#60](../tickets/corpus-coverage.md#t60)** (round() off by one ulp), as won't
+fix, **and [#56](../tickets/corpus-coverage.md#t56)** (q2 CASE in partial sum), once q2 is green.
+Eleventh of chain K, after decimal-literal.
+
+## Why
+
+The device's `round(x, p > 0)` is `cudf::round(·, p, HALF_UP)`, which rounds in two steps. So
+about one value in twenty at or above 1.0 is one ulp from DataFusion's answer. In q78, 5 `ratio`
+cells of 100 rows come back as `2.7800000000000002` against `2.78`: a gap of 4.4e-16, about
+1.6e-16 relative. A bit-identical fix needs either three cuDF passes and two temporary columns,
+or a custom kernel. Neither is worth one ulp. So the engine keeps `cudf::round`, and the device's
+comparison allows the gap.
+
+#56 asks for proof that q2's `sum(CASE WHEN <string equality> …)` is right across a plan's merges.
+q2's per-node sections already match the cpu's, and its answer differs only through `round`. A
+green q2 is that proof.
+
+## The work
+
+1. **Loosen the device comparison for q78 and q2.**
+   - `gpu_oracle` becomes `golden_approx_std`: 1e-11 relative on every numeric cell, the device
+     comparison that already exists.
+   - `duckdb_oracle` becomes `duckdb_approx`: 1e-11 relative on a float, one last-place unit on a
+     decimal. The cpu's `data_fusion_exact` stays, since the cpu is DataFusion's own kernel.
+2. **Say it in the code.** The comment at `round` in `cpp/src/expr.cpp` names the two-step
+   rounding, the one-ulp gap against DataFusion, and that the corpus compares it within 1e-11.
+3. **No engine change.**
+
+## Corpus
+
+`tpcds/q78` and `tpcds/q2`: their five device cells each turn on. `60` leaves both rows and `56`
+leaves q2's. Their `gpu-result.txt` sections are recorded at every mode.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/expr.cpp` | the comment at `round` |
+| `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`, `testdata/report.html`, `testdata/goldens/tpcds.sf1/gpu-result.txt` | q78 and q2 on, under the looser oracles |
+| `llm-wiki/tickets/`, `archive/archived-tickets.md`, `tickets.md`, `build-test.md` | #60 archived as won't fix, #56 as done; counts |
+
+Component-level API: none.
+
+## Restriction
+
+No engine change. Only q78's and q2's lines change oracle. If q2 is red for a reason other than
+`round`, #56 stays open with the measurement, and q2's cells stay off under it. A device cell further from
+the golden than 1e-11 relative (a half-way value rounding to another last digit) is not this
+task's either: that query's cells stay off and #60 stays open with the measurement.
+
+## Verification
+
+- q78 and q2 green at all five device modes on nebius-gpu, DuckDB's device comparison included;
+  the dispatched `GPU Tests (nebius-gpu)` CI job green.
+- The detail file records each device cell that differs from the golden, with the largest
+  relative gap, so the archived #60 says how big the gap was.
+
+## Signoff (2026-10-21)
+
+Partly solved. q78 is on at all five device modes under `golden_approx_std` and `duckdb_approx`:
+5 of its 1000 cells sit one ulp from the golden, the largest 1.76e-16 relative. #60 is archived as
+won't fix with that measurement, and the comment at `round` names the gap. No engine change.
+Not met: q2's half of Verification and closing #56. q2's device answer is right, but `round`'s
+ulp widens its rendering past the 256 KiB result cap, the recording becomes a fingerprint, and
+`duckdb_approx` refuses it. That is a scope gap, not the Restriction's case: the fix is in
+`test_support/duckdb_oracle.rs`, outside Scope, and #56 now carries it. The board's "closes #56"
+is the human's wording and is stale. Shortcuts: the cpu-side DuckDB check on q78's decimals now
+allows one last-place unit, as the spec chose. Completeness: reviewer 0/0, analyst 1 important
+(this scope gap); no `architecture.md` sentence falsified.
+
+---
+
+<!-- archived from llm-wiki/tasks/decimal-literal.md -->
+
+**Merged 2026-10-23 as PR #186, chain K's task, one commit `89b112d4`, merged into master by `03eb7da1`. GitHub closed the PR when #172 merged, reading that PR's "Closes #186" (the ticket) as this PR; it was reopened and merged unchanged.**
+
+# A bare decimal literal is a decimal column on the device
+
+Kind: production
+
+**This task closes [#210](../tickets/corpus-coverage.md#t210)** (AST decimal literal). Tenth of
+chain K, after value-case.
+
+## Why
+
+cuDF's AST has no fixed-point literal. So `ast_scalar` (`cpp/src/expr.cpp`) turns a `Decimal128`
+literal into a scaled double. That is right under `CAST(… AS Float64)`. But
+`cudf_ast_can_evaluate` also accepts a bare or unary-wrapped decimal literal, and then
+`SELECT 1.5 FROM t` computes a `FLOAT64` column where the plan declares `Decimal128(2, 1)`. The
+export refuses it by name. tpcds q5's `0.00 as return_amt` and `net_loss` hit this at every
+mode, and #210 is the only ticket left on its device cells.
+
+## The work
+
+1. **`cudf_ast_can_evaluate` refuses a decimal literal**, in its `LiteralExpr` arm, the way its
+   `BinaryExprNode` arm already refuses a decimal operand. The column path then builds a real
+   `fixed_point_scalar`.
+2. **A decimal literal directly under a `CAST` the AST takes (to `Float64` or `Int64`) stays on
+   the AST path**, through `ast_scalar` as today. That keeps every current answer and golden
+   where it is.
+3. **A unary minus over a decimal literal is not this task's.** The column path has no
+   `Negative` arm, and DataFusion folds `-1.5` into one literal, so the corpus never builds the
+   shape.
+4. `Literals.EveryWireTypeEitherMakesAnAstLiteralOrSaysWhyNot`'s `Decimal128` row says why the
+   literal is not an AST literal.
+
+## Corpus
+
+`tpcds/q5`: its five device cells turn on. `210` leaves its registry row. Its `gpu-result.txt`
+sections are recorded at every mode.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/expr.cpp` | `cudf_ast_can_evaluate`'s literal and cast arms |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the `Literals` walk row; the CAST case |
+| `peacockdb-core/src/tests/gpu_tests/exec_cases.rs` | the `bug_` pin becomes an agreement case |
+| `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`, `testdata/report.html`, `testdata/goldens/tpcds.sf1/gpu-result.txt` | q5 on |
+| `llm-wiki/tickets/`, `archive/archived-tickets.md`, `tickets.md`, `build-test.md` | #210 archived; counts |
+
+Component-level API: none.
+
+## Restriction
+
+Which path a decimal literal takes, and nothing else. No cpu golden moves. A `gpu-result.txt`
+section other than q5's that moves is a finding to explain, not to accept.
+
+## Verification
+
+- `bug_a_bare_decimal_literal_is_a_float64_column_on_the_device` becomes
+  `a_bare_decimal_literal_agrees`: `Decimal128(15, 3, 1)` projected answers `Decimal128(3, 1)`
+  `1.5` on both engines.
+- gtests: `CAST(1.5 AS DOUBLE)` and `CAST(1.5 AS BIGINT)` stay AST-able and answer what they
+  answer today.
+- q5 green at all five device modes on nebius-gpu, DuckDB's device comparison included; the
+  dispatched `GPU Tests (nebius-gpu)` CI job green.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. `cudf_ast_can_evaluate` refuses a bare `Decimal128` literal, so the
+column path builds a `fixed_point_scalar` of the declared scale; one directly under a cast to
+`Float64` or `Int64` stays on the AST and answers as before. Red then green: the walk row,
+`a_bare_decimal_literal_agrees` and q5's cells; q5 on at all five device modes, only its sections
+added to `gpu-result.txt`; #210 archived. Completeness: reviewer 0 blocking, 1 important (the
+coordinator's own `architecture.md` wording, corrected); analyst no omissions. Shortcuts or
+bandaids: none. Kept by design: the cast arm's scaled double, which can sit one ulp from arrow at
+scale 2 and above. Not added: a host-only routing case for the predicate (the GPU tier pins it).
+
+---
+
+<!-- archived from llm-wiki/tasks/value-case.md -->
+
+**Merged 2026-10-23 as PR #185, chain K's task, one commit `8d8a9d2f`, merged into master by `2bb5e79f`.**
+
+# The device answers a value-form CASE
+
+Kind: production
+
+**This task closes [#57](../tickets/corpus-coverage.md#t57)** (value-form CASE). Ninth of chain K,
+after welford-device.
+
+## Why
+
+`build_column_case` (`cpp/src/expr.cpp`) throws `value-form CASE not supported in column path` for
+any `CASE x WHEN v THEN … END`. The throw rests on a false measurement: the gtest that saw a wrong
+answer built every Int64 literal as 0 (`reports/corpus-fixes.md`, fix 7). tpcds q39 uses the form
+twice per plan, and #57 is the only ticket left on its device cells.
+
+## The work
+
+1. **Lower the value form onto the search form.** Build the comparand column once. Each WHEN
+   becomes `comparand = when` (`cudf::binary_operation`, `EQUAL`, `BOOL8`); a literal WHEN uses the
+   scalar overload. The result feeds the existing `copy_if_else` fold unchanged.
+2. **SQL's rules hold.** A NULL comparand or a NULL WHEN never matches, since `copy_if_else` reads
+   a null condition as false. The first matching WHEN wins. No match and no ELSE answers NULL.
+3. **Remove what guarded the refusal**: the throw and its comment, and the #57 clause in
+   `PlanError::Unsupported`'s doc (`plan/mod.rs`).
+
+## Corpus
+
+`tpcds/q39`: its five device cells turn on. `57` leaves its registry row. Its `gpu-result.txt`
+sections are recorded at every mode.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/expr.cpp` | `build_column_case` |
+| `cpp/tests/gpu/test_plan_executor.cpp` | the value-form gtest |
+| `peacockdb-core/src/tests/gpu_tests/exec_cases.rs` | the `bug_` pin becomes an agreement case |
+| `peacockdb-core/src/plan/mod.rs` | the doc clause |
+| `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv`, `testdata/report.html`, `testdata/goldens/tpcds.sf1/gpu-result.txt` | q39 on |
+| `llm-wiki/tickets/`, `archive/archived-tickets.md`, `tickets.md`, `build-test.md` | #57 archived; counts |
+
+Component-level API: none. No wire, ABI or facade change.
+
+## Restriction
+
+The value form only. Nothing else in `build_column_case` changes. No cpu golden moves.
+
+## Verification
+
+- A gtest in `test_plan_executor.cpp`. Its comparand holds a NULL, one WHEN maps to NULL, and
+  there are two WHENs where the first match must win. With and without ELSE.
+- `bug_a_value_case_is_refused_on_the_device` becomes `a_value_case_agrees`, a cpu-vs-device
+  agreement case with a string THEN, and a second with a NULL comparand row.
+- q39 green at all five device modes on nebius-gpu, DuckDB's device comparison included. The final
+  device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. The value form lowers onto the search form's `copy_if_else` fold;
+NULL never matches and the first match wins, pinned by two gtests and two cpu-vs-device agreement
+cases that were red with the fix reversed. q39 is on at all five device modes; #57 is archived.
+Completeness: reviewer 0 blocking/0 important, analyst no omissions, no `architecture.md` sentence
+falsified. Shortcuts or bandaids: none. Notes: q39's corpus cells prove no regression rather than
+the new semantics (both its WHENs are literals); most of the `report.html` diff is catch-up from
+earlier chain-K registry edits; this spec's `#t57` link now points at an archived ticket.
+
+---
+
+<!-- archived from llm-wiki/tasks/welford-device.md -->
+
+**Merged 2026-10-23 as PR #184, chain K's task, one commit `d14e9237`, merged into master by `0b4b9fed`.**
+
+# The device's Welford state: keyless, NULL-free and version-gated
+
+Kind: production
+
+**This task closes [#216](../tickets/corpus-coverage.md#t216)** (the device's global aggregate has
+no Welford arm) **and [#94](../tickets/corpus-coverage.md#t94)** (MERGE_M2 count-child type is
+cuDF-version-specific). Fourth and last of chain L: after keyless-identity, whose done call is this
+task's only zero-row keyless call, and after aggregate-arms, whose one request builder the keyless
+Welford runs through and which has already named the triple (#225) and taken the `ddof` from the
+wire.
+
+## Why it happens
+
+**#216.** `execute_aggregate`'s keyless path (`key_cols.empty()`) reduces a stddev name with
+`make_std_aggregation` whatever the phase: at the init the finished sample stddev of the argument,
+at the merge the stddev of the state's first column, the count. The finalize project above then
+fails (`ColumnRef index 2 out of range (cols=1)`), and a `var` name is refused by
+`make_reduce_agg`. So `SELECT stddev(x) FROM t` and `SELECT var(x) FROM t` are refused on the device
+in every shape. cuDF has `M2` and `MERGE_M2` for groupby only.
+
+**#94.** The Merge arm's `MERGE_M2` casts the count child to `INT32`, which cuDF 25.02's
+`group_merge_m2` requires; 25.06 and later (cuDF PR #18546) accept only `INT64` or `FLOAT64`. The 26.02 CI leg is
+build-only, so nothing fails until a GPU runs a later cuDF.
+
+**All-NULL groups.** DataFusion's Welford state over a group whose values are all NULL is
+`(0, 0.0, 0.0)`, never NULL (`VarianceGroupsAccumulator::state` builds its arrays with no null
+buffer). cuDF's `MEAN` and `M2` over no valid values are not pinned and may answer NULL. The answer
+is right either way, since the finalize answers NULL wherever `count − ddof ≤ 0`. The state is what
+differs, and a NULL child in a `MERGE_M2` input beside other lanes' real entries is cuDF's to skip
+or to poison.
+
+## The work
+
+1. **#216, the keyless Welford.** A keyless node holding any stddev or var runs through
+   aggregate-arms' grouped request builder on one constant `INT32` key column of the input's row
+   count, dropped before return. The rest of the node's aggregates (a `sum` or `count` beside it)
+   ride along, as in a grouped node. Every other keyless node keeps the `cudf::reduce` path, the
+   cheaper pass over raw rows. The `is_std` reduce arm goes.
+2. **#216, zero rows.** After keyless-identity, the only keyless call over zero rows is the done
+   identity call, and a groupby over zero rows has no groups. So a routed node over zero rows
+   builds its one row: `count` 0 (`INT64`), each Welford triple `(0, 0.0, 0.0)`, every other column
+   the typed NULL of the type the groupby answers for it over zero rows (the wire's
+   `CudfAggregate` carries no output schema; a decimal keeps its scale), named from `state_names`. This is `empty_state`'s table
+   (`plan/aggregates.rs`), written once in C++.
+3. **All-NULL groups.** The Welford init, grouped, grouping-set and keyless alike (the builder is
+   one), applies `cudf::replace_nulls(…, 0.0)` to `$mean` and `$m2`, always. So does every Merge:
+   cuDF's `MERGE_M2` itself answers NULL moments for a group whose merged counts are all 0
+   (`group_merge_m2.cu`, `is_valid = count > 0`, in 25.02 and 25.10 alike), so a per-lane merge
+   would hand NULL children to the cross-lane one. The state is then DataFusion's at every step,
+   and no `MERGE_M2` meets a NULL child. The zero-row row of 2 already holds `(0, 0.0, 0.0)`.
+4. **#94.** `aggregate.cpp` picks one `constexpr` count type from cuDF's own
+   `CUDF_VERSION_MAJOR` and `CUDF_VERSION_MINOR` (`<cudf/version_config.hpp>`, shipped in 25.02 and
+   26.02 alike; no CMake define, which would be a second source of the version), `INT32` before
+   25.06 and `INT64` from 25.06, and the one `MERGE_M2` site aggregate-arms leaves uses it. Chain
+   J's verify-26.02 runs `shuffle-stddev` on 26.02 and may already have gated this site the same
+   way; if so, this item only confirms it covers the site aggregate-arms leaves, and #94 is
+   archived with verify-26.02 rather than here. The widening back to `INT64` after the merge
+   stays, a no-op from 25.06. No runtime probe: each cuDF version is its own build. The gate goes
+   when 25.02 does.
+
+## Corpus
+
+A new tpch query, `testdata/tpch-queries/global-stddev.sql`, puts a keyless stddev and var in the
+corpus, which no query has:
+
+```sql
+-- A keyless stddev and var: the device's Welford over no keys (#216).
+SELECT stddev_samp(l_quantity) AS sd, var_samp(l_quantity) AS v FROM lineitem;
+```
+
+It reads lineitem whole, so the tp4 modes merge four lanes' states. Its oracle and golden are
+`shuffle_stddev`'s (`data_fusion_approximate`, `golden_approx_std`); its five plan goldens, cpu
+sections, DuckDB section, `corpus_cases.inc` line and registry row (features `stddev_var`) are
+written. Every cell enabled if it passes.
+
+pbench's `empty-dispersion-aggregates` (keyless-identity) has its gpu cells turned on and `216`
+struck. Any other row tagged `216` or `94` is run at its off modes and enabled if it passes; a
+failing cell takes its ticket.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/operators/aggregate.cpp`, `cpp/tests/` | the keyless route, the zero-row row, the NULL replacement, the count type |
+| `peacockdb-core/src/tests/gpu_tests/aggregate_dimension_cases.rs`, `aggregate_schema_cases.rs`, a new `welford_cases.rs` (`aggregate_cases.rs` is near the 1000-line cap) | the #216 pins flip; the zero-row and all-NULL cases |
+| `testdata/tpch-queries/global-stddev.sql`, its goldens and sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | the new query; the rows above |
+| `llm-wiki/architecture.md` (Welford), `build-test.md`, `tickets/` | as in the work; counts; #216 and #94 archived; #261's "after #216" line |
+
+Component-level API: none. No facade, trait, ABI or wire change.
+
+## Restriction
+
+The keyless route, the zero-row row, the NULL replacement and the count type. The keyless
+`cudf::reduce` path for every other aggregate is unchanged. A Welford companion beside a DISTINCT
+stays refused ([#261](../tickets/complete-coverage.md#t261)). No 26.02 device run: that is
+verify-26.02's and [#260](../tickets/system-hardening.md#t260)'s.
+
+## Tests
+
+- The #216 pins in `aggregate_dimension_cases.rs` —
+  `bug_a_global_welford_init_answers_a_finished_stddev_on_the_device`,
+  `bug_a_keyless_welford_merge_answers_the_stddev_of_its_counts_on_the_device`,
+  `bug_a_global_stddev_finalize_is_refused_on_the_device`,
+  `bug_a_keyless_var_merge_is_refused_as_unsupported_on_the_device` — and
+  `bug_a_global_stddev_holds_one_finished_float64_where_the_plan_declares_the_welford_state`
+  (`aggregate_schema_cases.rs`) become cpu-vs-device agreement cases, `holds_as_declared` where
+  they read the handle.
+- keyless-identity's identity cases for `Stddev` and `Var` gain their device half: no batch and
+  zero-row batches, init and shortcut, both backends agree with `empty_state`.
+- A keyless `stddev` beside a `sum` and a `count`, init and merge, both backends.
+- All-NULL groups, grouped and keyless, both backends: the init's state is `(0, 0.0, 0.0)` with
+  no NULL, on the device as on the cpu. Across lanes: one lane holds a group's values and another
+  only NULLs for it; the merged and finalized answer matches the cpu's. A group all NULL on every
+  lane finalizes to NULL.
+- gtest: the count type is `INT32` under 25.02's `version_config.hpp` (the 26.02 CI leg compiles the other
+  branch).
+
+## Verification bar
+
+- rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
+  tests both ways.
+- C++: `ctest -L cpu` locally against cuDF 25.02; the 26.02 CI build leg green.
+- device: `gpu_tests::`, the walk tests, and `test_gpu_corpus` over `shuffle-stddev`,
+  `rollup-stddev`, `global-stddev`, `empty-dispersion-aggregates` and the rows above, on the GPU
+  host the chain header names.
+
+## Device workflow
+
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.
+
+## Completeness signoff
+
+Solved under its constraints. A keyless `stddev` or `var` runs on the device through the grouped
+request builder on one constant key and answers `empty_state`'s row over zero rows; the Welford
+state is never NULL, at the init and after every `MERGE_M2`; `kMergeM2CountType` is read from
+cuDF's own version header. `global-stddev` and `empty-dispersion-aggregates` run at all five
+device modes. Final pass: no blocking; one important was stale `ddof` prose (fixed), the other a
+missing ticket, filed as #289 (first numbered 287, which master had already used): on 25.02 the merge's INT32 count wraps past 2^31, which the
+keyless route now makes reachable from a plain `stddev(x)`. Shortcuts: none. The `INT64` branch is
+built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image) and has had no device run.
+
+---
+
+<!-- archived from llm-wiki/tasks/aggregate-arms.md -->
+
+**Merged 2026-10-23 as PR #183, chain K's task, one commit `3325712c`, merged into master by `c804e8da`.**
+
+# The device aggregate reads every column by reference and names every column from the plan
+
+Kind: production
+
+**This task closes [#164](../tickets/corpus-coverage.md#t164)** (a column ordinal reaches cuDF
+unchecked, and a bad one degrades rather than throws), **[#225](../tickets/corpus-coverage.md#t225)**
+(the device names every Welford state column by the same alias) **and
+[#280](../tickets/corpus-coverage.md#t280)** (a `stddev` or `var` under a grouping set answers one
+column where the plan declares three). Third of chain L, after keyless-identity and before
+welford-device, which builds the keyless Welford on the one request builder this task leaves.
+
+## Why it happens
+
+The wire's rule is that a node reads every column through a `ColumnRef { index, name }` and names
+every column it emits from the plan's declared schema. `execute_aggregate`
+(`cpp/src/operators/aggregate.cpp`) keeps it for an init's arguments and its group keys, and breaks
+it everywhere else.
+
+- **Inputs.** The grouped Merge arms read state with a running cursor, `in_off`, and recover each
+  function's width from its name, from `mergeable_agg_state` (a stddev takes 1 or 3 columns) and
+  from the residual column count (an avg takes 1 or 2) (`:491-532`, `:705-738`). The plan already
+  puts a `ColumnRef` to each state column in every merge call's `args`
+  (`translator/aggregate.rs:173-194`), and the writer sends them; the grouped arms ignore them,
+  while the keyless merge reads them (`get_values_col`). Two rules for one input.
+- **Outputs.** A function's columns are named from its `alias`. The init's three Welford calls are
+  folded into one function node whose alias is the SQL output name, so the triple holds three
+  columns under one name (#225). `ddof` is re-derived from that name (`stddev_ddof`), which the
+  plan holds (`reports/hacks-audit.md` §5).
+- **Three paths, three rules.** The grouped path builds the Welford triple when
+  `mergeable_agg_state` is set; the grouping-set path (`:363-423`) does not and answers one
+  finished `STD` or `VARIANCE` column (#280); the keyless path reduces by name (#216, welford-device).
+- **Dead arms.** The writer sends `Partial` and `Merge` only (`aggregate_writer.rs`), never `avg`
+  (decomposed into sum and count), and sets `mergeable_agg_state` whenever a Welford is present.
+  So every Final and Single arm, every `avg` arm, the non-mergeable stddev path, `get_values_col`'s
+  Final branch and the Final guards are unreachable — the 2026-10-08 column-indexing audit.
+- **Unchecked ordinals (#164).** `TableResult` (`cpp/src/plan_executor.h`) holds a table and a
+  name vector with nothing tying their lengths; the name sites use `operator[]` (`filter.cpp:42`,
+  `join.cpp:260,338,343`, `aggregate.cpp:169`), so a short vector is undefined behaviour.
+  `infer_expr_type` (`expr.cpp:330`) answers `type_id::EMPTY` for an out-of-range `ColumnRef`,
+  surfacing later as a confusing type error. No C++ reader checks a `ColumnRef`'s name; the cpu
+  does (`expr_physical.rs:45`).
+
+## The work
+
+1. **One request builder.** A function node and the node's phase give its cuDF requests and its
+   output columns, in one place, used by the grouped path and once per set by the grouping-set
+   path:
+
+   | function | Init (`Partial`) | Merge |
+   |---|---|---|
+   | `sum`, `min`, `max` | that aggregation over `args[0]` | that aggregation over `args[0]` |
+   | `count` | `COUNT` over `args[0]`, widened to `INT64` | refused: the plan merges a count with `sum` |
+   | `stddev`, `stddev_pop`, `var`, `var_pop` | `COUNT`, `MEAN`, `M2` over `args[0]` cast to `FLOAT64` | `MERGE_M2` over the struct of `args[0..3]` |
+
+   Every input is the `ColumnRef` its `args` carry; a node's state is never located by counting.
+   A function node with no `args`, or an `args` of the wrong length for its function, is refused
+   naming the function. The builder hands welford-device two readbacks to extend: the init's
+   `$mean` and `$m2`, and the moments a Merge reads out of `MERGE_M2`. A computed argument is
+   evaluated once per node, not once per grouping set. The grouping-set path, built on it, emits the Welford triple (#280). The
+   keyless path keeps `cudf::reduce` for sum, min, max and count, its merge already reading `args`;
+   its Welford arm stays as it is — a finished `stddev`, a refused `var` (#216, welford-device).
+2. **Names from the plan.** `AggregateFuncNode` (`flatbuffers/gpu_plan.fbs`) appends
+   `state_names: [string]` and `ddof: int8`. `state_funcs` (`plan/aggregate.rs`) fills
+   `state_names` for every function from its calls' `outputs` — one name for a plain function,
+   three for a folded Welford — and `ddof` from `AggStateColumns.ddof`. `execute_aggregate` names
+   every state column from `state_names` and reads `func->ddof()`; `stddev_ddof` goes. `alias` and
+   `mergeable_agg_state` are deprecated, no slot moved, as chain K deprecated `distinct`; the
+   writer stops filling them.
+3. **The dead arms go.** `agg_phase` maps `Partial` and `Merge` and refuses the rest, naming the
+   mode. The Final, Single and `avg` arms, the non-mergeable stddev path, `make_agg`'s `is_final`,
+   `get_values_col`'s Final branch, the width recovery and its check, `has_stddev_or_var_final` and
+   its guard, and the keyless Final guards go. `is_avg_name` and `avg`'s `out_decimal_*` handling go
+   with them; the two fields stay on the wire, unwritten, as today.
+4. **#164.** Every `TableResult` is built through a constructor that refuses a table whose column
+   count differs from its name count — chain J's refcounted-scatter adds one
+   (`TableResult::owning`); the sites still assembling a `TableResult` by hand go through it. One
+   helper, `column_at(table, names, ref)`, resolves a `ColumnRef`: an index past the width throws
+   naming the index and the width; a missing name throws; a name other than `names[index]` throws
+   naming both. Every `ColumnRef` reader in `cpp/src` resolves through it — `expr.cpp`'s
+   `build_column`, `build_expr`'s AST arm and `infer_expr_type` (which throws rather than answering
+   `EMPTY`), `project.cpp`, `sort.cpp`, the join's keys and residual (in `join_session.cpp` once
+   join-backend has deleted `join.cpp`), the sort-preserving merge's keys and the repartition keys
+   (`node_session.cpp`), `aggregate.cpp`'s keys and arguments. The expression evaluators
+   (`build_column`, `evaluate_column`, `cudf_ast_can_evaluate`) take the input's names, which they
+   do not today. Every name site indexed with `operator[]` uses `.at()`.
+
+   The name check is safe to turn on: the device corpus's schema validator already holds every
+   batch a node emits to its node's declared names on every enabled cell, and the one known
+   exception, the Welford triple's (#225), is fixed in 2. A union is a forwarder, which the
+   validator never sees run, and a branch whose names differ from the union's is refused at
+   planning today (`check_branch_schemas`, `plan/union.rs`); `cast_branch`
+   (`planner/translator/nodes.rs`) projects such a branch to the union's names, as it already does
+   one whose types differ, so the plan runs and the names the node above reads are the union's. A cell that the check
+   refuses is a wrong reference found, ticketed as such.
+5. **The scan's names, checked at plan time.** The device's scan reads parquet columns by name:
+   the writer sends the declared output schema as `file_schema` and no `projection`
+   (`wire/node_writer.rs`, `scan`), and `scan.cpp` asks cuDF's reader for those names. The cpu reads
+   the plan's file ordinals (`cpu_backend/source.rs`). The two agree only while each declared name
+   is the file's column name at its ordinal, which holds for every table registered from its own
+   file and breaks for one whose declared schema renames or reorders the file's columns: the
+   device then reads another column, or fails. `survivor_metadata`
+   (`planner/translator/scan_mapping/parquet_meta.rs`), which already opens the file at plan time,
+   refuses a scan where the file's root field name at a projection ordinal differs from the
+   declared output field at that position, naming the ordinal and both names. No wire or C++
+   change: the name-based read is then safe by construction.
+
+## Corpus
+
+A new tpch query, `testdata/tpch-queries/rollup-stddev.sql`, puts a Welford under a grouping set,
+which neither benchmark has:
+
+```sql
+-- A stddev and a var under a rollup: the grouping-set path builds the Welford triple (#280).
+select l_returnflag, l_linestatus, stddev_samp(l_quantity), var_pop(l_quantity)
+from lineitem
+group by rollup (l_returnflag, l_linestatus);
+```
+
+Its oracle and golden are `shuffle_stddev`'s (`data_fusion_approximate`, `golden_approx_std`); its
+five plan goldens, cpu sections, DuckDB section, `corpus_cases.inc` line and registry row (features
+`rollup stddev_var`) are written, schema validation enabled. Every cell enabled if it passes; a
+failing one takes its ticket.
+
+`tpch/shuffle-stddev` goes to `schema_validation_enabled`, and its `corpus_cases.inc` comment
+naming #225 goes; its registry row carries no `225`. Every other
+corpus cell keeps its state: nothing else this task touches changes an answer.
+
+## Scope
+
+| path | change |
+|---|---|
+| `flatbuffers/gpu_plan.fbs` | `state_names`, `ddof` appended; `alias`, `mergeable_agg_state` deprecated |
+| `peacockdb-core/src/plan/aggregate.rs`, `wire/aggregate_writer.rs`, `wire/fb_text.rs` | the fields filled, written and printed |
+| `peacockdb-core/src/planner/translator/nodes.rs` (`cast_branch`) | a union branch projected where its names differ |
+| `cpp/src/operators/aggregate.cpp` | the builder, the names, the dead arms gone |
+| `cpp/src/plan_executor.h`, `cpp/src/expr.cpp`, `cpp/src/operators/{project,sort,join,filter}.cpp`, `cpp/src/node_session.cpp`, and every `TableResult` construction | #164 |
+| `cpp/tests/` | the builder per function and phase; #164's refusals |
+| `peacockdb-core/src/planner/translator/scan_mapping/parquet_meta.rs`, its tests | the scan's name check |
+| `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs`, `aggregate_schema_cases.rs` | the #225 pins flip; a rollup Welford case |
+| `testdata/goldens/recipe-payloads.txt` | every aggregate payload |
+| `testdata/tpch-queries/rollup-stddev.sql`, its goldens and sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | the new query; shuffle-stddev |
+| `llm-wiki/architecture.md` (the aggregate's wire fields, the C++ aggregate), `build-test.md`, `tickets/` | as in the work; counts; #164, #225 and #280 archived |
+
+Component-level API: the wire format — two fields appended to `AggregateFuncNode`, two deprecated,
+no slot moved. No facade, trait or ABI symbol change.
+
+## Restriction
+
+The aggregate's inputs, names and dead arms, #164's checks and the scan's name check. The keyless
+Welford (#216), the `MERGE_M2` count type (#94) and all-NULL Welford groups are welford-device's.
+Dead code outside the aggregate (`window.cpp`, `limit.cpp`, `union.cpp`), output names other nodes
+copy from their input, and the device scan's read by name (checked at plan time instead, 5) do not
+change. `__grouping_id` keeps its C++-built name, which is the plan's.
+
+## Tests
+
+- gtests, per function and phase of the builder's table: the requests made and the columns named
+  from `state_names`, a `ColumnRef` that is not the next column in the input read where it points,
+  and a function whose `args` have the wrong length refused.
+- `bug_stddev_holds_three_identically_named_columns` and
+  `bug_stddev_merge_holds_three_identically_named_columns` (`aggregate_schema_cases.rs`) assert
+  the three declared names, under names without `bug_`.
+- A rollup with a `stddev`, a `var` and a `sum` after them, init and merge: both backends agree, and
+  the device holds the declared schema.
+- #164: a `TableResult` of three columns and two names refused (it needs device memory, so it runs
+  with the device tier); a `ColumnRef` past the width, one
+  with no name, and one whose name is another column's, each refused with its own message, through
+  `build_column` and through a sort key.
+- `agg_phase` over `Final` and `Single` refused.
+- The scan check: a table registered over a parquet file with a declared schema that renames one
+  column, or swaps two of the same type, is refused at planning, naming the ordinal and both
+  names; every corpus scan plans as before.
+- Every existing aggregate case, walk test and corpus cell answers as before. The gtests that
+  build a `ColumnRef` with no name, the Single-mode count tests with no args and the `avg` merge
+  test are rewritten to the plan's shapes: they test arms this task removes or references it now
+  checks.
+
+## Verification bar
+
+- rust-only: `--lib` (payloads), `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the
+  registry tests both ways.
+- ffi: `--lib -- ffi_tests::` and the payload test, through `scripts/cargo-cudf.sh`.
+- C++: `ctest -L cpu` locally against cuDF 25.02; the 26.02 CI build leg green.
+- device: every `peacock_*_tests` gtest binary, `gpu_tests::`, the walk tests, and the whole
+  `test_gpu_corpus` (the name check touches every node), on the GPU host the chain header names.
+
+## Device workflow
+
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.
+
+## Completeness signoff
+
+Solved under its constraints. One request builder serves the grouped and grouping-set paths,
+reading every input through its `args` and naming every state column from `state_names`; the
+dead arms are gone; every `ColumnRef` reader resolves through `column_ordinal` and every
+`TableResult` through a checking constructor; a scan's names are checked at plan time.
+`rollup-stddev` runs at five device modes and every enabled corpus cell runs with the schema hook
+on. Final pass: no blocking; one important was a check no test could turn red (now pinned on the
+cpu tier, shown red), the rest stale prose, fixed. Shortcuts: none. Outside Scope, forced by the
+evaluator signature, the private constructor or the name check: `window.cpp`, `dispatch.cpp`, the
+`join_*` files, and three test fixtures that read state under the wrong name.
+
+---
+
+<!-- archived from llm-wiki/tasks/keyless-identity.md -->
+
+**Merged 2026-10-23 as PR #182, chain K's task, one commit `109bfffb`, merged into master by `c0f6ae18`.**
+
+# A keyless aggregate answers one row whatever arrived
+
+Kind: production
+
+**This task closes [#199](../tickets/corpus-coverage.md#t199)** (a global aggregate over no
+arrival drops its identity row) **and [#282](../tickets/corpus-coverage.md#t282)** (a scan with no
+surviving row groups is refused at planning). Second of chain L, after grouping-id and before
+aggregate-arms and welford-device; the last builds its keyless Welford on this task's done call.
+
+## Why it happens
+
+A keyless aggregate owes one row over any input: `SELECT count(*) FROM t WHERE false` is `0`, and
+`SELECT sum(x), min(x) FROM t WHERE false` is one row of NULLs. Two sites break it.
+
+- **The init over no batch.** A `GpuAggregate` is `Exec`, so a lane that receives no batch makes
+  no call and answers nothing. The merge above then folds fewer rows than lanes, and over none
+  at all it answers nothing on the device (`gpu_backend/accumulate.rs`) and, on the cpu, a merged
+  `count` of NULL (`cpu_backend/accumulate.rs`, `mark_done_and_fetch`'s `!self.grouped`
+  clause), which a non-nullable declaration refuses. That is q96, q88 and q90 at the three tp4
+  modes: an empty lane comes from tp4-single cutting a one-row-group table into four, or from an
+  Inner join with no build rows in a lane.
+- **The single-node shortcut** (`translator/aggregate.rs`): a keyless `GpuAggregate` over a
+  single-batch input finalizes itself, and when no batch arrives it is never called. Symmetric,
+  so no cpu-vs-device comparison sees it.
+
+A third break is the init's own: called once per batch, it answers one row per call, a zero-row
+batch included. Adding a zero-row batch adds a row to its output, which `architecture.md`'s
+"Zero-row batches change no answer" forbids. The merge absorbs the extra row, so no answer is
+wrong; the node's rows are.
+
+## The work
+
+1. **What each aggregator owes over no rows.** `empty_state(agg, input) -> Result<ScalarValue,
+   PlanError>` in `plan/aggregates.rs`, beside `state_type` and shaped like it, with a
+   `PlanAgg::empty_state` method beside `PlanAgg::state_type`. No wildcard:
+
+   | `PlanAgg` | empty state |
+   |---|---|
+   | `Count` | `Int64(Some(0))` |
+   | `Mean`, `M2` | `Float64(Some(0.0))` |
+   | `Sum`, `Min`, `Max` | the typed NULL of `state_type(agg, input)`, `ScalarValue::try_from(&DataType)` |
+   | `MergeM2` | unreachable: it merges the Welford triple and declares no state |
+
+   Its doc says why `Mean` is `0.0` and not NULL: `Mean` exists only inside the Welford triple,
+   and DataFusion 45's `VarianceAccumulator::state` answers `(0, 0.0, 0.0)` over no rows. Neither
+   backend builds a row from it: each engine computes its own identity, and the tests hold both to
+   this table.
+2. **The category.** `category_of` (`plan/mod.rs`) makes every `GpuAggregate` a
+   `BatchAccumulator`, as `GpuLimit`, which also streams and holds nothing, already is. One node,
+   one category: the mapping stays by node, not by body. The driver already makes `MarkDone` on
+   every `BatchAccumulator` lane, one that saw no batch included, so it does not change.
+3. **The recipe** (`wire/attach.rs`, `aggregate()`). One new `CallPattern`,
+   `AtDoneIfNothingOut` ("at done, if nothing went out"). Not `AtDone`: that reads as always,
+   once, at the end, and the walk tests run every `AtDone` call after the batches, so a keyless
+   walk would add an identity row after its real one. Every init's recipe:
+
+   ```
+   Aggregate(init)    [batch]         per batch
+   Project(finalize)  [prior output]  per batch                     (shortcut only)
+   Aggregate(init)    []              at done, if nothing went out
+   Project(finalize)  [prior output]  at done, if nothing went out  (shortcut only)
+   ```
+
+   The per-batch calls stay `PerBatch`: the recipe says which seq a batch goes to, and whether a
+   given batch needs the call is the executor's (next item), as a limit's slice stays
+   `PerStraddlingBatch` though a batch wholly inside its interval makes none. The done call reuses
+   the init's seq; no second wire node. Only the aggregate's executors accept the new pattern;
+   `wire/recipes.rs`, which renders recipes, prints a call with no input and a reused seq cleanly.
+   Grouped and keyless share the recipe: what the done call answers is the engine's (next item),
+   not the planner's.
+4. **The executors.** Each backend's init is a batch accumulator holding one flag, `emitted`.
+   `executors_for(…, lane)` builds one per node per lane, so the flag is one lane's, and nothing
+   else keeps it: not the driver, the recipe or C++, whose node stays stateless.
+   `accumulate_and_fetch` checks the row count first: a zero-row batch is dropped, which releases
+   its handle, and answers nothing with no ABI call (`no_abi_calls()`), as the limit's executor
+   releases a batch outside its interval (`gpu_backend/accumulate.rs`). The driver still records
+   the `Accumulate`, with an empty call list; the trace and the cost registry record calls made, so
+   the skip shows as no row. Otherwise it makes the init call (and the finalize call) and answers
+   its output, setting `emitted` when that has rows: the device reads the row count the call
+   already returns (`produced`), the cpu `RecordBatch::num_rows()`.
+   `mark_done_and_fetch` makes the done call(s) when `emitted` is false and answers their output
+   if it has rows, nothing otherwise. Over zero rows a keyless init answers its identity row and a
+   grouped one no groups, so a grouped lane that saw no rows emits nothing — each engine's own
+   answer (cuDF's groupby, DataFusion's `AggregateExec`), with no keyless case in either executor.
+   A grouped init stops emitting a zero-row batch per zero-row input. The cpu (`CpuAccumulator`,
+   built in `cpu_backend/backend.rs`) runs the init over
+   `RecordBatch::new_empty(input schema)`; the device's done call hands the seq no input; the
+   driver's mock (`executor/driver/tests/mock.rs`) scripts the new category. The walk tests
+   (`wire/gpu_tests/mod.rs`), which drive recipe calls with no executor, keep the same flag per
+   lane: `phases` puts `AtDoneIfNothingOut` on the done side, and the walk runs it for a lane only
+   where that lane's per-batch calls returned no rows.
+5. **No input on the device.** `execute_aggregate` (`cpp/src/operators/aggregate.cpp`), handed no
+   input, builds a zero-row table from the node's `aggr_input_schema` (on the wire today, read by
+   nothing) through `fb_to_type_id` (`cpp/src/peacock/expr.h`, already exposed), and runs as it does over any
+   input: the keyless `cudf::reduce` path answers one row, the groupby no groups. Any other node
+   handed no input still refuses.
+6. **The merge's clause goes.** A keyless merge now always meets at least one row per lane, so
+   the cpu's `!self.grouped` clause, and its `grouped` field, go; the device's merge is unchanged.
+7. **#282, a scan of nothing.** `source()` (`planner/translator/nodes.rs`) maps a scan with no
+   surviving row groups — every one pruned, or a file with none — to one lane that holds no batch
+   (`partition_groups = [[]]`), rather than calling `partition()`, which keeps its refusal of an
+   empty survivor list for every other caller. The lane's source executors make no call: the cpu's
+   `CpuSource` and the device's source step one call per mapped batch, so none means the lane ends
+   with nothing, the arrival 1–6 make every node answer right. The validator needs no change: it
+   already accepts a lane with no batch (`plan/source.rs`, "four lanes over two row groups leave
+   two of them empty") and refuses only a scan with no lane, a batch reading no row group, or one
+   reading a pruned group. The memory estimate prices the lane at zero. The wire never sees an
+   empty mapping: no call is made to carry one.
+8. **`architecture.md`.** "Zero-row batches change no answer" loses its first break; the
+   categories list the aggregate's init as a batch accumulator; the call patterns list the new one;
+   "a lane that receives nothing is never runnable" and "an empty lane emits no batch at all" are
+   corrected: such a lane gets its `MarkDone`, and a keyless init's emits its identity row. An empty
+   grouped answer reaches the sink as nothing, and chain K's empty-sorts (in this chain's base)
+   answers it with one zero-row batch under the sink's schema, so `empty-grouped-count` compares
+   with DuckDB exactly.
+
+## Corpus
+
+Six pbench queries, in `testdata/pbench-queries/`, reaching the three ways an init meets nothing.
+The first four filter `tiny` with `t_id + t_v < 0`, which holds for no row and which no row-group
+statistic can prune: the scan reads `tiny`'s one row group and the filter hands the init a zero-row
+batch, on the one lane at tp1, and at tp4-single on one lane with three left no batch (`tiny` is
+under the small-table size, so tp4-rowgroup and tp4-sized plan it one lane and reach the zero-row
+batch only). The last two scan
+nothing at all (#282): pbench's `empty` table has no row group, and `t_v < 0` prunes `tiny`'s one.
+Every answer checked with DuckDB 1.5 on 2026-10-08 (the first four over `empty`, which answers as
+the filter does):
+
+| name | SQL | DuckDB | off on |
+|---|---|---|---|
+| empty-all-null-aggregates | `SELECT sum(t_v) AS s, min(t_v) AS lo, max(t_v) AS hi FROM tiny WHERE t_id + t_v < 0` | one row: NULL, NULL, NULL | none |
+| empty-count-aggregates | `SELECT count(*) AS n, count(t_v) AS nv, sum(t_v) AS s, avg(t_v) AS a FROM tiny WHERE t_id + t_v < 0` | one row: 0, 0, NULL, NULL | none |
+| empty-dispersion-aggregates | `SELECT stddev_samp(t_v) AS sd, var_pop(t_v) AS vp FROM tiny WHERE t_id + t_v < 0` | one row: NULL, NULL | gpu: #216, turned on by welford-device |
+| empty-grouped-count | `SELECT t_k, count(*) AS n FROM tiny WHERE t_id + t_v < 0 GROUP BY t_k` | no rows | none: a grouped init owes nothing at done |
+| empty-table-count | `SELECT count(*) AS n, sum(t_v) AS s FROM empty` | one row: 0, NULL | none: a file with no row group (#282) |
+| empty-pruned-count | `SELECT count(*) AS n, min(t_v) AS lo FROM tiny WHERE t_v < 0` | one row: 0, NULL | none: `t_v` is `i * 5`, never negative, so the statistics prune `tiny`'s one row group (#282) |
+
+Each gets its plan goldens, cpu sections, DuckDB section, `corpus_cases.inc` line and registry row,
+as pbench's queries do. pbench's `cross-empty-build` and `outer-on-true-empty`, refused at planning
+on #282 until now, then meet the joins they test; each cell runs and takes the ticket it fails on. `max(t_pat)` is left out: a string min or max on the device is #195's.
+
+The rows tagged `199` — q96, q88 and q90 at the tp4 modes, q32 at tp4, and any other carrying it
+when this task builds — are run at those modes and enabled if they pass; a failing cell takes its
+ticket. `199` is struck from their tags, and the `corpus_cases.inc` comments naming #199 are
+reworded.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/plan/aggregates.rs`, `plan/mod.rs` | `empty_state`; `category_of` |
+| `peacockdb-core/src/wire/mod.rs`, `wire/attach.rs`, `wire/recipes.rs` | the new pattern; the init's recipe; rendering a call with no input |
+| `peacockdb-core/src/wire/gpu_tests/mod.rs` | `phases` runs the new pattern per lane, only where nothing went out |
+| `peacockdb-core/src/executor/cpu_backend/accumulate.rs`, `cpu_backend/backend.rs` | the init accumulator; the merge's clause goes |
+| `peacockdb-core/src/executor/gpu_backend/accumulate.rs`, `gpu_backend/backend.rs` | the init accumulator |
+| `peacockdb-core/src/executor/driver/tests/` | the mock and the lane cases |
+| `cpp/src/operators/aggregate.cpp`, `cpp/tests/` | no input → zero-row table |
+| `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs`, `aggregate_dimension_cases.rs` | the identity cases |
+| `testdata/goldens/*/*.plans.txt`, `testdata/goldens/recipe-payloads.txt` | every init's recipe and category |
+| `peacockdb-core/src/planner/translator/nodes.rs`, the source executors, the memory estimate | #282's scan of nothing |
+| `testdata/pbench-queries/empty-*.sql`, their goldens and sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | the six queries; the `199` and `282` rows |
+| `llm-wiki/architecture.md`, `build-test.md`, `tickets/` | as in the work; counts; #199 and #282 archived |
+
+Component-level API: `ExecutorCategory` of `GpuAggregate`; one `CallPattern` variant, which
+prints in the plan text. No facade, trait, ABI or wire change: the done call is an existing
+seq handed no input.
+
+## Restriction
+
+The init, its recipe and the merge's clause. The merge's device code,
+the limit (#214) and the cpu's sort and merge over zero-row batches (#205) do not change: below the
+init, a source of nothing needs no fix of its own for this beyond #282's scan. The keyless Welford on the device stays as it is: a
+finished `stddev`, a refused `var` (#216, welford-device).
+
+## Tests
+
+- #282: `select count(*) from nation where n_nationkey < 0;` (tpch) plans one lane with no batch at
+  every mode and answers `0` on the cpu; a scan with survivors maps as before.
+- `empty_state`: for every init `PlanAgg` over `Int32`, `Int64`, `Float64`, `Decimal128(15, 2)`
+  and `Date32` where `state_type` accepts it, the value's `data_type()` is `state_type`'s.
+- `category_of`: `GpuAggregate` → `BatchAccumulator`. The init's recipe: four calls and their
+  patterns, grouped and keyless alike.
+- Driver (mock): a keyless lane with no batch makes one done call and answers one row; one with
+  only zero-row batches makes no init call and one done call; one with batches with rows makes no
+  done call; zero-row batches interleaved among them change no row. A grouped lane with no batch,
+  and one with only zero-row batches, makes one done call and emits nothing.
+- Both backends, per `AggFunc`, through `decomposition()`: a keyless init over no batch and over
+  two zero-row batches answers the row `empty_state` gives, and the shortcut answers it finalized
+  (count 0, the rest NULL). For `Stddev` and `Var` the cpu half is here and the device half is
+  welford-device's.
+- `bug_a_global_merge_over_no_arrival_answers_nothing_on_the_device` becomes
+  `a_global_merge_over_no_arrival_answers_nothing_on_both`: no merge meets no arrival now, and
+  neither backend invents a row for one.
+- A walk test with a lane that receives no batch: a keyless aggregate answers its identity row
+  there and its one row elsewhere, matching DataFusion; a keyless walk over lanes with rows makes
+  no done call.
+- gtest, in a new `cpp/tests/gpu/` file (`test_plan_executor.cpp` is past the 1000-line cap):
+  `execute_aggregate` handed no input answers one row, typed as declared, for a keyless
+  node, and zero rows for a grouped one.
+
+## Verification bar
+
+- rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
+  tests both ways.
+- C++: `ctest -L cpu` locally against cuDF 25.02.
+- device: `gpu_tests::`, the walk tests, and `test_gpu_corpus` over the `199` and `282` rows and the six
+  pbench queries, on the GPU host the chain header names.
+
+## Device workflow
+
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.
+
+## Completeness signoff
+
+Solved under its constraints. Every aggregate init is a batch accumulator answering its identity
+row at done where nothing went out, on both engines; a scan of nothing is one lane with no batch;
+the six pbench queries and every `199` and `282` cell run, `empty-dispersion-aggregates` off on
+the device on #216 as planned. Final pass: no blocking; the importants were comments and
+`architecture.md` sentences, fixed. Shortcuts named: an init's done call is priced at zero bytes
+(an identity row of one); a keyless merge still answers nothing over no arrival, unreachable since
+every init answers per lane; seven `cuda_aggregate_bytes` rises (the identity rows) accepted by the
+coordinator, not pre-accepted on the board. Spec drift: pbench plans `tiny` four ways at every
+tp4 mode. Left for the human: #214 now names no wrong row; `empty_state` is test-only code.
+
+---
+
+<!-- archived from llm-wiki/tasks/grouping-id.md -->
+
+**Merged 2026-10-23 as PR #181, chain K's task, one commit `258dde0b`, merged into master by `a29f0b7f`.**
+
+# The device's grouping-set id is DataFusion's; q66's quotient and the DISTINCT lowering run on a device
+
+Kind: production
+
+**This task closes [#65](../tickets/corpus-coverage.md#t65)** (the device's grouping-set id is not
+DataFusion's value or width) **[#55](../tickets/corpus-coverage.md#t55)** (q66: two-phase
+decimal aggregate ignores the partial-phase divisor cast) **and
+[#262](../tickets/corpus-coverage.md#t262)** (the DISTINCT lowering's device cells have never
+run). First of chain L, whose base is master once chains J and K have both merged: J closes #152,
+#220 and #189, which hold most of the cells this task turns on, and K adds the DISTINCT lowering
+and `tpch/rollup-distinct`, whose device cells are off on #65.
+
+## Why it happens
+
+**#65.** `execute_aggregate`'s grouping-set arm (`cpp/src/operators/aggregate.cpp`) sets bit `i`
+for masked key `i` and builds the id from a `cudf::numeric_scalar<int32_t>`. DataFusion 45 folds
+`(acc << 1) | is_null` over the keys in order, the first key highest (`group_id_array`,
+`datafusion-physical-plan` `aggregates/mod.rs`), into a `u64`, and holds it at the width
+`Aggregate::grouping_id_type` picks: `UInt8` up to 8 keys, `UInt16` to 16, `UInt32` to 32,
+`UInt64` beyond; past 64 keys it refuses. A two-key rollup is 0, 1, 3 there and 0, 2, 3 on the
+device. The merge only needs one id per set, so it is right; `GROUPING()` over the full key list
+reads the device's bits, and the schema validator refuses the width.
+
+**#55.** Most likely stale. DataFusion casts `sum(decimal / int)`'s divisor in the Partial phase
+only; the old executor's Final re-evaluated the argument over state. The wire has had no Final
+since: `Init` is written as `Partial` and `Merge` as `Merge`, the division runs once in `Partial`,
+and a merge reads state columns by reference. What is missing is a device run.
+
+**#262.** Chain K ran without a GPU, so distinct-companions is proven on the cpu only. Its plans
+reach the wire as no device has run them: a two-stage aggregate whose outer init runs merge
+aggregators over state, a `__distinct_arg` key, a grouping id narrowed by a project. Its C++ edits
+(the `distinct` guard gone from `aggregate.cpp`, `test_plan_executor.cpp`'s arguments) were built
+and not run. A device answer could differ from the cpu's, and nothing says so: the cells are off.
+
+## The work
+
+1. **#65, the id.** A static `grouping_id_column(mask, nkeys, rows)` in `aggregate.cpp` folds
+   `gid = (gid << 1) | masked` over the mask in key order into a `uint64_t`, and builds the column
+   from a `numeric_scalar` of `uint8_t`, `uint16_t`, `uint32_t` or `uint64_t` for `nkeys` ≤ 8,
+   ≤ 16, ≤ 32, beyond. Past 64 keys it throws, naming the count, as DataFusion refuses. The
+   `int32_t gid` block and its comment go. No wire change and no payload change: the payloads
+   print masks, never an id.
+2. **#65, the exec model.** `grouping_set_id` (`scripts/exec_model/operators/aggregates.py`)
+   folds the same way, `rollup_masks`' docstring says 0, 1, 3, and the pins in
+   `tests/test_operators.py` and `tests/test_end_to_end.py` go from `{0, 2, 3}` to `{0, 1, 3}`, and
+   `test_operators.py`'s single-set pin from `2` to `1`.
+3. **#55, the proof.** A walk test beside
+   `each_lane_merges_its_own_state_before_the_cross_lane_merge_folds_them` in
+   `wire/gpu_tests/mod.rs`: `SUM_OF_QUOTIENTS`, a grouped `sum(l_extendedprice / l_linenumber)`
+   under an outer `sum`, through `assert_walk_matches_datafusion` at `TWO_LANES`, with the
+   `PARTIAL`, `MERGE` and `FINALIZE` counts pinned from the trail as the neighbouring tests do.
+   Green closes #55 as stale. Red means the defect is live: the throwing call names its phase,
+   and the merge's argument is fixed here.
+4. **#262, the proof.** A walk test of a two-stage DISTINCT at `TWO_LANES` through
+   `assert_walk_matches_datafusion`: `l_returnflag, count(DISTINCT l_suppkey), avg(l_quantity),
+   count(*)` over lineitem, grouped by `l_returnflag` — shapes DataFusion 45 answers right (not
+   `avg` or `stddev` DISTINCT, which it answers wrong or refuses; distinct-companions' corpus
+   note). Plus the full device gtest run, which runs K's `test_plan_executor.cpp`.
+5. **The cells.** The corpus rows below are run at every device mode still off when this task
+   builds, and each cell is enabled if it passes, compared with its golden and with DuckDB. A cell
+   that fails gets the ticket it fails on (an open one, or a new one filed with the query and mode)
+   and stays off under it. `65`, `55` and `262` are struck from the rows' tags in
+   `testdata/cost-registry.csv` once no off cell is left without another ticket.
+
+## Corpus
+
+#65 reaches the corpus two ways.
+
+**A wrong answer: `tpch/rollup-grouping` alone** (below), the one query reading the id's value.
+
+**A schema refusal only: every corpus plan with a grouping-set id.** `tpch/rollup-over-join` and
+tpcds q5, q14, q18, q22, q77, q80 (the plan goldens' `__grouping_id`), and chain K's
+`tpch/rollup-distinct`. None reads the id: the merge needs one distinct id per set, which the
+device gives, and the final project drops it, so their answers are right. But each row is
+`schema_validation_enabled`, and the device corpus holds every batch a node emits to its declared
+schema (`test_support/schema_validation.rs`): the init's `Int32` id against the declared `UInt8`
+refuses the cell there, the divergence
+`bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8` pins. Predicted, not
+seen: on master today no device cell of theirs runs past #152, #189 or #220, which chain J
+closes. Their registry tags as of 2026-10-08:
+
+| row | tags |
+|---|---|
+| tpch rollup-over-join | `152 189 220` (lacks `65`; join-backend adds it if a cell then fails on it) |
+| tpcds q5 | `65 152 189` |
+| tpcds q14 | `65 220` |
+| tpcds q18, q22 | `65 189 220` |
+| tpcds q77 | `65 152 212 220` |
+| tpcds q80 | `65 152 189 220` |
+| tpch rollup-distinct (chain K) | `65 189` |
+| pbench rollup-small-keys (chain J, repartition-keys) | `65` |
+
+Any other row carrying `65` when this task builds is run the same way: the registry, not this
+table, is the list. The id's value shows only through `GROUPING()`. The corpus's users are q70 and q86 (and q67's
+rollup), window queries that never run (`32 143`); they stay off.
+
+**#262's rows:** `tpch/distinct-functions` (off at all five device modes on `262` alone; its
+oracle is DuckDB's, DataFusion's being `data_fusion_disabled`), tpcds q28 (`262` and `152`) and
+`tpch/rollup-distinct` (`262` once chain K has run, with `65 189`). `262` is struck when no off
+cell is left without another ticket. `distinct-functions` carries a `stddev(DISTINCT …)`, whose
+float digits differ across lanes as `shuffle-stddev`'s do, so its gpu oracle goes from
+`golden_exact` to `golden_approx_std`; `rollup-distinct` and q28 stay exact.
+
+**#55's row:** tpcds q66, tags `55 152 220`. Its five device cells are off; once chain J closes
+#152 and #220, `55` alone holds them.
+
+**A new tpch query,** `testdata/tpch-queries/rollup-grouping.sql`: the ticket's simplest, from
+[`reports/corpus-fixes.md`, fix 14](../reports/corpus-fixes.md#fix14).
+
+```sql
+-- GROUPING() over the full key list reads the grouping-set id itself, so its value and width
+-- are the answer, not just a tag that keeps the sets apart (#65).
+select n_regionkey, n_nationkey, grouping(n_regionkey, n_nationkey) as g, count(*)
+from nation
+group by rollup (n_regionkey, n_nationkey);
+```
+
+31 rows with `g` in {0, 1, 3} on the cpu; before the fix the device answers the five subtotal rows
+with `g = 2`. Its five plan goldens, its cpu sections, its `duckdb-result.txt` section from the
+pinned `testdata/duckdb_result.py`, a `corpus_cases.inc` line and a registry row (features
+`rollup`) are written. Every cell enabled if it passes; a failing one takes its ticket.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/operators/aggregate.cpp`, a new `cpp/tests/gpu/` gtest file (`test_plan_executor.cpp` is past the 1000-line cap) | the id's fold and width, through hand-built plans in `peacock_plan_tests` (`grouping_id_column` is file-static, so the gtests need the device) |
+| `peacockdb-core/src/tests/executor_cases.rs`, `executor/cpu_backend/tests/contract.rs`, `executor/gpu_backend/gpu_tests/contract.rs` | the rollup contract case |
+| `scripts/exec_model/operators/aggregates.py`, `scripts/exec_model/tests/test_operators.py`, `test_end_to_end.py` | the model's id |
+| `peacockdb-core/src/tests/gpu_tests/aggregate_cases.rs`, `aggregate_schema_cases.rs`, `peacockdb-core/src/wire/gpu_tests/mod.rs` | the four `bug_` pins flip, `grouping_sets_as_exported` goes; the rollup cases; `SUM_OF_QUOTIENTS` |
+| `testdata/tpch-queries/rollup-grouping.sql`, `testdata/goldens/tpch.sf1/*.plans.txt`, the cpu tier's and DuckDB's sections for it | the new query |
+| `peacockdb-core/src/wire/gpu_tests/mod.rs` | the two-stage DISTINCT walk |
+| `peacockdb-core/tests/common/corpus_cases.inc`, `testdata/cost-registry.csv` | device modes and tags of the rows above |
+| `llm-wiki/architecture.md` (grouping sets), `build-test.md`, `tickets/` | the id described; counts; #65, #55 and #262 archived |
+
+Component-level API: none. No facade, trait, ABI or wire change; `recipe-payloads.txt` unchanged.
+
+## Restriction
+
+The id and the two proofs. `GROUPING()` over a subset or a reordering of the keys stays refused on the
+device (#230); DataFusion 55's duplicate ordinal stays #228. A cell that fails on anything but the
+id, the quotient or the DISTINCT lowering's device path is a ticket, not a fix here.
+
+## Tests
+
+- gtests, on the device: the id over 1, 2, 8, 9, 17, 33 and 64 keys, value and type each (`UInt8`
+  at 8, `UInt16` at 9, `UInt32` at 17, `UInt64` at 33 and 64), and 65 keys refused.
+- `bug_grouping_sets_carry_the_devices_own_id_and_type`,
+  `bug_grouping_sets_over_zero_rows_are_zero_rows_under_the_devices_id_type`
+  (`gpu_tests/aggregate_cases.rs`),
+  `bug_grouping_sets_hold_an_int32_grouping_id_where_the_plan_declares_uint8`
+  (`aggregate_schema_cases.rs`) and
+  `bug_a_rollup_partial_holds_an_int32_grouping_id_where_the_plan_says_uint8`
+  (`wire/gpu_tests/mod.rs`) become agreement cases under names without `bug_`;
+  `grouping_sets_as_exported`, which swapped the bits and the type, goes.
+- A rollup contract case, two keys, on both engines: the device's id equals the cpu's, value and
+  type. A walk test of `rollup-grouping.sql`'s query at `TWO_LANES` against DataFusion.
+- `SUM_OF_QUOTIENTS` and the two-stage DISTINCT walk, as in the work.
+- The exec model's suites green with the new pins.
+
+## Verification bar
+
+- rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
+  tests both ways.
+- C++: the build against cuDF 25.02 locally, `ctest -L cpu` green; the id's gtests run with the
+  device tier.
+- exec model: every `scripts/exec_model/tests/test_*.py`.
+- device: every `peacock_*_tests` gtest binary (K's `test_plan_executor.cpp` included),
+  `gpu_tests::` and the walk tests, and `test_gpu_corpus` over the rows above, on the GPU host the
+  chain header names.
+
+## Device workflow
+
+As the chain header says: one sync per task to its host, with as many back-to-back builds as its
+red/green pairs need, the red build first.
+The corpus run is filtered to the rows above and `rollup-grouping`.
+
+## Completeness signoff
+
+Solved under its constraints. The device's id folds and widens as DataFusion's, every width
+boundary pinned from both sides and 65 keys refused; the exec model agrees. #55 is stale, proven
+by the quotient walk; #262 closed by the two-stage DISTINCT walks, one reading `GROUPING()`
+through the narrowing. 45 device cells on; q5 stays off on #210. Final pass: one blocking (a
+Python test pinning tpch's query count at 41, fixed) and two important, both the same stale
+`build-test.md` row count (fixed). Shortcuts: none. Outside Scope: comment-only edits in
+`planner/translator/`, a shared `cpp/tests/gpu/hand_tables.hpp`, the walk harness skipping the
+at-done call on an empty lane as the device does, and `testdata/test_duckdb_result.py`'s count.
+
+---
+
+<!-- archived from llm-wiki/tasks/empty-sorts.md -->
+
+**Merged 2026-10-23 as PR #174, chain K's task, two commits: the task `561f6145` and the dropped wiki-anchor test `5eafc05d`, merged into master by `5987edaf`.**
+
+# A sort over zero-row batches answers a zero-row batch, and an empty answer keeps its columns
+
+Kind: production
+
+**This task closes [#205](../tickets/corpus-coverage.md#t205)** (the cpu's accumulating sort and
+merge answer nothing over zero-row batches). Fourth of chain K, after limits; runs without a GPU.
+
+## Why it happens
+
+DataFusion's `SortExec` over zero rows yields no batch at all. `SortedRuns::mark_done_and_fetch`
+and `CpuPartitionAccumulator::accumulate_and_fetch` (`cpu_backend/accumulate.rs`) hand that empty
+answer to `coalesce_or_nothing`, which reads it as a lane that received nothing. So a
+`GpuAccumulateBatchesAndSort` or `GpuMergeSortedPartitions` whose only batches have zero rows emits
+no batch on the cpu, where the device emits one of zero rows; `CpuExec::exec` and the cpu coalesce
+answer zero rows under the schema, so the two cpu paths disagree with each other as well.
+
+An empty answer also loses its columns. `tpcds/q17` answers zero rows; its `mini.result.txt`
+section is a bare `++`/`++`, with no names or types, so nothing checks them, and DuckDB's answer
+(`duckdb-result.txt`, chain J's duckdb-oracle) prints the header ours lacks.
+
+## The work
+
+1. **The sort and the merge.** When every held batch has zero rows, `SortedRuns` and
+   `CpuPartitionAccumulator` skip the sort and pass the held batches to `coalesce_or_nothing`,
+   which concatenates them into one zero-row batch under the schema, as the device answers. A fetch
+   has no rows to cut. A lane that received nothing still answers nothing.
+2. **An empty answer keeps its schema.** A query whose root received nothing answers one
+   zero-row batch under the sink's declared schema. The driver makes it, once, for both backends:
+   the unload is called per batch and is never told that none came, and telling it would change
+   its trait. The batch is the answer only: it is not recorded as an emitted batch, so the
+   execution goldens move only where the rows did. DataFusion's own empty answer, which the corpus
+   compares against (`test_support/corpus.rs`), gets its columns the same way, or every zero-row
+   query's cpu cells would differ on the header alone. So an answer's schema never depends on how
+   its rows ran out. q17's result section is regenerated with its header: tp4-sized writes it,
+   where the scatter leaves every lane of the merge empty, which is this rule's case rather than
+   1's.
+3. **DuckDB.** If chain J's duckdb-oracle has merged when this task builds, q17's empty-answer
+   divergence against `duckdb-result.txt` goes with 2, and its line in that task's divergence list
+   is struck. If not, nothing here touches DuckDB, and the helper merging duckdb-oracle after this
+   task strikes what names #205 there, since #205 is archived here: q17's `duckdb_divergent(205)`,
+   the tests asserting #205 open (`duckdb_oracle/tests.rs:157-158`, `:270-278`, `:322-323`) and the
+   empty-answer branch in `duckdb_oracle.rs:113-115`. If duckdb-oracle has not merged when this task
+   lands, this list is also written into #235's empty-answer bullet.
+
+## Corpus
+
+`tpcds/q17` at `tp1-single`, the one enabled corpus query answering zero rows: its result section
+gains its header. Its device cell at `tp1-single`, off on `205`, stays off under
+[#281](../tickets/corpus-coverage.md#t281) (chain K has no GPU), and `205` leaves the row.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/executor/cpu_backend/accumulate.rs` | the sort and merge over zero rows |
+| `peacockdb-core/src/executor/driver/` | the empty answer under the sink's schema |
+| `peacockdb-core/src/test_support/corpus.rs` | DataFusion's empty answer with its columns |
+| `peacockdb-core/src/tests/gpu_tests/accumulate_cases.rs` | the three `bug_` pins |
+| `peacockdb-core/src/tests/end_to_end.rs` | the empty ordered query |
+| `testdata/goldens/tpcds.sf1/*mini.result.txt`, q17's `tp1-single` and `tp1-rowgroup` `.cpu.txt` and `.cost.txt` sections, `corpus_cases.inc`, `testdata/cost-registry.csv` | q17 |
+| `llm-wiki/architecture.md` ("Zero-row batches change no answer"), `build-test.md`, `tickets/` | the break struck; counts; #205 archived |
+
+Component-level API: `RunReport::batches` (`executor/mod.rs`, public) is never empty for a query
+whose root received nothing; no signature changes.
+
+## Restriction
+
+The cpu's two accumulating sorts and the empty answer's schema. The limit's zero-row drop is #214;
+a keyless aggregate over nothing is #199 (chain L).
+
+## Tests
+
+- The three `bug_` pins (`bug_one_zero_row_batch_sorts_to_nothing_on_the_cpu`,
+  `bug_a_fetch_over_zero_rows_is_nothing_on_the_cpu`,
+  `bug_every_lane_a_zero_row_batch_is_nothing_on_the_cpu`, `gpu_tests/accumulate_cases.rs`)
+  become agreement cases under names without `bug_`; built here, run on the next GPU run (#281).
+- cpu-backend cases: one zero-row batch, two, and one per lane of a merge each answer one zero-row
+  batch under the schema; a lane with no batch answers nothing; a fetch over zero rows answers zero
+  rows.
+- End-to-end on the cpu, the five modes: `select n_name from nation where n_nationkey +
+  n_regionkey < 0 order by n_name;` (tpch) answers zero rows under one `n_name` column. Not
+  `n_nationkey < 0`: its statistics prune nation's one row group, and a scan of nothing is refused
+  until chain L fixes #282.
+
+## Verification bar
+
+- rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
+  tests both ways.
+- device: none.
+
+## No GPU, superseded
+
+**Superseded 2026-10-09:** this task's GPU tests now run on nebius-gpu, under chain K's board
+note in `tasks.md`, which reopens it to `building` for its GPU half. The paragraph below is the
+original rule, kept for the record.
+
+Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
+job but the GPU tests is green; the GPU jobs are not waited on. The device cases are built, not
+run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints, re-proved after the rebase onto limits on master ca4dedeb. Both
+rules landed as written; every Tests line exists, the unpruned predicate included. Item 3 took its
+first branch: q17 and pbench `not-in-uncorrelated` are `duckdb_exact`, and the oracle's
+column-count exemption is gone. The device half ran on nebius-gpu (2026-10-19): the four
+accumulate cases pass, and q17's five device cells are on. Final pass: reviewer and analyst each
+found nothing blocking. Deviations: q17's tp1 device cells run with the schema hook masked on
+open #225; `cost-report/src/main.rs`, outside Scope, swaps its example ticket 205→214 because
+archiving broke it; two DataFusion comparisons outside the corpus still take the raw empty answer.
+
+---
+
+<!-- archived from llm-wiki/tasks/limits.md -->
+
+**Merged 2026-10-23 as PR #172, chain K's task, one commit `fbeb216c`, merged into master by `d00fddbf`.**
+
+# A scan's limit is a limit node, and a limit's rows are counted once
+
+Kind: production
+
+**This task closes [#186](../tickets/corpus-coverage.md#t186)** (a limit pushed into the scan:
+the cpu ignores it, the device refuses it) **and [#234](../tickets/corpus-coverage.md#t234)** (a
+mid-plan limit is counted twice, by the driver and by its executor, and nothing compares them).
+Third of chain K, after distinct-companions; the chain runs without a GPU.
+
+## Why it happens
+
+**#186.** DataFusion pushes a `LIMIT` into the scan (`DataSourceExec`'s `limit`) and, at tp1,
+removes the limit node above it, so the scan's limit is the whole cut. `source()`
+(`planner/translator/nodes.rs`) copies it onto `GpuLoadParquet.limit` and gives the scan one lane
+(`lanes_for`), but each reader is left to apply it, per call. `CpuSource` never reads it:
+`SELECT * FROM lineitem LIMIT 10` answers 6,001,215 rows on the cpu at the tp1 modes. `scan.cpp`
+calls `set_num_rows(limit)` and then sets the call's row groups, which cuDF refuses together, so
+every device mode fails its first read. And a per-call limit is right only for a scan of one batch,
+which the rowgroup and sized modes do not map.
+
+**#234.** For a mid-plan `GpuLimit`, the driver adds each consumed batch's rows to `rows_seen`
+(`executor/driver/partitioned.rs`), and `settle_limit` reads it to stop pulling from below. Each
+backend's `LimitStream` (`cpu_backend/accumulate.rs`, `gpu_backend/accumulate.rs`) keeps its own
+`seen` and decides per batch whether to drop, forward or slice it. Two counts of one stream for
+two decisions; they agree today, and a drift would be a LIMIT returning short or reading more than
+it needs, with no test to notice.
+
+## The work
+
+1. **#186, a scan's limit is a limit node.** `source()` builds the `GpuLoadParquet` with no limit
+   and, where DataFusion's scan carries one, puts a `GpuLimit` with `RowInterval { skip: 0, fetch:
+   Some(n) }` directly above it. Where the scan's limit is the whole query's cut — the scan sits
+   under the sink, as in `scan-limit` — the cut joins the unload's interval instead, since the
+   validator refuses a `GpuLimit` whose only parent is the sink (`plan/validate.rs`). DataFusion
+   pushes `skip + fetch` into the scan and keeps its own limit above for any skip, so the scan's cut
+   never carries a skip. `lanes_for` keeps its limit arm: one lane, since rows from several
+   lanes have no order a cut could follow. The scan's mapping is the mode's own: one batch, one per
+   row group, or sized. The limit cuts the batch that straddles `n`, and once it is satisfied the
+   driver's hold on its subtree (`settle_limit` → `scheduler.satisfy`) stops the scan. That alone
+   bounds the read only where batches are small: at tp1-single, tp4-single and tp4-sized lineitem is
+   one batch of all 49 row groups, so `LIMIT 10` would still read the file. So `source()` also
+   trims a limited scan's survivors to the shortest prefix whose row counts (from the parquet
+   metadata it already holds) reach `n`, before mapping: a small limit reads one row group in every
+   mode.
+2. **#186, the readers lose their limit.** `GpuLoadParquet.limit` goes, and with it the plan
+   text's `limit=` on a source (`plan_text/node_text.rs`). The wire's `CudfScan.limit` is
+   deprecated, no slot moved, as chain K deprecated `AggregateFuncNode.distinct`; the writer stops
+   filling it, and `scan.cpp` drops `set_num_rows`. `CpuSource` needs nothing: it never read the
+   limit.
+3. **#234, one count.** The limit's executor keeps the only input count and every drop, forward
+   and slice decision, as now. The driver stops counting the limit's input: it counts the rows the
+   limit emits, which the lane outcome already carries, and `settle_limit` marks the limit satisfied
+   when that reaches `fetch`. A limit with no `fetch` is never satisfied, and one with `fetch 0` is
+   satisfied before any read, where today it pulls one batch first. The driver's number is
+   then a consequence of the executor's decisions, not a second computation of them. The unload's
+   interval, which only the driver decides, keeps counting its input as now.
+
+## Corpus
+
+`tpch/scan-limit` and `tpch/nested-limits` are the only corpus queries with a limited scan (three
+at tp1-single). Their plan goldens at the five modes lose the source's `limit=`. scan-limit's cut
+joins its unload's interval (`skip=0, fetch=10` at tp1, where it had none). nested-limits gains two
+`GpuLimit`s, one over each limited scan: region's (`limit=23`) and part's, beside its existing one.
+Their execution sections are regenerated. `mini.result.txt` does not change.
+scan-limit's cpu cells at `tp1-single` and `tp1-rowgroup` turn on and `186` leaves their tags.
+Their device cells, and nested-limits', stay off under [#281](../tickets/corpus-coverage.md#t281),
+filed with this chain: chain K has no GPU.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/planner/translator/nodes.rs`, `translator/mod.rs`, `plan/interval.rs` | `source()`: the limit node above the scan, or the unload's interval |
+| `peacockdb-core/src/plan/source.rs`, `plan/mod.rs`, `plan_text/node_text.rs`, every `GpuLoadParquet` constructor's caller, `tests/rebuild.rs` | `GpuLoadParquet.limit` gone |
+| `flatbuffers/gpu_plan.fbs`, `wire/node_writer.rs`, `wire/fb_text.rs`, `cpp/src/operators/scan.cpp` | `CudfScan.limit` deprecated; `set_num_rows` gone |
+| `peacockdb-core/src/executor/driver/partitioned.rs`, `executor/driver/tests/` (the mock included) | a limit satisfied by what it emits |
+| `peacockdb-core/src/tests/end_to_end/limits.rs` | the limit cases |
+| `peacockdb-core/src/tests/gpu_tests/source_cases.rs` | the four #186 `bug_` cases |
+| `testdata/goldens/tpch.sf1/*.plans.txt`, the cpu tier's sections for the two queries, `corpus_cases.inc`, `testdata/cost-registry.csv` | scan-limit, nested-limits |
+| `llm-wiki/architecture.md` (a limited scan; the driver's limit), `build-test.md`, `tickets/` | as in the work; counts; #186 and #234 archived; #281 filed; #229's line on the scan's limit (`memory.md`) corrected |
+
+Component-level API: the wire format, `CudfScan.limit` deprecated, no slot moved. No facade, trait
+or ABI symbol change.
+
+## Restriction
+
+The scan's limit and the limit's count. The limit's handling of a zero-row batch stays as it is
+([#214](../tickets/corpus-coverage.md#t214), whose fix is in the joins). The unload's interval does
+not change.
+
+## Tests
+
+- Translator: `select n_nationkey from nation limit 3;` (tpch) plans a one-lane scan carrying no
+  limit under an unload whose interval is `fetch 3`, at every mode; a limited scan below a join or
+  a subquery plans a `GpuLimit` above it; a scan without a limit gains no node; a limited scan maps
+  only the prefix of row groups that reaches `n`, at every mode.
+- End-to-end on the cpu, the five modes: `SELECT count(n_name) FROM (SELECT * FROM nation LIMIT 3)`
+  answers 3. Today it answers 25 at every mode: the limit sits in the scan under an aggregate, and
+  no reader applies it.
+- Driver (mock): a mid-plan limit is satisfied when the rows it emitted reach `fetch` and not
+  before; an executor that emits fewer than its input's rows keeps the driver pulling; a limit with
+  no `fetch` is never satisfied.
+- End-to-end on the cpu, the five modes: `select * from lineitem limit 10` answers 10 rows, and
+  `a_limit_slices_at_most_two_batches_and_stops_the_scan` holds over the scan's own mapping.
+- The four `bug_` cases in `gpu_tests/source_cases.rs` lose their inputs with the scan's limit:
+  they become one agreement case of the scan and three of a `GpuLimit` over the scan's batches,
+  under names without `bug_`; built here, run on the next GPU run (#281).
+
+## Verification bar
+
+- rust-only: `--lib`, `test_cpu_corpus`, `test_corpus_goldens`, `test_cost_model`; the registry
+  tests both ways.
+- C++: the build against cuDF 25.02 locally, `ctest -L cpu`.
+- device: none.
+
+## No GPU, superseded
+
+**Superseded 2026-10-09:** this task's GPU tests now run on nebius-gpu, under chain K's board
+note in `tasks.md`, which reopens it to `building` for its GPU half. The paragraph below is the
+original rule, kept for the record.
+
+Chain K runs without a GPU. No device run, no GPU cycle. This task reaches `done` when every CI
+job but the GPU tests is green; the GPU jobs are not waited on. Its `scan.cpp` edit and the device
+cases are built, not run; #281 holds them.
+
+## Completeness signoff
+
+Solved under its constraints, by the shape the page already described rather than by either
+ticket's proposed fix. The device half ran on nebius-gpu: the four converted `source_cases.rs`
+cases green, and `tpch/scan-limit` enabled at all five device modes — which corrected its
+`gpu_oracle` to `golden_exact`, its result section having always served.
+
+Six deviations outside the Scope table, recorded in `limits-detail.md`: `Empties::fires` firing
+every source's first call; a comment in `translator/common.rs`; that oracle change and the guard
+term it forced in `test_cpu_corpus.rs`; `gpu_plan.fbs`'s two field docs, which stated the model
+#285 is made of; and a fifth `source_cases.rs` case pinning #285. The spec's `## No GPU` and its
+"device: none" bar are superseded by chain K's board note.
+
+Filed, not fixed: **#284**, and **#285**, whose zero-column scan keeps `tpch/nested-limits` off at
+every device mode — not a limit defect, older than this branch, #281 narrowed to empty-sorts'
+half, and the one device gap named there: nested-limits carries the corpus's only mid-plan limit.
+
+---
+
+<!-- archived from llm-wiki/tasks/distinct-companions.md -->
+
+**Merged 2026-10-23 as PR #171, chain K's task, one commit `1634e17c`, merged into master by `9160b970`.**
+
+# A DISTINCT aggregate plans beside any companion
+
+Kind: production
+
+**This task closes [#62](../tickets/corpus-coverage.md#t62)** (a DISTINCT beside an avg or a count
+is refused at planning). Second of chain K, on guard-checks' branch; runs beside chain J while the
+GPU host is down, so everything it proves, it proves on the cpu. Files nothing new: the one shape
+it still refuses with no ticket of its own is [#261](../tickets/complete-coverage.md#t261), filed
+with this spec.
+
+## Why it happens
+
+DataFusion removes a DISTINCT only through `SingleDistinctToGroupBy`, whose precondition is that
+every DISTINCT aggregate shares one argument, every other aggregate is `sum`, `min` or `max`, and
+there are no grouping sets: its outer level re-applies the same function, sound only where
+`f(f(x))` is `f(x)`. Anything else reaches us with the flag set, and `decompose`
+(`planner/translator/aggregate.rs`) refuses it with `DISTINCT inside … (#62)`. tpcds q28 — six
+global `avg, count, count(DISTINCT ss_list_price)` blocks, cross-joined — is refused at every mode.
+
+The restriction is DataFusion's, not the shape's. This engine already separates init from merge
+(`decomposition()`, `plan/aggregates.rs`): a `count` merges by `sum`, an `avg` by `sum` over each
+of its two state columns. So the outer level can merge each companion's state with ordinary
+aggregators instead of re-applying the function.
+
+## The lowering
+
+Applies when every DISTINCT aggregate in the node, of any function the engine decomposes
+(`count`, `sum`, `avg`, `min`, `max`, `stddev`, `var`), has the same single argument `x` once
+DataFusion's coercion casts are stripped. DataFusion casts `sum`'s and `avg`'s argument and not
+`count`'s, so `count(DISTINCT c), sum(DISTINCT c)` over an `Int32` column arrives as `c` and
+`CAST(c AS Int64)`. A widening cast that keeps distinct values distinct is stripped: integer to a
+wider integer, integer to `Float64` (exact below 2^53), decimal to a wider decimal, a decimal of
+precision ≤ 15 to `Float64`. The inner stage groups on the stripped `x`; each DISTINCT aggregate
+re-applies its own casts over `__distinct_arg`. The decision is made before the node's input is
+translated, so the input is translated once: a second translation reaches its sources twice, and
+tp4-sized's two-pass planner refuses a plan whose passes reach different source counts. Two
+`aggregate_sequence` stages replace the one:
+
+- **Inner stage.** Groups by `(x, keys)` — `x` first — and runs the companions' inits. `x` is
+  always its own key column, `__distinct_arg`, even where it is also a group key: under a grouping
+  set a key can be masked to NULL, and the distinct argument never is. Shuffled as DataFusion
+  shuffles the aggregate — on its keys (a subset of the inner's), or collapsed for a keyless one —
+  so every row of an outer group is already in one lane. Emits state; no finalize.
+- **Outer stage.** Groups by `keys`; no shuffle (a subset of the inner's keys, `plan/aggregate.rs`'s
+  subset rule). Its first node is an init: each DISTINCT aggregate runs as its non-distinct twin
+  over the deduplicated `x` (from values); each companion's state column runs its merge rule from
+  `decomposition()` (`sum` over a count or a sum, `min`, `max`) as an init aggregator. It then
+  merges and finalizes to DataFusion's final schema, so nothing above the node changes.
+
+A NULL `x` makes one inner group, and the outer `f(x)` skips it, as SQL requires.
+
+The four traps from `reports/bugfix-proposals/62-review.md`, built in:
+1. The outer stage pairs each companion's state columns with `rule.state` by position, not by
+   tag. `declared_nullable`'s `[tag]` lookup does not match this engine's own names (`avg(…)$sum`,
+   `$count`) and would refuse q28's `avg` as drifted.
+2. Each outer argument's type is the inner stage's declared type at its position, through
+   `state_type(merge_func, …)`. `arg_type` reads the raw input's first expression, which in the
+   outer stage is the wrong column or out of range.
+3. Every state column the outer stage declares is nullable, and every `count` in it — companion
+   or DISTINCT — finalizes as `CASE WHEN o IS NULL THEN 0 ELSE o END`: a count merged by `sum`
+   answers NULL over an empty keyless input, where SQL says 0. `plan/aggregates.rs`'s count
+   finalize stays the bare column; the translator wraps it for the outer stage only.
+4. The shapes under "Still refused" stay refused.
+
+And one the review of this spec found: the outer init's `sum` over a decimal state widens it again
+(`state_type`), so an outer `sum` companion's state is wider than DataFusion's declared output. Its
+finalize casts explicitly to the declared type (`architecture.md`: no executor changes a type the
+plan did not ask for).
+
+## Grouping sets
+
+A ROLLUP, CUBE or GROUPING SETS under a DISTINCT plans too. The inner stage expands the sets over
+`(x, keys)` with `x` unmasked in every set. DataFusion folds the id first key highest, `(acc << 1)
+| masked`, so `x`'s bit is the top one and always 0: the inner `__grouping_id` is the value
+DataFusion computes over `keys` alone. Its width is not always: at exactly 8, 16 or 32 keys the
+extra key moves it to the next type. The outer stage groups by `keys ++ [__grouping_id]` at the
+inner's width; where DataFusion's width differs, a project above the outer stage casts the id to
+DataFusion's type. Not a cast in `group_by`: a merge's co-location check and the hash it carries
+up read plain column keys only, so a cast key would lose the shuffle's distribution.
+
+On the device the id is [#65](../tickets/corpus-coverage.md#t65)'s: bits from the other end and
+`Int32`. There `x` is bit 0, so the inner id is twice the device's usual value — still one per set,
+so the groups hold, and only the id's value is wrong, as #65 already makes it; at 8, 16 or 32 keys
+the project's cast also overflows it. #65's fix removes both. No device cell reaches it before
+then: every grouping-set corpus query is off on #65, #152 or #189. #65 gains a line saying so.
+
+## Still refused
+
+The lowering's classifier refuses these two by name, before `decompose`. Each is a `bug_` test
+(`coding-style.md`), with its ticket in a comment above it:
+- a `stddev` or `var` companion beside a DISTINCT —
+  [#261](../tickets/complete-coverage.md#t261). Its state merges as `Merge::Combined(MergeM2)`, a
+  merge-phase aggregator only, and the outer node is an init. A `stddev(DISTINCT x)` is not this:
+  it reads values and plans.
+- DISTINCT over two arguments, or over two different arguments —
+  [#144](../tickets/complete-coverage.md#t144), now with a refusal of its own (it fell to #62's
+  until now). #195's bullet saying it has none is updated.
+
+Neither test name carries its ticket number (`coding-style.md`'s Names rule); the number is in
+the comment.
+
+Any other aggregate that still carries the flag reaches `decompose`, whose `is_distinct()` check
+stays and refuses it: `DISTINCT inside <agg> in a shape the lowering does not handle`. No SQL we
+know reaches it. It is the net for a shape DataFusion sends that the classifier does not
+recognise, which would otherwise be computed as non-distinct on both engines, where the
+cpu-vs-device comparison cannot see it. It names no ticket: it is not a known wrong answer.
+
+## The wire
+
+`AggregateFuncNode.distinct` goes: marked `(deprecated)` in `gpu_plan.fbs`, so `alias` and every
+later field keep their slots and both generated sides lose the accessor. With it go the writer's
+`distinct: false` (`wire/aggregate_writer.rs`), the C++ guard that reads it (`aggregate.cpp`,
+"DISTINCT aggregate … see #62"), and the argument at the three `CreateAggregateFuncNode` calls in
+`cpp/tests/gpu/test_plan_executor.cpp`. Nothing sets the flag before or after this task: the
+rewrite removes DISTINCT before the wire. FlatBuffers omits a `false` at its default, so
+`recipe-payloads.txt` does not move; the payload test confirms it.
+
+## Corpus
+
+q28's five plan goldens go from the `(#62)` refusal to a plan. q28 gains a `corpus_cases.inc`
+line, its cpu modes run and each one enabled if it passes (its cpu, cost and result sections
+written by the cpu tier), or ticketed if it does not. Its gpu cells stay off: q28 is a cross join,
+behind #152 (join-backend). Registry row 29: the plan cells enabled, the cpu cells as run, `62`
+struck.
+
+A new tpch query, `testdata/tpch-queries/rollup-distinct.sql`, puts a DISTINCT under a grouping
+set, which no corpus query does:
+
+```sql
+-- A DISTINCT aggregate under a grouping set. DataFusion's SingleDistinctToGroupBy declines
+-- grouping sets, so the flag reaches the translator; the avg companion is q28's.
+SELECT l_returnflag, l_linestatus,
+       count(DISTINCT l_suppkey), avg(l_quantity), count(*)
+FROM lineitem
+GROUP BY ROLLUP(l_returnflag, l_linestatus);
+```
+
+It reads lineitem whole so the tp4 modes split it across lanes and the inner stage shuffles; about
+60k inner groups. Its five plan goldens and its cpu sections are written. Cpu cells: the tp1 modes
+enabled; the tp4 modes off on #189, whose shuffle cannot hash the inner merge's `__grouping_id`
+(as `rollup_over_join`'s are) until repartition-keys lands. Gpu cells off at every mode on #65,
+whose `Int32` id the schema validator refuses, and #189 at tp4. A new registry row: features
+`rollup count_distinct`, tickets `65 189`.
+
+A second new tpch query, `testdata/tpch-queries/distinct-functions.sql`, reaches the widened
+functions, which no corpus query does:
+
+```sql
+-- DISTINCT aggregates of the functions the lowering widens to, beside companions DataFusion's
+-- SingleDistinctToGroupBy declines (count(*), avg), so the flag reaches the translator.
+SELECT l_returnflag,
+       count(DISTINCT l_quantity) AS distinct_qty,
+       sum(DISTINCT l_quantity) AS sum_distinct_qty,
+       avg(DISTINCT l_quantity) AS avg_distinct_qty,
+       stddev(DISTINCT l_quantity) AS stddev_distinct_qty,
+       count(*) AS n,
+       avg(l_extendedprice) AS avg_price
+FROM lineitem
+GROUP BY l_returnflag;
+```
+
+DataFusion cannot be its oracle. With these companions it runs the DISTINCT aggregates itself,
+and DataFusion 45 refuses `stddev`/`var(DISTINCT)` ("not implemented"), refuses a keyless
+`avg(DISTINCT)`, and answers a grouped decimal or float `avg(DISTINCT)` as the plain average,
+silently: its grouped `avg` accumulator ignores the flag. So its line declares a new cpu oracle,
+`data_fusion_disabled`, which skips the DataFusion compare; a comment above the line says DuckDB's
+answer is to be its oracle once chain J's duckdb-oracle has merged. Until then its answer is held
+by the end-to-end case below, which runs this file against a hand-written oracle. All five cpu
+cells enabled; gpu cells off — never run, chain K has no GPU — under [#262](../tickets/corpus-coverage.md#t262), filed with this spec.
+A new registry row: features `count_distinct`.
+
+All three lines carry whatever fields `corpus_query!` takes when this task builds. If chain J's
+duckdb-oracle has merged, each new tpch query needs its `duckdb-result.txt` section, from the
+pinned `testdata/duckdb_result.py`, or `duckdb_none`; and `distinct-functions`' cpu oracle stays
+`data_fusion_disabled`, its DuckDB oracle on. If repartition-keys merges after this task, its
+`drop_grouping_id` lands in `sequence`, keyed on each stage's own id ordinal (n + 1 in the inner
+stage), and it turns on `rollup-distinct`'s tp4 cpu cells and strikes `189`; whichever lands
+second does that.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/planner/translator/aggregate.rs`, `aggregate/distinct.rs` (new), `aggregate/tests.rs` (new) | the stage split, the two-stage lowering, the refusals |
+| `peacockdb-core/src/planner/translator/tests.rs` | plan tests of the two stages |
+| `peacockdb-core/src/planner/tests/join_refusals.rs` | the #62 pin replaced by two `bug_` tests |
+| `peacockdb-core/src/tests/end_to_end.rs` | the answers at the five modes; `sql_answers_match_oracle`, a variant taking a separate oracle SQL |
+| `peacockdb-core/src/test_support/corpus.rs` | the `data_fusion_disabled` cpu oracle |
+| `flatbuffers/gpu_plan.fbs`, `wire/aggregate_writer.rs`, `cpp/src/operators/aggregate.cpp`, `cpp/tests/gpu/test_plan_executor.cpp` | `distinct` deprecated; its writer, guard and test arguments |
+| `peacockdb-core/src/plan/mod.rs` | `PlanError::Unsupported`'s doc drops "a mixed distinct (#62)" |
+| `testdata/goldens/tpcds.sf1/*.plans.txt`, the cpu tier's q28 sections, `testdata/cost-registry.csv`, `corpus_cases.inc` | q28 |
+| `testdata/tpch-queries/rollup-distinct.sql`, `distinct-functions.sql`, `testdata/goldens/tpch.sf1/*.plans.txt`, the cpu tier's sections for them, `testdata/cost-registry.csv`, `corpus_cases.inc` | rollup-distinct, distinct-functions |
+| `llm-wiki/architecture.md` ("DISTINCT lowers to grouping", "Grouping sets", the wire's `aggr_funcs`), `build-test.md`, `tickets/` | the lowering described; counts; #62 archived, #65, #195 and #261 lines; #262 filed with this spec |
+
+Component-level API: the wire format — `AggregateFuncNode.distinct` deprecated, no slot moves. No
+facade, trait or ABI symbol changes.
+
+## Restriction
+
+The lowering, its refusals and the `distinct` field. No backend change: both run the two-stage
+plan as they run any aggregate sequence. No device fix for #65.
+
+## Tests
+
+- Plan tests of the two stages: grouped at four lanes (one shuffle, hashed on the keys one column
+  right; the outer stage co-located with no shuffle of its own), keyless at four lanes, `x`
+  already a key, an `avg` companion (its outer `$sum` state the widened decimal), `count` and
+  `sum(DISTINCT)` of one `Int32` column sharing one inner key, a ROLLUP (`x` unmasked in every
+  set), and a ROLLUP over eight keys whose project casts a `UInt16` id to `UInt8` — and a
+  two-key ROLLUP with no such cast.
+- End-to-end on the cpu (`tests/end_to_end.rs`, the five modes):
+  - against DataFusion on the same SQL, where DataFusion answers right: `count` and `sum`
+    DISTINCT beside `count` and `avg` companions; an argument holding NULLs
+    (`store_sales.ss_customer_sk`, 129,392 NULLs at sf1); the empty keyless case, red before the
+    fix: `select count(ss_customer_sk), count(distinct ss_customer_sk) from store_sales where
+    ss_quantity + ss_item_sk < 0;` (tpcds) answers `0, 0` — a predicate row-group statistics
+    cannot prune, since `ss_quantity < 0` prunes every row group and the plan is refused before
+    it runs;
+  - against a hand-written oracle (`sql_answers_match_oracle`): `distinct-functions.sql` itself,
+    against SQL DataFusion answers right — the DISTINCT aggregates over `SELECT DISTINCT
+    l_returnflag, l_quantity`, joined on `l_returnflag` to the companions over `lineitem`, under
+    the same column names.
+
+  No rollup case here: the harness runs all five modes, and a rollup's tp4
+  modes fail on the cpu on #189 until repartition-keys lands; `rollup-distinct`'s tp1 cpu cells
+  compare its answer with DataFusion instead.
+- `bug_` tests for #261 and #144.
+- `decompose` called directly with a distinct `AggregateFunctionExpr` is refused with the
+  generic message. This is an ordinary test, not a `bug_` one.
+- Every existing plan golden but q28's unchanged (rollup-distinct's are new); `recipe-payloads.txt`
+  unchanged.
+
+## Verification bar
+
+- rust-only: `--lib` (plan goldens, the planner's tests), `test_cpu_corpus`, `test_corpus_goldens`,
+  `test_cost_model`.
+- ffi: `--lib -- ffi_tests::` and the payload test, through `scripts/cargo-cudf.sh`
+  (`build-test.md`'s FFI workflow).
+- C++: `scripts/build.sh --cudf_ROOT <rapids-cuda-12.2> --gcc-version 12` builds `cpp/build`,
+  `peacock_plan_tests` included; `ctest -L cpu`.
+- device: none. q28's gpu cells wait on join-backend; the device's DISTINCT walk waits on the host.
+
+## No GPU, superseded
+
+**Superseded 2026-10-09:** this task's GPU tests now run on nebius-gpu, under chain K's board
+note in `tasks.md`, which reopens it to `building` for its GPU half. The paragraph below is the
+original rule, kept for the record.
+
+Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. No device run,
+no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs
+are not waited on. The C++ changes are built, not run on a device.
+
+## Completeness signoff
+
+Solved under its constraints. The lowering is as specified, and `distinct-functions` now runs it
+on a device at five modes — the first such plan any device has run, the C++ change with it. #261
+and #144 stay refused by name, and the wire's `distinct` is deprecated with no slot moved.
+
+Two shortcuts, both on #225 and both earned by a run: a schema-validation mask off at the three
+tp4 modes, where #225 refuses the outer init's Welford state, and `golden_approx_std` for one ULP
+of `stddev`. The cast-back stays pinned by a plan test, for a better reason than first given — a
+device holds `{type_id, scale}`, not a precision. Nothing else.
+
+Owed at merge: q28's and `rollup-distinct`'s device cells, off on #152, #65 and #189 with #262
+narrowed to that; #144's `Float32 → Float64` subcase; and two wiki edits nobody asked for, a
+`build-test.md` antipattern bullet and a widened `coding-style.md` re-export rule.
+
+---
+
+<!-- archived from llm-wiki/tasks/guard-checks.md -->
+
+**Merged 2026-10-23 as PR #170, chain K's task, one commit `2c1b99f8`, merged into master by `385a7c2d`.**
+
+# One rule, checked wherever it is written down
+
+Kind: production
+
+**This task closes [#233](../tickets/corpus-coverage.md#t233)** (the plan validator does not
+check that a pass-through node keeps its input's column count) **and
+[#174](../tickets/corpus-coverage.md#t174)** (two clamps for one rule, and nothing compares them).
+First of chain K, which runs beside chain J while the GPU host is down: everything here runs on
+the cpu tier. No production behaviour changes; both tickets are a check that is missing.
+
+## Why it happens
+
+**#233.** `declared_width` (`plan/validate.rs`) checks a node's column count for the kinds that
+compute a width, and for a Filter without a projection, against its input. The other pass-through
+kinds — Sort, CoalesceAllBatches, AccumulateBatchesAndSort, Limit, MergePartitions,
+EmitPartitions, MergeSortedPartitions — fall to its `_ => return Ok(())` arm and reach only
+`types_across_the_edge`, which zips the node's fields with its input's. `zip` stops at the shorter
+list, so a sort declaring three columns over five passes both checks. The planner cannot build
+that tree; a test that rewrites a planned tree and calls `validate` can. (The ticket lists the
+filter among them; `declared_width` already covers it.)
+
+**#174.** A limit's row range is clamped twice: `RowRange::clamp` (`executor/mod.rs`, calling
+`row_range::clamp` in `executor/row_range.rs`; `(offset, length)`) for the cpu, C++ `clamp_row_range` (`node_session.cpp`, `(begin, end)`) for
+the device's export and slice. Each side has its own cases — 4 in `executor/row_range/tests.rs`,
+10 in `cpp/tests/cpu/test_executor.cpp`'s four `ClampRowRange` tests, 14 in all — and no case
+reaches both. A third copy is the driver's mock: `MockUnload::unload`
+(`executor/driver/tests/mock.rs`) clamps with its own `min` arithmetic, so the driver's limit
+tests check that copy and not the shipped rule.
+
+## The work
+
+1. **#233.** `types_across_the_edge` compares the node's field count with its input's before the
+   zip. A mismatch is `PlanError::Invalid` naming the node and both counts, worded as
+   `declared_width`'s message is.
+2. **#174, the cases.** `testdata/fixtures/row-range-clamp.txt` holds every existing case, one
+   per line: `offset length rows -> begin end`, `max` spelling `u64::MAX` (in `offset` and
+   `length` only), `#` comments, grouped as to-the-end, past-the-end, empty, overflow. `begin
+   end` is the expected half-open span. The fixtures README gains a paragraph for it, and its
+   opening line, which says every fixture is read by two crates, is reworded.
+3. **#174, Rust.** `row_range/tests.rs` reads the file through `test_support::testdata_root()`
+   and checks, per line, `RowRange { offset, length }.clamp(rows)` mapped `(o, l) → (o, o + l)`
+   against `(begin, end)`. Its literal cases go.
+4. **#174, C++.** `peacock_cpu_tests` takes the `PEACOCK_TESTDATA_DIR` compile definition, read
+   with the environment override as `peacock_plan_tests` does. `ClampRowRange` checks
+   `clamp_row_range(offset, length, rows)` per line; all four tests' literal cases go.
+5. **#174, the mock.** `MockUnload::unload` calls `rows.clamp(batch.rows as u64)`.
+   `driver/tests/limit.rs`'s counts stay as they are.
+6. Both readers fail on a malformed line, naming its number, and on a file with no case. Both
+   accept the same lines: a number is digits only (no sign, no space), as Rust's `u64` parse
+   takes it.
+7. Every host that runs `peacock_cpu_tests` from a copied tree is handed the fixture. The GPU
+   runs install every `peacock_*_tests` binary and run them by glob, `peacock_cpu_tests` included,
+   from a testdata tree filled by hand-written lists: `build-test-shadgpu.sh` (beside its
+   `cost-registry.csv` rsync) and `pipeline.yml`'s GPU job (its `rsync_retry` list) each gain
+   `testdata/fixtures`. `build-test.sh`'s `sync_fixtures` already sweeps every tracked testdata
+   file. The rust lib's row-range test runs on no GPU host: those run `gpu_tests::` only.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/plan/validate.rs`, `plan/validate/tests.rs` | #233's check and its two cases |
+| `testdata/fixtures/row-range-clamp.txt`, `testdata/fixtures/README.md` | the case table |
+| `peacockdb-core/src/executor/row_range/tests.rs` | reads the table |
+| `peacockdb-core/src/executor/driver/tests/mock.rs` | the mock calls the clamp |
+| `cpp/tests/cpu/test_executor.cpp`, `cpp/CMakeLists.txt` | reads the table; the compile definition |
+| `scripts/build-test-shadgpu.sh`, `.github/workflows/pipeline.yml` | `testdata/fixtures` provisioned to the GPU host |
+| `llm-wiki/build-test.md`, `llm-wiki/tickets/` | counts; both tickets archived on merge |
+
+Component-level API: none. No facade, trait, ABI, wire or golden change.
+
+## Restriction
+
+The validator check, the shared table and the mock. Neither clamp's code changes; if the table
+shows them disagreeing, that is a ticket, not a fix here.
+
+## Tests
+
+- `plan/validate/tests.rs`: a `GpuSort` over a two-column source whose declared schema the test
+  overrides (its `kind` field, reachable from `plan`'s own test module; the constructor derives
+  the schema) to one column is refused, naming both counts, and so is one overridden to three;
+  the sort as built passes. Each fails before the change.
+- The fourteen table lines pass on both sides. A deliberately wrong line, tried once by hand and
+  not committed, fails both suites on that line.
+- The driver's limit tests green unchanged.
+
+## Verification bar
+
+- rust-only: `--lib`, every target green.
+- C++: `ctest --test-dir cpp/build -L cpu`, locally, `cpp/build` configured against cuDF 25.02
+  (`scripts/build.sh --configure --build --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2
+  --gcc-version 12`).
+- device: none.
+
+## No GPU
+
+Chain K runs without a GPU, so it does not contend with chain J for nebius-gpu. No device run,
+no GPU cycle. This task reaches `done` when every CI job but the GPU tests is green; the GPU jobs
+are not waited on. Its edits to `build-test-shadgpu.sh` and to `pipeline.yml`'s GPU job are not
+run here; the next GPU run after merge is the first to exercise them.
+
+## Completeness signoff
+
+Solved under its constraints. The validator refuses a pass-through width mismatch; both clamps
+and the driver's mock now answer to `testdata/fixtures/row-range-clamp.txt`; the fourteen cases
+are the exact union of the two sides' old literals, and the two clamps agree on every one, so
+#174 produced no divergence ticket.
+
+One shortcut, and it is the chain's: no GPU. The `build-test-shadgpu.sh` and `pipeline.yml`
+GPU-job provisioning edits ship verified by reading and a local rsync rehearsal, not by a run on
+the host. No other shortcut or bandaid.
+
+Owed at merge: archive #233 and #174, including `tickets.md`'s corpus-coverage count 33 → 31.
+
+---
+
 <!-- archived from llm-wiki/tasks/join-backend.md -->
 
 **Merged 2026-10-16 as PR #179, chain J's task, two commits: the code `4b75f649` and the board `3e1bb4ba`, merged into master by `72103bf1`.**
