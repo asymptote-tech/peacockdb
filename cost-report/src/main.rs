@@ -2296,10 +2296,10 @@ mod tests {
         let q61 = "duckdb(no_sort, rel(1e-5, \"\"promotional_sales.promotions / all_sales.total \
                    * Int64(100)\"\"))";
         let text = format!(
-            "dataset,sf,query,{},plan_status,features,tickets,duckdb_oracle,cpu_oracle,\
+            "dataset,sf,query,{},plan_status,features,tickets,stored,duckdb_oracle,cpu_oracle,\
              gpu_oracle,schema_validation\n\
-             tpcds,1,q61,{states},ok,avg,288,\"{q61}\",\"data_fusion(sort, exact)\",\
-             \"golden(no_sort, exact)\",enabled\n",
+             tpcds,1,q61,{states},ok,avg,288,result|result|fingerprint,\"{q61}\",\
+             \"data_fusion(sort, exact)\",\"golden(no_sort, exact)\",enabled\n",
             modes.join(",")
         );
         let dir = std::env::temp_dir().join(format!("cost-report-csv-{}", std::process::id()));

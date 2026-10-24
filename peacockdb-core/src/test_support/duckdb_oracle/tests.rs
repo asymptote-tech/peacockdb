@@ -9,7 +9,7 @@ use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, TimeUnit};
 use datafusion::arrow::util::display::array_value_to_string;
 
-use super::tight;
+use super::{compare_device_section, tight};
 use crate::test_support::{
     CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, compare_sections,
 };
@@ -19,6 +19,7 @@ fn compare_on(order: RowOrder, values: Values) -> DuckdbOracle {
         order,
         values,
         dates: vec![],
+        gpu_fingerprint: false,
     }
 }
 
@@ -45,6 +46,17 @@ fn dated(columns: &[&str]) -> DuckdbOracle {
         order: RowOrder::Sort,
         values: Values::Exact,
         dates: columns.iter().map(|c| c.to_string()).collect(),
+        gpu_fingerprint: false,
+    }
+}
+
+/// `duckdb(sort, exact, gpu: fingerprint)`: the device side by fingerprint.
+fn gpu_fp() -> DuckdbOracle {
+    DuckdbOracle::Compare {
+        order: RowOrder::Sort,
+        values: Values::Exact,
+        dates: vec![],
+        gpu_fingerprint: true,
     }
 }
 
@@ -113,6 +125,57 @@ fn divergent_is_gone() {
 #[should_panic(expected = "sort|no_sort")]
 fn an_unknown_order_names_the_two() {
     DuckdbOracle::parse("duckdb(sorted, exact)");
+}
+
+#[test]
+fn the_gpu_part_parses() {
+    assert_eq!(
+        DuckdbOracle::parse("duckdb(no_sort, exact, gpu: fingerprint)"),
+        DuckdbOracle::Compare {
+            order: RowOrder::NoSort,
+            values: Values::Exact,
+            dates: vec![],
+            gpu_fingerprint: true,
+        }
+    );
+    let dated = DuckdbOracle::parse("duckdb(no_sort, exact, date(\"d\"), gpu: fingerprint)");
+    assert_eq!(
+        dated,
+        DuckdbOracle::Compare {
+            order: RowOrder::NoSort,
+            values: Values::Exact,
+            dates: vec!["d".into()],
+            gpu_fingerprint: true,
+        }
+    );
+    assert_eq!(
+        DuckdbOracle::parse("duckdb(no_sort, exact, gpu: fingerprint)").facets(),
+        ["no_sort", "exact", "gpu_fingerprint"]
+    );
+}
+
+#[test]
+#[should_panic(expected = "gpu: takes fingerprint only")]
+fn the_gpu_part_takes_fingerprint_only() {
+    DuckdbOracle::parse("duckdb(sort, exact, gpu: rows)");
+}
+
+#[test]
+#[should_panic(expected = "unknown duckdb_oracle")]
+fn gpu_comes_last() {
+    DuckdbOracle::parse("duckdb(sort, exact, gpu: fingerprint, date(\"d\"))");
+}
+
+#[test]
+#[should_panic(expected = "unknown duckdb_oracle")]
+fn duckdb_fingerprint_takes_no_gpu_part() {
+    DuckdbOracle::parse("duckdb_fingerprint(gpu: fingerprint)");
+}
+
+#[test]
+#[should_panic(expected = "unknown duckdb_oracle")]
+fn duckdb_none_takes_no_gpu_part() {
+    DuckdbOracle::parse("duckdb_none(gpu: fingerprint)");
 }
 
 #[test]
@@ -436,6 +499,66 @@ fn one_side_fingerprinted_near_the_cap_is_fingerprinted_here_too() {
         compare(&DuckdbOracle::Fingerprint, OURS, &as_fingerprint, &KINDS),
         Ok(())
     );
+}
+
+// --- the device side: `gpu: fingerprint` -----------------------------------
+
+/// OURS over the cap, as a device section holding a fingerprint reads.
+fn fp() -> String {
+    crate::test_support::fingerprint_of_rendered(OURS, &[false, false])
+}
+
+#[test]
+fn a_fingerprinted_device_section_is_compared_under_gpu_fingerprint() {
+    assert_eq!(
+        compare_device_section(&gpu_fp(), &fp(), OURS, &KINDS),
+        Ok(())
+    );
+}
+
+/// The same fingerprint against a DuckDB answer one row off: the device side is compared,
+/// not waved through.
+#[test]
+fn a_fingerprinted_device_section_that_differs_fails_under_gpu_fingerprint() {
+    let off = OURS.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
+    compare_device_section(&gpu_fp(), &fp(), &off, &KINDS)
+        .expect_err("a different answer behind the fingerprint");
+}
+
+#[test]
+fn a_fingerprinted_device_section_without_the_part_fails() {
+    let said = compare_device_section(&exact(), &fp(), OURS, &KINDS)
+        .expect_err("a fingerprinted device section under a line that compares rows");
+    assert!(said.contains("declare `gpu: fingerprint`"), "{said}");
+}
+
+#[test]
+fn rows_on_the_device_under_gpu_fingerprint_fail() {
+    let said = compare_device_section(&gpu_fp(), OURS, DUCK, &KINDS)
+        .expect_err("rows on the device where the line says fingerprint");
+    assert!(said.contains("drop `gpu: fingerprint`"), "{said}");
+}
+
+#[test]
+fn a_fingerprinted_cpu_section_is_refused_under_a_gpu_fingerprint_line() {
+    let said = compare(&gpu_fp(), &fp(), DUCK, &KINDS)
+        .expect_err("the cpu side does not take the device's part");
+    assert!(said.contains("declare duckdb_fingerprint"), "{said}");
+}
+
+#[test]
+fn the_device_side_under_duckdb_fingerprint_is_unchanged() {
+    assert_eq!(
+        compare_device_section(&DuckdbOracle::Fingerprint, &fp(), OURS, &KINDS),
+        Ok(())
+    );
+}
+
+#[test]
+fn rows_on_the_device_without_the_part_are_compared_as_rows() {
+    assert_eq!(compare_device_section(&exact(), OURS, DUCK, &KINDS), Ok(()));
+    let off = DUCK.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
+    compare_device_section(&exact(), OURS, &off, &KINDS).expect_err("a wrong row");
 }
 
 #[test]

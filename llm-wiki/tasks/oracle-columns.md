@@ -134,3 +134,14 @@ Component-level API: none. No engine, wire or ABI change.
 - Widget tests: q2's two split cells, a one-word `stored` cell, and each header's hover text.
 - `testdata/report.html` regenerated with `python3 scripts/ticket_widget.py` in the commit that
   changes the registry.
+
+## Completeness signoff (2026-10-21)
+
+Solved under its constraints. `duckdb(…, gpu: fingerprint)` parses last, is refused on the bare
+oracles and with any other value, and the device side fails in both directions, so no
+fingerprint falls back silently. q2 is on at all five device modes, recorded on nebius-gpu. The
+registry's `stored` column is held to the three goldens both ways, including a stale
+`gpu: fingerprint` line; every CSV reader takes it; the report shows the four columns with
+q2's split cells. No engine change. Completeness reviewer: none; analyst: archived #56's original
+shape restored, two build-test.md sentences corrected by the coordinator. Shortcuts or bandaids:
+none.

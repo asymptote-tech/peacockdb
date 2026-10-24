@@ -158,18 +158,21 @@ class RowOrder(unittest.TestCase):
 
     def test_a_quoted_oracle_cell_is_one_field(self):
         """The registry's quoted spelling reads whole, so q61's `no_sort` is seen and a
-        comma inside its column name does not shift the columns."""
+        comma inside its column name does not shift the columns; q2's `no_sort` is read past
+        its `gpu: fingerprint` part."""
         name = "promotional_sales.promotions / all_sales.total * Int64(100)"
         spelled = f'duckdb(no_sort, rel(1e-5, "{name}"))'
         quoted = '"' + spelled.replace('"', '""') + '"'
         with tempfile.TemporaryDirectory() as scratch:
             registry = pathlib.Path(scratch) / "cost-registry.csv"
             registry.write_text(
-                "dataset,sf,query,tickets,duckdb_oracle,cpu_oracle\n"
-                f'tpcds,1,q61,288,{quoted},"data_fusion(sort, exact)"\n'
-                "tpcds,1,q1,,duckdb(sort, exact),na\n"
-                "tpch,1,q3,,\"duckdb(no_sort, exact)\",na\n")
-            self.assertEqual(dr.ordered_queries("tpcds", registry), {"q61"})
+                "dataset,sf,query,tickets,stored,duckdb_oracle,cpu_oracle\n"
+                f'tpcds,1,q61,288,result,{quoted},"data_fusion(sort, exact)"\n'
+                "tpcds,1,q1,,result,duckdb(sort, exact),na\n"
+                "tpcds,1,q2,,result|result|fingerprint,"
+                "\"duckdb(no_sort, exact, gpu: fingerprint)\",\"data_fusion(sort, exact)\"\n"
+                "tpch,1,q3,,result,\"duckdb(no_sort, exact)\",na\n")
+            self.assertEqual(dr.ordered_queries("tpcds", registry), {"q61", "q2"})
 
 
 class QueryFiles(unittest.TestCase):

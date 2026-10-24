@@ -374,6 +374,10 @@ pub struct CsvRow {
     pub plan_status: String,
     pub features: Vec<String>,
     pub tickets: Vec<String>,
+    /// What each side's result section holds: `result`, `fingerprint`, `cpu|duckdb|gpu` where
+    /// the sides differ, or `na` for a query with no line. Held to the goldens by
+    /// `the_registry_stored_column_matches_the_goldens_in_both_directions`.
+    pub stored: String,
     /// The `corpus_query!` line's three oracles, each its full spelling, and its schema
     /// validation (`enabled|disabled`), copied here so the widget can show them; all four `na`
     /// for a query with no line.
@@ -521,13 +525,16 @@ pub enum Values {
 /// `date` name the columns they apply to, as our result header prints them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DuckdbOracle {
-    /// `duckdb(<order>, <values>[, date("<column>", …)])`. A `dates` column's DuckDB cell is
-    /// compared by its date part: DuckDB answers `date ± interval` as a timestamp where
-    /// DataFusion answers a date.
+    /// `duckdb(<order>, <values>[, date("<column>", …)][, gpu: fingerprint])`. A `dates`
+    /// column's DuckDB cell is compared by its date part: DuckDB answers `date ± interval` as
+    /// a timestamp where DataFusion answers a date. `gpu_fingerprint` is read by the device
+    /// case alone: its section is over the cap and compared by fingerprint, while the cpu's
+    /// is compared under the rest of the spelling.
     Compare {
         order: RowOrder,
         values: Values,
         dates: Vec<String>,
+        gpu_fingerprint: bool,
     },
     /// `duckdb_fingerprint`: both sides are over the cap and hold a fingerprint.
     Fingerprint,
@@ -538,7 +545,7 @@ pub enum DuckdbOracle {
 impl DuckdbOracle {
     /// Every facet some corpus line must name, so one nothing uses is deleted rather than
     /// carried (`every_duckdb_oracle_is_named_by_some_line`).
-    pub const FACETS: [&'static str; 8] = [
+    pub const FACETS: [&'static str; 9] = [
         "sort",
         "no_sort",
         "exact",
@@ -547,6 +554,7 @@ impl DuckdbOracle {
         "date",
         "fingerprint",
         "none",
+        "gpu_fingerprint",
     ];
 
     /// The spelling as a line writes it. Exhaustive: an unknown spelling panics naming the
@@ -563,13 +571,15 @@ impl DuckdbOracle {
         }
     }
 
-    /// The [`Self::FACETS`] this spelling names, plus `date` where it has one.
+    /// The [`Self::FACETS`] this spelling names, plus `date` and `gpu_fingerprint` where it
+    /// has them.
     pub fn facets(&self) -> Vec<&'static str> {
         match self {
             Self::Compare {
                 order,
                 values,
                 dates,
+                gpu_fingerprint,
             } => {
                 let mut facets = vec![
                     match order {
@@ -584,6 +594,9 @@ impl DuckdbOracle {
                 ];
                 if !dates.is_empty() {
                     facets.push("date");
+                }
+                if *gpu_fingerprint {
+                    facets.push("gpu_fingerprint");
                 }
                 facets
             }
@@ -772,6 +785,29 @@ pub fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
 /// names a cuDF other than the committed one, whose file is gitignored beside it.
 pub fn gpu_result_golden(dataset: &str, sf: &str, version: Option<&str>) -> PathBuf {
     corpus_golden::gpu_result_golden(dataset, sf, version)
+}
+
+/// The registry's `stored` cell for one corpus query, as the three result goldens say it:
+/// `result` or `fingerprint` where every side with a section agrees, else `cpu|duckdb|gpu`.
+pub fn stored_of(dataset: &str, sf: &str, query: &str) -> String {
+    corpus_golden::stored_of(dataset, sf, query)
+}
+
+/// A registry `stored` cell against [`stored_of`]'s, or `None` where they agree; the
+/// mismatch names the first side whose part differs.
+pub fn stored_mismatch(dataset: &str, query: &str, got: &str, want: &str) -> Option<String> {
+    registry::stored_mismatch(dataset, query, got, want)
+}
+
+/// A line's `gpu: fingerprint` against its registry `stored` cell, or `None` where the line
+/// does not declare it or the cell's gpu part is `fingerprint`.
+pub fn gpu_fingerprint_mismatch(
+    dataset: &str,
+    query: &str,
+    duckdb_oracle: &str,
+    stored: &str,
+) -> Option<String> {
+    registry::gpu_fingerprint_mismatch(dataset, query, duckdb_oracle, stored)
 }
 
 /// What `PCK_WRITE_GPU_RESULT` asks of a device run.
