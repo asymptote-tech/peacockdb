@@ -344,25 +344,30 @@ operator_case! {
     }
 }
 
-// #57 — value-form CASE is withheld on the column path since the fold on the comparand
-// came back wrong; the device refuses it, the cpu answers.
+/// `CASE key WHEN 1 THEN 'one' WHEN 2 THEN 'two' [ELSE 'other'] END`; `key` is NULL every
+/// 11th row, and a NULL comparand matches no WHEN.
+fn value_case(else_expr: Option<Expr>) -> GpuProject {
+    let case = Expr::Case {
+        comparand: Some(Box::new(Expr::column(1, "key"))),
+        when_then: vec![(lit_i32(1), lit_str("one")), (lit_i32(2), lit_str("two"))],
+        else_expr: else_expr.map(Box::new),
+    };
+    project(vec![keep_id(), (case, "word", DataType::Utf8)])
+}
+
 operator_case! {
     GpuProject,
-    fn bug_a_value_case_is_refused_on_the_device() {
-        let case = Expr::Case {
-            comparand: Some(Box::new(Expr::column(1, "key"))),
-            when_then: vec![(lit_i32(1), lit_str("one"))],
-            else_expr: Some(Box::new(lit_str("other"))),
-        };
-        let node = project(vec![keep_id(), (case, "word", DataType::Utf8)]);
-        let outcome = run_both(&node, Script::Exec(vec![input()]));
-        assert!(
-            outcome
-                .gpu_refuses()
-                .contains("value-form CASE not supported in column path"),
-            "{}",
-            outcome.gpu_refuses()
-        );
+    fn a_value_case_agrees() {
+        let node = value_case(Some(lit_str("other")));
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
+    }
+}
+
+operator_case! {
+    GpuProject,
+    fn a_value_case_without_else_answers_null() {
+        let node = value_case(None);
+        run_both(&node, Script::Exec(vec![input()])).same(Order::AsEmitted);
     }
 }
 

@@ -37,7 +37,7 @@ tpcds,1,q35,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enab
 tpcds,1,q36,disabled,disabled,disabled,disabled,disabled,na,na,na,na,na,na,na,na,na,na,ok,window_functions top_n,32 143,na,na,na
 tpcds,1,q37,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q38,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,,data_fusion_exact,golden_exact,enabled
-tpcds,1,q39,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,disabled,disabled,disabled,disabled,disabled,ok,corr_subquery stddev_var avg,57,data_fusion_approximate,golden_approx_std,enabled
+tpcds,1,q39,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery stddev_var avg,,data_fusion_approximate,golden_approx_std,enabled
 tpcds,1,q40,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n outer_join,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q41,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,top_n,,data_fusion_exact,golden_exact,enabled
 tpcds,1,q42,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,enabled,ok,corr_subquery top_n,,data_fusion_exact,golden_exact,enabled

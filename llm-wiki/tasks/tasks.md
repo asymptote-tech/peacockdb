@@ -134,7 +134,7 @@ name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
 A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
 Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.
 
-### 9. [`value-case.md`](value-case.md) — closes [#57](../tickets/corpus-coverage.md#t57) — state: approved to build
+### 9. [`value-case.md`](value-case.md) — closes [#57](../archive/archived-tickets.md#t57) — state: done — PR #185
 
 The device lowers `CASE x WHEN v …` onto the search form's fold, NULL never matching; tpcds q39's
 device cells on.

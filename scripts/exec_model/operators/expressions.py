@@ -350,8 +350,8 @@ class Case(Expr):
 
     Folded from the last branch backwards, each step selecting `then` where the condition
     holds and the accumulated result otherwise — the same shape as `build_column_case`'s
-    `copy_if_else` fold in `cpp/src/expr.cpp`. Value-form CASE is deliberately absent: it
-    is what #57 withheld on the GPU.
+    `copy_if_else` fold in `cpp/src/expr.cpp`. The device lowers the value form onto this
+    one, a condition `x = v` per WHEN, so the model needs no form of its own.
     """
 
     whens: tuple           # ((condition, then), …)
