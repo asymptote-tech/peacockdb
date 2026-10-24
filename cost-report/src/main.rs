@@ -14,11 +14,12 @@
 //! directional-only proxy (the report displays it, asserts nothing).
 //!
 //! Emits a self-contained HTML page (inline CSS, for GitHub Pages) and a compact
-//! Markdown blob (for the upserted PR comment, keyed on [`SENTINEL`]).
+//! Markdown blob (for the upserted PR comment, keyed on [`SENTINEL`]). `--widget-md` writes
+//! the comment's tables whole, for `scripts/ticket_widget.py`.
 //!
 //! Usage — the flags here are `FLAGS`, and a test holds the two to each other:
 //!   cost-report [--testdata DIR] [--html FILE] [--site DIR]
-//!               [--md FILE]
+//!               [--md FILE] [--widget-md FILE]
 //!               [--pages-url URL] [--sha SHA] [--repo OWNER/REPO]
 //!               [--generated-at TS] [--published]
 //!               [--cost-diff --base REF|DIR --md-diff FILE]
@@ -59,7 +60,7 @@ const COMMENT_MAX_BYTES: usize = 65_536;
 /// checks the workflow's invocations against it, in both directions: a caller passing a
 /// flag that no longer exists, and a flag nothing passes any more.
 const FLAGS: &[&str] = &[
-    "--testdata", "--html", "--site", "--md", "--md-diff", "--pages-url",
+    "--testdata", "--html", "--site", "--md", "--widget-md", "--md-diff", "--pages-url",
     "--published", "--sha", "--generated-at", "--repo", "--cost-diff", "--base",
 ];
 
@@ -443,6 +444,7 @@ fn main() {
         panic!("unknown flag {bad}: this binary accepts {FLAGS:?}");
     }
     let md_out = opt("--md", "");
+    let widget_md_out = opt("--widget-md", "");
     let md_diff_out = opt("--md-diff", "");
     let pages_url = opt("--pages-url", PAGES_URL_DEFAULT);
     let published = args.iter().any(|a| a == "--published");
@@ -526,7 +528,12 @@ fn main() {
         eprintln!("assembled page-per-sha site at {site}/");
     }
 
-    let md = render_markdown(&datasets, &pages_url, published, &links, freshness.as_deref());
+    if !widget_md_out.is_empty() {
+        let tables = render_markdown(Markdown::Whole, &datasets, &pages_url, published, &links, None);
+        std::fs::write(&widget_md_out, &tables).unwrap_or_else(|e| panic!("write {widget_md_out}: {e}"));
+        eprintln!("wrote {widget_md_out}");
+    }
+    let md = render_markdown(Markdown::Comment, &datasets, &pages_url, published, &links, freshness.as_deref());
     assert!(
         md.len() <= COMMENT_MAX_BYTES,
         "the comment is {} bytes against the {COMMENT_MAX_BYTES}-byte cap — GitHub refuses the \
@@ -1090,7 +1097,24 @@ fn full_report_ref(published: bool, pages_url: &str) -> String {
     }
 }
 
+/// What a markdown rendering is for. The PR comment is held under GitHub's body cap, so it
+/// drops the Features column and shows pbench as its summary line (#258). `--widget-md` writes
+/// the whole tables, which `ticket_widget.py` lays `testdata/report.html` out from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Markdown {
+    Comment,
+    Whole,
+}
+
+impl Markdown {
+    /// Whether this rendering gives `d` a table. The comment gives pbench its summary line.
+    fn tables(self, d: &Dataset) -> bool {
+        self == Markdown::Whole || d.label != "pbench"
+    }
+}
+
 fn render_markdown(
+    shape: Markdown,
     datasets: &[Dataset],
     pages_url: &str,
     published: bool,
@@ -1123,10 +1147,19 @@ fn render_markdown(
     s.push('\n');
 
     for d in datasets {
-        // The same table as the html's, in what markdown allows: no row background, so the
-        // ratio cell carries the flag, and no hover, so the mode order is above the table.
-        // A table that lands in one rendering and not the other is the failure to expect
-        // here — the html is what a person looks at and this is what the review reads.
+        if !shape.tables(d) {
+            let _ = write!(
+                s,
+                "**pbench** — {}/{} GPU-operational; its rows are on the full report. {}\n\n",
+                d.operational(),
+                d.total,
+                full_report_ref(published, pages_url)
+            );
+            continue;
+        }
+        // The html's table in what markdown allows: no row background, so the ratio cell
+        // carries the flag, and no hover, so the mode order is above the table. The comment
+        // drops the Features column; `Whole` keeps it, and the html always has it.
         let _ = write!(
             s,
             "<details><summary>{} — {}/{} GPU-operational</summary>\n\n",
@@ -1142,9 +1175,12 @@ fn render_markdown(
         s.push_str(concat!(
             "<table>\n<tr><th>Query</th><th><sub>plan</sub></th><th><sub>cpu</sub></th>",
             "<th><sub>gpu</sub></th><th><sub>PeacockDB \u{3a3}out</sub></th>",
-            "<th><sub>DuckDB \u{3a3}out</sub></th><th>Ratio</th><th><sub>Features</sub></th>",
-            "<th>Tickets</th></tr>\n"
+            "<th><sub>DuckDB \u{3a3}out</sub></th><th>Ratio</th>"
         ));
+        if shape == Markdown::Whole {
+            s.push_str("<th><sub>Features</sub></th>");
+        }
+        s.push_str("<th>Tickets</th></tr>\n");
         for r in &d.rows {
             let stem = r.stem();
             let cost = r.peacockdb.as_ref().map(|(_, total)| *total);
@@ -1168,7 +1204,7 @@ fn render_markdown(
             };
             let _ = write!(
                 s,
-                "<tr><td>{}</td>{}<td><sub>{}</sub></td><td><sub>{}</sub></td><td>{}</td><td><sub>{}</sub></td><td>{}</td></tr>\n",
+                "<tr><td>{}</td>{}<td><sub>{}</sub></td><td><sub>{}</sub></td><td>{}</td>{}<td>{}</td></tr>\n",
                 match r.n {
                     None => format!("<sub>{}</sub>", query_cell_md(&r.query, links.query_url_short(d.query_rel, &stem))),
                     Some(_) => query_cell_md(&r.query, links.query_url_short(d.query_rel, &stem)),
@@ -1177,7 +1213,11 @@ fn render_markdown(
                 peacock_cell_md(cost, None, None),
                 cost_cell_md(r.duckdb, None),
                 ratio_cell,
-                if r.features.is_empty() { "—".to_string() } else { r.features.join(" ") },
+                match shape {
+                    Markdown::Comment => String::new(),
+                    Markdown::Whole if r.features.is_empty() => "<td><sub>—</sub></td>".to_string(),
+                    Markdown::Whole => format!("<td><sub>{}</sub></td>", r.features.join(" ")),
+                },
                 tickets_plain(&r.tickets),
             );
         }
@@ -1605,11 +1645,6 @@ mod tests {
     /// costs render as plain text. Tests that assert bare glyph output use this.
     fn dry_links() -> Links {
         Links { repo: "o/r".to_string(), sha: None, tickets: TicketIndex::default() }
-    }
-
-    /// A `Links` WITH a sha, so link-emitting paths are exercised.
-    fn sha_links() -> Links {
-        Links { repo: "o/r".to_string(), sha: Some("abc123".to_string()) , tickets: TicketIndex::default() }
     }
 
     /// Build a Row for tests. `modes` maps each mode column to its state; anything
@@ -2224,20 +2259,13 @@ mod tests {
     /// many more queries fit. What is asserted is the thing GitHub checks — rendered bytes.
     #[test]
     fn the_pr_comment_fits_under_the_body_cap() {
-        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
-        let registry = Registry::load(&testdata.join("cost-registry.csv"));
-        let links = Links {
-            repo: "asymptote-tech/peacockdb".into(),
-            sha: Some("0".repeat(40)),
-            tickets: TicketIndex::default(),
-        };
-        let datasets = all_datasets(&testdata, &registry);
-        let body = render_markdown(&datasets, "https://p/", false, &links, None);
+        let (datasets, body) = the_real_comment();
         // The margin, not just the verdict: the body grows by a row per query enabled, so
         // the number a later reader needs is how many more fit — a guard that only says
         // "green" is one nobody can plan against.
         let margin = COMMENT_MAX_BYTES.saturating_sub(body.len());
-        let per_row = body.len() / datasets.iter().map(|d| d.rows.len()).sum::<usize>().max(1);
+        let tabled = datasets.iter().filter(|d| Markdown::Comment.tables(d));
+        let per_row = body.len() / tabled.map(|d| d.rows.len()).sum::<usize>().max(1);
         println!(
             "{} bytes of {COMMENT_MAX_BYTES}, {margin} spare — about {} more queries at \
              {per_row} bytes a row",
@@ -2250,6 +2278,111 @@ mod tests {
              this with a 422 that reads as a permissions error",
             body.len()
         );
+    }
+
+    /// The real registry's datasets and the comment `the_pr_comment_fits_under_the_body_cap`
+    /// measures, so the shape tests below read the body that is held to the cap.
+    fn the_real_comment() -> (Vec<Dataset>, String) {
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        let links = Links {
+            repo: "asymptote-tech/peacockdb".into(),
+            sha: Some("0".repeat(40)),
+            tickets: TicketIndex::default(),
+        };
+        let datasets = all_datasets(&testdata, &registry);
+        let body = render_markdown(Markdown::Comment, &datasets, "https://p/", false, &links, None);
+        (datasets, body)
+    }
+
+    /// No Features header, and no row wider than its header: a feature cell printed without its
+    /// header leaves the word out and still shifts every row's Tickets cell one column right.
+    #[test]
+    fn the_comment_carries_no_features_column() {
+        let (_, body) = the_real_comment();
+        assert!(!body.contains("Features"), "{body}");
+        let width = |cell: &str| -> usize {
+            match cell.strip_prefix(" colspan=\"") {
+                Some(rest) => rest[..rest.find('"').unwrap()].parse().unwrap(),
+                None => 1,
+            }
+        };
+        for table in body.split("<table>").skip(1) {
+            let table = &table[..table.find("</table>").unwrap()];
+            let mut rows = table.split("<tr>").skip(1);
+            let header = rows.next().unwrap().matches("<th>").count();
+            for row in rows {
+                let cells: usize = row.split("<td").skip(1).map(width).sum();
+                assert_eq!(cells, header, "a row with {cells} cells under {header} headers: {row}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_comment_collapses_pbench_to_its_summary_line() {
+        let (datasets, body) = the_real_comment();
+        let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
+        let line = format!("pbench** — {}/{} GPU-operational", pbench.operational(), pbench.total);
+        assert!(body.contains(&line), "no `{line}` in:\n{body}");
+        for stem in ["anti-null-preserved-condition", "bool-key-group"] {
+            assert!(!body.contains(stem), "pbench's `{stem}` row is in the comment");
+        }
+        assert!(!body.contains("pbench-queries/"), "a pbench query link is in the comment");
+        assert!(body.contains("tpch-queries/q1.sql\">q1</a>"), "TPC-H's q1 row went too");
+    }
+
+    #[test]
+    fn the_page_keeps_features_and_every_pbench_row() {
+        let (datasets, _) = the_real_comment();
+        // A real ticket index: `ticket_link` exits the process on a ticket it cannot resolve.
+        let links = Links {
+            repo: "o/r".into(),
+            sha: None,
+            tickets: TicketIndex::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki")),
+        };
+        let html = render_html(&datasets, "https://p/", &links, None, None);
+        assert!(html.contains("<th>Features</th>"), "the page lost its Features column");
+        let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
+        for r in &pbench.rows {
+            let cell = format!(">{}<", r.query);
+            assert!(html.contains(&cell), "the page lost pbench's `{}` row", r.query);
+        }
+    }
+
+    /// `ticket_widget.py` lays `testdata/report.html` out from the markdown `--widget-md` writes,
+    /// so that rendering keeps what the comment drops.
+    #[test]
+    fn the_widget_tables_keep_features_and_every_pbench_row() {
+        let (datasets, _) = the_real_comment();
+        let links = Links { repo: "o/r".into(), sha: None, tickets: TicketIndex::default() };
+        let md = render_markdown(Markdown::Whole, &datasets, "https://p/", false, &links, None);
+        assert!(md.contains("<th><sub>Features</sub></th>"), "the widget lost its Features column");
+        assert!(md.contains("<details><summary>pbench — "), "the widget lost pbench's table");
+        let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
+        for r in &pbench.rows {
+            assert!(md.contains(&format!(">{}<", r.query)), "no `{}` row", r.query);
+        }
+    }
+
+    /// The checked-in `testdata/report.html` is the widget's page over the `--widget-md` tables.
+    /// Laid out from the comment's markdown instead, it loses the Features column and every
+    /// pbench row while each test above stays green.
+    #[test]
+    fn the_checked_in_report_keeps_features_and_every_pbench_row() {
+        let (datasets, _) = the_real_comment();
+        let report = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/report.html");
+        let page = std::fs::read_to_string(&report).unwrap();
+        assert_eq!(
+            page.matches("<sub>Features</sub></th>").count(),
+            datasets.len(),
+            "testdata/report.html wants one Features header per dataset; regenerate it with \
+             `python3 scripts/ticket_widget.py`"
+        );
+        let pbench = datasets.iter().find(|d| d.label == "pbench").expect("a pbench dataset");
+        for r in &pbench.rows {
+            let row = format!("<tr id=\"pbench-{}\">", r.stem());
+            assert!(page.contains(&row), "testdata/report.html has no `{row}`");
+        }
     }
 
     /// The widget renders every corpus dataset, pbench included, and the three come from one
@@ -2424,7 +2557,7 @@ mod tests {
         };
         let mut d = sample_dataset();
         d.rows[0].tickets = vec!["163".to_string()];
-        let text = render_markdown(std::slice::from_ref(&d), "https://p/", false, &linked, None);
+        let text = render_markdown(Markdown::Comment, std::slice::from_ref(&d), "https://p/", false, &linked, None);
 
         assert!(text.starts_with(SENTINEL), "{text}");
         assert!(text.contains("GPU-operational</summary>"), "the comment lost its table");
@@ -2447,7 +2580,7 @@ mod tests {
     fn both_renderings_carry_the_mode_table() {
         let html = render_html(&[sample_dataset()], "https://p/", &no_links(), None, None);
         assert!(html.contains("TPC-H"), "{html}");
-        let md = render_markdown(&[sample_dataset()], "https://p/", false, &no_links(), None);
+        let md = render_markdown(Markdown::Comment, &[sample_dataset()], "https://p/", false, &no_links(), None);
         assert!(md.contains("GPU-operational"), "{md}");
         // Four leading spaces is a code block, whatever produced them — and what produced
         // them here was a `\` continuation after a `\n\n`, which carries the source's own
@@ -2542,14 +2675,14 @@ mod tests {
 
         let html = render_html(&[one_row_dataset()], "https://p/", &linked, None, None);
         assert!(html.contains(&format!("<a href=\"{url}\">q1</a>")));
-        let md = render_markdown(&[one_row_dataset()], "https://p/", false, &linked, None);
+        let md = render_markdown(Markdown::Comment, &[one_row_dataset()], "https://p/", false, &linked, None);
         assert!(md.contains(&format!("<a href=\"{short}\">q1</a>")), "{md}");
         assert!(!md.contains(url), "the comment kept the full sha: {md}");
 
         // No sha → plain q1 cell, no query link.
         let html_plain = render_html(&[one_row_dataset()], "https://p/", &no_links(), None, None);
         assert!(html_plain.contains("<td>q1</td>") && !html_plain.contains("q1.sql"));
-        let md_plain = render_markdown(&[one_row_dataset()], "https://p/", false, &no_links(), None);
+        let md_plain = render_markdown(Markdown::Comment, &[one_row_dataset()], "https://p/", false, &no_links(), None);
         assert!(md_plain.contains("<td>q1</td>") && !md_plain.contains("q1.sql"));
     }
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """ticket_widget.py — the PR coverage widget as one HTML page, with readable ticket cells.
 
-The PR comment `cost-report --md` writes lists each query's tickets as bare numbers
-(`#152 #220`). This renders the same tables — every dataset the tree's cost-report covers —
-as one standalone HTML page:
+The PR comment's tables, as `cost-report --widget-md` writes them whole — the Features column
+and every pbench row, which the comment itself drops for GitHub's body cap — list each query's
+tickets as bare numbers (`#152 #220`). This renders those tables — every dataset the tree's
+cost-report covers — as one standalone HTML page:
 
 - a contents list at the top, one section per dataset rather than collapsible blocks;
 - under each dataset's title, how many of its queries plan, run on the cpu and run on the
@@ -31,13 +32,13 @@ The short description is the parenthesised part of a ticket header,
 
     scripts/ticket_widget.py                          # this tree -> testdata/report.html
     scripts/ticket_widget.py --root ../other-checkout --wiki llm-wiki=master --wiki ../other-checkout/llm-wiki=ENS-x
-    scripts/ticket_widget.py --md pr_comment.md       # skip cargo, render an existing comment
+    scripts/ticket_widget.py --widget-md widget.md    # skip cargo, render existing --widget-md tables
 
 `testdata/report.html` is checked in, and a commit that changes `testdata/cost-registry.csv`
 regenerates it. It prints no machine path, sha or time, so the same tree always writes the same
 page; its links point at `--blob` and `--ref`, both `master` by default.
 
-The tables come from cost-report itself, so the page shows what the PR shows; this script
+The tables come from cost-report itself, so the page shows the PR's tables, whole; this script
 rewrites cells and lays the page out. cost-report runs with the tree's own cargo target dir
 unless CARGO_TARGET_DIR says otherwise — never point two worktrees at one target dir.
 """
@@ -577,7 +578,9 @@ def main() -> int:
                     help="wiki the tickets are read from, linked at REF (default --ref); repeat to "
                          "fall back to another, the first to hold a number winning "
                          "(default: <root>/llm-wiki)")
-    ap.add_argument("--md", type=Path, help="an existing `cost-report --md` comment; skips cargo")
+    ap.add_argument("--widget-md", type=Path,
+                    help="existing `cost-report --widget-md` tables, never its comment `--md`; "
+                         "skips cargo")
     ap.add_argument("--repo", default=DEFAULT_REPO)
     ap.add_argument("--ref", default="master", help="branch or sha the ticket links point at")
     ap.add_argument("--blob", default="master",
@@ -596,15 +599,15 @@ def main() -> int:
         p = Path(path).resolve()
         return p.relative_to(root).as_posix() if p.is_relative_to(root) else str(path)
 
-    if args.md:
-        md, source = args.md.read_text(), f"Tables from {shown(args.md)}"
+    if args.widget_md:
+        md, source = args.widget_md.read_text(), f"Tables from {shown(args.widget_md)}"
     else:
         with tempfile.TemporaryDirectory() as tmp:
-            md_path = Path(tmp) / "pr_comment.md"
+            md_path = Path(tmp) / "widget.md"
             run = subprocess.run(
                 ["cargo", "run", "-q", "-p", "cost-report", "--",
                  "--testdata", str(root / "testdata"),
-                 "--html", str(Path(tmp) / "report.html"), "--md", str(md_path)],
+                 "--html", str(Path(tmp) / "report.html"), "--widget-md", str(md_path)],
                 cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
             if run.returncode != 0:
                 sys.stderr.write(run.stderr)

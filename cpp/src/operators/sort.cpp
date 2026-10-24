@@ -14,6 +14,12 @@
 
 namespace peacock {
 
+// cuDF applies `null_order` before it flips a DESCENDING key, so BEFORE puts a descending
+// key's nulls last: "nulls first" is BEFORE on an ascending key and AFTER on a descending one.
+cudf::null_order null_order_of(const fb::SortExprNode* key) {
+  return key->nulls_first() == key->asc() ? cudf::null_order::BEFORE : cudf::null_order::AFTER;
+}
+
 TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
   auto input = take_input(in);
   auto tv = input.view();
@@ -41,8 +47,7 @@ TableResult execute_sort(const fb::CudfSort* sort, NodeInputs* in) {
       key_cols.push_back(owned_keys.back()->view());
     }
     orders.push_back(se->asc() ? cudf::order::ASCENDING : cudf::order::DESCENDING);
-    null_orders.push_back(se->nulls_first() ? cudf::null_order::BEFORE
-                                            : cudf::null_order::AFTER);
+    null_orders.push_back(null_order_of(se));
   }
 
   cudf::table_view keys{key_cols};

@@ -45,6 +45,33 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t202"></a>
+### #202 — a descending sort key puts its nulls on the wrong end on the device
+**Done by [`desc-null-order`](../tasks/desc-null-order.md) (chain K); awaiting merge.**
+
+`sort.cpp` and the merge in `node_session.cpp` mapped `nulls_first` straight onto
+`cudf::null_order`, which cuDF applies before it flips a descending key: `DESC NULLS FIRST` came
+back nulls last, and `DESC NULLS LAST` nulls first. Both sites now call `null_order_of`
+(`sort.cpp`): `BEFORE` when `nulls_first == asc`, else `AFTER`. One function, so the two cannot
+drift: a merge reading runs under another mapping than the sort that made them breaks cuDF's
+merge precondition and duplicates and drops rows. The five pins assert agreement now
+(`a_descending_key_with_nulls_last_agrees` and its four siblings), and the accumulating sort and
+the merge gained a `DESC NULLS LAST` case on a nullable key. Six pbench `sort-*` queries sort
+`fact` on a nullable key at all five modes on both engines; all 30 of their device cells were
+red before the fix. tpcds q34 and q71 run at all five device modes.
+
+<a id="t258"></a>
+### #258 — the PR comment had about seven corpus rows of headroom left
+**Done by [`desc-null-order`](../tasks/desc-null-order.md) (chain K); awaiting merge.**
+
+`the_pr_comment_fits_under_the_body_cap` holds cost-report's PR comment under GitHub's
+65,536-byte body cap. At chain K's tip it was 64,808 bytes, 728 to spare. The human took both
+remedies: the comment has no Features column, and pbench is one summary line pointing at the
+full report. That made it 37,343 bytes, 28,193 to spare; with the six `sort-*` rows in and
+#202's cells gone it is 37,317, 28,219 to spare. Both pages
+keep the Features column and every pbench row: cost-report's html, and `testdata/report.html`,
+which `ticket_widget.py` builds from `cost-report --widget-md`, the comment's tables whole.
+
 <a id="t56"></a>
 ### #56 — `duckdb(…, approx)` refuses q2's over-cap device recording
 **Done by [`oracle-columns`](../tasks/oracle-columns.md) (chain K); awaiting merge.**
