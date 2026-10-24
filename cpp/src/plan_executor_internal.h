@@ -11,6 +11,7 @@
 #include <cudf/column/column.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+#include <cudf/version_config.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -32,6 +33,18 @@ cudf::data_type binop_output_type(fb::BinaryOp op, cudf::data_type lhs,
 // and every ColumnRef of an expression answered true has been resolved against it.
 bool cudf_ast_can_evaluate(const fb::Expr* expr, cudf::table_view const& table,
                            std::vector<std::string> const& names);
+
+// The type cuDF's MERGE_M2 takes its count child in: INT32 before 25.06, and INT64 from 25.06,
+// where cuDF #18546 widened it against overflow and refused INT32 (#94).
+constexpr cudf::type_id merge_m2_count_type(int major, int minor) {
+  return major < 25 || (major == 25 && minor < 6) ? cudf::type_id::INT32 : cudf::type_id::INT64;
+}
+
+// The linked cuDF's, from its own headers: each cuDF version is its own build, so no runtime
+// probe and no second source of the version. merge_m2_input casts to it; the gate goes when
+// 25.02 does.
+inline constexpr cudf::type_id kMergeM2CountType =
+    merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR);
 
 // The ordinal a ColumnRef names in a table whose columns are `names`, checked (#164): an index
 // past the width throws naming the index and the width, a reference with no name throws, and a

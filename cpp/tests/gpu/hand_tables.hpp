@@ -8,6 +8,7 @@
 #include "plan_executor.h"
 
 #include <cudf/column/column.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
@@ -30,6 +31,27 @@ std::unique_ptr<cudf::column> column_of(std::vector<T> const& values) {
   return std::make_unique<cudf::column>(cudf::data_type{cudf::type_to_id<T>()},
                                         static_cast<cudf::size_type>(values.size()),
                                         std::move(data), rmm::device_buffer{}, 0);
+}
+
+/// `values` as a column, NULL wherever `valid` is false.
+template <typename T>
+std::unique_ptr<cudf::column> nullable_column_of(std::vector<T> const& values,
+                                                 std::vector<bool> const& valid) {
+  auto column = column_of(values);
+  std::vector<cudf::bitmask_type> words((values.size() + 31) / 32, 0);
+  cudf::size_type nulls = 0;
+  for (size_t i = 0; i < valid.size(); ++i) {
+    if (valid[i])
+      words[i / 32] |= cudf::bitmask_type{1} << (i % 32);
+    else
+      ++nulls;
+  }
+  rmm::device_buffer mask(cudf::bitmask_allocation_size_bytes(values.size()),
+                          cudf::get_default_stream());
+  cudaMemcpy(mask.data(), words.data(), words.size() * sizeof(cudf::bitmask_type),
+             cudaMemcpyHostToDevice);
+  column->set_null_mask(std::move(mask), nulls);
+  return column;
 }
 
 template <typename T>

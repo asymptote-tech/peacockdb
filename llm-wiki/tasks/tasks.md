@@ -129,7 +129,7 @@ The device aggregate reads every state column through its `args` and names every
 wire's `state_names`; one request builder; the dead arms go; `ColumnRef`s checked for bounds and
 name; the scan's names checked at plan time; `tpch/rollup-stddev` added.
 
-### 8. [`welford-device.md`](welford-device.md) — closes [#216](../tickets/corpus-coverage.md#t216), [#94](../tickets/corpus-coverage.md#t94) — state: approved to build
+### 8. [`welford-device.md`](welford-device.md) — closes [#216](../archive/archived-tickets.md#t216), [#94](../archive/archived-tickets.md#t94) — state: done — PR #184
 
 A keyless stddev or var on the device through the request builder on a constant key; a NULL-free
 Welford state; the `MERGE_M2` count type gated on the cuDF version; `tpch/global-stddev` added.

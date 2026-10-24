@@ -189,7 +189,7 @@ fn a_keyless_init_that_finalizes_itself_calls_the_pair_again_at_done() {
 }
 
 /// Every column the device emits is named on the wire, and a Welford's ddof rides beside its
-/// three names: a sample stddev must not reach the device reading as a population one.
+/// three names.
 #[test]
 fn an_init_writes_each_functions_state_names_and_a_welfords_ddof() {
     let triple = |out: &str| -> Vec<AggCall> {

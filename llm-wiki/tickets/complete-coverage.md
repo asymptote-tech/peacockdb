@@ -13,7 +13,7 @@ Tickets for MVP SQL functionality milestone
 - [#249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type](#t249)
 - [#283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
 - [#255 (nested column panic) the planner panics on a Struct or Interval column instead of refusing it](#t255)
-- [#284 — a limit over a filter is refused above one lane](#t284)
+- [#284 (limit over filter at tp4) a limit over a filter is refused above one lane](#t284)
 
 <a id="t239"></a>
 ### #239 (date_part as Int16) `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
@@ -121,9 +121,9 @@ l_partkey) from lineitem group by l_returnflag;` (tpch).
   for itself. The state-layout check and the `u64` → `Int64` count cast go per call.
 - Device: `aggregate.cpp` takes the phase per function, not once per node from `agg_phase`.
 
-After [#216](corpus-coverage.md#t216): a keyless outer stage merging a Welford state meets the
-device's missing keyless Welford arm. The `bug_` test flips to a plan test and a cpu-vs-device
-case.
+The device runs a keyless Welford through the grouped request builder
+([#216](../archive/archived-tickets.md#t216)), so a keyless outer stage needs only the
+per-function phase above. The `bug_` test flips to a plan test and a cpu-vs-device case.
 
 <a id="t249"></a>
 ### #249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type
@@ -201,7 +201,7 @@ own task (`pbench.md`) could not land them — its Restriction forbids fixing wh
 shows — and recorded the hold in `pbench-detail.md`.
 
 <a id="t284"></a>
-### #284 — a limit over a filter is refused above one lane
+### #284 (limit over filter at tp4) a limit over a filter is refused above one lane
 **Priority: low** — no corpus query has this shape, and the one-lane modes answer it.
 
 `select * from lineitem where l_quantity > 0 limit 10;` is refused at `tp4-single`,
