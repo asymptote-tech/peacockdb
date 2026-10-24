@@ -12,60 +12,15 @@ here; the scan-limit divergence in particular is #186 and is not repeated.
 Ordered worst first, by what it costs a reader who has to trust the code.
 
 **Pruned 2026-09-28, 2026-10-08, 2026-10-09 and 2026-10-23.** Findings fixed since, or made obsolete by later
-work, are cut; a finding half fixed keeps only its open half. The numbers are the original
+work, are cut; a finding half fixed keeps only its open half. Production bug 1 is folded into
+[#229](../tickets/memory.md#t229) and shape problem 4 into [#166](../tickets/df-upgrade.md#t166). The numbers are the original
 ones, since tickets cite them. Line numbers are the audit's and have drifted; search by
 symbol.
-
-## Production bugs
-
-One thing here behaves wrongly, and it is narrow.
-
-### 1. A sliced batch on the device is priced with no string bytes
-
-Ticketed as [#229](../tickets/memory.md#t229).
-
-`executor/gpu_backend/accumulate.rs:455`. The mid-plan limit slices a straddling batch and
-prices the result with
-
-    logical_size_from_schema(&self.schema, rows.length as usize, 0)
-
-The third argument is the var-length content, and it is zero. Every other GPU batch is
-priced by `produced()` (`gpu_backend/mod.rs:194`), which passes
-`stats.varlen_content_bytes` from the ABI. So one batch in the tree is accounted at its
-fixed-width size alone. For a schema with string columns that understates it by the whole
-payload.
-
-The comment says the batch "is priced from the rows asked for" and does not say that the
-strings are priced at nothing.
-
-What it costs: the accountant's resident total is low for that batch, so a budgeted run
-can pass a boundary it should trip on, and `peak_bytes` in a golden is wrong. Holds and
-releases still reconcile, because `Held::of` reads the figure once — which is why nothing
-notices.
-
-Not reachable in the corpus today: the one mid-plan limit, `tpch/nested-limits`, sits over
-`part(p_partkey)`, which is Int64.
-
-Honest fix: read the slice's size the way every other batch is read. The ABI has
-`peacock_result_from_handle` for the export but no stats call for a slice, so either
-`slice_handle` reports `NodeStats` like `execute_node` does, or the slice is priced by
-scaling the input batch's measured var-length bytes by the row ratio, with the
-approximation named at the site.
 
 ## Shape problems
 
 Nothing below behaves wrongly today. Each one costs a reader who has to decide whether a
 rule still holds.
-
-### 4. An untested arm for a coalesce that carries a fetch at the root
-
-Folded into [#166](../tickets/df-upgrade.md#t166). `limit_interval` (`planner/translator/common.rs`)
-turns a root `CoalesceBatchesExec` carrying a fetch into the unload's interval. **Half fixed
-2026-10-09**: the arm said DataFusion 45 never produces that shape, and limits (chain K) measured
-that it does — at one target partition `select * from lineitem where l_quantity > 0 limit 10;`
-has that coalesce as its root, and the comment is corrected. The open half is the same as before
-and worse for being live: nothing reaches the arm, because above one partition that query is
-refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no test asks for it.
 
 ### 12. Small ones, no fix needed beyond a line
 
@@ -110,52 +65,3 @@ refused ([#284](../tickets/complete-coverage.md#t284)) and at one partition no t
   time as* a probe batch, so the number to assert is `4096 + 80`.
 - `driver/tests/memory.rs:125` — `assert!(four.peak_bytes >= one.peak_bytes)`. Four lanes
   hold four batches; `>=` passes on a driver that ran the lanes one at a time.
-## What I did not read
-
-Named so the next reader knows the edges.
-
-- `cpp/src/operators/join.cpp` beyond the NULL-equality region (lines 1-80 and 300-536),
-  `aggregate.cpp` beyond `execute_aggregate`'s first 200 lines and the name helpers, and
-  `expr.cpp`'s column path (`:470-945`) except `build_scalar` and `infer_expr_type`.
-  `window.cpp`, `sort.cpp`, `project.cpp`, `filter.cpp`, `union.cpp`, `limit.cpp` not read.
-- `cpp/tests/` was grepped, not read. The gtest suites are a large uncovered surface.
-- `wire/expr_writer.rs`, `wire/fb_text.rs`, `wire/node_writer.rs` past the scan and filter
-  arms, `wire/serialize.rs`, and `wire/tests.rs` (894 lines).
-- `plan/mod.rs` past the join and interval sections; `plan/aggregate.rs` and
-  `plan/accumulators.rs` sampled only; `plan/tests/` not read.
-- `planner/translator/scan_mapping/` — `partition.rs` sampled, `parquet_meta.rs` and
-  `rowgroup_prune.rs` not read. The mapping is the one policy every golden depends on and it
-  deserves its own pass.
-- `cpu_backend/join.rs` past line 140, `cpu_backend/expr_physical.rs`, `merge_m2.rs`,
-  `single_node.rs`, `spark_partitioning.rs`.
-- The integration tests were grepped for assertion shapes, not read: `test_corpus_goldens.rs`,
-  `test_plan_goldens.rs` past `call_shapes`, `test_golden_format.rs`, `test_ci_coverage.rs`,
-  `test_cpu_end_to_end.rs` past the limit section, `test_gpu_recipe_walk.rs` past the walk
-  itself, and both executor test crates. `test_ci_coverage.rs` in particular is full of
-  first-match readers over shell and YAML, which is the antipattern that file is most exposed
-  to, and I did not check them.
-
-## What the known bugs are propping up
-
-A second reading of the same tree at 5fed63f2, looking only for code that exists because of a
-known defect. Not the defects — #175, #173, #183, #187, #198, #152 — but the branches, fields,
-fixtures and goldens that grew around them. Every finding it made is resolved: join-backend
-removed the join ones, and keyless-identity closed #199, the open half of the first. What it did
-not read stays below.
-
-### What I did not read
-
-- `cpp/` beyond `expr.cpp`'s `cudf_ast_can_evaluate`, `build_scalar` and `build_column`, and
-  `node_session.cpp` around the collapse. No operator file was read for this pass.
-- `driver/accounting.rs`, `driver/scheduler.rs`, `driver/index.rs` and the whole of
-  `driver/tests/` except the two files the findings name. An empty lane's effect on the
-  accounting is unexamined, and finding 1 turns partly on it.
-- `planner/memory_estimation.rs`, `planner/translator/scan_mapping/`, `plan/validate.rs` and
-  `plan/tests/`. I checked `validate.rs` for empty-lane rules and found none; I did not read it
-  through.
-- `tests/test_corpus_goldens.rs`, `test_golden_format.rs`, `test_plan_goldens.rs`,
-  `test_ci_coverage.rs`, `test_inc2_conformance.rs`, and the gtest suites under `cpp/tests/`.
-- `scripts/exec_model/` past `recipe.py`'s session and `recipe_join.py`'s header. The Python model
-  duplicates the capability rules and deserves a pass of its own against `plan/join.rs`.
-- The goldens were counted, not read. Whether any golden records a *result* that is a workaround
-  rather than an answer is a question this pass did not ask, and it is the one I would ask next.
