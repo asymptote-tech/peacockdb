@@ -13,6 +13,7 @@ These issues should be fixed on a pre-prod performance path.
 - [#242 (26.02 join paths) the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
 - [#248 (join parallelism gaps) three join shapes run on one lane or skewed after the rewrite](#t248)
 - [#286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips](#t286)
+- [#290 (stacked limits) a limit DataFusion pushed down and kept above becomes two adjacent `GpuLimit`s](#t290)
 
 <a id="t150"></a>
 ### #150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
@@ -199,3 +200,32 @@ leading row groups whose cumulative row count is at most the skip, and lower the
 by the rows they held. This holds only where the trim already holds: one lane, row groups in
 index order, and metadata row counts that are the rows the scan emits. Test: the example above
 reads one row group and answers the same ten rows as today.
+
+
+<a id="t290"></a>
+### #290 (stacked limits) a limit DataFusion pushed down and kept above becomes two adjacent `GpuLimit`s
+**Priority: low** — no answer is wrong; the extra node slices at most `skip + fetch` rows again.
+
+DataFusion pushes `skip + fetch` into an operator below a limit and keeps the limit above it
+for the skip, or at tp4 for the `CoalescePartitionsExec` between them. The translator turns each
+into its own node: `CoalesceBatchesExec`'s fetch (`node()`) and the `GlobalLimitExec`
+(`mid_plan_limit`, `planner/translator/nodes.rs`). The coalesce between them leaves no node on a
+one-lane input. So the plan carries a `GpuLimit` directly over a `GpuLimit`. Only a
+root-adjacent limit folds today, into the unload's interval. After chain K's limits task, a
+limited scan's cut is a `GpuLimit` too, and every limited scan under a kept limit stacks the
+same way. Examples, sf1:
+
+- `SELECT k FROM (SELECT p_partkey AS k FROM part WHERE p_size > 10 LIMIT 40 OFFSET 5) x, region`
+  plans `GpuLimit 5..+40` over `GpuLimit 0..+45` at every mode, on master.
+- The same without `OFFSET 5` plans `GpuLimit 0..+40` over an identical `GpuLimit 0..+40` at
+  tp4.
+- `SELECT p_partkey FROM part WHERE p_size > 10 LIMIT 10 OFFSET 2`, at the root: the
+  projection above the limit stops the fold, so `GpuLimit 2..+10` sits over `GpuLimit 0..+12`.
+
+**Corpus queries:** `tpch/nested-limits`, once the limits task lands: `GpuLimit 5..+23` over
+the part scan's `GpuLimit 0..+28`, at every mode.
+
+**Fix proposed:** in `mid_plan_limit`, when the translated input is a `GpuLimit`, replace the
+pair with one `GpuLimit` whose interval is `RowInterval::over(outer, inner)`, the composition
+the limits task adds for the root fold. Test: the three examples above plan one `GpuLimit`
+each and answer as today. Their plan goldens and `nested-limits`' lose a line.
