@@ -101,8 +101,7 @@ impl Registry {
         let text = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("cannot read registry CSV {}: {e}", path.display()));
         let mut lines = text.lines();
-        let header: Vec<&str> = lines.next().expect("registry CSV is empty").split(',').collect();
-        let cols: Vec<String> = header.iter().map(|s| s.to_string()).collect();
+        let cols = split_csv_line(lines.next().expect("registry CSV is empty"));
         let idx = |name: &str| -> usize {
             cols.iter()
                 .position(|c| c == name)
@@ -127,11 +126,11 @@ impl Registry {
             if line.trim().is_empty() {
                 continue;
             }
-            let f: Vec<&str> = line.split(',').collect();
+            let f = split_csv_line(line);
             assert_eq!(f.len(), cols.len(), "registry CSV: ragged row: {line}");
             let states = mode_idx
                 .iter()
-                .map(|(m, i)| (m.clone(), f[*i].to_string()))
+                .map(|(m, i)| (m.clone(), f[*i].clone()))
                 .collect();
             rows.push(RegistryRow {
                 dataset: f[i_ds].to_string(),
@@ -149,6 +148,28 @@ impl Registry {
     fn for_dataset(&self, dataset: &str) -> impl Iterator<Item = &RegistryRow> {
         self.rows.iter().filter(move |r| r.dataset == dataset)
     }
+}
+
+/// One CSV line's fields, RFC 4180: a field may be quoted, and `""` inside quotes is one `"`.
+/// The registry quotes an oracle spelling that has arguments; peacockdb-core's
+/// `registry::split_csv_line` is the same rule, kept apart because this crate links nothing.
+fn split_csv_line(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        let field = fields.last_mut().expect("a field under construction");
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            ('"', _) => quoted = !quoted,
+            (',', false) => fields.push(String::new()),
+            _ => field.push(c),
+        }
+    }
+    fields
 }
 
 /// Render a cell state as its glyph. `enabled` means the mode runs AND its result is
@@ -2258,6 +2279,94 @@ mod tests {
         };
         let html = render_html(&datasets, "https://p/", &links, None, None);
         assert!(html.contains("pbench"), "the page names the section");
+    }
+
+    /// A registry cell quoted for its commas and quotes is one field, so the row is not ragged
+    /// and the columns after it keep their places — the same split as peacockdb-core's
+    /// `registry::split_csv_line`, `ticket_widget.py` and `duckdb_result.py`.
+    #[test]
+    fn a_registry_row_with_a_quoted_oracle_parses() {
+        let modes: Vec<String> = MODES
+            .iter()
+            .flat_map(|mode| {
+                [ModeGroup::Plan, ModeGroup::Cpu, ModeGroup::Gpu].map(|group| group.column(mode))
+            })
+            .collect();
+        let states = vec!["enabled"; modes.len()].join(",");
+        let q61 = "duckdb(no_sort, rel(1e-5, \"\"promotional_sales.promotions / all_sales.total \
+                   * Int64(100)\"\"))";
+        let text = format!(
+            "dataset,sf,query,{},plan_status,features,tickets,duckdb_oracle,cpu_oracle,\
+             gpu_oracle,schema_validation\n\
+             tpcds,1,q61,{states},ok,avg,288,\"{q61}\",\"data_fusion(sort, exact)\",\
+             \"golden(no_sort, exact)\",enabled\n",
+            modes.join(",")
+        );
+        let dir = std::env::temp_dir().join(format!("cost-report-csv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let path = dir.join("cost-registry.csv");
+        std::fs::write(&path, text).expect("write the registry");
+        let registry = Registry::load(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        let row = &registry.rows[0];
+        assert_eq!((row.query.as_str(), row.tickets.as_slice()), ("q61", &["288".to_string()][..]));
+        assert_eq!(row.states.get("cpu_tp4_sized").map(String::as_str), Some("enabled"));
+        assert_eq!(
+            split_csv_line("a,\"b, \"\"c\"\"\",d"),
+            ["a", "b, \"c\"", "d"]
+        );
+    }
+
+    /// A ticket a plan golden's refusal names exists. The reason a query does not plan is the
+    /// content of these files, and a number that has been renumbered or never existed reads as
+    /// an explanation while pointing at nothing. Here rather than in peacockdb-core, whose
+    /// binaries are staged to hosts without the wiki: this crate is never staged.
+    ///
+    /// It does not require that a refusal name one: `not runnable` must, a `refused:` line
+    /// need not, and carries its ticket on the registry row instead. The archive counts: a
+    /// ticket keeps its number when it closes, and a refusal whose blocker was fixed elsewhere
+    /// is a stale refusal to delete, not a broken reference.
+    #[test]
+    fn every_refusal_names_a_ticket_that_exists() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let testdata = root.join("testdata");
+        let registry = Registry::load(&testdata.join("cost-registry.csv"));
+        let tickets = TicketIndex::load(&root.join("llm-wiki"));
+        for dataset in all_datasets(&testdata, &registry) {
+            for mode in MODES {
+                let path = root.join(dataset.canon_rel).join(format!("{mode}.plans.txt"));
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                // Both shapes of line that decline something: `refused` is the planner's,
+                // and `not runnable` the crossing's. A ticket is cited in PARENTHESES, which
+                // separates it from the `#5` in "at #5", a seq.
+                let declines =
+                    |line: &&str| line.starts_with("refused") || line.starts_with("not runnable");
+                for line in text.lines().filter(declines) {
+                    let cited: Vec<&str> = line
+                        .match_indices("(#")
+                        .filter_map(|(at, _)| {
+                            line[at + 2..].split(|c: char| !c.is_ascii_digit()).next()
+                        })
+                        .filter(|number| !number.is_empty())
+                        .collect();
+                    assert!(
+                        !cited.is_empty() || !line.starts_with("not runnable"),
+                        "{}/{mode}: a plan the mode cannot cross names no ticket, so a reader \
+                         has nowhere to go:\n{line}",
+                        dataset.label
+                    );
+                    for number in cited {
+                        assert!(
+                            tickets.path_for(number).is_some(),
+                            "{}/{mode}: a refusal names #{number}, which no ticket file \
+                             anchors:\n{line}",
+                            dataset.label
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// A row whose five modes are all enabled reads at a glance: one heavier tick instead of

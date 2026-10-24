@@ -48,7 +48,7 @@ extended to it.
 **Corpus queries:** none. pbench's `struct-key-join`
 (`SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct`) was written for this ticket and
 could not land: the planner panics on a Struct column before it refuses, which is
-[#255](complete-coverage.md#t255). The query arrives with that ticket's fix.
+[#255](scalars.md#t255). The query arrives with that ticket's fix.
 
 <a id="t246"></a>
 ### #246 (LIKE column pattern) a `LIKE` whose pattern is a column is refused on the device

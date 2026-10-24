@@ -5,10 +5,11 @@
 
 use std::collections::BTreeSet;
 
-use crate::{
+use crate::ci_coverage::{
     BENCHMARK_TARGET, INTENTIONALLY_NOT_IN_CI, PIPELINE, cargo_features, fold_continuations,
-    repo_root, workspace_test_targets,
+    workspace_test_targets,
 };
+use crate::repo_root;
 
 const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
 
@@ -245,9 +246,8 @@ fn gpu_runtime_targets() -> BTreeSet<(String, String)> {
 /// built by SUBTRACTING it, whole-line, so an entry with the wrong crate or a stale target
 /// name subtracts nothing and a file-gated GPU test RUNS on a host with no device.
 ///
-/// Not checked: a target exempted as `NotRun` may be absent from `gpu_runtime_targets()`
-/// with nothing red. No file says "needs a device" — that is what the hand-declared set is
-/// for.
+/// Not checked: a target no workflow runs may be absent from `gpu_runtime_targets()` with
+/// nothing red. No file says "needs a device" — that is what the hand-declared set is for.
 #[test]
 fn the_three_gpu_target_lists_agree() {
     let ci = gpu_job_staged_targets();

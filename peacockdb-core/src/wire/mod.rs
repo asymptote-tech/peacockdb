@@ -344,7 +344,7 @@ impl RecipePlan {
     }
 
     /// What every `CudfJoin` in the buffer carries as `chunk_bytes`: the scratch one join
-    /// call may spend, 0 being the session's own 1 GiB. An executor pricing a join call
+    /// call may spend, never 0. An executor pricing a join call
     /// reads it here, so the accountant and the session bound the same number.
     // Its reader is the device executor, which `rust-only` does not build.
     #[cfg_attr(feature = "rust-only", allow(dead_code))]
@@ -357,8 +357,8 @@ impl RecipePlan {
 /// a statement about a node, and a node is not finished until the plan is.
 ///
 /// `join_scratch_bytes` is what each join call may spend on pairs — the planner's
-/// `join_scratch_bytes(knobs)` for a planned query, 0 (the session's 1 GiB) for a tree no
-/// mode planned.
+/// `join_scratch_bytes(knobs)` for a planned query, [`DEFAULT_CHUNK_BYTES`] for a tree no
+/// mode planned. Never 0: the session refuses it.
 ///
 /// `Err` where a node's payload cannot be written — an expression the wire has no shape
 /// for (#168): a plan missing one node's arguments cannot be handed to the C++, and the
@@ -370,13 +370,18 @@ pub(crate) fn attach_recipes(
     attach::attach_recipes(root, join_scratch_bytes)
 }
 
+/// `gpu_plan.fbs`'s `JoinLimits.DefaultChunkBytes`, 1 GiB: `CudfJoin.chunk_bytes`'s default.
+/// The one Rust name for it, since `generated` is private to this component.
+pub(crate) const DEFAULT_CHUNK_BYTES: u64 = fb::JoinLimits::DefaultChunkBytes.0;
+
 /// What one join call may spend on pairs and the cross product, written into every
-/// `CudfJoin` as `chunk_bytes`: a sixteenth of a budgeted mode's budget, at most 1 GiB, and 0
-/// — the session's own 1 GiB — where the mode sets no budget.
+/// `CudfJoin` as `chunk_bytes`: a sixteenth of a budgeted mode's budget, at most
+/// [`DEFAULT_CHUNK_BYTES`], and the default itself where the mode sets no budget — which the
+/// buffer then leaves out.
 pub(crate) fn join_scratch_bytes(knobs: &PlanKnobs) -> u64 {
     match knobs.sizing {
-        BatchSizing::Budgeted => (knobs.budget / 16).min(1 << 30),
-        BatchSizing::OneBatchPerLane | BatchSizing::OneBatchPerRowGroup => 0,
+        BatchSizing::Budgeted => (knobs.budget / 16).min(DEFAULT_CHUNK_BYTES),
+        BatchSizing::OneBatchPerLane | BatchSizing::OneBatchPerRowGroup => DEFAULT_CHUNK_BYTES,
     }
 }
 

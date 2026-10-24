@@ -11,6 +11,8 @@ use crate::plan::{GpuCrossJoin, GpuHashJoin, GpuNestedLoopJoin};
 use crate::plan::{JoinFilterColumn, JoinSide};
 use datafusion::common::JoinType;
 
+mod nulls;
+
 const DIM: [(i64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
 /// Split as `[(2,20), (2,21)]` then `[(4,40)]`: `k=2` matches only the first batch and
 /// `k=1` and `k=3` match neither, so a per-batch answer and a finished one differ.

@@ -98,7 +98,7 @@ cudf::ast::expression const& cross_ast(std::vector<AstConjunct> const& cs, ExprC
                                        JoinFilterColMap const& map, bool flip, cudf::size_type bw,
                                        cudf::size_type pw);
 
-/// Row ranges of the probe batch, so each range's pairs fit `budget` bytes (0 = 1 GiB).
+/// Row ranges of the probe batch, so each range's pairs fit `budget` bytes; never 0.
 std::vector<std::pair<cudf::size_type, cudf::size_type>> chunks(std::size_t pairs,
                                                                 std::size_t row_bytes,
                                                                 cudf::size_type rows,

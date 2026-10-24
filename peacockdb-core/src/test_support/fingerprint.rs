@@ -52,7 +52,7 @@ pub(crate) fn is_fingerprint(section: &str) -> bool {
 /// Whether this section holds the query's rows, as against standing in for them: the
 /// `skipped:` marker a query no mode enables carries, or the fingerprint an answer over the
 /// cap leaves. Both keep first position for this reader — a mode line ahead of either would
-/// let a `golden_exact` device case compare against nothing.
+/// let a `golden(…)` device case compare against nothing.
 pub(crate) fn section_holds_rows(section: &str) -> bool {
     !section.starts_with(SKIPPED) && !is_fingerprint(section)
 }
@@ -323,7 +323,7 @@ pub(crate) fn compare_fingerprints(ours: &str, duckdb: &str, tol: f64) -> Result
                     "col {at}: ours renders it {ours} and DuckDB's {duck}, so the two hash \
                      different columns and neither hash can be recomputed from a fingerprint. \
                      Class it alike on both sides — `is_approximate` here, \
-                     `duckdb_result.py`'s there; duckdb_divergent does not reach this path"
+                     `duckdb_result.py`'s there"
                 ));
             }
         }

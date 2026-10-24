@@ -45,6 +45,58 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t287"></a>
+### #287 — no corpus compare checks the order an `ORDER BY` asks for
+**Done by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.**
+
+Every corpus compare sorted both answers' rows first, so a query ending in `ORDER BY` passed
+with the right rows in the wrong order. Now a line whose plan ends in a sort (under any limit or
+projection) says `no_sort` in its `duckdb(…)` and its `golden(…)`, and a guard holds every line
+to it (`every_line_whose_query_ends_in_a_sort_says_no_sort`). Its sections keep engine order.
+
+- The cpu at its authoring mode: its rendering equals the committed section text for text, and
+  that section meets DuckDB's row for row.
+- The device at every mode on every run, row for row against the cpu's section through
+  `golden(no_sort, …)`; and against DuckDB as of the last recording of `gpu-result.txt`.
+- Still order-blind: the other four cpu modes (compared through `data_fusion` only) and
+  `live_cpu`. A fingerprinted line has no row order.
+
+No tie rule: no corpus answer compared row for row has tied rows (tpch q11 does, and is a
+fingerprint). The proposed key-monotonic check was not taken.
+
+<a id="t252"></a>
+### #252 — six corpus cases read the checkout, which a remote CPU run never ships
+**Done by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** No peacockdb-core
+test reads the checkout beyond testdata: `ticket_is_open`, `corpus_lines` and `macro_invocations`
+are gone, `test_corpus_goldens` compiles both case lists in, and the refusal-ticket test moved to
+cost-report. `no_core_test_reads_the_checkout` (`cost-report --test test_source_formatting`)
+holds it. The ticket's push-side fix was not taken.
+
+`ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through
+`env!("CARGO_MANIFEST_DIR")` with no environment escape, so the four `duckdb_divergent` cases —
+`duckdb_tpcds_q17`, `q58`, `q61`, `q66` — look for the ticket files at the build host's path.
+`scripts/build-test.sh` ships binaries, goldens and data and never source, and `rust_only_targets`
+stages `test_cpu_corpus` among them, so those four go red on verda and pass locally.
+
+`testdata.rs` states the rule the other goldens follow: the compile-time path is the fallback and
+`PEACOCK_TESTDATA_DIR` wins, because a binary is built on one host and run on another (#49).
+`ticket_is_open` has no equivalent, and an escape variable nobody sets would be a no-op.
+
+Six cases are in the class, not four. `all_modes_expands_to_the_five_in_either_position`
+(`tests/test_cpu_corpus.rs`) reads `tests/common/corpus_cases.inc` the same way, through
+`corpus::corpus_lines`, and panics in `macro_invocations`' `read_to_string`; and
+`every_timed_case_is_enabled_on_a_device` (`tests/test_corpus_goldens/benchmark.rs`) already did
+this before the oracle landed. `test_corpus_goldens` is staged too — `rust_only_targets`' second
+axis greps only the top-level `tests/*.rs` for `repo_root`, so a `CARGO_MANIFEST_DIR` read inside
+a submodule is invisible to it. `test_module_layout` and `test_ci_coverage` read the source tree
+as well and are the two that genuinely never ship, excluded by that same rule at the top level.
+
+**Fix proposed:** the push side, carrying both reads — `llm-wiki/tickets/` and
+`peacockdb-core/tests/common/` — which is why this is a ticket and not a line in the task that
+found it. Measured by reading `rust_only_targets` and its classifier, over
+the duckdb-oracle branch; the four `duckdb_divergent` cases were found in that task's review round
+3 and the other two in its completeness pass.
+
 <a id="t210"></a>
 ### #210 — a bare decimal literal on the AST path comes back as a Float64 column
 **Done by [`decimal-literal`](../tasks/decimal-literal.md) (chain K); awaiting merge.**
@@ -753,7 +805,7 @@ bit-casts each unit to `INT64` under a live gate.
 
 **Corpus queries:** `pbench`'s `timestamp-ms-key-group`, `timestamp-us-key-group` and
 `timestamp-ns-key-group`, all five device cells on each — which is what proves the key itself
-hashes. `timestamp-s-key-group` is off on [#264](../tickets/corpus-coverage.md#t264): it reaches
+hashes. `timestamp-s-key-group` is off on [#264](../tickets/complete-coverage.md#t264): it reaches
 the aggregate through `arrow_cast`, and the device refuses a group key that is not a bare column.
 `ts-key-join` is off on [#152](#t152) and [#220](#t220).
 tpch and tpcds have nothing here; they use `Date32`.
@@ -1455,6 +1507,192 @@ which is what `architecture.md` requires of a node ("a zero-row batch and no bat
 arrival"). The one wrong answer it led to is [#199](#t199)'s: a keyless
 aggregate owes one row whatever arrived, and #199's fix covers a limit that sends nothing. Its three
 `bug_` pins in `gpu_tests/harness_cases.rs` were dropped with it.
+
+<a id="t251"></a>
+### #251 — a decimal quotient truncates at its own scale and later arithmetic carries the error up
+**Stale by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** Replaced by
+[#288](../tickets/scalars.md#t288) (decimal division digits); its three lines are `rel(1e-5, …)`.
+
+DataFusion cuts a decimal division at the scale it declared for the result rather than rounding,
+and we follow it. The truncated value then feeds the rest of the expression, so the answer is
+wrong in digits it printed.
+
+Two shapes, measured against DuckDB by #235's comparison. `(x / y) * 100` multiplies the
+truncation by a hundred: tpcds q58's `ss_dev` is `103.719200` against `103.71926462…`, and q61's
+ratio `51.82319100` against `51.82319145…` — 45 to 97 units in our last rendered place.
+`sum(x / y)` adds one truncation per row: q66's twelve `*_per_sq_foot` columns are 1 to 2 units
+short. A quotient nothing consumes stays inside its scale — tpch q1's `avg_qty` is `25.522005`
+against `25.522005853…` — so it is the expression around the division that loses the digits.
+
+**Corpus queries:** `tpcds/q58` (columns 2, 4, 6), `tpcds/q61` (column 2) and `tpcds/q66`
+(columns 20-31), each `duckdb_divergent(251, ...)` in `corpus_cases.inc`.
+
+**Fix proposed:** round the quotient at its declared scale, or widen the scale a division
+declares so the next operand has digits to spend. Either departs from DataFusion's convention,
+so the decision comes before the code.
+
+<a id="t263"></a>
+### #263 — a tickets-only commit can turn the rust tier red while CI skips the pipeline
+**Stale (won't fix) by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** Both
+halves. The first is gone with `ticket_is_open`: no test reads `llm-wiki/` at run time. The second
+(a PR head left unbuilt after docs pushes) stays, and its workaround stands: close and reopen the
+PR to force a real run.
+
+`ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so
+the open-ticket set is now a test input. `pipeline.yml`'s two skip layers both still class the
+whole of `llm-wiki/` and every `.md` as inert: `paths-ignore` at the top, and the `changes` job's
+`grep -qvE '(\.md$|^llm-wiki/)'`. The file's own comment states the condition this breaks — "a doc
+file that ever becomes an input has to come off this list".
+
+So a commit that only moves a ticket between `llm-wiki/tickets/` and
+`llm-wiki/archive/archived-tickets.md` can break `--lib` and no run reports it. Two cases are live:
+`an_archived_ticket_is_not_open_and_a_listed_one_is` asserts `ticket_is_open(251)` directly, and
+every `duckdb_divergent(<n>)` line goes red when `<n>` is archived. The helper's
+post-merge protocol guarantees the shape: it archives task specs in a master-only commit carrying
+nothing else. Master then goes red on the next unrelated code push, with the cause several commits
+back.
+
+Not [#252](#t252), though they share a cause. That one is a staged binary not receiving the
+checkout on a remote CPU host; this one is CI declining to run at all.
+
+2026-10-09: an adjacent instance of the same mechanism, filed here rather than as its own ticket
+because the second fix below ends both. The `changes` job classifies the push it reacts to, not
+the pull request's diff, so a code commit followed by documentation pushes leaves the PR head
+unbuilt while GitHub reports the PR green. Found on PR #175, where four runs followed the code
+commit and all four skipped every job. A close and reopen forces a real run on a mergeable PR,
+which is the workaround until a fix lands.
+
+**Two fixes, and the choice is a cost decision rather than a technical one.** Excepting
+`llm-wiki/tickets/` is not expressible in `paths-ignore` — GitHub Actions has no negation there —
+so the first shape is to drop the doc patterns from `paths-ignore` and let the `changes` job carry
+the whole rule, where a grep can hold the exception. That costs a `changes` job per docs commit,
+and the job currently answers "run everything" for any `push` event, so the push trigger needs the
+same logic before it is safe. The second shape is to move the open-ticket set out of the docs tree,
+which ends the class and also closes #252. Until one lands, `build-test.md`'s CI section says to
+run `--lib` by hand after a tickets-only commit.
+
+Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, which is the branch
+that made the wiki an input.
+
+<a id="t266"></a>
+### #266 — the registry accepts an archived ticket as a reason to keep a cell off
+**Stale by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** Its fix leaned on
+`ticket_is_open`, which is gone: no core test reads the ticket files.
+
+**Priority: low** — no answer is wrong; the cost is coverage that silently stops being measured.
+
+`registry.rs`'s rule for a row with disabled cells is `off == 0 || !tickets.is_empty()`, which asks
+only that *some* number sit in the `tickets` column. It does not ask whether that number names an
+open ticket. So a ticket closes, its rows keep their tag, and their cells are never run again —
+which is exactly what happened to sixteen tpch device cells under #183 and #187 for the months
+between those tickets closing and [`stale-cells`](../tasks/stale-cells.md) running them. All
+sixteen passed, so the engine was right the whole time and nobody could have known.
+
+**Corpus queries:** none fails. The failing state today is `tpch/nested_loop_join`: four device
+cells off under a lone `183`, archived, with no live blocker — assigned to `join-backend`. The
+fourteen tpcds window rows under #32 and #143 are the same shape but not the same problem: the
+capability is genuinely absent and the live pages say so.
+
+**Fix proposed:** the rule asks for at least one *open* ticket. `ticket_is_open`
+(`test_support/duckdb_oracle.rs`) already reads `llm-wiki/tickets/` for exactly this question and
+is already used by `duckdb_divergent`, so this is wiring rather than new machinery. A row whose
+every tag is archived goes red and is either run or re-tagged. The tpcds window rows need an
+answer first — an open capability ticket to point at, or an exemption the rule names — since they
+would go red on day one and their cells genuinely cannot run.
+
+<a id="t254"></a>
+### #254 — `data_fusion_subset` is the one cpu oracle no test can show failing
+**Stale by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** One line uses it; not worth
+a split harness.
+
+[#235](#t235)'s harness item was that the corpus helpers are proven to fail on a wrong answer,
+and `duckdb-oracle` delivered it for two of the three `CpuOracle` variants: `results_match` and
+`result_matches` were split out of their panicking wrappers and are driven by negative cases.
+`CpuOracle::DataFusionSubset` routes to `assert_subset_of_unlimited` (`test_support/corpus.rs`),
+which runs a live DataFusion query and takes no injectable answer, so nothing hands it a wrong
+one and `every_oracle_variant_is_named_by_some_line` is all that holds it.
+
+One corpus line uses it — `tpch/scan-limit`, an unordered `LIMIT` over lineitem whose row set is
+not determined — so the exposure is small and the fix is the same shape as the other two: split
+the comparison from the query, and hand the split a doctored answer that is not a subset.
+
+<a id="t253"></a>
+### #253 — the DuckDB oracle cannot record a divergence it finds on two of its paths
+**Stale by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.** Superseded by its oracle grammar;
+no line needs it.
+
+`duckdb_divergent(<ticket>, <positions>)` is how a corpus line records a difference the oracle
+found and a ticket explains. It reaches the per-line cpu comparison and nothing else, so two
+paths can find a divergence and have no way to say so. Both block tasks already on chain J's
+board.
+
+**A device answer that differs from DuckDB while the cpu's matches.** One `duckdb_oracle` per
+line serves the cpu case and every `duckdb_gpu_<query>_<mode>` case, and the two values a
+developer has both go red: `duckdb_exact` fails the device case, and `duckdb_divergent` fails
+the cpu case, because `compare_sections` reports a named column that *agrees* as "stopped
+diverging". An empty position list does the same at the row level. So the only green options are
+to leave the device cell off or to change the harness. This is the shape `gpu-result.txt` is
+keyed by mode for in the first place — a lane split or a shuffle defect shows per mode.
+
+**An over-cap section whose fingerprints differ.** `duckdb_fingerprint` takes no ticket and no
+column list, and `compare_sections` routes a fingerprinted section under `duckdb_divergent` to
+"declare `duckdb_fingerprint`" — the error text at `test_support/fingerprint.rs` says
+`duckdb_divergent does not reach this path`. So an over-cap answer is all or nothing: one
+SHA-256 over the rendered rows either matches or the line cannot be green at all.
+[`join-backend`](../tasks/join-backend.md) turns tpch q11's cpu cells on, and DuckDB's side of
+q11 is already a 27,604-row fingerprint with no approximate column, so that task is the first to
+hold a fingerprint nobody has compared.
+
+A third shape reaches the same door: the two writers classing one column differently — a decimal
+on our side against a double on DuckDB's, which the [`duckdb-oracle`](../tasks/duckdb-oracle.md)
+spec's step 3 asks to be approximate and which cannot be, since neither writer can see the
+other's declared type and a fingerprint no longer holds the rows to rehash. Today that is a hard
+error naming both classifiers. No committed section has the shape.
+
+**Fix proposed:** give `duckdb_divergent` a side — which of the cpu and the device diverges — and
+give `duckdb_fingerprint` the optional ticket and column list `duckdb_divergent` already has, so
+a triple or a per-column exemption can carry a known difference while `rows` and the remaining
+columns stay checked.
+
+**2026-10-09: `stale-cells` ran and produced no instance.** It was named here as the first task
+that could, and its sixteen device cells all matched DuckDB, so the first half is still a shape
+nothing has exhibited. The harness was deliberately not widened there: the task's restriction was
+the sixteen cells, and a device-only divergence would have stayed off under this ticket.
+
+**pbench moved the deadline, and widened both halves.** pbench landed ahead of `stale-cells`,
+and the next task to build was `repartition-keys` — which owns `uint-key-group`, a
+`duckdb_fingerprint` line over a 19,848-row answer whose cpu tp4 cells and gpu cells it both turns
+on. So the decision is owed before that task, not before `stale-cells`. pbench also took the
+fingerprint lines from 4 to 14, ten of the new ones its own rows whose device comparison is
+`live_cpu` because the answer is over the cap; and the first half — a device answer diverging
+while the cpu's matches — now has 27 pbench rows in reach, all of them DuckDB-green on the cpu
+already, in a dataset that exists to make the device differ.
+
+**Decided, 2026-10-08, so that whoever implements it need not re-litigate it.** Two changes, both
+additive, neither touching a line that is green today:
+
+- **`duckdb_divergent` gains a side**, written as a trailing non-numeric component:
+  `duckdb_divergent(<ticket>, <positions…>[, <side>])` where the side is `both`, `cpu` or `device`.
+  Positions are variadic — `duckdb_oracle.rs`'s `divergent` maps all of `args[1..]` through
+  `number`, and `corpus_cases.inc:178` writes thirteen components — so the side cannot be the third
+  one. A last component that parses as a number, or no last component at all, means `both`, which
+  is today's meaning and leaves every existing line alone. The named columns must still differ **on the side
+  named** and must still agree on the other, so a cell that stops diverging on the device fails
+  exactly as one that stops diverging on the cpu does today. That is what makes the variant worth
+  having: it narrows the claim rather than waiving it.
+- **`duckdb_fingerprint` gains the optional ticket and column list** `duckdb_divergent` already
+  carries: `duckdb_fingerprint(<ticket>, <positions>)`. `rows` and every column not named stay
+  checked — the `nonnull` counts, the triples, and the hash recomputed over the exact columns the
+  line does not except. A hash cannot be recomputed from a fingerprint, so an excepted column
+  means both writers must leave it out of their hash, which makes the exception a property of the
+  section rather than of the comparison: the writers read the line's exceptions. That is the part
+  that costs work, and it is why this is a ticket and not a line edit.
+
+Rejected: a tenth `corpus_query!` argument for a separate device oracle. It doubles the oracle
+column on all 176 lines to express something four or five of them need, and a line's coverage
+stops reading off the line. Also rejected: classing every decimal approximate so the fingerprint
+needs no exception — it takes 1.5M rows of `o_totalprice` out of row-for-row checking, which is
+the thing the fingerprint exists to do.
 
 <a id="t60"></a>
 ### #60 — `round(x, p > 0)` on the device differs from DataFusion by one ulp

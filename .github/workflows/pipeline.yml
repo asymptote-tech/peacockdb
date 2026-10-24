@@ -270,7 +270,7 @@ jobs:
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
-          # at the merge gate of whoever notices next. test_ci_coverage asserts this line.
+          # at the merge gate of whoever notices next. test_source_formatting asserts this line.
           cargo build --features rust-only -p peacockdb
         env:
           # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
@@ -293,7 +293,7 @@ jobs:
           # The cpu rung, entire: every in-crate test module that needs neither the FFI
           # nor a device. It needs the sf1 dataset generated above: the plan goldens read
           # row-group metadata off the parquet, and the end-to-end tier runs against it.
-          # test_ci_coverage asserts this line exists.
+          # test_source_formatting asserts this line exists.
           cargo test --features rust-only -p peacockdb-core --lib
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
@@ -599,8 +599,8 @@ jobs:
       # fails CI fast. python3 is preinstalled, and neither file needs duckdb or parquet.
       #
       # Enumerated by glob for the reason the exec-model step below gives: there is no meta
-      # guard over python files, so a hand-written list rots the way test_ci_coverage
-      # exists to prevent.
+      # guard over python files, so a hand-written list rots the way the CI coverage
+      # guard exists to prevent.
       - name: DuckDB generator unit tests (Python)
         run: |
           set -euo pipefail
@@ -616,6 +616,11 @@ jobs:
           done
           exit "$status"
 
+      # The report widget's registry reader: a quoted oracle cell, a registry older than the
+      # duckdb_oracle column, and the include fallback. Stdlib only, no cargo.
+      - name: Ticket widget unit tests (Python)
+        run: python3 scripts/test_ticket_widget.py
+
       # The execution-model prototype. No project code, so it belongs
       # in this cheap tier next to the extractor tests. The scheduler tests are stdlib
       # only; the operator tests need pandas, and they FAIL rather than skip when it is
@@ -624,7 +629,7 @@ jobs:
       #
       # Enumerated by glob rather than by name, unlike the rust targets above: there is
       # no meta guard over python files, so a hand-written list would rot the way
-      # test_ci_coverage exists to prevent.
+      # the CI coverage guard exists to prevent.
       - name: Exec-model prototype tests (Python)
         run: |
           set -euo pipefail
@@ -691,26 +696,20 @@ jobs:
           exit "$status"
 
       - name: cost-report unit tests (Rust)
-        run: cargo test -p cost-report
+        run: cargo test -p cost-report --bin cost-report
 
-      # It reads committed workflow text and asserts about CI rather than about the engine,
-      # so it is tooling and lives with the tooling — and its whole value is saying EARLY that a
-      # target is unwired, which it cannot do from behind a container and a dataset build.
-      # Every peacockdb-core integration test target must be NAMED by some workflow
-      # step above. CI does not sweep them as a set, so a new tests/test_*.rs is
-      # invisible here until someone remembers to add it — which is exactly how a wire-format
-      # guard once shipped unable to go red at the merge gate, and how peacock_tpchv_tests was
-      # built+shipped+patched but never run (see the C++ glob note in the gpu-tests job).
-      # This asserts the coverage instead.
-      - name: Every rust test target is wired into CI
-        run: cargo test --features rust-only -p peacockdb-core --test test_ci_coverage
+      # The tests whose subject is the source tree: every rust test target wired into CI (CI
+      # does not sweep them as a set, so a new tests/*.rs is invisible here until someone adds
+      # it), the module layout rules nothing in rustc checks, a doc block a split left behind,
+      # and that no peacockdb-core test reads the checkout. They read src/, tests/ and the
+      # workflows, so they live in cost-report, which is never staged to a remote host.
+      - name: The source tree's own rules hold
+        run: cargo test -p cost-report --test test_source_formatting
 
-      # The layout rules nothing in rustc checks: where `pub` may appear, whether a
-      # subcomponent reaches a sibling, and whether a component's private module is
-      # reachable from outside the crate. Text rules plus one probe that compiles against
-      # the built library, so it needs no dataset and no device.
-      - name: The module layout rules hold
-        run: cargo test --features rust-only -p peacockdb-core --test test_module_layout
+      # A component's private module is unreachable from outside the crate: a probe compiled
+      # against the built library, so it needs no dataset and no device.
+      - name: A private module is unreachable from outside the crate
+        run: cargo test --features rust-only -p peacockdb-core --test test_crate_privacy
 
       - name: Generate report
         env:

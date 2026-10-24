@@ -287,27 +287,16 @@ rust_only_targets() {
       base=$(basename "$f" .rs)
       # File-level gate => needs cmake; excluded from the rust-only set.
       grep -qF '#![cfg(not(feature = "rust-only"))]' "$f" && continue
-      # EXCLUSION, for a measured reason rather than taste: test_ffi compiles under
-      # rust-only but yields ZERO tests — the whole file is behind one cfg. Staging it
-      # ships a binary that runs nothing, which reads as coverage.
+      # Excluded for measured reasons: test_ffi compiles under rust-only to ZERO tests (one
+      # cfg covers the file), so staging it ships a run of nothing that reads as coverage;
+      # test_crate_privacy invokes rustc against the crate's rlib, which a staged binary's
+      # host does not have.
       case "$base" in
-        test_ffi) continue ;;
+        test_ffi | test_crate_privacy) continue ;;
       esac
       # Needs a GPU at RUNTIME even where it compiles fine — subtracted as a SET, not
       # by name. See gpu_runtime_targets.
       if gpu_runtime_targets | grep -qx "$pkg:$base"; then
-        continue
-      fi
-      # SECOND AXIS: what does the target verify — the RUNTIME, or the REPO?
-      # A test that reads the checkout (.github/workflows, the tests/ tree) cannot be
-      # verified from a shipped binary: none of that travels with it. Running
-      # test_ci_coverage on verda compared today's binary against a pipeline.yml left
-      # there by some earlier push — verda is not even a git checkout — so it failed
-      # for reasons that say nothing about the remote. It classified the next one
-      # automatically, as intended: test_module_layout reads src/ and names repo_root
-      # for that reason, so today this excludes two.
-      # It still runs locally and in CI, which is where a repo check belongs.
-      if grep -qE 'repo_root|\.github/workflows' "$f"; then
         continue
       fi
       printf '%s:%s\n' "$pkg" "$base"

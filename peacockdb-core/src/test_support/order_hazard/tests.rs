@@ -6,7 +6,12 @@ use std::sync::Arc;
 use datafusion::arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
 use datafusion::execution::context::{SessionConfig, SessionContext};
 
-use super::hazard_in;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::limit::GlobalLimitExec;
+use datafusion::physical_plan::projection::ProjectionExec;
+
+use super::{hazard_in, line_order_is_right, plan_ends_in_sort};
+use crate::test_support::RowOrder;
 
 /// `a(k, v)` and `b(k, w)`, joined one to one on `k`. `w` ties on its first two rows, so
 /// `ORDER BY w` cuts between two rows whose `v` differ after one row, and not after two.
@@ -139,4 +144,67 @@ async fn an_offset_through_a_projection_inside_a_tie_is_a_hazard() {
     let sql = "SELECT a.v FROM a JOIN b ON a.k = b.k ORDER BY b.w OFFSET 2";
     let why = hazard_in(&ctx, sql).await;
     assert!(why.is_some_and(|why| why.contains("tie")));
+}
+
+async fn physical(sql: &str) -> Arc<dyn ExecutionPlan> {
+    tables()
+        .sql(sql)
+        .await
+        .expect("plans")
+        .create_physical_plan()
+        .await
+        .expect("a physical plan")
+}
+
+/// Whether the plan ends in a sort, read through a limit and a projection: an `ORDER BY`, the
+/// same under a `LIMIT` (folded into the sort's fetch), a projection over a sorted, limited
+/// subquery, and a `GROUP BY` with no sort at all.
+#[tokio::test]
+async fn plan_ends_in_sort_reads_through_limit_and_projection() {
+    for sql in [
+        "SELECT k, w FROM b ORDER BY w",
+        "SELECT k, w FROM b ORDER BY w LIMIT 2",
+        "SELECT k + 1 AS j FROM (SELECT k, w FROM b ORDER BY w LIMIT 2) s",
+    ] {
+        assert!(plan_ends_in_sort(&physical(sql).await), "{sql}");
+    }
+    assert!(!plan_ends_in_sort(
+        &physical("SELECT w, count(*) FROM b GROUP BY w").await
+    ));
+}
+
+/// An offset keeps a `GlobalLimitExec` above the sort, which a bare `LIMIT` folds into the
+/// sort's fetch: the limit arm is read only here. The root is asserted, so a planner that
+/// folds the offset too cannot leave this case passing through the sort arm alone.
+#[tokio::test]
+async fn plan_ends_in_sort_reads_through_a_limit_that_keeps_an_offset() {
+    let limited = physical("SELECT k, w FROM b ORDER BY w LIMIT 1 OFFSET 1").await;
+    assert!(
+        limited.as_any().is::<GlobalLimitExec>(),
+        "{}",
+        limited.name()
+    );
+    assert!(plan_ends_in_sort(&limited));
+
+    let sql = "SELECT k + 1 AS j FROM (SELECT k, w FROM b ORDER BY w LIMIT 2 OFFSET 1) s";
+    let projected = physical(sql).await;
+    assert!(
+        projected.as_any().is::<ProjectionExec>(),
+        "{}",
+        projected.name()
+    );
+    let below = projected.children()[0];
+    assert!(below.as_any().is::<GlobalLimitExec>(), "{}", below.name());
+    assert!(plan_ends_in_sort(&projected));
+}
+
+/// The guard's decision in both failing directions: `sort` over a plan that ends in a sort,
+/// and `no_sort` over one that does not.
+#[test]
+fn a_line_declaring_sort_over_a_sorted_plan_fails() {
+    let said = line_order_is_right(RowOrder::Sort, true).expect_err("sort over a sorted plan");
+    assert!(said.contains("say no_sort"), "{said}");
+    assert!(line_order_is_right(RowOrder::NoSort, false).is_err());
+    assert_eq!(line_order_is_right(RowOrder::NoSort, true), Ok(()));
+    assert_eq!(line_order_is_right(RowOrder::Sort, false), Ok(()));
 }

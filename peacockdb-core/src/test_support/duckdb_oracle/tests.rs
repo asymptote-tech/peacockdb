@@ -1,62 +1,137 @@
-//! The oracle keyword parsed, and the section comparison it names: two rendered tables in,
+//! The oracle spelling parsed, and the section comparison it names: two rendered tables in,
 //! a verdict out. No dataset, no run — the doctored sections are what prove each variant
 //! fails where it should.
 
 use std::collections::BTreeSet;
 
-use crate::test_support::{CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, compare_sections};
+use datafusion::arrow::array::StringArray;
+use datafusion::arrow::compute::cast;
+use datafusion::arrow::datatypes::{DataType, TimeUnit};
+use datafusion::arrow::util::display::array_value_to_string;
 
-// --- the keyword -------------------------------------------------------------
+use super::tight;
+use crate::test_support::{
+    CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, compare_sections,
+};
+
+fn compare_on(order: RowOrder, values: Values) -> DuckdbOracle {
+    DuckdbOracle::Compare {
+        order,
+        values,
+        dates: vec![],
+    }
+}
+
+fn exact() -> DuckdbOracle {
+    compare_on(RowOrder::Sort, Values::Exact)
+}
+
+fn approx() -> DuckdbOracle {
+    compare_on(RowOrder::Sort, Values::Approx)
+}
+
+fn rel(tolerance: f64, columns: &[&str]) -> DuckdbOracle {
+    compare_on(
+        RowOrder::Sort,
+        Values::Rel {
+            tolerance,
+            columns: columns.iter().map(|c| c.to_string()).collect(),
+        },
+    )
+}
+
+fn dated(columns: &[&str]) -> DuckdbOracle {
+    DuckdbOracle::Compare {
+        order: RowOrder::Sort,
+        values: Values::Exact,
+        dates: columns.iter().map(|c| c.to_string()).collect(),
+    }
+}
+
+// --- the spelling ------------------------------------------------------------
 
 #[test]
-fn every_spelling_parses_and_names_itself() {
-    assert_eq!(DuckdbOracle::parse("duckdb_exact"), DuckdbOracle::Exact);
-    assert_eq!(DuckdbOracle::parse("duckdb_approx"), DuckdbOracle::Approx);
+fn the_grammar_parses_each_order_and_value() {
+    assert_eq!(DuckdbOracle::parse("duckdb(sort, exact)"), exact());
+    assert_eq!(
+        DuckdbOracle::parse("duckdb (no_sort , approx)"),
+        compare_on(RowOrder::NoSort, Values::Approx)
+    );
+    assert_eq!(
+        DuckdbOracle::parse("duckdb(sort, exact, date(\"next_month\"))"),
+        dated(&["next_month"])
+    );
     assert_eq!(
         DuckdbOracle::parse("duckdb_fingerprint"),
         DuckdbOracle::Fingerprint
     );
     assert_eq!(DuckdbOracle::parse("duckdb_none"), DuckdbOracle::None);
-    for variant in DuckdbOracle::ALL {
-        let name = variant.name();
-        let sample = match name {
-            "duckdb_divergent" => "duckdb_divergent(1)",
-            other => other,
-        };
-        assert_eq!(DuckdbOracle::parse(sample).name(), name);
-    }
 }
 
-/// `stringify!` of a parenthesized argument list puts spaces in, so the parse drops them
-/// rather than every line having to be written without any.
+/// q61's header: spaces, dots and parentheses inside the quotes, none of which may split the
+/// name or lose a space.
 #[test]
-fn a_divergent_keeps_its_ticket_and_its_positions_through_stringifys_spacing() {
+fn rel_takes_a_name_with_spaces_dots_and_parentheses() {
+    let name = "promotional_sales.promotions / all_sales.total * Int64(100)";
     assert_eq!(
-        DuckdbOracle::parse("duckdb_divergent(243)"),
-        DuckdbOracle::Divergent {
-            ticket: 243,
-            columns: vec![]
-        }
-    );
-    assert_eq!(
-        DuckdbOracle::parse("duckdb_divergent (243, 1, 2)"),
-        DuckdbOracle::Divergent {
-            ticket: 243,
-            columns: vec![1, 2]
-        }
+        DuckdbOracle::parse(&format!("duckdb(no_sort, rel(1e-5, \"{name}\"))")),
+        compare_on(
+            RowOrder::NoSort,
+            Values::Rel {
+                tolerance: 1e-5,
+                columns: vec![name.into()]
+            }
+        )
     );
 }
 
 #[test]
-#[should_panic(expected = "duckdb_exact|duckdb_approx")]
-fn a_typo_names_the_accepted_set() {
-    DuckdbOracle::parse("duckdb_exakt");
+#[should_panic(expected = "names columns by name")]
+fn rel_refuses_a_position() {
+    DuckdbOracle::parse("duckdb(sort, rel(1e-5, 2))");
 }
 
 #[test]
-#[should_panic(expected = "a ticket first")]
-fn a_divergent_with_no_ticket_says_so() {
-    DuckdbOracle::parse("duckdb_divergent()");
+#[should_panic(expected = "names columns by name")]
+fn date_refuses_a_position() {
+    DuckdbOracle::parse("duckdb(sort, exact, date(3))");
+}
+
+#[test]
+#[should_panic(expected = "unknown duckdb_oracle")]
+fn the_old_spelling_is_refused() {
+    DuckdbOracle::parse("duckdb_exact");
+}
+
+#[test]
+#[should_panic(expected = "unknown duckdb_oracle")]
+fn divergent_is_gone() {
+    DuckdbOracle::parse("duckdb_divergent(251, 2)");
+}
+
+#[test]
+#[should_panic(expected = "sort|no_sort")]
+fn an_unknown_order_names_the_two() {
+    DuckdbOracle::parse("duckdb(sorted, exact)");
+}
+
+#[test]
+fn tight_keeps_the_spaces_inside_quotes_only() {
+    assert_eq!(
+        tight("duckdb (no_sort , rel(1e-5, \"a / b * c\"))"),
+        "duckdb(no_sort,rel(1e-5,\"a / b * c\"))"
+    );
+}
+
+#[test]
+fn each_spelling_names_its_facets() {
+    assert_eq!(
+        DuckdbOracle::parse("duckdb(no_sort, rel(1e-5, \"a\"), date(\"d\"))").facets(),
+        ["no_sort", "rel", "date"]
+    );
+    assert_eq!(exact().facets(), ["sort", "exact"]);
+    assert_eq!(DuckdbOracle::Fingerprint.facets(), ["fingerprint"]);
+    assert_eq!(DuckdbOracle::None.row_order(), RowOrder::Sort);
 }
 
 // --- the comparator ----------------------------------------------------------
@@ -68,48 +143,73 @@ const OURS: &str = "+---+-----+\n| a | b   |\n+---+-----+\n| 1 | x   |\n| 2 | 1.
 const DUCK: &str = "+---+-----+\n| a | sum |\n+---+-----+\n| 1 | x   |\n| 2 | 1.5 |\n+---+-----+\n";
 const KINDS: [CellKind; 2] = [CellKind::Exact, CellKind::Exact];
 
-fn open(_: u32) -> bool {
-    true
-}
-
-fn closed(_: u32) -> bool {
-    false
-}
-
-fn divergent(ticket: u32, columns: Vec<usize>) -> DuckdbOracle {
-    DuckdbOracle::Divergent { ticket, columns }
-}
-
 fn compare(
     oracle: &DuckdbOracle,
     ours: &str,
     duckdb: &str,
     kinds: &[CellKind],
 ) -> Result<(), String> {
-    compare_sections(oracle, ours, duckdb, kinds, &open)
+    compare_sections(oracle, ours, duckdb, kinds)
+}
+
+/// A table with the header `a | b | d`, one row per `(a, b, d)`, its borders sized to the
+/// widest cell as a rendering's are.
+fn abd(rows: &[(&str, &str, &str)]) -> String {
+    let all: Vec<[&str; 3]> = std::iter::once(["a", "b", "d"])
+        .chain(rows.iter().map(|(a, b, d)| [*a, *b, *d]))
+        .collect();
+    let width = |i: usize| all.iter().map(|r| r[i].len()).max().unwrap_or(1);
+    let rule = format!(
+        "+{}+{}+{}+",
+        "-".repeat(width(0) + 2),
+        "-".repeat(width(1) + 2),
+        "-".repeat(width(2) + 2)
+    );
+    let line = |r: &[&str; 3]| {
+        format!(
+            "| {:w0$} | {:w1$} | {:w2$} |",
+            r[0],
+            r[1],
+            r[2],
+            w0 = width(0),
+            w1 = width(1),
+            w2 = width(2)
+        )
+    };
+    let mut out = vec![rule.clone(), line(&all[0]), rule.clone()];
+    out.extend(all[1..].iter().map(line));
+    out.push(rule);
+    out.join("\n")
+}
+
+const ABD_KINDS: [CellKind; 3] = [CellKind::Decimal(6), CellKind::Decimal(2), CellKind::Exact];
+
+/// DuckDB's rendering of a timestamp, parsed and printed by arrow-rs — the format
+/// `duckdb_result.py`'s `cell()` writes, `%Y-%m-%dT%H:%M:%S` — rather than typed by hand.
+fn duckdb_timestamp(date: &str, time: &str) -> String {
+    let text = StringArray::from(vec![format!("{date} {time}")]);
+    let parsed = cast(&text, &DataType::Timestamp(TimeUnit::Second, None)).expect("a timestamp");
+    array_value_to_string(&parsed, 0).expect("a rendered timestamp")
 }
 
 #[test]
 fn exact_passes_by_position_whatever_the_names() {
-    assert_eq!(compare(&DuckdbOracle::Exact, OURS, DUCK, &KINDS), Ok(()));
+    assert_eq!(compare(&exact(), OURS, DUCK, &KINDS), Ok(()));
 }
 
 #[test]
 fn a_wrong_row_fails_exact() {
     let bad = DUCK.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
-    let said = compare(&DuckdbOracle::Exact, OURS, &bad, &KINDS).expect_err("a wrong row");
+    let said = compare(&exact(), OURS, &bad, &KINDS).expect_err("a wrong row");
     assert!(said.contains("row"), "{said}");
 }
 
-/// Row order is not an answer either: both sides sort their own rendering, at their own
+/// Under `sort` row order is not an answer: both sides sort their own rendering, at their own
 /// widths, so the comparator pairs the rows itself.
 #[test]
-fn the_rows_are_a_multiset_and_their_order_is_not_compared() {
+fn under_sort_the_rows_are_a_multiset_and_their_order_is_not_compared() {
     let reversed = "+---+-----+\n| a | sum |\n+---+-----+\n| 2 | 1.5 |\n| 1 | x   |\n+---+-----+\n";
-    assert_eq!(
-        compare(&DuckdbOracle::Exact, OURS, reversed, &KINDS),
-        Ok(())
-    );
+    assert_eq!(compare(&exact(), OURS, reversed, &KINDS), Ok(()));
 }
 
 #[test]
@@ -117,12 +217,9 @@ fn approx_holds_a_float_to_the_relative_tolerance_and_exact_does_not() {
     let ours = "+-----+\n| x   |\n+-----+\n| 1.5 |\n+-----+";
     let near = "+-----------------+\n| x               |\n+-----------------+\n| 1.5000000000001 |\n+-----------------+\n";
     let far = "+--------+\n| x      |\n+--------+\n| 1.5001 |\n+--------+\n";
-    assert_eq!(
-        compare(&DuckdbOracle::Approx, ours, near, &[CellKind::Float]),
-        Ok(())
-    );
-    assert!(compare(&DuckdbOracle::Approx, ours, far, &[CellKind::Float]).is_err());
-    assert!(compare(&DuckdbOracle::Exact, ours, near, &[CellKind::Float]).is_err());
+    assert_eq!(compare(&approx(), ours, near, &[CellKind::Float]), Ok(()));
+    assert!(compare(&approx(), ours, far, &[CellKind::Float]).is_err());
+    assert!(compare(&exact(), ours, near, &[CellKind::Float]).is_err());
     assert!(DUCKDB_FLOAT_TOLERANCE < 1e-10);
 }
 
@@ -135,12 +232,12 @@ fn approx_holds_a_decimal_to_one_unit_in_our_last_place() {
     let duck = "+--------------------+\n| avg_qty            |\n+--------------------+\n| 25.522005853257337 |\n+--------------------+\n";
     let off = duck.replace("25.522005853257337", "25.522007");
     assert_eq!(
-        compare(&DuckdbOracle::Approx, ours, duck, &[CellKind::Decimal(6)]),
+        compare(&approx(), ours, duck, &[CellKind::Decimal(6)]),
         Ok(())
     );
-    assert!(compare(&DuckdbOracle::Approx, ours, &off, &[CellKind::Decimal(6)]).is_err());
+    assert!(compare(&approx(), ours, &off, &[CellKind::Decimal(6)]).is_err());
     // The same cell under the float rule would be a divergence, which is the point.
-    assert!(compare(&DuckdbOracle::Approx, ours, duck, &[CellKind::Float]).is_err());
+    assert!(compare(&approx(), ours, duck, &[CellKind::Float]).is_err());
 }
 
 /// A NEGATIVE declared scale does not widen the tolerance. `10^-s` with `s = -2` is a
@@ -150,7 +247,7 @@ fn approx_holds_a_decimal_to_one_unit_in_our_last_place() {
 fn a_negative_decimal_scale_does_not_buy_a_wider_tolerance() {
     let ours = "+-------+\n| x     |\n+-------+\n| 100.0 |\n+-------+";
     let off = "+-------+\n| x     |\n+-------+\n| 150.0 |\n+-------+\n";
-    assert!(compare(&DuckdbOracle::Approx, ours, off, &[CellKind::Decimal(-2)]).is_err());
+    assert!(compare(&approx(), ours, off, &[CellKind::Decimal(-2)]).is_err());
 }
 
 /// A zero-column answer has a header with no pipes in it, and `split_cells` reads a pipeless
@@ -165,65 +262,159 @@ fn a_zero_column_answer_reports_no_columns() {
         " a |".repeat(15),
         "---+".repeat(15)
     );
-    let said =
-        compare(&DuckdbOracle::Exact, none, &fifteen, &[]).expect_err("no columns against fifteen");
+    let said = compare(&exact(), none, &fifteen, &[]).expect_err("no columns against fifteen");
     assert!(said.contains("0 columns against 15"), "{said}");
 }
 
+/// q58's `ss_dev`: our truncated quotient and DuckDB's double, 6.2e-7 relative apart.
 #[test]
-fn divergent_needs_a_difference_and_an_open_ticket() {
-    let bad = DUCK.replace("| 2 | 1.5 |", "| 2 | 9.5 |");
-    assert_eq!(compare(&divergent(80, vec![1]), OURS, &bad, &KINDS), Ok(()));
-    let stopped = compare(&divergent(80, vec![1]), OURS, DUCK, &KINDS)
-        .expect_err("a divergence that is no longer one");
-    assert!(stopped.contains("stopped diverging"), "{stopped}");
-    let archived = compare_sections(&divergent(80, vec![1]), OURS, &bad, &KINDS, &closed)
-        .expect_err("a ticket nobody can read");
-    assert!(archived.contains("#80 is not open"), "{archived}");
-}
-
-#[test]
-fn divergent_still_checks_the_row_count_and_the_columns_it_does_not_name() {
-    let col0_wrong = DUCK.replace("| 2 | 1.5 |", "| 7 | 9.5 |");
-    let said = compare(&divergent(80, vec![1]), OURS, &col0_wrong, &KINDS)
-        .expect_err("a column nobody declared divergent");
-    assert!(said.contains("column 0"), "{said}");
-
-    let extra_row = "+---+-----+\n| a | sum |\n+---+-----+\n| 1 | x   |\n| 2 | 9.5 |\n| 3 | z   |\n+---+-----+\n";
-    let said = compare(&divergent(80, vec![]), OURS, extra_row, &KINDS)
-        .expect_err("a row-level divergence still counts the rows");
-    assert!(said.contains("rows"), "{said}");
-}
-
-/// Empty positions mean the ROW SET diverges, so only the count is checked — but a line
-/// that diverges nowhere at all is still a line that stopped diverging.
-#[test]
-fn divergent_with_no_positions_checks_the_count_and_nothing_more() {
-    let every_cell_wrong =
-        "+---+-----+\n| a | sum |\n+---+-----+\n| 8 | y   |\n| 9 | 2.5 |\n+---+-----+\n";
+fn rel_passes_inside_its_tolerance() {
+    let ours = abd(&[
+        ("103.719200", "1.00", "2024-01-01"),
+        ("1.000000", "2.00", "2024-01-02"),
+    ]);
+    let duck = abd(&[
+        ("103.71926462", "1.00", "2024-01-01"),
+        ("1.0", "2.00", "2024-01-02"),
+    ]);
     assert_eq!(
-        compare(&divergent(80, vec![]), OURS, every_cell_wrong, &KINDS),
+        compare(&rel(1e-5, &["a"]), &ours, &duck, &ABD_KINDS),
         Ok(())
     );
-    let said = compare(&divergent(80, vec![]), OURS, DUCK, &KINDS)
-        .expect_err("two identical sections diverge nowhere");
-    assert!(said.contains("stopped diverging"), "{said}");
+    assert!(
+        compare(&approx(), &ours, &duck, &ABD_KINDS).is_err(),
+        "the gap is past approx's last-place unit, which is why the line needs rel"
+    );
+}
+
+/// The bound is relative to the larger magnitude: 2e-5 of 1.00002 is 2.00004e-5, so a gap
+/// of exactly 2e-5 is inside it and one of 2.00005e-5 is not.
+#[test]
+fn rel_fails_just_outside_its_tolerance() {
+    let ours = abd(&[("1.000000", "1.00", "2024-01-01")]);
+    let inside = abd(&[("1.00002", "1.00", "2024-01-01")]);
+    let outside = abd(&[("1.0000200005", "1.00", "2024-01-01")]);
+    assert_eq!(
+        compare(&rel(2e-5, &["a"]), &ours, &inside, &ABD_KINDS),
+        Ok(())
+    );
+    let said = compare(&rel(2e-5, &["a"]), &ours, &outside, &ABD_KINDS)
+        .expect_err("2.00005e-5 apart under a 2e-5 tolerance");
+    assert!(said.contains("(a)"), "{said}");
+}
+
+#[test]
+fn an_unnamed_column_stays_at_approx() {
+    let ours = abd(&[("1.000000", "1.00", "2024-01-01")]);
+    let duck = abd(&[("1.0", "1.02", "2024-01-01")]);
+    let said = compare(&rel(1e-5, &["a"]), &ours, &duck, &ABD_KINDS)
+        .expect_err("b is two last-place units off and rel does not name it");
+    assert!(said.contains("(b)"), "{said}");
+}
+
+#[test]
+fn rel_and_date_fail_on_a_column_the_header_does_not_have() {
+    let table = abd(&[("1.000000", "1.00", "2024-01-01")]);
+    for oracle in [rel(1e-5, &["zz"]), dated(&["zz"])] {
+        let said = compare(&oracle, &table, &table, &ABD_KINDS).expect_err("no column zz");
+        assert!(said.contains("\"zz\""), "{said}");
+        assert!(said.contains("a, b, d"), "the header's names: {said}");
+    }
+}
+
+/// A name the header carries twice is refused rather than read at its first position.
+#[test]
+fn rel_fails_on_a_name_the_header_has_twice() {
+    let table = "+---+---+\n| a | a |\n+---+---+\n| 1 | 2 |\n+---+---+";
+    let kinds = [CellKind::Exact, CellKind::Exact];
+    let said = compare(&rel(1e-5, &["a"]), table, table, &kinds).expect_err("two columns a");
+    assert!(said.contains("2 times"), "{said}");
+}
+
+/// `date ± interval`: DuckDB answers a timestamp where DataFusion answers a date, so a named
+/// column's DuckDB cell compares by its date part, whatever its time.
+#[test]
+fn date_compares_the_date_part() {
+    let ours = abd(&[("1.000000", "1.00", "2024-02-29")]);
+    for time in ["00:00:00", "12:00:00"] {
+        let duck = abd(&[("1.000000", "1.00", &duckdb_timestamp("2024-02-29", time))]);
+        assert_eq!(compare(&dated(&["d"]), &ours, &duck, &ABD_KINDS), Ok(()));
+        assert!(compare(&exact(), &ours, &duck, &ABD_KINDS).is_err());
+    }
+    assert_eq!(
+        duckdb_timestamp("2024-02-29", "00:00:00"),
+        "2024-02-29T00:00:00"
+    );
+}
+
+#[test]
+fn date_fails_on_another_day() {
+    let ours = abd(&[("1.000000", "1.00", "2024-03-10")]);
+    let duck = abd(&[(
+        "1.000000",
+        "1.00",
+        &duckdb_timestamp("2024-03-09", "12:00:00"),
+    )]);
+    let said = compare(&dated(&["d"]), &ours, &duck, &ABD_KINDS).expect_err("a day apart");
+    assert!(said.contains("(d)"), "{said}");
+}
+
+/// Two rows whose dates differ only in DuckDB's time part sort and pair by their dates: the
+/// time cannot reorder DuckDB's rows against ours.
+#[test]
+fn date_pairs_rows_under_sort() {
+    let ours = abd(&[
+        ("1.000000", "1.00", "2024-01-02"),
+        ("2.000000", "1.00", "2024-01-01"),
+    ]);
+    let duck = abd(&[
+        (
+            "2.000000",
+            "1.00",
+            &duckdb_timestamp("2024-01-01", "23:00:00"),
+        ),
+        (
+            "1.000000",
+            "1.00",
+            &duckdb_timestamp("2024-01-02", "00:00:00"),
+        ),
+    ]);
+    assert_eq!(compare(&dated(&["d"]), &ours, &duck, &ABD_KINDS), Ok(()));
+}
+
+/// `no_sort` pairs rows by position: the same two rows swapped is an answer in the wrong
+/// order, and it fails at the first row out of place.
+#[test]
+fn no_sort_fails_on_two_swapped_rows() {
+    let swapped = "+---+-----+\n| a | sum |\n+---+-----+\n| 2 | 1.5 |\n| 1 | x   |\n+---+-----+\n";
+    let no_sort = compare_on(RowOrder::NoSort, Values::Exact);
+    let said = compare(&no_sort, OURS, swapped, &KINDS).expect_err("two rows out of order");
+    assert!(said.starts_with("row 0,"), "{said}");
+    assert_eq!(compare(&exact(), OURS, swapped, &KINDS), Ok(()));
+}
+
+#[test]
+fn no_sort_passes_rows_in_the_same_order() {
+    for values in [Values::Exact, Values::Approx] {
+        let no_sort = compare_on(RowOrder::NoSort, values);
+        assert_eq!(compare(&no_sort, OURS, DUCK, &KINDS), Ok(()));
+    }
 }
 
 #[test]
 fn a_column_count_difference_fails_before_any_row_is_compared() {
     let wide = "+---+-----+---+\n| a | sum | c |\n+---+-----+---+\n| 1 | x   | 0 |\n| 2 | 1.5 | 0 |\n+---+-----+---+\n";
-    let said = compare(&DuckdbOracle::Exact, OURS, wide, &KINDS).expect_err("a dropped column");
+    let said = compare(&exact(), OURS, wide, &KINDS).expect_err("a dropped column");
     assert!(said.contains("2 columns against 3"), "{said}");
 }
 
 #[test]
 fn a_fingerprinted_section_needs_the_fingerprint_oracle() {
     let fp = "fingerprint: rows=2\ncol 0: nonnull=2\ncol 1: nonnull=2\nhash: 00\n";
-    let said = compare(&DuckdbOracle::Exact, fp, fp, &KINDS)
+    let said = compare(&exact(), fp, fp, &KINDS)
         .expect_err("an over-cap section under an oracle that reads rows");
     assert!(said.contains("duckdb_fingerprint"), "{said}");
-    let said = compare(&DuckdbOracle::Approx, OURS, fp, &KINDS)
+    let said = compare(&approx(), OURS, fp, &KINDS)
         .expect_err("one side over the cap and the line says otherwise");
     assert!(said.contains("duckdb_fingerprint"), "{said}");
 }
@@ -254,84 +445,33 @@ fn none_over_two_sections_that_both_exist_fails() {
     assert!(said.contains("duckdb_none"), "{said}");
 }
 
-/// A NULL renders as an empty cell on both sides, and it is not a number: the tolerance
-/// cannot make it equal to one.
+/// A NULL renders as an empty cell on both sides, and it is not a number: no tolerance can
+/// make it equal to one.
 #[test]
 fn a_null_is_not_within_any_tolerance_of_a_value() {
     let ours = "+-----+\n| x   |\n+-----+\n|     |\n+-----+";
     let duck = "+-----+\n| x   |\n+-----+\n| 0.0 |\n+-----+\n";
-    assert!(compare(&DuckdbOracle::Approx, ours, duck, &[CellKind::Float]).is_err());
-    assert_eq!(
-        compare(&DuckdbOracle::Approx, ours, ours, &[CellKind::Float]),
-        Ok(())
-    );
+    assert!(compare(&approx(), ours, duck, &[CellKind::Float]).is_err());
+    assert!(compare(&rel(1.0, &["x"]), ours, duck, &[CellKind::Float]).is_err());
+    assert_eq!(compare(&approx(), ours, ours, &[CellKind::Float]), Ok(()));
 }
 
-/// A column-count difference fails under every oracle, a row-level divergence included: an
-/// engine that dropped a column is wrong whatever the rows do. Both sides here answer zero
-/// rows, the one shape where the width is all there is to compare.
+/// A column-count difference fails under every oracle that reads rows: an engine that dropped
+/// a column is wrong whatever the rows do. Both sides here answer zero rows, the one shape
+/// where the width is all there is to compare.
 #[test]
 fn a_column_count_difference_fails_under_every_oracle() {
     let ours = "++\n++\n";
     let duck = "+---+-----+\n| a | sum |\n+---+-----+\n+---+-----+\n";
     for oracle in [
-        divergent(251, vec![]),
-        DuckdbOracle::Exact,
-        DuckdbOracle::Approx,
+        exact(),
+        approx(),
+        compare_on(RowOrder::NoSort, Values::Exact),
     ] {
         let said = compare(&oracle, ours, duck, &KINDS)
             .expect_err("a dropped schema under an oracle that reads rows");
-        assert!(
-            said.contains("0 columns against 2"),
-            "{}: {said}",
-            oracle.name()
-        );
+        assert!(said.contains("0 columns against 2"), "{oracle:?}: {said}");
     }
-}
-
-/// Each named column has to diverge somewhere. One that came right is a line to update and
-/// a ticket to look at closing, not a column to go on excusing — and the set as a whole
-/// still differing would hide it.
-#[test]
-fn divergent_names_each_column_and_one_that_came_right_fails() {
-    let ours = "+---+---+\n| a | b |\n+---+---+\n| 1 | 2 |\n+---+---+";
-    let duck = "+---+---+\n| a | b |\n+---+---+\n| 1 | 9 |\n+---+---+\n";
-    let kinds = [CellKind::Exact, CellKind::Exact];
-    assert_eq!(compare(&divergent(80, vec![1]), ours, duck, &kinds), Ok(()));
-    let said = compare(&divergent(80, vec![0, 1]), ours, duck, &kinds)
-        .expect_err("column 0 agrees and the line says it diverges");
-    assert!(said.contains("column 0"), "{said}");
-    assert!(said.contains("stopped diverging"), "{said}");
-}
-
-/// A declared position past the answer's width names the line, rather than panicking on a
-/// slice index: `duckdb_divergent(251, 99)` is a line somebody mistyped, and a reader looking
-/// at `index out of bounds: the len is 2 but the index is 99` learns neither which line nor
-/// which position.
-#[test]
-fn a_declared_position_past_the_last_column_names_the_line() {
-    // Column 1 really does diverge here, so nothing short-circuits ahead of position 99.
-    let duck = "+---+-----+\n| a | sum |\n+---+-----+\n| 1 | y   |\n| 2 | 9.9 |\n+---+-----+\n";
-    let said = compare(&divergent(251, vec![1, 99]), OURS, duck, &KINDS)
-        .expect_err("column 99 of a two-column answer");
-    assert!(said.contains("99") && said.contains("251"), "{said}");
-    assert!(said.contains("out of range"), "{said}");
-}
-
-/// The ticket reader, both ways, over the committed files. An archived ticket must read as
-/// closed, or a `duckdb_divergent` line goes on excusing a divergence after the fix landed —
-/// which is the one thing the number on that line is there to prevent.
-#[test]
-fn an_archived_ticket_is_not_open_and_a_listed_one_is() {
-    use crate::test_support::ticket_is_open;
-    // #251 is what `corpus_cases.inc`'s divergent lines name; a case asserting it open goes
-    // red the day it is archived, and the fix is to swap in another open number.
-    assert!(ticket_is_open(251), "#251 is in llm-wiki/tickets/");
-    assert!(
-        !ticket_is_open(191),
-        "#191 is in llm-wiki/archive/archived-tickets.md, which is not a list of what is broken"
-    );
-    assert!(!ticket_is_open(99_999), "no file holds this number");
 }
 
 // --- the gpu-result file's coverage ------------------------------------------

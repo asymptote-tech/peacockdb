@@ -73,9 +73,9 @@ impl GpuNode for Given {
     }
 }
 
-/// A writer whose joins carry no budget of their own: the session's default.
+/// A writer whose joins carry no budget of their own: the default.
 fn writer<'a>() -> Writer<'a> {
-    Writer::with_join_scratch(0)
+    Writer::with_join_scratch(DEFAULT_CHUNK_BYTES)
 }
 
 fn columns_of(columns: &[&str]) -> Schema {
@@ -193,7 +193,7 @@ fn written_with(node: JoinNode<'_>, chunk_bytes: u64) -> (Recipe, Vec<u8>, Seq) 
 }
 
 fn written(node: JoinNode<'_>) -> (Recipe, Vec<u8>, Seq) {
-    written_with(node, 0)
+    written_with(node, DEFAULT_CHUNK_BYTES)
 }
 
 /// The `CudfJoin` at the seq a recipe's calls address.
@@ -351,22 +351,19 @@ fn a_join_recipe_line_is_the_session() {
 }
 
 /// The session's chunk is the plan's budget: a sixteenth of it in the one mode that sets
-/// one, capped at 1 GiB, and 0 — the session's own 1 GiB — everywhere else.
+/// one, capped at the default 1 GiB, and the default everywhere else.
 #[test]
 fn a_budgeted_join_carries_its_chunk_budget() {
     let sized = crate::test_support::mode_named("tp4_sized").knobs_for("tpch");
-    let single = crate::test_support::mode_named("tp1_single").knobs_for("tpch");
     assert_eq!(join_scratch_bytes(&sized), sized.budget / 16);
-    assert!(join_scratch_bytes(&sized) > 0);
-    assert_eq!(join_scratch_bytes(&single), 0);
     let huge = PlanKnobs {
         budget: 64 << 30,
         ..sized
     };
     assert_eq!(
         join_scratch_bytes(&huge),
-        1 << 30,
-        "never past the session's own default"
+        DEFAULT_CHUNK_BYTES,
+        "never past the default"
     );
 
     let node = join(JoinType::Inner, false, None);
@@ -375,7 +372,46 @@ fn a_budgeted_join_carries_its_chunk_budget() {
     assert_eq!(cudf_join(&plan, &recipe).chunk_bytes(), sized.budget / 16);
     let (recipe, bytes, _) = written(JoinNode::Hash(&node));
     let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
-    assert_eq!(cudf_join(&plan, &recipe).chunk_bytes(), 0);
+    assert_eq!(cudf_join(&plan, &recipe).chunk_bytes(), DEFAULT_CHUNK_BYTES);
+}
+
+/// A mode with no budget writes the default, which the buffer then leaves out: there is no
+/// value left that means "the session decides".
+#[test]
+fn an_unbudgeted_mode_writes_the_default() {
+    for mode in ["tp1_single", "tp1_rowgroup", "tp4_single", "tp4_rowgroup"] {
+        let knobs = crate::test_support::mode_named(mode).knobs_for("tpch");
+        assert_eq!(join_scratch_bytes(&knobs), DEFAULT_CHUNK_BYTES, "{mode}");
+    }
+}
+
+/// `JoinLimits.DefaultChunkBytes` and `CudfJoin.chunk_bytes`'s field default are two
+/// literals in `gpu_plan.fbs`; a join written with nothing set reads back the one Rust names.
+#[test]
+fn the_join_limit_and_the_field_default_agree() {
+    let mut builder = flatbuffers::FlatBufferBuilder::new();
+    let join = fb::CudfJoin::create(&mut builder, &fb::CudfJoinArgs::default());
+    builder.finish(join, None);
+    let read = flatbuffers::root::<fb::CudfJoin>(builder.finished_data()).expect("verifies");
+    assert_eq!(read.chunk_bytes(), DEFAULT_CHUNK_BYTES);
+    assert_eq!(DEFAULT_CHUNK_BYTES, 1 << 30);
+}
+
+/// The default is the unbudgeted modes' value, so printing it would put a line into every
+/// unbudgeted plan golden; a budgeted mode's chunk prints.
+#[test]
+fn fb_text_prints_chunk_bytes_only_when_it_is_not_the_default() {
+    let node = join(JoinType::Inner, false, None);
+    let text = |chunk_bytes: u64| {
+        let (recipe, bytes, _) = written_with(JoinNode::Hash(&node), chunk_bytes);
+        let plan = flatbuffers::root::<fb::GpuPlan>(&bytes).expect("the buffer verifies");
+        let at = node_at(&plan, recipe.seqs()[0])
+            .expect("the walk names every kind")
+            .expect("a join's seq holds a node");
+        super::fb_text::payload_text(&at, "")
+    };
+    assert!(!text(DEFAULT_CHUNK_BYTES).contains("chunk_bytes"));
+    assert!(text(1000).contains("chunk_bytes: 1000"), "{}", text(1000));
 }
 
 // #249 — a type the wire's enum cannot name: the plan is not runnable on the device, said at
@@ -411,7 +447,7 @@ fn bug_a_join_side_holding_a_list_column_is_not_runnable() {
         Some(vec![0, 2]),
         columns_of(&["k", "fk"]),
     );
-    let refused = attach_recipes(&node, 0)
+    let refused = attach_recipes(&node, DEFAULT_CHUNK_BYTES)
         .err()
         .expect("the wire cannot type a list")
         .to_string();
@@ -444,7 +480,7 @@ fn seqs_are_the_post_order_positions_of_what_was_built() {
 /// structural union — so the stubs are indexed and the join's seq is the one after them.
 #[test]
 fn a_join_leaves_its_inputs_for_the_walk_to_gather() {
-    let plan = attach_recipes(&join(JoinType::Inner, false, None), 0)
+    let plan = attach_recipes(&join(JoinType::Inner, false, None), DEFAULT_CHUNK_BYTES)
         .expect("a join over two given leaves is writable");
     assert_eq!(
         plan.get(2).expect("the join's recipe").seqs(),
@@ -793,7 +829,7 @@ fn filter_over_scan_with_an_interval() -> GpuFilter {
 
 #[test]
 fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
-    let refused = attach_recipes(&filter_over_scan_with_an_interval(), 0)
+    let refused = attach_recipes(&filter_over_scan_with_an_interval(), DEFAULT_CHUNK_BYTES)
         .err()
         .expect("the wire has no interval, so this plan cannot be built");
     let said = refused.to_string();
@@ -825,7 +861,8 @@ fn a_leaf_outside_the_registry_emits_no_seq_and_its_parent_takes_a_stub() {
         None,
         input,
     );
-    let plan = attach_recipes(&filter, 0).expect("a filter over a given leaf is writable");
+    let plan = attach_recipes(&filter, DEFAULT_CHUNK_BYTES)
+        .expect("a filter over a given leaf is writable");
     assert!(plan.get(0).is_none(), "the leaf has no recipe");
     let recipe = plan.get(1).expect("the filter has one");
     assert_eq!(recipe.calls.len(), 1);
@@ -846,7 +883,7 @@ fn a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub() {
             fetch: Some(2),
         },
     );
-    let plan = attach_recipes(&limit, 0).expect("writable");
+    let plan = attach_recipes(&limit, DEFAULT_CHUNK_BYTES).expect("writable");
     assert!(plan.get(0).is_none());
     assert_eq!(
         plan.get(1).expect("the limit's").calls[0].symbol,
@@ -861,7 +898,7 @@ fn a_seqless_operator_over_a_given_leaf_is_a_plan_of_one_stub() {
 #[test]
 fn an_empty_relation_is_a_stub_with_no_recipe() {
     let empty = GpuEmpty::new(columns_of(&["k"]));
-    let plan = attach_recipes(&GpuUnload::new(Box::new(empty), None), 0)
+    let plan = attach_recipes(&GpuUnload::new(Box::new(empty), None), DEFAULT_CHUNK_BYTES)
         .expect("an unload over an empty relation is writable");
     assert!(plan.get(0).is_none(), "the empty relation makes no call");
     assert_eq!(plan.wire_nodes(), 1, "its stub, and nothing else");
