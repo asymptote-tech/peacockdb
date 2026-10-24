@@ -11,7 +11,7 @@ use super::super::{GpuAccumulator, GpuEmitter};
 use crate::plan::{
     GpuAccumulateBatchesAndSort, GpuAggregateBatches, GpuCoalesceAllBatches, GpuEmitPartitions,
 };
-use crate::tests::executor_cases::{CASES, Shape};
+use crate::tests::executor_cases::{CASES, ROLLUP_STATE, Shape, rollup_bodies, rollup_rows};
 
 /// `k|v` per row, sorted, as the table writes its answers.
 fn rendered(batch: &CpuBatch) -> Vec<String> {
@@ -205,6 +205,21 @@ fn emitted(shape: Shape) -> Vec<String> {
                 })
                 .collect()
         }
+        Shape::SumOverRollup => {
+            let state = Schema::new(Arc::new(schema_of(&ROLLUP_STATE)));
+            let (init, merge) = rollup_bodies();
+            merged_over_batches(
+                source_per_row_group(),
+                &[],
+                state.clone(),
+                init,
+                merge,
+                state,
+            )
+            .iter()
+            .flat_map(|batch| rollup_rows(batch.record_batch()))
+            .collect()
+        }
         Shape::ScatterLanes { lanes } => {
             let out = columns();
             let tree: Box<dyn GpuNode> = Box::new(GpuEmitPartitions::new(
@@ -277,7 +292,6 @@ fn merged(
     merged_over(source, &[], state, init, merge, output)
 }
 
-/// The two nodes the planner stacks, driven by hand: an init per batch and a merge at done.
 fn merged_over(
     source: Box<dyn GpuNode>,
     between: &[ArrowSchema],
@@ -286,6 +300,21 @@ fn merged_over(
     merge: AggregateBody,
     output: Schema,
 ) -> Vec<String> {
+    merged_over_batches(source, between, state, init, merge, output)
+        .iter()
+        .flat_map(rendered)
+        .collect()
+}
+
+/// The two nodes the planner stacks, driven by hand: an init per batch and a merge at done.
+fn merged_over_batches(
+    source: Box<dyn GpuNode>,
+    between: &[ArrowSchema],
+    state: Schema,
+    init: AggregateBody,
+    merge: AggregateBody,
+    output: Schema,
+) -> Vec<CpuBatch> {
     let init_node = GpuAggregate::new(source, init, state.clone(), state.clone());
     let tree: Box<dyn GpuNode> = Box::new(GpuAggregateBatches::new(
         Box::new(init_node),
@@ -323,15 +352,16 @@ fn merged_over(
             .expect("the arrival is accepted");
     }
     let (emitted, _) = accumulator.mark_done_and_fetch().expect("done is accepted");
-    let mut answered = Vec::new();
-    for batch in emitted {
-        let (back, _) = session
-            .export(&out)
-            .unload(batch, RowRange::WHOLE)
-            .expect("the rows cross the boundary");
-        answered.extend(rendered(&back));
-    }
-    answered
+    emitted
+        .into_iter()
+        .map(|batch| {
+            session
+                .export(&out)
+                .unload(batch, RowRange::WHOLE)
+                .expect("the rows cross the boundary")
+                .0
+        })
+        .collect()
 }
 
 #[test]

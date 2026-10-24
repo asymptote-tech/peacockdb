@@ -1644,6 +1644,25 @@ GpuUnload: estimated_max_resident_size=318064395
       GpuAggregateBatches: estimated_max_resident_size=384077760
         GpuAggregate: estimated_max_resident_size=28744177
           GpuLoadParquet: estimated_max_resident_size=19761622, source_bytes=19761622, target_batch_bytes=19761622, amplification=1.5
+== rollup-grouping
+GpuUnload
+  GpuProject: exprs=[n_regionkey@0, n_nationkey@1, CAST(__grouping_id@2 AS Int32) as g, count(*)@3], lanes=1, batches=single, schema=[n_regionkey:Int32, n_nationkey:Int32, g:Int32, count(*):Int64]
+    GpuAggregateBatches: group_by=[n_regionkey@0, n_nationkey@1, __grouping_id@2], aggs=[sum(count(*)@3) as count(*)], final=[count(*)@3], lanes=1, batches=single, schema=[n_regionkey:Int32, n_nationkey:Int32, __grouping_id:UInt8, count(*):Int64]
+      GpuAggregate: group_by=[n_regionkey@1, n_nationkey@0], grouping_sets=[[], [n_regionkey@1], [n_regionkey@1, n_nationkey@0]], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[n_regionkey:Int32, n_nationkey:Int32, __grouping_id:UInt8, count(*):Int64]
+        GpuLoadParquet: table=nation, projections=[n_nationkey@0, n_regionkey@2], partition_groups=[[[0]]], lanes=1, batches=multiple, schema=[n_nationkey:Int32, n_regionkey:Int32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#5 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output); at done: execute_node(#4 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#1 CudfAggregate{Partial}, batch)
+        GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=525, certain=0
+GpuUnload: estimated_max_resident_size=600
+  GpuProject: estimated_max_resident_size=600
+    GpuAggregateBatches: estimated_max_resident_size=525
+      GpuAggregate: estimated_max_resident_size=588
+        GpuLoadParquet: estimated_max_resident_size=280, source_bytes=280, target_batch_bytes=280, amplification=2.1
 == rollup-over-join
 GpuUnload
   GpuProject: exprs=[c_nationkey@0, c_mktsegment@1, count(*)@3], lanes=1, batches=single, schema=[c_nationkey:Int32, c_mktsegment:Utf8, count(*):Int64]

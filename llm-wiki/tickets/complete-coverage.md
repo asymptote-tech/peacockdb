@@ -73,7 +73,7 @@ grouping can dedup `a` or `b`, not both, and grouping by `(a, b)` dedups neither
 fix is Spark's `RewriteDistinctAggregates` — an expand multiplies each row into one per distinct
 argument tagged with a group id, the inner aggregate groups by `(keys, gid, args)`, and the
 outer computes each count from the rows carrying its own gid. That needs a new row-multiplying
-node, which is why it is a ticket rather than a planner tweak. Not [#65](corpus-coverage.md#t65), whose gid is the
+node, which is why it is a ticket rather than a planner tweak. Not [#65](../archive/archived-tickets.md#t65), whose gid is the
 ROLLUP/CUBE `__grouping_id` — the two would coexist as separate columns. Until it lands the
 planner refuses the shape at plan time.
 

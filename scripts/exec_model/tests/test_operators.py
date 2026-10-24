@@ -545,9 +545,18 @@ def test_a_rollup_expands_into_one_batch_carrying_every_set():
     # per set, because an executor may return at most one batch per call per output lane.
     aggs = [A.Agg(A.SUM, "v", "s")]
     out = A.partial_over_sets(rollup_frame(), ["a", "b"], aggs, A.rollup_masks(2))
-    assert set(out[A.GROUPING_ID]) == {0, 2, 3}          # bitmask of masked positions
+    assert set(out[A.GROUPING_ID]) == {0, 1, 3}          # DataFusion's: the first key highest
     assert len(out) == 4 + 2 + 1                          # (a,b) x4, (a) x2, () x1
     assert out[out[A.GROUPING_ID] == 3].s.iloc[0] == 15.0  # the grand total
+
+
+def test_the_grouping_id_puts_the_first_key_highest():
+    # Only all-false and all-true masks read the same from either end, so a mixed mask is
+    # what tells the two numberings apart.
+    assert A.grouping_set_id((False, True)) == 1
+    assert A.grouping_set_id((True, False, False)) == 4
+    assert A.grouping_set_id((False, False, True)) == 1
+    assert A.grouping_set_id((True,) * 9) == 511
 
 
 def test_the_grouping_id_sits_between_the_keys_and_the_state():
@@ -563,7 +572,8 @@ def test_a_masked_key_is_null_rather_than_absent():
     # masked position is a NULL value, not a missing column.
     out = A.partial_over_sets(rollup_frame(), ["a", "b"], [A.Agg(A.SUM, "v", "s")],
                               A.rollup_masks(2))
-    masked = out[out[A.GROUPING_ID] == 2]
+    masked = out[out[A.GROUPING_ID] == 1]
+    assert len(masked) == 2
     assert masked.b.isna().all() and masked.a.notna().all()
     assert out[out[A.GROUPING_ID] == 3][["a", "b"]].isna().all().all()
 
