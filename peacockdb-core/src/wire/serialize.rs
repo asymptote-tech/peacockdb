@@ -81,6 +81,24 @@ pub(crate) fn serialize_scalar_value<'a>(
             args.decimal_precision = *prec;
             args.decimal_scale = *scale as i8;
         }
+        // All three interval literals cross as one type, so the device has one arm.
+        DfScalarValue::IntervalMonthDayNano(Some(v)) => {
+            set_interval(&mut args, v.months, v.days, v.nanoseconds);
+        }
+        DfScalarValue::IntervalYearMonth(Some(months)) => {
+            set_interval(&mut args, *months, 0, 0);
+        }
+        DfScalarValue::IntervalDayTime(Some(v)) => {
+            set_interval(&mut args, 0, v.days, v.milliseconds as i64 * 1_000_000);
+        }
+        // Ahead of the generic null: `convert_data_type` has no interval, since it also types
+        // schemas and an interval column stays refused (#249).
+        DfScalarValue::IntervalMonthDayNano(None)
+        | DfScalarValue::IntervalYearMonth(None)
+        | DfScalarValue::IntervalDayTime(None) => {
+            args.type_ = fb::DataType::IntervalMonthDayNano;
+            args.is_null = true;
+        }
         // Treat any None variant as typed null. The `is_null` flag is what
         // distinguishes it from a zero value on the wire.
         other if other.is_null() => {
@@ -97,6 +115,13 @@ pub(crate) fn serialize_scalar_value<'a>(
     }
 
     Ok(fb::ScalarValue::create(b, &args))
+}
+
+fn set_interval(args: &mut fb::ScalarValueArgs<'_>, months: i32, days: i32, nanos: i64) {
+    args.type_ = fb::DataType::IntervalMonthDayNano;
+    args.interval_months = months;
+    args.interval_days = days;
+    args.interval_nanos = nanos;
 }
 
 pub(crate) fn convert_data_type(dt: &ArrowDataType) -> Result<fb::DataType, String> {

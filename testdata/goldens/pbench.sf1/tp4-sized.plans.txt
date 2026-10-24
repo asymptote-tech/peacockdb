@@ -762,6 +762,222 @@ GpuUnload: estimated_max_resident_size=55000
             GpuAggregateBatches: estimated_max_resident_size=220000
               GpuAggregate: estimated_max_resident_size=542520
                 GpuLoadParquet: estimated_max_resident_size=98640, source_bytes=80279, target_batch_bytes=80279, amplification=22.0
+== interval-days-filter
+GpuUnload
+  GpuProject: exprs=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`@0 as late, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`@1 as early], lanes=1, batches=single, schema=[late:Int64, early:Int64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`@0) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`, sum(`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`@1) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`], final=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`@0, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`@1], lanes=1, batches=single, schema=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`:Int64, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`:Int64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`:Int64, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`:Int64]
+        GpuAggregateBatches: group_by=[], aggs=[sum(`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`@0) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`, sum(`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`@1) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`], lanes=4, batches=single, schema=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`:Int64, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`:Int64]
+          GpuAggregate: group_by=[], aggs=[sum(CASE WHEN (f_dt@0 + `30 days`) > 2024-12-01 THEN 1 ELSE 0 END) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`, sum(CASE WHEN (f_dt@0 + `-45 days`) < 2024-01-01 THEN 1 ELSE 0 END) as `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`], lanes=4, batches=multiple, schema=[`sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: 30, nanoseconds: 0 }") > Utf8("2024-12-01") THEN Int64(1) ELSE Int64(0) END)`:Int64, `sum(CASE WHEN fact.f_dt + IntervalMonthDayNano("IntervalMonthDayNano { months: 0, days: -45, nanoseconds: 0 }") < Utf8("2024-01-01") THEN Int64(1) ELSE Int64(0) END)`:Int64]
+            GpuLoadParquet: table=fact, projections=[f_dt@12], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#7 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#4 CudfCoalescePartitions, lane batches), execute_node(#5 CudfAggregate{Merge}, prior output); at done: execute_node(#6 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#2 CudfCoalescePartitions, lane batches), execute_node(#3 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#1 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#1 CudfAggregate{Partial})
+            GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=720000, certain=0
+GpuUnload: estimated_max_resident_size=360000
+  GpuProject: estimated_max_resident_size=360000
+    GpuAggregateBatches: estimated_max_resident_size=360000
+      GpuMergePartitions: estimated_max_resident_size=90000
+        GpuAggregateBatches: estimated_max_resident_size=360000
+          GpuAggregate: estimated_max_resident_size=355104
+            GpuLoadParquet: estimated_max_resident_size=98640, source_bytes=80279, target_batch_bytes=80279, amplification=14.4
+== interval-join-keyed
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n], lanes=1, batches=single, schema=[n:Int64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[count(*):Int64]
+        GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], lanes=4, batches=single, schema=[count(*):Int64]
+          GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[count(*):Int64]
+            GpuProject: exprs=[0 as __rowmarker__], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
+              GpuHashJoin: join_type=Inner, on=[(d_k@0, f_k@0)], filter=f_dt@probe:1 <= (d_dt@build:1 + `1 mons`), lanes=4, batches=multiple, hashed_on=[d_k@0], schema=[d_k:Int32, d_dt:Date32, f_k:Int32, f_dt:Date32]
+                GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[d_k@0], schema=[d_k:Int32, d_dt:Date32]
+                  GpuEmitPartitions: hash=[d_k@0], lanes=4, batches=multiple, hashed_on=[d_k@0], schema=[d_k:Int32, d_dt:Date32]
+                    GpuFilter: predicate=d_k@0 IS NOT NULL, lanes=1, batches=multiple, schema=[d_k:Int32, d_dt:Date32]
+                      GpuMergePartitions: lanes=1, batches=multiple, schema=[d_k:Int32, d_dt:Date32]
+                        GpuLoadParquet: table=dim, projections=[d_k@1, d_dt@12], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_k:Int32, d_dt:Date32]
+                GpuEmitPartitions: hash=[f_k@0], lanes=4, batches=multiple, hashed_on=[f_k@0], schema=[f_k:Int32, f_dt:Date32]
+                  GpuFilter: predicate=f_k@0 IS NOT NULL, lanes=1, batches=multiple, schema=[f_k:Int32, f_dt:Date32]
+                    GpuMergePartitions: lanes=1, batches=multiple, schema=[f_k:Int32, f_dt:Date32]
+                      GpuLoadParquet: table=fact, projections=[f_k@1, f_dt@12], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_k:Int32, f_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#16 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#13 CudfCoalescePartitions, lane batches), execute_node(#14 CudfAggregate{Merge}, prior output); at done: execute_node(#15 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#11 CudfCoalescePartitions, lane batches), execute_node(#12 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#10 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#10 CudfAggregate{Partial})
+            GpuProject: calling_lanes=4, per batch: execute_node(#9 CudfProject, batch)
+              GpuHashJoin: calling_lanes=4, join_build(#7 CudfJoin); per probe batch: join_probe
+                GpuCoalesceAllBatches: calling_lanes=4, at done: execute_node(#3 CudfCoalescePartitions, lane batches)
+                  GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#2 CudfRepartition{Hash, 1→4}, batch)
+                    GpuFilter: calling_lanes=1, per batch: execute_node(#1 CudfFilter, batch)
+                      GpuMergePartitions: none
+                        GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+                GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#6 CudfRepartition{Hash, 1→4}, batch)
+                  GpuFilter: calling_lanes=1, per batch: execute_node(#5 CudfFilter, batch)
+                    GpuMergePartitions: none
+                      GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#4 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=432000, certain=0
+GpuUnload: estimated_max_resident_size=180000
+  GpuProject: estimated_max_resident_size=180000
+    GpuAggregateBatches: estimated_max_resident_size=180000
+      GpuMergePartitions: estimated_max_resident_size=45000
+        GpuAggregateBatches: estimated_max_resident_size=180000
+          GpuAggregate: estimated_max_resident_size=23400
+            GpuProject: estimated_max_resident_size=5200
+              GpuHashJoin: estimated_max_resident_size=247548
+                GpuCoalesceAllBatches: estimated_max_resident_size=20000
+                  GpuEmitPartitions: estimated_max_resident_size=64516
+                    GpuFilter: estimated_max_resident_size=16129
+                      GpuMergePartitions: estimated_max_resident_size=16129
+                        GpuLoadParquet: estimated_max_resident_size=64516, source_bytes=16129, target_batch_bytes=16129, amplification=4.0
+                GpuEmitPartitions: estimated_max_resident_size=195548
+                  GpuFilter: estimated_max_resident_size=48887
+                    GpuMergePartitions: estimated_max_resident_size=48887
+                      GpuLoadParquet: estimated_max_resident_size=195548, source_bytes=159091, target_batch_bytes=159091, amplification=4.0
+== interval-join-keyless
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n], lanes=1, batches=single, schema=[n:Int64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
+      GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=1, batches=multiple, schema=[count(*):Int64]
+        GpuProject: exprs=[0 as __rowmarker__], lanes=1, batches=multiple, schema=[__rowmarker__:Int8]
+          GpuNestedLoopJoin: join_type=Inner, filter=(f_dt@build:0 + `7 days`) < d_dt@probe:0, lanes=1, batches=multiple, schema=[f_dt:Date32, d_dt:Date32]
+            GpuCoalesceAllBatches: lanes=1, batches=single, schema=[f_dt:Date32]
+              GpuMergePartitions: lanes=1, batches=multiple, schema=[f_dt:Date32]
+                GpuFilter: predicate=f_id@0 < 50, projection=[f_dt@1], lanes=4, batches=multiple, schema=[f_dt:Date32]
+                  GpuLoadParquet: table=fact, projections=[f_id@0, f_dt@12], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[f_id:Int64, f_dt:Date32]
+            GpuMergePartitions: lanes=1, batches=multiple, schema=[d_dt:Date32]
+              GpuFilter: predicate=d_id@0 < 50, projection=[d_dt@1], lanes=4, batches=multiple, schema=[d_dt:Date32]
+                GpuLoadParquet: table=dim, projections=[d_id@0, d_dt@12], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[d_id:Int64, d_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#12 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#9 CudfCoalescePartitions, lane batches), execute_node(#10 CudfAggregate{Merge}, prior output); at done: execute_node(#11 CudfProject{finalize}, prior output)
+      GpuAggregate: calling_lanes=1, per batch: execute_node(#8 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#8 CudfAggregate{Partial})
+        GpuProject: calling_lanes=1, per batch: execute_node(#7 CudfProject, batch)
+          GpuNestedLoopJoin: calling_lanes=1, join_build(#5 CudfJoin); per probe batch: join_probe
+            GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#2 CudfCoalescePartitions, lane batches)
+              GpuMergePartitions: none
+                GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+                  GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+            GpuMergePartitions: none
+              GpuFilter: calling_lanes=4, per batch: execute_node(#4 CudfFilter, batch)
+                GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#3 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=38912, certain=0
+GpuUnload: estimated_max_resident_size=18432
+  GpuProject: estimated_max_resident_size=18432
+    GpuAggregateBatches: estimated_max_resident_size=18432
+      GpuAggregate: estimated_max_resident_size=9216
+        GpuProject: estimated_max_resident_size=2048
+          GpuNestedLoopJoin: estimated_max_resident_size=18831
+            GpuCoalesceAllBatches: estimated_max_resident_size=10240
+              GpuMergePartitions: estimated_max_resident_size=8797
+                GpuFilter: estimated_max_resident_size=35188
+                  GpuLoadParquet: estimated_max_resident_size=98532, source_bytes=24633, target_batch_bytes=24633, amplification=4.0
+            GpuMergePartitions: estimated_max_resident_size=8591
+              GpuFilter: estimated_max_resident_size=34364
+                GpuLoadParquet: estimated_max_resident_size=96224, source_bytes=24056, target_batch_bytes=24056, amplification=4.0
+== interval-mixed-units
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_id@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_id@0 asc nulls_last], schema=[f_id:Int64, dt:Date32, ms:Timestamp(Millisecond, None), us:Timestamp(Microsecond, None), ns:Timestamp(Nanosecond, None)]
+    GpuSort: by=[f_id@0 asc nulls_last], lanes=4, batches=multiple, sorted_on=[f_id@0 asc nulls_last], schema=[f_id:Int64, dt:Date32, ms:Timestamp(Millisecond, None), us:Timestamp(Microsecond, None), ns:Timestamp(Nanosecond, None)]
+      GpuProject: exprs=[f_id@0, f_dt@4 + `1 mons 2 days 10800000000000 nanos` as dt, f_ts_ms@1 + `1 mons 2 days 10800000000000 nanos` as ms, f_ts_us@2 - `1 mons 2 days 10800000000000 nanos` as us, f_ts_ns@3 + `1 mons 2 days 10800000000000 nanos` as ns], lanes=4, batches=multiple, schema=[f_id:Int64, dt:Date32, ms:Timestamp(Millisecond, None), us:Timestamp(Microsecond, None), ns:Timestamp(Nanosecond, None)]
+        GpuFilter: predicate=f_id@0 < 400, lanes=4, batches=multiple, schema=[f_id:Int64, f_ts_ms:Timestamp(Millisecond, None), f_ts_us:Timestamp(Microsecond, None), f_ts_ns:Timestamp(Nanosecond, None), f_dt:Date32]
+          GpuLoadParquet: table=fact, projections=[f_id@0, f_ts_ms@9, f_ts_us@10, f_ts_ns@11, f_dt@12], partition_groups=[[[0]],[],[],[]], lanes=4, batches=multiple, schema=[f_id:Int64, f_ts_ms:Timestamp(Millisecond, None), f_ts_us:Timestamp(Microsecond, None), f_ts_ns:Timestamp(Nanosecond, None), f_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#4 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#3 CudfSort, batch)
+      GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
+        GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+          GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=83968, certain=0
+GpuUnload: estimated_max_resident_size=83968
+  GpuMergeSortedPartitions: estimated_max_resident_size=83968
+    GpuSort: estimated_max_resident_size=295476
+      GpuProject: estimated_max_resident_size=295476
+        GpuFilter: estimated_max_resident_size=295476
+          GpuLoadParquet: estimated_max_resident_size=295476, source_bytes=73869, target_batch_bytes=73869, amplification=4.0
+== interval-month-clamp
+GpuUnload
+  GpuMergeSortedPartitions: by=[f_dt@0 asc nulls_last], lanes=1, batches=single, sorted_on=[f_dt@0 asc nulls_last], schema=[f_dt:Date32, next_month:Date32, prev_month:Date32]
+    GpuSort: by=[f_dt@0 asc nulls_last], lanes=4, batches=single, hashed_on=[f_dt@0], sorted_on=[f_dt@0 asc nulls_last], schema=[f_dt:Date32, next_month:Date32, prev_month:Date32]
+      GpuProject: exprs=[f_dt@0, f_dt@0 + `1 mons` as next_month, f_dt@0 - `1 mons` as prev_month], lanes=4, batches=single, hashed_on=[f_dt@0], schema=[f_dt:Date32, next_month:Date32, prev_month:Date32]
+        GpuAggregateBatches: group_by=[f_dt@0], aggs=[], final=[], lanes=4, batches=single, hashed_on=[f_dt@0], schema=[f_dt:Date32]
+          GpuEmitPartitions: hash=[f_dt@0], lanes=4, batches=multiple, hashed_on=[f_dt@0], schema=[f_dt:Date32]
+            GpuCoalesceAllBatches: lanes=1, batches=single, schema=[f_dt:Date32]
+              GpuMergePartitions: lanes=1, batches=multiple, schema=[f_dt:Date32]
+                GpuAggregateBatches: group_by=[f_dt@0], aggs=[], lanes=4, batches=single, schema=[f_dt:Date32]
+                  GpuAggregate: group_by=[f_dt@0], aggs=[], lanes=4, batches=multiple, schema=[f_dt:Date32]
+                    GpuFilter: predicate=(((f_dt@0 = 2024-01-31) OR (f_dt@0 = 2024-02-29)) OR (f_dt@0 = 2024-03-31)) OR (f_dt@0 = 2024-05-31), lanes=4, batches=multiple, schema=[f_dt:Date32]
+                      GpuLoadParquet: table=fact, projections=[f_dt@12], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuMergeSortedPartitions: calling_lanes=1, at done: execute_node(#12 CudfSortPreservingMerge, all lanes)
+    GpuSort: calling_lanes=4, per batch: execute_node(#11 CudfSort, batch)
+      GpuProject: calling_lanes=4, per batch: execute_node(#10 CudfProject, batch)
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#7 CudfCoalescePartitions, lane batches), execute_node(#8 CudfAggregate{Merge}, prior output); at done: execute_node(#9 CudfProject{finalize}, prior output)
+          GpuEmitPartitions: calling_lanes=1, per batch: execute_node(#6 CudfRepartition{Hash, 1→4}, batch)
+            GpuCoalesceAllBatches: calling_lanes=1, at done: execute_node(#5 CudfCoalescePartitions, lane batches)
+              GpuMergePartitions: none
+                GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#3 CudfCoalescePartitions, lane batches), execute_node(#4 CudfAggregate{Merge}, prior output)
+                  GpuAggregate: calling_lanes=4, per batch: execute_node(#2 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#2 CudfAggregate{Partial})
+                    GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+                      GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=600000, certain=0
+GpuUnload: estimated_max_resident_size=300000
+  GpuMergeSortedPartitions: estimated_max_resident_size=300000
+    GpuSort: estimated_max_resident_size=300000
+      GpuProject: estimated_max_resident_size=300000
+        GpuAggregateBatches: estimated_max_resident_size=100000
+          GpuEmitPartitions: estimated_max_resident_size=400000
+            GpuCoalesceAllBatches: estimated_max_resident_size=100000
+              GpuMergePartitions: estimated_max_resident_size=25000
+                GpuAggregateBatches: estimated_max_resident_size=100000
+                  GpuAggregate: estimated_max_resident_size=98640
+                    GpuFilter: estimated_max_resident_size=98640
+                      GpuLoadParquet: estimated_max_resident_size=98640, source_bytes=80279, target_batch_bytes=80279, amplification=4.0
+== interval-where
+GpuUnload
+  GpuProject: exprs=[count(*)@0 as n], lanes=1, batches=single, schema=[n:Int64]
+    GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], final=[count(*)@0], lanes=1, batches=single, schema=[count(*):Int64]
+      GpuMergePartitions: lanes=1, batches=multiple, schema=[count(*):Int64]
+        GpuAggregateBatches: group_by=[], aggs=[sum(count(*)@0) as count(*)], lanes=4, batches=single, schema=[count(*):Int64]
+          GpuAggregate: group_by=[], aggs=[count(1) as count(*)], lanes=4, batches=multiple, schema=[count(*):Int64]
+            GpuProject: exprs=[0 as __rowmarker__], lanes=4, batches=multiple, schema=[__rowmarker__:Int8]
+              GpuFilter: predicate=(f_dt@0 + `-45 days`) < 2024-01-01, lanes=4, batches=multiple, schema=[f_dt:Date32]
+                GpuLoadParquet: table=fact, projections=[f_dt@12], partition_groups=[[[0,1]],[[2,3,4]],[[5,6]],[[7,8,9]]], lanes=4, batches=multiple, schema=[f_dt:Date32]
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuProject: calling_lanes=1, per batch: execute_node(#9 CudfProject, batch)
+    GpuAggregateBatches: calling_lanes=1, per compaction and at done: execute_node(#6 CudfCoalescePartitions, lane batches), execute_node(#7 CudfAggregate{Merge}, prior output); at done: execute_node(#8 CudfProject{finalize}, prior output)
+      GpuMergePartitions: none
+        GpuAggregateBatches: calling_lanes=4, per compaction and at done: execute_node(#4 CudfCoalescePartitions, lane batches), execute_node(#5 CudfAggregate{Merge}, prior output)
+          GpuAggregate: calling_lanes=4, per batch: execute_node(#3 CudfAggregate{Partial}, batch); at done, if nothing went out: execute_node(#3 CudfAggregate{Partial})
+            GpuProject: calling_lanes=4, per batch: execute_node(#2 CudfProject, batch)
+              GpuFilter: calling_lanes=4, per batch: execute_node(#1 CudfFilter, batch)
+                GpuLoadParquet: calling_lanes=4, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+--- memory ---
+budget=2147483648, accumulators=360000, certain=0
+GpuUnload: estimated_max_resident_size=180000
+  GpuProject: estimated_max_resident_size=180000
+    GpuAggregateBatches: estimated_max_resident_size=180000
+      GpuMergePartitions: estimated_max_resident_size=45000
+        GpuAggregateBatches: estimated_max_resident_size=180000
+          GpuAggregate: estimated_max_resident_size=177552
+            GpuProject: estimated_max_resident_size=39456
+              GpuFilter: estimated_max_resident_size=98640
+                GpuLoadParquet: estimated_max_resident_size=98640, source_bytes=80279, target_batch_bytes=80279, amplification=7.2
 == left-join-null-keys
 GpuUnload
   GpuHashJoin: join_type=Left, on=[(d_k@1, f_k@1)], projection=[d_id@0, d_k@1, f_id@2], lanes=4, batches=multiple, hashed_on=[d_k@1], schema=[d_id:Int64, d_k:Int32, f_id:Int64]

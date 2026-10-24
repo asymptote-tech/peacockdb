@@ -36,6 +36,8 @@ enum DataType : byte {
   TimestampMillisecond,
   TimestampMicrosecond,
   TimestampNanosecond,
+  /// An interval literal's type, never a column's: cuDF has no interval column (#249).
+  IntervalMonthDayNano,
 }
 
 // =========================================================================
@@ -61,6 +63,10 @@ table ScalarValue {
   decimal_lo: uint64;
   decimal_precision: uint8;
   decimal_scale: int8;
+  // IntervalMonthDayNano: arrow's three parts, applied months, then days, then nanoseconds.
+  interval_months: int32;
+  interval_days: int32;
+  interval_nanos: int64;
 }
 
 // =========================================================================

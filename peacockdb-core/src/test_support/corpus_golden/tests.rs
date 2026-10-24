@@ -101,25 +101,26 @@ fn a_mode_keyed_merge_drops_a_cell_the_registry_no_longer_enables() {
     let path = dir.join("gpu-result.txt");
     std::fs::write(
         &path,
-        "cudf=25.02\n== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
-         == mixed-join mode=tp1-single\nan answer from before the cell was turned off\n",
+        "cudf=25.02\n== bool-key-group mode=tp4-sized\na cell nothing reran\n\
+         == timestamp-s-key-group mode=tp1-single\nan answer from before the cell was turned off\n",
     )
     .expect("the file");
     merge_mode_section(
         &path,
-        "tpch",
+        "pbench",
         "1",
-        "q6",
+        "uint-key-join",
         "tp1-single",
-        "q6's answer\n",
+        "uint-key-join's answer\n",
         "25.02",
     );
     let text = std::fs::read_to_string(&path).expect("the merged file");
     assert_eq!(
         text,
-        "cudf=25.02\n== q1 mode=tp4-sized\nq1 at a cell nothing reran\n\
-         == q6 mode=tp1-single\nq6's answer\n",
-        "tpch mixed-join has no enabled device cell (#168) and tpch q1 at tp4-sized has one"
+        "cudf=25.02\n== bool-key-group mode=tp4-sized\na cell nothing reran\n\
+         == uint-key-join mode=tp1-single\nuint-key-join's answer\n",
+        "pbench timestamp-s-key-group has no enabled device cell (#264) and bool-key-group at \
+         tp4-sized has one"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

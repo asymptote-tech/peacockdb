@@ -330,6 +330,14 @@ const PBENCH_SHAPES: &[(&str, &[&str])] = &[
         &["an_inner_join_over_one_probe_batch_agrees"],
     ),
     (
+        "interval-join-keyed",
+        &["an_inner_join_with_an_interval_residual_agrees"],
+    ),
+    (
+        "interval-join-keyless",
+        &["a_nested_loop_join_on_an_interval_condition_agrees"],
+    ),
+    (
         "left-join-null-keys",
         &["a_left_join_pads_a_null_key_build_row_under_the_sql_default"],
     ),

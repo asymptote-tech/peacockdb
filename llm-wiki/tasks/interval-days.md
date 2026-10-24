@@ -128,3 +128,15 @@ Component-level API: the wire format. `DataType` gains `IntervalMonthDayNano` (a
 - The new pbench queries and mixed-join green at all five device modes on nebius-gpu, DuckDB's
   device comparison included, and on the cpu. The dispatched `GPU Tests (nebius-gpu)` CI job is
   green.
+
+## Signoff (2026-10-21)
+
+Solved under its constraints. An interval literal crosses the wire as months, days and
+nanoseconds (`IntervalMonthDayNano` appended); the device adds months with the month-end clamp,
+then days, then nanoseconds, as arrow does, in a new `interval.cpp`. Only a date or naive
+timestamp ± a literal reaches the wire; every other interval use, a CASE or function argument
+included, is refused at plan time naming #249. `NOT_RUNNABLE` is empty, tpch mixed-join is on at
+all five device modes, six pbench queries cover the spec's list on both engines, and DuckDB's
+timestamp answers compare through `date(…)` (no `timestamp(…)` facet needed: measured). #168
+archived. Completeness: reviewer 0/0, analyst 0/0; no `architecture.md` sentence falsified.
+Shortcuts or bandaids: none. `interval.cpp` is proven on cuDF 25.02; 26.02 only by CI's build leg.

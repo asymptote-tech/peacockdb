@@ -63,6 +63,16 @@ std::unique_ptr<cudf::column> build_column(const fb::Expr* expr, cudf::table_vie
 
 cudf::type_id fb_to_type_id(fb::DataType dt);
 
+// False for a typed NULL literal: the one reader of `ScalarValue.is_null` (expr.cpp).
+bool literal_is_valid(const fb::ScalarValue* sv);
+
+// The interval arm (interval.cpp): an interval literal is an operand of date or timestamp ±
+// literal and of nothing else, and `shift_by_interval` answers that binary or refuses it.
+bool is_interval_literal(const fb::Expr* expr);
+std::unique_ptr<cudf::column> shift_by_interval(const fb::BinaryExprNode* bin,
+                                                cudf::table_view const& table,
+                                                std::vector<std::string> const& names);
+
 // binop_output_type, cudf_ast_can_evaluate, EvaluatedColumn and evaluate_column come from
 // plan_executor_internal.h, above.
 
