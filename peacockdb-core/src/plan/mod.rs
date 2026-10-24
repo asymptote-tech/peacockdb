@@ -51,7 +51,7 @@ use union::{new_interleave, new_union};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
     /// A shape the engine does not implement — window functions (#143), two DISTINCT
-    /// arguments (#144), a value-form CASE (#57). Names the shape, not the node's fix.
+    /// arguments (#144). Names the shape, not the node's fix.
     Unsupported(String),
     /// A plan that violates what a node requires of its children. Names the fix, since
     /// the node knows it: "the planner inserts `GpuMergePartitions` below it".

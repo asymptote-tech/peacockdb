@@ -122,7 +122,7 @@ corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, 
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// four: q78 and q2 (#60's `round`), q5 (#210's decimal literal), q39 (#57's CASE). The
+// three: q78 and q2 (#60's `round`) and q5 (#210's decimal literal). The
 // joins' own blockers, #152's side copies and #220's batch splits, went with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -258,12 +258,12 @@ corpus_query!(tpcds, 1, q26, all_modes, all_modes, duckdb_approx, data_fusion_ex
 corpus_query!(tpcds, 1, q30, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q32, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
-// T19 batch 20, the last six, run rather than declared, and the rollout's end. All six run at
-// every cpu mode; q39 takes the tolerance oracle, its `cov` differing from DataFusion's in the
-// last digits at every mode — the Welford merge over batches, as shuffle-stddev found. On the
-// device q39 meets #57's CASE in the filter; the other five run everywhere.
+// T19 batch 20, the last six, run rather than declared, and the rollout's end. All six run
+// everywhere on both engines; q39 takes the tolerance oracle, its `cov` differing from
+// DataFusion's in the last digits at every mode — the Welford merge over batches, as
+// shuffle-stddev found.
 corpus_query!(tpcds, 1, q35, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
-corpus_query!(tpcds, 1, q39, all_modes, none, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
+corpus_query!(tpcds, 1, q39, all_modes, all_modes, duckdb_approx, data_fusion_approximate, golden_approx_std, schema_validation_enabled);
 corpus_query!(tpcds, 1, q65, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q81, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q85, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);

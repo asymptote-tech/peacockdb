@@ -45,6 +45,20 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t57"></a>
+### #57 — the device refuses a value-form CASE
+**Done by [`value-case`](../tasks/value-case.md) (chain K); awaiting merge.**
+
+`build_column_case` (`cpp/src/expr.cpp`) threw `value-form CASE not supported in column path`
+for any `CASE x WHEN v THEN …`. The throw rested on a false measurement: the gtest that saw a
+wrong answer built every Int64 literal as 0 ([`reports/corpus-fixes.md`, fix 7](../reports/corpus-fixes.md#fix7)).
+
+The value form now folds through the search form's `copy_if_else`, on one `x = v` condition per
+WHEN, a literal WHEN through the scalar overload. A NULL never matches, since `copy_if_else` reads
+a null condition as false. Proof: `CaseValueForm.*` (`test_plan_executor.cpp`),
+`a_value_case_agrees` and `a_value_case_without_else_answers_null` (`gpu_tests/exec_cases.rs`),
+and `tpcds/q39` on at all five device modes.
+
 <a id="t216"></a>
 ### #216 — the device's global aggregate has no Welford arm
 **Done by [`welford-device`](../tasks/welford-device.md) (chain K); awaiting merge.**
@@ -172,7 +186,7 @@ is the wire change it needs (`reports/hacks-audit.md` §5, aggregate half).
 outputs, three for a Welford, and `execute_aggregate` names every state column from it; `ddof`
 rides the wire too and `stddev_ddof` is gone. `tpch/shuffle-stddev`, `tpcds/q17` at tp1 and
 `tpch/distinct-functions` at tp4 run with the schema hook on; q39 stays off on
-[#57](../tickets/corpus-coverage.md#t57).
+[#57](#t57).
 
 <a id="t280"></a>
 ### #280 — a `stddev` or `var` under a grouping set answers one column where the plan declares three
