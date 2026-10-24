@@ -19,12 +19,12 @@ are never reused, so an old reference still resolves there.
 
 ## Contents
 
-79 open tickets, in file order.
+77 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
-| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 5 | #267 #289 #217 #204 #227 |
-| [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 9 | #239 #195 #161 #144 #261 #249 #283 #284 #264 |
+| [`corpus-coverage.md`](tickets/corpus-coverage.md) | Corpus rollout: every corpus query on the cpu and the device, all modes | 0 |  |
+| [`complete-coverage.md`](tickets/complete-coverage.md) | MVP SQL functionality: shapes the corpus does not reach | 10 | #239 #195 #161 #144 #261 #249 #283 #284 #264 #267 |
 | [`scalars.md`](tickets/scalars.md) | Scalar functions and expressions, for MVP SQL | 13 | #224 #211 #203 #223 #218 #222 #221 #219 #200 #162 #230 #288 #255 |
 | [`joins.md`](tickets/joins.md) | Join execution | 4 | #243 #245 #246 #250 |
 | [`df-upgrade.md`](tickets/df-upgrade.md) | The DataFusion upgrade | 6 | #241 #23 #166 #228 #247 #257 |
@@ -32,5 +32,5 @@ are never reused, so an old reference still resolves there.
 | [`optimizer.md`](tickets/optimizer.md) | The optimizer project | 16 | #73 #101 #140 #170 #141 #139 #147 #20 #71 #19 #16 #75 #146 #158 #142 #138 |
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 9 | #150 #149 #148 #231 #232 #242 #248 #286 #290 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
-| [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 6 | #13 #196 #169 #128 #244 #260 |
+| [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 8 | #13 #196 #169 #128 #244 #260 #204 #289 |
 | [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 3 | #178 #176 #129 |

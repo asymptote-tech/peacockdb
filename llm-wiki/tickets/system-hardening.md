@@ -9,6 +9,8 @@
 - [#128 (doctests unrun) Doctests run nowhere, and the meta guard cannot see them](#t128)
 - [#244 (cuDF 25.02 rationale) cuDF 25.02 is kept for a host constraint that may no longer hold](#t244)
 - [#260 (26.02 decimal avg fault) on cuDF 26.02 a multi-batch decimal avg faults in cuDF's shared-memory groupby](#t260)
+- [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
+- [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 
 <a id="t13"></a>
 ### #13 (hermetic builds) Hermetic builds: system-library whitelist + CI audit
@@ -167,3 +169,47 @@ synthetic embeddings. `lineitem.parquet` has sha256 `91e14da396295b2f…`, the s
 minimal case upstream. Then check whether reordering the requests (decimal128 sums before the
 4-byte counts) avoids it, as a workaround until cuDF is fixed. This blocks a GPU run on 26.02:
 [#244](#t244) and `verify-26.02` wait on it.
+
+<a id="t204"></a>
+### #204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input
+
+`CudfSortPreservingMerge` with a `fetch` over a single input table answers every row: 16 where the
+plan asked for 5. A merge with no sort keys drops it the same way.
+
+`node_session.cpp`'s collapse arm merges and slices only when there are keys and
+`views.size() > 1`. Anything else falls to the plain `cudf::concatenate`, which applies no fetch.
+Both accumulating sorts reach it: an `AccumulateBatchesAndSort` lane that received one batch, and
+a `MergeSortedPartitions` with one populated lane. The wire puts the fetch on the merge alone
+(`accumulating_sort` writes `fetch: -1` per batch). Pinned by
+`bug_a_fetch_over_one_sorted_batch_is_not_applied_on_the_device` and
+`bug_a_fetch_over_one_populated_lane_is_not_applied_on_the_device` (`gpu_tests/accumulate_cases.rs`).
+#118 filed the same fallback from the comment audit and is archived as its duplicate.
+
+**Corpus queries:** none can see it. The translator copies the fetch onto the per-batch `GpuSort`
+(`per_batch_sort`, `planner/translator/nodes.rs`), so every input reaches the merge with at most
+n rows and the missing cut drops nothing. All 324 fetch-carrying sort nodes in the plan goldens
+sit on a capped input: 322 on a `GpuSort` with the same fetch, and `tpcds/q23` at the tp1 modes on
+a union of two accumulating sorts with `fetch=100` (2026-09-28). A merge whose fetch its input
+lacks, or whose input is not a sort (`sort_preserving_merge`'s `None` arm), would answer too many
+rows.
+
+**Fix proposed:** in `node_session.cpp`, move the fetch slice out of the merge arm and after
+both arms: whenever `spm` is set and `spm->fetch() >= 0`, slice `result.table` to
+`min(fetch, rows)`. One slice for every path. The two `bug_` pins become green `same` cases, and
+`architecture.md`'s three notes on this exception drop.
+
+<a id="t289"></a>
+### #289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently
+On cuDF before 25.06, `merge_m2_input` (`aggregate.cpp`) casts the INT64 state count to INT32 with
+`cudf::cast`, which wraps, and `group_merge_m2` sums it in INT32: a group with more than
+2,147,483,647 non-NULL values gets a wrong or NULL stddev or var, with no error.
+
+Since welford-device a keyless `stddev(x)` is one group, so `SELECT stddev(l_quantity) FROM
+lineitem` reaches it at about sf360; no dataset here does (sf40 lineitem is 240M rows). The cpu's
+count is `u64` and answers right. cuDF 25.06 and later sum in INT64 (`kMergeM2CountType`).
+
+**Corpus query:** none.
+
+**Fix proposed:** on a cuDF older than 25.06, refuse by name a merge whose count column's maximum
+exceeds `INT32_MAX`, as the join session refuses past its `size_type` limits. The check goes with
+25.02.

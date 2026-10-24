@@ -40,7 +40,7 @@ is the one: DataFusion refuses `stddev(DISTINCT)` and answers a grouped decimal 
 as the plain average, and `end_to_end.rs` holds it against a hand-lowered oracle as well. 201
 lines, 200 of them running at the modes each is correct at — one of pbench's runs at the two tp1
 modes only: `not-in-uncorrelated`, which tp4 refuses at plan time on
-[#267](tickets/corpus-coverage.md#t267). **1 line is out entirely**, the one `duckdb_none` line:
+[#267](tickets/complete-coverage.md#t267). **1 line is out entirely**, the one `duckdb_none` line:
 pbench's `in-is-null`, refused at plan time on [#250](tickets/joins.md#t250). 997 cells,
 plus twelve checks
 that every declaration's oracles suit each other and every device cell has a cpu cell,
@@ -129,7 +129,7 @@ RightAnti answering like the oracle from the empty build lanes it leaves
 hook — `tpch/q6` at every mode passing under it, an index over the same tree with one
 project's field retyped refused naming the field, and the same tree with a field declared
 non-nullable over a column holding NULLs refused naming the nulls and their count
-([#227](tickets/corpus-coverage.md#t227)); a scan's limit answering its count from one row group
+([#227](archive/archived-tickets.md#t227)); a scan's limit answering its count from one row group
 at every mode, a limited subquery under an aggregate, and a limit stopping a scan whose mapping
 offers every row group it has; and five on the DISTINCT lowering — a
 `count(DISTINCT)` beside an `avg` and a `count`, a grouped `count` and `sum` DISTINCT beside
@@ -593,7 +593,7 @@ rather than `try_new`'s first; nullability is never a clause, since `try_new` do
 a NULL in a column the node declares non-nullable, which neither validator saw before: the cpu
 flavour hands the comparison real counts off the arrow batch, the device flavour says `Unread`
 because nothing exports the device's counts yet — cuDF holds them, the schema message does not
-carry them. Half of [#227](tickets/corpus-coverage.md#t227), which carries the two routes to the
+carry them. Half of [#227](archive/archived-tickets.md#t227), which carries the two routes to the
 other half
 
 | Device schema projection | [test_support::device_schema::tests](../peacockdb-core/src/test_support/device_schema/tests.rs) | 16 |

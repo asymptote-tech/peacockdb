@@ -246,7 +246,7 @@ both versions, and each cuDF version is its own build, so no runtime probe. The 
 device run; the `INT64` branch is built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image,
 [#129](../tickets/testinfra.md#t129)) and not yet run on a device
 ([#260](../tickets/system-hardening.md#t260)). The INT32 count still wraps past 2^31 on 25.02:
-[#289](../tickets/corpus-coverage.md#t289).
+[#289](../tickets/system-hardening.md#t289).
 
 <a id="t164"></a>
 ### #164 — a column ordinal reaches cuDF unchecked, and a bad one degrades rather than throws
@@ -657,7 +657,7 @@ No `null_equality` setting gives `NOT IN` its meaning. The planner's rule (`plan
 rewrites a `NOT IN` on a filter's AND/OR spine whose operands can be NULL into anti joins that are
 exact there; off the spine a nullable `IN` is refused on [#250](../tickets/joins.md#t250). pbench's
 seven rows answer as DuckDB on both engines, but `not-in-uncorrelated` at tp4, refused on
-[#267](../tickets/corpus-coverage.md#t267). The oracle half was [#235](#t235).
+[#267](../tickets/complete-coverage.md#t267). The oracle half was [#235](#t235).
 
 <a id="t59"></a>
 ### #59 — Nullable-key semantics for semi/anti/mark joins
@@ -1555,6 +1555,50 @@ No clean verification run is on record.
 
 ## Stale or obsolete
 
+<a id="t227"></a>
+### #227 (schema nullability tests) — Check schema nullability in tests
+
+Column nullability is maintained tin node's output_schema, but not tested anywhere. Start testing
+it in the CPU engine, by adding this logic to declared_as() - if not null constraint is set in the
+schema, check that every record batch produced does not have any nulls.
+
+**Half landed in [`pbench`](../tasks/pbench.md), and the half that is left is the device's.**
+`nulls_where_none_declared` sits beside `device_divergence` in `test_support/schema_validation.rs`
+and `held_to_declaration` runs both; which half runs is the explicit argument
+`NullsHeld::{Unread, PerColumn(&[usize])}`, the cpu flavour passing counts read off the arrow
+batch and the device flavour `Unread`. Nothing exports the device's count today:
+`peacock_handle_schema` carries the schema message alone. cuDF does hold it —
+`column_view::null_count()` is a stored member, and this repo's C++ already reads it in
+`expr.cpp` and `aggregate.cpp` — so the rest of this ticket is plumbing, not a new capability.
+Two routes: a null-count entry point beside `peacock_handle_schema`, or materialising through
+the existing `peacock_result_from_handle` and counting in Rust. The first is worth the C++
+because the second copies a resident table to count its nulls, and the gpu hook already holds
+both arguments it would need. Either way the device flavour then passes `PerColumn` and nothing
+else changes. Not type-checkable without cuDF, so it wants a host with a card.
+
+**Obsolete 2026-10-23.** Dropped by the human.
+
+<a id="t217"></a>
+### #217 (sort fetch 0) — a sort with `fetch 0` keeps every row on the device
+
+`GpuSort` with `fetch: Some(0)` answers zero rows on the cpu and the whole batch on the device.
+
+`sort.cpp` applies its slice under `sort->fetch() > 0`, and the wire writes `-1` for no fetch
+(`node_writer.rs`, `fetch_of`), so zero is a fetch the device reads as none. The merge in
+`node_session.cpp` tests `>= 0` and is right. `LIMIT 0` under an `ORDER BY` is the SQL shape;
+DataFusion usually plans it away, so no corpus cell reaches it. Pinned by
+`bug_a_fetch_of_zero_keeps_every_row_on_the_device` (`gpu_tests/exec_cases.rs`).
+
+**Corpus query:** none, and likely none possible: `select l_orderkey from lineitem order by
+l_orderkey limit 0;` (tpch) is the shape, but DataFusion is expected to turn `LIMIT 0` into an
+empty relation before a sort exists. Unconfirmed; a plan-golden run of that query settles it.
+
+**Fix proposed:** `sort.cpp:54` tests `sort->fetch() >= 0`, as `node_session.cpp`'s merge does.
+Safe: every `CudfSort` writer sets `fetch` explicitly — `fetch_of`'s `-1` for none, the
+accumulating sort's `-1`, and the three C++ tests. The `bug_` pin flips to a green case.
+
+**Obsolete 2026-10-23.** Dropped by the human.
+
 <a id="t214"></a>
 ### #214 (limit drops empty batch) — a limit drops a zero-row batch on both backends
 A `GpuLimit` handed a batch of zero rows emits nothing for it, on the cpu and the device alike.
@@ -1944,7 +1988,7 @@ branches. Found during the comment audit; not yet reproduced against a corpus qu
 (most SPMs arrive multi-partition), so severity depends on whether any enabled plan hits
 the single-partition path.
 
-**Stale 2026-09-28.** A duplicate of [#204](../tickets/corpus-coverage.md#t204), which has the
+**Stale 2026-09-28.** A duplicate of [#204](../tickets/system-hardening.md#t204), which has the
 same cause, the tests that pin it and the fix.
 
 <a id="t125"></a>

@@ -14,6 +14,7 @@ Tickets for MVP SQL functionality milestone
 - [#283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
 - [#284 (limit over filter at tp4) a limit over a filter is refused above one lane](#t284)
 - [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
+- [#267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4](#t267)
 
 <a id="t239"></a>
 ### #239 (date_part as Int16) `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
@@ -214,3 +215,18 @@ smallest fix is a planner one, and the device needs no new arm.
 [#240](../archive/archived-tickets.md#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
 three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
 until this ticket had a number.
+
+<a id="t267"></a>
+### #267 (tp4 single-mode aggregate) a Single-mode aggregate over a scan split into lanes is refused at tp4
+DataFusion plans an aggregate `mode=Single` where its input is one partition. The planner can map
+that input to several lanes, and `aggregate_sequence` (`translator/aggregate.rs`) then finalizes
+on every lane with no merge below it. Validation refuses the plan: "a finalizing merge over several
+lanes needs its input hashed on a subset of its group columns". The Final arm merges first; the
+Single arm passes `Shuffle::None` and does not.
+
+The small-table rule hides it: a source under 5 MB plans one lane, so a larger one is needed.
+
+**Corpus queries:** `pbench/not-in-uncorrelated` at the three tp4 modes, where the `NOT IN`
+rewrite's `count(lit(1i32))` over `sub` is the Single aggregate. pbench turns the small-table rule off, so
+`sub` gets four lanes. Its tp1 cells answer on both engines. Found when join-backend lifted #160,
+which refused first.
