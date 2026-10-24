@@ -11,9 +11,10 @@ here; the scan-limit divergence in particular is #186 and is not repeated.
 
 Ordered worst first, by what it costs a reader who has to trust the code.
 
-**Pruned 2026-09-28.** Findings fixed since, or made obsolete by later work, are cut; a
-finding half fixed keeps only its open half. The numbers are the original ones, since tickets
-cite them. Line numbers are the audit's and have drifted; search by symbol.
+**Pruned 2026-09-28 and 2026-10-08.** Findings fixed since, or made obsolete by later
+work, are cut; a finding half fixed keeps only its open half. The numbers are the original
+ones, since tickets cite them. Line numbers are the audit's and have drifted; search by
+symbol.
 
 ## Production bugs
 
@@ -87,41 +88,6 @@ Antipattern: a model of what another component does where the answer could be re
 
 Fix: send the ddof on the wire for `execute_aggregate` to read rather than parsing the name.
 
-### 6. The validator does not compare column counts
-
-Ticketed as [#233](../tickets/corpus-coverage.md#t233).
-
-`types_across_the_edge` (`plan/validate.rs`) zips the two field lists, and `zip` stops at the
-shorter one, so a node declaring three columns over a five-column input passes. The kinds
-`declared_width` hands off — Sort, CoalesceAllBatches, AccumulateBatchesAndSort, Limit,
-MergePartitions, EmitPartitions, MergeSortedPartitions — are checked by this alone. Unreachable
-from the constructors, which derive those schemas from their input, but `validate` exists for
-trees a test rewrites into shapes no planner emits. (Its comment claimed a check stronger than a
-count; that was corrected 2026-09-28.)
-
-Fix: compare the two lengths before zipping. One test: a hand-built sort declaring one column
-over a two-column source.
-
-### 7. The mock keeps its own copy of the clamp the limit tests are about
-
-Folded into [#174](../tickets/corpus-coverage.md#t174). `executor/driver/tests/mock.rs`, in
-`MockUnload::unload`:
-
-    let start = (rows.offset as usize).min(batch.rows);
-    let taken = if rows.length == u64::MAX { batch.rows - start }
-                else { (rows.length as usize).min(batch.rows - start) };
-
-That is `RowRange::clamp` (`executor/row_range.rs:12`) written a third time — #174 already
-records two, in Rust and C++, and this is the one the driver's limit tests run against.
-Every row count in `driver/tests/limit.rs` is a fact about this private clamp, not about the
-clamp the engine ships.
-
-Antipattern: a test asserting mock behaviour, and a rule duplicated with nothing enforcing
-it.
-
-Fix: `let (offset, length) = rows.clamp(batch.rows as u64);`. It is a one-line change and it
-makes those tests cover the production rule.
-
 ### 8. Two live counters of one mid-plan limit, and nothing comparing them
 
 Ticketed as [#234](../tickets/corpus-coverage.md#t234). The driver keeps its own count
@@ -171,10 +137,6 @@ always writes `false`, had its comment corrected 2026-09-28; its deletion with t
 ## The tests
 
 ### Tests that would not catch the bug they exist for
-
-**`driver/tests/limit.rs` as a whole.** Every row count in it is a fact about
-`MockUnload::unload`'s private clamp (finding 7). Replace `RowRange::clamp` with a wrong
-implementation and nothing in this file moves.
 
 **`GpuLoadParquet.limit` was covered on neither backend.** Ticketed as
 [#186](../tickets/corpus-coverage.md#t186). The four `bug_` cases in `gpu_tests/source_cases.rs`
