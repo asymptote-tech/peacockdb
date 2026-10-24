@@ -28,6 +28,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 mod aggregate_init;
+mod intervals;
 
 /// An input whose layout and schema the test writes. A recipe function is handed its
 /// node and the schemas that node declares it consumes, so that is all a case needs to
@@ -787,14 +788,8 @@ fn a_finalize_that_does_not_fill_the_declared_output_is_refused() {
     );
 }
 
-/// The one literal the wire cannot carry, in a node with an input — so the walk has
-/// something to lose. #168 is the corpus case (`mixed-join`'s residual adds an interval to
-/// a column), and the failure mode it guards is structural: a placeholder that dropped the
-/// inputs its node had taken would leave them unreachable, and the tree would then be
-/// shorter than the numbering.
-///
-/// A leaf would prove nothing here — the counts agree either way when nothing was taken.
-fn filter_over_scan_with_an_interval() -> GpuFilter {
+/// A filter over a one-group scan of `o_orderdate`, its predicate built over that column.
+fn filter_over_scan(predicate: impl FnOnce(Expr) -> Expr) -> GpuFilter {
     let scan = crate::plan::ScanMetadata {
         file: "/orders.parquet".to_string(),
         groups: vec![crate::plan::RowGroupMeta {
@@ -811,35 +806,69 @@ fn filter_over_scan_with_an_interval() -> GpuFilter {
         &scan,
         columns_of(&["o_orderdate"]),
     );
-    let ninety_days = ScalarValue::IntervalMonthDayNano(Some(
-        datafusion::arrow::datatypes::IntervalMonthDayNano::new(0, 90, 0),
-    ));
     GpuFilter::new(
         Box::new(load),
-        Expr::binary(
-            Expr::column(0, "o_orderdate"),
-            BinaryOp::Lt,
-            Expr::Literal(ninety_days),
-            DataType::Boolean,
-        ),
+        predicate(Expr::column(0, "o_orderdate")),
         None,
         columns_of(&["o_orderdate"]),
     )
 }
 
+/// A literal the wire still cannot carry, in a node with an input — so the walk has something
+/// to lose. The failure mode it guards is structural: a placeholder that dropped the inputs its
+/// node had taken would leave them unreachable, and the tree would then be shorter than the
+/// numbering.
+///
+/// A leaf would prove nothing here — the counts agree either way when nothing was taken.
 #[test]
 fn a_payload_the_wire_cannot_carry_fails_the_plan_and_names_where() {
-    let refused = attach_recipes(&filter_over_scan_with_an_interval(), DEFAULT_CHUNK_BYTES)
+    let before_one_nanosecond = |column| {
+        Expr::binary(
+            column,
+            BinaryOp::Lt,
+            Expr::Literal(ScalarValue::Time64Nanosecond(Some(1))),
+            DataType::Boolean,
+        )
+    };
+    let node = filter_over_scan(before_one_nanosecond);
+    let refused = attach_recipes(&node, DEFAULT_CHUNK_BYTES)
         .err()
-        .expect("the wire has no interval, so this plan cannot be built");
+        .expect("the wire has no time literal, so this plan cannot be built");
     let said = refused.to_string();
     // The reason, its ticket, and the seq the node would have taken — the three things a
-    // reader of the golden line needs, and the assertion that keeps the Err arm real: it
-    // would go quietly green the day the writer learns intervals, having stopped testing
-    // anything, so the message is checked rather than merely the failure.
+    // reader of the golden line needs. Checked rather than merely the failure, so the test
+    // cannot go quietly green the day the writer learns a time literal.
     assert!(said.contains("scalar value"), "{said}");
-    assert!(said.contains("(#168)"), "{said}");
+    assert!(said.contains("(#249)"), "{said}");
     assert!(said.contains(" at #"), "{said}");
+}
+
+/// A payload golden reads an interval literal as its three parts, not as the `0` an unread
+/// `int_val` would print.
+#[test]
+fn fb_text_prints_an_interval_literal_as_its_three_parts() {
+    let shifted_before_a_date = |column| {
+        let later = Expr::binary(
+            column,
+            BinaryOp::Plus,
+            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                datafusion::arrow::datatypes::IntervalMonthDayNano::new(1, 90, 5),
+            ))),
+            DataType::Date32,
+        );
+        let cutoff = Expr::Literal(ScalarValue::Date32(Some(9000)));
+        Expr::binary(later, BinaryOp::Lt, cutoff, DataType::Boolean)
+    };
+    let node = filter_over_scan(shifted_before_a_date);
+    let recipes = attach_recipes(&node, DEFAULT_CHUNK_BYTES).expect("an interval literal crosses");
+    let filter = recipes.get(1).expect("the filter, above its load").seqs()[0];
+    let bytes = recipes.bytes();
+    let plan = flatbuffers::root::<fb::GpuPlan>(bytes).expect("the buffer verifies");
+    let at = node_at(&plan, filter)
+        .expect("the walk names every kind")
+        .expect("the filter's seq holds a node");
+    let text = super::fb_text::payload_text(&at, "");
+    assert!(text.contains("interval(1, 90, 5)"), "{text}");
 }
 
 /// A leaf the registry does not know — the operator harness's stub — emits no seq, so the

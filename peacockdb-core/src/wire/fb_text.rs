@@ -374,6 +374,12 @@ fn scalar_text(value: &fb::ScalarValue<'_>) -> String {
                 value.decimal_scale()
             )
         }
+        fb::DataType::IntervalMonthDayNano => format!(
+            "interval({}, {}, {})",
+            value.interval_months(),
+            value.interval_days(),
+            value.interval_nanos()
+        ),
         fb::DataType::UInt8
         | fb::DataType::UInt16
         | fb::DataType::UInt32

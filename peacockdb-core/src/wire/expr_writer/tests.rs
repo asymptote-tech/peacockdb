@@ -496,3 +496,128 @@ fn a_stddev_finalize_writes_with_its_sqrt_under_the_case() {
         fb::UnaryOp::Sqrt
     );
 }
+
+/// `value` as the operand of `d + value`, the one place the writer takes an interval literal.
+fn interval_parts(value: ScalarValue) -> (bool, fb::DataType, i32, i32, i64) {
+    let bytes = written(&Expr::binary(
+        column(0, "d"),
+        BinaryOp::Plus,
+        Expr::Literal(value),
+        DataType::Date32,
+    ));
+    let binary = read(&bytes).node_as_binary_expr_node().unwrap();
+    let scalar = binary
+        .right()
+        .unwrap()
+        .node_as_literal_expr()
+        .unwrap()
+        .value()
+        .unwrap();
+    (
+        scalar.is_null(),
+        scalar.type_(),
+        scalar.interval_months(),
+        scalar.interval_days(),
+        scalar.interval_nanos(),
+    )
+}
+
+/// Each of DataFusion's three interval literals crosses as one wire type of three parts,
+/// so the device has one arm. A day-time interval's milliseconds become nanoseconds.
+#[test]
+fn each_interval_literal_type_crosses_as_three_parts() {
+    use datafusion::arrow::datatypes::{IntervalDayTime, IntervalMonthDayNano};
+    let mdn = fb::DataType::IntervalMonthDayNano;
+    assert_eq!(
+        interval_parts(ScalarValue::IntervalMonthDayNano(Some(
+            IntervalMonthDayNano::new(1, -2, 10_800_000_000_123)
+        ))),
+        (false, mdn, 1, -2, 10_800_000_000_123)
+    );
+    assert_eq!(
+        interval_parts(ScalarValue::IntervalYearMonth(Some(-14))),
+        (false, mdn, -14, 0, 0)
+    );
+    assert_eq!(
+        interval_parts(ScalarValue::IntervalDayTime(Some(IntervalDayTime::new(
+            3, -1_500
+        )))),
+        (false, mdn, 0, 3, -1_500_000_000)
+    );
+}
+
+#[test]
+fn a_null_interval_crosses_as_a_typed_null() {
+    for null in [
+        ScalarValue::IntervalMonthDayNano(None),
+        ScalarValue::IntervalYearMonth(None),
+        ScalarValue::IntervalDayTime(None),
+    ] {
+        assert_eq!(
+            interval_parts(null.clone()),
+            (true, fb::DataType::IntervalMonthDayNano, 0, 0, 0),
+            "{null:?}"
+        );
+    }
+}
+
+fn one_day() -> Expr {
+    Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+        datafusion::arrow::datatypes::IntervalMonthDayNano::new(0, 1, 0),
+    )))
+}
+
+fn interval_refusal(left: Expr, op: BinaryOp, right: Expr, out_type: DataType) -> String {
+    let mut b = FlatBufferBuilder::new();
+    write_expr(&mut b, &Expr::binary(left, op, right, out_type))
+        .expect_err("the device has no arm for this interval")
+        .to_string()
+}
+
+/// Date and naive timestamp ± an interval literal write; every other use of one is refused at
+/// plan time naming #249. A zoned timestamp, because arrow adds months and days in its zone
+/// and the device has none; a `Date64`, because the device holds it as milliseconds and would
+/// floor a sub-day part DataFusion drops.
+#[test]
+fn an_interval_outside_date_or_timestamp_plus_minus_is_refused() {
+    for (left, op, right, out_type) in [
+        (
+            column(0, "ts_utc"),
+            BinaryOp::Plus,
+            one_day(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some("+01:00".into())),
+        ),
+        (
+            column(0, "d64"),
+            BinaryOp::Minus,
+            one_day(),
+            DataType::Date64,
+        ),
+        (one_day(), BinaryOp::Minus, column(0, "d"), DataType::Date32),
+        (
+            one_day(),
+            BinaryOp::Multiply,
+            column(0, "n"),
+            DataType::Interval(datafusion::arrow::datatypes::IntervalUnit::MonthDayNano),
+        ),
+        (column(0, "iv"), BinaryOp::Lt, one_day(), DataType::Boolean),
+    ] {
+        let said = interval_refusal(left, op, right, out_type.clone());
+        assert!(said.contains("interval"), "{op:?} {out_type}: {said}");
+        assert!(said.contains("(#249)"), "{op:?} {out_type}: {said}");
+    }
+    let mut b = FlatBufferBuilder::new();
+    for (left, op, right, out_type) in [
+        (column(0, "d"), BinaryOp::Plus, one_day(), DataType::Date32),
+        (one_day(), BinaryOp::Plus, column(0, "d"), DataType::Date32),
+        (
+            column(0, "ts"),
+            BinaryOp::Minus,
+            one_day(),
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+        ),
+    ] {
+        write_expr(&mut b, &Expr::binary(left, op, right, out_type))
+            .expect("date or timestamp ± an interval literal writes");
+    }
+}

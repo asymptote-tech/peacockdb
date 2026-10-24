@@ -21,7 +21,7 @@ use crate::plan::{
 /// a statement about a node, and a node is not finished until the plan is.
 ///
 /// `Err` where a node's payload cannot be written — an expression the wire has no shape
-/// for (#168) — because a plan missing one node's arguments is not a plan the C++ can be
+/// for (#249) — because a plan missing one node's arguments is not a plan the C++ can be
 /// handed, and the alternative is a buffer whose every later seq has to be checked against
 /// a list to be trusted.
 pub(crate) fn attach_recipes(

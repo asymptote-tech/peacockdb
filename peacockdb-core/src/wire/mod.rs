@@ -361,7 +361,7 @@ impl RecipePlan {
 /// mode planned. Never 0: the session refuses it.
 ///
 /// `Err` where a node's payload cannot be written — an expression the wire has no shape
-/// for (#168): a plan missing one node's arguments cannot be handed to the C++, and the
+/// for (#249): a plan missing one node's arguments cannot be handed to the C++, and the
 /// alternative is a buffer whose every later seq must be checked against a list.
 pub(crate) fn attach_recipes(
     root: &dyn GpuNode,

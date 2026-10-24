@@ -537,14 +537,14 @@ pub enum DuckdbOracle {
 
 impl DuckdbOracle {
     /// Every facet some corpus line must name, so one nothing uses is deleted rather than
-    /// carried (`every_duckdb_oracle_is_named_by_some_line`). `date` is not here until a line
-    /// writes it; its negative cases hold it meanwhile.
-    pub const FACETS: [&'static str; 7] = [
+    /// carried (`every_duckdb_oracle_is_named_by_some_line`).
+    pub const FACETS: [&'static str; 8] = [
         "sort",
         "no_sort",
         "exact",
         "approx",
         "rel",
+        "date",
         "fingerprint",
         "none",
     ];

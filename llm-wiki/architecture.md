@@ -1279,7 +1279,8 @@ copies together.
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
 hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
 regions, the NVTX domain and the harness range),
-`expr.cpp` (expression and AST building),
+`expr.cpp` (expression and AST building), `interval.cpp` (a date or timestamp ± an interval
+literal, the column path's one interval arm),
 `table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
 `column_at`),
 `spark_hash_partition.cu` (the murmur3 kernel), and `operators/` (one `execute_*` per wire
@@ -1346,7 +1347,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 | `cudf::null_policy` (groupby) | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp), [grouping sets](../cpp/src/operators/aggregate.cpp) | `INCLUDE` | `EXCLUDE` silently drops the NULL group — tpcds q15's NULL `ca_zip` row disappears |
 | `cudf::null_policy` (rolling count) | [`window.cpp`](../cpp/src/operators/window.cpp) | `EXCLUDE` for `COUNT(col)`, `INCLUDE` for `COUNT(*)` | one of the two is always wrong: `COUNT(*)` counts rows, `COUNT(col)` counts non-nulls |
 | decimal scale | [`window.cpp`](../cpp/src/operators/window.cpp) | `data_type{id, -out_decimal_scale}` from the flat buffers | cuDF would re-derive a scale per operation and drift from DataFusion's |
-| binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates, else the wider input; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
+| binary-op output type | [`expr.cpp`](../cpp/src/expr.cpp) | boolean for predicates; a decimal operand gives `DECIMAL128` at the scale cuDF computes (min for add and subtract, the sum for multiply, the difference for divide); otherwise the left operand's type; division pre-scales the numerator to hit the flat buffers's `out_decimal_precision/scale` | cuDF promotes by its own rule, which is not SQL's decimal arithmetic |
 | hash seed / algorithm | [`spark_hash_partition.cu`](../cpp/src/spark_hash_partition.cu) | our own Spark-murmur3, seed 42, cuDF only for the scatter | cuDF ships standard murmur3, whose partition numbers differ from comet's — see [Rehash and the comet hash](#rehash-and-the-comet-hash) |
 | IPC export | [`gpu_executor.cpp`](../cpp/src/gpu_executor.cpp) | column names as `column_metadata`; each declared decimal precision set on the imported Arrow schema; a fixed_point that is not DECIMAL128 refused | unnamed columns, and every decimal labelled `decimal128(38, s)`, which the sink refuses against the narrower declaration (#187) |
 | stream + memory resource | everywhere in the single-GPU path | `cudf::get_default_stream()`, current device resource | fine on device 0 and wrong anywhere else — the multi-GPU rules are in [Multi-GPU notes](#multi-gpu-notes-cudf-2602) |
@@ -1367,6 +1368,7 @@ to it.
 | `SortExpr.asc`, `.nulls_first` | `node_writer.rs` | the node's sort keys, from `PhysicalSortExpr::options` | `cudf::order`,<br>`cudf::null_order` |
 | `CudfSort.fetch`,<br>`CudfSortPreservingMerge.fetch` | `node_writer.rs` | the node's `fetch`, `-1` where there is none | a post-sort / post-merge slice; the sort skips it at 0 ([#217](tickets/corpus-coverage.md#t217)) |
 | `BinaryExpr`<br>`.out_decimal_precision/scale` | `expr_writer.rs` | the expression's declared output type | the binop output type, and division pre-scales to hit it |
+| `ScalarValue.interval_months`,<br>`.interval_days`, `.interval_nanos` | `serialize.rs` | any of DataFusion's three interval literals, as one `IntervalMonthDayNano`; `expr_writer.rs` refuses it anywhere but a date or naive timestamp ± it (#249) | arrow's `add_month_day_nano` in [`interval.cpp`](../cpp/src/interval.cpp): months by `add_calendrical_months`, clamped to the month's end, then days, then nanoseconds — floored to a timestamp's unit, whole days toward zero on a date |
 | `CudfAggregate.mode` | `aggregate_writer.rs` | the phase: `Partial` builds state from the columns it reads, `Merge` merges state into state. A `Partial` over state columns is how the DISTINCT lowering's outer init merges a companion — the merge rule rides in the aggregator, not in the mode. Never `Final`, which would also finalize, and a finalize here is a project both engines evaluate | which requests the builder makes: state from values at Partial, merged state at Merge; any other mode is refused by name |
 | `AggregateFuncNode.state_names` | `aggregate_writer.rs` | `state_funcs`: each function's calls' outputs, three for a Welford | the name of every column the device emits |
 | `AggregateFuncNode.ddof` | `aggregate_writer.rs` | `AggStateColumns.ddof` | carried for the plan; no device code reads it, since the finalize is a project |

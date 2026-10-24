@@ -32,10 +32,10 @@ fn every_timestamp_unit_crosses_the_wire_with_its_unit() {
     }
 }
 
-// #249: the wire enum has no Interval member, so a schema holding one is refused at plan
-// time naming the column — the refusal is what the engine does wrong to a user, and the
-// member that would carry it is what #249 still owes. The `Null` this used to write
-// instead is gone.
+// #249: the wire's one interval member types a literal and never a column, since cuDF has no
+// interval column, so a schema holding one is refused at plan time naming the column — the
+// refusal is what the engine does wrong to a user, and an interval column is what #249 still
+// owes. The `Null` this used to write instead is gone.
 #[test]
 fn bug_a_schema_holding_an_interval_is_refused_at_plan_time() {
     let schema: Arc<ArrowSchema> = Arc::new(ArrowSchema::new(vec![
@@ -43,7 +43,8 @@ fn bug_a_schema_holding_an_interval_is_refused_at_plan_time() {
         Field::new("iv", DataType::Interval(IntervalUnit::MonthDayNano), true),
     ]));
     let mut b = flatbuffers::FlatBufferBuilder::new();
-    let err = serialize_schema(&mut b, &schema).expect_err("an interval has no wire type (#249)");
+    let err =
+        serialize_schema(&mut b, &schema).expect_err("an interval column has no wire type (#249)");
     assert!(
         matches!(&err, PlanError::Unsupported(why) if why.contains("iv") && why.contains("Interval")),
         "{err}"

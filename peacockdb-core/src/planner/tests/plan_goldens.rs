@@ -410,8 +410,8 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
                     deepest = deepest.max((reached, format!("{dataset} {name}")));
                 }
                 // A plan the wire cannot carry has no recipe plan to check. Named rather
-                // than counted: the day a second query joins mixed-join here, that is a
-                // fact about the engine worth a red test rather than a smaller number.
+                // than counted: the day a query lands here, that is a fact about the engine
+                // worth a red test rather than a smaller number.
                 Err(_) => uncrossable.push(format!("{dataset} {name}")),
             }
         }
@@ -457,10 +457,10 @@ async fn every_published_seq_addresses_the_kind_its_recipe_claims() {
 /// answer two questions at once.
 ///
 /// Asserted both ways below. A new unwritable expression goes red until someone adds it
-/// here with a ticket, and an entry that stops being true goes red until it is removed —
-/// which is the direction that matters when #168 closes, since a stale entry is how a
-/// declared set rots into a list nobody trusts.
-const NOT_RUNNABLE: &[(&str, &str, &str)] = &[("tpch", "mixed-join", "168")];
+/// here with a ticket, and an entry that stops being true goes red until it is removed, since
+/// a stale entry is how a declared set rots into a list nobody trusts. Empty while every
+/// corpus plan crosses.
+const NOT_RUNNABLE: &[(&str, &str, &str)] = &[];
 
 #[test]
 fn every_query_that_cannot_cross_the_wire_is_declared_and_every_declaration_is_true() {
@@ -610,8 +610,8 @@ fn the_payload_golden_covers_every_kind_and_call_shape_the_modes_produce() {
 
     let missing_shapes: Vec<&String> = wanted
         .difference(&covered)
-        // A shape the modes hold and the payload file cannot: `not runnable` is a
-        // property of mixed-join, which by definition has no payload to show.
+        // A shape the modes hold and the payload file cannot: a `not runnable` plan by
+        // definition has no payload to show.
         .filter(|shape| !shape.starts_with("not runnable"))
         .collect();
     assert!(
@@ -778,6 +778,17 @@ const PBENCH_JOINS: &[(&str, &str)] = &[
     ("exists-or-mark", "GpuHashJoin: join_type=LeftMark"),
     ("mark-cross-residual", "GpuHashJoin: join_type=LeftMark"),
     ("not-in-under-or", "GpuHashJoin: join_type=LeftMark"),
+    // An interval literal in a keyed residual, and in a keyless condition whose left operand
+    // the session hoists.
+    (
+        "interval-join-keyed",
+        "GpuHashJoin: join_type=Inner, on=[(d_k@0, f_k@0)], filter=f_dt@probe:1 <= (d_dt@build:1 \
+         + `1 mons`)",
+    ),
+    (
+        "interval-join-keyless",
+        "GpuNestedLoopJoin: join_type=Inner, filter=(f_dt@build:0 + `7 days`) < d_dt@probe:0",
+    ),
 ];
 
 #[test]

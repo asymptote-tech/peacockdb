@@ -45,6 +45,21 @@ The two clamps agree on every case, so no divergence ticket was needed.
 so a sort declaring three columns over five passed. It now compares the two field counts before
 the zip and refuses a mismatch with `PlanError::Invalid`, naming the node and both counts.
 
+<a id="t168"></a>
+### #168 — interval type can not be represented in the fbs ScalarValue
+**Done by [`interval-days`](../tasks/interval-days.md) (chain K); awaiting merge.**
+
+The wire's `ScalarValue` had no interval type, so `tpch/mixed-join`, whose residual adds
+`INTERVAL '90' DAY` to a column, could not cross to the device at any mode. Now `DataType` ends
+in `IntervalMonthDayNano` and `ScalarValue` carries `interval_months`, `interval_days` and
+`interval_nanos`; all three DataFusion interval literals cross as that one type. The device
+answers a date or naive timestamp ± an interval literal as arrow's `add_month_day_nano` does
+(`cpp/src/interval.cpp`). Every other use of an interval is refused at plan time under
+[#249](../tickets/complete-coverage.md#t249). The proposed `DurationDays` was not taken: a month
+is an ordinary interval, and cuDF can add one. Proof: `IntervalArithmetic.*`
+(`test_interval_arithmetic.cpp`), the wire tests in `wire/expr_writer/tests.rs`, mixed-join on at
+all five device modes, and six pbench `interval-*` queries on both engines.
+
 <a id="t287"></a>
 ### #287 — no corpus compare checks the order an `ORDER BY` asks for
 **Done by [`oracle-cleanup`](../tasks/oracle-cleanup.md) (chain K); awaiting merge.**

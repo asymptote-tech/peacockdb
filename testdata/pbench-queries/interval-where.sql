@@ -1,0 +1,1 @@
+SELECT count(*) AS n FROM fact WHERE f_dt + INTERVAL '-45' DAY < DATE '2024-01-01'
