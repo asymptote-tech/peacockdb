@@ -109,13 +109,8 @@ pub(crate) fn compare_sections(
     }
 
     let (ours, duck) = (table(ours), table(duckdb));
-    // A ROW-LEVEL divergence — `duckdb_divergent(<ticket>)`, no positions — says the two
-    // answer different row sets, and the width is part of what differs: tpcds q17 renders no
-    // columns where DuckDB renders fifteen, both over zero rows (#205). Under every other
-    // oracle a width difference is an engine that dropped a column.
-    let row_level = matches!(oracle, DuckdbOracle::Divergent { columns, .. } if columns.is_empty());
-    let same_width = ours.width == duck.width;
-    if !row_level && !same_width {
+    // A width difference is an engine that dropped a column, under every oracle.
+    if ours.width != duck.width {
         return Err(format!(
             "ours has {} columns against {} in DuckDB's",
             ours.width, duck.width
@@ -152,7 +147,7 @@ pub(crate) fn compare_sections(
         DuckdbOracle::Exact => same_multiset(&ours, &duck, &every, None),
         DuckdbOracle::Approx => same_multiset(&ours, &duck, &every, Some(kinds)),
         DuckdbOracle::Divergent { ticket, columns } if columns.is_empty() => {
-            if same_width && same_multiset(&ours, &duck, &every, Some(kinds)).is_ok() {
+            if same_multiset(&ours, &duck, &every, Some(kinds)).is_ok() {
                 return stopped("the row set".to_string());
             }
             open_ticket(*ticket, tickets_open)

@@ -240340,11 +240340,15 @@ hash: 43c9395301d8e280c33d5fca37e137ea3988a2848a7ceb5cff2c2fd0b23ebe68
 | 9999  |
 +-------+
 == not-in-uncorrelated mode=tp1-single
-++
-++
++------+
+| f_id |
++------+
++------+
 == not-in-uncorrelated mode=tp1-rowgroup
-++
-++
++------+
+| f_id |
++------+
++------+
 == not-in-under-or mode=tp1-single
 +-------+
 | f_id  |

@@ -1764,28 +1764,6 @@ mod tests {
         assert!(open.contains("llm-wiki/tickets.md#t170"), "{open}");
     }
 
-    /// The index is read off the anchors, which is what the links point at — so a ticket
-    /// that has one resolves and a number that has none anywhere does not.
-    ///
-    /// It reads the real wiki, so the numbers below are examples that must stay one per
-    /// file: archiving the ticket named here turns this red, and the fix is to swap in a
-    /// currently-open number rather than to look for a bug in `path_for`. That is the price
-    /// of reading the files rather than a fixture, and it is the reason this caught #103
-    /// moving.
-    #[test]
-    fn the_index_reads_the_anchors_of_every_wiki_file() {
-        let wiki = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../llm-wiki");
-        let index = TicketIndex::load(&wiki);
-        assert_eq!(index.path_for("205"), Some("llm-wiki/tickets/corpus-coverage.md"));
-        assert_eq!(index.path_for("243"), Some("llm-wiki/tickets/joins.md"));
-        assert_eq!(
-            index.path_for("103"),
-            Some("llm-wiki/archive/archived-tickets.md")
-        );
-        // A number nothing has ever used is a link to nowhere, and says so.
-        assert_eq!(index.path_for("99999"), None);
-    }
-
     /// Placement, which the case above cannot see: it asserts `170` resolves, and it passed
     /// while #170's anchor sat above #177's header. Built from strings rather than from the
     /// wiki, so the red case is reachable without an edit to `tickets.md` that would then

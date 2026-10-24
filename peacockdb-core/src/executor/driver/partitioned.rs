@@ -11,6 +11,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use datafusion::arrow::array::RecordBatch;
+
 use super::StepError;
 use super::accounting::{Held, ResidentAccountant, Slot, Trip};
 use super::index::PROBE_CHILD;
@@ -944,9 +946,24 @@ impl<'a, B: Backend> Driver<'a, B> {
         }
     }
 
-    fn report(self) -> RunReport {
+    /// The sink's batches, or one of zero rows under its input's columns where none reached it.
+    fn answer(&mut self) -> Vec<CpuBatch> {
+        if !self.results.is_empty() {
+            return std::mem::take(&mut self.results);
+        }
+        let declared = self.index.nodes[ROOT].node.children()[0]
+            .kind()
+            .schema()
+            .expect("a sink's input declares its columns")
+            .fields
+            .clone();
+        vec![CpuBatch::new(RecordBatch::new_empty(declared))]
+    }
+
+    fn report(mut self) -> RunReport {
+        let batches = self.answer();
         RunReport {
-            batches: self.results,
+            batches,
             peak_bytes: self.acct.peak(),
             in_flight_bytes: self.acct.in_flight(),
             steps: self.steps,

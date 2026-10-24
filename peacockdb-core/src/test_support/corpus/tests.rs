@@ -117,9 +117,9 @@ fn a_mask_and_a_comments_parenthesis_are_not_the_invocations_close() {
             "schema_validation_disabled(tp4_single | tp4_sized)",
         ]]
     );
-    let bare = "corpus_query!(tpch, 1, q6, tp1_single, none, duckdb_divergent(205, 1), \
+    let bare = "corpus_query!(tpch, 1, q6, tp1_single, none, duckdb_divergent(251, 1), \
                 data_fusion_exact, golden_exact, schema_validation_enabled);";
     let read = invocations_in(bare, "corpus_query!", "a line").remove(0);
-    assert_eq!(read[5], "duckdb_divergent(205, 1)");
+    assert_eq!(read[5], "duckdb_divergent(251, 1)");
     assert_eq!(read[8], "schema_validation_enabled");
 }

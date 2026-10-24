@@ -118,6 +118,16 @@ fn a_zero_fetch_unloads_nothing_at_all_and_the_plan_still_completes() {
     assert_eq!(report.in_flight_bytes, 0);
 }
 
+/// A zero fetch is an answer that ran out of rows before anything ran, and it still has its
+/// columns.
+#[test]
+fn a_zero_fetch_answers_one_zero_row_batch_under_the_sinks_input_columns() {
+    let report = run(chain(0, Some(0)).as_ref(), &six_batches());
+    assert_eq!(report.batches.len(), 1);
+    assert_eq!(report.batches[0].record_batch().num_rows(), 0);
+    assert_eq!(report.batches[0].record_batch().schema(), schema().fields);
+}
+
 #[test]
 fn an_offset_with_no_fetch_never_exits_early() {
     let report = run(chain(25, None).as_ref(), &six_batches());
