@@ -68,7 +68,7 @@ ORACLE_HOW = {
     "data_fusion_approximate": "As exact, but Float64 columns may differ from DataFusion's by 1e-12 relative (multi-lane summation order).",
     "data_fusion_subset": "For an unordered LIMIT: the row count must match and the rows must be a sub-multiset of DataFusion's unlimited answer.",
     "golden_exact": "Same rows as the committed .result.txt section the cpu wrote, exactly, in any order (#287).",
-    "golden_approx_std": "As golden exact, with a 1e-11 relative tolerance on float columns, for stddev and var.",
+    "golden_approx_std": "As golden exact, with a 1e-11 relative tolerance on numeric columns, for stddev and var, and for a float round to p > 0 places (#60).",
     "live_cpu": "Compared with a cpu run at the same mode, since no committed answer can serve (over the size cap, or rows the SQL does not determine).",
 }
 

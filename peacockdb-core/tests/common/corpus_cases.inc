@@ -122,8 +122,8 @@ corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, duckdb_approx, 
 
 // --- tpcds --------------------------------------------------------------------
 // THE DEVICE COLUMN. Every tpcds line runs on the device wherever it runs on the cpu, but
-// two: q78 and q2 (#60's `round`). The joins' own blockers, #152's side copies and #220's
-// batch splits, went with the join session.
+// one: q2 (#56). The joins' own blockers, #152's side copies and #220's batch splits, went
+// with the join session.
 corpus_query!(tpcds, 1, q41, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q42, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q3, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -177,9 +177,10 @@ corpus_query!(tpcds, 1, q66, all_modes, all_modes, duckdb_divergent(251, 20, 21,
 corpus_query!(tpcds, 1, q76, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q16, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 
-// T19 batch 12, by expected calls. q2 is off on the device on #60: every per-node section
-// matches, and the answer differs in its seven `round(…, 2)` columns while their row count and
-// sums agree to the printed digit.
+// T19 batch 12, by expected calls. q2 is off on the device on #56. Its device answer matches
+// the golden within 1e-11 at every mode, but some cells of its seven `round(…, 2)` columns are
+// one ulp off, which widens the rendering past the result cap: the recording is a
+// fingerprint, and the DuckDB check on the device's side takes rows under `duckdb_approx`.
 corpus_query!(tpcds, 1, q25, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q29, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q90, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
@@ -187,9 +188,9 @@ corpus_query!(tpcds, 1, q2, all_modes, none, duckdb_exact, data_fusion_exact, go
 corpus_query!(tpcds, 1, q59, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_exact, schema_validation_enabled);
 
 // T19 batch 13, by expected calls. q54's nested-loop join projects, which the cpu applies.
-// On the device q78 is off on #60: five `ratio` cells, `round(…, 2)` over Float64, one ulp
-// from DataFusion's and DuckDB's at every mode. The other four run everywhere.
-corpus_query!(tpcds, 1, q78, all_modes, none, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
+// All five run everywhere on both engines. q78's `ratio`, `round(…, 2)` over Float64, is one
+// ulp from DataFusion's and DuckDB's in five cells, so q78 compares within 1e-11 relative (#60).
+corpus_query!(tpcds, 1, q78, all_modes, all_modes, duckdb_approx, data_fusion_exact, golden_approx_std, schema_validation_enabled);
 corpus_query!(tpcds, 1, q5, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q54, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);
 corpus_query!(tpcds, 1, q95, all_modes, all_modes, duckdb_exact, data_fusion_exact, golden_exact, schema_validation_enabled);

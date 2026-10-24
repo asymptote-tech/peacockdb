@@ -16,10 +16,9 @@ Tickets required for corpus rollout (CPU+GPU, all modes), TPC-H numbered and nam
   - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
 - [Scalars](#scalars)
   - [#168 (interval literal on wire) interval type can not be represented in the fbs ScalarValue](#t168)
-  - [#56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum](#t56)
-  - [#60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp](#t60)
   - [#251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up](#t251)
 - [Testing](#testing)
+  - [#56 (q2 fingerprinted answer) `duckdb_approx` refuses q2's over-cap device recording](#t56)
   - [#227 (schema nullability tests) Check schema nullability in tests](#t227)
   - [#253 (DuckDB divergence record) the DuckDB oracle cannot record a divergence it finds on two of its paths](#t253)
   - [#254 (untestable subset oracle) `data_fusion_subset` is the one cpu oracle no test can show failing](#t254)
@@ -175,57 +174,6 @@ timestamp side, so `90 days + date` answers a date. Unconfirmed on a build. Then
 and the uncrossable set go empty, the wire test takes a month interval, the golden line becomes
 a plan, and mixed-join's device cells turn on.
 
-<a id="t56"></a>
-### #56 (q2 CASE in partial sum) q2: CASE-over-string-equality inside a partial-phase sum
-
-Filed against the old executor: the device built a cuDF AST for `sum(CASE WHEN <string equality>
-…)`, and cuDF refused with binaryop "Unsupported operator", since its AST cannot compare strings.
-[`reports/corpus-fixes.md`](../reports/corpus-fixes.md) traced the recorded error to the old Final phase, which evaluated the
-arguments in every phase — the same root as #55.
-
-Neither path is left. The aggregate builds no AST: only `filter.cpp` calls `cudf_ast_can_evaluate`. Its
-`arg_col` (`cpp/src/operators/aggregate.cpp`) builds a computed argument with `build_column`,
-which compares strings, and a merge reads state columns by reference.
-
-**Corpus queries:** `tpcds/q2`, whose `sum(CASE WHEN d_day_name = 'Sunday' …)` repeats the shape
-per weekday. Its five gpu cells are off, on [#60](#t60)'s `round` as measured: every per-node
-section matches the cpu's and the answer's sums agree, so nothing of this shape showed; registry row
-3 tags `56 60`. The harness test's comment counts the shape 48 times
-in the corpus.
-
-**Fix proposed:** likely fixed already. `a_grouped_sum_of_a_case_over_a_string_equality_agrees`
-(`src/tests/gpu_tests/aggregate_dimension_cases.rs`) runs this shape through a device
-`GpuAggregate` and matches the CPU, green since 2026-09-16. It covers the init alone, one operator,
-not a plan's merges across lanes. The complete proof is `tpcds/q2` enabled at every gpu mode once
-#152 lands; green there, archive #56 and drop `56` from registry row 3.
-
-<a id="t60"></a>
-### #60 (round off by one ulp) `round(x, p > 0)` on the device differs from DataFusion by one ulp
-
-The device rounds a float to `p > 0` places with two roundings where DataFusion uses one, so about
-one value in twenty at or above 1.0 comes back one ulp off: `2.7800000000000002` for `2.78`.
-
-`expr.cpp` calls `cudf::round(col, places, HALF_UP)` for any `places`. cuDF's kernel takes `modf`
-and computes `ip + round(fp·10^p)/10^p`; DataFusion computes `(x·10^p).round()/10^p`. `fl(0.78)`
-puts `2 + fl(0.78)` on a midpoint of the result grid, and ties-to-even takes the upper double.
-Re-emulated over q78's committed answer, exactly five `ratio` cells split under `golden_exact`;
-q2 takes the same kernel seven times per row. This ticket used to describe an anti join and memory
-pressure on q78 ([`reports/corpus-fixes.md` fix 6](../reports/corpus-fixes.md#fix6) found neither), and called `round` proven by q54.
-
-**Corpus queries:** tpcds q78 and q2, every gpu cell off on this ticket. Measured on an L40S
-(join-backend's task 14): q78 differs from the golden in exactly the five `ratio` cells at all
-five modes, `2.7800000000000002` among them, and DuckDB says `2.78`; q2 matches every per-node
-section and differs in its answer, its row count and column sums agreeing to the printed digit. Simplest: `select n_nationkey, round((cast(n_nationkey as double) * 25.0) / 9.0, 2) as r
-from nation;` (tpch): two rows differ on the device today.
-
-**Fix proposed:** [fix 6 of `reports/corpus-fixes.md`](../reports/corpus-fixes.md#fix6), in `expr.cpp`. `places == 0` keeps
-`cudf::round(·, 0, HALF_UP)`. Otherwise multiply by a FLOAT64 scalar `10^|p|` (exact for p ≤ 22;
-`1/10^|p|` for a negative p), `cudf::round(·, 0, HALF_UP)`, divide: bit-identical to DataFusion.
-The comment beside it names which kernel agrees. The cpu relays `round` to DataFusion,
-untouched; no golden moves. Test: a walk test `ROUND_PLACES` running the query above at
-`ONE_LANE`, red on two rows today; `scripts/exec_model/operators/expressions.py`'s docstring.
-Registry: q78's row drops `60`. `round` over Float32 is #221.
-
 <a id="t251"></a>
 ### #251 (decimal quotient scale) a decimal quotient truncates at its own scale and later arithmetic carries the error up
 
@@ -248,6 +196,28 @@ declares so the next operand has digits to spend. Either departs from DataFusion
 so the decision comes before the code.
 
 ## Testing
+
+<a id="t56"></a>
+### #56 (q2 fingerprinted answer) `duckdb_approx` refuses q2's over-cap device recording
+
+tpcds q2's device answer is right, and its five gpu cells stay off because the DuckDB check
+cannot read how it is recorded. Registry row 3 tags `56`.
+
+**Measured on an L40S (round-tolerance, 2026-10-21).** Under `golden_approx_std` q2 passed at all
+five device modes against `mini.result.txt`, in memory; the five recordings are identical. The
+cpu's q2 section is 261,767 bytes, just under the 256 KiB result cap. Some cells of the device's
+seven `round(…, 2)` columns print one ulp longer ([#60](../archive/archived-tickets.md#t60)), a
+column is padded to its widest cell, and the device's rendering crosses the cap. So
+`gpu-result.txt` gets a fingerprint, which `duckdb_approx` refuses ("declare
+duckdb_fingerprint"); `duckdb_fingerprint` refuses the cpu's side, which holds rows. One
+`duckdb_oracle` per line serves neither. The fingerprint agrees with DuckDB's rows: 2513 rows,
+each column's sum, min and max within 2.5e-14 relative at every mode.
+
+**Fix proposed:** in `compare_sections` (`test_support/duckdb_oracle.rs`), let `duckdb_approx`
+fall back to `compare_over_cap` for the device's recording only (`duckdb_gpu_case`), keeping the
+cpu side's refusal. Then q2's line takes `duckdb_approx` and `golden_approx_std`, its sections
+are recorded, and #56 is done. The CASE-over-string-equality shape #56 was first filed for is
+proven by `a_grouped_sum_of_a_case_over_a_string_equality_agrees`.
 
 <a id="t227"></a>
 ### #227 (schema nullability tests) Check schema nullability in tests

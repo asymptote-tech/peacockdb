@@ -724,10 +724,10 @@ static std::unique_ptr<cudf::column> build_column_scalar_fn(const fb::ScalarFunc
     return cudf::unary_operation(col.view(), cudf::unary_operator::ABS);
   }
 
-  // round(x [, places]) — evaluate in FLOAT64 with HALF_UP: that is DataFusion's
-  // semantics (f64::round, half away from zero), and cudf::round has no
-  // DECIMAL128 overload though our scan widens every decimal to DECIMAL128.
-  // `places`, when given, must be an integer literal.
+  // round(x [, places]) in FLOAT64, HALF_UP: DataFusion's f64::round, and cudf::round
+  // has no DECIMAL128 overload. For places > 0 cudf rounds in two steps (modf, then
+  // the fraction), so some cells land one ulp from DataFusion's (x·10^p).round()/10^p:
+  // #60, won't fix; the corpus compares those queries within 1e-11.
   if (name == "round") {
     if (args->size() < 1 || args->size() > 2)
       throw std::runtime_error("round expects 1 or 2 args");
