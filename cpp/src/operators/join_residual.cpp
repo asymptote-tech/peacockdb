@@ -300,13 +300,13 @@ cudf::ast::expression const& cross_ast(std::vector<AstConjunct> const& cs, ExprC
   return *acc;
 }
 
-/// Row ranges of the probe batch, so each range's pairs fit `budget` bytes (0 = 1 GiB).
-/// Every per-row outcome is decided within one range, so chunking never moves an answer.
+/// Row ranges of the probe batch, so each range's pairs fit `budget` bytes. Every per-row
+/// outcome is decided within one range, so chunking never moves an answer. `budget` is never
+/// 0: `JoinSession` refuses a `CudfJoin` that carries one.
 std::vector<std::pair<cudf::size_type, cudf::size_type>> chunks(std::size_t pairs,
                                                                 std::size_t row_bytes,
                                                                 cudf::size_type rows,
                                                                 uint64_t budget) {
-  if (budget == 0) budget = 1ull << 30;
   const std::size_t bytes = pairs * (8 + row_bytes);
   std::size_t k = std::max<std::size_t>(1, (bytes + budget - 1) / budget);
   k = std::min<std::size_t>(k, static_cast<std::size_t>(std::max(rows, 1)));

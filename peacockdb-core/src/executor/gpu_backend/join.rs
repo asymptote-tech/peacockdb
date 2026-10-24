@@ -31,9 +31,6 @@ use crate::wire::{AbiSymbol, CallPattern, FbKind, Recipe, Seq};
 /// Each key-match pair's index maps, before the residual's own columns are gathered for it.
 const INDEX_BYTES_PER_PAIR: u64 = 8;
 
-/// What `chunk_bytes = 0` means to the session.
-const DEFAULT_CHUNK_BYTES: u64 = 1 << 30;
-
 /// What one join call may spend on pairs, as the session bounds it: `pairs × (8 + the
 /// residual's per-row bytes)`, chunked at `chunk_bytes` — `gpu_plan.fbs` has the formula.
 #[derive(Clone, Copy)]
@@ -67,10 +64,7 @@ impl PairScratch {
         Self {
             keyed,
             bytes_per_pair: INDEX_BYTES_PER_PAIR + residual,
-            chunk_bytes: match chunk_bytes {
-                0 => DEFAULT_CHUNK_BYTES,
-                bytes => bytes,
-            },
+            chunk_bytes,
         }
     }
 

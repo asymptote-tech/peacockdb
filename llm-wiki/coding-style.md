@@ -50,7 +50,7 @@
   `#[cfg(test)] mod tests { … }`. Every test-only path in `src/` carries `test` in its name
   (`src/tests/`, `plan/tests/`, `driver/tests/mock.rs`), so a reader tells test code from
   production code by the path alone. A `#[cfg(test)]` sits on a test-module declaration and
-  nowhere else, bar the register below. `test_module_layout` checks all three.
+  nowhere else, bar the register below. `test_source_formatting` (cost-report) checks all three.
 - **A test module declares the lowest build rung it needs, and its name says which.** The three
   shapes nest — `rust-only` ⊂ default ⊂ `gpu` — and a module says what it needs, never what it
   excludes: `#[cfg(test)] mod tests;` for pure Rust, `#[cfg(all(test, not(feature = "rust-only")))]
@@ -71,7 +71,7 @@
   can host it — the callers cannot see the private item, and the owning module's `tests` child
   is invisible to the other component — so it is declared in the owning module's `mod.rs`, like
   any other item that crosses a boundary. Every such item is registered in `TEST_ONLY_ITEMS`
-  (`test_module_layout/test_code.rs`) with its file and callers; the layout test checks the
+  (cost-report's `test_source_formatting/test_code.rs`) with its file and callers; the layout test checks the
   item exists, the callers exist, and the doc comment names them, in both directions, and
   allows a `#[cfg(test)] use` only in a file that holds an entry. The register is the decision
   to grow the set — an unregistered gate fails the test. Not a case: a helper that only reads a
@@ -147,7 +147,7 @@ Kernighan's rules, written down after the fact rather than followed from the sta
 
 Four boundaries, each one thing. **The crate** exposes what the CLI calls: 47 bare `pub` items in
 five files, listed by file and name — fields included — in `SURFACE`
-(`test_module_layout/visibility.rs`). **A
+(cost-report's `test_source_formatting/visibility.rs`). **A
 component** — `plan`, `planner`, `executor`, `wire`, `plan_text` — is a directory whose `mod.rs`
 declares its whole API `pub(crate)`, reachable by sibling components and by nothing outside the
 crate; `common.rs` is a file rather than a directory, what the components share, declared in one
@@ -207,7 +207,7 @@ feature, with signatures free of engine types.
   `common.rs` have no length limit; every other file keeps the 1000-line one.
 - **What the compiler enforces**: a component is reachable only through its `mod.rs`, and a
   subcomponent only from inside its parent, both by module privacy. **What
-  `test_module_layout` must**: sibling reach between subcomponents of one component, where a
+  `test_source_formatting` must**: sibling reach between subcomponents of one component, where a
   `pub` appears at all and that it is in `SURFACE`, that `pub mod` sits in `lib.rs` alone and
   `pub(crate) mod` only in a test directory, and a type
   from a private module in a public signature — `private_interfaces` reads nominal visibility,
@@ -320,6 +320,19 @@ through an anonymous-namespace `thread_local`, which is per-translation-unit —
 the file would have silently forked the variable and re-executed whole subtrees (correct
 answers, exponential cost, invisible to correctness tests). Pass inputs and outputs
 explicitly through parameters; never smuggle them through thread-locals or globals.
+
+### A test that reads the checkout
+
+A test does not read the checkout at run time beyond testdata: not `src/`, `tests/`, `cpp/`,
+`scripts/`, `.github/` or `llm-wiki/`. A staged binary runs where the checkout is not, and a
+test whose input is source text is a test of the text. A line list the test needs is compiled in
+(`include!`), not read. cost-report is never staged, so its tests may read the ticket files, and
+its `test_source_formatting` may read source, whose subject is the source tree.
+`no_core_test_reads_the_checkout` holds peacockdb-core to it.
+
+The case: `ticket_is_open` read `llm-wiki/tickets/`, and two benchmark checks parsed
+`corpus_cases.inc`, all through `CARGO_MANIFEST_DIR`. They passed locally and failed on verda,
+which is shipped binaries and testdata only (#252).
 
 ### A reader that stops at the first match
 

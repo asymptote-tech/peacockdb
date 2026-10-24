@@ -10,11 +10,11 @@ use peacockdb_core::test_support::{
     gpu_recording, gpu_result_golden, result_golden,
 };
 
-/// One test and one registration per enabled gpu mode of a declaration, given its schema
-/// validation already rendered. A helper because the mask does not repeat per mode: used
+/// One test and one registration per enabled gpu mode of a declaration, given its oracles and
+/// schema validation already rendered. A helper because the mask does not repeat per mode: used
 /// inside the repetition over `$gpu`, a mask metavariable would have to repeat with it.
 macro_rules! gpu_cases {
-    ($dataset:ident, $sf:expr, $query:ident, $($gpu:ident)|+, $gpu_oracle:ident, $validation:expr) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($gpu:ident)|+, $gpu_oracle:expr, $duck:expr, $validation:expr) => {
         $(
             paste::paste! {
                 #[tokio::test]
@@ -24,7 +24,8 @@ macro_rules! gpu_cases {
                         stringify!($sf),
                         &stringify!($query).replace('_', "-"),
                         stringify!($gpu),
-                        stringify!($gpu_oracle),
+                        $gpu_oracle,
+                        $duck,
                         $validation,
                     )
                     .await;
@@ -60,15 +61,22 @@ macro_rules! corpus_query {
         corpus_query!($dataset, $sf, $query, $($cpu)|+,
             tp1_single | tp1_rowgroup | tp4_single | tp4_rowgroup | tp4_sized, $($rest)*);
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident $(($($vmode:ident)|+))?) => {};
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident ($($vmode:ident)|+)) => {
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, none, $($rest:tt)*) => {};
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+,
+     $duck:ident $(($($duck_arg:tt)*))?, $cpu_oracle:ident $(($($cpu_arg:tt)*))?,
+     $gpu_oracle:ident $(($($gpu_arg:tt)*))?, $validation:ident ($($vmode:ident)|+)) => {
         gpu_cases!(
-            $dataset, $sf, $query, $($gpu)|+, $gpu_oracle,
-            stringify!($validation($($vmode)|+))
+            $dataset, $sf, $query, $($gpu)|+, stringify!($gpu_oracle $(($($gpu_arg)*))?),
+            stringify!($duck $(($($duck_arg)*))?), stringify!($validation($($vmode)|+))
         );
     };
-    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+, $duck:ident $(($($duck_arg:literal),*))?, $cpu_oracle:ident, $gpu_oracle:ident, $validation:ident) => {
-        gpu_cases!($dataset, $sf, $query, $($gpu)|+, $gpu_oracle, stringify!($validation));
+    ($dataset:ident, $sf:expr, $query:ident, $($cpu:ident)|+, $($gpu:ident)|+,
+     $duck:ident $(($($duck_arg:tt)*))?, $cpu_oracle:ident $(($($cpu_arg:tt)*))?,
+     $gpu_oracle:ident $(($($gpu_arg:tt)*))?, $validation:ident) => {
+        gpu_cases!(
+            $dataset, $sf, $query, $($gpu)|+, stringify!($gpu_oracle $(($($gpu_arg)*))?),
+            stringify!($duck $(($($duck_arg)*))?), stringify!($validation)
+        );
     };
 }
 
@@ -105,7 +113,7 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
         .map(|path| std::fs::read(path).expect("a committed golden"))
         .collect();
     // SAFETY: `--test-threads=1` on this binary, which the gpu job and the shadgpu script
-    // both pass and `test_ci_coverage` holds them to.
+    // both pass and `test_source_formatting` holds them to.
     unsafe {
         std::env::set_var("UPDATE_CANONICAL", "1");
         std::env::set_var("PCK_UPDATE_SECTIONS", "1");
@@ -118,7 +126,8 @@ fn a_device_run_under_a_regeneration_writes_no_golden() {
                 sf,
                 query,
                 mode,
-                "golden_exact",
+                "golden(sort, exact)",
+                "duckdb(sort, exact)",
                 "schema_validation_enabled",
             ));
     }));

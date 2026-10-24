@@ -13,9 +13,10 @@ as one standalone HTML page:
 - every mode glyph links to the query's section for that mode: the plan in `<mode>.plans.txt`,
   the cpu run in `<mode>-mini.cpu.txt`, the device answer in `gpu-result.txt` (a glyph standing
   for all five modes links the last one's);
-- each query's two oracles before the plan columns and its schema validation after the gpu
-  ones, from the registry's `cpu_oracle`, `gpu_oracle` and `schema_validation` columns, or
-  from `corpus_cases.inc` on a tree whose registry has none;
+- each query's three oracles before the plan columns — DuckDB, cpu, gpu — and its schema
+  validation after the gpu ones, from the registry's `duckdb_oracle`, `cpu_oracle`,
+  `gpu_oracle` and `schema_validation` columns, or from `corpus_cases.inc` on a tree whose
+  registry has none;
 - every query name links to its SQL, and every DuckDB Σout to its `<q>.duckdb_cost.txt`;
 - a by-ticket table first: each cited ticket, its title, and per dataset the queries citing it, each
   linking to that query's row;
@@ -40,6 +41,7 @@ unless CARGO_TARGET_DIR says otherwise — never point two worktrees at one targ
 """
 
 import argparse
+import csv
 import html
 import re
 import subprocess
@@ -62,54 +64,127 @@ DATASETS = {
     "pbench": ("testdata/goldens/pbench.sf1", "testdata/pbench-queries"),
 }
 REGISTRY_NAME = {"TPC-H": "tpch", "TPC-DS": "tpcds", "pbench": "pbench"}
-# How each oracle compares, as `test_support/corpus.rs` (cpu) and `corpus_gpu.rs` (gpu) do it.
+# What each oracle compares, as `test_support/duckdb_oracle.rs` (DuckDB), `corpus.rs` (cpu) and
+# `device_answer.rs` (gpu) do it. A spelling is `name(order, values[, date(...)])` or a bare name.
 ORACLE_HOW = {
-    "data_fusion_exact": "Same rows as plain DataFusion at target_partitions = 1, exactly, in any order (#287).",
-    "data_fusion_approximate": "As exact, but Float64 columns may differ from DataFusion's by 1e-12 relative (multi-lane summation order).",
-    "data_fusion_subset": "For an unordered LIMIT: the row count must match and the rows must be a sub-multiset of DataFusion's unlimited answer.",
-    "golden_exact": "Same rows as the committed .result.txt section the cpu wrote, exactly, in any order (#287).",
-    "golden_approx_std": "As golden exact, with a 1e-11 relative tolerance on numeric columns, for stddev and var, and for a float round to p > 0 places (#60).",
-    "live_cpu": "Compared with a cpu run at the same mode, since no committed answer can serve (over the size cap, or rows the SQL does not determine).",
+    "duckdb": "DuckDB's answer (duckdb-result.txt) against our committed one.",
+    "data_fusion": "Plain DataFusion at target_partitions = 1, run live.",
+    "golden": "The committed .result.txt section the cpu wrote.",
+    "sort": "Both answers' rows sorted before comparing.",
+    "no_sort": "Row for row, in the engine's order: the query ends in ORDER BY.",
+    "duckdb exact": "Every cell equal as rendered.",
+    "duckdb approx": "A decimal within one unit in our last place, a float within 1e-11 relative.",
+    "duckdb rel": "The named columns within the tolerance, relative to the larger magnitude; every "
+                  "other column as approx.",
+    "duckdb date": "The named columns' DuckDB timestamps compared by their date part.",
+    "data_fusion exact": "Every cell equal.",
+    "data_fusion approx": "Float64 columns within 1e-12 relative (multi-lane summation order).",
+    "golden exact": "Every cell equal as text.",
+    "golden approx_std": "Numeric cells within 1e-11 relative, for stddev and var, and for a "
+                         "float round to p > 0 places (#60).",
+    "duckdb_fingerprint": "Both answers are over the size cap: row count, per-column counts and "
+                          "sums, and a hash.",
+    "duckdb_none": "Nothing to compare: one of the two does not answer this query.",
+    "data_fusion_subset": "For an unordered LIMIT: the row count must match and the rows must be "
+                          "a sub-multiset of DataFusion's unlimited answer.",
+    "data_fusion_disabled": "No comparison: DataFusion answers this query wrong; DuckDB holds it.",
+    "live_cpu": "Compared with a cpu run at the same mode, since no committed answer can serve "
+                "(over the size cap, or rows the SQL does not determine).",
 }
 
 
+def split_top(text: str) -> list:
+    """`text` split at the commas outside parentheses and double quotes, each part stripped."""
+    parts, depth, quoted, cur = [], 0, False, ""
+    for c in text:
+        if c == '"':
+            quoted = not quoted
+        elif not quoted and c in "()":
+            depth += 1 if c == "(" else -1
+        elif not quoted and depth == 0 and c == ",":
+            parts.append(cur.strip())
+            cur = ""
+            continue
+        cur += c
+    return parts + [cur.strip()] if cur.strip() else parts
+
+
+def call(spelled: str):
+    """`name(a, b)` as (name, [a, b]); a bare name as (name, None)."""
+    spelled = spelled.strip()
+    name, paren, rest = spelled.partition("(")
+    if not paren or not rest.endswith(")"):
+        return spelled, None
+    return name.strip(), split_top(rest[:-1])
+
+
+def oracle_view(spelled: str) -> tuple:
+    """A spelling's short form and its hover text."""
+    name, args = call(spelled)
+    if args is None:
+        how = ORACLE_HOW.get(name)
+        short = re.sub(r"^(data_fusion|duckdb)_", "", name).replace("_", " ")
+        return short, f"{spelled}: {how}" if how else spelled
+    order, values, rest = args[0], args[1], args[2:]
+    vname, vargs = call(values)
+    lines = [f"{spelled}:", ORACLE_HOW.get(name, ""), ORACLE_HOW.get(order, ""),
+             ORACLE_HOW.get(f"{name} {vname}", "")]
+    if vargs:
+        short = f"{vname} {vargs[0]}"
+        lines.append(f"Columns: {', '.join(c.strip(chr(34)) for c in vargs[1:])}.")
+    else:
+        short = f"{order} {vname}".replace("_std", " std")
+    for extra in rest:
+        dname, dargs = call(extra)
+        short += f" {dname}"
+        lines += [ORACLE_HOW.get(f"{name} {dname}", ""),
+                  f"Columns: {', '.join(c.strip(chr(34)) for c in dargs or [])}."]
+    return short, " ".join(l for l in lines if l)
+
+
 def declarations(root: Path) -> dict:
-    """(dataset, query) -> (cpu oracle, gpu oracle, schema validation). From the registry's own
-    columns where it has them; else from `corpus_cases.inc`, whose lines end in those three
-    whatever comes before them (a tree that also declares a DuckDB oracle has one more)."""
+    """(dataset, query) -> (duckdb oracle, cpu oracle, gpu oracle, schema validation). From the
+    registry's own columns where it has them, the DuckDB one `None` on a registry older than its
+    column; else from `corpus_cases.inc`, whose lines end in the four."""
     out = {}
-    csv = root / "testdata" / "cost-registry.csv"
-    lines = csv.read_text().splitlines() if csv.exists() else []
-    header = lines[0].split(",") if lines else []
+    path = root / "testdata" / "cost-registry.csv"
+    rows = list(csv.reader(path.read_text().splitlines())) if path.exists() else []
+    header = rows[0] if rows else []
     if {"cpu_oracle", "gpu_oracle", "schema_validation"} <= set(header):
-        at = [header.index(c) for c in ("dataset", "query", "cpu_oracle", "gpu_oracle",
-                                          "schema_validation")]
-        for line in lines[1:]:
-            f = line.split(",")
-            if len(f) == len(header) and f[at[2]] != "na":
-                out[(f[at[0]], f[at[1]])] = (f[at[2]], f[at[3]], f[at[4]])
+        at = {c: header.index(c) for c in header}
+        for f in rows[1:]:
+            if len(f) == len(header) and f[at["cpu_oracle"]] != "na":
+                duck = f[at["duckdb_oracle"]] if "duckdb_oracle" in at else None
+                out[(f[at["dataset"]], f[at["query"]])] = (
+                    duck, f[at["cpu_oracle"]], f[at["gpu_oracle"]], f[at["schema_validation"]])
         return out
     inc = root / "peacockdb-core" / "tests" / "common" / "corpus_cases.inc"
     text = inc.read_text() if inc.exists() else ""
-    for m in re.finditer(r"^corpus_query!\(([^)]*)\);", text, re.M):
-        a = [x.strip() for x in m.group(1).split(",")]
-        out[(a[0], a[2])] = (a[-3], a[-2], a[-1].replace("schema_validation_", ""))
+    for m in re.finditer(r"^corpus_query!\((.*)\);", text, re.M):
+        a = split_top(m.group(1))
+        out[(a[0], a[2])] = (a[-4], a[-3], a[-2], a[-1].replace("schema_validation_", ""))
     return out
 
 
 def declared_cells(decl) -> tuple:
-    """The two oracle cells and the schema validation cell, each its keyword shortened, the
-    full keyword on hover."""
+    """The three oracle cells, DuckDB first, and the schema validation cell: each the spelling
+    shortened, the full spelling and what it compares on hover."""
+    dash = '<td class="decl">—</td>'
     if decl is None:
-        dash = '<td class="decl">—</td>'
-        return dash + dash, dash
-    cpu, gpu, validation = decl
-    short = lambda k: k.replace("data_fusion_", "").replace("_", " ")
-    def cell(k, cls=""):
-        tip = f"{k}: {ORACLE_HOW[k]}" if k in ORACLE_HOW else k
-        return f'<td class="decl{cls}" title="{html.escape(tip)}">{html.escape(short(k))}</td>'
-    return (cell(cpu) + cell(gpu),
-            cell(validation, " off" if validation == "disabled" else ""))
+        return dash * 3, dash
+    duck, cpu, gpu, validation = decl
+
+    def cell(spelled, cls=""):
+        if spelled is None:
+            return dash
+        short, tip = oracle_view(spelled)
+        return f'<td class="decl{cls}" title="{html.escape(tip)}">{html.escape(short)}</td>'
+
+    off = " off" if validation == "disabled" else ""
+    return (cell(duck) + cell(cpu) + cell(gpu),
+            f'<td class="decl{off}" title="{html.escape(validation)}">{html.escape(validation)}</td>')
+
+
 GROUPS = [("Planning", 1), ("CPU execution", 2), ("GPU execution", 3)]
 MODES = [("1s", "tp1-single"), ("1r", "tp1-rowgroup"), ("4s", "tp4-single"),
          ("4r", "tp4-rowgroup"), ("4z", "tp4-sized")]
@@ -304,11 +379,11 @@ def rewrite_table(label: str, slug: str, table: str, root: Path, blob: str, inde
     span = lambda h: h.replace("<th>", f'<th colspan="{len(MODES)}">')
     side = lambda t: f'<th rowspan="2"><sub>{t}</sub></th>'
     new_header = (heads[0].replace("<th>", '<th rowspan="2">')
-                  + side("cpu oracle") + side("gpu oracle")
+                  + side("DuckDB oracle") + side("cpu oracle") + side("gpu oracle")
                   + "".join(span(h) for h in heads[1:4]) + side("schema validation")
                   + "".join(h.replace("<th>", '<th rowspan="2">') for h in heads[4:]))
     table = table.replace(header, f"<tr>{new_header}</tr>\n<tr>{modes}</tr>", 1)
-    width = 1 + 2 + 3 * len(MODES) + 1 + len(heads) - 4
+    width = 1 + 3 + 3 * len(MODES) + 1 + len(heads) - 4
     tail = ""
     for title, rows in (("Window functions — refused at planning", window),
                         ("DataFusion upgrade — refused at planning, a different fix proposed",

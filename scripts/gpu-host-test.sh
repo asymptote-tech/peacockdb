@@ -28,8 +28,8 @@ run_all() {  # <tree>; every binary runs even after a failure; rc is the OR of a
   [ "$ran_c" -gt 0 ] || { echo "::error::no peacock_*_tests binaries in $tree/cpp/install/bin"; rc=1; }
   for t in "$tree"/cpp/install/rust-tests/*; do
     [ -x "$t" ] || continue; name=${t##*/}
-    # Written out on one command line, not gathered in an array: test_ci_coverage
-    # (runners.rs) reads the rung, the bench_ skip and --test-threads=1 off these lines.
+    # Written out on one command line, not gathered in an array: the CI coverage guard
+    # (cost-report's test_source_formatting, runners.rs) reads the rung, the bench_ skip and --test-threads=1 off these lines.
     # The lib holds every rung; the device one is selected by path.
     rung=""; skip=""; filter=()
     [ "$name" = peacockdb_core_gpu_lib ] && rung=gpu_tests::

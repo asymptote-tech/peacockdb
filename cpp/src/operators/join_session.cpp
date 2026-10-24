@@ -101,6 +101,10 @@ JoinSession::JoinSession(const fb::CudfJoin* d, std::optional<TableResult> build
           build ? std::move(*build)
                 : null_table(types_of(d->build_schema()), names_of(d->build_schema()), 0))) {
   s_->d = d;
+  // A mode with no budget leaves the field out and reads the 1 GiB default, so a 0 is a writer
+  // that meant something else; `chunks` divides by it.
+  if (d->chunk_bytes() == 0)
+    throw std::runtime_error("CudfJoin: chunk_bytes = 0; leave the field out for the default");
   s_->type = d->join_type();
   s_->cmp = d->null_equals_null() ? cudf::null_equality::EQUAL : cudf::null_equality::UNEQUAL;
   if (d->keys()) {

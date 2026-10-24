@@ -5,122 +5,23 @@ Tests, CI, hosts, testdata etc
 
 ## Contents
 
-- [#266 (archived ticket accepted) the registry accepts an archived ticket as a reason to keep a cell off](#t266)
-- [#263 (tickets-only CI skip) a tickets-only commit can turn the rust tier red while CI skips the pipeline](#t263)
 - [#258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left](#t258)
-- [#252 (checkout reads remotely) six corpus cases read the checkout, which a remote CPU run never ships](#t252)
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
 
-<a id="t266"></a>
-### #266 (archived ticket accepted) the registry accepts an archived ticket as a reason to keep a cell off
-**Priority: low** — no answer is wrong; the cost is coverage that silently stops being measured.
-
-`registry.rs`'s rule for a row with disabled cells is `off == 0 || !tickets.is_empty()`, which asks
-only that *some* number sit in the `tickets` column. It does not ask whether that number names an
-open ticket. So a ticket closes, its rows keep their tag, and their cells are never run again —
-which is exactly what happened to sixteen tpch device cells under #183 and #187 for the months
-between those tickets closing and [`stale-cells`](../tasks/stale-cells.md) running them. All
-sixteen passed, so the engine was right the whole time and nobody could have known.
-
-**Corpus queries:** none fails. The failing state today is `tpch/nested_loop_join`: four device
-cells off under a lone `183`, archived, with no live blocker — assigned to `join-backend`. The
-fourteen tpcds window rows under #32 and #143 are the same shape but not the same problem: the
-capability is genuinely absent and the live pages say so.
-
-**Fix proposed:** the rule asks for at least one *open* ticket. `ticket_is_open`
-(`test_support/duckdb_oracle.rs`) already reads `llm-wiki/tickets/` for exactly this question and
-is already used by `duckdb_divergent`, so this is wiring rather than new machinery. A row whose
-every tag is archived goes red and is either run or re-tagged. The tpcds window rows need an
-answer first — an open capability ticket to point at, or an exemption the rule names — since they
-would go red on day one and their cells genuinely cannot run.
-
-<a id="t263"></a>
-### #263 (tickets-only CI skip) a tickets-only commit can turn the rust tier red while CI skips the pipeline
-`ticket_is_open` (`test_support/duckdb_oracle.rs`) reads `llm-wiki/tickets/` at test run time, so
-the open-ticket set is now a test input. `pipeline.yml`'s two skip layers both still class the
-whole of `llm-wiki/` and every `.md` as inert: `paths-ignore` at the top, and the `changes` job's
-`grep -qvE '(\.md$|^llm-wiki/)'`. The file's own comment states the condition this breaks — "a doc
-file that ever becomes an input has to come off this list".
-
-So a commit that only moves a ticket between `llm-wiki/tickets/` and
-`llm-wiki/archive/archived-tickets.md` can break `--lib` and no run reports it. Two cases are live:
-`an_archived_ticket_is_not_open_and_a_listed_one_is` asserts `ticket_is_open(251)` directly, and
-every `duckdb_divergent(<n>)` line goes red when `<n>` is archived. The helper's
-post-merge protocol guarantees the shape: it archives task specs in a master-only commit carrying
-nothing else. Master then goes red on the next unrelated code push, with the cause several commits
-back.
-
-Not [#252](#t252), though they share a cause. That one is a staged binary not receiving the
-checkout on a remote CPU host; this one is CI declining to run at all.
-
-2026-10-09: an adjacent instance of the same mechanism, filed here rather than as its own ticket
-because the second fix below ends both. The `changes` job classifies the push it reacts to, not
-the pull request's diff, so a code commit followed by documentation pushes leaves the PR head
-unbuilt while GitHub reports the PR green. Found on PR #175, where four runs followed the code
-commit and all four skipped every job. A close and reopen forces a real run on a mergeable PR,
-which is the workaround until a fix lands.
-
-**Two fixes, and the choice is a cost decision rather than a technical one.** Excepting
-`llm-wiki/tickets/` is not expressible in `paths-ignore` — GitHub Actions has no negation there —
-so the first shape is to drop the doc patterns from `paths-ignore` and let the `changes` job carry
-the whole rule, where a grep can hold the exception. That costs a `changes` job per docs commit,
-and the job currently answers "run everything" for any `push` event, so the push trigger needs the
-same logic before it is safe. The second shape is to move the open-ticket set out of the docs tree,
-which ends the class and also closes #252. Until one lands, `build-test.md`'s CI section says to
-run `--lib` by hand after a tickets-only commit.
-
-Found by the completeness analyst on the `duckdb-oracle` branch, 2026-10-08, which is the branch
-that made the wiki an input.
-
 <a id="t258"></a>
 ### #258 (PR comment headroom) the PR comment has about seven corpus rows of headroom left
-`the_pr_comment_fits_under_the_body_cap` holds the cost widget's comment under GitHub's
-65,536-byte body limit. pbench's 60 rows took it to 79,352, and three cuts in the pbench task
-brought it back to **63,339** — the fully-enabled tick made one character wider, a 7-character sha
-in the comment's query links (the archived page keeps the full one), and no `<sub>` on the three
-mode cells. None of the three lost information.
+`the_pr_comment_fits_under_the_body_cap` holds the cost widget's PR comment under GitHub's
+65,536-byte body cap. After pbench it was 63,339 bytes: 2,197 to spare, about six corpus rows.
+[#255](scalars.md#t255)'s three queries are already owed.
 
-That leaves **2,197 bytes, about six corpus rows**, and chain J already owes three of them: the
-queries [#255](complete-coverage.md#t255) blocks. `int8-key-group` spent the fourth when pbench's
-device cycle landed it. So the next task after those to add a corpus query goes
-red here, and the lever left is a choice about what a PR comment is for rather than another byte
-cut.
+**Two options**, measured in the pbench task:
 
-**The two options, measured in the pbench task:** take the Features column out of the comment
-(about 9 KB, and the page still carries it), or collapse pbench in the comment to its summary line
-with the rows on the page only. The first is the better trade on the argument that a feature matrix
-does not change with the PR while a per-row pass or fail does — but it changes what every reviewer
-sees in every comment from then on, which is why it is filed for a human rather than taken inside
-the task that measured it.
+- take the Features column out of the comment (about 9 KB; the page keeps it);
+- collapse pbench in the comment to its summary line, with the rows on the page only.
 
-<a id="t252"></a>
-### #252 (checkout reads remotely) six corpus cases read the checkout, which a remote CPU run never ships
-`ticket_is_open` (`test_support/duckdb_oracle.rs`) resolves `llm-wiki/tickets/` through
-`env!("CARGO_MANIFEST_DIR")` with no environment escape, so the four `duckdb_divergent` cases —
-`duckdb_tpcds_q17`, `q58`, `q61`, `q66` — look for the ticket files at the build host's path.
-`scripts/build-test.sh` ships binaries, goldens and data and never source, and `rust_only_targets`
-stages `test_cpu_corpus` among them, so those four go red on verda and pass locally.
-
-`testdata.rs` states the rule the other goldens follow: the compile-time path is the fallback and
-`PEACOCK_TESTDATA_DIR` wins, because a binary is built on one host and run on another (#49).
-`ticket_is_open` has no equivalent, and an escape variable nobody sets would be a no-op.
-
-Six cases are in the class, not four. `all_modes_expands_to_the_five_in_either_position`
-(`tests/test_cpu_corpus.rs`) reads `tests/common/corpus_cases.inc` the same way, through
-`corpus::corpus_lines`, and panics in `macro_invocations`' `read_to_string`; and
-`every_timed_case_is_enabled_on_a_device` (`tests/test_corpus_goldens/benchmark.rs`) already did
-this before the oracle landed. `test_corpus_goldens` is staged too — `rust_only_targets`' second
-axis greps only the top-level `tests/*.rs` for `repo_root`, so a `CARGO_MANIFEST_DIR` read inside
-a submodule is invisible to it. `test_module_layout` and `test_ci_coverage` read the source tree
-as well and are the two that genuinely never ship, excluded by that same rule at the top level.
-
-**Fix proposed:** the push side, carrying both reads — `llm-wiki/tickets/` and
-`peacockdb-core/tests/common/` — which is why this is a ticket and not a line in the task that
-found it. Measured by reading `rust_only_targets` and its classifier, over
-the duckdb-oracle branch; the four `duckdb_divergent` cases were found in that task's review round
-3 and the other two in its completeness pass.
+The first changes what every reviewer sees in every comment, so a human chooses.
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault

@@ -5,9 +5,9 @@ use std::sync::Arc;
 use datafusion::arrow::array::{Float64Array, Int32Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 
-use super::{CpuOracle, cpu_oracle_mode, invocations_in, result_matches};
-use crate::test_support::MODES;
+use super::{CpuOracle, cpu_oracle_mode, line_row_order, result_matches, result_section_body};
 use crate::test_support::device_answer::{GpuResultMode, gpu_result_mode};
+use crate::test_support::{MODES, RowOrder, registry};
 
 fn answer() -> Vec<RecordBatch> {
     let schema = Arc::new(Schema::new(vec![
@@ -38,27 +38,30 @@ fn section(rows: &[&str]) -> String {
 #[test]
 fn the_cpu_helper_accepts_the_right_answer() {
     let right = section(&["| 1 | 0.5  |", "| 2 | 1.25 |"]);
-    assert_eq!(result_matches(&right, &MODES[0], &answer()), Ok(()));
+    assert_eq!(
+        result_matches(&right, &MODES[0], RowOrder::Sort, &answer()),
+        Ok(())
+    );
 }
 
 #[test]
 fn the_cpu_helper_fails_on_a_wrong_row() {
     let wrong = section(&["| 1 | 0.5  |", "| 3 | 1.25 |"]);
-    assert!(result_matches(&wrong, &MODES[0], &answer()).is_err());
+    assert!(result_matches(&wrong, &MODES[0], RowOrder::Sort, &answer()).is_err());
 }
 
 #[test]
 fn the_cpu_helper_fails_on_a_missing_row() {
     let short = section(&["| 1 | 0.5  |"]);
-    assert!(result_matches(&short, &MODES[0], &answer()).is_err());
+    assert!(result_matches(&short, &MODES[0], RowOrder::Sort, &answer()).is_err());
 }
 
 /// The cpu's section is exact text, so a digit anywhere is a different answer — there is no
-/// tolerance here to be inside of. The device's `golden_approx_std` is where one lives.
+/// tolerance here to be inside of. The device's `golden(…, approx_std)` is where one lives.
 #[test]
 fn the_cpu_helper_fails_on_a_digit() {
     let near = section(&["| 1 | 0.5  |", "| 2 | 1.2500000000001 |"]);
-    assert!(result_matches(&near, &MODES[0], &answer()).is_err());
+    assert!(result_matches(&near, &MODES[0], RowOrder::Sort, &answer()).is_err());
 }
 
 /// A section written at another mode is a section this mode cannot be held to, and the
@@ -66,60 +69,97 @@ fn the_cpu_helper_fails_on_a_digit() {
 #[test]
 fn the_cpu_helper_fails_on_a_section_another_mode_wrote() {
     let right = section(&["| 1 | 0.5  |", "| 2 | 1.25 |"]);
-    assert!(result_matches(&right, &MODES[4], &answer()).is_err());
+    assert!(result_matches(&right, &MODES[4], RowOrder::Sort, &answer()).is_err());
 }
 
 /// Every variant of both enums is named by some `corpus_query!` line, so one the corpus
-/// does not use is deleted rather than carried. `every_duckdb_oracle_is_named_by_some_line`
-/// (`test_cpu_corpus.rs`) is the third of the three, over `DuckdbOracle`.
+/// does not use is deleted rather than carried. Read off the registry's copy of each line's
+/// oracles, which `the_registry_carries_each_lines_oracles_and_schema_validation`
+/// (`test_cpu_corpus.rs`) holds to the lines. `every_duckdb_oracle_is_named_by_some_line` is
+/// the third of the three, over `DuckdbOracle`.
 #[test]
 fn every_oracle_variant_is_named_by_some_line() {
-    let lines = super::corpus_lines();
-    assert!(!lines.is_empty(), "the include declares nothing");
+    let rows: Vec<_> = registry::load_csv()
+        .into_iter()
+        .filter(|row| row.cpu_oracle != "na")
+        .collect();
+    assert!(!rows.is_empty(), "the registry names no oracle");
     for variant in CpuOracle::ALL {
         assert!(
-            lines
-                .iter()
-                .any(|line| cpu_oracle_mode(&line[6]) == variant),
+            rows.iter()
+                .any(|row| cpu_oracle_mode(&row.cpu_oracle) == variant),
             "{variant:?} is named by no corpus_query! line — delete it rather than keep it"
         );
     }
     for variant in GpuResultMode::ALL {
         assert!(
-            lines
-                .iter()
-                .any(|line| gpu_result_mode(&line[7]) == variant),
+            rows.iter()
+                .any(|row| gpu_result_mode(&row.gpu_oracle) == variant),
             "{variant:?} is named by no corpus_query! line — delete it rather than keep it"
         );
     }
 }
 
-/// The two bracket shapes a declaration line can carry, read off one line each: a mask on
-/// the last argument, and a trailing comment with a parenthesis in it. The second is one
-/// `(tp4 only)` away on a line that already says `// #225`, and taking the line's final `)`
-/// read the comment's — reporting a second invocation on a line that has one.
 #[test]
-fn a_mask_and_a_comments_parenthesis_are_not_the_invocations_close() {
-    let masked = "corpus_query!(tpch, 1, distinct_functions, all_modes, all_modes, \
-                  duckdb_approx, data_fusion_disabled, golden_approx_std, \
-                  schema_validation_disabled(tp4_single | tp4_sized)); // #225 (tp4 only)";
+fn the_cpu_oracle_grammar_decodes_through_stringifys_spacing() {
     assert_eq!(
-        invocations_in(masked, "corpus_query!", "a line"),
-        vec![vec![
-            "tpch",
-            "1",
-            "distinct_functions",
-            "all_modes",
-            "all_modes",
-            "duckdb_approx",
-            "data_fusion_disabled",
-            "golden_approx_std",
-            "schema_validation_disabled(tp4_single | tp4_sized)",
-        ]]
+        cpu_oracle_mode("data_fusion (sort, exact)"),
+        CpuOracle::SortExact
     );
-    let bare = "corpus_query!(tpch, 1, q6, tp1_single, none, duckdb_divergent(251, 1), \
-                data_fusion_exact, golden_exact, schema_validation_enabled);";
-    let read = invocations_in(bare, "corpus_query!", "a line").remove(0);
-    assert_eq!(read[5], "duckdb_divergent(251, 1)");
-    assert_eq!(read[8], "schema_validation_enabled");
+    assert_eq!(
+        cpu_oracle_mode("data_fusion(sort,approx)"),
+        CpuOracle::SortApprox
+    );
+    assert_eq!(cpu_oracle_mode("data_fusion_subset"), CpuOracle::Subset);
+}
+
+/// DataFusion's oracle runs live at one partition and its order is no answer, so `no_sort`
+/// is refused there rather than read as `sort`.
+#[test]
+#[should_panic(expected = "data_fusion(sort, exact)|data_fusion(sort, approx)")]
+fn data_fusion_refuses_no_sort() {
+    cpu_oracle_mode("data_fusion(no_sort, exact)");
+}
+
+/// The authority's section under `no_sort` is the engine's order, text for text: the same rows
+/// written the other way round is a moved section, which `sort` would not see.
+#[test]
+fn a_no_sort_section_holds_the_rows_in_the_engines_order() {
+    let reversed = section(&["| 2 | 1.25 |", "| 1 | 0.5  |"]);
+    let right = section(&["| 1 | 0.5  |", "| 2 | 1.25 |"]);
+    assert_eq!(
+        result_matches(&right, &MODES[0], RowOrder::NoSort, &answer()),
+        Ok(())
+    );
+    assert!(result_matches(&reversed, &MODES[0], RowOrder::NoSort, &answer()).is_err());
+}
+
+/// A `duckdb_none` line compares no rows with DuckDB, so the row order its section is written
+/// in is its golden's: under `golden(no_sort, exact)` the engine's, which the device is then
+/// held to row for row. The DuckDB order wins where it compares, and `live_cpu` reads none.
+#[test]
+fn a_duckdb_none_line_with_a_no_sort_golden_writes_its_section_in_engine_order() {
+    let batch = &answer()[0];
+    let engine_order = [batch.slice(1, 1), batch.slice(0, 1)];
+    let written = result_section_body(
+        &engine_order,
+        &MODES[0],
+        line_row_order("duckdb_none", "golden(no_sort, exact)"),
+    );
+    let two = written.find("| 2 ").expect("row 2");
+    let one = written.find("| 1 ").expect("row 1");
+    assert!(two < one, "the engine's order, 2 then 1:\n{written}");
+    assert_eq!(
+        line_row_order("duckdb_none", "golden(sort, exact)"),
+        RowOrder::Sort
+    );
+    assert_eq!(line_row_order("duckdb_none", "live_cpu"), RowOrder::Sort);
+    assert_eq!(
+        line_row_order("duckdb(no_sort, exact)", "live_cpu"),
+        RowOrder::NoSort
+    );
+    assert_eq!(
+        line_row_order("duckdb(sort, exact)", "golden(sort, exact)"),
+        RowOrder::Sort
+    );
 }

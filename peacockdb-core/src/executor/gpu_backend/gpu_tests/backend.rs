@@ -15,7 +15,7 @@ use crate::plan::{
     ExecutorCategory, GpuAccumulateBatchesAndSort, GpuEmitPartitions, GpuHashJoin, GpuUnload,
     category_of,
 };
-use crate::wire::attach_recipes;
+use crate::wire::{DEFAULT_CHUNK_BYTES, attach_recipes};
 use datafusion::common::JoinType;
 
 /// The tree children-first, which is the numbering a recipe is addressed by and what the
@@ -77,7 +77,8 @@ fn each_node_builds_the_executor_its_category_names() {
     let session = Session::open(tree.as_ref());
     let ctx = GpuContext {
         executor: session.executor,
-        recipes: attach_recipes(tree.as_ref(), 0).expect("every node's payload is writable"),
+        recipes: attach_recipes(tree.as_ref(), DEFAULT_CHUNK_BYTES)
+            .expect("every node's payload is writable"),
     };
     let mut nodes = Vec::new();
     children_first(tree.as_ref(), &mut nodes);
@@ -117,7 +118,8 @@ fn a_node_built_at_another_nodes_post_order_is_refused() {
     let session = Session::open(tree.as_ref());
     let ctx = GpuContext {
         executor: session.executor,
-        recipes: attach_recipes(tree.as_ref(), 0).expect("every node's payload is writable"),
+        recipes: attach_recipes(tree.as_ref(), DEFAULT_CHUNK_BYTES)
+            .expect("every node's payload is writable"),
     };
     let mut nodes = Vec::new();
     children_first(tree.as_ref(), &mut nodes);

@@ -19,7 +19,7 @@ use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::arrow::util::pretty::pretty_format_batches;
 
-use super::ResultDigest;
+use super::{ResultDigest, RowOrder};
 
 /// How many rows either side of the first difference a failure prints.
 const EXCERPT: usize = 3;
@@ -337,22 +337,37 @@ pub(crate) fn results_match(
     Ok(())
 }
 
-/// Pretty-print batches with the data rows sorted, for order-independent compares. Unlike
-/// the comparators above this renders the whole answer, so it is for the small ones: a
-/// caller with a large result wants `results_agree`.
-pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
+/// Pretty-print batches: the data rows sorted under [`RowOrder::Sort`], for order-independent
+/// compares, or in the order the batches hold them under [`RowOrder::NoSort`], for an answer
+/// whose order is part of it. Unlike the comparators above this renders the whole answer, so
+/// it is for the small ones: a caller with a large result wants `results_agree`.
+pub(crate) fn batches_to_str(batches: &[RecordBatch], order: RowOrder) -> String {
     let formatted = pretty_format_batches(batches).unwrap().to_string();
-    let lines: Vec<&str> = formatted.lines().collect();
-    if lines.len() > 4 {
-        let mut data = lines[3..lines.len() - 1].to_vec();
-        data.sort_unstable();
-        let mut out = lines[..3].to_vec();
-        out.extend(data);
-        out.push(lines[lines.len() - 1]);
-        out.join("\n")
-    } else {
-        formatted
+    match order {
+        RowOrder::Sort => sorted_rendering(&formatted),
+        RowOrder::NoSort => formatted,
     }
+}
+
+/// A rendered table with its data rows sorted as text, header and borders kept: what
+/// [`batches_to_str`] makes of a [`RowOrder::Sort`] answer, and what a section written in
+/// engine order is sorted by before a `sort` comparison reads it.
+pub(crate) fn sorted_rendering(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= 4 {
+        return text.to_string();
+    }
+    let mut data = lines[3..lines.len() - 1].to_vec();
+    data.sort_unstable();
+    let mut out = lines[..3].to_vec();
+    out.extend(data);
+    out.push(lines[lines.len() - 1]);
+    out.join("\n")
+}
+
+/// [`batches_to_str`] under [`RowOrder::Sort`].
+pub(crate) fn batches_to_sorted_str(batches: &[RecordBatch]) -> String {
+    batches_to_str(batches, RowOrder::Sort)
 }
 
 /// A rendered table's column count, read off its header rather than its data: an answer of

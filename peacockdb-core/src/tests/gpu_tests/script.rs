@@ -137,7 +137,7 @@ fn shaped_for(node: &dyn GpuNode, script: &Script) {
 }
 
 pub(crate) fn run_both(node: &dyn GpuNode, script: Script) -> Outcome {
-    run_both_with_join_scratch(node, script, 0)
+    run_both_with_join_scratch(node, script, crate::wire::DEFAULT_CHUNK_BYTES)
 }
 
 /// `run_both` with the device's join pairs held to `bytes` a call (`Device::with_join_scratch`).

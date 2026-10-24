@@ -14,25 +14,19 @@
 //! add it to `INTENTIONALLY_NOT_IN_CI` below WITH a reason. Deleting the test to make
 //! the failure go away recreates the exact hole it exists to close.
 
-// A test target's child modules resolve against tests/ itself, and a file there would be
-// another target. The path keeps them under a directory named for this one.
-#[path = "test_ci_coverage/runners.rs"]
-mod runners;
-
 use std::collections::BTreeSet;
 
-use runners::{
+use crate::repo_root;
+use crate::runners::{
     GPU_HOST_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
     gpu_job_staged_targets, is_rust_gpu_runner_invocation, lib_rung_of,
     rust_gpu_runner_invocations, staged_by_name_of,
 };
 
-/// Why a target is absent from the normal CI tiers.
-///
-/// An enum rather than a free-text reason plus a bool, because the two kinds differ in
-/// what can be CHECKED: [`Exemption::GpuJob`] makes a claim about a committed workflow
-/// array, so the claim is verified below; [`Exemption::NotRun`] asserts only that
-/// nothing runs the target, which nothing can confirm.
+/// Why a target is absent from the normal CI tiers. One kind today, and it is checkable:
+/// [`Exemption::GpuJob`] makes a claim about a committed workflow array, verified below. A
+/// target nothing runs at all gets a variant of its own carrying the reason, since that claim
+/// is one nothing can confirm.
 #[derive(Debug)]
 pub(crate) enum Exemption {
     /// Run on the GPU host by pipeline.yml's gpu-tests job, from a prebuilt binary
@@ -42,8 +36,6 @@ pub(crate) enum Exemption {
     /// mode disappearing with nothing red, which is the failure the pipeline comment
     /// warns about in prose but nothing enforced.
     GpuJob,
-    /// Not run by any workflow, for the stated reason.
-    NotRun(&'static str),
 }
 
 /// The measurement harness, which is a GPU-job target like the others and is additionally
@@ -55,12 +47,7 @@ pub(crate) const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_node_timing", Exemption::GpuJob),
     (BENCHMARK_TARGET, Exemption::GpuJob),
     ("test_gpu_corpus", Exemption::GpuJob),
-    ("test_ci_coverage", Exemption::NotRun("this test")),
 ];
-
-pub(crate) fn repo_root() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
-}
 
 /// Join backslash-continued shell lines into one logical line.
 ///
@@ -599,7 +586,6 @@ fn every_rust_test_target_is_named_by_ci() {
         .filter(|(n, _)| !targets.contains(*n))
         .map(|(n, e)| match e {
             Exemption::GpuJob => format!("{n} (exempt as: run by the gpu-tests job)"),
-            Exemption::NotRun(why) => format!("{n} (exempt as: {why})"),
         })
         .collect();
     assert!(

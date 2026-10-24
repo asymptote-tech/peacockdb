@@ -36,7 +36,7 @@ mod schema_validation;
 /// Where a Welford merge is the only divergence: the engine decomposes the aggregate into
 /// an init, two merges and a finalize, and DataFusion computes it in one pass, so the last
 /// digits differ by reassociation. The legacy GPU tier uses the same figure for the same
-/// reason (`golden_approx_std`).
+/// reason (`golden(…, approx_std)`).
 const WELFORD_TOLERANCE: f64 = 1e-11;
 
 /// One query at every mode, against DataFusion on the same text.

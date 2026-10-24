@@ -16,6 +16,7 @@ import decimal
 import os
 import pathlib
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -144,6 +145,31 @@ class Fingerprint(unittest.TestCase):
         self.assertEqual(dr.approx_number(float("inf")), "inf")
         self.assertEqual(dr.approx_number(float("-inf")), "-inf")
         self.assertEqual(dr.approx_number(float("nan")), "nan")
+
+
+class RowOrder(unittest.TestCase):
+    def test_render_keeps_order_when_asked(self):
+        """A query whose line says `no_sort` keeps DuckDB's row order; any other is sorted."""
+        rows = [(2, "b"), (1, "a")]
+        kept = dr.render(["k", "v"], rows, keep_order=True).splitlines()
+        self.assertEqual([kept[3], kept[4]], ["| 2 | b |", "| 1 | a |"])
+        sorted_ = dr.render(["k", "v"], rows).splitlines()
+        self.assertEqual([sorted_[3], sorted_[4]], ["| 1 | a |", "| 2 | b |"])
+
+    def test_a_quoted_oracle_cell_is_one_field(self):
+        """The registry's quoted spelling reads whole, so q61's `no_sort` is seen and a
+        comma inside its column name does not shift the columns."""
+        name = "promotional_sales.promotions / all_sales.total * Int64(100)"
+        spelled = f'duckdb(no_sort, rel(1e-5, "{name}"))'
+        quoted = '"' + spelled.replace('"', '""') + '"'
+        with tempfile.TemporaryDirectory() as scratch:
+            registry = pathlib.Path(scratch) / "cost-registry.csv"
+            registry.write_text(
+                "dataset,sf,query,tickets,duckdb_oracle,cpu_oracle\n"
+                f'tpcds,1,q61,288,{quoted},"data_fusion(sort, exact)"\n'
+                "tpcds,1,q1,,duckdb(sort, exact),na\n"
+                "tpch,1,q3,,\"duckdb(no_sort, exact)\",na\n")
+            self.assertEqual(dr.ordered_queries("tpcds", registry), {"q61"})
 
 
 class QueryFiles(unittest.TestCase):

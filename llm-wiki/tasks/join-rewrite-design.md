@@ -510,7 +510,7 @@ the layout is what changed. A later fast path that only a version has (`filtered
 - `wire/join.rs`'s recipes go: no `ProjectRole::{ProbeKeys, NullPad, Narrow}`, no
   `Input::{BuildSideCopy, BatchCopy, AccumulatedKeys}`, no `CallPattern::AtDone` for joins. A join
   writes one `CudfJoin` with both side schemas; `attach.rs` dispatches it without a recipe.
-- `CudfJoin.chunk_bytes` (join-session-cpp's field; 0 means 1 GiB) is written from the planner's
+- `CudfJoin.chunk_bytes` (join-session-cpp's field; default 1 GiB, 0 refused) is written from the planner's
   scratch budget, so the session's chunking follows the mode's budget and the accountant prices it.
 - Timestamps in a `CudfJoin` schema use the fbs `Timestamp*` variants repartition-keys adds. A type
   `convert_data_type` cannot map is a `PlanError` in every schema from repartition-keys on (#249) —

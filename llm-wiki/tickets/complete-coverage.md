@@ -12,8 +12,8 @@ Tickets for MVP SQL functionality milestone
 - [#261 (stddev beside DISTINCT) a `stddev` or `var` beside a DISTINCT is refused at planning](#t261)
 - [#249 (wire nested/time types) the wire has no Time, Duration, Interval, Struct or List type](#t249)
 - [#283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row](#t283)
-- [#255 (nested column panic) the planner panics on a Struct or Interval column instead of refusing it](#t255)
 - [#284 (limit over filter at tp4) a limit over a filter is refused above one lane](#t284)
+- [#264 (computed group key) the device refuses a group key that is not a bare column](#t264)
 
 <a id="t239"></a>
 ### #239 (date_part as Int16) `date_part` could declare cuDF's `Int16` in DataFusion instead of casting on the device
@@ -149,7 +149,7 @@ written for this ticket — an interval column carried through a join
 (`SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k`)
 and a struct column carried through one (`SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k`)
 — cannot reach the wire at all: the planner panics on either column before a plan exists
-([#255](#t255)). They land with that fix, and are declared not runnable on this one then.
+([#255](scalars.md#t255)). They land with that fix, and are declared not runnable on this one then.
 
 <a id="t283"></a>
 ### #283 (empty ROLLUP total row) a ROLLUP or CUBE over no rows answers no grand-total row
@@ -166,39 +166,6 @@ keyless-identity, which makes a keyless aggregate answer its row and leaves this
 **Fix proposed:** after keyless-identity (chain K): an init with grouping sets, over no rows, emits
 the identity row for each set whose mask masks every key, its keys NULL and its grouping id the
 set's. DataFusion is not the oracle for it; DuckDB is.
-
-<a id="t255"></a>
-### #255 (nested column panic) the planner panics on a Struct or Interval column instead of refusing it
-`common::type_structural_size` has an arm per flat type and `panic!`s on everything else
-(`common.rs:66`, "add a deterministic arm"). The planner's memory estimation calls it for every
-field of every node's output schema (`logical_size_from_schema`, `common.rs:84`), so a query
-carrying a `Struct` or an `Interval` column through any node aborts the process at plan time.
-Three queries show it, each a `SELECT` a user can write:
-
-    SELECT f_id, d_id FROM fact JOIN dim ON f_kstruct = d_kstruct
-    SELECT d_id, d_kstruct FROM dim JOIN tiny ON d_k = t_k
-    SELECT d_id, t.iv FROM dim LEFT JOIN (SELECT t_k, INTERVAL '1' DAY AS iv FROM tiny) t ON d_k = t_k
-
-Not [#249](#t249), which is the wire writing an unnamed type as `Null`: this fires first, in the
-planner, so the plan #249 describes is never built. Not [#245](joins.md#t245) either — that is the
-shuffle's hasher, and the second query above has no nested key at all.
-
-**The guard to delete when this closes:** the three queries' absence is asserted, not merely tolerated — `testdata/test_duckdb_result.py`'s `test_the_queries_that_panic_the_planner_are_not_in_the_tree` goes red the moment a `.sql` appears. So adding the files turns every Rust tier green and then fails in a Python test in the cost-report job. Delete that case in the same commit, and add the three registry rows, corpus lines and `duckdb-result.txt` sections the absence guard currently stands in for.
-
-A panic is the wrong refusal in two ways. The engine's contract for a shape it cannot plan is
-`PlanError`, which renders as a `refused:` line a reader can act on; and a panic cannot be
-recorded, so these three queries cannot join the corpus at all — they take the whole plan golden
-down with them rather than landing with a ticket on their row. The fix is an estimator that
-refuses a type it has no deterministic width for, through the same `PlanError` path the rest of
-the planner uses. A nested type's width cannot be derived from the parent row count (the panic's
-own comment says so), so the arm wanted is a refusal, not a number.
-
-**Corpus queries:** pbench's `struct-key-join`, `struct-through-join` and
-`interval-through-join`, whose SQL is above. They are NOT in `testdata/pbench-queries/`: a query
-file there is read by every plan-golden renderer, so one of these in the directory aborts all five
-of pbench's plan goldens and the dataset cannot land at all. They arrive with the fix. pbench's
-own task (`pbench.md`) could not land them — its Restriction forbids fixing what a query
-shows — and recorded the hold in `pbench-detail.md`.
 
 <a id="t284"></a>
 ### #284 (limit over filter at tp4) a limit over a filter is refused above one lane
@@ -234,3 +201,18 @@ handing its interval back rather than wrapping it, and `translate` composes the 
 already written and already tested; what is missing is reaching it from this shape. Tests: the
 query above at every mode, and the refusal's own case retired to the shape that still earns it,
 a limit over a node that is not erasable.
+
+<a id="t264"></a>
+### #264 (computed group key) the device refuses a group key that is not a bare column
+`CudfAggregate` throws `CudfAggregate: only ColumnRef group exprs supported`
+(`execute_aggregate`, `cpp/src/operators/aggregate.cpp`) for any group expression that is not a `ColumnRef`, so
+`GROUP BY` over a cast, an arithmetic expression or a function call is refused at run time on the
+device, at every mode. The cpu answers. The planner does not lower a group expression into a
+project below the aggregate, and the recipe hands the expression through as it stands — so the
+smallest fix is a planner one, and the device needs no new arm.
+
+**Corpus queries:** `pbench/timestamp-s-key-group`
+(`GROUP BY arrow_cast(f_ts_s, 'Timestamp(Second, None)')`), its five device cells off here. Not on
+[#240](../archive/archived-tickets.md#t240): the timestamp key itself hashes on both engines since `repartition-keys`, which the
+three `timestamp-{ms,ns,us}-key-group` rows demonstrate at all five modes. This row carried `240`
+until this ticket had a number.

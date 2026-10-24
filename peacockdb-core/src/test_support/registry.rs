@@ -24,6 +24,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+mod tests;
+
 use super::corpus::CpuOracle;
 use super::device_answer::GpuResultMode;
 use super::{CsvRow, RegistryEntry};
@@ -108,10 +111,38 @@ pub(crate) const FEATURE_CODES: [&str; 15] = [
     "limit_offset",
 ];
 
-/// The last three columns: what a query's `corpus_query!` line declares besides its modes.
-/// The test binary that expands the lines holds them to the CSV, both directions
-/// (`the_registry_carries_each_lines_oracles_and_schema_validation`).
-pub(crate) const DECLARATION_COLUMNS: [&str; 3] = ["cpu_oracle", "gpu_oracle", "schema_validation"];
+/// The last four columns: what a query's `corpus_query!` line declares besides its modes, each
+/// its full spelling. The test binary that expands the lines holds them to the CSV, both
+/// directions (`the_registry_carries_each_lines_oracles_and_schema_validation`).
+pub(crate) const DECLARATION_COLUMNS: [&str; 4] = [
+    "duckdb_oracle",
+    "cpu_oracle",
+    "gpu_oracle",
+    "schema_validation",
+];
+
+/// One CSV line's fields, RFC 4180: a field may be quoted, and `""` inside quotes is one `"`.
+/// A writer quotes a field only where it holds a comma or a quote — an oracle spelling with
+/// arguments — and the three other readers (`cost-report`, `ticket_widget.py`,
+/// `duckdb_result.py`) split by the same rule.
+pub(crate) fn split_csv_line(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        let field = fields.last_mut().expect("a field under construction");
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            ('"', _) => quoted = !quoted,
+            (',', false) => fields.push(String::new()),
+            _ => field.push(c),
+        }
+    }
+    fields
+}
 
 pub(crate) fn registry_csv_path() -> std::path::PathBuf {
     super::testdata_root().join("cost-registry.csv")
@@ -140,11 +171,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         )
     });
     let mut lines = text.lines();
-    let header: Vec<&str> = lines
-        .next()
-        .expect("registry CSV is empty")
-        .split(',')
-        .collect();
+    let header = split_csv_line(lines.next().expect("registry CSV is empty"));
     let expect: Vec<&str> = ["dataset", "sf", "query"]
         .into_iter()
         .chain(COLUMNS)
@@ -161,7 +188,8 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
         if line.trim().is_empty() {
             continue;
         }
-        let f: Vec<&str> = line.split(',').collect();
+        let fields = split_csv_line(line);
+        let f: Vec<&str> = fields.iter().map(String::as_str).collect();
         assert_eq!(
             f.len(),
             expect.len(),
@@ -253,9 +281,10 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             i + 2
         );
         // What the query's `corpus_query!` line says, copied for the widget. A query with
-        // no line — it does not plan — has `na` in all three, and only such a query does.
+        // no line — it does not plan — has `na` in all four, and only such a query does.
         let declared: Vec<&str> = f[6 + COLUMNS.len()..].to_vec();
-        let (cpu_oracle, gpu_oracle, schema_validation) = (declared[0], declared[1], declared[2]);
+        let (duckdb_oracle, cpu_oracle, gpu_oracle, schema_validation) =
+            (declared[0], declared[1], declared[2], declared[3]);
         // The accepted keywords are the ones `cpu_oracle_mode` and `gpu_result_mode` decode.
         let cpu_oracles: Vec<&str> = CpuOracle::ALL.iter().map(|o| o.keyword()).collect();
         let gpu_oracles: Vec<&str> = GpuResultMode::ALL.iter().map(|m| m.keyword()).collect();
@@ -270,6 +299,11 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             path.display(),
             i + 2
         );
+        // Decoded, so a misspelling fails here naming the accepted set rather than reaching
+        // the widget as a keyword nothing compares by.
+        if !all_na {
+            super::DuckdbOracle::parse(duckdb_oracle);
+        }
         rows.push(CsvRow {
             dataset: f[0].to_string(),
             sf: f[1].to_string(),
@@ -278,6 +312,7 @@ pub(crate) fn load_csv() -> Vec<CsvRow> {
             plan_status: plan_status.to_string(),
             features,
             tickets,
+            duckdb_oracle: duckdb_oracle.to_string(),
             cpu_oracle: cpu_oracle.to_string(),
             gpu_oracle: gpu_oracle.to_string(),
             schema_validation: schema_validation.to_string(),

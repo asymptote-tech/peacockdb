@@ -1,6 +1,6 @@
 //! The whole-answer comparator over batches: no dataset, no run, no file.
 //!
-//! What `assert_answer`'s tolerance arm reaches under `data_fusion_approximate`, and what
+//! What `assert_answer`'s tolerance arm reaches under `data_fusion(sort, approx)`, and what
 //! the device's `live_cpu` compare reaches with no tolerance at all. Driven here as
 //! [`results_match`] so a wrong answer can be shown failing without a DataFusion run behind
 //! it — `assert_results_match` panics, and a panic is not a thing a case can assert on
@@ -11,7 +11,8 @@ use std::sync::Arc;
 use datafusion::arrow::array::{Float64Array, Int64Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 
-use super::{assert_results_match, results_match};
+use super::{assert_results_match, batches_to_str, results_match};
+use crate::test_support::RowOrder;
 use crate::test_support::corpus::CpuOracle;
 
 /// `(k, v)` with `v` a float, so the tolerant arm keys on `k` and compares `v`.
@@ -36,10 +37,10 @@ fn answer(rows: &[(i64, f64)]) -> Vec<RecordBatch> {
     ]
 }
 
-/// The tolerance `data_fusion_approximate` declares, read off the oracle rather than
+/// The tolerance `data_fusion(sort, approx)` declares, read off the oracle rather than
 /// written again here: a line's oracle and what this comparator is held to are one number.
 fn tolerant() -> Option<f64> {
-    CpuOracle::DataFusionApproximate.rel_tol()
+    CpuOracle::SortApprox.rel_tol()
 }
 
 #[test]
@@ -123,4 +124,27 @@ fn the_tolerant_oracle_fails_on_a_nan_against_a_number() {
     assert!(said.contains("rel diff") || said.contains("NaN"), "{said}");
     assert!(results_match(&nan, &oracle, tolerant()).is_err());
     assert_eq!(results_match(&nan, &nan, tolerant()), Ok(()));
+}
+
+/// `NoSort` renders the rows in the order the batches hold them; `Sort` sorts them.
+#[test]
+fn no_sort_rendering_keeps_the_batches_order() {
+    let rows = answer(&[(2, 0.5), (1, 1.5)]);
+    let data = |text: String| -> Vec<String> {
+        text.lines()
+            .skip(3)
+            .filter(|l| l.starts_with('|'))
+            .map(str::to_string)
+            .collect()
+    };
+    let kept = data(batches_to_str(&rows, RowOrder::NoSort));
+    assert!(
+        kept[0].starts_with("| 2 ") && kept[1].starts_with("| 1 "),
+        "{kept:?}"
+    );
+    let sorted = data(batches_to_str(&rows, RowOrder::Sort));
+    assert!(
+        sorted[0].starts_with("| 1 ") && sorted[1].starts_with("| 2 "),
+        "{sorted:?}"
+    );
 }
