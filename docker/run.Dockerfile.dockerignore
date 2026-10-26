@@ -1,0 +1,6 @@
+# The build context is the repository; the run image needs the conda specs, the filter that takes
+# their runtime subset, and the device run's script.
+*
+!docker/conda/
+!docker/runtime-spec.sh
+!docker/run-tests.sh
