@@ -156,11 +156,11 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   dispatch only, `packages: write` and `contents: read`, built and pushed through `image.sh`,
   the runner's disk freed and checked against the largest build's measured peak.
 - [x] **Step 0c:** `build-test.md`'s "Images", and the `scripts/env/tests` cases in its counts.
-- [ ] **Step 1:** until the workflow is on master (GitHub dispatches only workflows the default
+- [x] **Step 1:** until the workflow is on master (GitHub dispatches only workflows the default
   branch holds), publish with `image.sh push` from the developer's host, with a token holding
   `write:packages` (the human adds the scope: `gh auth refresh -s write:packages`). Push all four
   images, set the packages public, and check a pull on a host with no credentials succeeds.
-- [ ] **Step 2:** commit.
+- [x] **Step 2:** commit.
 
 ### Task 5: data — embeddings from S3
 
