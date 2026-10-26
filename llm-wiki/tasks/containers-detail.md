@@ -786,3 +786,18 @@ the total 5888, the header the sum of the rows.
   `persist-credentials: false`; "Manage Actions access" is conditional on a denied push.
 - The workflow test is 15 cases now. The Dockerfile changes are comments, so the images'
   layers do not move.
+
+## Task 4: published
+
+- Pushed from the developer's host with `image.sh push`, f75cba7e's images; both tags of each
+  image are one digest:
+  - `peacockdb-run:cudf-25.02` `sha256:885cd51eec3924469df44bcb9f74c6a54d0c9bf2099d48d73502ac0bbde29f27`
+  - `peacockdb-run:cudf-26.02` `sha256:4f446175bfba3743e7f67bad5d00d284d6dc902766dde225cd485c9d481a196b`
+  - `peacockdb-build:cudf-25.02` `sha256:df5179809f69c91f587a098be5f092e2b182038bf7eb2f85dcab0b268dd9e28d`
+  - `peacockdb-build:cudf-26.02` `sha256:5bc62eec994ed85853b7c4120bb7e3f18316b233e3f08f039b0c0abde0a82e09`
+- A push creating a package in the organization is denied (`permission_denied: create_package`)
+  to an outside collaborator, whatever the token's scopes: the pusher is an organization member.
+  A package is created private; making it public needs the organization's package creation
+  setting to allow public packages, and is done in the package's settings (no REST endpoint).
+- With an empty `DOCKER_CONFIG`, all eight tags pull and resolve to the digests above, and each
+  package serves a layer blob to an anonymous token (HTTP 200).
