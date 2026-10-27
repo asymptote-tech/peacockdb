@@ -117,7 +117,7 @@ eight to fifteen minutes each.
 
 **Manual.** `test_stats_embeddings` generates tpch sf1 with external embeddings in a temp
 directory — a minute or two and about 1.5 GB — and checks it gives the committed sidecar. It
-needs the embeddings cache (`testdata/fetch_embeddings.sh`), which no CI host may fetch, named by
+needs the embeddings cache (`testdata/fetch_embeddings.sh`), which no CI job fetches, named by
 `PEACOCK_EMBEDDINGS_CACHE` when it is kept outside the tree:
 
 ```

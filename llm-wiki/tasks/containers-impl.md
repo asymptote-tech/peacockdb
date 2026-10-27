@@ -173,7 +173,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Produces: S3 key prefix `embeddings/<sha256>/{glove,deep1b}…` in the existing datasets bucket,
   pinned by `testdata/embeddings.sha256`; `fetch_embeddings.sh --from-s3` reads `AWS_*`.
 
-- [ ] **Step 1: failing test** — with a fake `aws` on `PATH`, `fetch_embeddings.sh --from-s3`
+- [x] **Step 1: failing test** — with a fake `aws` on `PATH`, `fetch_embeddings.sh --from-s3`
   downloads exactly the pinned keys and refuses a file whose sha256 differs.
 - [ ] **Step 2:** implement; upload once from a dev host; commit the pin.
 - [ ] **Step 3:** in the build image, sf1 generated with the S3 embeddings answers the tpchv
