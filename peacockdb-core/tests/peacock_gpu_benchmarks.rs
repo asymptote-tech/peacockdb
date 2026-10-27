@@ -119,17 +119,29 @@ fn the_sections_of_a_file_are_ordered_numerically() {
     );
 }
 
-/// Where a mode's results land: one file per (dataset, mode), stemmed by the mode.
+/// Where a mode's results land: one file per (device, dataset, mode), under the device's
+/// slug and stemmed by the mode.
 #[test]
-fn a_modes_results_go_to_one_file_per_dataset_and_mode() {
+fn a_modes_results_go_to_one_file_per_device_dataset_and_mode() {
     use peacockdb_core::test_support::results_file;
 
-    let path = results_file("tpch", "40", "tp1_single");
+    let path = results_file("h100-80gb-hbm3", "tpch", "40", "tp1_single");
     assert!(
-        path.ends_with("benchmark-results/tpch.sf40/tp1_single.benchmark.txt"),
+        path.ends_with("benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt"),
         "{}",
         path.display()
     );
+}
+
+/// A provenance for the record cases below, which write no device's numbers.
+fn a_provenance() -> peacockdb_core::test_support::Provenance {
+    peacockdb_core::test_support::Provenance {
+        device: "NVIDIA H200".to_string(),
+        driver: "570.172.08".to_string(),
+        cuda: "12.2".to_string(),
+        cudf: "25.02.02".to_string(),
+        host: "gpu-host".to_string(),
+    }
 }
 
 /// A run that produced one query's section leaves every other query's alone — the property
@@ -175,6 +187,7 @@ fn the_record_is_written_only_when_a_path_is_named() {
         COLUMNS, Capture, RECORD_PATH_ENV, RunMeta, append_records,
     };
 
+    let provenance = a_provenance();
     let meta = RunMeta {
         dataset: "tpch",
         sf: "40",
@@ -182,6 +195,7 @@ fn the_record_is_written_only_when_a_path_is_named() {
         mode: "tp1-single",
         allocator: "none",
         capture: Capture::None,
+        provenance: &provenance,
     };
     // A row of the width the file actually holds, so what reaches the file is a record
     // line and not a fixture the reader would have to know to allow for.
@@ -318,6 +332,7 @@ fn an_append_under_a_different_heading_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
     let _loan = EnvLoan::set(RECORD_PATH_ENV, dir.join("records.tsv"));
     let row = vec!["0"; COLUMNS.len()].join("\t");
+    let provenance = a_provenance();
     let mut meta = RunMeta {
         dataset: "tpch",
         sf: "40",
@@ -325,6 +340,7 @@ fn an_append_under_a_different_heading_is_refused() {
         mode: "tp1-single",
         allocator: "rmm-pool",
         capture: Capture::None,
+        provenance: &provenance,
     };
     append_records(std::slice::from_ref(&row), &meta);
     meta.allocator = "rmm-default";

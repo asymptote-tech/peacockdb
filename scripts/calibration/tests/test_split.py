@@ -1,4 +1,4 @@
-"""`split_record.py`: a run's record cut into one file per dataset, and refused unless whole.
+"""`split_record.py`: a run's record cut into one file per device and dataset, refused unless whole.
 
 A run is truncated at its start and writes only the cases it ran, so a filtered run's record
 is a fraction of the full one under the same name; pinned, it would stand for the full one.
@@ -15,6 +15,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import record  # noqa: E402
 import split_record  # noqa: E402
 from harness import main  # noqa: E402
 
@@ -23,7 +24,12 @@ COLUMNS = ("dataset sf query mode node_seq node_type lane recipe_seq recipe_kind
 HEADING = ("# peacockdb cost-model calibration record.\n"
            "# run: timing_mode=events\n"
            "# run: allocator=rmm-pool initial=1.0GiB\n"
-           "# run: capture=none\n")
+           "# run: capture=none\n"
+           "# run: device=NVIDIA H200\n"
+           "# run: driver=580.95.05\n"
+           "# run: cuda=12.2\n"
+           "# run: cudf=25.02.02\n"
+           "# run: host=gpu-host\n")
 CASES = """\
 // a comment naming corpus_query_benchmark!(tpch, 40, q99, tp1_single); is not a case
 corpus_query_benchmark!(tpch, 40, q6, tp1_single | tp4_sized);
@@ -74,8 +80,8 @@ def test_a_whole_run_of_one_dataset_is_its_file_byte_for_byte():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         record = write(tmp, TPCH)
-        assert split(tmp, record) == ["tpch.sf40"]
-        assert (tmp / "out/tpch.sf40/records.tsv").read_bytes() == record.read_bytes()
+        assert split(tmp, record) == ["h200/tpch.sf40"]
+        assert (tmp / "out/h200/tpch.sf40/records.tsv").read_bytes() == record.read_bytes()
 
 
 def test_two_datasets_in_one_run_are_two_files_each_under_the_run_s_heading():
@@ -83,10 +89,10 @@ def test_two_datasets_in_one_run_are_two_files_each_under_the_run_s_heading():
         tmp = pathlib.Path(tmp)
         tpcds = row("tpcds", "q82", "tp1-single")
         record = write(tmp, [TPCH[0], tpcds, *TPCH[1:]])
-        assert split(tmp, record) == ["tpcds.sf40", "tpch.sf40"]
+        assert split(tmp, record) == ["h200/tpcds.sf40", "h200/tpch.sf40"]
         head = HEADING + "\t".join(COLUMNS) + "\n"
-        assert (tmp / "out/tpch.sf40/records.tsv").read_text() == head + "".join(TPCH)
-        assert (tmp / "out/tpcds.sf40/records.tsv").read_text() == head + tpcds
+        assert (tmp / "out/h200/tpch.sf40/records.tsv").read_text() == head + "".join(TPCH)
+        assert (tmp / "out/h200/tpcds.sf40/records.tsv").read_text() == head + tpcds
 
 
 def test_a_run_that_missed_a_declared_case_is_refused_naming_it_and_writes_nothing():
@@ -108,15 +114,15 @@ def test_a_dataset_the_run_did_not_time_is_left_alone():
     """tpcds is declared and absent: a run filtered to one dataset is that dataset's whole run."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        assert split(tmp, write(tmp, TPCH)) == ["tpch.sf40"]
-        assert not (tmp / "out/tpcds.sf40").exists()
+        assert split(tmp, write(tmp, TPCH)) == ["h200/tpch.sf40"]
+        assert not (tmp / "out/h200/tpcds.sf40").exists()
 
 
 def test_a_query_named_with_an_underscore_is_the_record_s_dashed_one():
     """The macro writes `stringify!($query).replace('_', "-")`, so `scan_limit` is `scan-limit`."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        assert split(tmp, write(tmp, TPCH)) == ["tpch.sf40"]
+        assert split(tmp, write(tmp, TPCH)) == ["h200/tpch.sf40"]
         refused = refusal(tmp, write(tmp, TPCH[:-1]))
         assert "scan-limit tp1-single" in refused, refused
 
@@ -128,6 +134,46 @@ def test_a_captured_run_s_record_is_refused():
         record = write(tmp, TPCH)
         record.write_text(record.read_text().replace("capture=none", "capture=trace"))
         assert "capture=none" in refusal(tmp, record)
+
+
+def test_a_record_lies_under_its_device_slug():
+    """The pin and the key name the device as `benchmark-results/` does: by its slug."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        record = write(tmp, TPCH)
+        h100 = record.read_text().replace("device=NVIDIA H200", "device=NVIDIA H100 80GB HBM3")
+        record.write_text(h100)
+        assert split(tmp, record) == ["h100-80gb-hbm3/tpch.sf40"]
+        written = tmp / "out/h100-80gb-hbm3/tpch.sf40/records.tsv"
+        assert written.read_bytes() == record.read_bytes()
+
+
+def test_a_record_naming_no_device_or_two_is_refused():
+    """A record from before provenance has no device to file it under; two is two runs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        record = write(tmp, TPCH)
+        record.write_text(record.read_text().replace("# run: device=NVIDIA H200\n", ""))
+        assert "device=" in refusal(tmp, record)
+        record = write(tmp, TPCH)
+        two = "# run: device=NVIDIA H200\n# run: device=NVIDIA L40S\n"
+        record.write_text(record.read_text().replace("# run: device=NVIDIA H200\n", two))
+        assert "device=" in refusal(tmp, record)
+        assert not (tmp / "out").exists(), "a refused split wrote a file"
+
+
+def test_the_device_slug_is_the_harness_s():
+    """`device_slug` in `test_support/provenance.rs` names the results tree, this copy the pin:
+    both are held to the one table, `testdata/device_slugs.tsv`."""
+    table = pathlib.Path(__file__).resolve().parents[3] / "testdata" / "device_slugs.tsv"
+    lines = table.read_text().splitlines()
+    rows = [line.split("\t") for line in lines if not line.startswith("#")]
+    assert ["NVIDIA H200", "h200"] in rows and ["NVIDIA H100 80GB HBM3", "h100-80gb-hbm3"] in rows
+    for name, want in rows:
+        slug = record.device_slug(name)
+        assert slug == want, (name, slug)
+        assert "/" not in slug and not any(c.isspace() for c in slug), (name, slug)
+        assert record.device_slug(slug) == slug, (name, slug)
 
 
 def test_a_record_with_no_rows_is_refused():

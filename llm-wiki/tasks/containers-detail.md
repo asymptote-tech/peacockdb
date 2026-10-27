@@ -877,3 +877,259 @@ the total 5888, the header the sum of the rows.
 - `testdata/tpch-vec-queries/NOTICE`'s last sentence (the human's wording): not in git; a copy
   verified against the pin is in the project's private bucket, fetched by `--from-s3`.
 - Still 20 tests; the counts do not move.
+
+## Task 8: provenance and the per-device tree
+
+Worked in its own worktree, branch `ENS-containers-task8` from `0d9e1dc4`, to be replayed onto
+`ENS-containers` after Task 5. Built and tested in `peacockdb-build:cudf-25.02` with no network.
+
+**Where each of the five comes from** (as of review round 1):
+- `device`, `cuda`: one additive ABI symbol, `peacock_device_info(PeacockDeviceInfo*)`
+  (`cpp/include/peacock_gpu.h`), the name and `runtime`. It reads `cudaGetDevice`,
+  `cudaGetDeviceProperties` and `cudaRuntimeGetVersion`. No existing read gives either:
+  `peacock_gpu_version` is the engine's `0.1.0`, and the pool's info holds byte counts only.
+  Rust wraps it as `executor::device_info()`.
+- `driver=` is the kernel module's release, `580.95.05`, read from `/proc/driver/nvidia/version`.
+- `cudf=` is the release, `device_answer::cudf_release()`, `25.02.02`: the same build-time copy of
+  `version_config.hpp` as the `gpu-result.txt` stamp, which stays `major.minor`.
+- `host=` is `/proc/sys/kernel/hostname`. Inside a container that is the container's own name
+  unless `docker run --hostname` sets it: the GPU-host runner must pass the machine's.
+
+**The slug.** `device_slug` drops a leading `NVIDIA `, lowercases ASCII and joins the runs of
+`[a-z0-9]` with `-`. It has two copies: `test_support/provenance.rs`, which names the results tree,
+and `scripts/calibration/record.py`, which names the record's pin and key. Both tests read one
+table, `testdata/device_slugs.tsv`.
+
+**The record's key and pin.**
+- New shape, by device: key `<slug>/<dataset>.sf<sf>/<sha256>.tsv`, pin line
+  `<sha256>  <slug>/<dataset>.sf<sf>/records.tsv`, fetched to
+  `testdata/calibration/<slug>/<dataset>.sf<sf>/records.tsv`. The rule is the old one, `name` =
+  the pin path's directory, so `calibration-bucket.sh` did not change and
+  `build-test-shadgpu.sh --pull-benchmarks` publishes per device unchanged: its names come from
+  `split_record.py`, which now prints `<slug>/<dataset>.sf<sf>`.
+- `fetch_record.sh` takes `[<slug>/]<dataset>.sf<sf>`.
+- The H200's two records keep their objects and their pin lines, `tpch.sf40/records.tsv` and
+  `tpcds.sf40/records.tsv`, so `records.sha256` is unchanged. Moving them under `h200/` needs an
+  object at `h200/<dataset>.sf40/<sha256>.tsv`, and nothing is uploaded here.
+- **What a later step must do to move them** (the list now lives in #226): copy each of the two
+  objects in the bucket,
+  `s3://calibration/<dataset>.sf40/<sha256>.tsv` to `s3://calibration/h200/<dataset>.sf40/<sha256>.tsv`,
+  and read each back against its sha256. Then rename the two pin lines to `h200/…`, point
+  `scripts/exec_model/optimizer/call_cost.py`'s `RECORD` at `calibration/h200/tpch.sf40/`, and
+  change `exec-model-corpus.yml`'s `fetch_record.sh tpch.sf40` to `h200/tpch.sf40`. This task may
+  not edit that workflow. `create_nsys_profile.sh` reads `calibration/<dataset>.sf<sf>/records.tsv`
+  and needs the device level too before an Nsight pass runs on another card.
+- The new device's record (Task 11) needs no copy: its first publish writes the per-device key.
+  The new GPU-host path's pull must publish as `build-test-shadgpu.sh` does: split, upload under
+  `<slug>/…`, read back, pin.
+
+**The tree.** `benchmark-results/<slug>/<dataset>.sf<sf>/<mode>.benchmark.txt`; the H200's six
+files are under `h200/`, byte-identical (moved in the working tree, not staged).
+`every_declared_case_has_a_section_in_the_tree` now holds the case list to every device directory.
+Task 9's registry-driven list will fail it against `h200/`, which holds the 26 cases it was run
+on. Task 9 decides which trees the list is held to.
+
+**verify-26.02.** One tree per card, not per cuDF: its 25.02 run is committed first, the 26.02 run
+on the same card rewrites the files, and `git diff` with the trailers' `cudf=` is the comparison.
+Its spec's step 4 and Scope row say so, and its impl plan's Task 5 carries a note that Steps 1 and
+3 are superseded.
+
+**#226** stays open (the human's call, round 1): it now lists what remains, the first run with
+the five lines (Task 11) and the H200 migration with its two hazards. `nsys_hbm.py` compares a
+capture's GPUs with the record's `device=`.
+
+**A slip.** The H200 move was first made with `git mv`, which staged it. `git restore --staged
+-- testdata/benchmark-results` put the index back to HEAD; the move stays in the working tree.
+
+**Tests.** Each new case was red first: the Rust ones against stubs (the slug returned unchanged,
+an empty version, a trailer and a heading without the five), the two golden cases against the
+unmoved tree, the Python ones against the old `split_record.py` and `fetch_record.sh`. Two
+`test_fetch.py` cases pin what the old script already did and passed against it: the H200's pin
+fetched as it was, never shown red, and the refusal of a malformed name, red only on the mutation
+below. Each other case went red again on a mutation of the code it guards, the code then restored:
+- the vendor strip removed: `device_slug_is_stable` and `test_the_device_slug_is_the_harness_s`;
+- `% 100` for `% 1000 / 10`: `cuda_versions_read_as_major_minor`;
+- `driver` and `cuda` swapped in `fields`: `trailer_names_its_provenance` and
+  `record_heading_names_its_provenance`;
+- `device=NVIDIA L40S` added to one `h200/` trailer: `every_benchmark_file_lies_under_its_device`;
+- a record with two `device=` lines accepted: `test_a_record_naming_no_device_or_two_is_refused`;
+- `fetch_record.sh`'s name check loosened to `\.sf[0-9]+$`:
+  `test_a_name_that_is_not_a_pin_path_is_refused_before_any_fetch`.
+
+A cpu-tier gtest of the null refusal stayed green with the null check removed, because with no
+device the runtime refuses first. It was dropped, and the refusal is asserted in the gpu gtest.
+
+**Results**, in `peacockdb-build:cudf-25.02`, network off:
+- `cargo test --features rust-only -p peacockdb-core`: lib 774 passed and 2 ignored (776),
+  `test_cpu_corpus` 2009, `test_corpus_goldens` 28, `test_cost_model` 4, `test_ci_coverage` 11,
+  `test_module_layout` 18, `test_golden_format` 43. No warnings.
+- FFI build (default features): green, no warnings. `peacock_gpu_benchmarks -- --skip bench_
+  --test-threads=1` 8 passed, three runs; `--lib -- ffi_tests::` 4; `peacockdb-ffi --test
+  test_ffi` 3. The binaries need `LD_LIBRARY_PATH=/opt/cudf/lib`. Without `--test-threads=1`,
+  `an_append_under_a_different_heading_is_refused` fails: two cases set `PEACOCK_RECORD_PATH`
+  process-wide, which is why the binary is documented single-threaded.
+- `cargo test -p peacockdb-core --features gpu --no-run`: green. One warning, already on the
+  base: an unused `AsArray` import in `src/tests/gpu_tests/aggregate_dimension_cases.rs`.
+- `scripts/build.sh --configure --build` (gtests included): green, no warnings.
+  `peacock_cpu_tests` 15 passed. `git clang-format --diff HEAD` changes nothing.
+- `scripts/calibration/tests/`: 35 passed (calls 6, fetch 3, hbm 8, plot 7, split 11).
+
+**Not exercised: anything on a device.** That covers `peacock_device_info` on a card and
+`PeacockGpu.DeviceInfoDescribesTheDevice`, which is compiled and not run. It also covers
+`provenance::of_this_run`, a `bench_` case writing under `benchmark-results/<slug>/` with the five
+lines, and `host=` inside the run image.
+
+## Task 8: review round 1
+
+Every finding was applied. The human decided I2 and I4.
+
+- **I1, `cudf=` with the patch level.** `cudf_release()` beside `cudf_version()`, one header
+  reader (`config_field`) for both. It writes `25.02.02`, or `26.02.01` on 26.02. The
+  `gpu-result.txt` stamp stays `25.02`.
+- **I2, `driver=` is the driver release.** It is read from `/proc/driver/nvidia/version`, with no
+  fallback. The NVIDIA container toolkit puts that file into a container's `/proc`, so the run
+  image reads the host's driver the same way the host does. `/sys/module/nvidia/version` would
+  hold the same number, and a second source is a second way to disagree. The parser takes the
+  file's one `NVRM version:` line and that line's one word of digits and dots, and refuses
+  anything else. An unreadable file is refused naming its path. The ABI field `driver` is
+  dropped, so `PeacockDeviceInfo` is `name` and `runtime`. Not seen on a device: the file inside
+  the run image.
+- **I3.** `--hostname "$(hostname)"` is in build-test.md's run-image command, with a line saying
+  why. Task 7's Interfaces carry it, with `test_run_passes_the_machines_hostname`.
+- **I4.** #226 is reopened: back in `tickets/benchmarks.md` and the index, out of the archive. The
+  links from `tasks.md`, `containers.md` and build-test.md resolve again.
+- **`nsys_hbm.py`.** A join refuses a capture unless every row of its `TARGET_INFO_GPU` has the
+  slug of the record heading's `device=`. A record with no `device=` was refused too; round 2
+  takes it as the H200's instead. The
+  comparison is by slug, the name the results tree files a device under: a spelling difference
+  between nsys and the runtime is not a refusal, and a different card always is. Every row is
+  checked, since a host with two kinds of card cannot say which ran the calls. Not seen against a real
+  export: the fixture's `TARGET_INFO_GPU (id, name)` is my reading of nsys's schema.
+- **`device_slug` in Python** moved from `split_record.py` to `record.py`, which every
+  calibration script already shares.
+- **I5.** The migration list and the two hazards are in #226. The plan's Step 2 says the H200 pins
+  wait on it.
+- **I6.** The architecture count is twenty-six symbols, with `device_info` in instrumentation.
+  `record.py`'s docstring names the nine `# run:` lines.
+- **Nits.**
+  - N1: `# mode = ` regained its space; an Edit had stripped it.
+  - N2: the gpu gtest asserts `runtime >= 11000` and the null refusal.
+  - N3: `testdata/device_slugs.tsv`.
+  - N4: the comment on the provenance module's `allow(dead_code)`.
+  - N5: every `device=` line of a trailer is read; more than one fails. None is allowed: the
+    H200's sections have none.
+  - N6, N7: wording and reflow.
+  - N8: notes in the plan's Task 9 and Task 11.
+- **A slip, fixed:** a first insertion put `cudf_release` between `cudf_version`'s doc comment and
+  its item. It is now below `cudf_version`.
+
+**Red, then a mutation.** The new Rust and Python cases failed against stubs or the old code first.
+Each mutation turned its cases red, and the code was then restored:
+
+| mutation | red cases |
+|---|---|
+| patch printed unpadded | `the_cudf_release_is_read_with_its_patch_padded` |
+| the two-module-lines check removed | `the_driver_release_is_read_from_the_module_version` |
+| the path dropped from the read error | `an_unreadable_or_unknown_driver_version_is_refused` |
+| a wrong row added to `device_slugs.tsv` | `device_slug_is_stable` and `test_the_device_slug_is_the_harness_s` |
+| two `device=` lines in one `h200/` trailer | `every_benchmark_file_lies_under_its_device` |
+
+`test_hbm.py`'s two device cases failed before `check_device` existed.
+
+**Results, round 1**, in `peacockdb-build:cudf-25.02`, network off:
+- `cargo test --features rust-only -p peacockdb-core`: lib 777 passed and 2 ignored (779),
+  `test_cpu_corpus` 2009, `test_corpus_goldens` 28, `test_cost_model` 4, `test_ci_coverage` 11,
+  `test_module_layout` 18, `test_golden_format` 43. No warnings.
+- FFI build: green, no warnings. `peacock_gpu_benchmarks -- --skip bench_ --test-threads=1` 8,
+  `--lib -- ffi_tests::` 4, `peacockdb-ffi --test test_ffi` 3.
+- `--features gpu --no-run`: green, with the one warning already on the base.
+- C++ rebuilt with no warnings: `peacock_cpu_tests` 15 passed. `peacock_gpu_tests` lists its three
+  cases (not run). `git clang-format --diff HEAD` changes nothing.
+- `scripts/calibration/tests/`: 37 passed (calls 6, fetch 3, hbm 10, plot 7, split 11).
+- Staged into a scratch index, `testdata/benchmark-results/` shows six renames at 100 %.
+- Not exercised: anything on a device, now including the driver file inside the run image and
+  `check_device` against a real Nsight export.
+
+## Task 8: review round 2
+
+Every finding was applied. The human decided item 1.
+
+- **A record naming no device is the H200's.** `nsys_hbm.py` has the constant
+  `PREDATES_PROVENANCE = "NVIDIA H200"`, with its reason: both hosts that ran the benchmark
+  before provenance, shad-gpu and verda-gpu, are H200s, and only shad-gpu published (worded
+  so in round 3). The refusal text says when it was assumed. The
+  capture is still held to it, every `TARGET_INFO_GPU` row. So the pending HBM pass on shad-gpu
+  over the two pinned records can run. The docstring's usage example names the per-device record
+  path and says where the H200's lie. A capture with no `TARGET_INFO_GPU` table is a one-line
+  refusal naming it, not a sqlite traceback.
+- **The golden holds a new tree to the five keys.** `PREDATES_PROVENANCE = ["h200"]` in
+  `test_corpus_goldens/benchmark.rs`, with the same reason. In any other tree, every timed
+  trailer holds each of `device driver cuda cudf host` once, as its last five keys, and
+  `device=` slugs to the directory. An `h200/` section may carry none of them, or all five. The
+  check is `device_tree_problem(root)`. `a_tree_without_provenance_under_another_device_is_refused`
+  feeds it the committed `h200/` copied under `h100-80gb-hbm3/` in a temp directory.
+- **#226** gains a line: both constants go once the H200 is re-run with provenance.
+- build-test.md:
+  - the cuDF GPU smoke row is corrected (item 3);
+  - the Nsight sentence names the H200 assumption;
+  - a segmented run needs the same `--hostname` in every `docker run` (N5).
+- **Nits.**
+  - N1: the stale references to `split_record.py`'s copy now name `record.py`.
+  - N2: the `benchmark_trailer` comment names `run_section`.
+  - N3: the split fixture uses `driver=580.95.05` and `cudf=25.02.02`.
+  - N4: three more cases. A module line naming two releases, inside the driver test. A capture
+    listing an H200 and an L40S. A capture with no GPU table.
+  - N6: both script headers are ten lines.
+
+**Red, then a mutation (code restored each time):**
+
+| mutation | red cases |
+|---|---|
+| `PREDATES_PROVENANCE` set to the H100 | `test_a_record_naming_no_device_is_the_h200_s` and `test_a_device_less_record_still_refuses_another_card_s_capture` |
+| only `gpus[0]` checked | `test_one_foreign_card_among_the_capture_s_gpus_is_refused` |
+| `Some(release)` for the second-release check | `the_driver_release_is_read_from_the_module_version` ("a module line naming two releases") |
+| the five-key condition replaced by `false` | `a_tree_without_provenance_under_another_device_is_refused` |
+
+Before the change, three nsys cases failed. The device-less H200 join and the foreign capture
+were refused under the old rule. The missing table raised `OperationalError`.
+
+**Results, round 2**, in `peacockdb-build:cudf-25.02`, network off:
+- rust-only, every target: lib 777 passed and 2 ignored, `test_cpu_corpus` 2009,
+  `test_corpus_goldens` 29, `test_cost_model` 4, `test_ci_coverage` 11, `test_module_layout` 18,
+  `test_golden_format` 43. No warnings.
+- FFI: `peacock_gpu_benchmarks -- --skip bench_ --test-threads=1` 8, `ffi_tests::` 4,
+  `test_ffi` 3. `--features gpu --no-run` is green, with the one warning already on the base.
+  `peacock_cpu_tests` 15 passed.
+- `scripts/calibration/tests/`: 40 passed (calls 6, fetch 3, hbm 13, plot 7, split 11).
+
+## Task 8: review round 3
+
+- **I1, the slug comparison and the accept path are now reached.**
+  - `synthesized_tree` copies one committed `h200/` file into a temp tree under a device
+    directory, strips any provenance lines, and can append the five after each `allocator=`.
+  - Three cases use it. The bare copy under `h100-80gb-hbm3/` is refused, asserted on the
+    no-provenance refusal's own wording, which holds even once `h200/` gains five-key sections.
+    `device=NVIDIA L40S` there is refused ("measured on"). `device=NVIDIA H100 80GB HBM3` passes.
+  - With the slug check deleted, the L40S case is red. With it inverted, the L40S case and the
+    H100 case are both red.
+- **I2.** `nsys_hbm.py`'s `PREDATES_PROVENANCE` sits after the metric names, and `TUPLE` has its
+  comment back.
+- **N1.** `split_record.py`'s header is ten lines. The sentence on why a filtered run is refused
+  left it; build-test.md's *Benchmark data flow* has it.
+- **N2.** Two refusal wordings. A trailer with none of the five outside `h200/` names the allowed
+  trees. One with only some of the five, or out of order, names its keys.
+- **N3.** The reason everywhere is now: both hosts that ran the benchmark before provenance,
+  shad-gpu and verda-gpu, are H200s, and only shad-gpu published. That covers the golden's
+  constant, `nsys_hbm.py`'s constant and refusal, build-test.md, and the round-2 entry above.
+  #226 states no reason.
+- **N4.** An empty GPU table is refused naming the table, with its own case. It is red with the
+  old merged `not gpus or …` condition put back.
+- **N5.** Line lengths: `provenance.rs`, `nsys_hbm.py`'s docstring paragraph, and build-test.md's
+  Corpus goldens paragraph.
+
+**Results, round 3** (build image 25.02, network off):
+- rust-only `test_corpus_goldens`: 31 passed.
+- `--lib`: 777 passed and 2 ignored.
+- `test_module_layout`: 18 passed.
+- `scripts/calibration/tests/`: 41 passed (calls 6, fetch 3, hbm 14, plot 7, split 11).
+- Counts: total 5912 = Rust 4480, C++ 174, Python 1258.

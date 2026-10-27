@@ -37,6 +37,16 @@ pub mod raw {
         pub maximum_bytes: u64,
     }
 
+    /// The current device as [`peacock_device_info`] describes it. Mirrors
+    /// `PeacockDeviceInfo` in `cpp/include/peacock_gpu.h`.
+    #[repr(C)]
+    pub struct PeacockDeviceInfo {
+        /// `cudaDeviceProp::name`, NUL-terminated.
+        pub name: [c_char; 256],
+        /// `cudaRuntimeGetVersion`: `1000 * major + 10 * minor`.
+        pub runtime: i32,
+    }
+
     /// A pool is the current device resource.
     pub const PEACOCK_RMM_POOL_INSTALLED: i32 = 0;
     /// The pool could not be built: the default resource, NOT on purpose.
@@ -75,6 +85,9 @@ pub mod raw {
     #[link(name = "peacock_gpu")]
     unsafe extern "C" {
         pub fn peacock_gpu_version() -> *const c_char;
+
+        /// Describe the current device: 0, or non-zero for a null `out_info` or no device.
+        pub fn peacock_device_info(out_info: *mut PeacockDeviceInfo) -> i32;
 
         pub fn peacock_executor_create(
             gpu_memory_limit: u64,

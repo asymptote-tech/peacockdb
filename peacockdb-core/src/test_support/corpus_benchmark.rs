@@ -16,8 +16,10 @@ use crate::plan::GpuNode;
 use crate::plan_text::{render_timings, timed_device_us};
 use crate::wire::{attach_recipes, join_scratch_bytes};
 
+use super::benchmark_trailer::run_section;
 use super::corpus::plan_at;
 use super::gpu_session::Session;
+use super::provenance::{device_slug, of_this_run};
 use super::record::{append_records, declared_steps, record_rows, rows_match_the_recipes};
 use super::{
     BUILD, BenchmarkCase, Capture, MEASURED_RUNS, NOT_TIMED, Regeneration, RunMeta, SKIPPED,
@@ -46,14 +48,14 @@ pub(crate) fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, 
     declared
 }
 
-/// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
-/// (dataset, mode), holding a section per query it timed.
+/// `testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file
+/// per (device, dataset, mode), holding a section per query it timed. `device` is a slug.
 ///
 /// One file rather than one per query because a mode's queries are read together, and a
 /// directory of one-query files makes that a listing rather than a diff.
-pub(crate) fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
+pub(crate) fn results_file(device: &str, dataset: &str, sf: &str, mode: &str) -> PathBuf {
     testdata_root()
-        .join(format!("benchmark-results/{dataset}.sf{sf}"))
+        .join(format!("benchmark-results/{device}/{dataset}.sf{sf}"))
         .join(format!("{mode}.benchmark.txt"))
 }
 
@@ -66,9 +68,16 @@ pub(crate) fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
 /// Always `Sections`, never `Whole`: the binary can be run under a name filter at any
 /// moment with nothing in the run to say so, and pruning what this run did not produce
 /// would delete a measurement nobody asked to lose.
-pub(crate) fn write_section(dataset: &str, sf: &str, mode: &str, query: &str, body: &str) {
+pub(crate) fn write_section(
+    device: &str,
+    dataset: &str,
+    sf: &str,
+    mode: &str,
+    query: &str,
+    body: &str,
+) {
     merge_section(
-        &results_file(dataset, sf, mode),
+        &results_file(device, dataset, sf, mode),
         &declared_for(dataset, sf, mode),
         query,
         body,
@@ -86,31 +95,6 @@ fn query_order(query: &str) -> (String, u32, String) {
         head.to_string(),
         number.parse().unwrap_or(0),
         query.to_string(),
-    )
-}
-
-/// The extra-data section: what the whole run cost, and under what conditions.
-///
-/// Named `--- run ---` after the `--- recipes ---` and `--- memory ---` the plan goldens
-/// carry, so a reader who has seen one file knows where a section ends in the other.
-///
-/// **Two totals, deliberately named apart.** `run_us` is the whole execution end to end;
-/// `device_us` is the sum of the tree's `total_us`. They do not agree, and the difference
-/// is the point: it is what the run spent outside the calls — the driver's own scheduling
-/// and the host prologue between them. One name for both would read as a discrepancy.
-fn run_section(chosen: &Run, times: &Measurements, spread: &[u64]) -> String {
-    let device_us = timed_device_us(times);
-    let spread: Vec<String> = spread.iter().map(u64::to_string).collect();
-    format!(
-        "--- run ---\n\
-         run_us={}\n\
-         device_us={device_us}\n\
-         runs=[{}]\n\
-         build={BUILD}\n\
-         allocator={}\n",
-        chosen.total_us,
-        spread.join(","),
-        install_rmm_pool(BENCH_POOL_BYTES),
     )
 }
 
@@ -153,6 +137,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     // Read before anything runs, so a misspelled value fails the case rather than the
     // publish at the end of it.
     let capture = Capture::from_env();
+    let provenance = of_this_run(&what);
 
     // Conditions of a benchmark run, not choices: rmm's default makes every cuDF
     // intermediate a cudaMalloc/cudaFree round trip charged to the node that allocated it,
@@ -211,6 +196,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
         mode: mode.name,
         allocator: &allocator,
         capture,
+        provenance: &provenance,
     };
     // Attached once more here rather than reached for through the session: `Session::open`
     // hands its plan to the driver and the driver consumes it. `attach_recipes` reads the
@@ -239,13 +225,20 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     let body = format!(
         "{}{}",
         render_timings(tree.as_ref(), &costed),
-        run_section(&chosen, &costed, &times)
+        run_section(
+            chosen.total_us,
+            timed_device_us(&costed),
+            &times,
+            &allocator,
+            &provenance
+        )
     );
     // A captured run measures under nsys, which costs the query several percent, so its
     // times must not reach the committed tree. It still wrote the record above — the
     // capture exists to be joined against exactly those rows.
     if capture == Capture::None {
-        write_section(dataset, sf, mode.ident().as_str(), query, &body);
+        let device = device_slug(&provenance.device);
+        write_section(&device, dataset, sf, mode.ident().as_str(), query, &body);
     }
 
     let per_node: Vec<String> = (0..costed.nodes())

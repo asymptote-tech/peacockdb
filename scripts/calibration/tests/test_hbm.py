@@ -7,6 +7,7 @@ charged to, and what a percentage of peak is worth in bytes.
 
 import pathlib
 import sys
+import sqlite3
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -51,6 +52,10 @@ def three_call_capture(directory, unit=""):
     return path
 
 
+# The heading's conditions a join reads: the device is what the capture is held to.
+HEADING = ["run: timing_mode=events", "run: build=release", "run: device=NVIDIA H200"]
+
+
 def three_row_record(directory, drop=None):
     """The clean run's rows for those calls: one per call, one execution."""
     path = directory / "records.tsv"
@@ -60,7 +65,7 @@ def three_row_record(directory, drop=None):
         for seq, kind in ((0, "CudfScan"), (1, "CudfFilter"), (2, "CudfProject"))
         if seq != drop
     ]
-    record.write_tsv(path, ["run: timing_mode=events", "run: build=release"],
+    record.write_tsv(path, HEADING,
                      COLUMNS.split(), rows)
     return path
 
@@ -124,7 +129,7 @@ def test_a_capture_of_two_datasets_joins_onto_their_two_records():
         records = []
         for dataset, query in (("tpch", "q6"), ("tpcds", "q37")):
             records.append(tmp / f"{dataset}.tsv")
-            record.write_tsv(records[-1], ["run: timing_mode=events", "run: build=release"],
+            record.write_tsv(records[-1], HEADING,
                              COLUMNS.split(),
                              [[dataset, "40", query, "tp1-single", 0, "CudfScan", "0", 0,
                                "CudfScan", "0", "0", "100", "800", "100", "800", "7", "5"]])
@@ -155,7 +160,7 @@ def scan_capture(directory, case, reads):
 
 def scan_record(directory, dataset, query, runs):
     path = directory / f"{dataset}.tsv"
-    record.write_tsv(path, ["run: timing_mode=events", "run: build=release"], COLUMNS.split(),
+    record.write_tsv(path, HEADING, COLUMNS.split(),
                      [[dataset, "40", query, "tp1-single", 0, "CudfScan", "0", 0, "CudfScan",
                        "0", run, "100", "800", "100", "800", "7", "5"] for run in range(runs)])
     return path
@@ -272,6 +277,97 @@ def test_a_capture_and_a_record_of_different_work_are_refused():
             assert "do not describe the same calls" in str(refused), refused
         else:
             raise AssertionError("a captured call with no row was joined anyway")
+
+
+def test_a_capture_from_another_device_is_refused():
+    """The capture's own GPU table names the card it ran on, the record's heading its own.
+    Joined across two cards, every byte would land on a call another card made."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        capture = three_call_capture(tmp)
+        conn = sqlite3.connect(capture)
+        conn.execute("update TARGET_INFO_GPU set name = 'NVIDIA L40S'")
+        conn.commit()
+        conn.close()
+        try:
+            hbm_of(capture, three_row_record(tmp), tmp / "hbm.tsv", "--peak-bw", str(PEAK_BW))
+        except SystemExit as refused:
+            assert "NVIDIA L40S" in str(refused) and "NVIDIA H200" in str(refused), refused
+        else:
+            raise AssertionError("a capture of another card was joined onto the record")
+        assert not (tmp / "hbm.tsv").exists()
+
+
+def device_less_record(directory):
+    """`three_row_record` as the H200's pinned records are: a heading naming no device."""
+    path = three_row_record(directory)
+    path.write_text(path.read_text().replace("# run: device=NVIDIA H200\n", ""))
+    return path
+
+
+def capture_on(directory, *gpus):
+    """`three_call_capture`, its GPU table naming `gpus` instead."""
+    path = three_call_capture(directory)
+    conn = sqlite3.connect(path)
+    conn.execute("delete from TARGET_INFO_GPU")
+    conn.executemany("insert into TARGET_INFO_GPU (id, name) values (?, ?)", enumerate(gpus))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def refused_join(capture, record_path, out):
+    try:
+        hbm_of(capture, record_path, out, "--peak-bw", str(PEAK_BW))
+    except SystemExit as refused:
+        assert refused.code not in (None, 0), refused
+        return str(refused)
+    raise AssertionError("the join went ahead")
+
+
+def test_a_record_naming_no_device_is_the_h200_s():
+    """Every record from before provenance is shad-gpu's, an H200's: an H200 capture joins."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        rows = hbm_of(three_call_capture(tmp), device_less_record(tmp), tmp / "hbm.tsv",
+                      "--peak-bw", str(PEAK_BW))
+        assert len(rows) == 3, rows
+
+
+def test_a_device_less_record_still_refuses_another_card_s_capture():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        refused = refused_join(capture_on(tmp, "NVIDIA H100 80GB HBM3"), device_less_record(tmp),
+                               tmp / "hbm.tsv")
+        assert "NVIDIA H100 80GB HBM3" in refused and "predate" in refused, refused
+
+
+def test_one_foreign_card_among_the_capture_s_gpus_is_refused():
+    """Every row of the GPU table, not the first: two kinds of card cannot say which ran."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        refused = refused_join(capture_on(tmp, "NVIDIA H200", "NVIDIA L40S"),
+                               three_row_record(tmp), tmp / "hbm.tsv")
+        assert "NVIDIA L40S" in refused, refused
+
+
+def test_a_capture_without_its_gpu_table_is_refused_naming_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        capture = three_call_capture(tmp)
+        conn = sqlite3.connect(capture)
+        conn.execute("drop table TARGET_INFO_GPU")
+        conn.commit()
+        conn.close()
+        refused = refused_join(capture, three_row_record(tmp), tmp / "hbm.tsv")
+        assert "TARGET_INFO_GPU" in refused, refused
+
+
+def test_a_capture_whose_gpu_table_lists_no_gpu_is_refused_naming_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        refused = refused_join(capture_on(tmp), three_row_record(tmp), tmp / "hbm.tsv")
+        assert "TARGET_INFO_GPU" in refused, refused
 
 
 if __name__ == "__main__":

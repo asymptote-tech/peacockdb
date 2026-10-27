@@ -7,8 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, RECORD_PATH_ENV, RunMeta, SKIPPED,
-    append_records, ordered_sections, record_header, rows_match_the_recipes, testdata_root,
+    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV, RunMeta,
+    SKIPPED, append_records, device_slug, ordered_sections, record_header, rows_match_the_recipes,
+    testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -70,6 +71,17 @@ include!("../common/corpus_cases.inc");
 /// An empty answer is a failure wherever this is called, not a skip: the files are
 /// committed, and a check that silently examines nothing is what this suite closes.
 fn benchmark_files() -> Vec<PathBuf> {
+    let files = files_under(&testdata_root().join("benchmark-results"));
+    assert!(
+        !files.is_empty(),
+        "no benchmark file under testdata/benchmark-results/ — the tree is committed, so \
+         its absence is a run that never published rather than a fresh checkout"
+    );
+    files
+}
+
+/// Every `.benchmark.txt` under `root`, sorted.
+fn files_under(root: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, into: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -84,13 +96,8 @@ fn benchmark_files() -> Vec<PathBuf> {
         }
     }
     let mut files = Vec::new();
-    walk(&testdata_root().join("benchmark-results"), &mut files);
+    walk(root, &mut files);
     files.sort();
-    assert!(
-        !files.is_empty(),
-        "no benchmark file under testdata/benchmark-results/ — the tree is committed, so \
-         its absence is a run that never published rather than a fresh checkout"
-    );
     files
 }
 
@@ -249,6 +256,13 @@ fn the_records_preamble_is_what_record_header_writes() {
     let dir = std::env::temp_dir().join(format!("peacock-corpus-{}-record", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("records.tsv");
+    let provenance = Provenance {
+        device: "NVIDIA H200".to_string(),
+        driver: "570.172.08".to_string(),
+        cuda: "12.2".to_string(),
+        cudf: "25.02.02".to_string(),
+        host: "gpu-host".to_string(),
+    };
     let run = RunMeta {
         dataset: "tpch",
         sf: "40",
@@ -256,6 +270,7 @@ fn the_records_preamble_is_what_record_header_writes() {
         mode: "tp1-single",
         allocator: "rmm-pool initial=1.0GiB max=1.0GiB of 2.0GiB free on a discrete device",
         capture: Capture::None,
+        provenance: &provenance,
     };
     let row = vec!["0"; COLUMNS.len()].join("\t");
     let restore = std::env::var_os(RECORD_PATH_ENV);
@@ -293,6 +308,7 @@ fn the_records_preamble_is_what_record_header_writes() {
         mode: "",
         allocator,
         capture: Capture::None,
+        provenance: &provenance,
     };
     assert_eq!(found.join("\n"), record_header(&meta), "{}", path.display());
 }
@@ -421,26 +437,27 @@ fn every_declared_case_has_a_section_in_the_tree() {
     }
     assert!(!files.is_empty(), "the benchmark list declares no mode");
 
-    for ((dataset, sf, mode), declared) in &files {
-        let path = testdata_root().join(format!(
-            "benchmark-results/{dataset}.sf{sf}/{mode}.benchmark.txt"
-        ));
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!(
-                "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured",
+    for device in device_directories() {
+        for ((dataset, sf, mode), declared) in &files {
+            let path = device.join(format!("{dataset}.sf{sf}/{mode}.benchmark.txt"));
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured \
+                     on this device",
+                    path.display()
+                )
+            });
+            let present: BTreeSet<String> = ordered_sections(&text)
+                .into_iter()
+                .map(|(query, _)| query)
+                .collect();
+            let missing: Vec<&String> = declared.difference(&present).collect();
+            assert!(
+                missing.is_empty(),
+                "{} has no section for {missing:?}, which the case list declares at {mode}",
                 path.display()
-            )
-        });
-        let present: BTreeSet<String> = ordered_sections(&text)
-            .into_iter()
-            .map(|(query, _)| query)
-            .collect();
-        let missing: Vec<&String> = declared.difference(&present).collect();
-        assert!(
-            missing.is_empty(),
-            "{} has no section for {missing:?}, which the case list declares at {mode}",
-            path.display()
-        );
+            );
+        }
     }
 }
 
@@ -504,6 +521,171 @@ fn dead_mask_entries(gpu_modes: &str, mask: &str) -> Vec<String> {
         .map(|entry| entry.trim().to_string())
         .filter(|entry| !on_device.contains(entry))
         .collect()
+}
+
+/// Every directory directly under `benchmark-results/`, each one device's tree.
+fn device_directories() -> Vec<PathBuf> {
+    let root = testdata_root().join("benchmark-results");
+    let mut devices: Vec<PathBuf> = std::fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("{}: {e}", root.display()))
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    devices.sort();
+    assert!(!devices.is_empty(), "{} holds no device", root.display());
+    devices
+}
+
+/// The five keys a trailer ends with, in order.
+const PROVENANCE_KEYS: [&str; 5] = ["device", "driver", "cuda", "cudf", "host"];
+
+/// The device trees written before the harness wrote provenance, whose trailers may carry
+/// none of it. Only the H200's: both hosts that ran the benchmark before then, shad-gpu and
+/// verda-gpu, are H200s. A tree copied or written under any other name is held to the five.
+const PREDATES_PROVENANCE: &[&str] = &["h200"];
+
+/// Every file is `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, its device directory a
+/// slug, and every timed section's trailer ends with the five provenance keys, `device=`
+/// slugging to that directory. Only a tree in `PREDATES_PROVENANCE` may have sections without.
+///
+/// The directory is what keeps two cards' runs apart: a file one level up, under a name the
+/// harness would not write, or without the card it names, is a run nobody can place.
+#[test]
+fn every_benchmark_file_lies_under_its_device() {
+    benchmark_files();
+    if let Err(problem) = device_tree_problem(&testdata_root().join("benchmark-results")) {
+        panic!("{problem}");
+    }
+}
+
+/// One committed file under `device`/ in a temp tree, its provenance lines stripped, then the
+/// five appended after each trailer's `allocator=` when `measured_on` names a card. Built from
+/// the committed bytes, so the tree is well formed in every other respect.
+fn synthesized_tree(case: &str, device: &str, measured_on: Option<&str>) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("peacock-{case}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let rel = "tpch.sf40/tp1_single.benchmark.txt";
+    let text = std::fs::read_to_string(testdata_root().join("benchmark-results/h200").join(rel))
+        .expect("the committed file");
+    let mut out = String::new();
+    for line in text.lines() {
+        let key = line.split_once('=').map_or("", |(key, _)| key);
+        if PROVENANCE_KEYS.contains(&key) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        if let (Some(card), true) = (measured_on, line.starts_with("allocator=")) {
+            out.push_str(&format!(
+                "device={card}\ndriver=580.95.05\ncuda=12.9\ncudf=25.02.02\nhost=gpu-host\n"
+            ));
+        }
+    }
+    let path = root.join(device).join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, out).unwrap();
+    root
+}
+
+/// The check over a synthesized tree, the tree removed whatever it answers.
+fn problem_of(root: PathBuf) -> Result<(), String> {
+    let problem = device_tree_problem(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    problem
+}
+
+/// The committed H200 sections under another device's name: well formed, and saying nothing
+/// of the card the directory claims.
+#[test]
+fn a_tree_without_provenance_under_another_device_is_refused() {
+    let problem = problem_of(synthesized_tree("no-provenance", "h100-80gb-hbm3", None))
+        .expect_err("h200/'s sections under h100-80gb-hbm3/ passed");
+    assert!(
+        problem.contains("names no device, driver, CUDA, cuDF or host"),
+        "{problem}"
+    );
+}
+
+/// A trailer naming a card other than its directory's: filed under the wrong device.
+#[test]
+fn a_trailer_naming_another_card_than_its_directory_is_refused() {
+    let tree = synthesized_tree("another-card", "h100-80gb-hbm3", Some("NVIDIA L40S"));
+    let problem = problem_of(tree).expect_err("an L40S's trailers under h100-80gb-hbm3/ passed");
+    assert!(problem.contains("measured on"), "{problem}");
+}
+
+/// The shape a new device's run writes: the five last, `device=` its directory's card.
+#[test]
+fn a_trailer_naming_its_directory_s_card_passes() {
+    let tree = synthesized_tree("own-card", "h100-80gb-hbm3", Some("NVIDIA H100 80GB HBM3"));
+    assert_eq!(problem_of(tree), Ok(()));
+}
+
+/// The first way the tree under `root` breaks the device layout, if any.
+fn device_tree_problem(root: &Path) -> Result<(), String> {
+    for path in files_under(root) {
+        let relative = path
+            .strip_prefix(root)
+            .expect("under the root it was found in");
+        let parts: Vec<&str> = relative.iter().map(|p| p.to_str().unwrap()).collect();
+        let [device, dataset_sf, _file] = parts[..] else {
+            return Err(format!(
+                "{}: not <device>/<dataset>.sf<sf>/<mode>.benchmark.txt",
+                path.display()
+            ));
+        };
+        if device_slug(device) != device {
+            return Err(format!(
+                "{}: {device:?} is not a device slug",
+                path.display()
+            ));
+        }
+        let sf = dataset_sf.split_once(".sf").map(|(_, sf)| sf);
+        if !sf.is_some_and(|sf| !sf.is_empty() && sf.chars().all(|c| c.is_ascii_digit())) {
+            return Err(format!(
+                "{}: {dataset_sf:?} is not <dataset>.sf<sf>",
+                path.display()
+            ));
+        }
+        let text = std::fs::read_to_string(&path).expect("a benchmark file");
+        for (query, body) in ordered_sections(&text) {
+            if body.starts_with(SKIPPED) {
+                continue;
+            }
+            let at = format!("{} {query}", path.display());
+            let trailer = run_trailer(&body, &at);
+            let keys: Vec<&str> = trailer.iter().map(|(key, _)| key.as_str()).collect();
+            // Every provenance key the trailer holds, not the first: two of one are two
+            // runs' trailers in one section.
+            let held = keys
+                .iter()
+                .filter(|key| PROVENANCE_KEYS.contains(key))
+                .count();
+            if held == 0 {
+                if PREDATES_PROVENANCE.contains(&device) {
+                    continue;
+                }
+                return Err(format!(
+                    "{at}: the trailer names no device, driver, CUDA, cuDF or host, and only \
+                     {PREDATES_PROVENANCE:?} were written before the harness wrote them"
+                ));
+            }
+            if held != PROVENANCE_KEYS.len() || !keys.ends_with(&PROVENANCE_KEYS) {
+                return Err(format!(
+                    "{at}: the trailer's keys are {keys:?}, which do not end with device= \
+                     driver= cuda= cudf= host=, each once"
+                ));
+            }
+            let named = trailer_field(&trailer, "device", &at);
+            if device_slug(&named) != device {
+                return Err(format!(
+                    "{at}: measured on {named:?}, filed under {device}/"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A `mode1 | mode2` argument as a set. `none` is the empty set, `all_modes` the five: the

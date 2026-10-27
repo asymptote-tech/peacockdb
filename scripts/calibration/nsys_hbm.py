@@ -16,17 +16,20 @@ a tuple rather than a node number.
                  --gpu-metrics-frequency=20000 -o cap -- <binary> <case's test> --exact
     nsys export --type=sqlite --force-overwrite=true -o cap.sqlite cap.nsys-rep
     scripts/calibration/nsys_hbm.py --capture cap.sqlite --case "tpch.sf40 q6 tp1-single" \
-        --peak-bw <B/s> --record testdata/calibration/tpch.sf40/records.tsv \
-        --record testdata/calibration/tpcds.sf40/records.tsv --out part.tsv
+        --peak-bw <B/s> --record testdata/calibration/<device>/tpch.sf40/records.tsv \
+        --record testdata/calibration/<device>/tpcds.sf40/records.tsv --out part.tsv
+    (the H200's two records lie one level up, `calibration/<dataset>.sf40/`)
     scripts/calibration/nsys_hbm.py --parts part.tsv --parts … --record … --out hbm.tsv
 
 The record is the clean run's, as published — a file per dataset, all of them given: its
 coordinates are what the output carries, and the capture supplies only bytes. The two must
 describe the same calls, which is checked both ways — a call in one and not the other means
-they are not the same work. A join without --case takes every case the capture holds; with
-it, the capture must hold that case alone and is checked against that case's rows, and the
-merge of the parts is where the record as a whole is checked. The harness wraps each case in
-a named NVTX range, so which query a call was in is read rather than typed.
+they are not the same work — and be of one card, the capture's GPUs against the heading's
+`device=`. A heading naming none predates provenance and is taken as the H200's
+(`PREDATES_PROVENANCE`). A join without --case takes every case the capture holds; with it,
+the capture must hold that case alone and is checked against that case's rows, and the merge
+of the parts is where the record as a whole is checked. The harness wraps each case in a named
+NVTX range, so which query a call was in is read rather than typed.
 
 The output is a row per call (`record.HBM_COLUMNS`): each reading the median over the call's
 executions. Joined per execution first, against the record row with the same run_index,
@@ -66,6 +69,11 @@ import record
 # wrote the name alone, 2024.5 appends " [Throughput %]", and metric_id takes either.
 DRAM_READ = "DRAM Read Bandwidth"
 DRAM_WRITE = "DRAM Write Bandwidth"
+
+# The card a record names when its heading names none. Both hosts that ran the benchmark
+# before provenance, shad-gpu and verda-gpu, are H200s, and only shad-gpu published, so the
+# two pinned records are an H200's. Goes once the H200 is re-run with `device=` (#226).
+PREDATES_PROVENANCE = "NVIDIA H200"
 
 # The record's coordinates, in the order the output writes them. Every one of them comes
 # from the record: the capture names a call `"<seq>.<call_index> <Kind>"` and nothing
@@ -275,11 +283,37 @@ def main():
     if args.capture and args.peak_bw is None:
         sys.exit("--peak-bw is required with --capture: bytes are the integral of a "
                  "percentage of it, so a guessed one scales every row silently")
-    _, rows = record.read_records(args.record, *TUPLE)
+    run, rows = record.read_records(args.record, *TUPLE)
     if args.parts:
         merge(args, rows)
     else:
-        join(args, rows)
+        join(args, run, rows)
+
+
+def check_device(conn, run, records):
+    """The capture's GPUs, every one of them, are the card the record's heading names, or
+    `PREDATES_PROVENANCE` for a heading that names none.
+
+    Compared by slug, the name the results tree files a device under, so a spelling the two
+    tools might differ in (case, spacing) is not a refusal and a different card always is.
+    Every row, not the first: a capture of a host with two kinds of card cannot say which
+    one the calls ran on.
+    """
+    named = run.get("device")
+    stated = f"the record on {named!r}"
+    if named is None:
+        named = PREDATES_PROVENANCE
+        stated = (f"{', '.join(records)} name no device and predate provenance, so are taken as "
+                  f"an H200's, on {named!r}")
+    try:
+        gpus = [name for (name,) in conn.execute("select name from TARGET_INFO_GPU")]
+    except sqlite3.OperationalError as e:
+        sys.exit(f"{e}: the capture has no TARGET_INFO_GPU table to say which card it ran on")
+    if not gpus:
+        sys.exit("the capture's TARGET_INFO_GPU table lists no GPU to say which card it ran on")
+    if any(record.device_slug(gpu) != record.device_slug(named) for gpu in gpus):
+        sys.exit(f"the capture ran on {gpus} and {stated}: their calls were made on different "
+                 "cards, and the bytes would land on the wrong ones")
 
 
 def merge(args, rows):
@@ -311,8 +345,9 @@ def merge(args, rows):
     print(f"{len(out)} calls from {len(args.parts)} parts; wrote {args.out}")
 
 
-def join(args, rows):
+def join(args, run, rows):
     conn = sqlite3.connect(args.capture)
+    check_device(conn, run, args.record)
     dom = nvtx_names.domain_id(conn, args.domain)
     ranges = list(
         conn.execute(
