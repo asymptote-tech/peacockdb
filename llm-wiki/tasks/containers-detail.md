@@ -801,3 +801,79 @@ the total 5888, the header the sum of the rows.
   setting to allow public packages, and is done in the package's settings (no REST endpoint).
 - With an empty `DOCKER_CONFIG`, all eight tags pull and resolve to the digests above, and each
   package serves a layer blob to an anonymous token (HTTP 200).
+
+## Task 5: embeddings from S3 (steps 1 and 2's code; nothing uploaded)
+
+- One pin, `testdata/embeddings.sha256` (sha256sum format, names relative to the cache): the four
+  inline SHAs moved there, and both sources read it. The origin path's base check is still the
+  sf1 prefix gate over `deep_base.sf1.fbin`'s pin; `--from-s3` needs a whole-file pin for
+  `deep_base.sf<SF>.fbin`, so it serves sf1 only until another slice is pinned.
+- The bucket is one value, `EMBEDDINGS_BUCKET=embeddings` in `scripts/lib/embeddings-bucket.sh`
+  (sourced by both scripts, as `calibration-bucket.sh` is), keys `<sha256>/<file>`. Not yet
+  confirmed by the human, and the bucket does not exist yet. The alternative is the existing
+  `calibration` bucket with an `embeddings/` key prefix, a one-line change to `embeddings_key`.
+- The guard: CI and GITHUB_ACTIONS refuse the origins only; PEACOCK_NO_FETCH ("no fetch")
+  refuses both sources. ssh and docker bootstraps do not carry CI/GITHUB_ACTIONS anyway, so what
+  the exemption admits is a CI job reading our own pinned bucket.
+- Origin byte-identity: the old and new script run over a copy of the real sf1 cache, with a
+  curl that fails loudly. Corrected in round 2, which compared HEAD's script with round 2's:
+  all cached, a bad flag and a damaged query file (the refetch attempt and its exit status)
+  print identical output. `CI=1` differs by design since round 1, in the refusal's third line.
+  GloVe extraction (the text removed, the zip cached) was not compared before round 2; it
+  extracts the same bytes, sha256 95dde4df…, and differs only in the text's mtime: `unzip -o -d`
+  restored the archive's (2014), `unzip -p` and a move leave the time of extraction.
+- Red on each mutation (19): the key without the sha, a call without the endpoint, the download
+  not verified, the refused file moved into place, a present file skipped unverified, the cache
+  never skipped, the sf1 pin used for any SF, the guard over `--from-s3`, the guard without
+  PEACOCK_NO_FETCH; for the upload: the key, the endpoint, no skip of a present object,
+  `--cache` ignored, no sha check, the check merged into the upload loop, the presence check
+  dropped, a stray argument accepted, no `--help`; a line dropped from the pin.
+- Step 2's upload and the pin's commit, and step 3, are open.
+
+## Task 5: review round 1
+
+- Run through a symlink: the lib and the pin are found from `realpath "${BASH_SOURCE[0]}"`, the
+  cache stays beside `$0` (how `/build/peacock/embeddings` was made). Tests through a link in
+  another directory, for both sources.
+- The origin path past the guard, tested: a full cache whose base slice is a sparse file of the
+  real 307200008 bytes (the fixture pins its sha) fetches nothing, four `cached+verified` lines;
+  a missing query set is fetched from `…/DEEP/query.public.10K.fbin` with `-C -` and `-o` into
+  the cache, no aws call.
+- PEACOCK_NO_FETCH refuses `--from-s3` too, before any call; CI and GITHUB_ACTIONS do not. The
+  reason is corrected here, in the script and in build-test.md; build-test.md's sidecar row and
+  `scripts/exec_model/README.md` no longer say no CI host may fetch the cache.
+- An SF the pin does not name: `--from-s3 serves only the scale factors <pin> names, not SF=N;
+  without --from-s3, SF=N is fetched from the origins.`
+- GloVe is extracted by `unzip -p` into `glove.6B.100d.txt.partial` and moved into place; a
+  failed unzip removes the partial. Tested with an unzip stub that writes part of the member and
+  fails.
+- The top comment and the guard comment are within the ten-line cap; what build-test.md already
+  says left them. The upload and the bucket comment say an object is skipped at the file's size.
+- The test docstring names the ~2.5 GiB the free-space check needs in the temp directory.
+- 20 tests. Red on each new mutation: the S3 branch always taken in `fetch` and for the base
+  (`|| true`), the sf1 prefix gate pinned from the query file, the query fetched without `-C -`,
+  the lib and pin found from `$0`, the cache beside the real script, CI or GITHUB_ACTIONS
+  ignored, CI refusing `--from-s3`, PEACOCK_NO_FETCH refusing the origins only, the other-SF
+  message reverted to the broken-pin one, unzip straight into place, a failed unzip leaving its
+  partial.
+- Open: the bucket choice and the plan's Interfaces wording (with the human), the upload, the
+  pin's commit, step 3.
+
+## Task 5: review round 2
+
+- build-test.md's cache bullet says what the guard is: by hand only from the origins; CI,
+  GITHUB_ACTIONS and PEACOCK_NO_FETCH refuse it; the check is on the environment, so a manual
+  run on shad-gpu passes and automation that shells in sets PEACOCK_NO_FETCH=1.
+- Not corrected everywhere: `.github/workflows/pipeline.yml`'s comment on `test_stats_embeddings.py`
+  still says "which no CI host may fetch". It is left as is, because the spec's restriction keeps
+  `pipeline.yml` unchanged and the human agreed to leave it.
+- The byte-identity record above is corrected (`CI=1`, GloVe extraction).
+- The unzip test now interrupts: the fake writes part of the member and SIGKILLs the shell
+  running the script, so no handler runs; the final text must not exist (a `.partial` may), and a
+  re-run with a full extraction gives the expected bytes. Red on: unzip into place with an
+  `|| rm` handler, the old `unzip -o -d`, the move dropped, unzip straight into place. The
+  `|| { rm -f …partial; … }` handler is gone: a failed unzip stops the script by `set -e`, and
+  the partial it leaves, as a kill does, is never accepted and is overwritten by the next run.
+- `testdata/tpch-vec-queries/NOTICE`'s last sentence (the human's wording): not in git; a copy
+  verified against the pin is in the project's private bucket, fetched by `--from-s3`.
+- Still 20 tests; the counts do not move.
