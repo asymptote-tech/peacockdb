@@ -12,6 +12,7 @@
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -319,10 +320,10 @@ pub(crate) fn append_records(rows: &[String], meta: &RunMeta<'_>) {
     let fresh = std::fs::metadata(&path)
         .map(|m| m.len() == 0)
         .unwrap_or(true);
-    if !fresh {
-        assert_run_conditions_match(&path, meta);
+    if let Some(mismatch) = heading_mismatch(&path, meta) {
+        panic!("{mismatch}");
     }
-    let mut f = std::fs::OpenOptions::new()
+    let f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
@@ -336,17 +337,45 @@ pub(crate) fn append_records(rows: &[String], meta: &RunMeta<'_>) {
         text.push_str(row);
         text.push('\n');
     }
-    f.write_all(text.as_bytes())
-        .unwrap_or_else(|e| panic!("cannot append records to {}: {e}", path.display()));
+    append_whole(&f, text.as_bytes(), |mut file, bytes| file.write_all(bytes))
+        .unwrap_or_else(|refused| panic!("cannot append records to {}: {refused}", path.display()));
 }
 
-/// Refuse to append to a file whose heading describes a different run.
+/// `text` appended whole or not at all: a write that stops partway is cut back to the file's
+/// length before it, or the next append would continue the cut-off row and merge two rows.
+/// `write` is the write itself, a parameter so a test can make one stop partway.
+fn append_whole(
+    file: &File,
+    text: &[u8],
+    write: impl FnOnce(&File, &[u8]) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let before = file
+        .metadata()
+        .map_err(|e| format!("cannot read its length: {e}"))?
+        .len();
+    let Err(failed) = write(file, text) else {
+        return Ok(());
+    };
+    match file.set_len(before) {
+        Ok(()) => Err(format!("{failed}; cut back to its {before} bytes")),
+        Err(cut) => Err(format!(
+            "{failed}, and cutting it back to its {before} bytes failed too: {cut}; its last \
+             row may be cut off"
+        )),
+    }
+}
+
+/// Why `path` is not this run's record to append to, if it is not: its heading describes a
+/// different run. A missing or empty file is any run's.
 ///
 /// This is the check the three dropped columns used to make possible. As columns, a file
 /// mixing two runs was legal and only detectable afterwards by whoever thought to look;
 /// as a heading written once, the mixing is what has to be caught, and here is the only
 /// place it can be. Reads the heading, not the file: it stops at the first row.
-fn assert_run_conditions_match(path: &Path, meta: &RunMeta<'_>) {
+pub(crate) fn heading_mismatch(path: &Path, meta: &RunMeta<'_>) -> Option<String> {
+    if std::fs::metadata(path).map_or(true, |m| m.len() == 0) {
+        return None;
+    }
     let f = std::fs::File::open(path)
         .unwrap_or_else(|e| panic!("cannot read the heading of {}: {e}", path.display()));
     let found: Vec<String> = std::io::BufReader::new(f)
@@ -356,13 +385,14 @@ fn assert_run_conditions_match(path: &Path, meta: &RunMeta<'_>) {
         .filter(|l| l.starts_with(RUN_PREFIX))
         .collect();
     let want = run_conditions(meta);
-    assert!(
-        found == want,
-        "{} was written by a different run and this one would not be comparable with \
-         it.\n  file: {}\n  this run: {}\nA record file is one run: point \
-         {RECORD_PATH_ENV} at a new path, or remove that one.",
-        path.display(),
-        found.join(" | "),
-        want.join(" | "),
-    );
+    (found != want).then(|| {
+        format!(
+            "{} was written by a different run and this one would not be comparable with \
+             it.\n  file: {}\n  this run: {}\nA record file is one run: point \
+             {RECORD_PATH_ENV} at a new path, or remove that one.",
+            path.display(),
+            found.join(" | "),
+            want.join(" | "),
+        )
+    })
 }

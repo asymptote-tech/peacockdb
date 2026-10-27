@@ -2,13 +2,14 @@
 //! prints: the two are what a reader joins on `node_seq`, and nothing else compares them.
 
 use std::collections::BTreeSet;
+use std::io::Write;
 
 use crate::executor::nodes_as_recorded;
 use crate::planner;
 use crate::test_support::{data_dir_for, mode_named, queries_dir_for};
 use crate::wire::{Payloads, attach_recipes, join_scratch_bytes, render_plan_recipes};
 
-use super::declared_steps;
+use super::{append_whole, declared_steps};
 
 /// A row's `node_seq` names the steps its `--- recipes ---` line prints.
 ///
@@ -209,4 +210,25 @@ fn record_heading_names_its_provenance() {
             "host=gpu-host-1",
         ]
     );
+}
+
+/// A write that stops partway leaves the file as it was: the next append would otherwise
+/// continue the cut-off row, and two rows would read as one.
+#[test]
+fn an_append_that_stops_partway_leaves_the_file_as_it_was() {
+    let path = std::env::temp_dir().join(format!("peacock-append-{}", std::process::id()));
+    std::fs::write(&path, "# heading\nrow 1\n").unwrap();
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    let refused = append_whole(&file, b"row 2\nrow 3\n", |mut file, bytes| {
+        file.write_all(&bytes[..4])?;
+        Err(std::io::Error::other("the disk filled"))
+    });
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let refused = refused.expect_err("a write that stopped partway was reported as whole");
+    assert!(refused.contains("the disk filled"), "{refused}");
+    assert_eq!(text, "# heading\nrow 1\n");
 }

@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV, RunMeta,
-    SKIPPED, append_records, device_slug, ordered_sections, record_header, rows_match_the_recipes,
-    testdata_root,
+    BUILD, COLUMNS, Capture, FAILED, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV,
+    RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections, record_header,
+    rows_match_the_recipes, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -108,8 +108,12 @@ fn run_trailer(body: &str, at: &str) -> Vec<(String, String)> {
     let (_, trailer) = body
         .split_once("--- run ---\n")
         .unwrap_or_else(|| panic!("{at}: the section has no `--- run ---` trailer"));
-    trailer
-        .lines()
+    key_values(trailer.lines(), at)
+}
+
+/// `key=value` lines in order, split at the first `=`.
+fn key_values<'a>(lines: impl Iterator<Item = &'a str>, at: &str) -> Vec<(String, String)> {
+    lines
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let (key, value) = line
@@ -151,8 +155,9 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
         let text = std::fs::read_to_string(&path).expect("a benchmark file");
         for (query, body) in ordered_sections(&text) {
             let at = format!("{} {query}", path.display());
-            // A query declared with no mode to time it at writes a marker and no tree.
-            if body.starts_with(SKIPPED) {
+            // A query declared with no mode to time it at writes a marker and no tree, and a
+            // failed case its record.
+            if !is_timed(&body) {
                 continue;
             }
             let mut tree_us = 0;
@@ -228,7 +233,7 @@ fn every_committed_tree_reports_a_release_build() {
     for path in benchmark_files() {
         let text = std::fs::read_to_string(&path).expect("a benchmark file");
         for (query, body) in ordered_sections(&text) {
-            if body.starts_with(SKIPPED) {
+            if !is_timed(&body) {
                 continue;
             }
             let at = format!("{} {query}", path.display());
@@ -411,56 +416,6 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
-/// Every case the list declares has its section in the committed tree.
-///
-/// The tree accumulates across runs and nothing else compares it with the list, so a case
-/// added and never measured would leave its file silently short. A query declared `none`
-/// is a marker section in every file of its dataset, as `declared_for` writes it.
-#[test]
-fn every_declared_case_has_a_section_in_the_tree() {
-    let cases: Vec<&TimedDeclaration> = inventory::iter::<TimedDeclaration>.into_iter().collect();
-    let mut files: BTreeMap<(&str, &str, String), BTreeSet<String>> = BTreeMap::new();
-    for case in &cases {
-        for mode in modes(case.modes) {
-            files
-                .entry((case.dataset, case.sf, mode))
-                .or_default()
-                .insert(case.query.replace('_', "-"));
-        }
-    }
-    for case in cases.iter().filter(|case| case.modes.trim() == "none") {
-        for ((dataset, sf, _), queries) in files.iter_mut() {
-            if (*dataset, *sf) == (case.dataset, case.sf) {
-                queries.insert(case.query.replace('_', "-"));
-            }
-        }
-    }
-    assert!(!files.is_empty(), "the benchmark list declares no mode");
-
-    for device in device_directories() {
-        for ((dataset, sf, mode), declared) in &files {
-            let path = device.join(format!("{dataset}.sf{sf}/{mode}.benchmark.txt"));
-            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!(
-                    "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured \
-                     on this device",
-                    path.display()
-                )
-            });
-            let present: BTreeSet<String> = ordered_sections(&text)
-                .into_iter()
-                .map(|(query, _)| query)
-                .collect();
-            let missing: Vec<&String> = declared.difference(&present).collect();
-            assert!(
-                missing.is_empty(),
-                "{} has no section for {missing:?}, which the case list declares at {mode}",
-                path.display()
-            );
-        }
-    }
-}
-
 /// Every schema-validation mask entry against its own line's device modes.
 ///
 /// On the declaration side because the decoder cannot see this: `is_validated_at` is asked
@@ -523,10 +478,273 @@ fn dead_mask_entries(gpu_modes: &str, mask: &str) -> Vec<String> {
         .collect()
 }
 
-/// Every directory directly under `benchmark-results/`, each one device's tree.
-fn device_directories() -> Vec<PathBuf> {
+/// The benchmark case list, compiled in: no core test reads the checkout.
+const CASE_LIST: &str = include_str!("../common/corpus_benchmark_cases.inc");
+
+/// The datasets the benchmark times. Their registry rows are sf1, where correctness runs; the
+/// list times the same cells at `BENCHMARK_SF`.
+const BENCHMARK_DATASETS: [&str; 2] = ["tpch", "tpcds"];
+const BENCHMARK_SF: &str = "40";
+
+/// Where `UPDATE_CANONICAL=1` writes the list. Never read: the list is compiled in.
+fn case_list_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/corpus_benchmark_cases.inc")
+}
+
+/// One `corpus_query_benchmark!` line's arguments as written: dataset, sf, query, modes.
+type Case = [String; 4];
+
+/// The compiled-in list's lines.
+fn listed_cases() -> Vec<Case> {
+    inventory::iter::<TimedDeclaration>
+        .into_iter()
+        .map(|case| [case.dataset, case.sf, case.query, case.modes].map(str::to_string))
+        .collect()
+}
+
+/// The `corpus_query_benchmark!(…);` lines of a list kept in testdata as text. Every other line
+/// is a `//` comment or blank; anything else is refused rather than skipped.
+fn text_cases(path: &Path) -> Vec<Case> {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(|line| {
+            let args = line
+                .strip_prefix("corpus_query_benchmark!(")
+                .and_then(|rest| rest.strip_suffix(");"))
+                .unwrap_or_else(|| panic!("{}: {line:?} is not a case line", path.display()));
+            let args: Vec<String> = args.splitn(4, ',').map(|a| a.trim().to_string()).collect();
+            args.try_into()
+                .unwrap_or_else(|_| panic!("{}: {line:?} has not four arguments", path.display()))
+        })
+        .collect()
+}
+
+/// `(dataset, query, modes)` for every tpch and tpcds row with an enabled device cell, in the
+/// registry's row order, the modes in `MODES` order.
+fn registry_cases() -> Vec<(String, String, Vec<String>)> {
+    let mut cases = Vec::new();
+    for dataset in BENCHMARK_DATASETS {
+        for row in load_csv().into_iter().filter(|row| row.dataset == dataset) {
+            let modes: Vec<String> = MODES
+                .iter()
+                .map(Mode::ident)
+                .filter(|mode| row.states[&format!("gpu_{mode}")] == "enabled")
+                .collect();
+            if !modes.is_empty() {
+                cases.push((row.dataset, row.query, modes));
+            }
+        }
+    }
+    cases
+}
+
+/// The case list as the registry makes it, one line per query.
+fn case_list_text(cases: &[(String, String, Vec<String>)]) -> String {
+    let mut text = String::from(CASE_LIST_HEADER);
+    for dataset in BENCHMARK_DATASETS {
+        text.push_str(&format!("\n// ── {dataset}, sf{BENCHMARK_SF} ──\n"));
+        for (_, query, modes) in cases.iter().filter(|(of, _, _)| of == dataset) {
+            text.push_str(&format!(
+                "corpus_query_benchmark!({dataset}, {BENCHMARK_SF}, {query}, {});\n",
+                modes.join(" | ")
+            ));
+        }
+    }
+    text
+}
+
+const CASE_LIST_HEADER: &str = "\
+// The benchmark corpus, one line per query, included only by
+// `tests/peacock_gpu_benchmarks.rs` — a statement about timing rather than about coverage.
+//
+//   corpus_query_benchmark!(dataset, sf, query, modes)
+//
+// Written from testdata/cost-registry.csv, never by hand: every tpch and tpcds row's enabled
+// device cells (`gpu_*`), timed at sf40. `the_benchmark_cases_follow_the_registry` in
+// `test_corpus_goldens` holds it to the registry and rewrites it under UPDATE_CANONICAL=1.
+// sf40 and not sf1: at sf1 a query is mostly the host prologue, below the clock's resolution.
+// build-test.md's Corpus Benchmarks section carries the rest.
+";
+
+/// The case list is, byte for byte, what the registry's enabled device cells for tpch and tpcds
+/// make of it at sf40; the cells that differ, mode by mode, are named. Under
+/// `UPDATE_CANONICAL=1` the source list is rewritten from the registry, published by rename, and
+/// the test passes: the next build compiles the new list in.
+#[test]
+fn the_benchmark_cases_follow_the_registry() {
+    let cases = registry_cases();
+    assert!(
+        !cases.is_empty(),
+        "the registry enables no tpch or tpcds device cell"
+    );
+    let want = case_list_text(&cases);
+    if std::env::var("UPDATE_CANONICAL").is_ok() {
+        let path = case_list_path();
+        let staged = path.with_extension("inc.new");
+        std::fs::write(&staged, &want).expect("the staged case list");
+        std::fs::rename(&staged, &path).expect("the case list");
+        return;
+    }
+    if CASE_LIST == want {
+        return;
+    }
+    let registry: BTreeSet<(String, String, String)> = cases
+        .iter()
+        .flat_map(|(dataset, query, modes)| {
+            modes
+                .iter()
+                .map(|mode| (dataset.clone(), query.clone(), mode.clone()))
+        })
+        .collect();
+    let mut listed = BTreeSet::new();
+    for args in listed_cases() {
+        for mode in modes(&args[3]) {
+            listed.insert((args[0].clone(), args[1].clone(), args[2].clone(), mode));
+        }
+    }
+    let listed: BTreeSet<(String, String, String)> = listed
+        .into_iter()
+        .filter(|(_, sf, _, _)| sf == BENCHMARK_SF)
+        .map(|(dataset, _, query, mode)| (dataset, query, mode))
+        .collect();
+    let unlisted: Vec<_> = registry.difference(&listed).collect();
+    let unregistered: Vec<_> = listed.difference(&registry).collect();
+    panic!(
+        "the case list is not what the registry writes: {} cells enabled and not listed at \
+         sf{BENCHMARK_SF} {:?}, {} listed and not enabled {:?}, and the rest of the bytes as \
+         written. Rewrite it with UPDATE_CANONICAL=1 cargo test --features rust-only -p \
+         peacockdb-core --test test_corpus_goldens -- the_benchmark_cases_follow_the_registry",
+        unlisted.len(),
+        unlisted.iter().take(10).collect::<Vec<_>>(),
+        unregistered.len(),
+        unregistered.iter().take(10).collect::<Vec<_>>(),
+    );
+}
+
+/// The `(dataset, sf, mode)` files a case list declares, each with the sections it is to hold.
+type Files = BTreeMap<(String, String, String), BTreeSet<String>>;
+
+/// The files `cases` declare. A query declared `none` is a marker section in every file of its
+/// dataset, as `declared_for` writes it.
+fn declared_files(cases: &[Case]) -> Files {
+    let mut files = Files::new();
+    for args in cases {
+        for mode in modes(&args[3]) {
+            files
+                .entry((args[0].clone(), args[1].clone(), mode))
+                .or_default()
+                .insert(args[2].replace('_', "-"));
+        }
+    }
+    for args in cases.iter().filter(|args| args[3] == "none") {
+        for ((dataset, sf, _), queries) in files.iter_mut() {
+            if (dataset, sf) == (&args[0], &args[1]) {
+                queries.insert(args[2].replace('_', "-"));
+            }
+        }
+    }
+    assert!(!files.is_empty(), "a case list declares no mode: {cases:?}");
+    files
+}
+
+/// What a tree in `PREDATES_PROVENANCE` was measured from, in that tree.
+const PREDATES_LIST: &str = "cases.inc";
+
+/// Every case the list declares has its section in each device's committed tree. The exception is
+/// a tree in `PREDATES_PROVENANCE`, which is held to the list it was measured from instead.
+///
+/// The tree accumulates across runs and nothing else compares it with the list, so a case
+/// added and never measured would leave its file silently short.
+#[test]
+fn every_declared_case_has_a_section_in_the_tree() {
     let root = testdata_root().join("benchmark-results");
-    let mut devices: Vec<PathBuf> = std::fs::read_dir(&root)
+    if let Err(problem) = missing_case_problem(&root, &declared_files(&listed_cases())) {
+        panic!("{problem}");
+    }
+}
+
+/// The committed H200 file under another device's name: a new tree, so held to the whole list.
+#[test]
+fn a_new_device_tree_is_held_to_every_declared_case() {
+    let tree = synthesized_tree(
+        "short-tree",
+        "h100-80gb-hbm3",
+        Some("NVIDIA H100 80GB HBM3"),
+    );
+    let problem = missing_case_problem(&tree, &declared_files(&listed_cases()));
+    let _ = std::fs::remove_dir_all(&tree);
+    let problem = problem.expect_err("a tree of one file passed against the whole list");
+    assert!(problem.contains("h100-80gb-hbm3"), "{problem}");
+}
+
+/// A file that exists and lacks one declared section: named, rather than read as whole.
+#[test]
+fn a_file_short_of_a_declared_section_is_refused() {
+    let tree = synthesized_tree(
+        "short-file",
+        "h100-80gb-hbm3",
+        Some("NVIDIA H100 80GB HBM3"),
+    );
+    let one_file = Files::from([(
+        (
+            "tpch".to_string(),
+            "40".to_string(),
+            "tp1_single".to_string(),
+        ),
+        BTreeSet::from(["q1".to_string(), "q2".to_string()]),
+    )]);
+    let problem = missing_case_problem(&tree, &one_file);
+    let _ = std::fs::remove_dir_all(&tree);
+    let problem = problem.expect_err("q2 is in no section of the file and the file passed");
+    assert!(problem.contains(r#"no section for ["q2"]"#), "{problem}");
+}
+
+/// The first declared case a device tree under `root` has no section for. A failed case's
+/// record is its section.
+///
+/// A tree in `PREDATES_PROVENANCE` is held to the list it was measured from, its own
+/// `PREDATES_LIST`: its card is outside the run that would complete it to `files`.
+fn missing_case_problem(root: &Path, files: &Files) -> Result<(), String> {
+    for device in device_directories(root) {
+        let name = device.file_name().unwrap().to_str().unwrap();
+        let own;
+        let held_to = match PREDATES_PROVENANCE.contains(&name) {
+            true => {
+                own = declared_files(&text_cases(&device.join(PREDATES_LIST)));
+                &own
+            }
+            false => files,
+        };
+        for ((dataset, sf, mode), declared) in held_to {
+            let path = device.join(format!("{dataset}.sf{sf}/{mode}.benchmark.txt"));
+            let text = std::fs::read_to_string(&path).map_err(|e| {
+                format!(
+                    "{}: {e} — {dataset}/sf{sf} is declared at {mode} and was never measured \
+                     on this device",
+                    path.display()
+                )
+            })?;
+            let present: BTreeSet<String> = ordered_sections(&text)
+                .into_iter()
+                .map(|(query, _)| query)
+                .collect();
+            let missing: Vec<&String> = declared.difference(&present).collect();
+            if !missing.is_empty() {
+                return Err(format!(
+                    "{} has no section for {missing:?}, which the case list declares at {mode}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every directory directly under `root`, each one device's tree.
+fn device_directories(root: &Path) -> Vec<PathBuf> {
+    let mut devices: Vec<PathBuf> = std::fs::read_dir(root)
         .unwrap_or_else(|e| panic!("{}: {e}", root.display()))
         .flatten()
         .map(|entry| entry.path())
@@ -541,13 +759,16 @@ fn device_directories() -> Vec<PathBuf> {
 const PROVENANCE_KEYS: [&str; 5] = ["device", "driver", "cuda", "cudf", "host"];
 
 /// The device trees written before the harness wrote provenance, whose trailers may carry
-/// none of it. Only the H200's: both hosts that ran the benchmark before then, shad-gpu and
-/// verda-gpu, are H200s. A tree copied or written under any other name is held to the five.
+/// none of it, and before the case list followed the registry, so each is held to the list it
+/// was measured from, `PREDATES_LIST`. Only the H200's: both hosts that ran the benchmark
+/// before then, shad-gpu and verda-gpu, are H200s. A tree copied or written under any other
+/// name is held to the five and to the whole list.
 const PREDATES_PROVENANCE: &[&str] = &["h200"];
 
 /// Every file is `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, its device directory a
 /// slug, and every timed section's trailer ends with the five provenance keys, `device=`
-/// slugging to that directory. Only a tree in `PREDATES_PROVENANCE` may have sections without.
+/// slugging to that directory; a failed case's record is its status line and the five. Only a
+/// tree in `PREDATES_PROVENANCE` may have timed sections without.
 ///
 /// The directory is what keeps two cards' runs apart: a file one level up, under a name the
 /// harness would not write, or without the card it names, is a run nobody can place.
@@ -622,8 +843,28 @@ fn a_trailer_naming_its_directory_s_card_passes() {
     assert_eq!(problem_of(tree), Ok(()));
 }
 
+/// A failed case's record without the five, even under `h200/`: the harness has written the
+/// five into every record since it recorded failures at all.
+#[test]
+fn a_failed_record_without_its_provenance_is_refused() {
+    let root = std::env::temp_dir().join(format!("peacock-bare-failure-{}", std::process::id()));
+    let path = root.join("h200/tpch.sf40/tp1_single.benchmark.txt");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, format!("== q1\n{FAILED}out of memory\n")).unwrap();
+    let problem = problem_of(root).expect_err("a bare failure record passed");
+    assert!(
+        problem.contains("a failed case's record holds []"),
+        "{problem}"
+    );
+}
+
+/// A section holding a measured tree: neither a marker nor a failed case's record.
+fn is_timed(body: &str) -> bool {
+    !body.starts_with(SKIPPED) && !body.starts_with(FAILED)
+}
+
 /// The first way the tree under `root` breaks the device layout, if any.
-fn device_tree_problem(root: &Path) -> Result<(), String> {
+pub(crate) fn device_tree_problem(root: &Path) -> Result<(), String> {
     for path in files_under(root) {
         let relative = path
             .strip_prefix(root)
@@ -654,8 +895,20 @@ fn device_tree_problem(root: &Path) -> Result<(), String> {
                 continue;
             }
             let at = format!("{} {query}", path.display());
-            let trailer = run_trailer(&body, &at);
+            let failed = body.starts_with(FAILED);
+            // A failed case's record is its status line and the five, which the harness
+            // wrote with provenance from the start.
+            let trailer = match failed {
+                true => key_values(body.lines().skip(1), &at),
+                false => run_trailer(&body, &at),
+            };
             let keys: Vec<&str> = trailer.iter().map(|(key, _)| key.as_str()).collect();
+            if failed && keys != PROVENANCE_KEYS {
+                return Err(format!(
+                    "{at}: a failed case's record holds {keys:?} after its status line, not \
+                     device= driver= cuda= cudf= host="
+                ));
+            }
             // Every provenance key the trailer holds, not the first: two of one are two
             // runs' trailers in one section.
             let held = keys

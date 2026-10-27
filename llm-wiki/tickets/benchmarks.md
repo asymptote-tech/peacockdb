@@ -23,8 +23,11 @@ Moving the H200 record under `h200/` is one change:
 - `exec-model-corpus.yml` fetches `h200/tpch.sf40`, not `tpch.sf40`;
 - `create_nsys_profile.sh` reads a record at `calibration/<device>/<dataset>.sf<sf>/`;
 - `build-test-shadgpu.sh`'s header documents the per-device tree, not the flat one;
-- once the H200 is re-run with provenance, both `PREDATES_PROVENANCE` constants go: `nsys_hbm.py`
-  takes a record naming no device as the H200's, and the benchmark golden lets `h200/` lack it.
+- the H200's Nsight pass runs from 02f6a4d8, whose case lines are `h200/cases.inc`'s:
+  `create_nsys_profile.sh --metrics` takes every case of the checkout's list;
+- once the H200 is re-run with provenance, both `PREDATES_PROVENANCE` constants and
+  `h200/cases.inc` go: `nsys_hbm.py` takes a record naming no device as the H200's, and the
+  golden lets `h200/` lack it.
 
 Two hazards until then:
 - The GPU host's own tree still holds flat `tpch.sf40/` and `tpcds.sf40/`. No push or pull prunes

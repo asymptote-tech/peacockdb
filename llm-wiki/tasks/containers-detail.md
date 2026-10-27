@@ -1133,3 +1133,238 @@ were refused under the old rule. The missing table raised `OperationalError`.
 - `test_module_layout`: 18 passed.
 - `scripts/calibration/tests/`: 41 passed (calls 6, fetch 3, hbm 14, plot 7, split 11).
 - Counts: total 5912 = Rust 4480, C++ 174, Python 1258.
+
+## Task 9: the registry-driven case set
+
+Built and tested in `peacockdb-build:cudf-25.02` with no network, as Task 8 was.
+
+**The list.** `corpus_benchmark_cases.inc` stays, written from the registry: every tpch and tpcds
+row's enabled `gpu_*` cells, at sf40, one `corpus_query_benchmark!` line per query, the registry's
+row order, the modes in `MODES` order. 534 cases over 110 queries (tpch 191, tpcds 343, the same
+counts as the device corpus); the 32 rows with no enabled device cell get no line, so no `none`
+markers. `the_benchmark_cases_follow_the_registry` (`test_corpus_goldens`, rust-only) compares the
+two sets of `(dataset, query, mode)` both ways and names what differs; under `UPDATE_CANONICAL=1`
+it rewrites the file first. Two rewrites give the same bytes. Task 10 regenerates it from master's
+registry with that command.
+- Why a written file and not a build script or a runtime read: the old path reads the list as
+  text (`shadgpu-env.sh`'s `bench_lines`, `split_record.py --cases`), and neither may change here.
+  Both parse the new file: 534 cases, `tpch.sf40` and `tpcds.sf40`. And a `bench_` test per case
+  keeps libtest's name filter, which a segmented run selects by.
+- `every_timed_case_is_enabled_on_a_device` stays: it holds the list to `corpus_cases.inc`, and
+  the registry is held to that file only on the device rung.
+
+**Which trees the list is held to.** A new device's tree is held to the whole list; a tree in
+`PREDATES_PROVENANCE` (`h200/`) is held to the list it was measured from, `h200/cases.inc`
+(round 1). The spec asks for "the benchmark of
+every tpch and tpcds query the registry enables on the device" (Done-when 3), so the whole list is
+what a new tree must hold. And it puts the H200 out of this task ("The L40S and the H200 are out
+of this task"), so `h200/` can never gain the 508 cases it lacks here; holding it to the list
+would leave the test red for good. The constant already names the trees the earlier harness wrote,
+and the one re-run that retires it (#226) would also complete the list, so one constant carries
+both. `every_declared_case_has_a_section_in_the_tree` reads `missing_case_problem`;
+`a_new_device_tree_is_held_to_every_declared_case` feeds it one committed H200 file under
+`h100-80gb-hbm3/`. A failed case's record counts as its section.
+
+**The rowgroup modes** are in the list, as the registry enables them: the list follows the
+registry and the run decides what it times. Task 11 must decide:
+- Running every mode makes the tree whole.
+- Deferring the rowgroup modes leaves the new tree short, and
+  `every_declared_case_has_a_section_in_the_tree` goes red. Committing that tree then needs a
+  named exception in that test (device, modes, reason) that the human approves. Nothing here
+  builds one.
+- `docker/run-tests.sh bench` takes one positional filter, so "the three other modes" is two
+  passes (`_single`, `_sized`). The second pass needs the first's record pulled and removed,
+  since `run-tests.sh` refuses a record holding rows.
+
+**A failed case.** `benchmark_case` reads the capture variable and the provenance, installs the
+pool, sets event timing and checks the pool and the release build, all before the boundary. Then
+`measure_into` (`test_support/benchmark_section.rs`) runs the case under `catch_unwind`. A panic
+becomes the case's section:
+
+    == <query>
+    status=failed reason=<the panic message, whitespace runs folded to one space>
+    device=… driver=… cuda=… cudf=… host=…   (five lines, as in a trailer)
+
+Then the test fails naming the file and the reason, and libtest goes on to the next case. The
+record's rows are appended before the section is written (round 2), so a failed case appends
+none. A captured run does not go through `measure_into`: it writes no section,
+so a panic there is only a panic. The checks before the boundary are the run's, not a case's:
+caught, one refusal would be written into every section of the tree. `device_tree_problem` holds a
+failed record to its status line and the five, under `h200/` too.
+
+**A rerun** (round 1: only under `PEACOCK_BENCH_RESUME=1`). `measure_into` keeps a section whose `--- run ---` trailer ends with this run's five
+lines exactly, and skips the case (`CaseOutcome::Held`, printed). It runs again a failed case,
+one never reached, and one another device, driver, CUDA, cuDF or host measured. So a 26.02 rerun
+on the same card (verify-26.02) measures everything again. `merge_section` publishes by rename, so
+a kill mid-case leaves the file as the last finished case left it.
+
+**For Task 11** (not built here):
+- A segmented run's records. Each segment writes its own record, since `run-tests.sh` refuses one
+  holding rows, and a case that segment held writes no rows. Two segments' headings also differ in
+  `allocator=`, which names the free GiB its process saw, so `append_records` refuses them as one
+  file. `split_record.py` refuses a record short of the list, so a failed case, a held case or a
+  deferred mode all stop the publish. The record scripts need a way to publish a run made of
+  segments and failures.
+- A case that kills the process (a segfault, an abort, the OOM killer) writes nothing, and every
+  rerun reaches it again. Skip it by name and record why.
+- Drift I may not fix: `build-test-shadgpu.sh`'s publish comment says "a failing case appends its
+  rows before it panics". That is no longer so, and the global constraints forbid editing it.
+
+**Red, then a mutation (code restored each time).** The two new rust-only cases on the run's
+write path failed first against a stub `measure_into` that ran the case and wrote its body: the
+case's panic went through. The list test failed first against the hand-written list: 508 enabled
+cells not listed. Then:
+
+| mutation | red cases |
+|---|---|
+| q6's line dropped from the list | `the_benchmark_cases_follow_the_registry` (5 enabled, not listed) |
+| `tp4_single` added to q11, disabled there | `the_benchmark_cases_follow_the_registry` (1 listed, not enabled) |
+| the `PREDATES_PROVENANCE` skip removed | `every_declared_case_has_a_section_in_the_tree` |
+| every tree skipped | `a_new_device_tree_is_held_to_every_declared_case` |
+| the failed record's five-key check off | `a_failed_record_without_its_provenance_is_refused` |
+| no `catch_unwind` | `a_failed_case_is_recorded_and_the_run_goes_on`, `test_partial_run_keeps_completed_cases` |
+| the reason not folded to one line | `a_failed_case_is_recorded_and_the_run_goes_on` |
+| no provenance in the failed record | `a_failed_case_is_recorded_and_the_run_goes_on` |
+| nothing held | `test_partial_run_keeps_completed_cases` (q1 run again) |
+| held whatever the provenance | `test_partial_run_keeps_completed_cases` (q6 held) |
+| a failed record held | `test_partial_run_keeps_completed_cases` (q17 held) |
+| sections sorted as text (FFI build) | `the_sections_of_a_file_are_ordered_numerically` |
+
+**Results**, in `peacockdb-build:cudf-25.02`, network off:
+- `cargo test --features rust-only -p peacockdb-core`: lib 777 passed and 2 ignored,
+  `test_cpu_corpus` 2009, `test_corpus_goldens` 36, `test_cost_model` 4, `test_ci_coverage` 11,
+  `test_module_layout` 18, `test_golden_format` 43. No warnings.
+- FFI build: `peacock_gpu_benchmarks -- --skip bench_ --test-threads=1` 8 passed, 534 filtered;
+  `--list` 542, of them 534 `bench_`. `--lib -- ffi_tests::` 4, `peacockdb-ffi --test test_ffi`
+  3. No warnings.
+- `cargo test -p peacockdb-core --features gpu --no-run`: green, with the one warning already on
+  the base (`AsArray`). Built with `CARGO_PROFILE_DEV_DEBUG=0` in its own target dir: with debug
+  info each test binary is 1.2 GB, and the gpu set beside the FFI set filled `/build`.
+- The list rewritten twice gives the same bytes. `shadgpu-env.sh`'s readers and
+  `split_record.declared` both parse it as 534 cases.
+- Counts: total 6445 = Rust 4993, C++ 174, Python 1278.
+
+**Not exercised: anything on a device.** That covers `benchmark_case` through `measure_into` on a
+card: a real refusal recorded, a held case printed, the pre-flight refusals, and a capture pass.
+It also covers a run killed mid-case and its rerun.
+
+## Task 9: review round 1
+
+Every finding was applied. The human decided I1 (option 1).
+
+- **I1, a section is kept only on resume.**
+  - `PEACOCK_BENCH_RESUME` (`RESUME_ENV`): `1` keeps a section whose trailer ends with this
+    run's five lines; unset or `0` measures every case, as at d2a0f88c.
+  - Any other value is refused naming the two. The refusal comes before the boundary, read
+    beside the capture variable.
+  - The setting is `Resume { No, KeepMeasured }`, an explicit argument of `measure_into`.
+    `Resume::from_env` reads the variable only in `benchmark_case`.
+  - A kept case prints `kept, <file> holds its section … and PEACOCK_BENCH_RESUME=1`.
+  - The rust-only tests pass the enum rather than set the variable: the golden binary is
+    multi-threaded, and only one case there touches the variable, the one that reads it.
+  - With resume off by default, a rerun after a run that died re-measures everything. That
+    removes I6's default-path loss.
+- **I2, `h200/` held to its own list.** `testdata/benchmark-results/h200/cases.inc` is
+  d2a0f88c's list, its 14 lines (26 cases) under a four-line header. It is text only, and
+  nothing expands it. It lies in the tree it describes, so retiring the H200 constants removes it
+  in the same place. `PREDATES_LIST = "cases.inc"`; `missing_case_problem` reads it for a tree
+  in `PREDATES_PROVENANCE`. Nothing else under `benchmark-results/` reads a non-`.benchmark.txt`
+  file: the tree readers walk `.benchmark.txt` only, and the pulls are additive.
+- **I3.** `a_file_short_of_a_declared_section_is_refused`, over the synthesized one-file tree.
+- **I4, run-level refusals before the boundary.**
+  - `assert_dataset_present(dataset, sf, what)` checks that `testdata/<dataset>.sf<sf>` is a
+    directory.
+  - The record's heading is checked before measuring, through `record_heading_mismatch`. It can
+    be: the heading holds only `timing_mode`, `build`, `allocator`, `capture` and the five, all
+    known once the pool is installed. The allocator string is now read once, before the case,
+    rather than after the runs; `install_rmm_pool` is idempotent, so it is the same string.
+  - `append_records` uses the same reader. Its own refusal could still fire if the file changed
+    mid-case: then the section is written, and the test panics naming the mismatch.
+- **I5.** The H200's Nsight pass runs from a checkout carrying the 26-case list (d2a0f88c or
+  earlier). This is written in build-test.md, at the derived-files bullet and at step 5, and in
+  #226. #226 is 30 lines, its cap.
+- **I6.** Task 11 gains a step 3: publishing a run made of segments, held cases and failures. It
+  also says what Task 9 settled and that a deferred mode needs a named exception. build-test.md
+  says a resumed run's record is not published today.
+- **N1.** The two headers are ten lines. The list was rewritten, header only.
+- **N2.** A missing tpcds dataset is a refusal of every tpcds case before it records anything.
+- **N3, code.** `measure` returns `(body, rows)`. `measure_into` is generic,
+  `CaseOutcome::Measured(T)`. `benchmark_case` appends the rows after the section is written,
+  and a captured run appends them directly.
+- **N4.** The list test compares bytes with `case_list_text` and names the differing cells. The
+  rewrite publishes through `<list>.inc.new` and a rename.
+- **N5.** The list is a row in build-test.md's Golden files table.
+- **N6.** The completeness test's doc names the exception.
+
+**Red, then a mutation (code restored each time).**
+- The byte comparison went red on the header change of N1, with every cell equal, before the
+  rewrite.
+- The new cases were written in the same pass as the code they guard, so each one's red is its
+  mutation below.
+
+| mutation | red cases |
+|---|---|
+| the hold ignores `resume` | `a_measured_section_is_measured_again_unless_the_run_resumes` |
+| `yes` read as `0` | `the_resume_variable_is_unset_zero_or_one` |
+| `h200/`'s q19 section renamed | `every_declared_case_has_a_section_in_the_tree` |
+| `if false && !missing.is_empty()` | `a_file_short_of_a_declared_section_is_refused` |
+| the dataset check vacuous | `a_missing_dataset_is_refused_before_any_case` |
+| the heading reader accepts any heading | `a_record_another_run_wrote_is_refused_before_any_case` |
+
+The calls in `benchmark_case` itself are device code: the refusals' placement before the
+boundary and the kept line were compiled and not run.
+
+## Task 9: review round 2
+
+Every finding was applied, N-a in code, as the human approved.
+
+- **R1.** The H200's list is named by `02f6a4d8` ("benchmarks: 26 device-enabled cases at sf40,
+  the per-call record in S3 by its content"), an ancestor of ENS-optimizer, PR #165's head, so
+  it reaches master. Its case lines equal `h200/cases.inc`'s: compared with `diff`, and no commit
+  between it and d2a0f88c touches the list. The places: build-test.md (the derived-files bullet,
+  the H200 paragraph, step 5), #226 (still 30 lines), and `h200/cases.inc`'s header.
+- **N-a, rows before the section.**
+  - `measure_into` takes `before_section: impl FnOnce(T)`. It runs on what the case returned
+    beside its body, inside the same failure boundary, and before `merge_section`.
+  - `benchmark_case` passes `|rows| append_records(&rows, &meta)`. `CaseOutcome` is no longer
+    generic: `Held`, `Measured`, `Failed(reason)`.
+  - A crash between the append and the rename leaves no section, so a resumed run measures the
+    case again; its rows from the dead attempt stay in that segment's record.
+  - A panic in the append, the record refusing the rows, is the case's failure. Its section is
+    `status=failed reason=<the record's reason>` with the five. The record then holds none of
+    the case's rows when the refusal came before the write (a heading mismatch, an unopenable
+    file), and part of them if `write_all` failed partway.
+  - A failed measurement never reaches the hook, so it still appends nothing.
+- **N-b.** The plan's Review focus 4 and Task 9's Interfaces say a rerun skips completed cases
+  only under `PEACOCK_BENCH_RESUME=1`.
+- **N-c.** The run-image `--hostname` bullet gives the real reason: a resumed segment keeps only
+  sections whose `host=` is its own. It also says `docker run` needs `-e PEACOCK_BENCH_RESUME=1`.
+- **N-d.** The refusal prints the bare value: `PEACOCK_BENCH_RESUME=yes is neither …`.
+
+**Red, then a mutation (code restored each time).** The two new cases were written with the
+code.
+
+| mutation | red case |
+|---|---|
+| the section merged before the hook (rows after the section) | `the_rows_are_appended_before_the_section_is_written` |
+| the hook called outside `catch_unwind` | `a_case_whose_rows_the_record_refuses_is_recorded_as_failed` |
+| the refusal prints `{:?}` of `to_str()` | `the_resume_variable_is_unset_zero_or_one` |
+
+## Task 9: review round 3
+
+Both nits were applied, as the human approved.
+
+- **N2, a refused append leaves no rows.** `append_records` writes through `append_whole(file,
+  text, write)`. It reads the file's length first, and on a write error `set_len`s back to it,
+  then panics with the write's error. If the cut back fails too, the panic names both errors and
+  says the last row may be cut off. `write` is a parameter only so a test can stop a write
+  partway; production passes `write_all`. build-test.md now says a refused case's record holds
+  none of its rows.
+- **N1.** Task 11 Step 3 names the case it must design for: a segment killed between a case's
+  rows and its section leaves rows with no section, and the resumed segment measures that case
+  again, so its rows are in two segments' records.
+- Task 9 Step 2's code items are ticked, the commit is not.
+
+**Red.** `an_append_that_stops_partway_leaves_the_file_as_it_was` (`record/tests.rs`, `--lib`)
+writes four of a call's bytes and fails. With `set_len` replaced by `Ok(())` it is red: the file
+ends `row 1\nrow ` instead of `row 1\n`.

@@ -478,13 +478,14 @@ the declared output
 
 what the export is told per column: a `Decimal128(p, _)` its `p`, every other column `0`
 
-| Record steps | [test_support::record::tests](../peacockdb-core/src/test_support/record/tests.rs) | 3 |
+| Record steps | [test_support::record::tests](../peacockdb-core/src/test_support/record/tests.rs) | 4 |
 |---|---|--:|
 
 the record's reading of a plan: a row's `node_seq` names the steps its `recipes` line prints,
 so the record and the plan golden agree on what a call is; every cell of a written row sits
 under the column named for it, since `row()` is positional and the heading is not; and the
-heading's `# run:` lines end with the five provenance keys, `device=` to `host=`, in order
+heading's `# run:` lines end with the five provenance keys, `device=` to `host=`, in order; and
+an append that stops partway leaves the file as it was, so no cut-off row is continued
 
 | Benchmark provenance | [test_support::provenance::tests](../peacockdb-core/src/test_support/provenance/tests.rs) | 4 |
 |---|---|--:|
@@ -1323,7 +1324,10 @@ What the arrows are there to make checkable:
   q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
   record by call, not by execution, so its three cases are drawn beside them, and it is still
-  a row per execution. The two derived files cover the twenty-six only after step 5.
+  a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
+  over them, and that step runs from a checkout carrying the 26-case list: 02f6a4d8, whose case
+  lines are `h200/cases.inc`'s. `create_nsys_profile.sh --metrics` takes every case of the list
+  and checks its merge against the pinned records, which hold the twenty-six.
 - **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the
   call's executions, and `executions` says how many. A row per execution would be ~255
   thousand rows and 25 MB over the corpus; a row per call is the record's 25,522 calls.
@@ -1958,8 +1962,9 @@ The binaries and data are mounted, never in the image:
 
 - `--hostname` gives the container the machine's name, which a benchmark writes as `host=`.
   Without it the container's own name, its id, is written instead. A run split into several
-  `docker run`s needs the same name in each: `host=` is in the record's heading, and a second
-  segment appending under another `host=` is refused.
+  `docker run`s needs the same name in each: a resumed segment keeps only the sections whose
+  `host=` is its own. Resuming needs `-e PEACOCK_BENCH_RESUME=1` on the `docker run`, which
+  passes none of the caller's environment through.
 - `/peacock/install` is a staged `cpp/install`, built in the build image of the same version:
   `lib/libpeacock_gpu.so`, `bin/peacock_*_tests`, `rust-tests/` and, for `bench`,
   `rust-benchmarks/`. Read-only.
@@ -2109,23 +2114,22 @@ line under every node:
 
     time_us=[[22,37,40],[55,1,30]] total_us=185
 
-Lanes outermost, one entry per call the lane made, each entry the call's device microseconds
-summed over its output partitions; `1` where the clock rounded a region to zero, since every
-call opens one; `0` where the call crossed no ABI — the backend answered from what it held,
-as an accumulator taking a batch or a join's `set_build` does. A lane the node was never
-driven on is `[]`. Then a `--- run ---` trailer:
-`run_us` (the chosen execution end to end, after planning), `device_us` (Σ of the tree's
-`total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution, in order),
-`build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default every cuDF
-intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it,
-which moves the profile and not just the scale), then the five provenance keys,
-`device=` to `host=`. The reported execution is the second-smallest
-by `run_us` of ten, after one discarded warm-up: the fastest run is the one most likely to
-have caught a scheduling accident, and a whole run is reported rather than a per-node minimum,
-which would be a tree belonging to no execution. Both counts are constants in
-`src/test_support/` (`MEASURED_RUNS` in `mod.rs`, the warm-up in `corpus_benchmark.rs`), so
-every file in the tree was taken at the same counts.
-`--pull-benchmarks` is additive and no push `--delete`s the directory.
+Lanes outermost, one entry per call the lane made, each entry the call's device microseconds summed
+over its output partitions; `1` where the clock rounded a region to zero, since every call opens
+one; `0` where the call crossed no ABI — the backend answered from what it held, as an accumulator
+taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`. Then a
+`--- run ---` trailer: `run_us` (the chosen execution end to end, after planning), `device_us` (Σ
+of the tree's `total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution,
+in order), `build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default
+every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated
+it, which moves the profile and not just the scale), then the five provenance keys, `device=` to
+`host=`. A failed case's section is its record instead (above). The reported execution is the
+second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
+likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
+minimum, which would be a tree belonging to no execution. Both counts are constants in
+`src/test_support/` (`MEASURED_RUNS` in `mod.rs`, the warm-up in `corpus_benchmark.rs`), so every
+file in the tree was taken at the same counts. `--pull-benchmarks` is additive and no push
+`--delete`s the directory.
 
 **The record**, `testdata/calibration/records.tsv` where a run's pull puts it, and
 `testdata/calibration/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the published
