@@ -8,13 +8,31 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::executor::{NodeTiming, NvtxRange, RmmPool};
+use crate::executor::{DeviceInfo, NodeTiming, NvtxRange, RmmPool};
 
 use peacockdb_ffi::raw::{
     PEACOCK_NODE_TIMING_EVENTS, PEACOCK_NODE_TIMING_OFF, PEACOCK_RMM_POOL_INSTALLED,
-    PeacockRmmPoolInfo, peacock_install_rmm_pool, peacock_nvtx_pop_range, peacock_nvtx_push_range,
-    peacock_set_node_timing, peacock_set_nvtx_ranges,
+    PeacockDeviceInfo, PeacockRmmPoolInfo, peacock_device_info, peacock_install_rmm_pool,
+    peacock_nvtx_pop_range, peacock_nvtx_push_range, peacock_set_node_timing,
+    peacock_set_nvtx_ranges,
 };
+
+/// The current device as the CUDA runtime names it, or `None` when it has none to name.
+pub(crate) fn device_info() -> Option<DeviceInfo> {
+    let mut info = PeacockDeviceInfo {
+        name: [0; 256],
+        runtime: 0,
+    };
+    if unsafe { peacock_device_info(&mut info) } != 0 {
+        return None;
+    }
+    // The C side terminates the name, so the scan stops inside the array.
+    let name = unsafe { std::ffi::CStr::from_ptr(info.name.as_ptr()) };
+    Some(DeviceInfo {
+        name: name.to_string_lossy().into_owned(),
+        runtime: info.runtime as u32,
+    })
+}
 
 /// Install the pooled device allocator of `bytes`, before any GPU work, and report what
 /// happened.

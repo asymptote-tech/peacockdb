@@ -9,6 +9,10 @@
 //! component's, so everything below is private with `pub(crate)` items, a type that crosses
 //! out is declared in this file, and no `pub` signature here names an engine type.
 
+// `run_section`, the trailer's writer, serves the benchmark harness, which a rust-only build
+// does not compile; its test runs in every shape.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod benchmark_trailer;
 mod corpus;
 #[cfg(not(feature = "rust-only"))]
 mod corpus_benchmark;
@@ -30,6 +34,9 @@ mod gpu_session;
 #[cfg(not(feature = "rust-only"))]
 mod node_timing;
 mod order_hazard;
+// The runtime's reads serve the harness alone; the slug and the five fields serve every shape.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod provenance;
 mod record;
 mod registry;
 mod result_text;
@@ -1104,11 +1111,12 @@ pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<
     corpus_benchmark::declared_for(dataset, sf, mode)
 }
 
-/// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
-/// (dataset, mode), holding a section per query it timed.
+/// `testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file
+/// per (device, dataset, mode), holding a section per query it timed. `device` is a
+/// [`device_slug`].
 #[cfg(not(feature = "rust-only"))]
-pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
-    corpus_benchmark::results_file(dataset, sf, mode)
+pub fn results_file(device: &str, dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    corpus_benchmark::results_file(device, dataset, sf, mode)
 }
 
 /// Time `query` at `mode` on the device: the tree's section and the record's rows.
@@ -1202,7 +1210,7 @@ pub const COLUMNS: &[&str] = &[
 /// What a row cannot be recovered from: which engine produced it, over what data, and
 /// under what conditions.
 ///
-/// The last two are constant across a run and go into the file's `#` heading rather than
+/// The last three are constant across a run and go into the file's `#` heading rather than
 /// into every row — see [`record_header`]. They are still part of this struct because the
 /// heading is written from it. The other two conditions, [`TIMING_MODE`] and [`BUILD`],
 /// are not fields at all: the harness refuses to measure under anything else.
@@ -1215,6 +1223,28 @@ pub struct RunMeta<'a> {
     pub mode: &'a str,
     pub allocator: &'a str,
     pub capture: Capture,
+    pub provenance: &'a Provenance,
+}
+
+/// What a benchmark run measured on, as each result trailer and record heading states it:
+/// `device=… driver=… cuda=… cudf=… host=…`, in that order. The same plan's microseconds
+/// move with every one of the five, so a file that omits one cannot be compared with another.
+///
+/// Strings as written: `device` is the runtime's name for the card, `driver` the kernel
+/// module's release (`580.95.05`), `cuda` the runtime's version (`12.9`), `cudf` the release
+/// built against (`25.02.02`).
+pub struct Provenance {
+    pub device: String,
+    pub driver: String,
+    pub cuda: String,
+    pub cudf: String,
+    pub host: String,
+}
+
+/// The directory under `benchmark-results/` a device's files lie in: its name as one stable
+/// path segment, `NVIDIA H100 80GB HBM3` as `h100-80gb-hbm3`. The full name is in each file.
+pub fn device_slug(name: &str) -> String {
+    provenance::device_slug(name)
 }
 
 /// The only timing mode a record is written under: the harness sets `NodeTiming::Events`

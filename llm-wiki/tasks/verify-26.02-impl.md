@@ -77,11 +77,11 @@ tree.
 | `scripts/lib/shadgpu-env.sh` | `PEACOCK_CUDF=25.02|26.02` selects root, gcc, build/install dirs, remote repo, host env |
 | `scripts/build.sh` | `--build-dir`, `--install-dir` (defaults `cpp/build`, `cpp/install`) |
 | `scripts/build-test-shadgpu.sh` | uses the selected dirs everywhere it names `cpp/install` |
-| `peacockdb-core/src/test_support/corpus_benchmark.rs`, `test_support/mod.rs` | `cudf=` in the run block; per-version results root |
+| `peacockdb-core/src/test_support/corpus_benchmark.rs`, `test_support/mod.rs` | none: containers' Task 8 writes `cudf=` in the run block and keys the tree by device |
 | `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp` | a new symbol, `peacock_cudf_version()`, answers the cuDF version it was built against; `peacock_gpu_version()` is unchanged (`cpp/tests/cpu/test_executor.cpp:9` pins it at `"0.1.0"`) |
 | `peacockdb-ffi/src/lib.rs` | `raw::peacock_cudf_version`, `cudf_version()` |
 | `peacockdb-core/tests/common/corpus_benchmark_cases.inc` | the chain's flipped tpch cells at sf40 |
-| `testdata/benchmark-results/cudf-25.02/`, `cudf-26.02/` | the two runs |
+| `testdata/benchmark-results/<device>/` | the two runs, one after the other (spec, step 4) |
 | `llm-wiki/build-test.md`, `tickets/system-hardening.md`, `tasks/verify-26.02-detail.md` | how to run; #244's evidence; the record |
 
 ---
@@ -256,6 +256,11 @@ For each failure of Task 3, in order of tier (C++ first: a broken library breaks
 - [ ] **Step 4:** Commit per fix: `<what>: <the 26.02 difference>, with its case`.
 
 ### Task 5: The benchmark, per cuDF version
+
+> Reconciled with containers' Task 8: the tree is `benchmark-results/<device>/`, and every
+> trailer already carries `cudf=` beside the device, driver, CUDA and host. Steps 1 and 3 below
+> are superseded: no `cudf-<version>/` level, no `git mv` of the H200 files (they are under
+> `h200/`). The two runs share one tree and are compared by `git diff`, as the spec's step 4 says.
 
 **Files:**
 - Modify: `cpp/include/peacock_gpu.h:15`, `cpp/src/gpu_executor.cpp:119-127`, `peacockdb-ffi/src/lib.rs:264-274`

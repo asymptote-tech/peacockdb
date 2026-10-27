@@ -14,6 +14,17 @@ extern "C" {
 /// The returned pointer is valid for the lifetime of the process.
 const char* peacock_gpu_version(void);
 
+/// The current device as a benchmark's provenance names it, read from the CUDA runtime.
+typedef struct PeacockDeviceInfo {
+  char name[256];   ///< cudaDeviceProp::name, NUL-terminated
+  int32_t runtime;  ///< cudaRuntimeGetVersion, 1000 * major + 10 * minor
+} PeacockDeviceInfo;
+
+/// Describe the current device.
+/// @return 0, or non-zero when out_info is NULL or the runtime has no device to describe;
+///         out_info is then unspecified.
+int peacock_device_info(PeacockDeviceInfo* out_info);
+
 // ---------------------------------------------------------------------------
 // Executor lifecycle
 // ---------------------------------------------------------------------------

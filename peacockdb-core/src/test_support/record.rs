@@ -4,9 +4,9 @@
 //! and what went into it, the device's regions say what it cost. Neither half is a row on
 //! its own.
 //!
-//! TSV, with the run's conditions — timing mode, build, allocator, capture — in the `#`
-//! heading rather than in every row. `hbm_bytes` is deliberately absent: it comes from
-//! Nsight and is joined in later on the same tuple.
+//! TSV, with the run's conditions — timing mode, build, allocator, capture, and the device,
+//! driver, CUDA, cuDF and host — in the `#` heading rather than in every row. `hbm_bytes` is
+//! deliberately absent: it comes from Nsight and is joined in later on the same tuple.
 
 #[cfg(test)]
 mod tests;
@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use crate::executor::{AbiCall, Measured, Measurements, RunReport};
 use crate::wire::{RecipePlan, Seq};
 
+use super::provenance::fields;
 use super::{BUILD, COLUMNS, RECORD_PATH_ENV, RunMeta, TIMING_MODE};
 
 // The row builder and the plan reader serve the harness, which a rust-only build has not;
@@ -229,12 +230,16 @@ const RUN_PREFIX: &str = "# run: ";
 /// mean, so a file mixing two of them is a file whose rows cannot be compared.
 /// [`append_records`] refuses to write one.
 fn run_conditions(meta: &RunMeta<'_>) -> Vec<String> {
-    vec![
+    let mut conditions = vec![
         format!("{RUN_PREFIX}timing_mode={TIMING_MODE}"),
         format!("{RUN_PREFIX}build={BUILD}"),
         format!("{RUN_PREFIX}allocator={}", meta.allocator),
         format!("{RUN_PREFIX}capture={}", meta.capture.name()),
-    ]
+    ];
+    for (key, value) in fields(meta.provenance) {
+        conditions.push(format!("{RUN_PREFIX}{key}={value}"));
+    }
+    conditions
 }
 
 /// The `#` preamble, written once per file. A record has to be readable without this
@@ -263,6 +268,9 @@ const HEADER_NOTES: &str = "\
 # capture = which Nsight pass measured this, `none` for a plain run. Tracing and the
 #   memory counters each cost the query several percent, so a captured run writes this
 #   file and never the .benchmark.txt tree.
+# device..host = what the run measured on: the runtime's name for the card, the driver's
+#   release, the CUDA runtime's version, the cuDF release the binary was built against, and
+#   the host name. The .benchmark.txt tree is filed by the device.
 # mode = the planning mode, `tp4-sized` and the like. The same query
 #   at two modes is a different plan and a different set of calls.
 # node_seq = the node's position in the tree, post-order — the same space recipe_seq is

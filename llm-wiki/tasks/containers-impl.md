@@ -255,13 +255,16 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   image there, sf40 from S3 or generated — skipped when present and its checksum holds), then
   `docker pull` the run image; `ship` rsyncs `cpp/install` and the query files to
   `~/peacock/<instance>/` (instance-named, never the old path's dirs), never the data;
-  `run` executes the run image with `--gpus all`; `pull` brings `benchmark-results/`, the record
+  `run` executes the run image with `--gpus all` and `--hostname` set to the machine's name, which
+  the benchmark writes as `host=` (Task 8); `pull` brings `benchmark-results/`, the record
   and logs home.
 
 - [ ] **Step 1: failing tests** (fake `ssh`/`rsync`/`nebius`): `test_ssh_adapter_start_is_noop`;
   `test_nebius_adapter_needs_instance_id`; `test_prepare_installs_key_on_password_host`;
   `test_run_refuses_old_driver` (fake `nvidia-smi` reporting a driver below the run image's CUDA
-  minimum → exit 3 before `ship`, message names both); `test_ship_dir_is_instance_named`.
+  minimum → exit 3 before `ship`, message names both); `test_ship_dir_is_instance_named`;
+  `test_run_passes_the_machines_hostname` (`docker run` gets `--hostname` with the name the fake
+  host's `hostname` answers).
 - [ ] **Step 2:** implement.
 - [ ] **Step 3: verify on nebius-gpu** (the L40S, by hand-given ssh): `gpu.sh nebius-l40s prepare`,
   `ship`, `run list` with binaries from the build image: the device tiers pass with the same
@@ -284,13 +287,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   host }` written as `device=… driver=… cuda=… cudf=… host=…` in each trailer and record heading;
   results at `benchmark-results/<slug>/<dataset>.sf<sf>/<mode>`.
 
-- [ ] **Step 1: failing tests** — `device_slug_is_stable` (`"NVIDIA H100 80GB HBM3"` →
+- [x] **Step 1: failing tests** — `device_slug_is_stable` (`"NVIDIA H100 80GB HBM3"` →
   `"h100-80gb-hbm3"`, `"NVIDIA H200"` → `"h200"`, no `/` or space ever);
   `trailer_names_its_provenance` (all five keys, in that order); the existing benchmark golden test
   reads the moved H200 tree.
-- [ ] **Step 2:** implement; the device name, driver and CUDA from the runtime (an additive ABI
+- [x] **Step 2:** implement; the device name, driver and CUDA from the runtime (an additive ABI
   symbol only if the existing reads cannot give them); move the H200 files; record pins per device.
-- [ ] **Step 3:** rust-only tiers green; commit.
+  The H200's own two pins keep their flat shape: moving them waits on the migration #226 lists.
+- [x] **Step 3:** rust-only tiers green; commit.
 
 ### Task 9: the registry-driven case set
 
@@ -305,6 +309,9 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   case's failure is recorded (`status=failed reason=…` in its section) and the run continues; a
   rerun skips cases whose complete section exists.
 
+- Note: `every_declared_case_has_a_section_in_the_tree` holds the case list to every device
+  directory, so it goes red once the list declares more than `h200/` holds. This task decides
+  which trees the list is held to.
 - [ ] **Step 1: failing tests** — `the_benchmark_cases_follow_the_registry` (the case list equals
   the registry's enabled device cells for tpch and tpcds, mode by mode);
   `a_failed_case_is_recorded_and_the_run_goes_on`; `test_partial_run_keeps_completed_cases`.
@@ -326,4 +333,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   (the run in segments, or the watcher configured for it on that host).
 - [ ] **Step 3:** results under `benchmark-results/<slug>/`, the record split, uploaded and pinned
   per device; the benchmark golden tests green on the new tree. Commit.
+  `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer cases than the
+  list declares (the deferred rowgroup modes), or if `h200/` holds fewer, unless Task 9 settled
+  which trees the list is held to.
 
