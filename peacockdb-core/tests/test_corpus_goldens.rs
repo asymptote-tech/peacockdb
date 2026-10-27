@@ -13,20 +13,28 @@
 //! wrong, and the renderer is most of what could be wrong.
 //!
 //! The benchmark tree, read back the same way, and the calibration record's format are
-//! `benchmark`.
+//! `benchmark`; what a run writes into the tree when a case fails or is run again is
+//! `benchmark_run`.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps it under a directory named for this one.
 #[path = "test_corpus_goldens/benchmark.rs"]
 mod benchmark;
+#[path = "test_corpus_goldens/benchmark_run.rs"]
+mod benchmark_run;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use peacockdb_core::test_support::{
     CORPUS_DATASETS, MODES, Regeneration, SKIPPED, assert_section, cost_golden, cpu_golden,
     fingerprint_of, load_csv, merge_section, merged_text, mode_named, ordered_sections,
     parse_node_line, parse_run_section, result_golden, section_holds_rows, stem,
 };
+
+/// Held by every case that sets or reads `UPDATE_CANONICAL`: the variable is process-wide, and
+/// cases run on parallel threads.
+static ENV: Mutex<()> = Mutex::new(());
 
 // --- the write path ------------------------------------------------------------
 
@@ -702,8 +710,10 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
     let path = scratch("read-only");
     let before = "== q1\nthe committed body\n";
     std::fs::write(&path, before).expect("the file");
-    // SAFETY: this binary's other cases drive the merge with an explicit `Regeneration`
-    // and never read the environment, so nothing else here observes these.
+    let env = ENV.lock().unwrap_or_else(PoisonError::into_inner);
+    // SAFETY: `ENV` is held, and the benchmark case list's registry check reads
+    // `UPDATE_CANONICAL` only under it. This binary's other cases drive the merge with an
+    // explicit `Regeneration` and read neither variable.
     unsafe {
         std::env::set_var("UPDATE_CANONICAL", "1");
         std::env::set_var("PCK_UPDATE_SECTIONS", "1");
@@ -715,6 +725,7 @@ fn a_regeneration_does_not_make_the_read_only_path_write() {
         std::env::remove_var("UPDATE_CANONICAL");
         std::env::remove_var("PCK_UPDATE_SECTIONS");
     }
+    drop(env);
     assert!(wrote_anyway.is_err(), "it did not even verify");
     assert_eq!(
         std::fs::read_to_string(&path).expect("the file"),

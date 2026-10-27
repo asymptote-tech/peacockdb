@@ -51,8 +51,9 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
    one worktree volume. → Task 6, `test_up_refuses_duplicate_instance`.
 3. A GPU host whose driver is older than the run image's CUDA needs: the run stops before
    shipping data, naming driver and required minimum. → Task 7, `test_run_refuses_old_driver`.
-4. A benchmark interrupted mid-run (preemption, watcher): what was measured is kept and the rerun
-   skips completed cases, never overwrites good results with a partial file. → Task 9,
+4. A benchmark interrupted mid-run (preemption, watcher): what was measured is kept, a rerun under
+   `PEACOCK_BENCH_RESUME=1` skips completed cases (without it every case is measured again), and
+   good results are never overwritten with a partial file. → Task 9,
    `test_partial_run_keeps_completed_cases`.
 5. A result directory for a device name with spaces or slashes (`NVIDIA H100 80GB HBM3`): the
    directory name is a stable slug (`h100-80gb-hbm3`), the full name in the file. → Task 8,
@@ -307,15 +308,19 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Consumes: `testdata/cost-registry.csv` `gpu_*` columns (rows `enabled` per mode).
 - Produces: the benchmark's case list = every tpch/tpcds row's enabled device modes at sf40; a
   case's failure is recorded (`status=failed reason=…` in its section) and the run continues; a
-  rerun skips cases whose complete section exists.
+  rerun under `PEACOCK_BENCH_RESUME=1` skips cases whose complete section exists, and without it
+  measures every case.
 
 - Note: `every_declared_case_has_a_section_in_the_tree` holds the case list to every device
   directory, so it goes red once the list declares more than `h200/` holds. This task decides
   which trees the list is held to.
-- [ ] **Step 1: failing tests** — `the_benchmark_cases_follow_the_registry` (the case list equals
+- [x] **Step 1: failing tests** — `the_benchmark_cases_follow_the_registry` (the case list equals
   the registry's enabled device cells for tpch and tpcds, mode by mode);
   `a_failed_case_is_recorded_and_the_run_goes_on`; `test_partial_run_keeps_completed_cases`.
-- [ ] **Step 2:** implement; rust-only tiers green; commit.
+- **Step 2:**
+  - [x] implement;
+  - [x] rust-only tiers green;
+  - [x] commit.
 
 ### Task 10: onto master
 
@@ -331,9 +336,18 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - [ ] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
   `gpu.sh <host> prepare && ship && run bench && pull`, the idle watcher's four-hour limit handled
   (the run in segments, or the watcher configured for it on that host).
-- [ ] **Step 3:** results under `benchmark-results/<slug>/`, the record split, uploaded and pinned
-  per device; the benchmark golden tests green on the new tree. Commit.
-  `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer cases than the
-  list declares (the deferred rowgroup modes), or if `h200/` holds fewer, unless Task 9 settled
-  which trees the list is held to.
+- [ ] **Step 3:** publishing a run made of segments, resumed (`PEACOCK_BENCH_RESUME=1`) cases and
+  failures. Each segment writes its own record (`run-tests.sh bench` refuses one holding rows),
+  their `# run: allocator=` headings differ (it names the free GiB each process saw), a held case
+  writes no rows, and a segment killed between appending a case's rows and writing its section
+  leaves rows for a case it has no section for, which the resumed segment measures again, so its
+  rows are in two segments' records; `split_record.py` refuses a record short of the list.
+  Decide how the segments' records join into one per dataset, and what a failed or deferred case
+  means to the publish; failing tests first, in `scripts/calibration/tests/`.
+- [ ] **Step 4:** results under `benchmark-results/<slug>/`, the record split, uploaded and pinned
+  per device; the benchmark golden tests green on the new tree. Commit. Task 9 settled which trees
+  the list holds: a new device's tree is held to the whole list, `h200/` to its own
+  `h200/cases.inc`. `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer
+  cases than the list declares (the deferred rowgroup modes); committing such a tree needs a named
+  exception in that test (device, modes, reason) that the human approves.
 
