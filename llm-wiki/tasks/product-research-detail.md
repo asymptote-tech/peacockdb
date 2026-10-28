@@ -51,3 +51,33 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
   DataFusion 45 output gives wrong answers (LIMIT→0, #1963); smallest unit a whole plan or a
   Fragment, no standalone libsirius. Fork: out (1,244 commits/12 mo, ~92% NVIDIA, no releases;
   ~7.8× peacockdb's size with cuCascade). Only route: pinned dependency plus upstream work.
+- Task 2: Ruling (human request, 2026-10-28): redo discovery with community sources scraped —
+  the first pass used deep-research, whose researchers stop at ~15 tool calls, and did not search
+  Reddit, Stack Overflow, Discord or several engines' issue trackers. Four scrape subagents
+  (GitHub + Apache JIRA; Reddit via PullPush; HN + Stack Exchange; Discord indexes + Discourse and
+  vendor forums) write classified digests to `artifacts/product-research/sources/`, raw dumps
+  stay in the scratchpad; then discovery.md is rewritten from them and the checkpoint is re-run.
+  The digests double as `demand.md`'s corpus. Cost if wrong: a few hours of agent time.
+- sources/hn-stackexchange.md: 133 relevant (89 HN, 44 SE): 49 complaint, 28 user, 27 vendor,
+  14 request. Signals: big Spark shuffle/join cloud bills (crowded: spark-rapids, ParaQuery,
+  Gluten, Comet); GPU idle on mixed job sizes, routing layer wanted; happy GPU users are
+  single-node pandas/Polars, plus log/netflow security niches. SE quota left 236.
+- sources/discord-forums.md: Discord/Slack unreadable (Answer Overflow and linen.dev 429 bot
+  checkpoints; community.heavy.ai refuses). 27 Discourse + 3 Khoros forums: 61 relevant (6
+  request, 8 user, 19 complaint, 21 vendor). Signals: Spark+RAPIDS on 2× DGX Spark nightly 380M
+  rows (only clear success); new:ran-sim-datalake (Aerial Data Lake → CPU ClickHouse inserts
+  stall); top complaint is RAPIDS install pain (20–40 GB images, Python lag, no Windows, ARM64).
+- sources/issue-trackers.md: 100 relevant threads (32 complaint, 30 request, 18 vendor, 15 user);
+  ~250 more listed in bulk families; JIRA 787 tickets, almost no GPU-SQL demand. Signals:
+  incumbents adding GPU themselves, mostly via Sirius (ClickHouse RFC + 11 PRs; Doris backend;
+  Sirius proposed as DuckDB core extension, PR 2026-10-28; MatrixOne, Paimon, PolarDB; Presto/Velox
+  cuDF); first-person complaints say GPU loses to a good CPU engine on IO, transfer and silent
+  CPU fallback; keep-data-on-GPU and BI-from-GPU demand explicit but thin; Microsoft Fabric GPU
+  acceleration with warm cache in early access. One cited spark-rapids complaint is the human's
+  own account (`alephonea`), marked, not a lead.
+- sources/reddit.md: 110 relevant (15 request, 18 user, 26 complaint, 31 vendor); scrape cut
+  short (PullPush blocked agents after ~45 requests; Arctic Shift flaky; several subreddits never
+  completed) — counts indicative. Signals: u/fmoralesh 1.2 TB logs on cuDF/V100 + 11 TB S3
+  Parquet (datafusion-log-gpu, gpu-scan-tier); single-machine setup pain (Windows, WSL2, old GPUs;
+  "willing to pay" for Windows cuDF) → workstation-gpu-sql; new: quant backtest sweeps, single-cell
+  genomics. No Reddit report of Spark RAPIDS in production.
