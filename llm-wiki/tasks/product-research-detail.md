@@ -10,7 +10,7 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 ## Tasks
 
 - Task 0: complete
-- Task 1: todo
+- Task 1: complete — yardstick 22,830 lines (57,659 test); 8 sheet CSVs (7 + 1 tabs, as the API reports); patch saved
 - Task 2: todo
 - Task 3: todo
 - Task 4: todo
@@ -25,6 +25,10 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
   state — cost if wrong: none.
 - Ruling: TDD does not apply (desk research, no code); each task's Verify step is its gate, and
   Task 6's audit is the final review — cost if wrong: none.
+
+- Task 2: Ruling: start `sirius.md` and `nvidia.md` now, alongside discovery, rather than
+  after the checkpoint — neither depends on the option list, and it saves a wave — cost if wrong:
+  none, they are needed whatever is kept. `demand.md` still waits for the checkpoint.
 
 ## Checkpoint
 

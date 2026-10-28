@@ -1,0 +1,350 @@
+commit 99a1d01b74f74a9e8dc228cefc4de6044df5aa46
+Author: dmitry <dmitry>
+Date:   Wed Oct 15 11:25:17 2025 +0300
+
+    more experimentation
+
+diff --git a/build.sh b/build.sh
+index 835a9c98e..3324a84ad 100644
+--- a/build.sh
++++ b/build.sh
+@@ -5,5 +5,6 @@ set -x
+ 
+ $HOME/spark-3.5.6-bin-hadoop3/sbin/stop-all.sh
+ unset SPARK_HOME
++killall -9 java || true
+ 
+-mvn -Dbuildver=356 package
++mvn -Dbuildver=356 -DskipTests -Drat.skip=true -Dmaven.scaladoc.skip -Dmaven.scalastyle.skip=true package
+diff --git a/sql-plugin/src/main/scala/com/nvidia/spark/rapids/GpuMultiFileReader.scala b/sql-plugin/src/main/scala/com/nvidia/spark/rapids/GpuMultiFileReader.scala
+index 93519bd2a..e05384cdc 100644
+--- a/sql-plugin/src/main/scala/com/nvidia/spark/rapids/GpuMultiFileReader.scala
++++ b/sql-plugin/src/main/scala/com/nvidia/spark/rapids/GpuMultiFileReader.scala
+@@ -137,7 +137,7 @@ object MultiFileReaderThreadPool extends Logging {
+         TrampolineUtil.newDaemonCachedThreadPool("multithreaded file reader worker", numThreads,
+           keepAliveSeconds)
+       threadPoolExecutor.allowCoreThreadTimeOut(true)
+-      logDebug(s"Using $numThreads for the multithreaded reader thread pool")
++      logDebug(s"Using $numThreads for the multithreaded reader thread pool AAABBBCCC")
+       threadPool = Some(threadPoolExecutor)
+     }
+     threadPool.get
+@@ -380,6 +380,7 @@ abstract class MultiFileCloudPartitionReaderBase(
+       logDebug("Not keeping reads in order")
+       synchronized {
+         if (fcs == null) {
++          logInfo("creating thread pool in initAndStartReaders")
+           val threadPool =
+             MultiFileReaderThreadPool.getOrCreateThreadPool(numThreads)
+           fcs = new ExecutorCompletionService[HostMemoryBuffersWithMetaDataBase](threadPool)
+@@ -418,7 +419,8 @@ abstract class MultiFileCloudPartitionReaderBase(
+         tasks.add(futureRunner)
+       } else {
+         // Add these in the order as we got them so that we can make sure
+-        // we process them in the same order as CPU would.
++        // we process them in the same order as CPU readPartFilesreadPartFileswould.
++        logInfo("creating thread pool in initAndStartReaders loop")
+         val threadPool = MultiFileReaderThreadPool.getOrCreateThreadPool(numThreads)
+         tasks.add(threadPool.submit(newTaskRunner(file)))
+       }
+@@ -730,6 +732,7 @@ abstract class MultiFileCloudPartitionReaderBase(
+         val futureRunner = fcs.submit(runner)
+         tasks.add(futureRunner)
+       } else {
++        logInfo("creating thread pool in addNextTaskIfNeeded")
+         val threadPool = MultiFileReaderThreadPool.getOrCreateThreadPool(numThreads)
+         tasks.add(threadPool.submit(runner))
+       }
+@@ -1049,6 +1052,7 @@ abstract class MultiFileCoalescingPartitionReaderBase(
+   def startNewBufferRetry: Unit = ()
+ 
+   private def readBatch(): Iterator[ColumnarBatch] = {
++    logInfo("MultiFileCoalescingPartitionReaderBase::readBatch called")
+     withResource(new NvtxRange(s"$getFileFormatShortName readBatch", NvtxColor.GREEN)) { _ =>
+       val currentChunkMeta = populateCurrentBlockChunk()
+       val batchIter = if (currentChunkMeta.clippedSchema.isEmpty) {
+@@ -1129,12 +1133,15 @@ abstract class MultiFileCoalescingPartitionReaderBase(
+ 
+           val allOutputBlocks = scala.collection.mutable.ArrayBuffer[DataBlockBase]()
+           val tc = TaskContext.get
++          logInfo("creating thread pool in readPartFiles")
+           val threadPool = MultiFileReaderThreadPool.getOrCreateThreadPool(numThreads)
+           filesAndBlocks.foreach { case (file, blocks) =>
+             val fileBlockSize = blocks.map(_.getBlockSize).sum
+             // use a single buffer and slice it up for different files if we need
+             val outLocal = hmb.slice(offset, fileBlockSize)
+             // Third, copy the blocks for each file in parallel using background threads
++            logInfo("Will read file: " + file + " with size: " + fileBlockSize +
++              " at offset: " + offset + " in thread pool")
+             tasks.add(threadPool.submit(
+               getBatchRunner(tc, file, outLocal, blocks, offset, batchContext)))
+             offset += fileBlockSize
+@@ -1142,6 +1149,8 @@ abstract class MultiFileCoalescingPartitionReaderBase(
+ 
+           for (future <- tasks.asScala) {
+             val (blocks, bytesRead) = future.get()
++            logInfo("Finished reading file " +
++              s"with bytesRead: $bytesRead")
+             allOutputBlocks ++= blocks
+             TrampolineUtil.incBytesRead(inputMetrics, bytesRead)
+           }
+@@ -1199,7 +1208,7 @@ abstract class MultiFileCoalescingPartitionReaderBase(
+             s"small, actual written: ${finalBufferSize}")
+         }
+       }
+-      logDebug(s"$getFileFormatShortName Coalescing reading estimates the initTotalSize:" +
++      logInfo(s"$getFileFormatShortName Coalescing reading estimates the initTotalSize:" +
+         s" $initTotalSize, and the true size: $finalBufferSize")
+       SpillableHostBuffer(finalBuffer,
+         finalBufferSize,
+diff --git a/sql-plugin/src/main/scala/com/nvidia/spark/rapids/parquet/GpuParquetScan.scala b/sql-plugin/src/main/scala/com/nvidia/spark/rapids/parquet/GpuParquetScan.scala
+index da80757e7..9545949b6 100644
+--- a/sql-plugin/src/main/scala/com/nvidia/spark/rapids/parquet/GpuParquetScan.scala
++++ b/sql-plugin/src/main/scala/com/nvidia/spark/rapids/parquet/GpuParquetScan.scala
+@@ -1097,6 +1097,8 @@ case class GpuParquetMultiFilePartitionReaderFactory(
+     queryUsesInputFile: Boolean)
+   extends MultiFilePartitionReaderFactoryBase(sqlConf, broadcastedConf, rapidsConf) {
+ 
++  logDebug(s"Parquet multi-file reader factory config: $rapidsConf")
++
+   private val isCaseSensitive = sqlConf.caseSensitiveAnalysis
+   private val debugDumpPrefix = rapidsConf.parquetDebugDumpPrefix
+   private val debugDumpAlways = rapidsConf.parquetDebugDumpAlways
+@@ -1245,6 +1247,7 @@ case class GpuParquetMultiFilePartitionReaderFactory(
+       metrics.getOrElse(SCAN_TIME, NoopMetric).ns {
+         val metaAndFilesArr = if (numFilesFilterParallel > 0) {
+           val tc = TaskContext.get()
++          logInfo("building base columnar reader for coalescing")
+           val threadPool = MultiFileReaderThreadPool.getOrCreateThreadPool(numThreads)
+           files.grouped(numFilesFilterParallel).map { fileGroup =>
+             // we need to copy the Hadoop Configuration because filter push down can mutate it,
+@@ -1280,6 +1283,8 @@ case class GpuParquetMultiFilePartitionReaderFactory(
+       }
+     }
+ 
++    logInfo("Creating multi-file coalescing parquet reader for " +
++      s"${clippedBlocks.size} blocks from ${files.length} files")
+     new MultiFileParquetPartitionReader(conf, files, clippedBlocks.toSeq, isCaseSensitive,
+       debugDumpPrefix, debugDumpAlways, maxReadBatchSizeRows, maxReadBatchSizeBytes,
+       targetBatchSizeBytes, maxGpuColumnSizeBytes,
+@@ -1309,6 +1314,9 @@ case class GpuParquetPartitionReaderFactory(
+     @transient params: Map[String, String])
+   extends ShimFilePartitionReaderFactory(params) with Logging {
+ 
++
++  logInfo("GpuParquetPartitionReaderFactory creating")
++
+   private val isCaseSensitive = sqlConf.caseSensitiveAnalysis
+   private val debugDumpPrefix = rapidsConf.parquetDebugDumpPrefix
+   private val debugDumpAlways = rapidsConf.parquetDebugDumpAlways
+@@ -1578,6 +1586,7 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+     val filePathString: String = filePath.toString
+     val remoteItems = new ArrayBuffer[CopyRange](blocks.length)
+     var totalBytesToCopy = 0L
++    logInfo("Starting to copy blocks data")
+     withResource(new ArrayBuffer[LocalCopy](blocks.length)) { localItems =>
+       blocks.foreach { block =>
+         block.getColumns.asScala.foreach { column =>
+@@ -1598,11 +1607,15 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+         localItem.close()
+       }
+     }
++    logInfo(s"Copied ${totalBytesToCopy} bytes of local data")
+     copyRemoteBlocksData(remoteItems.toSeq, filePath,
+       filePathString, out, metrics)
++    logInfo("Finished copying remote blocks data")
+     // fixup output pos after blocks were copied possibly out of order
+     out.seek(startPos + totalBytesToCopy)
++    logInfo("Computing new block metadata")
+     computeBlockMetaData(blocks, realStartOffset)
++    //logInfo("Finished computing new block metadata")
+   }
+ 
+   private class BufferedFileInput(
+@@ -1867,8 +1880,11 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+       return 0L
+     }
+ 
++    logInfo("Coalesceing remote reads")
+     val coalescedRanges = coalesceReads(remoteCopies)
++    logInfo(s"coalesced ranges done: ${coalescedRanges.size}")
+ 
++    logInfo(s"Starting read to host memory for ${filePath.toUri}")
+     val totalBytesCopied = PerfIO.readToHostMemory(
+         conf, out.buffer, filePath.toUri,
+         coalescedRanges.map(r => IntRangeWithOffset(r.offset, r.length, r.outputOffset))
+@@ -1880,6 +1896,9 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+           }
+         }
+       }
++
++    logInfo(s"Finished read to host memory for ${filePath.toUri}, ")
++
+     // try to cache the remote ranges that were copied
+     remoteCopies.foreach { range =>
+       metrics.getOrElse(GpuMetric.FILECACHE_DATA_RANGE_MISSES, NoopMetric) += 1
+@@ -1892,6 +1911,9 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+         token.complete(out.buffer.slice(range.outputOffset, range.length))
+       }
+     }
++
++    logInfo("Done updating metrics")
++
+     totalBytesCopied
+   }
+ 
+@@ -1958,6 +1980,7 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
+         HostMemoryBuffer.allocate(estTotalSize)
+       }
+       closeOnExcept(outHostBuf) { hmb =>
++        logInfo(s"Attempting to read Parquet data from ${filePath} with estimated size ${estTotalSize}")
+         val out = new HostMemoryOutputStream(hmb)
+         out.write(ParquetPartitionReader.PARQUET_MAGIC)
+         val outputBlocks = if (compressCfg.decompressAnyCpu) {
+@@ -2190,6 +2213,12 @@ class MultiFileParquetPartitionReader(
+     partitionSchema, maxReadBatchSizeRows, maxReadBatchSizeBytes, maxGpuColumnSizeBytes,
+     numThreads, execMetrics)
+   with ParquetPartitionReaderBase {
++  
++  logInfo("MultiFileParquetPartitionReader ctor conf: " + s"${conf} maxReadBatchSizeRows: " +
++    s"${maxReadBatchSizeRows}, maxReadBatchSizeBytes: ${maxReadBatchSizeBytes}, " +
++    s"maxGpuColumnSizeBytes: ${maxGpuColumnSizeBytes}, numThreads: ${numThreads}, " +
++    s"ignoreMissingFiles: ${ignoreMissingFiles}, ignoreCorruptFiles: ${ignoreCorruptFiles}, " +
++    s"useFieldId: ${useFieldId}")
+ 
+   // Some implicits to convert the base class to the sub-class and vice versa
+   implicit def toMessageType(schema: SchemaBase): MessageType =
+@@ -2209,6 +2238,7 @@ class MultiFileParquetPartitionReader(
+     extends Callable[(Seq[DataBlockBase], Long)] {
+ 
+     override def call(): (Seq[DataBlockBase], Long) = {
++      logInfo("ParquetCopyBlocksRunner::call")
+       TrampolineUtil.setTaskContext(taskContext)
+       try {
+         val startBytesRead = fileSystemBytesRead()
+@@ -2270,6 +2300,7 @@ class MultiFileParquetPartitionReader(
+       blocks: ArrayBuffer[DataBlockBase],
+       offset: Long,
+       batchContext: BatchContext): Callable[(Seq[DataBlockBase], Long)] = {
++    logInfo("MultiFileParquetPartitionReader::getBatchRunner")
+     // Track the actual read buffer size, since some columns or partitions may be pruned
+     execMetrics.get("readBufferSize").foreach { metric =>
+       blocks.foreach { block =>
+@@ -2686,6 +2717,7 @@ class MultiFileCloudParquetPartitionReader(
+       var filterTime = 0L
+       var bufferStartTime = 0L
+       val result = try {
++        logInfo("MultiFileCloudParquetPartitionReader::doRead")
+         val filterStartTime = System.nanoTime()
+         val fileBlockMeta = filterFunc(file)
+         filterTime = System.nanoTime() - filterStartTime
+@@ -2765,6 +2797,7 @@ class MultiFileCloudParquetPartitionReader(
+       file: PartitionedFile,
+       conf: Configuration,
+       filters: Array[Filter]): Callable[HostMemoryBuffersWithMetaDataBase] = {
++    logInfo("MultiFileCloudParquetPartitionReader::getBatchRunner")
+     new ReadBatchRunner(file, filterFunc, tc)
+   }
+ 
+@@ -2898,6 +2931,14 @@ object MakeParquetTableProducer extends Logging {
+       debugDumpPrefix: Option[String],
+       debugDumpAlways: Boolean
+   ): GpuDataProducer[Table] = {
++
++    /*
++    var stackTrace: String = ""
++    val stackTraceElements = Thread.currentThread().getStackTrace()
++    stackTraceElements.foreach(element => {stackTrace = stackTrace + element + "\n"})
++    logInfo(s"Stack trace: $stackTrace") */
++    logInfo(s"MakeParquetTableProducer ${buffers.length} buffers useChunkedReader=$useChunkedReader")
++
+     debugDumpPrefix.foreach { prefix =>
+       if (debugDumpAlways) {
+         val p = DumpUtils.dumpBuffer(conf, buffers, prefix, ".parquet")
+@@ -2944,6 +2985,8 @@ object MakeParquetTableProducer extends Logging {
+         clippedParquetSchema, readDataSchema, isSchemaCaseSensitive, useFieldId)
+       val outputTable = GpuParquetScan.rebaseDateTime(evolvedSchemaTable, dateRebaseMode,
+         timestampRebaseMode)
++      
++      logInfo(s"MakeParquetTableProducer done ${buffers.length} buffers, creating SingleGpuDataProducer")
+       new SingleGpuDataProducer(outputTable)
+     }
+   }
+@@ -2966,6 +3009,7 @@ case class ParquetTableReader(
+     splits: Array[PartitionedFile],
+     debugDumpPrefix: Option[String],
+     debugDumpAlways: Boolean) extends GpuDataProducer[Table] with Logging {
++  logInfo(s"ParquetTableReader ${buffers.length} buffers")
+   private[this] val reader = new ParquetChunkedReader(chunkSizeByteLimit,
+     maxChunkedReaderMemoryUsageSizeBytes, opts, buffers:_*)
+ 
+@@ -2975,9 +3019,11 @@ case class ParquetTableReader(
+ 
+   override def next: Table = {
+     val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
+-      metrics(GPU_DECODE_TIME))) { _ =>
++      metrics(GPU_DECODE_TIME))) { _ => {
++      var chunk: Table = null
++      logInfo("Starting readChunk")
+       try {
+-        reader.readChunk()
++        chunk = reader.readChunk()
+       } catch {
+         case e: Exception =>
+           val dumpMsg = debugDumpPrefix.map { prefix =>
+@@ -2990,8 +3036,12 @@ case class ParquetTableReader(
+           }.getOrElse("")
+           throw new IOException(s"Error when processing $splitsString$dumpMsg", e)
+       }
++      logInfo("Finished readChunk")
++      chunk
++      }
+     }
+ 
++    logInfo("closeOnExcept(table) start")
+     closeOnExcept(table) { _ =>
+       GpuParquetScan.throwIfRebaseNeededInExceptionMode(table, dateRebaseMode, timestampRebaseMode)
+       if (readDataSchema.length < table.getNumberOfColumns) {
+@@ -3000,9 +3050,15 @@ case class ParquetTableReader(
+       }
+     }
+     metrics(NUM_OUTPUT_BATCHES) += 1
++
++    logInfo("evolveSchemaIfNeededAndClose start")
+     val evolvedSchemaTable = ParquetSchemaUtils.evolveSchemaIfNeededAndClose(table,
+       clippedParquetSchema, readDataSchema, isSchemaCaseSensitive, useFieldId)
+-    GpuParquetScan.rebaseDateTime(evolvedSchemaTable, dateRebaseMode, timestampRebaseMode)
++
++    logInfo("rebaseDateTime start")
++    val result = GpuParquetScan.rebaseDateTime(evolvedSchemaTable, dateRebaseMode, timestampRebaseMode)
++    logInfo("rebaseDateTime done")
++    result
+   }
+ 
+   override def close(): Unit = {
+@@ -3125,7 +3181,7 @@ class ParquetPartitionReader(
+           }
+         }
+         iter.map { batch =>
+-          logDebug(s"GPU batch size: ${GpuColumnVector.getTotalDeviceMemoryUsed(batch)} bytes")
++          logInfo(s"GPU batch size: ${GpuColumnVector.getTotalDeviceMemoryUsed(batch)} bytes")
+           batch
+         }
+       }
+diff --git a/sql-plugin/src/main/scala/org/apache/spark/sql/rapids/shims/GpuFileScanRDD.scala b/sql-plugin/src/main/scala/org/apache/spark/sql/rapids/shims/GpuFileScanRDD.scala
+index ed8c2e7c2..b33b3e96e 100644
+--- a/sql-plugin/src/main/scala/org/apache/spark/sql/rapids/shims/GpuFileScanRDD.scala
++++ b/sql-plugin/src/main/scala/org/apache/spark/sql/rapids/shims/GpuFileScanRDD.scala
+@@ -110,7 +110,11 @@ class GpuFileScanRDD(
+       private def nextIterator(): Boolean = {
+         if (files.hasNext) {
+           currentFile = files.next()
+-          logInfo(s"Reading File $currentFile")
++          logInfo(s"Reading File $currentFile HERE")
++          var stackTrace: String = ""
++          val stackTraceElements = Thread.currentThread().getStackTrace()
++          stackTraceElements.foreach(element => {stackTrace = stackTrace + element + "\n"})
++          logInfo(s"GpuFileScanRDD Stack trace: $stackTrace")
+           // Sets InputFileBlockHolder for the file block's information
+           InputFileBlockHolder.set(currentFile.filePath.toString(),
+             currentFile.start, currentFile.length)

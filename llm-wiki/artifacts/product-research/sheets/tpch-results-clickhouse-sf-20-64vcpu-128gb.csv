@@ -1,0 +1,18 @@
+ClickHouse,,,,,,,,,,,,DuckDB,,CuDF
+data properly imported into the internal format,,,,,,,,,,,,data properly imported into the internal format,,H100 in Nebius
+vmtouch
+sf=20,64xIntel Xeon 128GB (yandex cloud),,64xEPYC 9655 256GB (datacrunch)
+,ClickHouse,DuckDB,ClickHouse,DuckDB,Peacock DB PoC,PeacockDB load time (1 GPU),PeacockDB copying time ,PeacockDB decode time,PeacockDB processing / DuckDB total,PeacockDB copying / DuckDB total,PeacockDB decoding / DuckDB total
+num,real time (CH),,,,cudf H100 (only processing),,,,,,,real time (DuckDB),Result verified (against CH),is result unexpected
+1,0.382,0.32,0.2,0.19,0.21,0.13,0.072,0.038,110.53%,37.89%,52.78%,,Y
+3,1.15,0.52,0.66,0.3,0.167,0.25,0.148,0.081,55.67%,49.33%,54.73%,,Y
+5,1.7,0.55,0.83,0.34,0.174,0.24,0.172,0.035,51.18%,50.59%,20.35%,,Y
+6,0.08,0.21,0.079,0.14,0.029,0.113,0.07,0.028,20.71%,50.00%,40.00%,,Y
+10,0.55,0.8,0.4,0.47,0.085,0.283,0.169,0.072,18.09%,35.96%,42.60%,,Y
+12,0.21,0.42,0.18,0.26,0.07,0.223,0.11,0.083,26.92%,42.31%,75.45%,,Y
+13,1.25,0.73,0.6,0.44,0.117,0.149,0.112,0.022,26.59%,25.45%,19.64%,,Y (DuckDB),ClickHouse result is incorrect: it includes NULL values into COUNT(column). DuckDB properly excludes NULLS. Made cudf code also properly exclude NULLs
+14,0.105,0.22,0.09,0.14,0.058,0.208,0.118,0.068,41.43%,84.29%,57.63%,,Y
+16,0.27,0.27,0.14,0.16,0.038,0.086,0.018,0.053,23.75%,11.25%,294.44%,,Y
+17,0.29,0.31,0.18,0.2,0.071,0.189,0.116,0.053,35.50%,58.00%,45.69%,0.333,Y
+19,0.31,0.45,0.17,0.27,0.074,0.24,0.133,0.077,27.41%,49.26%,57.89%,0.45,Y,ch is too fast re duckdb sf200
+20,0.17,0.45,0.1,0.27,0.048,0.248,0.14,0.064,17.78%,51.85%,45.71%,,,"Ch returns empty results, duckdb returns some results"
