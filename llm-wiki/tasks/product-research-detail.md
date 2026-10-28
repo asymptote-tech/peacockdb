@@ -45,3 +45,9 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
   GPU-centred), flight-sql-gpu-endpoint (no need). Most promising discovered: asof-gpu,
   datafusion-log-gpu, trainer-side-sql-prep. No named user found for any; web search ran out
   partway; some 2026 facts rest on one GTC attendee write-up.
+- sirius.md (2026-10-28): no own optimizer (DuckDB's; heuristics only); no automatic cross-query
+  cache (explicit `pin_table`, never evicted; raw-bytes cache off by default); spilling GPU→pinned
+  host→disk via cuCascade, young, unmeasured; Substrait in via library call, re-planned by DuckDB,
+  DataFusion 45 output gives wrong answers (LIMIT→0, #1963); smallest unit a whole plan or a
+  Fragment, no standalone libsirius. Fork: out (1,244 commits/12 mo, ~92% NVIDIA, no releases;
+  ~7.8× peacockdb's size with cuCascade). Only route: pinned dependency plus upstream work.
