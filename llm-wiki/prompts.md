@@ -31,7 +31,7 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   implementation plan the second planning phase produces, and is the developer's working
   document. `llm-wiki/tasks/<task>-detail.md` holds everything a run accumulates and is what
   a restarted coordinator reads to recover. `llm-wiki/tasks/tasks.md` changes only when a
-  state changes.
+  state changes. `llm-wiki/artifacts/<task>/` is used only by a task whose spec explicitly says to save artifacts there.
 - **Tickets** live in the milestone files under `llm-wiki/tickets/`, indexed by
   `llm-wiki/tickets.md` (GitHub issues are retired). New bugs and follow-ups get a ticket in
   the file of the milestone they block; ticket IDs (`#NN`) are permanent. A ticket's header is
