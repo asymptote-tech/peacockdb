@@ -189,11 +189,21 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `DISABLE_AUTOUPDATER=1` set for the machine user, gh at `GH_VERSION` from the same tarball as the
   image and at the same path, `/usr/local/bin/gh` (`gh auth setup-git` writes that absolute path
   into `~/.gitconfig`, and the container must resolve it),
-  the repository cloned, sf1 generated and the embeddings fetched (both with the build image, into
-  the machine's directories); it ends by printing the two logins left to do by hand
+  the repository cloned, the embeddings fetched and sf1 generated for the clone's generator inputs
+  (both with the build image, into the machine's data directory); it ends by printing the two
+  logins left to do by hand
 - Create: `scripts/env/up.sh` — `up.sh <instance> [--chain <c>] [--cudf 25.02] [--env <file>]`;
   `down.sh <instance>`
 - Create: `scripts/env/tests/test_up.py`
+- Create: `scripts/lib/image-inputs.sh` — the files an image is made from, each with its
+  sha256: `docker/conda/cudf-<v>.spec`, `docker/pins.env`, the kind's Dockerfile and
+  `.dockerignore`, and what that Dockerfile copies (`venv.lock`, `cmake-wrapper.sh`,
+  `runtime-spec.sh`, `run-tests.sh`); for the build image also `third_party/cudf`'s commit and the
+  flatbuffers `GIT_TAG` in `cpp/CMakeLists.txt`, which its prefetch fixes
+- Modify: `scripts/env/image.sh` — every image gets the label `peacockdb.inputs`, that list
+- Create: `scripts/lib/data-inputs.sh` — the hash of what sf1's bytes follow from:
+  `testdata/generate_testdata.sh`, `testdata/embeddings.sha256`, the `DUCKDB_VERSION` line of
+  `docker/pins.env`, and the generator's arguments per dataset
 - Modify: `llm-wiki/build-test.md` — a "Containers" section
 
 **Interfaces:**
@@ -220,6 +230,19 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   The registry is read-only, so a `Cargo.lock` that names a crate the machine lacks would fail
   every build: `up.sh` runs `cargo fetch` for the instance's worktree in the build image, with the
   registry writable for that one step only, before it starts the instance.
+  An image built from other inputs than the instance's tree fails later, mid-build or mid-run,
+  with an error that does not name the cause. `up.sh` pulls `:cudf-<v>`, or the tag `--image`
+  names (a `:cudf-<v>-<commit>` keeps an instance on one image), and compares its
+  `peacockdb.inputs` with `image-inputs.sh` over the instance's worktree; a difference or a missing
+  label refuses the start, naming each file that differs. The images published before this label
+  are refused until republished. Task 7's `prepare` makes the same check of the run image.
+  The data is generated once per machine and per generator, never per instance or per start: the
+  machine's data directory (`$HOME/peacock-data` unless `PEACOCK_DATA_DIR` names another) holds
+  `<hash>/{tpch.sf1,tpcds.sf1}` and `embeddings-cache/`, the hash being `data-inputs.sh` over a
+  worktree. `up.sh` mounts the set matching the instance's worktree read-only at its
+  `testdata/<dataset>` paths; when none matches, it generates that set once in the build image,
+  under a lock, so two instances starting together generate it once. Two chains whose branches
+  differ in the generator each get their own set; an old set is removed by hand.
 
 - [ ] **Step 1: failing tests** (fakes on `PATH` recording argv): `test_up_refuses_missing_login`
   (no Claude credentials, or `gh auth status` failing → exit 2, stderr names which);
@@ -231,7 +254,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   worktrees and target volumes, the same machine mounts, the data and the Claude install `:ro`,
   the GPU ssh key, the host files and a provider's config `:ro`);
   `test_up_runs_as_the_machine_user` (`--user` is the caller's uid:gid, never 0);
-  `test_up_never_passes_keys_as_args` (no key value in argv; only `--env-file`).
+  `test_up_never_passes_keys_as_args` (no key value in argv; only `--env-file`);
+  `test_up_mounts_data_by_generator_inputs` (a present set is mounted `:ro` and nothing is
+  generated; a changed `generate_testdata.sh` makes a new hash, generated once, the old set
+  untouched; two `up.sh` at once generate it once);
+  `test_image_labels_its_inputs` (`image.sh build --dry-run` passes the label, equal to
+  `image-inputs.sh` over the tree; a changed `venv.lock` changes the build image's label, not the
+  run image's); `test_up_refuses_stale_image` (a fake `docker image inspect` whose label differs
+  in `venv.lock` → exit 2, stderr names `docker/venv.lock`; no label → exit 2).
 - [ ] **Step 2:** implement; with `--chain`, `scripts/ensemble-watchdog.sh <c>` starts in the
   instance's worktree inside the container.
 - [ ] **Step 3: verify on a fresh VM** (a verda or nebius CPU VM the human creates): from nothing,
@@ -253,7 +283,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Produces: host file keys `PROVIDER=ssh|nebius HOST USER KEY [PASSWORD_FIRST_LOGIN=1]
   [INSTANCE_ID]`; `prepare` installs its own key on a password-only host, then Docker + NVIDIA
   Container Toolkit if missing, puts the data on the machine once (sf1 generated in the build
-  image there, sf40 from S3 or generated — skipped when present and its checksum holds), then
+  image there under the `data-inputs.sh` hash, as Task 6 keeps it; sf40 from S3 — skipped when
+  present and its checksum holds), then
   `docker pull` the run image; `ship` rsyncs `cpp/install` and the query files to
   `~/peacock/<instance>/` (instance-named, never the old path's dirs), never the data;
   `run` executes the run image with `--gpus all` and `--hostname` set to the machine's name, which
@@ -265,7 +296,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `test_run_refuses_old_driver` (fake `nvidia-smi` reporting a driver below the run image's CUDA
   minimum → exit 3 before `ship`, message names both); `test_ship_dir_is_instance_named`;
   `test_run_passes_the_machines_hostname` (`docker run` gets `--hostname` with the name the fake
-  host's `hostname` answers).
+  host's `hostname` answers); `test_prepare_refuses_stale_run_image` (the run image's
+  `peacockdb.inputs` differs from the tree → exit 2 before `ship`, naming the file).
 - [ ] **Step 2:** implement.
 - [ ] **Step 3: verify on nebius-gpu** (the L40S, by hand-given ssh): `gpu.sh nebius-l40s prepare`,
   `ship`, `run list` with binaries from the build image: the device tiers pass with the same
@@ -331,8 +363,11 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 
 ### Task 11: the benchmark run on an 80 GB A100 or H100
 
-- [ ] **Step 1:** the human creates the machine on nebius and settles the two run-time decisions
-  (rowgroup modes; tpcds sf40 source). Record both in the detail file.
+- [ ] **Step 1:** the human creates the machine on nebius and settles the rowgroup modes; record
+  it in the detail file. tpcds sf40 comes from the bucket `tpcds-sf40`, filled once from the copy
+  the H200 results were measured on, so every device reads the same parquet files (row-group
+  layout is part of what the rowgroup modes measure, and a regeneration need not reproduce it);
+  `scripts/upload_datasets.sh` learns the bucket, and `prepare` checks the files against it.
 - [ ] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
   `gpu.sh <host> prepare && ship && run bench && pull`, the idle watcher's four-hour limit handled
   (the run in segments, or the watcher configured for it on that host).
@@ -351,3 +386,20 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   cases than the list declares (the deferred rowgroup modes); committing such a tree needs a named
   exception in that test (device, modes, reason) that the human approves.
 
+
+### Task 12: the ensemble end to end on a scratch chain
+
+After Task 6 Step 3; its device step after Task 7 Step 3. The ensemble carries one small task
+from `approved to build` to `done` inside an instance, with nobody at the machine: Task 6 Step 3
+shows the first coordinator turn, this shows the whole path a real chain takes.
+
+- [ ] **Step 1:** a scratch branch off master whose board has one chain and one task, approved to
+  build: a change small enough for one developer pass, touching code and its test, with one device
+  step through `gpu.sh` on the Task 7 host. Never merged.
+- [ ] **Step 2:** `up.sh <i> --chain <c>` on the Task 6 machine; nothing else is done by hand
+  until the chain stops. Done when: the task reaches `done` (its commit pushed, its PR open, CI
+  green); the device step's results pulled into the worktree; no login or key asked for at any
+  point; `<c>.status` says why the watchdog stopped. Record wall times per board state.
+- [ ] **Step 3:** the PR closed unmerged, the scratch branches deleted on origin, `down.sh <i>`;
+  `docker volume ls` and the machine clone's `git worktree list` show nothing of the instance.
+  Record the run in the detail file.
