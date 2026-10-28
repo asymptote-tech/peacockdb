@@ -11,7 +11,7 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 
 - Task 0: complete
 - Task 1: complete — yardstick 22,830 lines (57,659 test); 8 sheet CSVs (7 + 1 tabs, as the API reports); patch saved
-- Task 2: todo
+- Task 2: complete — 10 named slugs present; 16 discovered pass
 - Task 3: todo
 - Task 4: todo
 - Task 5: todo
@@ -33,3 +33,15 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 ## Checkpoint
 
 ## Subagent returns
+- nvidia.md (2026-10-28): NVIDIA sells no DB but gives away GPU SQL engines its staff build
+  (HeavyDB bought 2025, open-sourced 2026-10; Sirius, 7 of top 9 committers NVIDIA; GPU Presto
+  with IBM); spark-rapids sold via AI Enterprise. "Denies competing": no public source. GQE
+  (rapidsai/gqe): DataFusion→Substrait→libcudf PoC. ClickHouse GPU RFCs #116807, #124455 (Sirius
+  offload) — both verified open on GitHub by the helper. Risk strong: clickhouse,
+  lakehouse-iceberg, realtime-vram-cache, realtime-other, spark-plugin, Sirius base; medium:
+  datafusion-plugin, distributed-pluggable, vector-sql; weak: streaming-flink, other-accelerators.
+- discovery.md (2026-10-28): 29 options, 26 pass (10 named, 9 of them `pass (weak)` mostly
+  for NVIDIA/host-project overlap; 16 discovered). Failed: robot-log-gpu, trace-analytics-gpu (not
+  GPU-centred), flight-sql-gpu-endpoint (no need). Most promising discovered: asof-gpu,
+  datafusion-log-gpu, trainer-side-sql-prep. No named user found for any; web search ran out
+  partway; some 2026 facts rest on one GTC attendee write-up.
