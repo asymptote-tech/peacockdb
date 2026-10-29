@@ -240,7 +240,7 @@ Total new work: 0.8× engine on peacockdb, 0.45× on Sirius (estimate)
 - [N] nvidia.md, stance and cuVS/NeMo rows (local; accessed 2026-10-29)
 - [E] evidence-in-hand.md, TPC-H SF20 load vs compute (local; accessed 2026-10-29)
 - [LN] options/lean.md data-path table (local; accessed 2026-10-29)
-- [GF] Research notes, GPU fit. Clones: cudf @785ee522f5688f485fc0b1eabca7f8d6d2adea0e, crosswalk @9b801f70b25658a1a2cab39c5f6c52523851f655, sirius @b9e05ffc653c8ed031c789e5c1415ac1186e0619 (accessed 2026-10-29). Key URLs:
+- [GF] Research notes, GPU fit (`../notes/gpu-fuzzy-joins-in-sql/gpu_fit.md`; [IN] and [DM] are `incumbents.md` and `demand.md` there). Clones: cudf @785ee522f5688f485fc0b1eabca7f8d6d2adea0e, crosswalk @9b801f70b25658a1a2cab39c5f6c52523851f655, sirius @b9e05ffc653c8ed031c789e5c1415ac1186e0619 (accessed 2026-10-29). Key URLs:
   - https://github.com/rapidsai/cudf/tree/785ee522f5688f485fc0b1eabca7f8d6d2adea0e/cpp/include/nvtext (accessed 2026-10-29)
   - https://github.com/rapidsai/cudf/issues/6503 (accessed 2026-10-29)
   - https://github.com/rapidsai/cudf/issues/18274 (accessed 2026-10-29)

@@ -192,7 +192,7 @@ option merged into it, named ones verbatim from the spec.
   entry points, 5 custom kernels, ~30 CUDA runtime calls. Cost 0.5× peacockdb, n/a Sirius (hard
   fork). Ratings: need weak · cost strong · data path medium · friction weak · platform medium ·
   funding weak.
-- Task 5: Ruling: the deep-research notes the option files cite (`[H]`, `[A]`, scratchpad paths)
+- Task 5: complete — headings, totals, sources, slugs all pass; 17 notes folders copied to `notes/` and citations rewritten; demand.md: #819 corrected, grace row added. Earlier ruling: the deep-research notes the option files cite (`[H]`, `[A]`, scratchpad paths)
   live in the session scratchpad and would vanish; copy the whole `scratchpad/research_notes/`
   tree into `artifacts/product-research/notes/` and rewrite the references — cost if wrong: a
   few MB of markdown in the repo.

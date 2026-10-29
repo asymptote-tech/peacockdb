@@ -234,8 +234,8 @@ Total new work: 0.5× engine on peacockdb, n/a on Sirius (estimate)
 ## Sources
 
 - [D] demand.md `## Ratings` row other-accelerators and `## What people ask for`; [E] evidence-in-hand.md; [I] inventory.md `## Yardstick` and measured numbers; [S] sirius.md `## Sirius components`; [N] nvidia.md row other-accelerators and refs [47][72][74]; digests sources/hn-stackexchange.md, sources/issue-trackers.md, sources/reddit.md (all in llm-wiki/artifacts/product-research/, accessed 2026-10-29).
-- [H] Desk research notes for AMD, Apple and Intel (session scratchpad; claims carried here with their own links).
-- [A] Desk research notes for AI accelerators (session scratchpad; claims carried here with their own links).
+- [H] Desk research notes for AMD, Apple and Intel (`../notes/non-nvidia-gpu-sql-layers/amd.md`, `apple_intel.md`; claims carried here with their own links).
+- [A] Desk research notes for AI accelerators (`../notes/non-nvidia-gpu-sql-layers/ai_accelerators.md`; claims carried here with their own links).
 - Code counts: peacockdb master f36a68ec `cpp/src` and `cpp/include`, plus `third_party/cudf` @ 43505bb975f46ce4e140fdaf55192611d6e231ac (local, 2026-10-29).
 1. hipDF repo and docs @ f59924fde8165ef59588abe65b5965336e28f99a: https://github.com/AMD-Ecosystem/hipDF ; https://github.com/AMD-Ecosystem/hipDF/blob/f59924fde8165ef59588abe65b5965336e28f99a/docs/what-is-hipdf.rst ; https://pypi.amd.com/rocm-7.2.3/simple/ (accessed 2026-10-29)
 2. hipCOMP-core @ 22cc762f54fba7cdfca74a4c50c00f2aac4ace7a: https://github.com/ROCm/hipCOMP-core (accessed 2026-10-29)
