@@ -138,3 +138,10 @@ option merged into it, named ones verbatim from the spec.
   other-accelerators 12/3/2·5, gpu-bi-dashboards 4/5/3·5. Changed: storage-oem-engine,
   gov-airgapped, ab-metrics-gpu, idle-gpu-batch, telco-xdr-gpu → fail (a); lakehouse-iceberg →
   pass (weak); datafusion-plugin → pass. Borderline passes: ran-sim-datalake, gpu-cpu-router.
+- demand.md (2026-10-29): strong — workstation-gpu-sql, spark-plugin; medium — lean,
+  gpu-bi-dashboards, quant-gpu, llm-corpus-sql; weak — other-accelerators, trainer-side-sql-prep,
+  datafusion-plugin, lakehouse-iceberg, postgres-gpu-analytics, clickhouse, realtime-other,
+  distributed-pluggable; thin — fuzzy-join-gpu, gpu-cpu-router, streaming-flink, vector-sql. No
+  user asked for the lean's "~100 GB in a few hundred ms". Leads: Graphistry (results on GPU, cudf
+  #23039), Superset over 9.6B-row Delta via Spark Thrift + RAPIDS (cudf-spark #11064), UC Berkeley
+  DuckDB data server GPU backend (mcp-data-server #227). Discord/Slack 429 again.
