@@ -176,3 +176,37 @@ option merged into it, named ones verbatim from the spec.
   independent attempts missed targets. Q3: no GPU decoded-column cache (compressed Parquet on JVM
   heap, re-decoded per query). Cost 1.6× peacockdb, 1.3× Sirius. Ratings: need strong · cost weak
   · data path medium · friction medium · platform weak · funding medium.
+- options/trainer-side-sql-prep.md: fits budget, weak bet. Nobody asks for SQL; train-time cost is
+  decode and Arrow→tensor, joins run upstream; training GPUs lack spare HBM; cudf-polars has
+  experimental zero-copy `persisted_to_torch`. Cache needed: decoded projected columns in pinned
+  host RAM. Cost 0.8× peacockdb, 0.7× Sirius. Ratings: need weak · cost strong · data path medium
+  · friction medium · platform weak · funding weak.
+- options/workstation-gpu-sql.md: fits budget, weak product. DuckDB `INSTALL sirius` (PR #28022
+  open; GPU backends as ~1 GB community extensions) and cudf-polars ship close to it. Edges thin:
+  static wheel 120–200 MB vs 1.7–2.7 GB `polars[gpu]` (estimate), visible fallback; native Windows
+  out of reach on libcudf. Cost 0.8× peacockdb, 0.2× Sirius. Ratings: need strong · cost medium ·
+  data path medium · friction weak · platform weak · funding weak. No desk-GPU numbers exist.
+- options/other-accelerators.md: a portability feature, not a product. AMD hipDF is a GA port of
+  cuDF 25.10 (peacockdb's pin), so AMD-only ≈ 0.5×; Apple Metal +~1×; Intel no datacenter GPU;
+  Cerebras/Groq/TPU poor fit. Demand weak (12 requests, 0 workloads). peacockdb uses ~75 libcudf
+  entry points, 5 custom kernels, ~30 CUDA runtime calls. Cost 0.5× peacockdb, n/a Sirius (hard
+  fork). Ratings: need weak · cost strong · data path medium · friction weak · platform medium ·
+  funding weak.
+- Task 5: Ruling: the deep-research notes the option files cite (`[H]`, `[A]`, scratchpad paths)
+  live in the session scratchpad and would vanish; copy the whole `scratchpad/research_notes/`
+  tree into `artifacts/product-research/notes/` and rewrite the references — cost if wrong: a
+  few MB of markdown in the repo.
+- options/grace-superchip-analytics.md: a deployment target, not a product; nobody asks for SQL
+  on Grace. Strengthens lean most (480 GB Grace memory per GPU at ~375 GB/s), then
+  gpu-bi-dashboards; DGX Spark fits workstation-gpu-sql. GQE and Sirius already target Grace.
+  GH200 GPU reads Grace memory at 350–418 GB/s (HBM 3.4 TB/s, pinned PCIe H200 47 GB/s); Sirius
+  GB300 SF1000 18–21 s from Grace memory vs ~7 s from HBM. GH200 $2.29/h. Cost 0.8× peacockdb,
+  0.3× Sirius. Ratings: need weak (no demand.md row; nearest rows used) · cost strong · data path
+  strong · friction medium · platform weak · funding weak. Gaps: GB200 C2C rate, random probe rate.
+  TODO Task 5: demand.md has no row for grace-superchip-analytics; add one.
+- options/quant-gpu.md: fits budget, not recommended first. As-of gap closing for free (cudf
+  #24634 ports KX TAQ benchmark to cudf-polars; `cudf::asof_join` PR #24180 open; KX ships GPU
+  `aj`); ours is the sweep runner over a resident VRAM cache. Cold as-of decode-bound ~8 GB/s.
+  First partners: small crypto market makers/prop shops, tick vendors (BMLL). Cost 0.75×
+  peacockdb, 0.45× Sirius. Ratings: need medium · cost strong · data path medium · friction medium
+  · platform weak · funding weak.
