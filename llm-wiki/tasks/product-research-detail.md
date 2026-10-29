@@ -36,7 +36,7 @@ Decided by the human on 2026-10-28, from the rewritten `discovery.md`. Ranking r
 (plan Task 3): over 2× the yardstick on both bases is out; then demand strength; ties by adoption
 friction, data path, funding story, platform risk.
 
-**Kept — thirteen deep runs, slug of the option file first:**
+**Kept — fourteen deep runs, slug of the option file first:**
 
 1. `lean` — the human's hypothesis, given to its researcher as "a candidate product's premises".
 2. `workstation-gpu-sql` — merged with `dataframe-gpu`.
@@ -51,6 +51,8 @@ friction, data path, funding story, platform risk.
 11. `llm-corpus-sql` — added by the human on 2026-10-29.
 12. `fuzzy-join-gpu` — added by the human on 2026-10-29.
 13. `gpu-cpu-router` — added by the human on 2026-10-29.
+14. `grace-superchip-analytics` — added by the human on 2026-10-29: analytics on Grace Hopper /
+    Grace Blackwell (GH200, GB200, GB300, DGX Spark GB10), exploiting the fast CPU–GPU memory link.
 
 (The helper's message said "ten"; the list it gave, and the human approved, has nine.) Each merged option's file answers the questions of every
 option merged into it, named ones verbatim from the spec.
@@ -72,7 +74,7 @@ option merged into it, named ones verbatim from the spec.
 - Next is Task 4. Wave 1 is partly done: `sirius.md` and `nvidia.md` exist. `demand.md` is still
   to write; it now starts from the four digests in `artifacts/product-research/sources/` as its
   corpus and fills gaps (Discord unreachable; Reddit partial) rather than searching from zero.
-- Then the option wave: the thirteen kept options above, at most five at a time, each given the paths
+- Then the option wave: the fourteen kept options above, at most five at a time, each given the paths
   of `sirius.md`, `nvidia.md`, `demand.md`, `discovery.md` and the digests.
 - Ruling: researchers may go past the deep-research skill's ~15-call cap per researcher when a
   question needs it (it is the skill's own guidance, not a quota) — cost if wrong: time.
