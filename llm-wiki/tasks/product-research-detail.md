@@ -15,7 +15,7 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 - Task 3: complete — human kept the nine suggested options, and added four on 2026-10-29 (thirteen) on 2026-10-28 (see Checkpoint)
 - Task 4: complete — 14 option files plus demand.md (sirius.md, nvidia.md earlier)
 - Task 5: todo
-- Task 6: todo
+- Task 6: report written; audit (`artifacts/product-research/audit.md`): 15 sampled sentences, 9 supported, 6 partly, 0 unsupported or contradicted; lean judged alike; strong ratings hold; rule reproduces the order. All 14 fixes applied (grace-superchip-analytics → thin; rows 7–14 reordered). Remaining: the human reads it.
 
 ## Rulings
 
@@ -240,3 +240,8 @@ option merged into it, named ones verbatim from the spec.
   budgets. Pain is blocking explosion, output spill, clustering OOM, labelling — not scoring speed.
   Cost 0.8× peacockdb, 0.45× Sirius. Ratings: need weak · cost strong · data path strong · friction
   medium · platform medium · funding weak.
+- notes/spark-gpu-plugin-research/cache.md (late sub-researcher, copied 2026-10-29): spark-rapids
+  keeps nothing decoded on the GPU between queries — PCBS stores Snappy Parquet bytes on the JVM
+  heap and re-copies and re-decodes per query; filecache (23.06, off by default) caches raw byte
+  ranges on local disk; no roadmap issue for a decoded cross-query cache; #16460 two-memory-manager
+  hang (open). Only Sirius `pin_table` skips both I/O and decode across queries.

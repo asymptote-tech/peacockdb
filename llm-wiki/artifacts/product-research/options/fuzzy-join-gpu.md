@@ -216,7 +216,7 @@ Total new work: 0.8× engine on peacockdb, 0.45× on Sirius (estimate)
 
 ## Ratings
 
-- **Who needs it badly: weak.** demand.md rates it thin. About 4 GPU askers and about 6 CPU complainers, none with a stated budget or deadline [D][DM].
+- **Who needs it badly: thin.** demand.md rates it thin. About 4 GPU askers and about 6 CPU complainers, none with a stated budget or deadline [D][DM].
 - **Build cost: strong.** 0.8× on peacockdb and 0.45× on Sirius, mostly additive. The hard part (a fused, skew-bounded operator) is contained.
 - **Data path: strong.** Compute per input byte is very high, so load is about 15% of the job. Output volume is the only path issue, and an in-operator threshold fixes it.
 - **Adoption friction: medium.** A Splink backend is a near-drop-in on Sirius. On peacockdb it needs Splink's acceptance and SQL-surface work. GPU access in secure government environments is hard.

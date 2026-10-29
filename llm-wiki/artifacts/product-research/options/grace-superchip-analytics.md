@@ -3,7 +3,7 @@
 ## Verdict
 
 - **What it is:** an engine that keeps hot columns in the Grace CPU's large LPDDR5X memory (480 GB per Grace) and has the GPU read them over NVLink-C2C (~375 GB/s measured on GH200), with HBM as the top tier. On GB10 there is one shared pool, so nothing is staged at all.
-- **Who needs it:** demand.md has **no row** for this option. Nobody was found who asks for SQL on Grace. Grace machines are bought and rented for AI. The few analytics owners found run Spark or RAPIDS on DGX Spark and complain about packaging and stability [D][F1–F4].
+- **Who needs it:** demand.md rates it **thin** (row added after this file was written: no first-person poster). Nobody was found who asks for SQL on Grace. Grace machines are bought and rented for AI. The few analytics owners found run Spark or RAPIDS on DGX Spark and complain about packaging and stability [D][F1–F4].
 - **Budget:** it fits easily: ~0.8× on peacockdb, ~0.3× on Sirius (estimate). **But it is a deployment target, not a product.** It makes the cache in **lean** and **gpu-bi-dashboards** cheaper and bigger. On DGX Spark it serves **workstation-gpu-sql**.
 
 ## Who needs it badly
@@ -202,7 +202,7 @@ Total new work: 0.8× engine on peacockdb, 0.3× on Sirius (estimate)
 
 ## Ratings
 
-- **Who needs it badly: weak.** demand.md has no row. The nearest rows are workstation-gpu-sql (strong, but dataframes and installs) and lean (medium). Here, only 4 DGX Spark posts and vendor marketing were found [D][F1–F4].
+- **Who needs it badly: thin.** demand.md rates it thin (0 first-person posters). The nearest rows are workstation-gpu-sql (strong, but dataframes and installs) and lean (medium). Here, only 4 DGX Spark posts and vendor marketing were found [D][F1–F4].
 - **Build cost: strong.** ~0.8× on peacockdb and ~0.3× on Sirius, well inside the budget.
 - **Data path: strong.** C2C is the best host link that exists (~375 GB/s, 8× PCIe). The cold path is still decode-bound, so a decoded cache is mandatory.
 - **Adoption friction: medium.** It needs rare, AI-allocated hardware. As a DuckDB extension (Sirius) or a plugin it is easy, but as a new peacockdb system it is not.

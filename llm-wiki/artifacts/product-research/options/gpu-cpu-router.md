@@ -210,7 +210,7 @@ Total new work: 0.45× engine on peacockdb, 0.25× on Sirius (estimate)
 
 ## Ratings
 
-- **Who needs it badly — weak:** demand.md rates it thin. One poster, who says "not mass-market" [D][HN1].
+- **Who needs it badly — thin:** demand.md rates it thin. One poster, who says "not mass-market" [D][HN1].
 - **Build cost — strong:** 0.45× on peacockdb, 0.25× on Sirius. Well inside the budget, though the middle-band accuracy is unproven.
 - **Data path — medium:** it routes around the data path rather than fixing it. Without a cache its answer is mostly CPU.
 - **Adoption friction — medium:** an extension or gateway hook is easy. But the buyer must already run a warm GPU engine and a CPU engine that give the same answers.
