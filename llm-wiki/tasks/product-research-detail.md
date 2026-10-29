@@ -12,7 +12,7 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 - Task 0: complete
 - Task 1: complete — yardstick 22,830 lines (57,659 test); 8 sheet CSVs (7 + 1 tabs, as the API reports); patch saved
 - Task 2: complete — 10 named slugs present; 16 discovered pass
-- Task 3: complete — human kept the ten suggested options on 2026-10-28 (see Checkpoint)
+- Task 3: complete — human kept the nine suggested options on 2026-10-28 (see Checkpoint)
 - Task 4: todo
 - Task 5: todo
 - Task 6: todo
@@ -36,7 +36,7 @@ Decided by the human on 2026-10-28, from the rewritten `discovery.md`. Ranking r
 (plan Task 3): over 2× the yardstick on both bases is out; then demand strength; ties by adoption
 friction, data path, funding story, platform risk.
 
-**Kept — ten deep runs, slug of the option file first:**
+**Kept — nine deep runs, slug of the option file first:**
 
 1. `lean` — the human's hypothesis, given to its researcher as "a candidate product's premises".
 2. `workstation-gpu-sql` — merged with `dataframe-gpu`.
@@ -48,7 +48,7 @@ friction, data path, funding story, platform risk.
 8. `datafusion-plugin` — merged with `datafusion-log-gpu`.
 9. `lakehouse-iceberg` — merged with `gpu-scan-tier`.
 
-(Nine files plus `lean` is ten runs.) Each merged option's file answers the questions of every
+(The helper's message said "ten"; the list it gave, and the human approved, has nine.) Each merged option's file answers the questions of every
 option merged into it, named ones verbatim from the spec.
 
 **Cut at the checkpoint, with the reason the report lists:**
@@ -69,7 +69,7 @@ option merged into it, named ones verbatim from the spec.
 - Next is Task 4. Wave 1 is partly done: `sirius.md` and `nvidia.md` exist. `demand.md` is still
   to write; it now starts from the four digests in `artifacts/product-research/sources/` as its
   corpus and fills gaps (Discord unreachable; Reddit partial) rather than searching from zero.
-- Then the option wave: the ten kept options above, at most five at a time, each given the paths
+- Then the option wave: the nine kept options above, at most five at a time, each given the paths
   of `sirius.md`, `nvidia.md`, `demand.md`, `discovery.md` and the digests.
 - Ruling: researchers may go past the deep-research skill's ~15-call cap per researcher when a
   question needs it (it is the skill's own guidance, not a quota) — cost if wrong: time.
