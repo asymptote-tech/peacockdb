@@ -81,3 +81,9 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
   Parquet (datafusion-log-gpu, gpu-scan-tier); single-machine setup pain (Windows, WSL2, old GPUs;
   "willing to pay" for Windows cuDF) → workstation-gpu-sql; new: quant backtest sweeps, single-cell
   genomics. No Reddit report of Spark RAPIDS in production.
+- discovery.md rewritten (2026-10-28) from the four digests: 41 options, 30 pass (10 named, 20
+  discovered), 11 fail (9 (a), 2+1 (c)). Strongest evidence (R/U/C · posters):
+  workstation-gpu-sql 7/11/38·22, spark-plugin 4/7/20·13, dataframe-gpu 2/10/17·7,
+  other-accelerators 12/3/2·5, gpu-bi-dashboards 4/5/3·5. Changed: storage-oem-engine,
+  gov-airgapped, ab-metrics-gpu, idle-gpu-batch, telco-xdr-gpu → fail (a); lakehouse-iceberg →
+  pass (weak); datafusion-plugin → pass. Borderline passes: ran-sim-datalake, gpu-cpu-router.
