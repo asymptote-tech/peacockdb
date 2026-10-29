@@ -13,7 +13,7 @@ Executed inline by a helper session on master (`superpowers:executing-plans`), p
 - Task 1: complete — yardstick 22,830 lines (57,659 test); 8 sheet CSVs (7 + 1 tabs, as the API reports); patch saved
 - Task 2: complete — 10 named slugs present; 16 discovered pass
 - Task 3: complete — human kept the nine suggested options, and added four on 2026-10-29 (thirteen) on 2026-10-28 (see Checkpoint)
-- Task 4: todo
+- Task 4: complete — 14 option files plus demand.md (sirius.md, nvidia.md earlier)
 - Task 5: todo
 - Task 6: todo
 
@@ -210,3 +210,33 @@ option merged into it, named ones verbatim from the spec.
   First partners: small crypto market makers/prop shops, tick vendors (BMLL). Cost 0.75×
   peacockdb, 0.45× Sirius. Ratings: need medium · cost strong · data path medium · friction medium
   · platform weak · funding weak.
+- options/postgres-gpu-analytics.md: weak. PG-Strom 9 years, no named customers, v6.2 drafts drop
+  GPU-Cache as "rarely used"; pg_duckdb/pg_lake cover Postgres-sized analytics on CPU; managed
+  Postgres allows no C/CUDA extension and no GPU instances. Cheapest alpha (Sirius in pg_lake's
+  DuckDB v1.5.6 sidecar) is equally easy for vendors/NVIDIA. EDB's GPU offer is remote Spark +
+  RAPIDS over Parquet. Cost 1.1× peacockdb, 0.4× Sirius. Ratings: need weak · cost medium · data
+  path medium · friction weak · platform weak · funding weak. Several provider facts unverified.
+- options/datafusion-plugin.md: weak. Seam is the right architecture and cheapest alpha, but one
+  user ask (Beacon) and zero GPU issues in five log-store trackers; Algeon (DataFusion 55.1,
+  99/99 TPC-DS) and libcudf-rs (Datadog engineers) already ship it; GQE is the blueprint. Version
+  skew: peacockdb on DF 45, targets on 52.5–55.2; datafusion-ffi breaks between majors → one build
+  per host pin. Logs: full-text already indexed; GPU work is aggregations and LIKE/regex; logs
+  compress 3.26×, H100 holds hours at 1 TB/day. Cost 0.55× peacockdb, 0.6× Sirius. Ratings: need
+  weak · cost strong · data path medium · friction medium · platform weak · funding weak.
+- options/llm-corpus-sql.md: pain real (Curator OOMs and broken Ray workflows at 6–24 TB) but
+  inside NVIDIA's free NeMo Curator; nobody asks for SQL; dedup ~16 H100-h per 8 TB vs 6,000
+  H100-h for one classifier pass. Cost 1.4× peacockdb (1.0–1.8), 0.6× Sirius (0.4–0.8); bulk is
+  spill + single-node multi-GPU. Ratings: need medium · cost medium · data path medium · friction
+  weak · platform weak · funding weak.
+- options/gpu-cpu-router.md: a feature, not a product; fits lean or gpu-bi-dashboards (deciding
+  signal: is the data already in GPU memory); on Sirius it is issue #990. Demand thin. Nothing
+  ships cost-based routing by default (spark-rapids CBO off; Sirius/Velox/ClickHouse/Fabric fall
+  back by capability). Hot vs cold swings ClickBench 20–40×; middle band unproven; peacockdb's
+  cost model counts bytes, times nothing. Cost 0.45× peacockdb, 0.25× Sirius. Ratings: need weak ·
+  cost strong · data path medium · friction medium · platform weak · funding weak.
+- options/fuzzy-join-gpu.md: strong engineering fit, weak demand. GPU ~8×10⁷ pairs/s (4070 Ti
+  SUPER) vs ~2×10⁷ on 192 vCPU; Splink on DuckDB already does 1B records in ~9 min predict(); no
+  GPU issue in Splink/Zingg/dedupe/RapidFuzz; ~4 GPU askers, ~6 CPU complainers at 10M+, no
+  budgets. Pain is blocking explosion, output spill, clustering OOM, labelling — not scoring speed.
+  Cost 0.8× peacockdb, 0.45× Sirius. Ratings: need weak · cost strong · data path strong · friction
+  medium · platform medium · funding weak.
