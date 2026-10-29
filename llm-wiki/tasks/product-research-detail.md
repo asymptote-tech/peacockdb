@@ -145,3 +145,32 @@ option merged into it, named ones verbatim from the spec.
   user asked for the lean's "~100 GB in a few hundred ms". Leads: Graphistry (results on GPU, cudf
   #23039), Superset over 9.6B-row Delta via Spark Thrift + RAPIDS (cudf-spark #11064), UC Berkeley
   DuckDB data server GPU backend (mcp-data-server #227). Discord/Slack 429 again.
+- options/lean.md: cache premise holds on NVLink boxes only with data already in VRAM, fails
+  cold, partly on PCIe-only; plugin premise mostly holds but DuckDB already has Sirius
+  `pin_table`; Voltron premise false (Theseus read Parquet in place, sold embedded via partners;
+  causes: revenue shortfall vs ~120 staff, late launch). Cost 1.1× peacockdb, 0.3× Sirius.
+  Ratings: need medium · cost medium · data path strong · friction medium · platform weak ·
+  funding weak.
+- options/lakehouse-iceberg.md: only as a GPU Iceberg engine with a three-tier cache (VRAM
+  decoded, pinned RAM lightly compressed, NVMe encoded pages); drop the decode-tier-for-any-engine
+  variant (3–5× bytes over Flight). Cold S3 NIC-bound; fix #232 and Snappy first (7–9 GB/s decode
+  < 100 Gbps NIC). Sirius already has GPU Iceberg with deletes (2026-09-15); also cudf-spark,
+  Presto-GPU, Starburst Torin, Bodo. Cost 0.6–1.1× peacockdb, 0.3–0.5× Sirius. Ratings: need weak
+  · cost medium · data path weak · friction medium · platform weak · funding weak.
+- options/gpu-bi-dashboards.md: GPU SQL server, hot tables in VRAM/pinned RAM, live appends,
+  Flight SQL, in-process device API. Cost 0.9× peacockdb, 0.35× Sirius. Ratings: need medium ·
+  cost medium · data path strong · friction weak · platform weak · funding weak. Encoded vs
+  compressed: both ~2.5–3× capacity; nvCOMP/Parquet pages ~0.5–0.7 s per 80 GB touch, bit-packed/
+  dictionary ~50–140 ms. TODO Task 5: correct demand.md on heavydb #819 (SIGSEGV from
+  `select_ipc_gpu` returning 0 rows, not only a SIGSEGV report).
+- notes/vram-cache-encoding-datapath.md: a late sub-researcher's notes from the gpu-bi-dashboards
+  run (cache/ingestion patterns in HeavyDB, PG-Strom, Kinetica, Sirius, GQE; nvCOMP vs lightweight
+  encodings; cuDF dictionary support; bandwidth table; GPU result hand-off), copied from the
+  scratchpad because they answer the human's VRAM-cache question in depth. Cited from the report.
+- options/spark-plugin.md: fits only at the top of the budget, read-only SQL alpha; best design
+  a GPU engine behind Comet's plan serializer, native Parquet reader, cross-query decoded-column
+  cache. Q1 reader issue NOT fixed in 26.10-rc (cudf-spark `49d3be94`; P0 epic #16073 for a native
+  HybridScanReader + GDS, one PR merged). Q2: every headline saving is NVIDIA-published;
+  independent attempts missed targets. Q3: no GPU decoded-column cache (compressed Parquet on JVM
+  heap, re-decoded per query). Cost 1.6× peacockdb, 1.3× Sirius. Ratings: need strong · cost weak
+  · data path medium · friction medium · platform weak · funding medium.
