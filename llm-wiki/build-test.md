@@ -2021,127 +2021,222 @@ The binaries and data are mounted, never in the image:
 
 ## Containers
 
-An ensemble instance runs in the build image on a CPU VM, one container per instance. The
-scripts are `scripts/env/bootstrap-vm.sh`, `up.sh` and `down.sh`; each has `--help`.
+An ensemble instance runs in the build image on a CPU VM, one container per chain. A developer
+readies a VM from their own machine, the laptop, with `scripts/env/provision-vm.sh`, and starts a
+chain from there with `scripts/env/up.sh`. On the VM the scripts are `bootstrap-vm.sh`, `up.sh`
+and `down.sh`. Each has `--help`.
 
 ### Trust
 
-The VM is reachable from any instance as the machine user. An instance writes the clone's `.git`,
-`CLAUDE_CONFIG_DIR` and `~/.config/gh`, and all three hold configuration that runs code: git
-hooks, Claude settings hooks, gh aliases. The machine user is in the docker group, which is root.
-So the VM holds nothing beyond what every instance may use: the S3 read key, a fine-grained PAT
-scoped to the repository, and a key made for the GPU hosts. Never the S3 writer key, never another secret.
+The VM is reachable from any instance as the developer's user. An instance writes the clone's
+`.git`, `CLAUDE_CONFIG_DIR` and `~/.config/gh`, and all three hold configuration that runs code:
+git hooks, Claude settings hooks, gh aliases. The developer's user is in the docker group, which is
+root. So the VM holds nothing beyond what every instance may use: the S3 read key, a fine-grained
+PAT scoped to the repository, and a key made for the GPU hosts. Never the S3 writer key, never
+another secret.
 
 The PAT's Contents and Actions write let an instance push its branch and dispatch `pipeline.yml`
 on it. That code then runs in CI with CI's secrets: the nebius service-account key, the GPU hosts'
 ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the ensemble runs
 device steps without a person. So CI's S3 secret stays a read-only key too.
 
+- **Developers on one VM** are separate Linux users. But every one of them is in the docker group,
+  which is root, and has sudo. So each can read the others' PAT and keys. Share a VM only among
+  people who trust each other.
+- **`peacock.env` holds only the storage keys** and may be passed between developers. The PAT and
+  the GPU key are personal: never forward them. `provision-vm.sh` refuses a `peacock.env` with any
+  other key, naming the key and never its value.
 - `up.sh`, `down.sh`, `bootstrap-vm.sh` and `scripts/lib/machine.sh` run every git call on the
   machine with `-c core.hooksPath=/dev/null -c core.fsmonitor=false`.
 - `up.sh` refuses to start while the clone has an active hook (a file in `.git/hooks` not ending
   in `.sample`), or `core.hooksPath` or `core.fsmonitor` in its `.git/config`. It names each.
-- **Known limitation:** `up.sh` cannot tell a read key from a write key. A keys file holding the
+- **Known limitation:** `up.sh` cannot tell a read key from a write key. An env file holding the
   writer key gives every instance write access to the buckets.
 
 ### A fresh VM
 
-1. As the machine user, who has sudo: `bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`. It is
-   one file; fetch it from the repository's raw view, or copy it. It installs what is missing,
-   after one `apt-get update`: git, curl and python3; Docker (`docker.io`); gh at `GH_VERSION` in
-   `/usr/local/bin`, from the tarball the image takes; Claude Code at `CLAUDE_CODE_VERSION` with
-   `superpowers@claude-plugins-official`. It clones the repository into `~/peacockdb`, at `--ref`
-   or master; a rerun with `--ref` passes when the clone is on that branch. It fetches the
-   cuDF checkout the clone pins (below). In the build image it fills cargo's registry and
-   generates sf1. A step already done is skipped.
-2. The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
-   afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
-   moves on, the check fails, and the two pins must be bumped.
-3. `~/.bashrc` gets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR=$HOME/.claude`, so Claude Code
-   keeps its login, settings and plugins in one directory. Log out and in again: the docker group
-   takes effect then too.
-4. By hand, once per machine: `claude`, then `/login`; gh with a fine-grained PAT, below; and
-   `git config --global user.name` and `user.email`.
-5. **gh's token** is a fine-grained PAT, never the OAuth token plain `gh auth login` makes, which
-   reaches every repository the user can. On GitHub: resource owner `asymptote-tech`, only the
-   `peacockdb` repository, an expiry; permissions Contents read-write, Pull requests read-write,
-   Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
-   `gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read
-   from stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
-   `~/.config/gh/hosts.yml`, which the container mounts; without it gh puts the token in a desktop
-   keyring where there is one, and `up.sh` refuses that. Then `gh auth setup-git`.
+Once per developer:
 
-### A keys file
+1. Get `peacock.env` from whoever administers the storage: the four storage keys (below).
+2. Have someone create the VM, with a login user that has sudo and your ssh key.
+3. On the laptop, in a clone of the repository:
+   `scripts/env/provision-vm.sh <login>@<address> --env <the file you got>`. The laptop needs
+   bash 4.4 or later; on macOS, `brew install bash`.
+   It prints a GitHub token recipe: make the token on GitHub and paste it. It ends in Claude
+   Code's login: open the URL it prints and finish there.
 
-What is not a login goes in a docker env file, `NAME=value` a line, kept outside the clone:
+Per chain, on the laptop: `scripts/env/up.sh A` for a new chain, `scripts/env/up.sh A --branch
+<its branch>` for one that ran before. `scripts/env/down.sh A` stops it.
+
+**What `provision-vm.sh` does.** Every argument is checked before anything is written. A rerun
+skips what is done.
+- On the laptop, in `~/.config/peacock/` (mode 700, each file 600): `peacock.env`, copied from
+  `--env`, which is needed only while it is missing, with every CR dropped and a final newline; `github-pat`, the token, asked for when
+  missing or with `--new-pat`; `gpu_ed25519` and `.pub`, made when missing. The `.pub` is printed:
+  put it on a GPU host when you create one. The token must be `github_pat_…` and able to read the
+  repository; gh checks it with the token in its environment, never its argv.
+- As `<login>`, with sudo: groups `docker` and `peacock`; your Linux user (`--user`, your laptop
+  user name by default) in both, with `<login>`'s `authorized_keys` and passwordless sudo.
+- As your user, over ssh: `bootstrap-vm.sh` (`--ref <branch>` passed on, master by default),
+  skipped once the machine marker is there; a `--ref` the VM's clone is not on is then refused.
+  Then the secrets, on ssh's stdin alone: `peacock.env`
+  and the GPU key pair into `~/.config/peacock/`, the VM's `peacock.env` gaining
+  `GPU_SSH_KEY_FILE`; the PAT into `gh auth login --with-token --insecure-storage`, then
+  `gh auth setup-git`. The PAT is never in the VM's `peacock.env`. Then git's identity, your
+  laptop's `user.name` and `user.email`.
+- The VM goes into the laptop's `~/.config/peacock/vm` as `<name> <user>@<address>`; `--name` is
+  the address by default. The last line is up.sh's default VM.
+- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already.
+- `provision-vm.sh --new-pat` replaces the PAT on the laptop and on every VM in `vm` it reaches.
+  It names each VM it cannot reach.
+
+**`bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`** prepares the machine, as a user with sudo.
+`provision-vm.sh` runs it; it is also one file you can fetch from the repository's raw view and
+run by hand. After one `apt-get update` it installs what is missing: git, curl and python3;
+Docker (`docker.io`); gh at `GH_VERSION` in `/usr/local/bin`, from the tarball the image takes;
+Claude Code at `CLAUDE_CODE_VERSION` with `superpowers@claude-plugins-official`. It makes the
+machine's data directory (below). It clones the repository into `~/peacockdb`, at `--ref` or
+master; a rerun with `--ref` passes when the clone is on that branch. It fetches the cuDF checkout
+the clone pins. In the build image it fills cargo's registry and generates sf1. Its last step
+writes the marker `~/.config/peacock/machine`: this machine runs instances. A step already done is
+skipped.
+- The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
+  afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
+  moves on, the check fails, and the two pins must be bumped.
+- `~/.bashrc` gets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR=$HOME/.claude`, so Claude Code
+  keeps its login, settings and plugins in one directory.
+
+**By hand, without `provision-vm.sh`:** run `bootstrap-vm.sh`, log out and in again (for the
+docker group), then: `claude`, then `/login`; gh with a fine-grained PAT, below;
+`git config --global user.name` and `user.email`; the storage keys in
+`~/.config/peacock/peacock.env`.
+
+**gh's token** is a fine-grained PAT, never the OAuth token plain `gh auth login` makes, which
+reaches every repository the user can. On GitHub: resource owner `asymptote-tech`, only the
+`peacockdb` repository, an expiry; permissions Contents read-write, Pull requests read-write,
+Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
+`gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read from
+stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
+`~/.config/gh/hosts.yml`, which the container mounts; without it gh puts the token in a desktop
+keyring where there is one, and `up.sh` refuses that. Then `gh auth setup-git`.
+
+### The env file
+
+The storage keys, in a docker env file, `NAME=value` a line:
 
     AWS_ACCESS_KEY_ID=…
     AWS_SECRET_ACCESS_KEY=…
     AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud:443
     AWS_REGION=eu-north1
-    GPU_SSH_KEY_FILE=/home/<user>/.ssh/<key>       # optional: the key to GPU hosts
-    PROVIDER_CONFIG_DIR=/home/<user>/.<provider>   # optional: a provider CLI's config
 
-Every start needs one. The four `AWS_*` lines are required; use the read key. The two paths
-must be absolute; each is mounted read-only at the same path. The file reaches a container only
-as `--env-file`.
+That is the whole of the laptop's `peacock.env`; blank and `#` lines are skipped, as docker
+skips them, and any other key is refused by name. On a VM, `~/.config/peacock/peacock.env` is the
+same with one more line, which `provision-vm.sh` writes, and may get a provider's:
+
+    GPU_SSH_KEY_FILE=/home/<user>/.config/peacock/gpu_ed25519   # the key to GPU hosts
+    PROVIDER_CONFIG_DIR=/home/<user>/.<provider>                # optional: a provider CLI's config
+
+Every start needs the file: `up.sh` reads `~/.config/peacock/peacock.env`, or the file `--env`
+names. The four `AWS_*` lines are required; use the read key. `GH_TOKEN` and `GITHUB_TOKEN` are
+refused: gh's login is the machine's. The two paths must be absolute;
+each is mounted read-only at the same path. The file reaches a container only as `--env-file`.
 
 ### Instances
 
-    ~/peacockdb/scripts/env/up.sh a --env ~/keys.env --chain C
-    docker exec -it peacock-a bash
-    ~/peacockdb/scripts/env/down.sh a
+    scripts/env/up.sh A                        # a new chain, on the laptop or on the VM
+    scripts/env/up.sh A --branch ENS-<b>       # a chain that ran before
+    docker exec -it peacock-<user>-A bash      # on the VM
+    scripts/env/down.sh A
 
-- `up.sh <instance> --env <file>` starts the container `peacock-<instance>` as the machine user's
-  uid:gid. Its worktree of `~/peacockdb` is `~/peacock-instances/<instance>`, detached at the
-  clone's HEAD the first time. The worktree and the clone's `.git` are mounted read-write at their
-  own paths, so a commit made inside lands in the clone. `down.sh` keeps the worktree; `up.sh`
-  with the same name reuses it. Remove one with `git worktree remove`.
-- `--chain <c>` runs `scripts/ensemble-watchdog.sh <c>` in the worktree. Without it the container
-  waits for `docker exec`.
+- **From the laptop.** On a machine without the marker, `up.sh` and `down.sh` run the VM's own
+  `~/peacockdb/scripts/env/up.sh` (or `down.sh`) with the same arguments, over ssh, as the user
+  `vm` records. The VM is the last line of `~/.config/peacock/vm`, or `--vm <name>`. A path given
+  to `--env` is the VM's. With no marker and no `vm` file they refuse and name `provision-vm.sh`.
+  `--vm` on the VM is refused. The remote command carries `PEACOCK_FORWARDED=1`, and a call that
+  carries it is never forwarded again. The three laptop scripts need bash 4.4 or later, and say
+  so before they source anything.
+- `up.sh <chain>` starts the container `peacock-<user>-<chain>`, labelled
+  `peacockdb.chain=<chain>` and `peacockdb.user=<user>`, as the user's uid:gid. It runs
+  `scripts/ensemble-watchdog.sh <chain>` in the chain's worktree of `~/peacockdb`,
+  `~/peacock-instances/<chain>`. The worktree and the clone's `.git` are mounted read-write at
+  their own paths, so a commit made inside lands in the clone. `down.sh <chain>` stops and removes
+  the caller's own container, found by both labels (with `-` in user and chain names, the name
+  alone can be two pairs), and keeps the worktree. `up.sh` reuses it as it is, its branch left
+  alone; a `--branch` naming another branch, or a `--board`, is refused then. Remove one with
+  `git worktree remove`.
+- **A chain runs once a machine.** The board is one per repository. `up.sh` refuses a chain while
+  any user's container carries its label, in any state, naming the user. A machine-wide lock in
+  the data directory holds from that check until the container is up.
+- **The chain's branch is never guessed.** The board names no branch, and branches are named
+  unlike their tasks (`ENS-optimizer` for `join-optimizer.md`). A new worktree is made from
+  origin, fetched first.
+  - `--branch <b>` resumes a chain that ran before: the worktree is on `<b>`, tracking
+    `origin/<b>`. A local `<b>` behind it is fast-forwarded; one diverged from it is refused,
+    naming both, and so is one another worktree has checked out. Refused: no `origin/<b>`, or no
+    section for the chain on its board.
+  - Without it, a new chain. Its section on the board at `--board <ref>`, `origin/master` by
+    default, gives its base, `(base: <b>)`, and its first task, the lowest-numbered `### <n>.`
+    heading's `<task>.md`. `up.sh` reads the board at the tip of every `origin/ENS*` branch first.
+    Where the chain's section holds that task at `building` or a later state (`blocked(…)` and
+    `rebase needed(…)` counting as the state they carry), it stops: "chain <c>
+    already ran on <branches>; resume with --branch <b>". It stops too when origin or the clone
+    has `ENS-<task>` already. Otherwise the worktree is on a new local `ENS-<task>` at
+    `origin/<base>`: the first branch checked out before the watchdog starts. Refused: no section
+    for the chain on that board, a section with no task or no base, a base origin lacks, and a
+    base whose own board lacks the chain, since the coordinator reads that board.
+  - A chain defined on a branch other than master, a scratch chain say: `--board origin/<branch>`,
+    with `(base: <branch>)` in its section, so its first branch carries that board.
 - `--cudf <v>` takes `peacockdb-build:cudf-<v>`, 25.02 by default. `--image cudf-<v>-<commit>`
   keeps an instance on one image.
-- **Refused before anything starts**, exit 2, naming what is missing: no `--env`; root; Claude
-  Code not installed or not logged in; no `~/.config/gh/hosts.yml`; no `oauth_token` in it (a
-  keyring login); an `oauth_token` that is not a fine-grained PAT (`github_pat_…`); `gh auth
-  status` failing with `GH_TOKEN` and `GITHUB_TOKEN` unset; no git identity in `~/.gitconfig`; no
-  `/usr/local/bin/gh auth git-credential` helper for github.com there (`gh auth setup-git`); a
-  missing, empty or repeated key; a relative path; a hook in the clone; a container of that name
-  in any state. A login the container cannot see does not count: a token in the environment or a
-  desktop keyring stays on the machine. Neither a key's value nor a token is ever printed.
+- **Refused before anything starts**, exit 2, naming what is missing: root; Claude Code not
+  installed or not logged in; no `~/.config/gh/hosts.yml`; no `oauth_token` in it (a keyring
+  login); an `oauth_token` that is not a fine-grained PAT (`github_pat_…`); `gh auth status`
+  failing with `GH_TOKEN` and `GITHUB_TOKEN` unset; no git identity in `~/.gitconfig`; no
+  `/usr/local/bin/gh auth git-credential` helper for github.com there (`gh auth setup-git`); no env
+  file; a missing, empty or repeated key; a relative path; a data directory missing or not
+  writable; a hook in the clone; a container of the chain. A login the container cannot see does
+  not count: a token in the environment or a desktop keyring stays on the machine. Neither a
+  key's value nor a token is ever printed.
+- **The data directory** is the machine's, shared by its developers: `/var/lib/peacock`, or
+  `$PEACOCK_DATA_DIR`. `bootstrap-vm.sh` makes it with sudo: group `peacock`, setgid, mode 2775,
+  owned by the user who ran it. `provision-vm.sh` puts every developer in `peacock`. What `up.sh`
+  and `bootstrap-vm.sh` write there is written under umask 002, the generator in the build image
+  too. So one developer reuses another's sf1 and cuDF checkouts, takes their locks, and clears a
+  crashed `.partial` they left. cargo's registry and ccache stay per user.
 - **third_party/cudf.** The FFI build's configure reads cuDF's cmake files. The machine keeps one
-  checkout a commit, `~/peacock-data/cudf/<commit>/` (under `$PEACOCK_DATA_DIR` when set), with
-  the paths the build image's prefetch takes (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`).
-  `up.sh` mounts the one its worktree's gitlink names read-only at the worktree's
-  `third_party/cudf`, fetching it first, under a lock, when the machine has none. So two instances
-  on different commits each see their own, and none moves under a running one. The clone's own
-  `third_party/cudf` is never read. An old checkout is removed by hand.
+  checkout a commit, `<data dir>/cudf/<commit>/`, with the paths the build image's prefetch takes
+  (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`). `up.sh` mounts the one its worktree's gitlink
+  names read-only at the worktree's `third_party/cudf`, fetching it first, under a lock, when the
+  machine has none. So two instances on different commits each see their own, and none moves
+  under a running one. The clone's own `third_party/cudf` is never read. The checkout can be
+  another developer's, so the container's git trusts that path (`safe.directory`, passed as
+  `GIT_CONFIG_*`). An old checkout is removed by hand.
 - **Refused after the pull**: an image whose `peacockdb.inputs` label differs from the
   worktree's inputs, naming each input. `image.sh` writes the label
   (`scripts/lib/image-inputs.sh`): the sha256 of each `docker/` file the Dockerfile reads, the
   25.02 build image taking nvcc from the 26.02 spec; one hash of the `pins.env` lines the
   Dockerfile declares as `ARG`, less one declared only in another cuDF version's stage
-  (`GCC_26_02` under `AS cudf-26.02`), so a machine-only pin such as `CLAUDE_CODE_VERSION` stales no image; and for the build image the `third_party/cudf` commit and the flatbuffers `GIT_TAG`. The
-  hash is the same in every locale. An image without the label is refused.
-- Each instance has its own home, `~/peacock-instances/.home/<instance>`, mounted at `$HOME`, and
-  builds into its worktree's `target/`. Its `/etc/passwd` and `/etc/group` are the image's with the
-  machine user added at its uid, gid and home, written to `~/peacock-instances/.etc/<instance>/`
-  and mounted read-only. So ssh and anything else that looks the uid up finds it.
+  (`GCC_26_02` under `AS cudf-26.02`), so a machine-only pin such as `CLAUDE_CODE_VERSION` stales
+  no image; and for the build image the `third_party/cudf` commit and the flatbuffers `GIT_TAG`.
+  The hash is the same in every locale. An image without the label is refused.
+- Each instance has its own home, `~/peacock-instances/.home/<chain>`, mounted at `$HOME`, and
+  builds into its worktree's `target/`. Its `/etc/passwd` and `/etc/group` are the image's with
+  the user added at its uid, gid and home, written to `~/peacock-instances/.etc/<chain>/` and
+  mounted read-only. So ssh and anything else that looks the uid up finds it.
 - From the machine, read-only: the Claude Code install (`~/.local/share/claude`,
   `~/.local/bin/claude`), `~/.gitconfig`, `~/.config/peacock/hosts/`, the cuDF checkout,
-  cargo's registry at
-  `/opt/rust/cargo/registry`, and sf1. Read-write and shared: `CLAUDE_CONFIG_DIR`, `~/.config/gh`
-  and ccache (`~/.cache/peacock/ccache`).
+  cargo's registry at `/opt/rust/cargo/registry`, and sf1. Read-write and shared by the user's
+  instances: `CLAUDE_CONFIG_DIR`, `~/.config/gh` and ccache (`~/.cache/peacock/ccache`).
 - **The registry** is `~/.cache/peacock/cargo-registry`. Before an instance starts, `up.sh`
-  runs `cargo fetch --locked` for its worktree in the build image, under a machine-wide lock. That
-  is the one step that writes the registry. A crate an agent adds mid-chain is not in it: the
-  build fails until `down.sh` and `up.sh` fetch it.
-- **The data.** `~/peacock-data/<hash>/` holds `tpch.sf1` and `tpcds.sf1`, or
-  `$PEACOCK_DATA_DIR/<hash>/`. The hash is over the worktree's `generate_testdata.sh`, the
-  `DUCKDB_VERSION` pin and the generator's arguments (`scripts/lib/data-inputs.sh`). A set is
-  mounted read-only at the worktree's `testdata/<dataset>`. With none for the hash, `up.sh`
-  generates one in the build image, with `--network none`, under a lock. Two starts at once
-  generate it once. A set appears only complete. An old set is removed by hand.
+  runs `cargo fetch --locked` for its worktree in the build image, under a lock. That is the one
+  step that writes the registry. A crate an agent adds mid-chain is not in it: the build fails
+  until `down.sh` and `up.sh` fetch it.
+- **The data.** `<data dir>/<hash>/` holds `tpch.sf1` and `tpcds.sf1`. The hash is over the
+  worktree's `generate_testdata.sh`, the `DUCKDB_VERSION` pin and the generator's arguments
+  (`scripts/lib/data-inputs.sh`). A set is mounted read-only at the worktree's
+  `testdata/<dataset>`. With none for the hash, `up.sh` generates one in the build image, with
+  `--network none`, under a lock. Two starts at once generate it once. A set appears only
+  complete. An old set is removed by hand.
 - Docker would create a missing mount point as root on the machine, so `up.sh` creates each one
   as the user first.
 

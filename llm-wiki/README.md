@@ -12,6 +12,7 @@
       ../peacockdb/scripts/ensemble-watchdog.sh <chain>
 
   It runs unattended until every task reaches `done` — PR open, CI green — or until it stalls.
+  On a VM, `scripts/env/up.sh <chain>` does all of it in a container: `build-test.md`, "Containers".
 - **Watch it, or steer it, from inside that workspace**, where its own `.claude/ensemble/`
   lives — status, control and log are per-workspace, never here. `<chain>.status` says why it
   stopped, `<chain>.log` is everything it said, and `echo rebase > .claude/ensemble/<chain>.control`

@@ -3,11 +3,12 @@
 #
 #   bootstrap-vm.sh [--ref <branch>] [--cudf <v>]
 #
-# Run as the machine user, with sudo. Installs what is missing: Docker, and gh and Claude Code with
-# the superpowers plugin at docker/pins.env's versions; clones the repository into ~/peacockdb at
-# <ref>, master by default, and the third_party/cudf it pins. Then, in the build image of cuDF
-# <v> (25.02 by default), it fills cargo's registry and generates sf1. A step already done is
-# skipped. It ends by printing the logins left to do by hand.
+# Run as the machine user, with sudo; provision-vm.sh runs it so. Installs what is missing: Docker,
+# and gh and Claude Code with the superpowers plugin at docker/pins.env's versions; makes the data
+# directory the machine's users share; clones the repository into ~/peacockdb at <ref>, master by
+# default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by default) it
+# fills cargo's registry and generates sf1. A step already done is skipped. Its last step is the
+# marker ~/.config/peacock/machine: this machine runs instances.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -54,6 +55,13 @@ if [ ! -e "$clone" ]; then safe_git clone --branch "${ref:-master}" "$REPO_URL" 
 . "$clone/scripts/lib/image-inputs.sh"
 . "$clone/scripts/lib/data-inputs.sh"
 . "$clone/scripts/lib/machine.sh"
+. "$clone/scripts/lib/peacock-config.sh"
+
+# The data directory every developer on the machine shares. Its owner writes it at once; another
+# developer through the group, which provision-vm.sh adds them to before their first login.
+if ! getent group peacock > /dev/null; then sudo groupadd peacock; fi
+if [[ " $(id -nG "$(id -un)") " != *" peacock "* ]]; then sudo usermod -aG peacock "$(id -un)"; fi
+if [ ! -d "$MACHINE_DATA" ]; then sudo install -d -o "$(id -un)" -g peacock -m 2775 "$MACHINE_DATA"; fi
 
 # The cuDF cmake files the FFI build reads, at the commit the clone pins; up.sh fetches others.
 machine_cudf_source "$clone"
@@ -124,12 +132,17 @@ machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"
 
+install -d -m 700 "$PEACOCK_CONFIG"
+echo "bootstrap-vm.sh made this machine one that runs instances: up.sh and down.sh run here" > "$PEACOCK_MARKER"
+
 cat << EOF
-The machine is ready. Log out and in again, for the docker group and CLAUDE_CONFIG_DIR, then:
+The machine is ready. scripts/env/provision-vm.sh, run on your own machine, does the rest; by
+hand instead, log out and in again, for the docker group and CLAUDE_CONFIG_DIR, then:
   1. claude: /login, then /exit
   2. gh: a fine-grained PAT for the peacockdb repository alone (llm-wiki/build-test.md,
      "A fresh VM"); gh auth login --with-token --insecure-storage, paste it, Enter, Ctrl-D;
      then gh auth setup-git
   3. git's identity: git config --global user.name <name>; git config --global user.email <email>
-Then: $clone/scripts/env/up.sh <instance> --env <keys file>
+  4. the storage keys in ~/.config/peacock/peacock.env (llm-wiki/build-test.md, "The env file")
+Then: $clone/scripts/env/up.sh <chain>
 EOF

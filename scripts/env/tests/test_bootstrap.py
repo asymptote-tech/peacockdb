@@ -3,7 +3,9 @@
 Run from a clone on the fake machine of `machine.py`, with a fake sudo and curl that record their
 argv, so a refusal can be checked to come before anything is installed, and nothing is downloaded.
 """
+import os
 import pathlib
+import pwd
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -71,6 +73,18 @@ def test_bootstrap_updates_the_package_lists_once_before_any_install():
         assert apt and apt[0].startswith("sudo apt-get update"), log
         assert [a for a in apt if " update" in a] == [apt[0]], log
         assert any("install" in a and "docker.io" in a for a in apt[1:]), log
+
+
+def test_bootstrap_makes_the_machine_wide_data_directory():
+    with Machine() as m:
+        data = m.home.parent / "machine-data"
+        r, log = bootstrap(m, FAKE_SUDO_STATUS="0", PEACOCK_DATA_DIR=str(data))
+        lines = log.splitlines()
+        user = pwd.getpwuid(os.getuid()).pw_name
+        made = f"sudo install -d -o {user} -g peacock -m 2775 {data}"
+        assert made in lines, log
+        downloads = [i for i, line in enumerate(lines) if line.startswith("curl ")]
+        assert not downloads or lines.index(made) < downloads[0], log
 
 
 if __name__ == "__main__":

@@ -1,52 +1,64 @@
 #!/usr/bin/env bash
-# Start an ensemble instance in the build image (llm-wiki/build-test.md, "Containers").
+# Start chain <chain>'s ensemble instance in the build image (llm-wiki/build-test.md, "Containers").
 #
-#   up.sh <instance> --env <file> [--chain <c>] [--cudf <v> | --image cudf-<v>-<commit>]
+#   up.sh <chain> [--branch <b> | --board <ref>] [--cudf <v> | --image cudf-<v>-<commit>] [--env <file>] [--vm <name>]
 #
-# The instance is the container peacock-<instance> over its own worktree of this clone, kept by
-# down.sh. --chain starts scripts/ensemble-watchdog.sh <c> in it. --cudf is 25.02 by default.
-# --env is a docker env file: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL and
-# AWS_REGION, and optionally GPU_SSH_KEY_FILE and PROVIDER_CONFIG_DIR, absolute paths mounted
-# read-only. Refused before anything starts without a login or a key; after the pull, for an image
-# of other inputs than the worktree's. The trust model: llm-wiki/build-test.md, "Containers".
+# The container peacock-<user>-<chain> runs scripts/ensemble-watchdog.sh <chain> in its worktree,
+# kept by down.sh. A new one is on --branch, a chain that ran before, or else a new chain's first
+# branch, from its section on --board (origin/master). A chain runs once a machine. --cudf is 25.02
+# by default. --env, ~/.config/peacock/peacock.env by default, holds the four AWS_* keys and maybe
+# GPU_SSH_KEY_FILE and PROVIDER_CONFIG_DIR. With no instances here, the arguments go over ssh to the
+# VM provision-vm.sh recorded last, or --vm's. Refused, exit 2 naming why, by a check that fails.
+[ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
+  echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
+# Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
 set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+. "$here/../lib/peacock-config.sh"
 shopt -s inherit_errexit
 
-usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "up.sh: $*" >&2; exit 2; }
-
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../lib/image-inputs.sh"
 . "$here/../lib/data-inputs.sh"
 . "$here/../lib/machine.sh"
+. "$here/../lib/board.sh"
 clone=$(dirname "$(machine_git -C "$here" rev-parse --path-format=absolute --git-common-dir)")
 
-instance="" chain="" cudf="" image_tag="" env_file=""
+chain="" cudf="" image_tag="" env_file="" vm="" branch="" board_ref="" forwarded=()
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) usage ;;
-    --chain|--cudf|--image|--env)
+    -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
+    --cudf|--image|--env|--vm|--branch|--board)
       [ -n "${2:-}" ] || die "$1 needs a value"
-      case "$1" in --chain) var=chain ;; --cudf) var=cudf ;; --image) var=image_tag ;; --env) var=env_file ;; esac
+      case "$1" in
+        --cudf) var=cudf ;; --image) var=image_tag ;; --env) var=env_file ;; --vm) var=vm ;;
+        --branch) var=branch ;; --board) var=board_ref ;;
+      esac
       take "$var" "$1" "$2"
+      if [ "$1" != --vm ]; then forwarded+=("$1" "$2"); fi
       shift 2 ;;
     -*) die "unknown flag $1" ;;
-    *) take instance "instance" "$1"; shift ;;
+    *) take chain "chain" "$1"; forwarded+=("$1"); shift ;;
   esac
 done
-[ -n "$instance" ] || die "name the instance: up.sh <instance>, see --help"
-[[ "$instance" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "an instance is named in lower-case letters, digits and -: $instance"
-[ -z "$chain" ] || [[ "$chain" =~ ^[A-Za-z0-9_-]+$ ]] || die "not a chain name: $chain"
+[ -n "$chain" ] || die "name the chain: up.sh <chain>, see --help"
+[[ "$chain" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "not a chain name: $chain"
+[ -z "$branch" ] || [ -z "$board_ref" ] || die "--branch resumes a chain and --board reads a new one: drop one"
+for name in "$branch" "$board_ref"; do
+  [ -z "$name" ] || [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "not a branch or ref name: $name"
+done
 if [ -n "$image_tag" ]; then
   [ -z "$cudf" ] || die "--image names its cuDF version: drop --cudf"
   [[ "$image_tag" =~ ^cudf-([0-9]+\.[0-9]+)-[0-9a-f]{12}$ ]] || die "--image takes a tag cudf-<v>-<commit>: $image_tag"
   cudf=${BASH_REMATCH[1]}
 fi
+peacock_forward up.sh "$vm" "${forwarded[@]}"
+
 cudf=${cudf:-25.02}
 [ -f "$clone/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
-[ -n "$env_file" ] || die "--env <file> is required: the keys file, see --help"
-[ -f "$env_file" ] || die "no env file $env_file"
+env_file=${env_file:-$PEACOCK_ENV}
+[ -f "$env_file" ] || die "no env file $env_file: provision-vm.sh puts the storage keys there, or --env names one"
 env_file=$(realpath "$env_file")
 [ "$(id -u)" != 0 ] || die "run as the machine user, not root: claude refuses root with --dangerously-skip-permissions"
 
@@ -84,12 +96,9 @@ env_path() {
   [ "$(grep -c . <<< "$lines" || true)" -le 1 ] || die "$env_file names $1 more than once"
   printf '%s' "${lines#*=}"
 }
-for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL AWS_REGION; do
-  case "$(grep -c "^$key=" "$env_file" || true)" in
-    0) die "$env_file has no $key" ;;
-    1) grep -q "^$key=." "$env_file" || die "$key is empty in $env_file" ;;
-    *) die "$env_file names $key more than once" ;;
-  esac
+peacock_env_has_storage "$env_file"
+for key in GH_TOKEN GITHUB_TOKEN; do
+  if grep -q "^$key=" "$env_file"; then die "$env_file holds $key: no token goes in the env file"; fi
 done
 ssh_key=$(env_path GPU_SSH_KEY_FILE)
 provider=$(env_path PROVIDER_CONFIG_DIR)
@@ -97,6 +106,9 @@ provider=$(env_path PROVIDER_CONFIG_DIR)
 [ -z "$ssh_key" ] || [ -f "$ssh_key" ] || die "no GPU_SSH_KEY_FILE $ssh_key"
 [ -z "$provider" ] || [[ "$provider" == /* ]] || die "PROVIDER_CONFIG_DIR must be an absolute path: $provider"
 [ -z "$provider" ] || [ -d "$provider" ] || die "no PROVIDER_CONFIG_DIR $provider"
+[ -d "$MACHINE_DATA" ] && [ -w "$MACHINE_DATA" ] \
+  || die "the machine's data directory $MACHINE_DATA is missing or not writable for $(id -un):" \
+         "bootstrap-vm.sh makes it, provision-vm.sh puts a developer in its group"
 
 # An instance writes the clone's .git. What would run there on the machine's next git call is
 # refused; machine_git runs none of it whatever the config says.
@@ -107,21 +119,92 @@ for key in core.hooksPath core.fsmonitor; do
     || die "the clone's .git/config sets $key, which runs as the machine user: git config --unset $key"
 done
 
-container=peacock-$instance
-if state=$(docker container inspect --format '{{.State.Status}}' "$container" 2> /dev/null); then
-  die "instance $instance is there already ($container, $state): scripts/env/down.sh $instance first"
+# The board is one per repository, so a chain runs once a machine, whichever user started it; the
+# lock is machine-wide for the same reason, and held until the container is up.
+user=$(id -un)
+container=peacock-$user-$chain
+mask=$(umask)
+umask 002
+exec {lock}> "$MACHINE_DATA/.chain-$chain.lock"
+umask "$mask"
+flock -n "$lock" || die "another up.sh is starting chain $chain"
+present=$(docker ps -a --filter "label=peacockdb.chain=$chain" --format '{{.Label "peacockdb.user"}} {{.Names}} {{.State}}')
+if [ -n "$present" ]; then
+  die "chain $chain is on this machine already ($(awk '{ printf "%s%s of %s, %s", (NR > 1 ? "; " : ""), $2, $1, $3 }' \
+    <<< "$present")): down.sh $chain as its user first"
 fi
 
 mkdir -p "$MACHINE_INSTANCES"
-exec {lock}> "$MACHINE_INSTANCES/.$instance.lock"
-flock -n "$lock" || die "another up.sh is starting instance $instance"
-worktree=$MACHINE_INSTANCES/$instance
-home=$MACHINE_INSTANCES/.home/$instance
+worktree=$MACHINE_INSTANCES/$chain
+home=$MACHINE_INSTANCES/.home/$chain
+has() { machine_git -C "$clone" rev-parse --verify --quiet "$1" > /dev/null; }
+
+# worktree_resumed — the worktree on --branch, a chain that ran before: origin's, a local branch
+# behind it brought up to it, one that diverged from it refused.
+worktree_resumed() {
+  local board mine theirs elsewhere
+  has "refs/remotes/origin/$branch" || die "origin has no branch $branch"
+  board=$(machine_git -C "$clone" show "origin/$branch:llm-wiki/tasks/tasks.md" 2> /dev/null) \
+    || die "origin/$branch holds no llm-wiki/tasks/tasks.md"
+  board_chain_section "$chain" "origin/$branch's board" <<< "$board"
+  if ! has "refs/heads/$branch"; then
+    machine_git -C "$clone" worktree add --quiet --track -b "$branch" "$worktree" "origin/$branch"
+    return
+  fi
+  # Checked out elsewhere, the branch must not move under that worktree.
+  elsewhere=$(machine_git -C "$clone" worktree list --porcelain \
+                | awk -v b="branch refs/heads/$branch" '/^worktree / { w = substr($0, 10) } $0 == b { print w }')
+  [ -z "$elsewhere" ] || die "$branch is checked out in $elsewhere already; a chain has a worktree of its own"
+  mine=$(machine_git -C "$clone" rev-parse "refs/heads/$branch")
+  theirs=$(machine_git -C "$clone" rev-parse "refs/remotes/origin/$branch")
+  if machine_git -C "$clone" merge-base --is-ancestor "$mine" "$theirs"; then
+    machine_git -C "$clone" update-ref "refs/heads/$branch" "$theirs" "$mine"
+  elif ! machine_git -C "$clone" merge-base --is-ancestor "$theirs" "$mine"; then
+    die "$branch ($mine) and origin/$branch ($theirs) have diverged: reconcile them, then up.sh again"
+  fi
+  machine_git -C "$clone" branch --quiet --set-upstream-to="origin/$branch" "$branch"
+  machine_git -C "$clone" worktree add --quiet "$worktree" "$branch"
+}
+
+# worktree_new — the worktree on a new chain's first branch, ENS-<its first task>, at its base.
+# Which branch a chain that ran before is on is never guessed: every origin/ENS* board where the
+# chain's first task is past approved to build is named, and up.sh stops.
+worktree_new() {
+  local ref=${board_ref:-origin/master} board ran=() r first
+  has "$ref^{commit}" || die "no $ref to read the board from"
+  board=$(machine_git -C "$clone" show "$ref:llm-wiki/tasks/tasks.md" 2> /dev/null) \
+    || die "$ref holds no llm-wiki/tasks/tasks.md"
+  board_chain "$chain" "$ref" <<< "$board"
+  while read -r r; do
+    [[ "$r" == origin/ENS* ]] || continue
+    board=$(machine_git -C "$clone" show "$r:llm-wiki/tasks/tasks.md" 2> /dev/null) || continue
+    if board_ran "$chain" "$BOARD_TASK" <<< "$board"; then ran+=("${r#origin/}"); fi
+  done < <(machine_git -C "$clone" for-each-ref --format='%(refname:short)' refs/remotes/origin/)
+  [ ${#ran[@]} = 0 ] || die "chain $chain already ran on ${ran[*]}; resume with --branch <b>"
+  first=ENS-$BOARD_TASK
+  if has "refs/remotes/origin/$first"; then die "origin has $first already: resume with --branch $first"; fi
+  if has "refs/heads/$first"; then
+    die "the clone has a branch $first, which origin lacks: push it and resume with --branch $first, or delete it"
+  fi
+  has "refs/remotes/origin/$BOARD_BASE" || die "chain $chain's base $BOARD_BASE is not on origin"
+  # The coordinator reads its own branch's board, which the new branch takes from the base.
+  board=$(machine_git -C "$clone" show "origin/$BOARD_BASE:llm-wiki/tasks/tasks.md" 2> /dev/null) \
+    || die "origin/$BOARD_BASE, chain $chain's base, holds no llm-wiki/tasks/tasks.md"
+  board_chain_section "$chain" "origin/$BOARD_BASE's board, which the chain's first branch carries" \
+    "give the chain a base whose board holds it" <<< "$board"
+  machine_git -C "$clone" worktree add --quiet --no-track -b "$first" "$worktree" "origin/$BOARD_BASE"
+}
+
 if [ -e "$worktree" ]; then
   [ "$(machine_git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)" = "$clone/.git" ] \
     || die "$worktree is not a worktree of $clone"
+  [ -z "$board_ref" ] || die "chain $chain's worktree is there already, $worktree; --board reads a new chain"
+  current=$(machine_git -C "$worktree" branch --show-current)
+  [ -z "$branch" ] || [ "$branch" = "$current" ] \
+    || die "chain $chain's worktree is on ${current:-a detached HEAD}, not $branch; a rerun keeps its branch"
 else
-  machine_git -C "$clone" worktree add --quiet --detach "$worktree"
+  machine_git -C "$clone" fetch --quiet origin
+  if [ -n "$branch" ]; then worktree_resumed; else worktree_new; fi
 fi
 machine_cudf_source "$worktree"
 
@@ -134,9 +217,9 @@ machine_cargo_fetch "$ref" "$worktree"
 
 # The machine user in the container's passwd and group, home and all: ssh and anything else that
 # looks the uid up finds it. Outside the instance's home, which the instance can write.
-etc=$MACHINE_INSTANCES/.etc/$instance
+etc=$MACHINE_INSTANCES/.etc/$chain
 mkdir -p "$etc"
-uid=$(id -u) gid=$(id -g) user=$(id -un) group=$(id -gn)
+uid=$(id -u) gid=$(id -g) group=$(id -gn)
 docker run --rm --user "$MACHINE_USER" --network none "$ref" cat /etc/passwd \
   | awk -F: -v id="$uid" -v name="$user" '$3 != id && $1 != name' > "$etc/passwd"
 echo "$user:x:$uid:$gid::$HOME:/bin/bash" >> "$etc/passwd"
@@ -186,16 +269,16 @@ for i in "${!dsts[@]}"; do
   fi
 done
 
-run=(docker run -d --init --name "$container" --user "$MACHINE_USER" -e "HOME=$HOME"
-     -e "PATH=$HOME/.local/bin:$image_path" -e DISABLE_AUTOUPDATER=1 -e "CLAUDE_CONFIG_DIR=$claude_dir"
-     -e "CCACHE_DIR=$MACHINE_CCACHE")
+# The cuDF checkout may be another developer's, and git refuses a repository another uid owns.
+run=(docker run -d --init --name "$container" --label "peacockdb.chain=$chain" --label "peacockdb.user=$user"
+     --user "$MACHINE_USER" -e "HOME=$HOME" -e "PATH=$HOME/.local/bin:$image_path" -e DISABLE_AUTOUPDATER=1
+     -e "CLAUDE_CONFIG_DIR=$claude_dir" -e "CCACHE_DIR=$MACHINE_CCACHE"
+     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e "GIT_CONFIG_VALUE_0=$worktree/third_party/cudf")
 run+=(--env-file "$env_file")
 for i in "${!dsts[@]}"; do
   spec="type=bind,src=${srcs[$i]},dst=${dsts[$i]}"
   if [ "${modes[$i]}" = ro ]; then spec+=,readonly; fi
   run+=(--mount "$spec")
 done
-cmd=(sleep infinity)
-if [ -n "$chain" ]; then cmd=(scripts/ensemble-watchdog.sh "$chain"); fi
-"${run[@]}" -w "$worktree" "$ref" "${cmd[@]}" > /dev/null
-echo "instance $instance is up: docker exec -it $container bash; scripts/env/down.sh $instance stops it"
+"${run[@]}" -w "$worktree" "$ref" scripts/ensemble-watchdog.sh "$chain" > /dev/null
+echo "chain $chain is up: docker exec -it $container bash; scripts/env/down.sh $chain stops it"
