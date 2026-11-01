@@ -7,8 +7,9 @@
 # scripts/env/upload-embeddings.sh.
 
 EMBEDDINGS_BUCKET=embeddings
-# Every aws call names the endpoint, or it goes to real AWS. Nebius, as upload_datasets.sh.
-EMBEDDINGS_S3=(--endpoint-url https://storage.eu-north1.nebius.cloud:443 --region eu-north-1)
+# Every aws call names the endpoint, or it goes to real AWS: a caller sets EMBEDDINGS_S3 with
+# `s3_args EMBEDDINGS_S3` before its first call, so the origins need no storage named.
+. "$(dirname "${BASH_SOURCE[0]}")/s3.sh"
 
 # embeddings_pinned_sha <pin file> <file> — every sha256 the pin names for <file>, one a line.
 embeddings_pinned_sha() { awk -v name="$2" '$2 == name { print $1 }' "$1"; }

@@ -8,8 +8,15 @@
 # --pull-benchmarks writes it.
 
 CALIBRATION_BUCKET=calibration
-# Every aws call names the endpoint, or it goes to real AWS. Nebius, as upload_datasets.sh.
-CALIBRATION_S3=(--endpoint-url https://storage.eu-north1.nebius.cloud:443 --region eu-north-1)
+# Every aws call names the endpoint, or it goes to real AWS: the environment's (s3.sh). Where it
+# names no endpoint, the storage and region the old GPU path has always used, whatever AWS_REGION
+# says, so build-test-shadgpu.sh needs no keys file.
+. "$(dirname "${BASH_SOURCE[0]}")/s3.sh"
+if [ -z "${AWS_ENDPOINT_URL:-}" ]; then
+  CALIBRATION_S3=(--endpoint-url https://storage.eu-north1.nebius.cloud:443 --region eu-north-1)
+else
+  s3_args CALIBRATION_S3
+fi
 # Which record each device's dataset tree was measured beside:
 # `<sha256>  <device>/<dataset>.sf<sf>/records.tsv`, sha256sum's format relative to
 # testdata/calibration/, where the fetch puts it. Committed. A name below is that path's directory.

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7542 test cases — Rust 5944, C++ 233, Python 1365.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 120 image tests under `scripts/env/tests/`, run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7590 test cases — Rust 5944, C++ 233, Python 1413.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 168 image and launcher tests under `scripts/env/tests/`, run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -919,7 +919,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Exec-model engine plans (Python) | the engine's own plan goldens run by the prototype over sf1 against DuckDB: as planned (130), pruned by their dynamic filters before and after join order (73), with every join cluster disassembled and rebuilt (111), and reordered by DPhyp and oriented (111) | [test_engine_answers.py](../scripts/exec_model/tests/plans/test_engine_answers.py), [test_engine_optimized.py](../scripts/exec_model/tests/optimizer/test_engine_optimized.py) | manual — exec-model-corpus.yml, 3 shards | 425 |
 | Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one, captured under Nsight or naming no device or two is refused naming why, with nothing written; each file lies under its device's slug, the harness's rule. And the fetch: a device's record from its own key into its own directory, the H200's pin, which names no device, as it was, and a name that is not a pin path refused before any fetch. A capture is refused unless every GPU it lists is the card the record's heading names, a record naming none being the H200's, and refused naming the table when it has no GPU table or lists no GPU; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py), [test_fetch.py](../scripts/calibration/tests/test_fetch.py) | cost-report | 41 |
-| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache through S3, over a fake aws: `fetch_embeddings.sh --from-s3` fetching the pinned keys and no other, by the Nebius endpoint, refusing a file whose sha256 is not its pin and leaving none of it behind, replacing a damaged cached file, fetching nothing the cache holds, refusing a scale factor the pin does not name, and run under CI or GITHUB_ACTIONS; the origin path fetching nothing a full cache holds and a missing query set from its origin, resumed; both through a symlink, the cache beside the link; PEACOCK_NO_FETCH refusing both before any call; an unzip killed midway leaving no GloVe text a re-run accepts; `upload-embeddings.sh` refusing a missing or differing file before its first upload, uploading nothing twice, and the committed pin naming each artifact once. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 120 |
+| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale, and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache through S3, over a fake aws: `fetch_embeddings.sh --from-s3` fetching the pinned keys and no other, by the endpoint the environment names, refusing a file whose sha256 is not its pin and leaving none of it behind, replacing a damaged cached file, fetching nothing the cache holds, refusing a scale factor the pin does not name, and run under CI or GITHUB_ACTIONS; the origin path fetching nothing a full cache holds and a missing query set from its origin, resumed; both through a symlink, the cache beside the link; PEACOCK_NO_FETCH refusing both before any call; an unzip killed midway leaving no GloVe text a re-run accepts; `upload-embeddings.sh` refusing a missing or differing file before its first upload, uploading nothing twice, and the committed pin naming each artifact once. Every bucket script's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, the embeddings refusing to run without them and the calibration bucket keeping the old storage when no endpoint is named. `up.sh` over a fake docker and gh: refusing no `--env`, root, a missing login, a login only the machine sees, git identity, gh credential helper or key without printing a value, a relative path, a clone with a hook, a keyring login or a token that is not a fine-grained PAT, a cuDF commit it cannot fetch, an instance already there and an image of other inputs; running none of the machine's git hooks; the machine user in the container's passwd and group; one cuDF checkout a commit, reused, the clone's own submodule never read; the registry written by one fetch at a time before the instance and mounted read-only in it; a commit from the container landing in the clone; per-instance worktrees and homes beside the same read-only machine mounts, made as the user; keys only as `--env-file`; the data set chosen by generator inputs and generated once for two starts at once; `down.sh`; and what `bootstrap-vm.sh` refuses before its first install, its `--ref` on a rerun, and one `apt-get update` before any install. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_up.py](../scripts/env/tests/test_up.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 168 |
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py) | cost-report | 170 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 26 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 3 |
@@ -978,7 +978,12 @@ Notes
 Host columns are audited, not assumed: they say whether the bytes were actually found
 there (`ls` + `sha256sum`, 2026-08-05). tpch.minimal and pbench.sf1 are in git; everything
 else is generated or fetched per host. S3 is Nebius object storage, endpoint
-`https://storage.eu-north1.nebius.cloud:443`, region `eu-north-1`.
+`https://storage.eu-north1.nebius.cloud:443`. It accepts region `eu-north-1` and `eu-north1`
+alike; both were checked against it. `scripts/lib/calibration-bucket.sh` and
+`scripts/lib/embeddings-bucket.sh` take the endpoint and region from `AWS_ENDPOINT_URL` and
+`AWS_REGION` (`scripts/lib/s3.sh`). `upload_datasets.sh` and `check_s3_datasets.py` still name the
+endpoint themselves. With `AWS_ENDPOINT_URL` unset, the calibration bucket uses the endpoint and
+region above, for `build-test-shadgpu.sh`.
 
 | Dataset | Shape | <sub>local</sub> | <sub>verda</sub> | <sub>shad-gpu</sub> | S3 bucket | Used by |
 |---|---|:-:|:-:|:-:|---|---|
@@ -1022,7 +1027,7 @@ sha256 matches local). Notes on the rows above:
   `testdata/embeddings.sha256`, committed, pins the four files both sources check:
   `deep_base.sf1.fbin`, the DEEP query set and groundtruth, `glove.6B.zip`.
   `fetch_embeddings.sh --from-s3` fetches them with the aws CLI on `PATH` and its `AWS_*`
-  credentials, refuses a file whose sha256 is not its pin, and fetches only scale factors the
+  credentials, from the storage `AWS_ENDPOINT_URL` and `AWS_REGION` name, refuses a file whose sha256 is not its pin, and fetches only scale factors the
   pin names. CI and GITHUB_ACTIONS refuse only the origins, so a CI job may read our own
   pinned bucket; PEACOCK_NO_FETCH refuses both. `scripts/env/upload-embeddings.sh [--cache
   <dir>]` writes the bucket: it checks every file against the pin before the first upload, and
@@ -2047,6 +2052,132 @@ The binaries and data are mounted, never in the image:
   No CI step runs them. `test_image_any_user.py`, `test_run_image.py` and `test_run_tests.py` need
   the images built; `test_run_image.py` also a staged install per version, named by
   `PEACOCK_STAGED_INSTALLS=<dir holding cudf-<v>/>`.
+
+## Containers
+
+An ensemble instance runs in the build image on a CPU VM, one container per instance. The
+scripts are `scripts/env/bootstrap-vm.sh`, `up.sh` and `down.sh`; each has `--help`.
+
+### Trust
+
+The VM is reachable from any instance as the machine user. An instance writes the clone's `.git`,
+`CLAUDE_CONFIG_DIR` and `~/.config/gh`, and all three hold configuration that runs code: git
+hooks, Claude settings hooks, gh aliases. The machine user is in the docker group, which is root.
+So the VM holds nothing beyond what every instance may use: the S3 read key, a fine-grained PAT
+scoped to the repository, and a key made for the GPU hosts. Never the S3 writer key, never another secret.
+
+The PAT's Contents and Actions write let an instance push its branch and dispatch `pipeline.yml`
+on it. That code then runs in CI with CI's secrets: the nebius service-account key, the GPU hosts'
+ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the ensemble runs
+device steps without a person. So CI's S3 secret stays a read-only key too.
+
+- `up.sh`, `down.sh`, `bootstrap-vm.sh` and `scripts/lib/machine.sh` run every git call on the
+  machine with `-c core.hooksPath=/dev/null -c core.fsmonitor=false`.
+- `up.sh` refuses to start while the clone has an active hook (a file in `.git/hooks` not ending
+  in `.sample`), or `core.hooksPath` or `core.fsmonitor` in its `.git/config`. It names each.
+- **Known limitation:** `up.sh` cannot tell a read key from a write key. A keys file holding the
+  writer key gives every instance write access to the buckets.
+
+### A fresh VM
+
+1. As the machine user, who has sudo: `bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`. It is
+   one file; fetch it from the repository's raw view, or copy it. It installs what is missing,
+   after one `apt-get update`: git, curl and python3; Docker (`docker.io`); gh at `GH_VERSION` in
+   `/usr/local/bin`, from the tarball the image takes; Claude Code at `CLAUDE_CODE_VERSION` with
+   `superpowers@claude-plugins-official`. It clones the repository into `~/peacockdb`, at `--ref`
+   or master; a rerun with `--ref` passes when the clone is on that branch. It fetches the
+   cuDF checkout the clone pins (below). In the build image it fills cargo's registry and
+   generates sf1. A step already done is skipped.
+2. The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
+   afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
+   moves on, the check fails, and the two pins must be bumped.
+3. `~/.bashrc` gets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR=$HOME/.claude`, so Claude Code
+   keeps its login, settings and plugins in one directory. Log out and in again: the docker group
+   takes effect then too.
+4. By hand, once per machine: `claude`, then `/login`; gh with a fine-grained PAT, below; and
+   `git config --global user.name` and `user.email`.
+5. **gh's token** is a fine-grained PAT, never the OAuth token plain `gh auth login` makes, which
+   reaches every repository the user can. On GitHub: resource owner `asymptote-tech`, only the
+   `peacockdb` repository, an expiry; permissions Contents read-write, Pull requests read-write,
+   Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
+   `gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read
+   from stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
+   `~/.config/gh/hosts.yml`, which the container mounts; without it gh puts the token in a desktop
+   keyring where there is one, and `up.sh` refuses that. Then `gh auth setup-git`.
+
+### A keys file
+
+What is not a login goes in a docker env file, `NAME=value` a line, kept outside the clone:
+
+    AWS_ACCESS_KEY_ID=…
+    AWS_SECRET_ACCESS_KEY=…
+    AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud:443
+    AWS_REGION=eu-north1
+    GPU_SSH_KEY_FILE=/home/<user>/.ssh/<key>       # optional: the key to GPU hosts
+    PROVIDER_CONFIG_DIR=/home/<user>/.<provider>   # optional: a provider CLI's config
+
+Every start needs one. The four `AWS_*` lines are required; use the read key. The two paths
+must be absolute; each is mounted read-only at the same path. The file reaches a container only
+as `--env-file`.
+
+### Instances
+
+    ~/peacockdb/scripts/env/up.sh a --env ~/keys.env --chain C
+    docker exec -it peacock-a bash
+    ~/peacockdb/scripts/env/down.sh a
+
+- `up.sh <instance> --env <file>` starts the container `peacock-<instance>` as the machine user's
+  uid:gid. Its worktree of `~/peacockdb` is `~/peacock-instances/<instance>`, detached at the
+  clone's HEAD the first time. The worktree and the clone's `.git` are mounted read-write at their
+  own paths, so a commit made inside lands in the clone. `down.sh` keeps the worktree; `up.sh`
+  with the same name reuses it. Remove one with `git worktree remove`.
+- `--chain <c>` runs `scripts/ensemble-watchdog.sh <c>` in the worktree. Without it the container
+  waits for `docker exec`.
+- `--cudf <v>` takes `peacockdb-build:cudf-<v>`, 25.02 by default. `--image cudf-<v>-<commit>`
+  keeps an instance on one image.
+- **Refused before anything starts**, exit 2, naming what is missing: no `--env`; root; Claude
+  Code not installed or not logged in; no `~/.config/gh/hosts.yml`; no `oauth_token` in it (a
+  keyring login); an `oauth_token` that is not a fine-grained PAT (`github_pat_…`); `gh auth
+  status` failing with `GH_TOKEN` and `GITHUB_TOKEN` unset; no git identity in `~/.gitconfig`; no
+  `/usr/local/bin/gh auth git-credential` helper for github.com there (`gh auth setup-git`); a
+  missing, empty or repeated key; a relative path; a hook in the clone; a container of that name
+  in any state. A login the container cannot see does not count: a token in the environment or a
+  desktop keyring stays on the machine. Neither a key's value nor a token is ever printed.
+- **third_party/cudf.** The FFI build's configure reads cuDF's cmake files. The machine keeps one
+  checkout a commit, `~/peacock-data/cudf/<commit>/` (under `$PEACOCK_DATA_DIR` when set), with
+  the paths the build image's prefetch takes (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`).
+  `up.sh` mounts the one its worktree's gitlink names read-only at the worktree's
+  `third_party/cudf`, fetching it first, under a lock, when the machine has none. So two instances
+  on different commits each see their own, and none moves under a running one. The clone's own
+  `third_party/cudf` is never read. An old checkout is removed by hand.
+- **Refused after the pull**: an image whose `peacockdb.inputs` label differs from the
+  worktree's inputs, naming each input. `image.sh` writes the label
+  (`scripts/lib/image-inputs.sh`): the sha256 of each `docker/` file the Dockerfile reads, the
+  25.02 build image taking nvcc from the 26.02 spec; one hash of the `pins.env` lines the
+  Dockerfile declares as `ARG`, less one declared only in another cuDF version's stage
+  (`GCC_26_02` under `AS cudf-26.02`), so a machine-only pin such as `CLAUDE_CODE_VERSION` stales no image; and for the build image the `third_party/cudf` commit and the flatbuffers `GIT_TAG`. The
+  hash is the same in every locale. An image without the label is refused.
+- Each instance has its own home, `~/peacock-instances/.home/<instance>`, mounted at `$HOME`, and
+  builds into its worktree's `target/`. Its `/etc/passwd` and `/etc/group` are the image's with the
+  machine user added at its uid, gid and home, written to `~/peacock-instances/.etc/<instance>/`
+  and mounted read-only. So ssh and anything else that looks the uid up finds it.
+- From the machine, read-only: the Claude Code install (`~/.local/share/claude`,
+  `~/.local/bin/claude`), `~/.gitconfig`, `~/.config/peacock/hosts/`, the cuDF checkout,
+  cargo's registry at
+  `/opt/rust/cargo/registry`, and sf1. Read-write and shared: `CLAUDE_CONFIG_DIR`, `~/.config/gh`
+  and ccache (`~/.cache/peacock/ccache`).
+- **The registry** is `~/.cache/peacock/cargo-registry`. Before an instance starts, `up.sh`
+  runs `cargo fetch --locked` for its worktree in the build image, under a machine-wide lock. That
+  is the one step that writes the registry. A crate an agent adds mid-chain is not in it: the
+  build fails until `down.sh` and `up.sh` fetch it.
+- **The data.** `~/peacock-data/<hash>/` holds `tpch.sf1` and `tpcds.sf1`, or
+  `$PEACOCK_DATA_DIR/<hash>/`. The hash is over the worktree's `generate_testdata.sh`, the
+  `DUCKDB_VERSION` pin and the generator's arguments (`scripts/lib/data-inputs.sh`). A set is
+  mounted read-only at the worktree's `testdata/<dataset>`. With none for the hash, `up.sh`
+  generates one in the build image, with `--network none`, under a lock. Two starts at once
+  generate it once. A set appears only complete. An old set is removed by hand.
+- Docker would create a missing mount point as root on the machine, so `up.sh` creates each one
+  as the user first.
 
 ## Benchmarks
 

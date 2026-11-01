@@ -878,6 +878,111 @@ the total 5888, the header the sum of the rows.
   verified against the pin is in the project's private bucket, fetched by `--from-s3`.
 - Still 20 tests; the counts do not move.
 
+## Task 6: the launcher (steps 1 and 2's code; no VM yet)
+
+- **No named volume for target or HOME.** A new named volume mounted where the image has no
+  directory is root's 0755, so the machine uid cannot write it. The worktree's own `target/` is
+  the per-instance target, and the per-instance home is a machine directory,
+  `~/peacock-instances/.home/<i>`, bind-mounted at `$HOME`. The same rule is why `up.sh` creates
+  every mount point as the user first: docker makes a missing one as root inside the enclosing
+  bind, on the machine. `testdata/tpch.sf1` in the developer's worktree is such a root-owned
+  directory, left by an earlier `docker run`.
+- **Mounts are `--mount type=bind`, never `-v`.** `-v` creates a missing source as root; `--mount`
+  refuses it, and the fake docker in `tests/machine.py` refuses it too.
+- **The image's PATH is read from the image** (`docker image inspect … .Config.Env`), and
+  `~/.local/bin` is put in front, so `claude` is found without spelling the image's PATH twice.
+- **`scripts/lib/machine.sh`** holds what `bootstrap-vm.sh` and `up.sh` share. Its step functions
+  are called as plain statements: set -e is off inside `$(…)` and before `||`, so a function
+  called there runs on past a failed step. Results come back in globals (`DATA_SET`).
+- **Trust (round 1).** An instance writes the clone's `.git`, so every git call on the machine
+  goes through `machine_git` (`-c core.hooksPath=/dev/null -c core.fsmonitor=false`); bootstrap
+  has a copy, `safe_git`, for the calls before the clone exists. `up.sh` also refuses a clone with
+  a hook or either key in `.git/config`. The `-c` is the guard: it also covers an `include.path`
+  or a global `core.hooksPath`, which the refusal does not look at. `test_up_never_runs_the_machine_s_git_hooks`
+  catches `git worktree add` running `reference-transaction`; no fsmonitor call was seen on that path.
+- **The data set** is generated from a copy of the worktree's `generate_testdata.sh` in
+  `<hash>.partial/`: the generator writes beside itself, so the copy's directory is the set's.
+  The stage is renamed to `<hash>/` only when both datasets are there. One `docker run` a
+  dataset, `--network none`, `PEACOCK_NO_FETCH=1`, under `flock` on `.<hash>.lock`. `cargo fetch`
+  takes `cargo-registry.lock` beside the registry.
+- **Keys.** `--env` is required for every start. `up.sh` greps `^NAME=` (present once) and
+  `^NAME=.` (not empty); it never captures a key's value. It reads two values, both paths and both
+  required absolute: `GPU_SSH_KEY_FILE` and `PROVIDER_CONFIG_DIR`, the generic name for "a
+  provider's config". It cannot tell a read key from a write key.
+- **Logins as the container sees them.** gh counts only with `~/.config/gh/hosts.yml` holding
+  an `oauth_token`, every one a fine-grained PAT (`github_pat_`), and with `gh auth status` passing
+  under `env -u GH_TOKEN -u GITHUB_TOKEN`. A keyring login writes hosts.yml without a token. The
+  checks count lines with `grep -c`, so no token reaches the output. The token goes in with
+  `gh auth login --with-token --insecure-storage`; without the flag gh writes it to a desktop
+  keyring where there is one, and `up.sh` refuses that. The flag is in gh 2.102.1 (`GH_VERSION`),
+  checked in the build image. gh's help favours `GH_TOKEN` over `--with-token` for fine-grained
+  tokens; the container never sees `GH_TOKEN`, so the token lives in hosts.yml. git needs the
+  `/usr/local/bin/gh auth git-credential` helper for github.com in `~/.gitconfig`.
+- **passwd and group** per instance, in `~/peacock-instances/.etc/<i>/`, not in the instance's
+  home: the home is writable from inside, and a passwd the instance could rewrite is not wanted
+  even when it gains nothing. The image's files come from `docker run … cat`; entries with the
+  machine uid or name are dropped and the machine user's line is added with `$HOME`.
+- **third_party/cudf.** One checkout a commit, `<data dir>/cudf/<commit>/`, fetched by
+  `machine_cudf_source` (bootstrap for the clone, `up.sh` for a worktree) from `.gitmodules`' URL,
+  sparse with the prefetch's paths, under a lock, renamed from `.partial` when whole. Each
+  instance mounts the one its gitlink names, read-only. A single checkout in the clone, the round-1
+  design, would have moved under every running instance when one needed another commit. The
+  clone's own `third_party/cudf` is never read, so a human's `git submodule update --init` (a
+  gitfile into `.git/modules`) cannot confuse it. Step 3 must show the sparse paths are enough
+  for the FFI build, not only for a configure.
+- **S3.** `s3.sh`'s `s3_args <array>` needs both variables. `calibration-bucket.sh` keeps the
+  old endpoint and region whenever `AWS_ENDPOINT_URL` is unset; an endpoint without a region is
+  refused. The embeddings scripts call `s3_args` only on the S3 path, so the origins need no
+  storage named.
+- **Image inputs.** The label is one line of `<input>=<value>` joined by spaces. Files: what the
+  Dockerfile reads, the 25.02 build image also taking `cudf-26.02.spec` for nvcc. Pins: one hash
+  of the `pins.env` lines whose names the Dockerfile declares as `ARG`, sorted under `LC_ALL=C`.
+  The locale was a real bug: `sort` orders `GCC_…`, `GH_…` and `G_…` differently under `C` and
+  `en_US.UTF-8`, so a label made on one host would refuse a VM in another locale. Its test picks
+  an installed locale that orders sample names otherwise than C and prints a SKIP line when none
+  is installed. A pin is left out of a version's label only where the Dockerfile declares it
+  inside another version's stage (`ARG GCC_26_02` under `FROM … AS cudf-26.02`); the versions are
+  the names of `docker/conda/cudf-*.spec`. So `ARROW_19_0` stays in every label, and a 26.02 pin
+  that a shared stage reads stays in the 25.02 label too. The flatbuffers tag is
+  read from the `FetchContent_Declare(flatbuffers …)` block; more than one is refused.
+  `test_the_label_holds_every_docker_file_its_dockerfile_reads` resolves each `COPY docker/…` to the
+  files the Dockerfile names by their copied path, `${CUDF}` substituted, for both versions. It
+  holds the label to what the Dockerfiles name today; a file read under another path, or through
+  a variable other than `${CUDF}`, would escape it. `scripts/build.sh`, copied by the prefetch
+  stage, is not an input, as the plan lists.
+- **bootstrap-vm.sh** takes `--ref`, since this branch is not on master; a rerun passes it when
+  the clone is on that branch. One `apt-get update` precedes the one `apt-get install` of
+  whatever is missing, Docker included. With Docker just installed, the group is not active in
+  the running shell, so its docker steps go through `sudo docker` as `--user <uid>:<gid>`.
+  `claude plugin` has no way to install at a commit (`marketplace add` takes a repo, URL or path;
+  `install` no ref), so the pin is checked in `installed_plugins.json` afterwards, and the error
+  says to bump the pins. Its tests stop at the first download.
+- **For step 3, what the fakes cannot show:**
+  - the images must be republished before anything starts: none has the label, so `up.sh`
+    refuses them;
+  - `--init` needs `docker-init`, which Ubuntu's `docker.io` must ship;
+  - Claude Code under a uid the image does not know (`os.userInfo`), now with the passwd entry;
+  - `.claude.json`'s location if `/login` ran before `CLAUDE_CONFIG_DIR` was set; no onboarding
+    question with only `CLAUDE_CONFIG_DIR` mounted;
+  - `claude` through the read-only `~/.local/bin/claude` bind;
+  - the plugin install with no login, and that it installs the pinned version at all;
+  - ssh to a GPU host and `whoami` inside, as a uid other than 1000 too;
+  - the gh credential helper `/usr/local/bin/gh` resolving in the container, and a real commit
+    and push from inside landing with the machine's identity;
+  - the FFI tier built once from the sparse `third_party/cudf`;
+  - `cargo build` touching nothing in the read-only registry; a crate added mid-chain needs
+    `down.sh` and `up.sh`;
+  - two concurrent builds with no `--memory` or CPU bounds on 8 cores and 32 GB: an OOM can hit
+    the neighbour;
+  - the data generation under `--network none` with the `.partial` stage, and `cargo fetch
+    --locked` with the worktree read-only;
+  - gh accepts the fine-grained PAT through `--with-token --insecure-storage`; its help warns of
+    "confusing behaviour" with fine-grained tokens there;
+  - under the fine-grained PAT, the coordinator's `gh pr create`, `gh workflow run` and
+    `gh api -X PATCH …/pulls/<n>` work, and the organisation allows fine-grained PATs;
+  - whether the storage honours `If-None-Match: *` on PUT (412 for a writer, 403 for a reader):
+    only then could `up.sh` test a key for write access without writing.
+
 ## Task 8: provenance and the per-device tree
 
 Worked in its own worktree, branch `ENS-containers-task8` from `0d9e1dc4`, to be replayed onto

@@ -7,7 +7,8 @@
 # --cache is the directory holding the files, testdata/embeddings-cache by default. Every file is
 # checked against its pin before the first upload: one missing or differing stops the run with
 # nothing uploaded. An object already in the bucket at the file's size is left alone, so a re-run
-# uploads only what is missing. The aws CLI takes its credentials from AWS_* or ~/.aws.
+# uploads only what is missing. The aws CLI takes its credentials from AWS_* or ~/.aws, and the
+# storage from AWS_ENDPOINT_URL and AWS_REGION.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -d "$cache" ] || die "no cache directory $cache"
+s3_args EMBEDDINGS_S3
 
 shas=() names=()
 while read -r sha name; do

@@ -10,8 +10,9 @@ H100, each result naming its device.
 
 **Architecture:** Docker images built from committed inputs (`docker/`): a conda prefix from an
 explicit spec, toolchain tarballs at pinned versions, everything a build fetches pre-fetched. A
-CPU VM runs N containers of one build image; per-instance state lives in named volumes, shared
-read-only data in shared volumes. GPU hosts are reached through a provider adapter with one
+CPU VM runs N containers of one build image; per-instance state lives in the instance's worktree
+and home, machine directories owned by its user, and shared data is mounted read-only from the
+machine. GPU hosts are reached through a provider adapter with one
 interface; the binaries built in the build image are shipped with the data and run in the run
 image. The benchmark harness gains a registry-driven case set and per-device provenance.
 
@@ -191,11 +192,12 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `DISABLE_AUTOUPDATER=1` set for the machine user, gh at `GH_VERSION` from the same tarball as the
   image and at the same path, `/usr/local/bin/gh` (`gh auth setup-git` writes that absolute path
   into `~/.gitconfig`, and the container must resolve it),
-  the repository cloned, sf1 generated for the clone's generator inputs with the generator's
+  the repository cloned, the cuDF checkout of the commit it pins fetched (one a commit, with the
+  sparse paths the build image's prefetch takes, which the FFI build's configure reads), sf1 generated for the clone's generator inputs with the generator's
   default vectors and `PEACOCK_NO_FETCH=1`, as CI generates it (in the build image, into the
   machine's data directory; no embeddings are fetched: no corpus query reads a vector column); it ends by printing the two
   logins left to do by hand
-- Create: `scripts/env/up.sh` — `up.sh <instance> [--chain <c>] [--cudf 25.02] [--env <file>]`;
+- Create: `scripts/env/up.sh` — `up.sh <instance> --env <file> [--chain <c>] [--cudf 25.02]`;
   `down.sh <instance>`
 - Create: `scripts/env/tests/test_up.py`
 - Create: `scripts/lib/image-inputs.sh` — the files an image is made from, each with its
@@ -207,6 +209,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Create: `scripts/lib/data-inputs.sh` — the hash of what sf1's bytes follow from:
   `testdata/generate_testdata.sh`, the `DUCKDB_VERSION` line of
   `docker/pins.env`, and the generator's arguments per dataset
+- Create: `scripts/lib/machine.sh` — the machine's layout and the three build-image steps
+  `bootstrap-vm.sh` and `up.sh` share: the image pulled and checked, the cargo fetch, the data set
 - Create: `scripts/lib/s3.sh` — the S3 endpoint and region every bucket script passes, from
   `AWS_ENDPOINT_URL` and `AWS_REGION` (the names the aws CLI itself reads), so the storage moves
   with the env file and no new script names a provider's endpoint. `calibration-bucket.sh` and
@@ -219,10 +223,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Consumes: Task 2's image, Task 5's fetch.
 - Produces: per instance `<i>`: a worktree of the machine's clone, and the clone's `.git`
   read-write, both at their machine paths inside the container, so the worktree's `.git` pointer
-  resolves and commits land; a target volume `peacock-<i>-target`. From the machine, read-only: the
-  Claude Code install at its machine path (its plugin and marketplace records hold absolute
+  resolves and commits land; the build in the worktree's own `target/`, and a home of its own on
+  the machine mounted at `$HOME` (a named volume would be root's, which the uid cannot write); its
+  own `/etc/passwd` and `/etc/group`, the image's with the machine user added, read-only. From
+  the machine, read-only: the Claude Code install at its machine path (its plugin and marketplace records hold absolute
   paths, and `~/.local/bin/claude` links into `~/.local/share/claude/versions/<v>`), sf1, the
-  embeddings, cargo's registry (filled by `bootstrap-vm.sh` with `cargo fetch` in the build image;
+  machine's cuDF checkout of the commit the worktree's gitlink names over its `third_party/cudf`
+  (`<data dir>/cudf/<commit>/`, fetched once a commit under a lock),
+  cargo's registry (filled by `bootstrap-vm.sh` with `cargo fetch` in the build image;
   read-only is what makes it safe to share, since cargo's package lock `$CARGO_HOME/.package-cache`
   is outside it and per container). Read-write: Claude's config and session data as a directory —
   `CLAUDE_CONFIG_DIR` set to one directory on the machine and in the container, not a single-file
@@ -232,9 +240,10 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   Git's identity and gh's credential helper come from the machine's `~/.gitconfig`, mounted
   read-only. For the GPU steps a chain runs: the ssh key to GPU hosts, mounted read-only at the
   path `GPU_SSH_KEY_FILE` names; `~/.config/peacock/hosts/` (Task 7's host files) read-only; a
-  provider CLI's config read-only where that provider is used. The container runs with
-  `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. `--env <file>` carries the values that
-  are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID`,
+  provider CLI's config read-only, at the path `PROVIDER_CONFIG_DIR` names, where that provider is
+  used. The container runs with
+  `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. `--env <file>`, required for every start, carries the
+  values that are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID`,
   `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` and `AWS_REGION` required, `GPU_SSH_KEY_FILE` and a provider's values optional.
   The registry is read-only, so a `Cargo.lock` that names a crate the machine lacks would fail
   every build: `up.sh` runs `cargo fetch` for the instance's worktree in the build image, with the
@@ -253,14 +262,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   under a lock, so two instances starting together generate it once. Two chains whose branches
   differ in the generator each get their own set; an old set is removed by hand.
 
-- [ ] **Step 1: failing tests** (fakes on `PATH` recording argv): `test_up_refuses_missing_login`
+- [x] **Step 1: failing tests** (fakes on `PATH` recording argv): `test_up_refuses_missing_login`
   (no Claude credentials, or `gh auth status` failing → exit 2, stderr names which);
-  `test_up_refuses_missing_key` (`--env` file without one of the two S3 keys → exit 2, stderr
-  names it); `test_up_fetches_before_it_starts` (the one writable-registry step precedes the
+  `test_up_refuses_missing_key` (`--env` file without one of the four `AWS_*` values, each in
+  turn, absent or empty → exit 2, stderr names it and no value); `test_up_fetches_before_it_starts` (the one writable-registry step precedes the
   instance, and the instance's mount is `:ro`); `test_up_commits_from_the_container` (a commit made in the instance's
   worktree inside the container lands in the machine's clone, with the machine's git identity);
   `test_up_refuses_duplicate_instance`; `test_up_mounts_per_instance` (two instances → disjoint
-  worktrees and target volumes, the same machine mounts, the data and the Claude install `:ro`,
+  worktrees and homes, the same machine mounts, the data and the Claude install `:ro`,
   the GPU ssh key, the host files and a provider's config `:ro`);
   `test_up_runs_as_the_machine_user` (`--user` is the caller's uid:gid, never 0);
   `test_up_never_passes_keys_as_args` (no key value in argv; only `--env-file`);
@@ -272,10 +281,11 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `image-inputs.sh` over the tree; a changed `venv.lock` changes the build image's label, not the
   run image's); `test_up_refuses_stale_image` (a fake `docker image inspect` whose label differs
   in `venv.lock` → exit 2, stderr names `docker/venv.lock`; no label → exit 2).
-- [ ] **Step 2:** implement; with `--chain`, `scripts/ensemble-watchdog.sh <c>` starts in the
+- [x] **Step 2:** implement; with `--chain`, `scripts/ensemble-watchdog.sh <c>` starts in the
   instance's worktree inside the container.
 - [ ] **Step 3: verify on a fresh VM** (a verda or nebius CPU VM the human creates): from nothing,
-  `bootstrap-vm.sh`, the two logins, `up.sh a && up.sh b`; both build rust-only at once; `docker
+  `bootstrap-vm.sh`, the two logins, `up.sh a && up.sh b`; both build rust-only at once, and one
+  builds the FFI tier once; `docker
   system df` shows one image copy; in each, `claude --version`, `gh auth status` and the
   ensemble's first coordinator turn on a scratch chain, with no login asked. Record wall times.
 - [ ] **Step 4:** commit.

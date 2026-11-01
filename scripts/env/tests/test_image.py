@@ -79,10 +79,10 @@ class Repo:
     def __enter__(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name) / "repo"
-        for rel in ["scripts/env/image.sh", "docker/build.Dockerfile", "docker/pins.env",
-                    "docker/conda/cudf-25.02.spec", "docker/conda/cudf-26.02.spec"]:
+        for rel in ["scripts/env/image.sh", "scripts/lib/image-inputs.sh", "cpp/CMakeLists.txt"]:
             (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / rel, self.root / rel)
+        shutil.copytree(REPO / "docker", self.root / "docker")
         (self.root / "third_party" / "cudf").mkdir(parents=True)  # an uninitialised submodule
         git(self.root, "init", "-q")
         git(self.root, "add", "-A")
@@ -276,6 +276,174 @@ def test_no_claude_code_is_installed_in_the_image():
         text = (REPO / "docker" / f"{kind}.Dockerfile").read_text()
         found = re.findall(r"claude\.ai/install\.sh|claude plugin|@anthropic-ai/claude-code", text)
         assert not found, f"{kind}.Dockerfile installs Claude Code: {found}"
+
+
+def label(line):
+    """The peacockdb.inputs label of a build line, as `{input: value}`."""
+    [value] = [v for v in flag_values(line, "--label") if v.startswith("peacockdb.inputs=")]
+    return dict(entry.split("=", 1) for entry in value[len("peacockdb.inputs="):].split(" "))
+
+
+def image_inputs(tree, kind, cudf):
+    out = subprocess.run(["bash", "-c", f'. "{tree}/scripts/lib/image-inputs.sh"; image_inputs "{tree}" {kind} {cudf}'],
+                         check=True, capture_output=True, text=True).stdout
+    return dict(line.split("=", 1) for line in out.splitlines())
+
+
+def test_image_labels_its_inputs():
+    with Repo() as repo:
+        before = {kind: label(build_line(run("build", kind, "25.02", "--dry-run", script=repo.script)))
+                  for kind in ("build", "run")}
+        for kind in ("build", "run"):
+            assert before[kind] == image_inputs(repo.root, kind, "25.02"), kind
+        assert before["build"]["third_party/cudf"] == SUBMODULE_SHA, before["build"]
+        assert before["build"]["cpp/CMakeLists.txt:flatbuffers"] == "v25.12.19", before["build"]
+        assert "docker/venv.lock" in before["build"] and "docker/venv.lock" not in before["run"]
+        (repo.root / "docker" / "venv.lock").write_text("changed==1\n")
+        after = {kind: label(build_line(run("build", kind, "25.02", "--dry-run", script=repo.script)))
+                 for kind in ("build", "run")}
+        changed = sorted(k for k in before["build"] if before["build"][k] != after["build"][k])
+        assert changed == ["docker/venv.lock"], changed
+        assert after["run"] == before["run"]
+
+
+def files_read(kind, cudf):
+    """The docker/ files <kind>.Dockerfile reads for <cudf>: each file it copies, and each file under a
+    copied directory that its instructions name by the path it was copied to."""
+    text = (REPO / "docker" / f"{kind}.Dockerfile").read_text()
+    files = set()
+    for src, dst in re.findall(r"^COPY (?!--from)(docker/\S*) (\S+)", text, re.M):
+        if not src.endswith("/"):
+            files.add(src)
+            continue
+        for rest in re.findall(re.escape(dst) + r"([^\s\"';)/]+)", text):
+            files.add(src + rest.replace("${CUDF}", cudf))
+    return files
+
+
+def test_the_label_holds_every_docker_file_its_dockerfile_reads():
+    for kind in ("build", "run"):
+        for cudf in ("25.02", "26.02"):
+            read = files_read(kind, cudf)
+            assert f"docker/conda/cudf-{cudf}.spec" in read, (kind, cudf, read)
+            missing = sorted(read - set(image_inputs(REPO, kind, cudf)))
+            assert not missing, f"the {kind} image's {cudf} label misses {missing}"
+    assert "docker/conda/cudf-26.02.spec" in files_read("build", "25.02"), "the nvcc spec is no longer read"
+
+
+def bump(repo, name):
+    pins = repo.root / "docker" / "pins.env"
+    pins.write_text("".join(line + ("9" if line.startswith(f"{name}=") else "") + "\n"
+                            for line in pins.read_text().splitlines()))
+
+
+def labels(repo):
+    return {kind: label(build_line(run("build", kind, "25.02", "--dry-run", script=repo.script)))
+            for kind in ("build", "run")}
+
+
+def test_a_pin_no_dockerfile_reads_changes_no_label():
+    with Repo() as repo:
+        before = labels(repo)
+        for name in ("CLAUDE_CODE_VERSION", "SUPERPOWERS_VERSION", "SUPERPOWERS_SHA"):
+            bump(repo, name)
+        assert labels(repo) == before
+
+
+def test_a_pin_changes_the_label_of_the_image_that_reads_it():
+    for name, changed in (("GH_VERSION", "build"), ("DRIVER_MINIMUM_25_02", "run"), ("MICROMAMBA_VERSION", "both")):
+        with Repo() as repo:
+            before = labels(repo)
+            bump(repo, name)
+            after = labels(repo)
+            for kind in ("build", "run"):
+                moved = sorted(k for k in before[kind] if before[kind][k] != after[kind][k])
+                want = ["docker/pins.env"] if changed in (kind, "both") else []
+                assert moved == want, (name, kind, moved)
+
+
+def sorted_in(locale, lines):
+    return subprocess.run(["sort"], input="".join(f"{ln}\n" for ln in lines), capture_output=True, text=True,
+                          check=True, env={**os.environ, "LC_ALL": locale}).stdout
+
+
+def a_locale_sorting_unlike_c():
+    """An installed locale whose `sort` orders pins.env's names otherwise than C does, or None."""
+    names = ["GCC_25_02=1", "GH_VERSION=1", "G_A=1"]
+    installed = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()
+    return next((loc for loc in installed if sorted_in(loc, names) != sorted_in("C", names)), None)
+
+
+def test_the_inputs_are_the_same_in_every_locale():
+    """The label is made on one host and checked on another, each in its own locale."""
+    locale = a_locale_sorting_unlike_c()
+    if locale is None:
+        print("  SKIP test_the_inputs_are_the_same_in_every_locale: no installed locale sorts unlike C")
+        return
+
+    def inputs(loc):
+        call = f'. "{REPO}/scripts/lib/image-inputs.sh"; image_inputs "{REPO}" build 25.02'
+        return subprocess.run(["bash", "-c", call], check=True, capture_output=True, text=True,
+                              env={**os.environ, "LC_ALL": loc, "LANG": loc}).stdout
+    assert inputs("C") == inputs(locale), locale
+
+
+def test_a_version_s_pin_changes_only_that_version_s_labels():
+    with Repo() as repo:
+        def all_labels():
+            return {(kind, cudf): label(build_line(run("build", kind, cudf, "--dry-run", script=repo.script)))
+                    for kind in ("build", "run") for cudf in ("25.02", "26.02")}
+        before = all_labels()
+        bump(repo, "GCC_26_02")
+        after = all_labels()
+        moved = sorted(k for k in before if before[k] != after[k])
+        assert moved == [("build", "26.02")], moved
+
+
+def declare(repo, kind, after, arg, value="1"):
+    """Declares ARG <arg> in <kind>.Dockerfile on the line after <after>, and gives it a pin."""
+    dockerfile = repo.root / "docker" / f"{kind}.Dockerfile"
+    text = dockerfile.read_text()
+    assert text.count(after + "\n") == 1, after
+    dockerfile.write_text(text.replace(after + "\n", f"{after}\nARG {arg}\n"))
+    pins = repo.root / "docker" / "pins.env"
+    if f"\n{arg}=" not in pins.read_text():
+        pins.write_text(pins.read_text() + f"{arg}={value}\n")
+
+
+def every_label(repo):
+    return {(kind, cudf): label(build_line(run("build", kind, cudf, "--dry-run", script=repo.script)))
+            for kind in ("build", "run") for cudf in ("25.02", "26.02")}
+
+
+def test_a_suffix_that_is_no_cudf_version_stays_in_every_label():
+    with Repo() as repo:
+        declare(repo, "build", "FROM cudf-${CUDF} AS toolchain", "ARROW_19_0")
+        declare(repo, "run", "FROM ubuntu:24.04 AS prefix", "ARROW_19_0")
+        before = every_label(repo)
+        bump(repo, "ARROW_19_0")
+        after = every_label(repo)
+        moved = sorted(k for k in before if before[k] != after[k])
+        assert moved == sorted(before), moved
+
+
+def test_a_version_s_pin_read_by_another_version_s_stage_stays_in_its_label():
+    with Repo() as repo:
+        declare(repo, "build", "FROM cudf-${CUDF} AS toolchain", "GCC_26_02")
+        before = every_label(repo)
+        bump(repo, "GCC_26_02")
+        after = every_label(repo)
+        moved = sorted(k for k in before if before[k] != after[k])
+        assert moved == [("build", "25.02"), ("build", "26.02")], moved
+
+
+def test_the_inputs_refuse_a_flatbuffers_tag_named_twice():
+    with Repo() as repo:
+        cmake = repo.root / "cpp" / "CMakeLists.txt"
+        cmake.write_text(cmake.read_text().replace("GIT_TAG        v25.12.19", "GIT_TAG v1\n  GIT_TAG v2"))
+        r = run("build", "build", "25.02", "--dry-run", script=repo.script)
+        assert r.returncode == 2 and "flatbuffers" in r.stderr, (r.returncode, r.stderr)
+        assert r.stdout == "", r.stdout
 
 
 if __name__ == "__main__":
