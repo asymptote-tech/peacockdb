@@ -9,7 +9,10 @@ directory it would have made; `cargo fetch` records in the world whether two ran
 instance's `docker run -d` runs FAKE_CONTAINER_CMD when set, in the paths its mounts give it,
 refusing a path that is not mounted at its own machine path. cuDF's origin is a local repository
 of two commits, named by the clone's .gitmodules; the clone pins the first, its own
-`third_party/cudf` an empty directory, as a fresh clone leaves it.
+`third_party/cudf` an empty directory, as a fresh clone leaves it. The clone's origin is a bare
+repository whose master holds a board of chains A, B and E (E with no task); `commit` pushes to it.
+The machine carries the marker of a bootstrapped VM and a machine-wide data directory, setgid.
+`other_user` adds a second developer: their own home and clone, the same data directory and docker.
 """
 import json
 import os
@@ -21,6 +24,7 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CLONE_FILES = [
     "scripts/env/up.sh", "scripts/env/down.sh", "scripts/env/bootstrap-vm.sh", "scripts/env/image.sh",
+    "scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh", "scripts/lib/board.sh",
     "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh",
     "scripts/ensemble-watchdog.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
@@ -33,6 +37,22 @@ GITCONFIG = ("[user]\n\tname = Machine User\n\temail = machine@example.test\n"
              f'[credential "https://github.com"]\n\thelper =\n\thelper = {GH_HELPER}\n')
 IMAGE_PATH = "/opt/venv/bin:/opt/rust/cargo/bin:/usr/local/bin:/usr/bin:/bin"
 REGISTRY = "ghcr.io/asymptote-tech/peacockdb-build"
+BOARD = """# Board
+
+## Chain A (base: master)
+
+### 1. [`alpha.md`](alpha.md) — state: approved to build
+
+## Chain B (base: master)
+
+### 2. [`beta-two.md`](beta-two.md) — state: new
+
+### 1. [`beta.md`](beta.md) — state: approved to build
+
+## Chain E (base: master)
+
+Nothing yet.
+"""
 
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import fcntl, json, os, pathlib, subprocess, sys, time
@@ -54,7 +74,15 @@ if a[:2] == ["container", "inspect"]:
     name = a[-1]
     if name not in w["containers"]:
         print(f"Error: No such container: {name}", file=sys.stderr); sys.exit(1)
-    print(w["containers"][name]); sys.exit(0)
+    print(w["containers"][name]["state"]); sys.exit(0)
+if a[0] == "ps":
+    wanted = [a[i + 1].removeprefix("label=").partition("=")[::2] for i, x in enumerate(a) if x == "--filter"]
+    found = [(name, c) for name, c in w["containers"].items() if all(c["labels"].get(k) == v for k, v in wanted)]
+    time.sleep(w["ps_seconds"])
+    fmt = a[a.index("--format") + 1]
+    for name, c in found:
+        print(name if fmt == "{{.Names}}" else f'{c["labels"].get("peacockdb.user", "")} {name} {c["state"]}')
+    sys.exit(0)
 if a[0] == "pull":
     sys.exit(0)
 if a[:2] == ["image", "inspect"]:
@@ -74,11 +102,11 @@ if a[0] in ("stop", "rm"):
         if a[0] == "rm":
             del w["containers"][name]
         else:
-            w["containers"][name] = "exited"
+            w["containers"][name]["state"] = "exited"
     update(settle)
     sys.exit(0)
 if a[0] == "run":
-    mounts, env, i, workdir = [], {}, 1, None
+    mounts, env, labels, i, workdir = [], {}, {}, 1, None
     while i < len(a) and a[i].startswith("-"):
         flag = a[i]
         if flag in ("-d", "--rm", "--init"):
@@ -94,8 +122,12 @@ if a[0] == "run":
             k, _, v = value.partition("="); env[k] = v
         elif flag == "-w":
             workdir = value
+        elif flag == "--label":
+            k, _, v = value.partition("="); labels[k] = v
         i += 2
     image, cmd = a[i], a[i + 1:]
+    if cmd[:2] == ["bash", "-c"] and cmd[2].startswith("umask 002 &&"):
+        os.umask(0o002)
     if cmd[:1] == ["cat"]:
         print(w["etc"][cmd[1]], end=""); sys.exit(0)
     if cmd[:2] == ["cargo", "fetch"]:
@@ -135,7 +167,7 @@ if a[0] == "run":
             subprocess.run(["sh", "-c", script], cwd=workdir, check=True,
                            env={"HOME": env["HOME"], "PATH": os.environ["PATH"], "GIT_CONFIG_NOSYSTEM": "1"})
         def add(w):
-            w["containers"][name] = "running"
+            w["containers"][name] = {"state": "running", "labels": labels}
         update(add)
         print("0123456789ab"); sys.exit(0)
     sys.exit(0)
@@ -152,6 +184,10 @@ exit 0
 
 FAKE_ROOT_ID = '''#!/bin/sh
 case "$1" in -u|-g) echo 0 ;; *) exec /usr/bin/id "$@" ;; esac
+'''
+
+FAKE_OTHER_ID = '''#!/bin/sh
+case "$1" in -un|-gn) echo "$FAKE_USER_NAME" ;; *) exec /usr/bin/id "$@" ;; esac
 '''
 
 KEYS = {
@@ -181,7 +217,11 @@ class Machine:
         tmp = pathlib.Path(self.tmp.name)
         self.home = tmp / "home"
         self.clone = self.home / "peacockdb"
-        self.make_home()
+        self.origin = tmp / "origin.git"
+        self.data_dir = tmp / "shared-data"
+        self.data_dir.mkdir()
+        self.data_dir.chmod(0o2775)
+        self.make_home(self.home)
         self.make_clone()
         self.bin = tmp / "bin"
         self.bin.mkdir()
@@ -192,11 +232,11 @@ class Machine:
         self.gh_log.touch()
         self.world_path.write_text(json.dumps({
             "containers": {}, "label": self.label("25.02"), "image_path": IMAGE_PATH, "gen_seconds": 0,
-            "fetch_seconds": 0, "fetching": 0, "fetch_overlap": False,
+            "fetch_seconds": 0, "ps_seconds": 0, "fetching": 0, "fetch_overlap": False,
             "etc": {"/etc/passwd": IMAGE_PASSWD, "/etc/group": IMAGE_GROUP}}))
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_DOCKER_LOG": str(self.docker_log), "FAKE_DOCKER_WORLD": str(self.world_path),
-                    "FAKE_GH_LOG": str(self.gh_log)}
+                    "FAKE_GH_LOG": str(self.gh_log), "PEACOCK_DATA_DIR": str(self.data_dir)}
         self.keys_file = tmp / "keys.env"
         self.write_keys(KEYS)
         return self
@@ -204,8 +244,7 @@ class Machine:
     def __exit__(self, *exc):
         self.tmp.cleanup()
 
-    def make_home(self):
-        h = self.home
+    def make_home(self, h):
         (h / ".claude").mkdir(parents=True)
         (h / ".claude" / ".credentials.json").write_text('{"claudeAiOauth": {}}')
         version = h / ".local" / "share" / "claude" / "versions" / "2.1.304"
@@ -217,6 +256,7 @@ class Machine:
         (h / ".config" / "gh").mkdir(parents=True)
         (h / ".config" / "gh" / "hosts.yml").write_text(GH_HOSTS)
         (h / ".config" / "peacock" / "hosts").mkdir(parents=True)
+        (h / ".config" / "peacock" / "machine").write_text("bootstrapped\n")
         (h / ".gitconfig").write_text(GITCONFIG)
 
     def make_clone(self):
@@ -241,17 +281,52 @@ class Machine:
         (self.clone / ".gitmodules").write_text(
             f'[submodule "third_party/cudf"]\n\tpath = third_party/cudf\n\turl = file://{self.cudf_origin}\n')
         (self.clone / "third_party" / "cudf").mkdir(parents=True)  # an uninitialised submodule, kept by commit -a
-        git(self.clone, "init", "-q")
+        (self.clone / "llm-wiki" / "tasks").mkdir(parents=True)
+        (self.clone / "llm-wiki" / "tasks" / "tasks.md").write_text(BOARD)
+        git(self.clone, "init", "-q", "-b", "master")
         git(self.clone, "add", "-A")
         self.pin_cudf(self.cudf_sha)
+        subprocess.run(["git", "clone", "-q", "--bare", str(self.clone), str(self.origin)], check=True)
+        git(self.clone, "remote", "add", "origin", str(self.origin))
+        git(self.clone, "fetch", "-q", "origin")
 
     def pin_cudf(self, sha):
         """Commits a third_party/cudf gitlink at <sha> in the clone."""
         git(self.clone, "update-index", "--add", "--cacheinfo", f"160000,{sha},third_party/cudf")
         git(self.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", f"cudf at {sha}")
+        self.push()
 
     def commit(self, message):
         git(self.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", message)
+        self.push()
+
+    def push(self, *refs):
+        """Pushes master, or <refs>, to origin once it exists."""
+        if self.origin.exists():
+            git(self.clone, "push", "-q", "origin", *(refs or ["master"]))
+
+    def push_branch(self, name, board, base="master"):
+        """Pushes <name> to origin: <base> and a commit whose board is <board>; the clone keeps no such branch."""
+        git(self.clone, "checkout", "-q", "-b", name, base)
+        (self.clone / "llm-wiki" / "tasks" / "tasks.md").write_text(board)
+        git(self.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-am", f"{name}'s board")
+        sha = git(self.clone, "rev-parse", "HEAD")
+        git(self.clone, "push", "-q", "origin", name)
+        git(self.clone, "checkout", "-q", "master")
+        git(self.clone, "branch", "-q", "-D", name)
+        return sha
+
+    def other_user(self, name):
+        """A second developer on this machine: their home, a clone of origin, `id -un` answering name."""
+        home = self.home.parent / f"home-{name}"
+        self.make_home(home)
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(home / "peacockdb")], check=True)
+        bin_dir = self.home.parent / f"bin-{name}"
+        bin_dir.mkdir()
+        (bin_dir / "id").write_text(FAKE_OTHER_ID)
+        (bin_dir / "id").chmod(0o755)
+        return OtherUser(self, name, home, {"HOME": str(home), "FAKE_USER_NAME": name,
+                                            "PATH": f"{bin_dir}:{self.env['PATH']}"})
 
     def install(self, name, text):
         (self.bin / name).write_text(text)
@@ -274,13 +349,15 @@ class Machine:
         return w
 
     def run(self, script, *args, env=None, background=False, cwd=None):
-        cmd = [str(self.clone / "scripts" / "env" / script), *map(str, args)]
         full_env = {**self.env, **(env or {})}
+        clone = pathlib.Path(full_env["HOME"]) / "peacockdb"
+        cmd = [str(clone / "scripts" / "env" / script), *map(str, args)]
+        # Under the umask a login shell commonly has, so what a script leaves group-writable is its doing.
         if background:
             return subprocess.Popen(cmd, env=full_env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, cwd=cwd)
+                                    stderr=subprocess.PIPE, text=True, cwd=cwd, umask=0o022)
         return subprocess.run(cmd, env=full_env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=120, cwd=cwd)
+                              timeout=120, cwd=cwd, umask=0o022)
 
     def up(self, *args, **kw):
         return self.run("up.sh", *args, **kw)
@@ -296,6 +373,19 @@ class Machine:
 
     def instance_runs(self):
         return [c for c in self.runs() if "-d" in c]
+
+
+class OtherUser:
+    """Another developer on a Machine: `up` and `down` run their clone's scripts as them."""
+
+    def __init__(self, machine, name, home, env):
+        self.machine, self.name, self.home, self.env = machine, name, home, env
+
+    def up(self, *args, **kw):
+        return self.machine.up(*args, env={**self.env, **kw.pop("env", {})}, **kw)
+
+    def down(self, *args, **kw):
+        return self.machine.down(*args, env={**self.env, **kw.pop("env", {})}, **kw)
 
 
 def path_without(tmp, names):

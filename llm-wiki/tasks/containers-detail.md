@@ -983,6 +983,78 @@ the total 5888, the header the sum of the rows.
   - whether the storage honours `If-None-Match: *` on PUT (412 for a writer, 403 for a reader):
     only then could `up.sh` test a key for write access without writing.
 
+## Task 6a: one command per machine, one per chain (steps 1 and 2's code; no VM yet)
+
+- **The developer's user has passwordless sudo** (`/etc/sudoers.d/peacock-<user>`). Bootstrap runs
+  as that user and installs with sudo; the docker group is root already, so the grant widens
+  nothing. The root step skips the keys and the sudoers file when `--user` is the login user.
+- **Groups before the first login.** The root step puts the user in `docker` and `peacock` before
+  any ssh as that user, so every later session has both active. A user who runs `bootstrap-vm.sh`
+  by hand joins `peacock` only at the next login; the data directory it makes is its own (owner,
+  group `peacock`, 2775), so its writes in that session do not need the group.
+- **Shared writes.** `machine_cudf_source`, `machine_data_set` and up.sh's chain lock set umask
+  002 for what they create; the generator runs as `bash -c 'umask 002 && exec "$@"'` in the build
+  image. The container's `--user uid:gid` carries no supplementary group, so a second user's
+  container reads the first user's set through the other-bits, which umask 002 leaves readable.
+  The cuDF checkout is mounted into another uid's container, and git refuses a repository another
+  uid owns: up.sh passes `safe.directory=<worktree>/third_party/cudf` as `GIT_CONFIG_*` (command
+  scope counts as protected configuration). Not seen failing yet: a VM check.
+- **The marker** is `~/.config/peacock/machine`, bootstrap's last write, so a bootstrap that
+  stopped midway is rerun by `provision-vm.sh`. Forwarding passes the arguments as one string,
+  each `printf %q`-quoted, `$HOME` left to the VM's shell (bash: the root step makes the user with
+  `--shell /bin/bash`). A path given to `--env` is the VM's.
+- **The chain's branch is never guessed.** The board names no branch, and origin's names do not
+  follow the tasks: `ENS-optimizer` carries `join-optimizer.md`, chain C's first task on
+  `ENS-optimizer`'s board, and there are `ENS1-*` and `ENS-bp-*` branches. So `--branch <b>`
+  resumes a chain, and without it up.sh starts only a new one: it reads the board at every
+  `origin/ENS*` tip and stops, naming them, where the chain's first task is past `approved to
+  build`: `building`, `reviewing`, `completing`, `completeness approved` or `done`, read as the
+  state's first words. `blocked(…)` and `rebase needed(…)` count as the state they carry, so
+  `blocked(done)` is a run and `blocked(new)` is not; `approved to build (resumed …)` is not. A new
+  chain's first branch is a local `ENS-<task>` at `origin/<base>`, checked out rather than a
+  detached HEAD, as `llm-wiki/README.md`, "Run a chain", starts a chain. The first task is the
+  lowest-numbered heading, read from the link target: the bracket text carries backticks on the
+  real board.
+- **`--board <ref>`** is where a new chain's section is read, `origin/master` by default, so a
+  scratch chain defined on another branch can run before a merge. Its section needs `(base:
+  <that branch>)`: the coordinator reads its own branch's board, and a first branch cut from
+  master would not hold the chain. up.sh refuses a base whose board lacks the chain. A
+  `--branch` another worktree has checked out is refused before the fast-forward, which would
+  move it under that worktree.
+- **Forwarding** puts `PEACOCK_FORWARDED=1` on the remote command line; a call carrying it on a
+  machine without the marker stops rather than forward again. The laptop scripts check
+  `BASH_VERSINFO` for 4.4 in two lines of bash 3.2, before any source: a library that bash 3.2
+  cannot parse would fail first. They print their help with bash alone.
+- **The env file** is copied with CRs dropped and a final newline (awk), into a temporary file
+  beside the copy and moved into place: `--env` may name the laptop's own `peacock.env`, which a
+  redirection would empty before awk read it. The VM appends
+  `GPU_SSH_KEY_FILE` after a newline whether or not the file ends in one: without both, a file
+  with no final newline ran `GPU_SSH_KEY_FILE=` onto `AWS_REGION`'s line and every check passed.
+- **`provision-vm.sh --ref`** exists because, before this branch is on master, bootstrap's
+  default (master) has no `up.sh`, so the VM check needs it.
+- **Claude's login** is `claude auth login` (in 2.1.316 here; the pinned 2.1.304 unchecked),
+  with `CLAUDE_CONFIG_DIR=$HOME/.claude`, since a non-interactive ssh does not read the
+  `.bashrc` lines bootstrap appends.
+- **Fakes.** The VM is a directory reached by a fake ssh that runs the remote command with the
+  VM's fakes first on PATH; sudo runs its command as the caller; `install` writes `/etc` and
+  `/var` under the VM's `root/`. A check of a real `/etc` path in the root script would read the
+  host's, so the script writes the sudoers file every run rather than testing for it.
+- **For the VM check, what the fakes cannot show:**
+  - useradd, usermod, groupadd and `install -m 440 /dev/stdin` as root on Ubuntu; sudo working for
+    the new user with no tty;
+  - `docker.io`'s postinst with a `docker` group the root step made first;
+  - bootstrap copied over ssh and run with stdin at EOF: the Claude installer, apt and the plugin
+    install reading nothing from it;
+  - ssh as the new user with the copied keys, and `StrictHostKeyChecking=accept-new` on a first
+    contact;
+  - `claude auth login` over `ssh -t` in the pinned version, its credentials landing in
+    `~/.claude`;
+  - a second developer: the shared set and checkout reused, a lock taken, a crashed `.partial`
+    removed, and git in that user's container accepting the first user's cuDF checkout;
+  - `gh auth login --with-token --insecure-storage` reading the token from ssh's stdin;
+  - sshd accepting a key login for the new user, whose password useradd leaves locked, on an
+    image whose sshd has `UsePAM no`.
+
 ## Task 8: provenance and the per-device tree
 
 Worked in its own worktree, branch `ENS-containers-task8` from `0d9e1dc4`, to be replayed onto

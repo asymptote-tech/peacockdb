@@ -2,7 +2,7 @@
 #
 # The S3 storage every bucket script passes to the aws CLI: the endpoint and region come from
 # AWS_ENDPOINT_URL and AWS_REGION, the names the CLI itself reads, so the storage moves with the
-# keys file and no script names a provider's endpoint. Access is the S3 API with static keys.
+# env file and no script names a provider's endpoint. Access is the S3 API with static keys.
 
 # s3_args <array> — sets <array> to `--endpoint-url <url> --region <region>`. With either variable
 # unset or empty, names it and returns 2: without an endpoint every call would go to AWS.

@@ -10,7 +10,7 @@
 CALIBRATION_BUCKET=calibration
 # Every aws call names the endpoint, or it goes to real AWS: the environment's (s3.sh). Where it
 # names no endpoint, the storage and region the old GPU path has always used, whatever AWS_REGION
-# says, so build-test-shadgpu.sh needs no keys file.
+# says, so build-test-shadgpu.sh needs no env file.
 . "$(dirname "${BASH_SOURCE[0]}")/s3.sh"
 if [ -z "${AWS_ENDPOINT_URL:-}" ]; then
   CALIBRATION_S3=(--endpoint-url https://storage.eu-north1.nebius.cloud:443 --region eu-north-1)

@@ -1,15 +1,19 @@
 # shellcheck shell=bash
 #
 # A CPU VM's layout for the ensemble's containers, and the steps bootstrap-vm.sh and up.sh both
-# take in the build image (llm-wiki/build-test.md, "Containers"). Every path comes from $HOME, and
-# every container runs as the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
+# take in the build image (llm-wiki/build-test.md, "Containers"). Every path but the data
+# directory comes from $HOME, and every container runs as the caller's uid:gid. Sourced after
+# image-inputs.sh and data-inputs.sh.
 # A step function (machine_image_checked, machine_cargo_fetch, machine_data_set,
 # machine_cudf_source) is called as a statement of its own, never in `$(…)` or before `||`: set -e
 # is what stops it at a failed step, and both turn it off inside. The others print a value for `$(…)`.
 
 MACHINE_IMAGE=ghcr.io/asymptote-tech/peacockdb-build
 MACHINE_USER=$(id -u):$(id -g)
-MACHINE_DATA=${PEACOCK_DATA_DIR:-$HOME/peacock-data}
+# The machine's developers share it: group peacock, setgid, made by bootstrap-vm.sh. What is
+# written there is written under umask 002, so another developer can take a lock or clear a
+# crashed .partial left by the first.
+MACHINE_DATA=${PEACOCK_DATA_DIR:-/var/lib/peacock}
 MACHINE_REGISTRY=$HOME/.cache/peacock/cargo-registry
 MACHINE_CCACHE=$HOME/.cache/peacock/ccache
 MACHINE_INSTANCES=$HOME/peacock-instances
@@ -28,7 +32,7 @@ machine_cudf_gitlink() { machine_git -C "$1" ls-files -s third_party/cudf | awk 
 # configure reads. One a commit, so an instance's never moves under it; fetched under a lock when
 # the machine has none, and appearing only whole. A clone's own third_party/cudf is never read.
 machine_cudf_source() {
-  local tree=$1 commit url stage lock
+  local tree=$1 commit url stage lock mask
   commit=$(machine_cudf_gitlink "$tree")
   url=$(machine_git config --file "$tree/.gitmodules" --get submodule.third_party/cudf.url || true)
   if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || [ -z "$url" ]; then
@@ -36,6 +40,8 @@ machine_cudf_source() {
     return 2
   fi
   CUDF_SOURCE=$MACHINE_DATA/cudf/$commit
+  mask=$(umask)
+  umask 002
   mkdir -p "$MACHINE_DATA/cudf"
   exec {lock}> "$MACHINE_DATA/cudf/.$commit.lock"
   flock "$lock"
@@ -53,6 +59,7 @@ machine_cudf_source() {
     mv "$stage" "$CUDF_SOURCE"
   fi
   exec {lock}>&-
+  umask "$mask"
 }
 
 # machine_image_checked <ref> <tree> <cudf> — pulls the build image <ref>; refuses it, naming each
@@ -91,10 +98,11 @@ machine_cargo_fetch() {
 # inputs, generating them first, offline, when the machine has none. Under a lock, so two callers
 # generate a set once; a set appears only whole, renamed from its .partial when done.
 machine_data_set() {
-  local ref=$1 tree=$2 hash stage entry words lock
+  local ref=$1 tree=$2 hash stage entry words lock mask
   hash=$(data_inputs "$tree")
   DATA_SET=$MACHINE_DATA/$hash
-  mkdir -p "$MACHINE_DATA"
+  mask=$(umask)
+  umask 002
   exec {lock}> "$MACHINE_DATA/.$hash.lock"
   flock "$lock"
   if [ ! -d "$DATA_SET" ]; then
@@ -105,7 +113,8 @@ machine_data_set() {
     for entry in "${DATA_SETS[@]}"; do
       read -r -a words <<< "$entry"
       docker run --rm --user "$MACHINE_USER" --network none -e PEACOCK_NO_FETCH=1 \
-        --mount "type=bind,src=$stage,dst=$stage" -w "$stage" "$ref" "$stage/generate_testdata.sh" "${words[@]:1}"
+        --mount "type=bind,src=$stage,dst=$stage" -w "$stage" "$ref" \
+        bash -c 'umask 002 && exec "$@"' bash "$stage/generate_testdata.sh" "${words[@]:1}"
       if [ ! -d "$stage/${words[0]}" ]; then
         echo "${0##*/}: the generator made no ${words[0]} in $stage" >&2
         return 2
@@ -115,4 +124,5 @@ machine_data_set() {
     mv "$stage" "$DATA_SET"
   fi
   exec {lock}>&-
+  umask "$mask"
 }

@@ -48,8 +48,9 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 1. A machine where Claude Code or gh is not logged in, or a needed key is missing: the launcher
    refuses to start and names what is missing, never starts an ensemble that fails an hour later on
    auth. → Task 6, `test_up_refuses_missing_login`, `test_up_refuses_missing_key`.
-2. A second instance started with the same name as a running one: refused, never two containers on
-   one worktree volume. → Task 6, `test_up_refuses_duplicate_instance`.
+2. A chain started while a container of that chain exists on the machine, for this user or another:
+   refused, naming the user, never two coordinators on one board. → Task 6,
+   `test_up_refuses_duplicate_instance`; Task 6a, `test_up_refuses_a_chain_another_user_runs`.
 3. A GPU host whose driver is older than the run image's CUDA needs: the run stops before
    shipping data, naming driver and required minimum. → Task 7, `test_run_refuses_old_driver`.
 4. A benchmark interrupted mid-run (preemption, watcher): what was measured is kept, a rerun under
@@ -197,8 +198,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   default vectors and `PEACOCK_NO_FETCH=1`, as CI generates it (in the build image, into the
   machine's data directory; no embeddings are fetched: no corpus query reads a vector column); it ends by printing the two
   logins left to do by hand
-- Create: `scripts/env/up.sh` — `up.sh <instance> --env <file> [--chain <c>] [--cudf 25.02]`;
-  `down.sh <instance>`
+- Create: `scripts/env/up.sh` — `up.sh <chain> [--cudf <v> | --image <tag>] [--env <file>]`;
+  `down.sh <chain>` (the instance is the chain: Task 6a)
 - Create: `scripts/env/tests/test_up.py`
 - Create: `scripts/lib/image-inputs.sh` — the files an image is made from, each with its
   sha256: `docker/conda/cudf-<v>.spec`, `docker/pins.env`, the kind's Dockerfile and
@@ -221,7 +222,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 
 **Interfaces:**
 - Consumes: Task 2's image, Task 5's fetch.
-- Produces: per instance `<i>`: a worktree of the machine's clone, and the clone's `.git`
+- Produces: per instance, named after its chain: a worktree of the machine's clone, and the clone's `.git`
   read-write, both at their machine paths inside the container, so the worktree's `.git` pointer
   resolves and commits land; the build in the worktree's own `target/`, and a home of its own on
   the machine mounted at `$HOME` (a named volume would be root's, which the uid cannot write); its
@@ -242,7 +243,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   path `GPU_SSH_KEY_FILE` names; `~/.config/peacock/hosts/` (Task 7's host files) read-only; a
   provider CLI's config read-only, at the path `PROVIDER_CONFIG_DIR` names, where that provider is
   used. The container runs with
-  `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. `--env <file>`, required for every start, carries the
+  `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. The env file, `~/.config/peacock/peacock.env` unless
+  `--env <file>` names another, is required for every start, carries the
   values that are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID`,
   `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` and `AWS_REGION` required, `GPU_SSH_KEY_FILE` and a provider's values optional.
   The registry is read-only, so a `Cargo.lock` that names a crate the machine lacks would fail
@@ -255,7 +257,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   label refuses the start, naming each file that differs. The images published before this label
   are refused until republished. Task 7's `prepare` makes the same check of the run image.
   The data is generated once per machine and per generator, never per instance or per start: the
-  machine's data directory (`$HOME/peacock-data` unless `PEACOCK_DATA_DIR` names another) holds
+  machine's data directory (`/var/lib/peacock`, shared by the machine's users, unless
+  `PEACOCK_DATA_DIR` names another; Task 6a) holds
   `<hash>/{tpch.sf1,tpcds.sf1}`, the hash being `data-inputs.sh` over a
   worktree. `up.sh` mounts the set matching the instance's worktree read-only at its
   `testdata/<dataset>` paths; when none matches, it generates that set once in the build image,
@@ -281,13 +284,199 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `image-inputs.sh` over the tree; a changed `venv.lock` changes the build image's label, not the
   run image's); `test_up_refuses_stale_image` (a fake `docker image inspect` whose label differs
   in `venv.lock` → exit 2, stderr names `docker/venv.lock`; no label → exit 2).
-- [x] **Step 2:** implement; with `--chain`, `scripts/ensemble-watchdog.sh <c>` starts in the
-  instance's worktree inside the container.
-- [ ] **Step 3: verify on a fresh VM** (a verda or nebius CPU VM the human creates): from nothing,
-  `bootstrap-vm.sh`, the two logins, `up.sh a && up.sh b`; both build rust-only at once, and one
-  builds the FFI tier once; `docker
-  system df` shows one image copy; in each, `claude --version`, `gh auth status` and the
-  ensemble's first coordinator turn on a scratch chain, with no login asked. Record wall times.
+- [x] **Step 2:** implement; `scripts/ensemble-watchdog.sh <chain>` starts in the instance's
+  worktree inside the container.
+- [ ] **Step 3: verify on a fresh VM, with Task 6a** (a verda or nebius CPU VM the human creates):
+  from nothing, on the laptop, `provision-vm.sh <login>@<address> --ref <this branch>`: the PAT
+  recipe, the Claude login, and nothing else by hand. A scratch branch off this one, pushed and
+  never merged, holds a board with two scratch chains, A and B, each `(base: <scratch>)` so that
+  its first branch carries that board; then, from the laptop,
+  `up.sh A --board origin/<scratch> && up.sh B --board origin/<scratch>`. Both build rust-only at once, and one builds the FFI tier
+  once; `docker system df` shows one image copy; in each, `claude --version`, `gh auth status` and
+  the ensemble's first coordinator turn, with no login asked. A second developer on the same VM
+  (`provision-vm.sh … --user <other>`) reuses sf1 and the cuDF checkout, generating and fetching
+  nothing, and `up.sh A` as them is refused naming the first. A rerun of `provision-vm.sh` skips
+  every step. Record wall times.
+- [ ] **Step 4:** commit.
+
+### Task 6a: one command per machine, one per chain
+
+A person readies a VM with one command run on their own machine (the laptop) and starts a chain
+with another. Nothing in either names a person, an address or a password manager; several
+developers share the storage keys and keep their own token, GPU key and Linux user.
+
+**Files:**
+- Create: `scripts/env/provision-vm.sh` — `provision-vm.sh <login>@<address> [--env <file>]
+  [--user <name>] [--name <vm>] [--ref <branch>] [--new-pat]`, run on the laptop
+- Create: `scripts/lib/peacock-config.sh` — `~/.config/peacock/`'s layout on the laptop and on a
+  VM, the env file's checks, the `vm` file, and the forwarding `up.sh` and `down.sh` share
+- Create: `scripts/lib/board.sh` — a chain's base and first branch, read from the board
+- Modify: `scripts/env/up.sh`, `scripts/env/down.sh` — the chain is the instance; labels; the
+  default env file; forwarding from the laptop; the chain's branch in a new worktree
+- Modify: `scripts/env/bootstrap-vm.sh` — the machine-wide data directory, the machine marker
+- Modify: `scripts/lib/machine.sh` — the data directory's default, group-writable files in it
+- Create: `scripts/env/tests/test_provision.py`, `scripts/env/tests/laptop.py` (a laptop and a VM
+  reached through a fake `ssh`)
+- Create: `scripts/env/tests/test_up_branch.py` (the branch a new worktree is on)
+- Modify: `scripts/env/tests/machine.py`, `test_up.py`, `test_bootstrap.py`
+- Modify: `llm-wiki/build-test.md` — "Trust", "A fresh VM", "The env file", "Instances";
+  `llm-wiki/README.md` — "Run a chain" points at them for a chain on a VM
+
+**Interfaces:**
+- **The laptop's files**, in `~/.config/peacock/` (mode 700, every file 600):
+  - `peacock.env`: exactly `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`,
+    `AWS_REGION`, each once and not empty; blank and `#` lines are skipped, as docker skips them.
+    Shared between developers, received from whoever administers the storage. Any other key is
+    refused by its name, never its value, so a token never rides along in a forwarded file. It is
+    kept with every CR dropped and a final newline.
+  - `github-pat`: the person's fine-grained PAT. Personal; never in `peacock.env`.
+  - `gpu_ed25519`, `gpu_ed25519.pub`: the person's key to GPU hosts, made with an empty
+    passphrase when missing.
+  - `vm`: one line a VM this laptop provisioned, `<name> <user>@<address>`; the last is the
+    default.
+- **`provision-vm.sh`.** `<login>` is the VM's login user, with sudo. Every argument is checked
+  before the first side effect. On the laptop: `--env` is needed only while the laptop has no
+  `peacock.env`, and replaces it when given; with no `github-pat`, or with `--new-pat`, it prints
+  the URL for a new fine-grained token and its recipe (resource owner and repository from the
+  clone's `origin`; Contents rw, Pull requests rw, Workflows rw, Actions rw, Commit statuses r,
+  Metadata r; an expiry), reads the token hidden, and refuses one that is not `github_pat_…` or
+  cannot read the repository, checked with the token in gh's environment (`GH_TOKEN`), never
+  argv; the GPU key pair is made when missing and its `.pub` printed with what it is for; the git
+  identity is the laptop's `user.name` and `user.email`, refused naming the one missing. On the VM:
+  - as `<login>`, with sudo: groups `docker` and `peacock`; the developer's user (`--user`, the
+    laptop's `id -un` by default) in both, with `<login>`'s `authorized_keys` when it has none,
+    and passwordless sudo (the docker group is root already, so it widens nothing; bootstrap
+    installs with it). Two developers on one VM are two Linux users;
+  - every later step as that user, over ssh: `bootstrap-vm.sh` copied and run (`--ref` passed
+    on), skipped when the machine marker is there, and then a `--ref` the VM's clone is not on is
+    refused;
+  - secrets only on ssh's stdin, never argv, a remote command line or shell history:
+    `peacock.env` and the key pair into `~/.config/peacock/`, the VM's `peacock.env` gaining
+    `GPU_SSH_KEY_FILE` at the VM's key, on a line of its own; the PAT into `gh auth login --with-token
+    --insecure-storage` when gh has no login there or with `--new-pat`, then `gh auth setup-git`.
+    The PAT is never in the VM's `peacock.env`;
+  - git's identity set for that user; the VM recorded in the laptop's `vm`, `--name` (the address
+    by default) replacing a line of that name and becoming the default;
+  - last, `claude auth login` over `ssh -t`, skipped when Claude's credentials are there.
+  `provision-vm.sh --new-pat`, with or without a target, replaces the PAT on the laptop and on
+  every VM in `vm` it can reach, naming each it cannot.
+- **The machine marker** `~/.config/peacock/machine`, written by `bootstrap-vm.sh` as its last
+  step: this machine runs instances. `up.sh` and `down.sh` on a machine without it forward their
+  arguments over ssh to the default VM (`--vm <name>` another), as the recorded user, to the
+  VM's `~/peacockdb/scripts/env/`; with no marker and no `vm` file they exit 2, naming
+  `provision-vm.sh`. `--vm` on a machine with the marker is refused. The remote command carries
+  `PEACOCK_FORWARDED=1`, and a call that carries it is never forwarded again. Both scripts and
+  `provision-vm.sh` refuse a bash older than 4.4 (macOS ships 3.2) in two lines of bash 3.2
+  before any source, and print their help with bash alone.
+- **The data directory** is machine-wide: `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names
+  another, group `peacock`, setgid, mode 2775, made by `bootstrap-vm.sh` with sudo and owned by
+  the user who ran it. What `up.sh` and bootstrap write there — locks, `.partial` stages, cuDF
+  checkouts, the data sets, the generator's output in the build image — is made under umask 002,
+  so another developer in `peacock` reuses a set, takes a lock and removes a crashed stage. A cuDF
+  checkout mounted into another uid's container is trusted there by git (`safe.directory`, passed
+  as `GIT_CONFIG_*`). The cargo registry stays per user. `up.sh` refuses a data directory that is missing or not writable.
+- **`up.sh <chain> [--branch <b> | --board <ref>] [--cudf <v> | --image <tag>] [--env <file>]
+  [--vm <name>]`, `down.sh <chain> [--vm <name>]`.** The instance is the chain: the worktree
+  `~/peacock-instances/<chain>`, its home and the container `peacock-<user>-<chain>`, labelled
+  `peacockdb.chain=<chain>` and `peacockdb.user=<user>`; `down.sh` finds its own container by the
+  two labels, since `-` in both names makes the name ambiguous. `--env` defaults to
+  `~/.config/peacock/peacock.env`, still required: missing or incomplete is exit 2 naming it, and
+  so is `GH_TOKEN` or `GITHUB_TOKEN` in it, by name. A container labelled with the chain, any user's and
+  in any state, refuses the start (exit 2, naming the user): the board is one per repository, so a
+  chain runs once. A machine-wide lock in the data directory holds from that check to the start.
+  The watchdog always starts: `scripts/ensemble-watchdog.sh <chain>`.
+- **The chain's branch is never guessed.** The board names no branch, and branches are named
+  unlike their tasks (`ENS-optimizer` for `join-optimizer.md`, `ENS1-…`). A new worktree is made
+  from origin, fetched with hooks off.
+  - `--branch <b>`, a chain that ran before: the worktree is on `<b>`, a local branch tracking
+    `origin/<b>`, made from it when the clone has none, fast-forwarded when behind it, refused when
+    diverged from it, naming both, or when another worktree has it checked out, naming that
+    worktree. Refused: no `origin/<b>`; no `## Chain <chain>` on its board.
+  - Without `--branch`, a new chain: its section on the board at `--board <ref>` (`origin/master`
+    by default) gives its base, `(base: <b>)`, and its first task, the lowest-numbered
+    `### <n>. [...](<task>.md)` heading. Before anything is made, the board at the tip of every
+    `origin/ENS*` branch is read: one whose `## Chain <chain>` holds that task at `building`,
+    `reviewing`, `completing`, `completeness approved` or `done` (`blocked(…)` and `rebase
+    needed(…)` counting as the state they carry, words after a state changing nothing) refuses the start,
+    every such branch named: "chain <c> already ran on <branches>; resume with --branch <b>". So
+    does an `ENS-<task>` origin or the clone has already. Otherwise the worktree is on a new local
+    `ENS-<task>` at `origin/<base>`: the first branch checked out before the watchdog starts, as
+    `llm-wiki/README.md`, "Run a chain", has it. Refused too: no section for `<chain>` on the
+    board (define the chain there first), a section with no task or no base, a base origin lacks,
+    a base whose board lacks the chain: the coordinator reads the board the new branch takes
+    from its base.
+  - An existing worktree is reused as it is, its branch left alone; a `--branch` naming another
+    branch, or a `--board`, is refused.
+
+- [ ] **Step 1: failing tests** (fakes on `PATH`: `ssh` recording argv and stdin and running the
+  remote command in a fake VM's home, `sudo`, `getent`, `groupadd`, `useradd`, `usermod`,
+  `install`, `gh`, `claude`, `docker`; a stub `bootstrap-vm.sh` recording its arguments):
+  - `test_provision.py::test_provision_readies_a_vm` — the laptop's directory 700 and its files
+    600; the recipe printed with the origin's owner and repository; gh asked with the token in
+    `GH_TOKEN`; on the VM the developer's user in `docker` and `peacock` with the login's
+    `authorized_keys`; bootstrap run as that user with `--ref`; the VM's `peacock.env` the four
+    keys and `GPU_SSH_KEY_FILE` at the VM's key, both key files there; gh logged in with the PAT
+    and `setup-git` run; the laptop's git identity on the VM; `vm` holds `<name> <user>@<address>`;
+    the last ssh is `-t` and `claude auth login`;
+  - `test_provision_never_puts_the_pat_in_argv_or_the_env_file` — neither the PAT nor a key's
+    value is in any ssh, gh or sudo argv, in stdout or stderr, or in the VM's `peacock.env`;
+  - `test_provision_refuses_an_extra_key_by_name` — a `peacock.env` with `GH_TOKEN=github_pat_…`
+    or `FOO=…` → exit 2, stderr names the key and holds no value, no ssh made, nothing copied;
+  - `test_provision_refuses_an_incomplete_env_file` — each of the four absent, empty or twice;
+  - `test_provision_needs_an_env_file_the_first_time` — no `peacock.env` and no `--env` → exit 2
+    naming `--env`;
+  - `test_provision_refuses_a_missing_git_identity` — each of `user.name`, `user.email` named;
+  - `test_provision_refuses_a_token_it_cannot_use` — `gho_…`, and a `github_pat_…` gh cannot read
+    the repository with → exit 2, nothing saved, no ssh;
+  - `test_provision_rerun_skips_what_is_done` — a second run reads no token, adds no user, runs no
+    bootstrap, logs gh and Claude in again never, and leaves one `vm` line;
+  - `test_provision_new_pat_replaces_it_everywhere` — two VMs recorded, one unreachable: the
+    laptop's PAT replaced, the reachable VM's gh given the new one, the other named, exit 0;
+  - `test_provision_refuses_bad_arguments_before_any_call`, `test_provision_has_help`;
+  - `test_up.py::test_up_forwards_from_a_laptop_to_its_default_vm` — no marker: one ssh to the
+    last `vm` line's target running its `~/peacockdb/scripts/env/up.sh` with the same arguments,
+    `--vm` picking another, the remote exit status returned, no docker call; the same for
+    `down.sh`; `test_up_without_a_vm_says_to_provision`;
+  - `test_up_takes_the_default_env_file` — no `--env`: `--env-file` is
+    `~/.config/peacock/peacock.env`; that file missing → exit 2 naming it;
+  - `test_up_names_the_container_after_user_and_chain` — the name and both labels;
+  - `test_up_refuses_a_chain_another_user_runs` — another user's container labelled with the chain
+    → exit 2 naming that user;
+  - `test_up_reuses_a_data_set_another_user_made` — a second user, another home, the same data
+    directory: no generation, no cuDF fetch, the first user's set mounted, the checkout's path in
+    the container's `safe.directory`;
+  - `test_up_leaves_the_shared_directory_writable_by_the_group` — the locks, the cuDF checkout and
+    the generated set group-writable under a caller's umask 022, the generator run under umask 002;
+  - `test_up_refuses_a_missing_data_directory`; `test_the_data_directory_is_machine_wide_by_default`;
+  - `test_two_users_starting_one_chain_at_once_start_it_once` — two users' `up.sh A` together,
+    the fake `docker ps` holding a window open: one instance, one refusal naming the lock;
+  - `test_down_finds_the_container_by_its_labels` — user `a-b`'s `down.sh C` leaves user `a`'s
+    chain `b-C` alone; `test_up_never_forwards_twice`; `test_up_refuses_a_token_in_the_env_file`;
+  - `test_help_needs_no_sed`; `test_laptop_scripts_need_bash_4_4` — 3.2 and 4.3 refused naming
+    `brew install bash`, the same two lines before the first source in each of the three scripts;
+  - `test_up_branch.py::test_up_resumes_a_branch_named_unlike_its_task`;
+    `test_up_refuses_a_chain_that_ran_before` — every origin branch whose board has the first task
+    past `approved to build` named, none at `approved to build`, and an `ENS-<task>` on origin or in
+    the clone refused; `test_up_refuses_an_unknown_branch` (no such origin branch; a board without
+    the chain); `test_up_brings_a_local_branch_up_to_its_origin` (fast-forward; diverged refused);
+    `test_up_starts_a_new_chain_at_its_base`; `test_up_reads_a_new_chain_from_the_board_it_is_given`;
+    `test_up_refuses_a_chain_the_board_lacks` (no section; a section with no task);
+    `test_up_refuses_a_base_whose_board_lacks_the_chain`; `test_up_refuses_a_branch_checked_out_elsewhere`
+    (the branch not moved); `test_board_ran_reads_a_state_past_approved_to_build` (`blocked(done)`
+    and `rebase needed(reviewing)` ran; `blocked(new)`, `blocked(approved to build)` and
+    `approved to build (resumed …)` did not);
+    `test_up_rerun_keeps_the_worktree_s_branch` (another `--branch`, or `--board`, refused);
+  - `test_bootstrap.py::test_bootstrap_makes_the_machine_wide_data_directory` — `sudo install -d
+    -o <user> -g peacock -m 2775 <data dir>`, before the first download;
+  - `test_provision_normalises_the_env_file` — a received file without a final newline, and one
+    with CRLF, kept as plain lines; a laptop file without a final newline still gives the VM
+    `GPU_SSH_KEY_FILE` on a line of its own; `--env` naming the laptop's own `peacock.env` keeps
+    it whole; `test_provision_takes_comments_in_the_env_file`;
+    `test_provision_refuses_a_ref_the_vm_clone_is_not_on` (its git call with hooks and fsmonitor off).
+- [ ] **Step 2:** implement; `llm-wiki/build-test.md`'s "Trust", "A fresh VM" and "Instances" say
+  what a developer does once and per chain, that every developer on a VM is in the docker group
+  and so can read the others' PAT and keys, and that `peacock.env` alone may be passed on.
+- [ ] **Step 3:** verified with Task 6's Step 3, on one fresh VM.
 - [ ] **Step 4:** commit.
 
 ### Task 7: host adapters and the device run
@@ -296,12 +485,19 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Create: `scripts/env/host/ssh.sh`, `scripts/env/host/nebius.sh` — each implements
   `start|stop|status|ip|ssh <cmd>` for `HOST_NAME` read from `~/.config/peacock/hosts/<name>.env`
 - Create: `scripts/env/gpu.sh` — `gpu.sh <host> prepare|ship|run <list|bench|filter> [--cudf v]|pull`
+- Modify: `scripts/env/provision-vm.sh` — `provision-vm.sh --gpu-host <name> <user>@<address>
+  [--provider <p>]`: writes the host file on the laptop and copies `hosts/` to every VM in the
+  `vm` file it can reach
 - Create: `scripts/env/tests/test_host.py`, `test_gpu.py`
 
 **Interfaces:**
 - Consumes: Tasks 2–3 images.
-- Produces: host file keys `PROVIDER=ssh|nebius HOST USER KEY [PASSWORD_FIRST_LOGIN=1]
-  [INSTANCE_ID]`; `prepare` installs its own key on a password-only host, then Docker + NVIDIA
+- Produces: host file keys `PROVIDER=ssh|nebius HOST USER [PASSWORD_FIRST_LOGIN=1]
+  [INSTANCE_ID]`, in `~/.config/peacock/hosts/<name>.env` on the laptop, written by
+  `provision-vm.sh --gpu-host` and copied to each VM, where an instance mounts `hosts/` read-only.
+  A host file names no key: the key to every GPU host is the person's `gpu_ed25519`, which the VM's
+  `peacock.env` names as `GPU_SSH_KEY_FILE` (Task 6a). `prepare` installs that key's `.pub` on a
+  password-only host, then Docker + NVIDIA
   Container Toolkit if missing, puts the data on the machine once (sf1 generated in the build
   image there under the `data-inputs.sh` hash with the default vectors, as Task 6 keeps it; sf40 from S3 — skipped when
   present and its checksum holds), then
@@ -414,13 +610,14 @@ After Task 6 Step 3; its device step after Task 7 Step 3. The ensemble carries o
 from `approved to build` to `done` inside an instance, with nobody at the machine: Task 6 Step 3
 shows the first coordinator turn, this shows the whole path a real chain takes.
 
-- [ ] **Step 1:** a scratch branch off master whose board has one chain and one task, approved to
-  build: a change small enough for one developer pass, touching code and its test, with one device
-  step through `gpu.sh` on the Task 7 host. Never merged.
-- [ ] **Step 2:** `up.sh <i> --chain <c>` on the Task 6 machine; nothing else is done by hand
+- [ ] **Step 1:** a scratch branch off master, pushed, whose board has one chain `<c>`,
+  `(base: <scratch>)` so that its first branch carries that board, and one task, approved to build: a change small enough for one developer pass, touching code and its test,
+  with one device step through `gpu.sh` on the Task 7 host. Never merged.
+- [ ] **Step 2:** `up.sh <c> --board origin/<scratch>` from the laptop, onto the Task 6 machine;
+  nothing else is done by hand
   until the chain stops. Done when: the task reaches `done` (its commit pushed, its PR open, CI
   green); the device step's results pulled into the worktree; no login or key asked for at any
   point; `<c>.status` says why the watchdog stopped. Record wall times per board state.
-- [ ] **Step 3:** the PR closed unmerged, the scratch branches deleted on origin, `down.sh <i>`;
+- [ ] **Step 3:** the PR closed unmerged, the scratch branches deleted on origin, `down.sh <c>`;
   `docker volume ls` and the machine clone's `git worktree list` show nothing of the instance.
   Record the run in the detail file.
