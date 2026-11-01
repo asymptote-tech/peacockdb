@@ -962,7 +962,12 @@ Notes
 Host columns are audited, not assumed: they say whether the bytes were actually found
 there (`ls` + `sha256sum`, 2026-08-05). tpch.minimal and pbench.sf1 are in git; everything
 else is generated or fetched per host. S3 is Nebius object storage, endpoint
-`https://storage.eu-north1.nebius.cloud:443`, region `eu-north-1`.
+`https://storage.eu-north1.nebius.cloud:443`. It accepts region `eu-north-1` and `eu-north1`
+alike; both were checked against it. `scripts/lib/calibration-bucket.sh` and
+`scripts/lib/embeddings-bucket.sh` take the endpoint and region from `AWS_ENDPOINT_URL` and
+`AWS_REGION` (`scripts/lib/s3.sh`). `upload_datasets.sh` and `check_s3_datasets.py` still name the
+endpoint themselves. With `AWS_ENDPOINT_URL` unset, the calibration bucket uses the endpoint and
+region above, for `build-test-shadgpu.sh`.
 
 | Dataset | Shape | <sub>local</sub> | <sub>verda</sub> | <sub>shad-gpu</sub> | S3 bucket | Used by |
 |---|---|:-:|:-:|:-:|---|---|
@@ -2013,6 +2018,132 @@ The binaries and data are mounted, never in the image:
   No CI step runs them. `test_image_any_user.py`, `test_run_image.py` and `test_run_tests.py` need
   the images built; `test_run_image.py` also a staged install per version, named by
   `PEACOCK_STAGED_INSTALLS=<dir holding cudf-<v>/>`.
+
+## Containers
+
+An ensemble instance runs in the build image on a CPU VM, one container per instance. The
+scripts are `scripts/env/bootstrap-vm.sh`, `up.sh` and `down.sh`; each has `--help`.
+
+### Trust
+
+The VM is reachable from any instance as the machine user. An instance writes the clone's `.git`,
+`CLAUDE_CONFIG_DIR` and `~/.config/gh`, and all three hold configuration that runs code: git
+hooks, Claude settings hooks, gh aliases. The machine user is in the docker group, which is root.
+So the VM holds nothing beyond what every instance may use: the S3 read key, a fine-grained PAT
+scoped to the repository, and a key made for the GPU hosts. Never the S3 writer key, never another secret.
+
+The PAT's Contents and Actions write let an instance push its branch and dispatch `pipeline.yml`
+on it. That code then runs in CI with CI's secrets: the nebius service-account key, the GPU hosts'
+ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the ensemble runs
+device steps without a person. So CI's S3 secret stays a read-only key too.
+
+- `up.sh`, `down.sh`, `bootstrap-vm.sh` and `scripts/lib/machine.sh` run every git call on the
+  machine with `-c core.hooksPath=/dev/null -c core.fsmonitor=false`.
+- `up.sh` refuses to start while the clone has an active hook (a file in `.git/hooks` not ending
+  in `.sample`), or `core.hooksPath` or `core.fsmonitor` in its `.git/config`. It names each.
+- **Known limitation:** `up.sh` cannot tell a read key from a write key. A keys file holding the
+  writer key gives every instance write access to the buckets.
+
+### A fresh VM
+
+1. As the machine user, who has sudo: `bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`. It is
+   one file; fetch it from the repository's raw view, or copy it. It installs what is missing,
+   after one `apt-get update`: git, curl and python3; Docker (`docker.io`); gh at `GH_VERSION` in
+   `/usr/local/bin`, from the tarball the image takes; Claude Code at `CLAUDE_CODE_VERSION` with
+   `superpowers@claude-plugins-official`. It clones the repository into `~/peacockdb`, at `--ref`
+   or master; a rerun with `--ref` passes when the clone is on that branch. It fetches the
+   cuDF checkout the clone pins (below). In the build image it fills cargo's registry and
+   generates sf1. A step already done is skipped.
+2. The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
+   afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
+   moves on, the check fails, and the two pins must be bumped.
+3. `~/.bashrc` gets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR=$HOME/.claude`, so Claude Code
+   keeps its login, settings and plugins in one directory. Log out and in again: the docker group
+   takes effect then too.
+4. By hand, once per machine: `claude`, then `/login`; gh with a fine-grained PAT, below; and
+   `git config --global user.name` and `user.email`.
+5. **gh's token** is a fine-grained PAT, never the OAuth token plain `gh auth login` makes, which
+   reaches every repository the user can. On GitHub: resource owner `asymptote-tech`, only the
+   `peacockdb` repository, an expiry; permissions Contents read-write, Pull requests read-write,
+   Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
+   `gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read
+   from stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
+   `~/.config/gh/hosts.yml`, which the container mounts; without it gh puts the token in a desktop
+   keyring where there is one, and `up.sh` refuses that. Then `gh auth setup-git`.
+
+### A keys file
+
+What is not a login goes in a docker env file, `NAME=value` a line, kept outside the clone:
+
+    AWS_ACCESS_KEY_ID=…
+    AWS_SECRET_ACCESS_KEY=…
+    AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud:443
+    AWS_REGION=eu-north1
+    GPU_SSH_KEY_FILE=/home/<user>/.ssh/<key>       # optional: the key to GPU hosts
+    PROVIDER_CONFIG_DIR=/home/<user>/.<provider>   # optional: a provider CLI's config
+
+Every start needs one. The four `AWS_*` lines are required; use the read key. The two paths
+must be absolute; each is mounted read-only at the same path. The file reaches a container only
+as `--env-file`.
+
+### Instances
+
+    ~/peacockdb/scripts/env/up.sh a --env ~/keys.env --chain C
+    docker exec -it peacock-a bash
+    ~/peacockdb/scripts/env/down.sh a
+
+- `up.sh <instance> --env <file>` starts the container `peacock-<instance>` as the machine user's
+  uid:gid. Its worktree of `~/peacockdb` is `~/peacock-instances/<instance>`, detached at the
+  clone's HEAD the first time. The worktree and the clone's `.git` are mounted read-write at their
+  own paths, so a commit made inside lands in the clone. `down.sh` keeps the worktree; `up.sh`
+  with the same name reuses it. Remove one with `git worktree remove`.
+- `--chain <c>` runs `scripts/ensemble-watchdog.sh <c>` in the worktree. Without it the container
+  waits for `docker exec`.
+- `--cudf <v>` takes `peacockdb-build:cudf-<v>`, 25.02 by default. `--image cudf-<v>-<commit>`
+  keeps an instance on one image.
+- **Refused before anything starts**, exit 2, naming what is missing: no `--env`; root; Claude
+  Code not installed or not logged in; no `~/.config/gh/hosts.yml`; no `oauth_token` in it (a
+  keyring login); an `oauth_token` that is not a fine-grained PAT (`github_pat_…`); `gh auth
+  status` failing with `GH_TOKEN` and `GITHUB_TOKEN` unset; no git identity in `~/.gitconfig`; no
+  `/usr/local/bin/gh auth git-credential` helper for github.com there (`gh auth setup-git`); a
+  missing, empty or repeated key; a relative path; a hook in the clone; a container of that name
+  in any state. A login the container cannot see does not count: a token in the environment or a
+  desktop keyring stays on the machine. Neither a key's value nor a token is ever printed.
+- **third_party/cudf.** The FFI build's configure reads cuDF's cmake files. The machine keeps one
+  checkout a commit, `~/peacock-data/cudf/<commit>/` (under `$PEACOCK_DATA_DIR` when set), with
+  the paths the build image's prefetch takes (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`).
+  `up.sh` mounts the one its worktree's gitlink names read-only at the worktree's
+  `third_party/cudf`, fetching it first, under a lock, when the machine has none. So two instances
+  on different commits each see their own, and none moves under a running one. The clone's own
+  `third_party/cudf` is never read. An old checkout is removed by hand.
+- **Refused after the pull**: an image whose `peacockdb.inputs` label differs from the
+  worktree's inputs, naming each input. `image.sh` writes the label
+  (`scripts/lib/image-inputs.sh`): the sha256 of each `docker/` file the Dockerfile reads, the
+  25.02 build image taking nvcc from the 26.02 spec; one hash of the `pins.env` lines the
+  Dockerfile declares as `ARG`, less one declared only in another cuDF version's stage
+  (`GCC_26_02` under `AS cudf-26.02`), so a machine-only pin such as `CLAUDE_CODE_VERSION` stales no image; and for the build image the `third_party/cudf` commit and the flatbuffers `GIT_TAG`. The
+  hash is the same in every locale. An image without the label is refused.
+- Each instance has its own home, `~/peacock-instances/.home/<instance>`, mounted at `$HOME`, and
+  builds into its worktree's `target/`. Its `/etc/passwd` and `/etc/group` are the image's with the
+  machine user added at its uid, gid and home, written to `~/peacock-instances/.etc/<instance>/`
+  and mounted read-only. So ssh and anything else that looks the uid up finds it.
+- From the machine, read-only: the Claude Code install (`~/.local/share/claude`,
+  `~/.local/bin/claude`), `~/.gitconfig`, `~/.config/peacock/hosts/`, the cuDF checkout,
+  cargo's registry at
+  `/opt/rust/cargo/registry`, and sf1. Read-write and shared: `CLAUDE_CONFIG_DIR`, `~/.config/gh`
+  and ccache (`~/.cache/peacock/ccache`).
+- **The registry** is `~/.cache/peacock/cargo-registry`. Before an instance starts, `up.sh`
+  runs `cargo fetch --locked` for its worktree in the build image, under a machine-wide lock. That
+  is the one step that writes the registry. A crate an agent adds mid-chain is not in it: the
+  build fails until `down.sh` and `up.sh` fetch it.
+- **The data.** `~/peacock-data/<hash>/` holds `tpch.sf1` and `tpcds.sf1`, or
+  `$PEACOCK_DATA_DIR/<hash>/`. The hash is over the worktree's `generate_testdata.sh`, the
+  `DUCKDB_VERSION` pin and the generator's arguments (`scripts/lib/data-inputs.sh`). A set is
+  mounted read-only at the worktree's `testdata/<dataset>`. With none for the hash, `up.sh`
+  generates one in the build image, with `--network none`, under a lock. Two starts at once
+  generate it once. A set appears only complete. An old set is removed by hand.
+- Docker would create a missing mount point as root on the machine, so `up.sh` creates each one
+  as the user first.
 
 ## Benchmarks
 

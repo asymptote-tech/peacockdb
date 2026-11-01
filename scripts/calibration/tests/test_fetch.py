@@ -28,7 +28,7 @@ exit 2
 
 def tree(tmp, pins, objects):
     """A repo of the fetch script alone, a pin file, and a bucket of `objects` by key."""
-    for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh"):
+    for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh"):
         (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / rel, tmp / rel)
     pin = tmp / "testdata/calibration/records.sha256"

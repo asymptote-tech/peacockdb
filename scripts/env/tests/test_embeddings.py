@@ -22,8 +22,11 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" /
 from harness import main  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-TREE = ["testdata/fetch_embeddings.sh", "scripts/lib/embeddings-bucket.sh", "scripts/env/upload-embeddings.sh"]
-ENDPOINT = ["--endpoint-url", "https://storage.eu-north1.nebius.cloud:443", "--region", "eu-north-1"]
+TREE = ["testdata/fetch_embeddings.sh", "scripts/lib/embeddings-bucket.sh", "scripts/lib/s3.sh",
+        "scripts/env/upload-embeddings.sh"]
+# The storage the environment names: test_s3.py holds that every bucket script passes it.
+STORAGE = {"AWS_ENDPOINT_URL": "https://s3.storage.example.test:443", "AWS_REGION": "test-north9"}
+ENDPOINT = ["--endpoint-url", STORAGE["AWS_ENDPOINT_URL"], "--region", STORAGE["AWS_REGION"]]
 GLOVE_100D = b"the 0.1 0.2\nof 0.3 0.4\n"
 
 
@@ -167,7 +170,7 @@ class Tree:
         drop = ("CI", "GITHUB_ACTIONS", "PEACOCK_NO_FETCH")
         self.env = {k: v for k, v in os.environ.items() if k not in drop}
         self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", FAKE_S3=str(self.s3),
-                        FAKE_AWS_LOG=str(self.aws_log), FAKE_CURL_LOG=str(self.curl_log))
+                        FAKE_AWS_LOG=str(self.aws_log), FAKE_CURL_LOG=str(self.curl_log), **STORAGE)
         return self
 
     def __exit__(self, *exc):
@@ -228,7 +231,7 @@ def copies(calls, direction):
 def assert_every_call_names_the_endpoint(calls):
     assert calls, "no aws call made"
     for argv in calls:
-        assert argv[:len(ENDPOINT)] == ENDPOINT, f"an aws call without the Nebius endpoint goes to AWS: {argv}"
+        assert argv[:len(ENDPOINT)] == ENDPOINT, f"an aws call without the endpoint goes to AWS: {argv}"
 
 
 def test_from_s3_downloads_exactly_the_pinned_keys():

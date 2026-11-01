@@ -77,6 +77,7 @@ if [ "$SOURCE" = s3 ]; then
     exit 1
   fi
   pin SHA_BASE "deep_base.sf${SF}.fbin"
+  s3_args EMBEDDINGS_S3
 fi
 mkdir -p "$CACHE"
 
