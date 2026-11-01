@@ -41,7 +41,7 @@ REGION = "eu-north-1"
 # bucket name IS the spec: tpch-sf40 -> (tpch, 40). Expectations are computed from it,
 # never hardcoded per bucket.
 BUCKET_RE = re.compile(r"^(tpch|tpcds)-sf(\d+)$")
-BUCKETS = ["tpch-sf40", "tpch-sf200", "tpcds-sf200"]
+BUCKETS = ["tpch-sf40", "tpch-sf200", "tpcds-sf40", "tpcds-sf200"]
 
 
 def aws(endpoint, *args):

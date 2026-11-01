@@ -13,7 +13,7 @@
 # Layout matches the existing tpch-sf20 convention: parquet FLAT at the bucket root.
 #
 # Usage (on the generation host):  scripts/upload_datasets.sh [dataset ...]
-#   default: all three. e.g. scripts/upload_datasets.sh tpch.sf40
+#   default: all four. e.g. scripts/upload_datasets.sh tpch.sf40
 set -euo pipefail
 
 AWS=${AWS:-/home/info/bin/aws}
@@ -25,12 +25,13 @@ BASE=${BASE:-/home/info/peacock-datasets/testdata}
 declare -A BUCKET=(
   [tpch.sf40]=tpch-sf40
   [tpch.sf200]=tpch-sf200
+  [tpcds.sf40]=tpcds-sf40
   [tpcds.sf200]=tpcds-sf200
 )
 
 aws_s3() { "$AWS" --endpoint-url "$ENDPOINT" --region "$REGION" "$@"; }
 
-DATASETS=("$@"); [ ${#DATASETS[@]} -eq 0 ] && DATASETS=(tpch.sf40 tpch.sf200 tpcds.sf200)
+DATASETS=("$@"); [ ${#DATASETS[@]} -eq 0 ] && DATASETS=(tpch.sf40 tpch.sf200 tpcds.sf40 tpcds.sf200)
 
 for ds in "${DATASETS[@]}"; do
   bucket=${BUCKET[$ds]:-}

@@ -988,7 +988,7 @@ else is generated or fetched per host. S3 is Nebius object storage, endpoint
 | TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — | — | CI only — regenerated every run |
 | TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ | — | plan + CPU + GPU subsets |
 | TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
-| TPC-DS sf40 | 24 tables, 15 GB | — | — | ✓ | — | `peacock_gpu_benchmarks` |
+| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | `tpcds-sf40` | `peacock_gpu_benchmarks` |
 | TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ | `tpcds-sf200` | no tests — S3 check, validate-large |
 | TPC-H sf200 | not generated yet | — | — | — | `tpch-sf200` | nothing yet |
 | embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ | — | generator input, not a test input |
@@ -1043,9 +1043,14 @@ sha256 matches local). Notes on the rows above:
 - **sf40 lives only on shad-gpu**, and its presence there is a hard precondition of the
   GPU job; the sf40 goldens are committed (see below), so CI compares without touching
   40 GB.
-- **tpcds sf40 is the benchmark's alone.** No CI job reads it and it is in no bucket. It was
-  made on shad-gpu beside tpch's by `generate_testdata.sh --bench tpcds --sf 40` (DuckDB
-  1.5.4, one thread): 9 min 41 s, peak RSS 60 GiB, nothing spilled. The benchmark run links
+- **tpcds sf40 is the benchmark's alone**: no test tier reads it, only the s3-datasets check
+  (`check_s3_datasets.py`) checks its bucket, `tpcds-sf40`. It is made by `generate_testdata.sh
+  --bench tpcds --sf 40` (DuckDB 1.5.4, one thread). On shad-gpu: 9 min 41 s, peak RSS 60 GiB,
+  nothing spilled. With 62 GB of RAM DuckDB holds about 50 GiB and spills the rest to its temp
+  directory (8 GB at most): 14 min 37 s, peak RSS 50.5 GiB, 15.8 GB of parquet. Single-threaded
+  with total-order sorts, the bytes follow from the script and DuckDB alone; the bucket's copy is
+  published by `upload_datasets.sh tpcds.sf40`, and the sha256 of its 24 files, sorted, sums to
+  `58610fc16152a12ea9769d645a6e72a4e03002e2498ec8d357862fcbd9bebb36` (`sha256sum *.parquet | sha256sum`). The benchmark run links
   each sf40 dataset the case list names into its testdata, as it does tpch's.
 - verda reaches the tree through a `/media/data/peacockdb` symlink to
   `~/peacockdb`. Every test binary honours `PEACOCK_TESTDATA_DIR`, but the plain cpu mode

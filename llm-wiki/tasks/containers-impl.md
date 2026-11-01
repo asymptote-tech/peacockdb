@@ -374,10 +374,11 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 ### Task 11: the benchmark run on an 80 GB A100 or H100
 
 - [ ] **Step 1:** the human creates the machine on nebius and settles the rowgroup modes; record
-  it in the detail file. tpcds sf40 comes from the bucket `tpcds-sf40`, filled once from the copy
-  the H200 results were measured on, so every device reads the same parquet files (row-group
-  layout is part of what the rowgroup modes measure, and a regeneration need not reproduce it);
-  `scripts/upload_datasets.sh` learns the bucket, and `prepare` checks the files against it.
+  it in the detail file. tpcds sf40 comes from the bucket `tpcds-sf40`, so every device reads the
+  same parquet files (row-group layout is part of what the rowgroup modes measure). It is
+  published (detail file, "tpcds sf40 in its bucket"); its sums are compared with the copy the
+  H200 results were measured on once shad-gpu is back, and `prepare` checks the files against
+  the bucket.
 - [ ] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
   `gpu.sh <host> prepare && ship && run bench && pull`, the idle watcher's four-hour limit handled
   (the run in segments, or the watcher configured for it on that host).
