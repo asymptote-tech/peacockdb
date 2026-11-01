@@ -4,20 +4,22 @@
 //! and what went into it, the device's regions say what it cost. Neither half is a row on
 //! its own.
 //!
-//! TSV, with the run's conditions — timing mode, build, allocator, capture — in the `#`
-//! heading rather than in every row. `hbm_bytes` is deliberately absent: it comes from
-//! Nsight and is joined in later on the same tuple.
+//! TSV, with the run's conditions — timing mode, build, allocator, capture, and the device,
+//! driver, CUDA, cuDF and host — in the `#` heading rather than in every row. `hbm_bytes` is
+//! deliberately absent: it comes from Nsight and is joined in later on the same tuple.
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use crate::executor::{AbiCall, Measured, Measurements, RunReport};
 use crate::wire::{RecipePlan, Seq};
 
+use super::provenance::fields;
 use super::{BUILD, COLUMNS, RECORD_PATH_ENV, RunMeta, TIMING_MODE};
 
 // The row builder and the plan reader serve the harness, which a rust-only build has not;
@@ -229,12 +231,16 @@ const RUN_PREFIX: &str = "# run: ";
 /// mean, so a file mixing two of them is a file whose rows cannot be compared.
 /// [`append_records`] refuses to write one.
 fn run_conditions(meta: &RunMeta<'_>) -> Vec<String> {
-    vec![
+    let mut conditions = vec![
         format!("{RUN_PREFIX}timing_mode={TIMING_MODE}"),
         format!("{RUN_PREFIX}build={BUILD}"),
         format!("{RUN_PREFIX}allocator={}", meta.allocator),
         format!("{RUN_PREFIX}capture={}", meta.capture.name()),
-    ]
+    ];
+    for (key, value) in fields(meta.provenance) {
+        conditions.push(format!("{RUN_PREFIX}{key}={value}"));
+    }
+    conditions
 }
 
 /// The `#` preamble, written once per file. A record has to be readable without this
@@ -263,6 +269,9 @@ const HEADER_NOTES: &str = "\
 # capture = which Nsight pass measured this, `none` for a plain run. Tracing and the
 #   memory counters each cost the query several percent, so a captured run writes this
 #   file and never the .benchmark.txt tree.
+# device..host = what the run measured on: the runtime's name for the card, the driver's
+#   release, the CUDA runtime's version, the cuDF release the binary was built against, and
+#   the host name. The .benchmark.txt tree is filed by the device.
 # mode = the planning mode, `tp4-sized` and the like. The same query
 #   at two modes is a different plan and a different set of calls.
 # node_seq = the node's position in the tree, post-order — the same space recipe_seq is
@@ -311,10 +320,10 @@ pub(crate) fn append_records(rows: &[String], meta: &RunMeta<'_>) {
     let fresh = std::fs::metadata(&path)
         .map(|m| m.len() == 0)
         .unwrap_or(true);
-    if !fresh {
-        assert_run_conditions_match(&path, meta);
+    if let Some(mismatch) = heading_mismatch(&path, meta) {
+        panic!("{mismatch}");
     }
-    let mut f = std::fs::OpenOptions::new()
+    let f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
@@ -328,17 +337,45 @@ pub(crate) fn append_records(rows: &[String], meta: &RunMeta<'_>) {
         text.push_str(row);
         text.push('\n');
     }
-    f.write_all(text.as_bytes())
-        .unwrap_or_else(|e| panic!("cannot append records to {}: {e}", path.display()));
+    append_whole(&f, text.as_bytes(), |mut file, bytes| file.write_all(bytes))
+        .unwrap_or_else(|refused| panic!("cannot append records to {}: {refused}", path.display()));
 }
 
-/// Refuse to append to a file whose heading describes a different run.
+/// `text` appended whole or not at all: a write that stops partway is cut back to the file's
+/// length before it, or the next append would continue the cut-off row and merge two rows.
+/// `write` is the write itself, a parameter so a test can make one stop partway.
+fn append_whole(
+    file: &File,
+    text: &[u8],
+    write: impl FnOnce(&File, &[u8]) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let before = file
+        .metadata()
+        .map_err(|e| format!("cannot read its length: {e}"))?
+        .len();
+    let Err(failed) = write(file, text) else {
+        return Ok(());
+    };
+    match file.set_len(before) {
+        Ok(()) => Err(format!("{failed}; cut back to its {before} bytes")),
+        Err(cut) => Err(format!(
+            "{failed}, and cutting it back to its {before} bytes failed too: {cut}; its last \
+             row may be cut off"
+        )),
+    }
+}
+
+/// Why `path` is not this run's record to append to, if it is not: its heading describes a
+/// different run. A missing or empty file is any run's.
 ///
 /// This is the check the three dropped columns used to make possible. As columns, a file
 /// mixing two runs was legal and only detectable afterwards by whoever thought to look;
 /// as a heading written once, the mixing is what has to be caught, and here is the only
 /// place it can be. Reads the heading, not the file: it stops at the first row.
-fn assert_run_conditions_match(path: &Path, meta: &RunMeta<'_>) {
+pub(crate) fn heading_mismatch(path: &Path, meta: &RunMeta<'_>) -> Option<String> {
+    if std::fs::metadata(path).map_or(true, |m| m.len() == 0) {
+        return None;
+    }
     let f = std::fs::File::open(path)
         .unwrap_or_else(|e| panic!("cannot read the heading of {}: {e}", path.display()));
     let found: Vec<String> = std::io::BufReader::new(f)
@@ -348,13 +385,14 @@ fn assert_run_conditions_match(path: &Path, meta: &RunMeta<'_>) {
         .filter(|l| l.starts_with(RUN_PREFIX))
         .collect();
     let want = run_conditions(meta);
-    assert!(
-        found == want,
-        "{} was written by a different run and this one would not be comparable with \
-         it.\n  file: {}\n  this run: {}\nA record file is one run: point \
-         {RECORD_PATH_ENV} at a new path, or remove that one.",
-        path.display(),
-        found.join(" | "),
-        want.join(" | "),
-    );
+    (found != want).then(|| {
+        format!(
+            "{} was written by a different run and this one would not be comparable with \
+             it.\n  file: {}\n  this run: {}\nA record file is one run: point \
+             {RECORD_PATH_ENV} at a new path, or remove that one.",
+            path.display(),
+            found.join(" | "),
+            want.join(" | "),
+        )
+    })
 }

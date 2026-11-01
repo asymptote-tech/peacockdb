@@ -1,12 +1,13 @@
 //! Benchmark run over the corpus: every query
-//! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes
-//! it names. Asserts nothing about an answer — correctness is `test_gpu_corpus`.
+//! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes it
+//! names — the registry's enabled device cells for tpch and tpcds. Asserts nothing about an
+//! answer. A case that fails is recorded in its section and fails, and the next case runs;
+//! `PEACOCK_BENCH_RESUME=1` keeps what this run already measured.
 //!
-//! The `bench_` cases need a GPU and both sf40 datasets, tpch's and tpcds's, and take about
-//! an hour, so CI runs the binary with `--skip bench_` and gets the assertions below; a
-//! measuring run is `build-test-shadgpu.sh --build-benchmarks --run-benchmarks`, which
-//! builds it at `--release`. On the host directly it is `--nocapture --test-threads=1`,
-//! and the threads are not optional — cuDF and rmm share one process-wide pool.
+//! The `bench_` cases need a GPU and both sf40 datasets and take hours, so CI runs the binary
+//! with `--skip bench_` and gets the assertions below; a measuring run is
+//! `build-test-shadgpu.sh --build-benchmarks --run-benchmarks`, at `--release`. On the host
+//! it is `--nocapture --test-threads=1`: cuDF and rmm share one process-wide pool.
 #![cfg(not(feature = "rust-only"))]
 
 use peacockdb_core::test_support::{BenchmarkCase, NOT_TIMED, benchmark_case, declared_for};
@@ -100,36 +101,43 @@ fn every_declared_mode_names_the_queries_its_file_will_hold() {
 #[test]
 fn the_sections_of_a_file_are_ordered_numerically() {
     let declared = declared_for("tpch", "40", "tp1_single");
-    let names: Vec<&str> = declared.iter().map(|(name, _)| name.as_str()).collect();
-    assert_eq!(
-        names,
-        [
-            "aggregate-groupby",
-            "filter-project",
-            "nested-loop-join",
-            "q1",
-            "q6",
-            "q17",
-            "q19",
-            "shuffle-additive",
-            "shuffle-additive-avg",
-            "shuffle-stddev",
-        ],
-        "6 before 17 before 19, not '17' before '6'"
+    let numbers: Vec<u32> = declared
+        .iter()
+        .filter_map(|(name, _)| name.strip_prefix('q')?.parse().ok())
+        .collect();
+    assert!(
+        numbers.contains(&2) && numbers.contains(&10),
+        "tpch at tp1_single times q2 and q10, the pair a text sort reverses: {numbers:?}"
+    );
+    assert!(
+        numbers.is_sorted(),
+        "2 before 10 before 19, not '10' before '2': {numbers:?}"
     );
 }
 
-/// Where a mode's results land: one file per (dataset, mode), stemmed by the mode.
+/// Where a mode's results land: one file per (device, dataset, mode), under the device's
+/// slug and stemmed by the mode.
 #[test]
-fn a_modes_results_go_to_one_file_per_dataset_and_mode() {
+fn a_modes_results_go_to_one_file_per_device_dataset_and_mode() {
     use peacockdb_core::test_support::results_file;
 
-    let path = results_file("tpch", "40", "tp1_single");
+    let path = results_file("h100-80gb-hbm3", "tpch", "40", "tp1_single");
     assert!(
-        path.ends_with("benchmark-results/tpch.sf40/tp1_single.benchmark.txt"),
+        path.ends_with("benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt"),
         "{}",
         path.display()
     );
+}
+
+/// A provenance for the record cases below, which write no device's numbers.
+fn a_provenance() -> peacockdb_core::test_support::Provenance {
+    peacockdb_core::test_support::Provenance {
+        device: "NVIDIA H200".to_string(),
+        driver: "570.172.08".to_string(),
+        cuda: "12.2".to_string(),
+        cudf: "25.02.02".to_string(),
+        host: "gpu-host".to_string(),
+    }
 }
 
 /// A run that produced one query's section leaves every other query's alone — the property
@@ -175,6 +183,7 @@ fn the_record_is_written_only_when_a_path_is_named() {
         COLUMNS, Capture, RECORD_PATH_ENV, RunMeta, append_records,
     };
 
+    let provenance = a_provenance();
     let meta = RunMeta {
         dataset: "tpch",
         sf: "40",
@@ -182,6 +191,7 @@ fn the_record_is_written_only_when_a_path_is_named() {
         mode: "tp1-single",
         allocator: "none",
         capture: Capture::None,
+        provenance: &provenance,
     };
     // A row of the width the file actually holds, so what reaches the file is a record
     // line and not a fixture the reader would have to know to allow for.
@@ -318,6 +328,7 @@ fn an_append_under_a_different_heading_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
     let _loan = EnvLoan::set(RECORD_PATH_ENV, dir.join("records.tsv"));
     let row = vec!["0"; COLUMNS.len()].join("\t");
+    let provenance = a_provenance();
     let mut meta = RunMeta {
         dataset: "tpch",
         sf: "40",
@@ -325,6 +336,7 @@ fn an_append_under_a_different_heading_is_refused() {
         mode: "tp1-single",
         allocator: "rmm-pool",
         capture: Capture::None,
+        provenance: &provenance,
     };
     append_records(std::slice::from_ref(&row), &meta);
     meta.allocator = "rmm-default";

@@ -9,13 +9,15 @@ Everything is read by name. A reader that counts fields survives a column change
 drawing or joining whatever slid into the slot it wanted.
 
 The `# run:` lines are the conditions the run measured under — timing mode, build,
-allocator, capture. They are not columns because they are constant across a file, but each
-one changes what the microseconds mean, so two files that disagree about them cannot be
-read as one set of samples. `record.rs` refuses to append across them; this refuses to read
-across them.
+allocator, capture, then device, driver, cuda, cudf and host: nine lines. They are not
+columns because they are constant across a file, but each one changes what the microseconds
+mean, so two files that disagree about them cannot be read as one set of samples. `record.rs`
+refuses to append across them; this refuses to read across them.
 """
 
+import re
 import statistics
+import string
 import sys
 
 RUN_PREFIX = "# run: "
@@ -28,6 +30,15 @@ HBM_CALL = ("dataset", "sf", "query", "mode", "node_seq", "node_type", "lane",
 HBM_VALUES = ("hbm_read_bytes", "hbm_write_bytes", "hbm_bytes", "samples",
               "device_busy_us", "device_idle_us")
 HBM_COLUMNS = HBM_CALL + ("executions",) + HBM_VALUES
+
+
+def device_slug(name):
+    """`device_slug` in `peacockdb-core/src/test_support/provenance.rs`: the vendor dropped,
+    ASCII lowercased, every run of other characters one `-`. Both copies are held to
+    `testdata/device_slugs.tsv`."""
+    lower = name.translate(str.maketrans(string.ascii_uppercase, string.ascii_lowercase))
+    model = lower[len("nvidia "):] if lower.startswith("nvidia ") else lower
+    return "-".join(word for word in re.split(r"[^a-z0-9]+", model) if word)
 
 
 def read_record(path, *required):

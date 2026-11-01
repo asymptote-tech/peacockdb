@@ -4,11 +4,11 @@
 #   image.sh build <build|run> <cudf> [--dry-run]
 #   image.sh push  <build|run> <cudf> [--dry-run]
 #
-# <cudf> is a version with a committed spec, docker/conda/cudf-<cudf>.spec. build passes every
-# docker/pins.env line as a build arg and tags ghcr.io/asymptote-tech/peacockdb-<kind>:cudf-<cudf>;
-# from a clean tree it also tags :cudf-<cudf>-<commit>. push publishes both tags, and only when
-# HEAD's commit tag exists locally and the version tag names the same image. --dry-run prints
-# the docker commands instead of running them.
+# <cudf> has a spec, docker/conda/cudf-<cudf>.spec. build passes every docker/pins.env line as a
+# build arg, labels the image peacockdb.inputs (scripts/lib/image-inputs.sh) and tags
+# ghcr.io/asymptote-tech/peacockdb-<kind>:cudf-<cudf>, and :cudf-<cudf>-<commit> from a clean tree.
+# push publishes both tags, only when HEAD's commit tag exists locally and the version tag names
+# the same image. --dry-run prints the docker commands instead of running them.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -49,6 +49,8 @@ tag=$name:cudf-$cudf
 commit_tag=$tag-$commit
 
 if [ "$verb" = build ]; then
+  . "$root/scripts/lib/image-inputs.sh"
+  inputs=$(image_inputs "$root" "$kind" "$cudf") || exit 2
   revision=$commit tags=(-t "$tag")
   if [ -z "$(git -C "$root" status --porcelain --untracked-files=normal)" ]; then
     tags+=(-t "$commit_tag")
@@ -59,6 +61,7 @@ if [ "$verb" = build ]; then
        --build-arg "CUDF=$cudf" --build-arg "CUDF_SUBMODULE=$submodule" "${pin_args[@]}"
        --label "org.opencontainers.image.revision=$revision" --label "org.opencontainers.image.version=cudf-$cudf"
        --label org.opencontainers.image.source=https://github.com/asymptote-tech/peacockdb
+       --label "peacockdb.inputs=$(paste -sd' ' <<< "$inputs")"
        "${tags[@]}" "$root")
   if [ "$dry_run" = 1 ]; then show "${cmd[@]}"; else "${cmd[@]}"; fi
   exit 0

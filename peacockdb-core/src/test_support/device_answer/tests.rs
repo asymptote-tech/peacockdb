@@ -124,6 +124,22 @@ fn the_device_comparison_fails_on_a_nan_against_a_number() {
     assert!(device_answer_matches(&nan, "golden(sort, exact)", &answer()).is_err());
 }
 
+/// The release a benchmark's `cudf=` names: the patch level too, padded like the minor, so the
+/// pinned 25.02.02 reads as itself. The real headers are the fixtures.
+#[test]
+fn the_cudf_release_is_read_with_its_patch_padded() {
+    use super::cudf_release_of_config;
+    let real = "#pragma once\n\n#define CUDF_VERSION_MAJOR 25\n#define CUDF_VERSION_MINOR 2\n\
+                #define CUDF_VERSION_PATCH 2\n";
+    assert_eq!(cudf_release_of_config(real).as_deref(), Some("25.02.02"));
+    let next = "#define CUDF_VERSION_MAJOR 26\n#define CUDF_VERSION_MINOR 2\n\
+                #define CUDF_VERSION_PATCH 1\n";
+    assert_eq!(cudf_release_of_config(next).as_deref(), Some("26.02.01"));
+    let no_patch = "#define CUDF_VERSION_MAJOR 26\n#define CUDF_VERSION_MINOR 2\n";
+    assert_eq!(cudf_release_of_config(no_patch), None);
+    assert_eq!(cudf_release_of_config(""), None);
+}
+
 /// cuDF's own `version_config.hpp`, the text `build.rs` copies into the build. The real 25.02
 /// header is the fixture, because the one digit that matters is the zero: cuDF's `MINOR` is `2`
 /// and every path, gitignore line and spec sentence in the tree says `25.02`.

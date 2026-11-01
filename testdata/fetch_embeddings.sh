@@ -1,60 +1,47 @@
 #!/bin/bash
 #
-# Fetch open-dataset embedding sources for `generate_testdata.sh --embeddings external`.
-#
-# LOCAL-ONLY. Downloads ~1.1GB into testdata/embeddings-cache/ and checksum-verifies
-# every artifact. The augmented parquet is generated locally and SHIPPED to the test
-# hosts as parquet — CI, verda and shad-gpu MUST NEVER run this (see the hard guard
-# below). Re-runs are skip-if-present: an artifact whose SHA256 already matches is not
-# re-downloaded.
-#
-# Sources (pinned, immutable objects):
-#   DEEP1B  image vectors, 96-dim float32, CC BY 4.0
-#           storage.yandexcloud.net/yandex-research/ann-datasets/DEEP/
-#   GloVe6B text vectors, 100-dim, PDDL / public domain
-#           downloads.cs.stanford.edu/nlp/data/glove.6B.zip
-#
-# Usage:
-#   ./testdata/fetch_embeddings.sh            # SF=1 (default): first 800k DEEP base vectors
-#   ./testdata/fetch_embeddings.sh --sf 10    # first 8M DEEP base vectors
-#
+# Fetch the embedding sources for `generate_testdata.sh --embeddings external` into
+# testdata/embeddings-cache/ beside this script (~1.1GB at SF=1), each checked against
+# testdata/embeddings.sha256; one already matching is not fetched again. The pinned, immutable
+# origins: DEEP1B (96-dim float32, CC BY 4.0) at storage.yandexcloud.net, GloVe6B (100-dim,
+# PDDL) at downloads.cs.stanford.edu; --from-s3 fetches the same files from our bucket. Which
+# hosts may fetch from where: llm-wiki/build-test.md, "Datasets".
+#   ./testdata/fetch_embeddings.sh [--sf N] [--from-s3]   # the first 800000*N DEEP base vectors
 set -euo pipefail
 
 SF=1
+SOURCE=origin
 while [ $# -gt 0 ]; do
   case "$1" in
     --sf) SF="$2"; shift ;;
+    --from-s3) SOURCE=s3 ;;
     *) echo "Unknown flag: $1" >&2; exit 1 ;;
   esac
   shift
 done
 
-# HARD GUARD — never fetch from an AUTOMATED run. CI must never reach out to the
-# dataset origins (network policy + determinism: the bytes are pinned once and the
-# generated parquet is distributed).
-#
-# The guard is on the ENVIRONMENT, not the host, and that distinction matters: the
-# GPU host is BOTH the CI runner AND the only machine with the disk to generate the
-# large scale factors (sf200 needs ~380GB parquet + ~62GB of sources; dev boxes have
-# nowhere near that). So a MANUAL run on that host is legitimate and allowed, while a
-# CI run on the very same machine is still blocked — CI sets CI/GITHUB_ACTIONS, and
-# any other automation can set PEACOCK_NO_FETCH to opt out explicitly.
-#
-# LIMIT OF THE GUARD: our CI reaches this host over SSH, and ssh does NOT inherit the
-# runner's CI/GITHUB_ACTIONS — inside such a session the environment is the GPU host's,
-# so those two variables would be unset and the guard would NOT fire on its own. That is
-# why pipeline.yml passes PEACOCK_NO_FETCH=1 explicitly on its ssh commands. Any new
-# automation that shells in must do the same; the variables alone are not enough.
-if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${PEACOCK_NO_FETCH:-}" ]; then
+# HARD GUARD, on the ENVIRONMENT rather than the host: no automated run fetches the origins
+# (network policy, and the bytes are pinned once). The GPU host is both a CI runner and the only
+# machine with the disk for the large SFs, so a manual run there is allowed and a CI run is not.
+# CI/GITHUB_ACTIONS refuse the origins only, since --from-s3 reads our own pinned bucket, which a
+# CI job may; PEACOCK_NO_FETCH refuses both. ssh does NOT carry the runner's CI/GITHUB_ACTIONS,
+# so automation that shells in sets PEACOCK_NO_FETCH=1 itself, as pipeline.yml's ssh commands do.
+if [ -n "${PEACOCK_NO_FETCH:-}" ] \
+   || { [ "$SOURCE" = origin ] && { [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; }; }; then
   echo "error: fetch_embeddings.sh must not run from CI/automation" >&2
   echo "       (detected via CI / GITHUB_ACTIONS / PEACOCK_NO_FETCH)." >&2
-  echo "       Automated jobs consume generated parquet; they never fetch sources." >&2
+  echo "       Automated jobs read generated parquet, or --from-s3 without PEACOCK_NO_FETCH;" >&2
+  echo "       they never fetch the origins." >&2
   exit 1
 fi
 
+# The cache goes beside $0, a symlink included (a cache kept outside the tree is made that way);
+# the pin and the bucket are the tree's.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TREE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+. "${TREE_DIR}/../scripts/lib/embeddings-bucket.sh"
 CACHE="${SCRIPT_DIR}/embeddings-cache"
-mkdir -p "$CACHE"
+PIN="${TREE_DIR}/embeddings.sha256"
 
 DEEP=https://storage.yandexcloud.net/yandex-research/ann-datasets/DEEP
 GLOVE_URL=https://downloads.cs.stanford.edu/nlp/data/glove.6B.zip
@@ -68,12 +55,31 @@ DEEP_DIMS=96
 N=$(( 800000 * SF ))
 BASE_BYTES=$(( 8 + N * DEEP_DIMS * 4 ))
 
+# pin <var> <file> — set <var> to the one sha256 the pin names for <file>, or stop.
+pin() {
+  local sha
+  sha=$(embeddings_pinned_sha "$PIN" "$2")
+  [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "error: $PIN pins no single sha256 for $2" >&2; exit 1; }
+  printf -v "$1" %s "$sha"
+}
+
 # Pinned SHA256, computed on the first pull from the immutable sources. Locking these
 # guarantees byte-identical embedding inputs on every later run / dev box.
-SHA_BASE_SF1=3e0dbaede4d3a989f53b19e6046e69dccd38654a92bb7387decece28b13b2e9e
-SHA_QUERY=8438fc763f14e0f9741fda15b3e11215aef089ce17d1ad47d53b52a7c9fda5bb
-SHA_GT=9429e662db0f1a24a78a279f41ab1a20405e372178875e79f342d3a57ced9970
-SHA_GLOVE_ZIP=617afb2fe6cbd085c235baf7a465b96f4112bd7f7ccb2b2cbd649fed9cbcf2fb
+pin SHA_BASE_SF1 deep_base.sf1.fbin
+pin SHA_QUERY deep_query.public.10K.fbin
+pin SHA_GT deep_groundtruth.public.10K.ibin
+pin SHA_GLOVE_ZIP glove.6B.zip
+# S3 holds whole files, so its base slice needs a whole-file pin for this SF.
+if [ "$SOURCE" = s3 ]; then
+  if [ -z "$(embeddings_pinned_sha "$PIN" "deep_base.sf${SF}.fbin")" ]; then
+    echo "error: --from-s3 serves only the scale factors $PIN names, not SF=$SF;" >&2
+    echo "       without --from-s3, SF=$SF is fetched from the origins." >&2
+    exit 1
+  fi
+  pin SHA_BASE "deep_base.sf${SF}.fbin"
+  s3_args EMBEDDINGS_S3
+fi
+mkdir -p "$CACHE"
 
 BASE_FILE="$CACHE/deep_base.sf${SF}.fbin"
 QUERY_FILE="$CACHE/deep_query.public.10K.fbin"
@@ -84,9 +90,28 @@ GLOVE_100D="$CACHE/glove.6B.100d.txt"
 # verify <file> <sha256>  — empty sha means "cannot verify" (returns non-zero).
 verify() { [ -n "$2" ] && [ -f "$1" ] && echo "$2  $1" | sha256sum -c --status; }
 
+# fetch_s3 <outfile> <sha> — skip if already verified. The object lands beside <outfile>
+# and is moved over it only once its sha256 is the pin's, so a refused file is never left.
+fetch_s3() {
+  local out="$1" sha="$2" url
+  url="s3://$EMBEDDINGS_BUCKET/$(embeddings_key "$sha" "$(basename "$out")")"
+  if verify "$out" "$sha"; then echo "  cached+verified: $(basename "$out")"; return 0; fi
+  echo "  fetching $url ..."
+  aws "${EMBEDDINGS_S3[@]}" s3 cp --only-show-errors "$url" "$out.partial" \
+    || { rm -f "$out.partial"; echo "error: fetching $url failed (above)" >&2; exit 1; }
+  if ! verify "$out.partial" "$sha"; then
+    echo "error: $url arrived with sha256 $(sha256sum "$out.partial" | cut -d' ' -f1), not the pinned $sha" >&2
+    rm -f "$out.partial"
+    exit 1
+  fi
+  mv -f "$out.partial" "$out"
+  echo "  ok (sha256 verified): $(basename "$out")"
+}
+
 # fetch <url> <outfile> <sha> [extra curl args...]  — skip if already verified.
 fetch() {
   local url="$1" out="$2" sha="$3"; shift 3
+  if [ "$SOURCE" = s3 ]; then fetch_s3 "$out" "$sha"; return; fi
   if verify "$out" "$sha"; then echo "  cached+verified: $(basename "$out")"; return 0; fi
   echo "  fetching $(basename "$out") ..."
   # Same stall guard as the base slice: some origins are unreachable from some hosts
@@ -155,7 +180,9 @@ if [ "$need" -gt "${avail:-0}" ]; then
 fi
 echo "  pre-flight: need ~$(( need / 1048576 )) MiB, have $(( ${avail:-0} / 1048576 )) MiB free"
 
-if base_prefix_ok "$BASE_FILE" && [ "$(stat -Lc%s "$BASE_FILE")" -ge "$BASE_BYTES" ]; then
+if [ "$SOURCE" = s3 ]; then
+  fetch_s3 "$BASE_FILE" "$SHA_BASE"
+elif base_prefix_ok "$BASE_FILE" && [ "$(stat -Lc%s "$BASE_FILE")" -ge "$BASE_BYTES" ]; then
   echo "  cached+verified: $(basename "$BASE_FILE") ($(stat -Lc%s "$BASE_FILE") bytes, need $BASE_BYTES)"
 elif donor=$(larger_slice_for "$BASE_BYTES"); then
   ln -sfn "$donor" "$BASE_FILE"
@@ -203,7 +230,9 @@ echo "==> GloVe 6B (zip once, extract 100d)"
 fetch "$GLOVE_URL" "$GLOVE_ZIP" "$SHA_GLOVE_ZIP" -C -
 if [ ! -f "$GLOVE_100D" ]; then
   echo "  extracting glove.6B.100d.txt ..."
-  unzip -o "$GLOVE_ZIP" glove.6B.100d.txt -d "$CACHE" >/dev/null
+  # Into a temporary name, so an interrupted unzip never leaves a short file a re-run accepts.
+  unzip -p "$GLOVE_ZIP" glove.6B.100d.txt > "$GLOVE_100D.partial"
+  mv -f "$GLOVE_100D.partial" "$GLOVE_100D"
 fi
 echo "  glove.6B.100d.txt: $(wc -l < "$GLOVE_100D") tokens"
 

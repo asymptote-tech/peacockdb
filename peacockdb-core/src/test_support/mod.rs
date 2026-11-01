@@ -9,6 +9,11 @@
 //! component's, so everything below is private with `pub(crate)` items, a type that crosses
 //! out is declared in this file, and no `pub` signature here names an engine type.
 
+mod benchmark_section;
+// `run_section`, the trailer's writer, serves the benchmark harness, which a rust-only build
+// does not compile; its test runs in every shape.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod benchmark_trailer;
 mod corpus;
 #[cfg(not(feature = "rust-only"))]
 mod corpus_benchmark;
@@ -30,6 +35,9 @@ mod gpu_session;
 #[cfg(not(feature = "rust-only"))]
 mod node_timing;
 mod order_hazard;
+// The runtime's reads serve the harness alone; the slug and the five fields serve every shape.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod provenance;
 mod record;
 mod registry;
 mod result_text;
@@ -1104,11 +1112,86 @@ pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<
     corpus_benchmark::declared_for(dataset, sf, mode)
 }
 
-/// `testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file per
-/// (dataset, mode), holding a section per query it timed.
+/// `testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` — one file
+/// per (device, dataset, mode), holding a section per query it timed. `device` is a
+/// [`device_slug`].
 #[cfg(not(feature = "rust-only"))]
-pub fn results_file(dataset: &str, sf: &str, mode: &str) -> PathBuf {
-    corpus_benchmark::results_file(dataset, sf, mode)
+pub fn results_file(device: &str, dataset: &str, sf: &str, mode: &str) -> PathBuf {
+    corpus_benchmark::results_file(device, dataset, sf, mode)
+}
+
+/// What became of one benchmark case in its mode's file.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CaseOutcome {
+    /// The run resumes and the file held the case's section, measured under this run's
+    /// provenance; nothing ran.
+    Held,
+    /// Measured, and its section written.
+    Measured,
+    /// The case, or what ran before its section, panicked with this reason, one line, and its
+    /// section records it.
+    Failed(String),
+}
+
+/// How a failed case's section opens: `status=failed reason=<one line>`, then the run's five
+/// provenance lines. A rerun runs the case again.
+pub const FAILED: &str = "status=failed reason=";
+
+/// Env var that makes a run resume: `1` keeps every section this run's device, driver, CUDA,
+/// cuDF and host measured. Unset or `0` measures every case, whatever its file holds.
+pub const RESUME_ENV: &str = "PEACOCK_BENCH_RESUME";
+
+/// Whether a benchmark run keeps the sections it already measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resume {
+    /// Every case measured: a rebuilt binary on the same host is a new measurement, and the
+    /// five provenance lines cannot tell it from the last one.
+    No,
+    /// A section whose trailer ends with this run's five is kept and its case not run: the
+    /// rest of a run that was cut short, with the same binary.
+    KeepMeasured,
+}
+
+impl Resume {
+    /// Exhaustive on purpose: any other value is refused naming the two, rather than read as
+    /// either — a typo that resumed would keep old numbers, one that did not would re-time hours.
+    pub fn from_env() -> Self {
+        let Some(value) = std::env::var_os(RESUME_ENV) else {
+            return Resume::No;
+        };
+        match value.to_str() {
+            Some("0") => Resume::No,
+            Some("1") => Resume::KeepMeasured,
+            _ => panic!(
+                "{RESUME_ENV}={} is neither `1`, which keeps the sections this run measured, \
+                 nor `0`, which measures every case",
+                value.to_string_lossy()
+            ),
+        }
+    }
+}
+
+/// One case into `path`'s section for `query`. Under [`Resume::KeepMeasured`] a section
+/// measured under `provenance` is kept and `case` not run. Otherwise `case` runs,
+/// `before_section` takes what it returned beside its body (the record's rows), and the body is
+/// merged in; a panic in either is recorded as [`FAILED`] instead.
+pub async fn measure_into<T>(
+    path: &Path,
+    declared: &[(String, Option<String>)],
+    query: &str,
+    provenance: &Provenance,
+    resume: Resume,
+    case: impl Future<Output = (String, T)>,
+    before_section: impl FnOnce(T),
+) -> CaseOutcome {
+    benchmark_section::measure_into(path, declared, query, provenance, resume, case, before_section)
+        .await
+}
+
+/// Refuse a run whose dataset is not there, before any case: every case of it would otherwise
+/// fail at plan time and write one refusal into each of its sections.
+pub fn assert_dataset_present(dataset: &str, sf: &str, what: &str) {
+    benchmark_section::assert_dataset_present(dataset, sf, what)
 }
 
 /// Time `query` at `mode` on the device: the tree's section and the record's rows.
@@ -1202,7 +1285,7 @@ pub const COLUMNS: &[&str] = &[
 /// What a row cannot be recovered from: which engine produced it, over what data, and
 /// under what conditions.
 ///
-/// The last two are constant across a run and go into the file's `#` heading rather than
+/// The last three are constant across a run and go into the file's `#` heading rather than
 /// into every row — see [`record_header`]. They are still part of this struct because the
 /// heading is written from it. The other two conditions, [`TIMING_MODE`] and [`BUILD`],
 /// are not fields at all: the harness refuses to measure under anything else.
@@ -1215,6 +1298,28 @@ pub struct RunMeta<'a> {
     pub mode: &'a str,
     pub allocator: &'a str,
     pub capture: Capture,
+    pub provenance: &'a Provenance,
+}
+
+/// What a benchmark run measured on, as each result trailer and record heading states it:
+/// `device=… driver=… cuda=… cudf=… host=…`, in that order. The same plan's microseconds
+/// move with every one of the five, so a file that omits one cannot be compared with another.
+///
+/// Strings as written: `device` is the runtime's name for the card, `driver` the kernel
+/// module's release (`580.95.05`), `cuda` the runtime's version (`12.9`), `cudf` the release
+/// built against (`25.02.02`).
+pub struct Provenance {
+    pub device: String,
+    pub driver: String,
+    pub cuda: String,
+    pub cudf: String,
+    pub host: String,
+}
+
+/// The directory under `benchmark-results/` a device's files lie in: its name as one stable
+/// path segment, `NVIDIA H100 80GB HBM3` as `h100-80gb-hbm3`. The full name is in each file.
+pub fn device_slug(name: &str) -> String {
+    provenance::device_slug(name)
 }
 
 /// The only timing mode a record is written under: the harness sets `NodeTiming::Events`
@@ -1237,6 +1342,12 @@ pub const MEASURED_RUNS: usize = 10;
 /// source, and every line in it is one a reader would otherwise guess wrong.
 pub fn record_header(meta: &RunMeta<'_>) -> String {
     record::record_header(meta)
+}
+
+/// Why the record at `path` is not this run's to append to, if it is not: its `# run:` lines
+/// differ from `meta`'s. A missing or empty file is any run's.
+pub fn record_heading_mismatch(path: &Path, meta: &RunMeta<'_>) -> Option<String> {
+    record::heading_mismatch(path, meta)
 }
 
 /// Append this run's rows to `$PEACOCK_RECORD_PATH`, or do nothing if it is unset.

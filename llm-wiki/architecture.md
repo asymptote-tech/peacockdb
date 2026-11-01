@@ -1114,14 +1114,15 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is twenty-five symbols in six groups: lifecycle (`peacock_gpu_version`,
+The ABI is twenty-six symbols in six groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
 `handle_schema`, a handle's schema without its rows, read by the test harness alone); the join
 session (`peacock_join_build`, `_probe`, `_finish`, `_release`, below);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
-`nvtx_pop_range`, `executor_collect_node_regions`); and two test hooks:
+`nvtx_pop_range`, `executor_collect_node_regions`, and `device_info`, the card's name and CUDA
+runtime a benchmark's provenance names); and two test hooks:
 `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so the
 Rust side can compare it against the production lane rule, and `peacock_handle_from_arrow`, which adopts one such
 batch into the live session as a handle so the operator harness can hand an executor a table it
