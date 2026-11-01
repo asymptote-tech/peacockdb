@@ -171,15 +171,17 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Test: `scripts/env/tests/test_embeddings.py`
 
 **Interfaces:**
-- Produces: S3 key prefix `embeddings/<sha256>/{glove,deep1b}…` in the existing datasets bucket,
-  pinned by `testdata/embeddings.sha256`; `fetch_embeddings.sh --from-s3` reads `AWS_*`.
+- Produces: the bucket `embeddings`, keys `<sha256>/<file>`, pinned by
+  `testdata/embeddings.sha256`; `fetch_embeddings.sh --from-s3` reads `AWS_*`.
 
 - [x] **Step 1: failing test** — with a fake `aws` on `PATH`, `fetch_embeddings.sh --from-s3`
   downloads exactly the pinned keys and refuses a file whose sha256 differs.
-- [ ] **Step 2:** implement; upload once from a dev host; commit the pin.
-- [ ] **Step 3:** in the build image, sf1 generated with the S3 embeddings answers the tpchv
-  goldens as the dev hosts do (`cargo test --features rust-only --test test_cpu_corpus -- tpchv`
-  green). Commit.
+- [x] **Step 2:** implement; commit the pin.
+- [ ] **Step 3 (when the origins are needed, on no run path):** create the bucket, upload once
+  from a dev host. No corpus query reads a vector column, and the sf1 goldens hold for the
+  synthetic vectors CI generates, so the external embeddings are an input of `tpch.sf40` (already
+  in its bucket), of `query_params.jsonl` and of the vector goldens only, regenerated on a dev
+  host. The bucket keeps those inputs should the origins move or vanish.
 
 ### Task 6: the CPU-VM launcher and isolated instances
 
@@ -189,8 +191,9 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `DISABLE_AUTOUPDATER=1` set for the machine user, gh at `GH_VERSION` from the same tarball as the
   image and at the same path, `/usr/local/bin/gh` (`gh auth setup-git` writes that absolute path
   into `~/.gitconfig`, and the container must resolve it),
-  the repository cloned, the embeddings fetched and sf1 generated for the clone's generator inputs
-  (both with the build image, into the machine's data directory); it ends by printing the two
+  the repository cloned, sf1 generated for the clone's generator inputs with the generator's
+  default vectors and `PEACOCK_NO_FETCH=1`, as CI generates it (in the build image, into the
+  machine's data directory; no embeddings are fetched: no corpus query reads a vector column); it ends by printing the two
   logins left to do by hand
 - Create: `scripts/env/up.sh` — `up.sh <instance> [--chain <c>] [--cudf 25.02] [--env <file>]`;
   `down.sh <instance>`
@@ -202,8 +205,14 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   flatbuffers `GIT_TAG` in `cpp/CMakeLists.txt`, which its prefetch fixes
 - Modify: `scripts/env/image.sh` — every image gets the label `peacockdb.inputs`, that list
 - Create: `scripts/lib/data-inputs.sh` — the hash of what sf1's bytes follow from:
-  `testdata/generate_testdata.sh`, `testdata/embeddings.sha256`, the `DUCKDB_VERSION` line of
+  `testdata/generate_testdata.sh`, the `DUCKDB_VERSION` line of
   `docker/pins.env`, and the generator's arguments per dataset
+- Create: `scripts/lib/s3.sh` — the S3 endpoint and region every bucket script passes, from
+  `AWS_ENDPOINT_URL` and `AWS_REGION` (the names the aws CLI itself reads), so the storage moves
+  with the env file and no new script names a provider's endpoint. `calibration-bucket.sh` and
+  `embeddings-bucket.sh` source it; where the variables are unset, the old path's value stays in
+  `calibration-bucket.sh` alone, so `build-test-shadgpu.sh` keeps working unedited. Access is the
+  S3 API with static keys only: no bucket script calls a provider's API
 - Modify: `llm-wiki/build-test.md` — a "Containers" section
 
 **Interfaces:**
@@ -225,8 +234,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   path `GPU_SSH_KEY_FILE` names; `~/.config/peacock/hosts/` (Task 7's host files) read-only; a
   provider CLI's config read-only where that provider is used. The container runs with
   `--user <machine uid>:<gid>` and `DISABLE_AUTOUPDATER=1`. `--env <file>` carries the values that
-  are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID` and
-  `AWS_SECRET_ACCESS_KEY` required, `GPU_SSH_KEY_FILE` and a provider's values optional.
+  are not a login and is passed only as `--env-file`: `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` and `AWS_REGION` required, `GPU_SSH_KEY_FILE` and a provider's values optional.
   The registry is read-only, so a `Cargo.lock` that names a crate the machine lacks would fail
   every build: `up.sh` runs `cargo fetch` for the instance's worktree in the build image, with the
   registry writable for that one step only, before it starts the instance.
@@ -238,7 +247,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   are refused until republished. Task 7's `prepare` makes the same check of the run image.
   The data is generated once per machine and per generator, never per instance or per start: the
   machine's data directory (`$HOME/peacock-data` unless `PEACOCK_DATA_DIR` names another) holds
-  `<hash>/{tpch.sf1,tpcds.sf1}` and `embeddings-cache/`, the hash being `data-inputs.sh` over a
+  `<hash>/{tpch.sf1,tpcds.sf1}`, the hash being `data-inputs.sh` over a
   worktree. `up.sh` mounts the set matching the instance's worktree read-only at its
   `testdata/<dataset>` paths; when none matches, it generates that set once in the build image,
   under a lock, so two instances starting together generate it once. Two chains whose branches
@@ -257,7 +266,8 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   `test_up_never_passes_keys_as_args` (no key value in argv; only `--env-file`);
   `test_up_mounts_data_by_generator_inputs` (a present set is mounted `:ro` and nothing is
   generated; a changed `generate_testdata.sh` makes a new hash, generated once, the old set
-  untouched; two `up.sh` at once generate it once);
+  untouched; two `up.sh` at once generate it once); `test_s3_endpoint_from_env` (each bucket
+  script's aws argv carries `AWS_ENDPOINT_URL`'s value; `embeddings-bucket.sh` names no endpoint);
   `test_image_labels_its_inputs` (`image.sh build --dry-run` passes the label, equal to
   `image-inputs.sh` over the tree; a changed `venv.lock` changes the build image's label, not the
   run image's); `test_up_refuses_stale_image` (a fake `docker image inspect` whose label differs
@@ -283,7 +293,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
 - Produces: host file keys `PROVIDER=ssh|nebius HOST USER KEY [PASSWORD_FIRST_LOGIN=1]
   [INSTANCE_ID]`; `prepare` installs its own key on a password-only host, then Docker + NVIDIA
   Container Toolkit if missing, puts the data on the machine once (sf1 generated in the build
-  image there under the `data-inputs.sh` hash, as Task 6 keeps it; sf40 from S3 — skipped when
+  image there under the `data-inputs.sh` hash with the default vectors, as Task 6 keeps it; sf40 from S3 — skipped when
   present and its checksum holds), then
   `docker pull` the run image; `ship` rsyncs `cpp/install` and the query files to
   `~/peacock/<instance>/` (instance-named, never the old path's dirs), never the data;
