@@ -24,7 +24,7 @@ binary). No C++, no Python change.
 
 **Spec:** [`bench-rows.md`](bench-rows.md).
 
-**Code base.** Branch from chain L's previous task (`ENS-containers-master` and the tasks above
+**Code base.** Branch from chain L's previous task (`ENS-containers-rebase` and the tasks above
 it). Line numbers below are `origin/ENS-containers`'s for the harness files
 (`corpus_benchmark.rs`, `benchmark_trailer.rs`, `benchmark_section.rs`,
 `tests/test_corpus_goldens/benchmark.rs`) and master's for the rest; on the branch they shift,

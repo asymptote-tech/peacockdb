@@ -54,7 +54,7 @@ tree through bench-rows' `parse_benchmark_section` and the H100 `loads.tsv`: `me
   for the task. The watchers (1 h idle, 4 h per process, the hourly GitHub check) are the backstop,
   not the plan.
 - Branch `ENS-query-fuser` on top of `ENS-dag-driver`: master's engine plus containers' harness
-  and scripts (`ENS-containers-master`), bench-rows, pinned-loads, sf40-baseline and dag-driver.
+  and scripts (`ENS-containers-rebase`), bench-rows, pinned-loads, sf40-baseline and dag-driver.
   The harness files (`corpus_benchmark.rs`, `benchmark_trailer.rs`, `benchmark_section.rs`,
   `record.rs`, `peacock_gpu_benchmarks.rs`, `create_nsys_profile.sh`) are containers'. Line
   numbers below are `origin/ENS-containers`'s, so find each by the function named beside it.

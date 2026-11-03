@@ -63,7 +63,7 @@ to master in one small commit once that task is `done`.
 
 ### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: new
 
-`ENS-containers-master`: containers' 16 commits replayed on master, plus the optimizer's benchmark
+`ENS-containers-rebase`: containers' 16 commits replayed on master, plus the optimizer's benchmark
 commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list regenerated from
 master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
 the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.

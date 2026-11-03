@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** branch `ENS-containers-master` on origin: today's master, then `02f6a4d8` carried from
+**Goal:** branch `ENS-containers-rebase` on origin: today's master, then `02f6a4d8` carried from
 `ENS-optimizer`, then containers' 16 commits replayed, each keeping rk00's authorship and date;
 case list regenerated from master's registry; the H200's case list converted once to
 `h200/cases.csv`, the per-device list format every chain L task reads; the agent-container
@@ -53,7 +53,7 @@ replayed piece is: `git show origin/ENS-containers:llm-wiki/tasks/containers-imp
 3. **The case list hand-merged** instead of written from master's registry: it passes no check
    until someone regenerates and gets a diff. → Task 3 Step 2: a second regeneration is a no-op.
 4. **The H200 tree touched by the move**, a merge picking master's flat copy over the newer one.
-   → Task 3 Step 3: `git diff origin/ENS-containers ENS-containers-master --
+   → Task 3 Step 3: `git diff origin/ENS-containers ENS-containers-rebase --
    testdata/benchmark-results` is empty; after Task 4 it names only `h200/cases.inc` (deleted)
    and `h200/cases.csv` (added).
 5. **An image published from another commit than the fork's tip, or not public.** → Task 6
@@ -100,7 +100,7 @@ containers commit edits it. Containers' commits add no `dphyp`/optimizer referen
 own wiki records. The trial cherry-pick stopped once (above) and the replay five times.
 
 **Interfaces:**
-- Produces: local branch `ENS-containers-master` = `origin/master` + carried `02f6a4d8` + 16
+- Produces: local branch `ENS-containers-rebase` = `origin/master` + carried `02f6a4d8` + 16
   replayed commits, in containers' order; `carried` = the new hash of `02f6a4d8` (named in later
   tasks and the detail file).
 
@@ -110,7 +110,7 @@ own wiki records. The trial cherry-pick stopped once (above) and the replay five
   611b5dcd..origin/ENS-containers` = 16; `git merge-base origin/ENS-optimizer origin/ENS-containers`
   = `611b5dcd…`. Record both tips' hashes in the detail file.
 - [ ] **Step 2: workspace.** In the chain workspace: `git config rerere.enabled false`;
-  `git switch -c ENS-containers-master origin/master`.
+  `git switch -c ENS-containers-rebase origin/master`.
 - [ ] **Step 3: carry.** `git cherry-pick -x 02f6a4d8`; resolve `benchmark.rs` as the table says;
   `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens --no-run` compiles;
   `git add` and `git cherry-pick --continue`. Tag it locally: `git tag fork-carried HEAD`.
@@ -123,11 +123,11 @@ own wiki records. The trial cherry-pick stopped once (above) and the replay five
   - If `git diff --cached --quiet` after `git add` (8437d6cd): `git commit --allow-empty -C
     REBASE_HEAD`, then `git rebase --continue`. `-C` keeps author, date and message.
   - Note each stop (commit, files, how resolved) for the detail file as you go.
-- [ ] **Step 5:** `git branch -f ENS-containers-master containers-replay`;
-  `git switch ENS-containers-master`; `git branch -D containers-replay`.
+- [ ] **Step 5:** `git branch -f ENS-containers-rebase containers-replay`;
+  `git switch ENS-containers-rebase`; `git branch -D containers-replay`.
 - [ ] **Step 6: a resolution found wrong later** (here or in Tasks 2-4) belongs in the commit it
   resolved, not in a fix-up commit, and `rebase -i` is unavailable: re-run Steps 2–5 from
-  scratch (`git switch -C ENS-containers-master origin/master`) with the corrected resolution.
+  scratch (`git switch -C ENS-containers-rebase origin/master`) with the corrected resolution.
   Cheap: six stops. Before Task 1 is pushed only; after the push, a wrong resolution is fixed in
   a developer commit and named in the detail file.
 - [ ] **Step 7: compile in the fork's rust-only shape.** `cargo test --features rust-only -p
@@ -138,13 +138,13 @@ own wiki records. The trial cherry-pick stopped once (above) and the replay five
 old() { git log -1 --format='%s|%an|%ae|%ad' 02f6a4d8
         git log --reverse --format='%s|%an|%ae|%ad' 611b5dcd..origin/ENS-containers; }
 new() { git log --reverse --author='00romankolesnik@gmail.com' --format='%s|%an|%ae|%ad' \
-          origin/master..ENS-containers-master; }
+          origin/master..ENS-containers-rebase; }
 diff <(old) <(new) && new | wc -l
 # the mapping for the detail file, old → new, matched by subject:
 join -t'|' <({ git log --format='%s|%h %an <%ae> %ad' 611b5dcd..origin/ENS-containers
                 git log -1 --format='%s|%h %an <%ae> %ad' 02f6a4d8; } | sort) \
            <(git log --author='00romankolesnik@gmail.com' --format='%s|%h %an <%ae> %ad' \
-               origin/master..ENS-containers-master | sort)
+               origin/master..ENS-containers-rebase | sort)
 ```
   (`join` prints 17 lines, subject|old|new; the two `%an <%ae> %ad` fields of each line are
   equal. The developer's own commits from Task 2 on are by `dmitry`, so the `--author` filter
@@ -152,11 +152,11 @@ join -t'|' <({ git log --format='%s|%h %an <%ae> %ad' 611b5dcd..origin/ENS-conta
 - [ ] **Step 9: no optimizer (Done-when 3).** Each prints nothing:
 
 ```bash
-git diff --name-only origin/master ENS-containers-master | grep -E 'peacockdb-dphyp|join-optimizer|exec_model/(optimizer|plans/|run\.py)'
-git diff --name-only origin/master ENS-containers-master -- scripts/exec_model Cargo.toml Cargo.lock | grep -v '^scripts/exec_model/README.md$'
-git diff origin/master ENS-containers-master -- . ':!llm-wiki/tasks/containers*' | grep '^+' | grep -i -E 'dphyp|join.optimi|optimizer\.txt'
+git diff --name-only origin/master ENS-containers-rebase | grep -E 'peacockdb-dphyp|join-optimizer|exec_model/(optimizer|plans/|run\.py)'
+git diff --name-only origin/master ENS-containers-rebase -- scripts/exec_model Cargo.toml Cargo.lock | grep -v '^scripts/exec_model/README.md$'
+git diff origin/master ENS-containers-rebase -- . ':!llm-wiki/tasks/containers*' | grep '^+' | grep -i -E 'dphyp|join.optimi|optimizer\.txt'
 ```
-- [ ] **Step 10:** push: `git push -u origin ENS-containers-master` (a new branch; no force).
+- [ ] **Step 10:** push: `git push -u origin ENS-containers-rebase` (a new branch; no force).
 
 ### Task 2: drop the launcher and the embeddings' S3 path (spec item 8)
 
@@ -314,7 +314,7 @@ git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/
   `every_timed_case_is_enabled_on_a_device`. If the tree check fails on h200, `h200` is missing
   from `PREDATES_PROVENANCE` or `h200/cases.inc` was altered by a resolution: fix the
   resolution (Task 1 Step 6), never the list. Then `git diff origin/ENS-containers
-  ENS-containers-master -- testdata/benchmark-results testdata/calibration/records.sha256` →
+  ENS-containers-rebase -- testdata/benchmark-results testdata/calibration/records.sha256` →
   empty (master never touched these since `623073da`; 02f6a4d8's copies are the newer of each
   pair, so the h200 tp1_single/tp4_sized files are 02f6a4d8's — name this in the detail file).
 - [ ] **Step 4:** replace the `02f6a4d8` references (Files above); `git grep -n 02f6a4d8 --
@@ -502,6 +502,6 @@ done; done
 - [ ] **Step 3: only if a diff is non-empty**, rebuild. `images.yml` is dispatchable only from the
   default branch, and master has none. Stop, `blocked(building)`, naming the differing inputs and
   asking the human to land `.github/workflows/images.yml` alone on master, as a separate commit
-  (approved in advance). Then `gh workflow run images.yml --ref ENS-containers-master -f kind=all -f cudf=all`,
+  (approved in advance). Then `gh workflow run images.yml --ref ENS-containers-rebase -f kind=all -f cudf=all`,
   `gh run watch <id> --exit-status` → four jobs green, and repeat Steps 1–2. Do not push to master.
 - [ ] **Step 4:** record tags, digests, and whether a rebuild happened; commit the detail file; push.

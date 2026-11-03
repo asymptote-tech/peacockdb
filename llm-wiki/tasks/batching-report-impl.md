@@ -31,7 +31,7 @@ trailer keys), [`pinned-loads-impl.md`](pinned-loads-impl.md) (Task 1 `loads.tsv
 
 - Kind: prototype. The coordinator skips the reviewer and the PR; the tests are the generator's.
 - Branch `ENS-batching-report` on `ENS-query-fuser`. Code base: master's engine + containers'
-  scripts (`ENS-containers-master`) + every chain L task above it.
+  scripts (`ENS-containers-rebase`) + every chain L task above it.
 - Shape: the TPC-H section of `reports/benchmark-minimal.md` (lines 30-44): a provenance table,
   then one table per dataset, load and execute as separate columns, DuckDB warm alongside.
 - Inputs, all under `testdata/`, read-only:

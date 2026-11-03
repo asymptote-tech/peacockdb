@@ -22,7 +22,7 @@ both alone.
 network), GitHub Actions, the `nebius` CLI 0.12.x, Docker + NVIDIA Container Toolkit, Nsight
 Systems, aws CLI v2, DuckDB CLI 1.5.4.
 
-**Spec:** [`new-hosts.md`](new-hosts.md). Base: `ENS-containers-master` (containers-rebase).
+**Spec:** [`new-hosts.md`](new-hosts.md). Base: `ENS-containers-rebase` (containers-rebase).
 Branch: `ENS-new-hosts`.
 
 ## Global Constraints

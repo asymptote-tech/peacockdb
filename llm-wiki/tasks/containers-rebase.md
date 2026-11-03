@@ -8,7 +8,7 @@ Containers (PR 192, branch `ENS-containers`, chain C task 2, state `building`) i
 `ENS-optimizer` (PR #165, join-optimizer, `done`, unmerged). Chain L needs containers' images,
 bucket scripts, provenance and per-device tree, on master's code and master's registry. Master's
 registry is the one that enables the 82 TPC-DS tp1_single cells; the branch has 71. The join
-optimizer itself is not needed. This task makes `ENS-containers-master`: containers' own commits
+optimizer itself is not needed. This task makes `ENS-containers-rebase`: containers' own commits
 replayed on today's master, green, as the base every later task of chain L branches from.
 
 ## What a trial rebase found (2026-11-02)
@@ -138,7 +138,7 @@ resolved blindly, only to count them. It needed:
 
 ## Done when
 
-1. `ENS-containers-master` exists on origin. It is based on master and holds containers' 16
+1. `ENS-containers-rebase` exists on origin. It is based on master and holds containers' 16
    commits, rewritten, plus only the optimizer commits item 1 needs, each named.
    **Every replayed commit keeps its original author.** All 17 are rk00's
    (`rk00 <00romankolesnik@gmail.com>`), with the original author date. A rebase or cherry-pick
@@ -154,7 +154,7 @@ resolved blindly, only to count them. It needed:
    through `parse_device_cases`; the tree check holds a device tree to its `cases.csv` when it
    has one and to the main list otherwise, each branch tested; every page naming
    `h200/cases.inc` names the CSV.
-3. `git diff master ENS-containers-master` holds no file of the join optimizer: no
+3. `git diff master ENS-containers-rebase` holds no file of the join optimizer: no
    `peacockdb-dphyp`, no optimizer code in `exec_model`, no join-optimizer spec.
 4. The build and run images for cuDF 25.02 and 26.02 on `ghcr.io/asymptote-tech/` serve the fork.
    They pull anonymously, and each one's `peacockdb.inputs` label equals the fork's own inputs.
