@@ -168,23 +168,6 @@ GpuSort: by=[x], output_bytes=10, output_rows=1
     assert_eq!(cost_total(&cost), 40);
 }
 
-#[test]
-fn a_forwarder_costs_nothing_and_a_scatter_costs_its_bytes() {
-    let model = CostModel::load();
-    let above_a_scan = |kind: &str| {
-        format!(
-            "{kind}: lanes=4, batches=multiple, output_rows=2, output_bytes=20\n  \
-             GpuLoadParquet: table=t, output_rows=3, output_bytes=30"
-        )
-    };
-    for kind in ["GpuMergePartitions", "GpuUnion", "GpuInterleave"] {
-        let cost = model.cost_text_from_cpu(&above_a_scan(kind), kind);
-        assert_eq!(cost_total(&cost), 30, "{kind}");
-    }
-    let cost = model.cost_text_from_cpu(&above_a_scan("GpuEmitPartitions"), "scatter");
-    assert_eq!(cost_total(&cost), 50);
-}
-
 /// Every node kind is in the taxonomy, and every name in the taxonomy is a kind — read off the exhaustive match in `nodes::node_name`, which
 /// is the one place a kind is named. A nineteenth kind adds an arm there and reddens this
 /// until it has an entry, which is what makes "all eighteen at once" a property rather

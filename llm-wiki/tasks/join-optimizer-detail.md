@@ -1150,9 +1150,9 @@ fixes #236 and #237):
   `output_bytes`, which a 0.0 category breaks. It now holds the category lines to Σ
   `output_bytes` — every node's bytes still land in one — as
   `cost_goldens_match_and_categories_hold_every_byte`.
-- Red first, over the committed conf: `a_forwarder_costs_nothing_and_a_scatter_costs_its_bytes`
-  (Rust) and `test_the_conf_prices_a_forwarder_at_nothing_and_a_scatter_at_its_bytes` (Python), a
-  scan's 30 bytes under one node of each kind. Both failed at `GpuMergePartitions`, 50 against 30.
+- Red first, over the committed conf: a scan's 30 bytes under one node of each kind, in Rust and in
+  Python. Both failed at `GpuMergePartitions`, 50 against 30. Neither test is in the tree now: they
+  pinned the conf's numbers, which the `.cost.txt` goldens pin.
 - The engine's goldens: `UPDATE_CANONICAL=1 cargo test -p peacockdb-core --features rust-only
   --test test_cost_model` rewrote the ten `-mini.cost.txt`. Against the parent commit, all 551
   sections: the old shuffle bytes are scatter + forward, every other category is unchanged, and the
