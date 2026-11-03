@@ -3253,3 +3253,200 @@ contents in header order, the index's rows, open count and next free number), th
   nothing under `scripts/exec_model`, `testdata/goldens`, `testdata/stats`,
   `testdata/cost_model.conf`, `cost-report`, `peacockdb-core/src` outside `test_support`, or `cpp`
   differs, so no prototype output can move and `run.py` and the corpus tier are not rerun.
+
+## The move onto master after chain K
+
+### The move
+
+The fourteen commits on `623073da` replay onto master at `9a1e82c7`: chain K's PRs #170–#191,
+the product research and chain L's planning, 59 commits. Each is cherry-picked in order with
+`rerere.enabled=false`, and every one keeps its author, its date and its message, the last with
+its ticket numbers moved (below). A conflicted commit is made with
+`--cleanup=verbatim`, so no line starting `#` is lost. Task 19's rule holds: master's side where
+master supersedes the branch, the branch's where it adds.
+
+| # | Commit | Before | After | Conflicted files |
+|---|---|---|---|---|
+| 1 | peacockdb-dphyp | `69448594` | `c4a324a6` | `pipeline.yml` |
+| 2 | benchmarks | `02f6a4d8` | `421f48c6` | `benchmark.rs` |
+| 3 | cost, the named queries | `2bef3b81` | `174e2da6` | `main.rs`, `corpus_cases.inc`, `cost-registry.csv`, `test_duckdb_result.py`, `tickets.md`, `corpus-coverage.md`, 13 `.cost.txt`, `report.html` |
+| 4 | the optimizer | `3625404b` | `5dd41773` | `aggregates.py`, `test_operators.py`, `test_end_to_end.py`, `tickets.md`, `corpus-coverage.md`, the archive |
+| 5 | spec, plan, record | `c5d12789` | `33a79015` | `build-test.md` (14 hunks), `tasks.md` |
+| 6 | every dataset's plans | `bbf7ee8c` | `75fd5b6a` | `build-test.md`, `tickets.md`, `optimizer.md`, `scalars.md` |
+| 7 | clusters, null-key filters | `299f206b` | `7c5d8ce3` | `build-test.md`, `tickets.md` |
+| 8 | the engine side | `5cec3570` | `b01ad516` | — |
+| 9 | made again and checked | `fa7ee6ae` | `d2d874a3` | `build-test.md`, this file, `tickets.md` |
+| 10 | master's ticket labels | `efb23d52` | `afee446a` | — |
+| 11 | device cells on | `a70066c4` | `0e47dde7` | `corpus_cases.inc`, `cost-registry.csv`, `gpu-result.txt`, `report.html`, `build-test.md` (10), this file, `tickets.md`, `corpus-coverage.md`, the archive |
+| 12 | signed off | `2a52e84a` | `ed697273` | — |
+| 13 | done | `611b5dcd` | `3ce3bd48` | — |
+| 14 | the report's red queries | `561411b4` | `fd5b53e4` | `tickets.md`, `optimizer.md` |
+
+### Conflicts and their resolutions
+
+- Commit 1, `pipeline.yml`: master folded `test_ci_coverage` and `test_module_layout` into
+  cost-report's `test_source_formatting`, with `test_crate_privacy` beside it. The branch's
+  `test_ci_coverage` step goes; its DPhyp step stays, before master's two.
+- Commit 2, `benchmark.rs`: master reads both case lists through `inventory`. `macro_invocations`
+  is gone, and `no_core_test_reads_the_checkout` refuses a core test naming `CARGO_MANIFEST_DIR`.
+  The branch's `every_declared_case_has_a_section_in_the_tree` reads `TimedDeclaration` instead,
+  which gains `sf`.
+- Commit 3, `main.rs`: `the_pr_comment_fits_under_the_body_cap` takes master's `the_real_comment`;
+  `committed_datasets` and the branch's two tests stay.
+- Commit 3, `cost-registry.csv`: master's 221 rows and columns, with the four named queries at the
+  branch's places, each with its line's oracles and `stored`: `result`, and `fingerprint` for
+  left-join-reorder.
+- Commit 3, `every_registry_query_has_a_duckdb_cost`: master added five tpch queries,
+  distinct-functions, global-stddev, rollup-distinct, rollup-grouping and rollup-stddev, with no
+  `.duckdb_cost.txt`. `gen_duckdb_cost.sh --gen` over tpch writes their profiles, bounds and
+  goldens, and writes the other 43 byte for byte as committed. master changed `nested-limits.sql`
+  only in a comment.
+- Commit 3, `test_duckdb_result.py`: master's 44 tpch query files and the branch's four, 48.
+- Commit 4, `aggregates.py`: master changed `Agg`'s docstring and moved `grouping_set_id` to
+  DataFusion's encoding, the first key highest. The branch replaces both with `PlanAggregate`, whose
+  `plan_aggregate` already folds the first key highest. Its rollup test holds the mixed mask, k
+  masked under (g, k), at 1, where the old encoding gave 2. So the file and its two test files are
+  the branch's, and master's three `Agg` grouping-set tests go with `Agg`. master's plans print
+  Welford as before: count, mean and m2 per state, `merge_m2` at the merge, `ddof` in the final's
+  `CASE`. Only the recipe line gained keyless-identity's clause, which the reader does not parse.
+- Commit 4, `corpus-coverage.md`: master closed every ticket there. The branch's edit to #65's
+  text goes, as #65 is in master's archive.
+- Commit 5, `tasks.md`: master's board, chain L for chain K, then the branch's Chain C.
+- Commit 6, the prototype's reader: master's pbench plans carry `1 mons` and `1 mons 2 days
+  10800000000000 nanos` (interval-join-keyed, interval-mixed-units, interval-month-clamp), and six
+  `sort-*` queries filter on `f_id % 20`. `_interval` read days only and `%` had no IR form, so
+  three corpus tests failed at this commit, the one that reads pbench's plans. A month interval is
+  a `pd.DateOffset`, clamped at the month's end as DataFusion adds it (2024-01-31 plus a month is
+  2024-02-29); days and nanoseconds alone stay a `Timedelta`. Beside a Date32 the interval keeps
+  whole days only, toward zero, as arrow adds a date's nanoseconds as a `Duration`:
+  interval-mixed-units' `dt` is 2024-02-03, not 2024-02-03 03:00. A timestamp takes all of it,
+  which arrow floors to the column's unit; the prototype holds nanoseconds and does not floor.
+  Only a bare column's type says Date32 or timestamp, so a sub-day interval beside any other DATE
+  operand, nested arithmetic, a CASE, an aggregate's state, is refused rather than guessed; no
+  corpus plan has one. `%` is `np.fmod`, since cuDF's MOD truncates. Four tests, red first:
+  `test_an_interval_with_months_is_calendar_months_clamped_at_the_month_end`,
+  `test_a_date_takes_an_interval_s_whole_days_toward_zero_and_a_timestamp_the_rest_too`,
+  `test_a_sub_day_interval_beside_a_date_the_reader_cannot_classify_is_refused` and
+  `test_a_remainder_takes_the_sign_of_its_dividend`.
+- Commit 11, `gpu-result.txt`: master's 220 sections and the branch's 20, ordered as
+  `corpus_golden.rs` writes them, by registry row and then mode. The branch's are byte for byte
+  its own. Master leaves the four queries' plans and cpu sections as they were: at commit 3,
+  `plan_goldens` under `UPDATE_CANONICAL=1` and the 24 cases under `PCK_UPDATE_SECTIONS=1`
+  rewrote nothing. So their device answers stand, and their `duckdb_gpu_tpch_` cases hold them
+  to DuckDB.
+- Commit 11, `corpus-coverage.md`: master's, with none open, now that the branch's #302 is
+  archived.
+- Ticket contents and index rows follow each file's header order. Where both sides added at the
+  same place, master's lines come first, then the branch's. The branch's #238 stays at the head of
+  `system-hardening.md`, where the branch put it. The index's counts and next free number are
+  counted again from the files at each commit.
+- After this record, master's scans carry no limit: its limits work puts a scan's limit in a
+  `GpuLimit` above it, and #186 is closed. So the prototype's scan limit goes, with everything
+  that existed only for it. One detail still differs, a keyless aggregate over no rows. master's
+  partial answers its identity row at done when nothing went out. The prototype's per-batch
+  `PlanAggregateExec` answers one per zero-row batch and none for a lane with no batch. The
+  answers agree, and the partial's row counts differ. Matching master needs an accumulator with a
+  done hook, and it moves `run.py`'s outputs, so it waits with them.
+- `build-test.md`: master's page and rows, each count master's plus the branch's change. Three
+  are counted again. The engine-plan runs are 425, not 419: master's queries add six. The
+  prototype's cheap tier is 488 at commit 4, since master's one added test was an `Agg` test. It
+  is 502 at commit 6 with the four tests above, and 525 at commit 9. The engine-plan row's answer
+  count is 130: 48 tpch and 82 tpcds. The header is the rows' sum.
+
+### What git merged without a conflict
+
+- Commit 3: the four named lines of `corpus_cases.inc`, still in the old oracle spelling, which
+  does not compile against master's macro. They now read `duckdb(sort, exact)`,
+  `data_fusion(sort, exact)` and `golden(sort, exact)`, since no query has an ORDER BY.
+  left-join-reorder reads `duckdb_fingerprint` and `live_cpu`. The device-column comment above
+  tpch is master's sentence with the four excepted, until commit 11 restores master's.
+- Every #288, #289 and #290 in the branch's own text: this file, the commit 3 comment in
+  `corpus_cases.inc`, and the messages of commits 3, 4, 8 and 11.
+
+### Ticket numbers
+
+master took #288 (decimal division digits), #289 (Welford count wrap) and #290 (stacked limits).
+The branch's three take the next free numbers in commit order:
+
+- #288, the named queries' device cells, is #302.
+- #289, matched shares over the key domain (done), is #303.
+- #290, an outer join's key NDV, is #304.
+
+The new numbers are in every anchor, header, contents line and index row, the archive, the
+registry's ticket cells and `report.html`, the `corpus_cases.inc` comment, this file (Task 24's
+label table too), and the four messages. master's own three stay where master put them:
+`scalars.md`, `system-hardening.md`, `performance.md`, the index, build-test.md and the archive.
+So the change goes line by line, not by a global replace. Task 19's ticket-number sentence keeps
+the numbers it gave and says the new ones beside them.
+
+The index after each commit:
+
+| Commits | Open | Next free |
+|---|---|---|
+| 1–2 | 77 | 291 |
+| 3 | 79 | 303 |
+| 4–5 | 81 | 305 |
+| 6 | 84 | 305 |
+| 7–8 | 87 | 305 |
+| 9–10 | 88 | 305 |
+| 11–13 | 87 | 305 |
+| 14 | 90 | 305 |
+
+### Regenerated
+
+- Commit 3: every `-mini.cost.txt`, by `UPDATE_CANONICAL=1 ... --test test_cost_model`. A second
+  run writes them unchanged. The 669 sections whose cpu run master left alone are the branch's old
+  text exactly. `report.html` is regenerated by `ticket_widget.py` in commits 3 and 11, and a
+  second run writes it unchanged.
+- Commit 9: the cardinality golden, by `UPDATE_CANONICAL=1` over `test_cardinality_corpus.py`.
+  master runs tpch scan-limit at tp1-single now, so tpch's file no longer lists it as not run.
+  tpcds q28 is planned and adds five cross joins: 661 joins, median q-error 1.26, 69.6 % within
+  2×. Every other line is as it was. `design.md`'s summary of it follows, by the same formula with
+  q64 apart: the rest of tpcds is 624 joins, median 1.20, 72.9 % within 2×.
+- Never regenerated: `run.py`'s outputs under `scripts/exec_model/testdata/goldens/`, which are
+  commit 9's, made on master at PR #178. Since then master changed the plan tree of tpch
+  scan-limit and nested-limits and of tpcds q28, and planned six new queries (tpch's five, and
+  tpcds q28, refused before). It moved the cpu run of 14 tpch and 62 tpcds queries, the cost of 11
+  and 51 of them. Those sections, and the ratios and links in `cost_report.html`, wait for a full
+  `run.py`.
+
+### Proving
+
+Per commit: `cargo check --workspace --all-targets --features peacockdb-core/rust-only`, no
+warning, and the ticket check (every open header labelled, contents in header order, the index's
+rows, open count and next free number). The cheap tier as `pipeline.yml` runs it, 48 files: 488
+passed at commit 4, 502 at 6, 523 at 7, 525 at 9. Commit 3: the cost-report crate, 49. From
+`test_cpu_corpus`, the registry checks, the four queries' cells and every `duckdb_tpch_` case: 72
+passed. `test_duckdb_result.py`: 22. Commit 11: those and the twenty `duckdb_gpu_tpch_` cases,
+361 passed.
+
+At the tip, with this record, the two tests' removal and the scan limit's removal on top:
+
+- rust-only: `test_cost_model` 3, its goldens unchanged under two regenerations;
+  `test_golden_format` 41, `test_corpus_goldens` 29, `--lib` 895 and 2 ignored,
+  `test_cpu_corpus` 2447. The CLI builds.
+- cost-report: `--bin cost-report` 49, `test_source_formatting` 32. `test_crate_privacy` 1,
+  DPhyp 6.
+- The cheap tier: 48 files, 523 passed. `testdata/test_duckdb_result.py`: 22.
+- The four engine-plan files over the sf1 tables against DuckDB, each in three shards as
+  `exec-model-corpus.yml` runs them: `test_engine_answers` 130, `test_engine_dynamic_filters`
+  73, `test_engine_reassembled` 111, `test_engine_optimized` 111, all 425 passed.
+- dataset-matrix's exec-model step over the local sf1 tables, with DuckDB 1.5.4:
+  `test_stats_sidecar` 4, `test_cardinality_corpus` 3, `test_ordered_corpus` 2,
+  `test_run_corpus` 1.
+- `git diff origin/master...<old head>` against `git diff origin/master <tip>`: the patch of every
+  file is the same but these, each a resolution above, a regeneration or one of the two removals:
+  - `aggregates.py`, `expressions.py`, `engine_ir.py` and `test_engine_ir.py`;
+  - `benchmark.rs`, `corpus_cases.inc` and `main.rs`;
+  - the registry, `test_duckdb_result.py` and `report.html`;
+  - the fifteen `.cost.txt`, and the two cardinality goldens;
+  - `test_cost_model.rs` and `test_cost_model.py`;
+  - `design.md`, and the scan limit's files: `engine_nodes.py`, `nodes.py`, `source.py`,
+    `cardinality.py` and `test_parquet_scan.py`;
+  - the ticket files, `build-test.md` and this file;
+  - `.github/workflows/pipeline.yml` and `tasks.md`, whose added lines are the branch's, but
+    among master's new neighbours after a conflict: the DPhyp step beside master's source-tree
+    steps, Chain C after master's chain L.
+
+  `corpus-coverage.md` drops out, being master's again. The five new queries' DuckDB profiles,
+  bounds and costs come in. Every plan, cpu, result and `gpu-result.txt` patch is the branch's.
