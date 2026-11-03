@@ -51,3 +51,64 @@ unnecessary.
 
 Every tier on shad-gpu's cuDF 26.02 environment, fixes, and the tpch sf40 benchmark of the cells
 the chain turned on, against 25.02; the evidence #244 waits on. On hold: not to be built for now.
+
+## Chain L (base: master)
+
+Query batching. Fuse several queries' plans so each sf40 table loads once, and measure what that
+buys on a Nebius H100 against DuckDB on 128 cores. The first task forks containers (PR 192) onto master
+without `ENS-optimizer`; every later task stacks on it. The chain
+takes over containers' device run (as `scripts/env/run-gpu.sh`) and its 80 GB benchmark, tp1_single
+and tp4_sized only. new-hosts' rename of the `gpu-host` scripts to `nebius` and its VM guarding go
+to master in one small commit once that task is `done`.
+
+### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: new
+
+`ENS-containers-master`: containers' 16 commits replayed on master, plus the optimizer's benchmark
+commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list regenerated from
+master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
+the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.
+
+### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: new
+
+The `gpu-host` scripts renamed `nebius`; `nebius.sh --instance-id/--profile` for the H100
+(eu-north1) and the 128-core CPU VM (eu-west1), 1-hour idle watchers with per-VM credentials, the
+hourly GH watch over all three VMs, sf40 data on both, `run-gpu.sh` on the H100 over `nebius.sh`
+(no host adapters), and `provision-vm.sh`/`bootstrap-vm.sh` verified on the CPU VM.
+
+### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../tickets/performance.md#t149) — state: new
+
+The parquet load reads into pinned host memory on a discrete GPU, measured on the H100.
+
+### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: new
+
+Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us`, `execute_us`,
+`peak_bytes` in the trailer.
+
+### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: new
+
+TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
+cores for the same set; queries that fail at sf40 are skipped.
+
+### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: new
+
+Production: the driver runs plans with shared sources and several roots, without deadlock, with
+per-consumer limits and an optional concurrency cap.
+
+### 7. [`query-fuser.md`](query-fuser.md) — closes no ticket — state: new
+
+Prototype: fuse the first 3/10/20/all queries into one DAG sharing scans, with mergeability and
+pipelining hints and a memory cap; run them on the H100.
+
+### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: new
+
+`llm-wiki/reports/query-batching.md`: fused vs unfused vs DuckDB per batch size.
+
+### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: new
+
+The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to the report.
+
+### 10. [`containers-only.md`](containers-only.md) — closes [#129](../tickets/testinfra.md#t129) (part a) — state: new
+
+Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.10), the L40S's `gpu-tests` through `run-gpu.sh`,
+local and verda builds through the image, the conda install and init scripts deleted, one path in
+the wiki. shad-gpu stays as it is, since it has no Docker.
