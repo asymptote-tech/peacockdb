@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use peacockdb_core::test_support::{
     BUILD, COLUMNS, Capture, FAILED, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV,
     RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections, record_header,
-    rows_match_the_recipes, testdata_root,
+    rows_match_the_recipes, source_file, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -486,11 +486,6 @@ const CASE_LIST: &str = include_str!("../common/corpus_benchmark_cases.inc");
 const BENCHMARK_DATASETS: [&str; 2] = ["tpch", "tpcds"];
 const BENCHMARK_SF: &str = "40";
 
-/// Where `UPDATE_CANONICAL=1` writes the list. Never read: the list is compiled in.
-fn case_list_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/corpus_benchmark_cases.inc")
-}
-
 /// One `corpus_query_benchmark!` line's arguments as written: dataset, sf, query, modes.
 type Case = [String; 4];
 
@@ -504,8 +499,7 @@ fn listed_cases() -> Vec<Case> {
 
 /// The `corpus_query_benchmark!(…);` lines of a list kept in testdata as text. Every other line
 /// is a `//` comment or blank; anything else is refused rather than skipped.
-fn text_cases(path: &Path) -> Vec<Case> {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+fn text_cases(text: &str, path: &Path) -> Vec<Case> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with("//"))
@@ -581,7 +575,7 @@ fn the_benchmark_cases_follow_the_registry() {
     );
     let want = case_list_text(&cases);
     if std::env::var("UPDATE_CANONICAL").is_ok() {
-        let path = case_list_path();
+        let path = source_file("tests/common/corpus_benchmark_cases.inc");
         let staged = path.with_extension("inc.new");
         std::fs::write(&staged, &want).expect("the staged case list");
         std::fs::rename(&staged, &path).expect("the case list");
@@ -712,7 +706,10 @@ fn missing_case_problem(root: &Path, files: &Files) -> Result<(), String> {
         let own;
         let held_to = match PREDATES_PROVENANCE.contains(&name) {
             true => {
-                own = declared_files(&text_cases(&device.join(PREDATES_LIST)));
+                let list = device.join(PREDATES_LIST);
+                let text = std::fs::read_to_string(&list)
+                    .map_err(|e| format!("{}: {e}", list.display()))?;
+                own = declared_files(&text_cases(&text, &list));
                 &own
             }
             false => files,

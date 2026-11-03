@@ -73,6 +73,12 @@ pub fn testdata_root() -> PathBuf {
     testdata::root()
 }
 
+/// A source file under `peacockdb-core/`, for an `UPDATE_CANONICAL` rewrite of a compiled-in
+/// list.
+pub fn source_file(rel: &str) -> PathBuf {
+    testdata::source_file(rel)
+}
+
 pub fn data_dir_for(dataset: &str, sf: &str) -> PathBuf {
     testdata_root().join(format!("{dataset}.sf{sf}"))
 }
