@@ -4,15 +4,17 @@ Each test runs the script from a clone on a fake laptop (`laptop.py`): ssh, gh a
 user and group tools are fakes, and the VM is a directory, so nothing leaves the machine.
 """
 import getpass
+import json
 import pathlib
 import stat
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from laptop import PAT, Laptop  # noqa: E402
-from machine import KEYS  # noqa: E402
+from laptop import GPU_KEY_NAMES, PAT, Laptop, make_key  # noqa: E402
+from machine import KEYS, path_without  # noqa: E402
 
 TARGET = "ubuntu@vm1.test"
 
@@ -23,14 +25,15 @@ def ok(r):
 
 
 def refused(r, lap, *names):
-    """Exit 2, one stderr line naming each of `names`, no ssh made and nothing kept on the laptop."""
+    """Exit 2, one stderr line naming each of `names`, no ssh made and nothing kept on the laptop
+    beside the GPU key it held."""
     assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
     assert len(r.stderr.strip().splitlines()) == 1, r.stderr
     assert r.stderr.startswith("provision-vm.sh: "), r.stderr
     for name in names:
         assert name in r.stderr, (name, r.stderr)
     assert lap.ssh_calls() == [], lap.ssh_calls()
-    assert not lap.config.exists() or not any(lap.config.iterdir()), list(lap.config.iterdir())
+    assert {p.name for p in lap.config.iterdir()} <= GPU_KEY_NAMES, list(lap.config.iterdir())
 
 
 def mode(path):
@@ -44,9 +47,11 @@ def readied(lap, *extra, stdin=PAT + "\n"):
 
 def test_provision_readies_a_vm():
     with Laptop() as lap:
-        r = readied(lap, "--ref", "ENS-containers")
+        key = lap.home / ".ssh" / "id_ed25519"
+        make_key(key, "Dev")
+        r = readied(lap, "--ref", "ENS-containers", "--gpu-key", key)
         assert mode(lap.config) == 0o700, oct(mode(lap.config))
-        for name in ("peacock.env", "github-pat", "gpu_ed25519", "gpu_ed25519.pub", "vm"):
+        for name in ("peacock.env", "github-pat", "vm"):
             assert mode(lap.config / name) == 0o600, (name, oct(mode(lap.config / name)))
         assert (lap.config / "peacock.env").read_text() == lap.received.read_text()
         assert (lap.config / "github-pat").read_text().strip() == PAT
@@ -56,8 +61,6 @@ def test_provision_readies_a_vm():
         checks = [c for c in lap.gh_calls() if c["host"] == "laptop"]
         assert [c["argv"][:2] for c in checks] == [["api", "repos/asymptote-tech/peacockdb"]], checks
         assert checks[0]["token"] == PAT
-        pub = (lap.config / "gpu_ed25519.pub").read_text().strip()
-        assert pub in r.stdout and "GPU host" in r.stdout, r.stdout
 
         vm, home = lap.vms / "vm1.test", lap.vm_home("vm1.test", "dev1")
         assert "dev1" in lap.group_members("vm1.test", "docker"), (vm / "group").read_text()
@@ -70,8 +73,8 @@ def test_provision_readies_a_vm():
         vm_cfg = home / ".config" / "peacock"
         want = lap.received.read_text() + f"GPU_SSH_KEY_FILE={vm_cfg / 'gpu_ed25519'}\n"
         assert (vm_cfg / "peacock.env").read_text() == want
-        for name in ("gpu_ed25519", "gpu_ed25519.pub"):
-            assert (vm_cfg / name).read_bytes() == (lap.config / name).read_bytes(), name
+        assert (vm_cfg / "gpu_ed25519").read_bytes() == key.read_bytes()
+        assert (vm_cfg / "gpu_ed25519.pub").read_bytes() == key.with_name("id_ed25519.pub").read_bytes()
         for name in ("gpu_ed25519", "gpu_ed25519.pub", "peacock.env"):
             assert mode(vm_cfg / name) == 0o600, (name, oct(mode(vm_cfg / name)))
         assert f"oauth_token: {PAT}" in (home / ".config" / "gh" / "hosts.yml").read_text()
@@ -85,6 +88,8 @@ def test_provision_readies_a_vm():
         assert all("dev1@vm1.test" in c["argv"] for c in calls[1:]), [c["argv"] for c in calls]
         last = calls[-1]["argv"]
         assert "-t" in last and "claude auth login" in last[-1], last
+        logins = [c for c in map(json.loads, (vm / "claude.log").read_text().splitlines()) if "login" in c["argv"]]
+        assert [c["config"] for c in logins] == [None], logins
         assert (home / ".claude" / ".credentials.json").is_file()
 
 
@@ -164,9 +169,9 @@ def test_provision_rerun_skips_what_is_done():
         key = (lap.config / "gpu_ed25519").read_bytes()
         r = ok(lap.provision(TARGET, stdin=""))
         assert "personal-access-tokens" not in r.stdout, "the token was asked for again"
-        assert (lap.config / "gpu_ed25519").read_bytes() == key, "the GPU key was made again"
+        assert (lap.config / "gpu_ed25519").read_bytes() == key, "the GPU key was changed"
         assert (vm / "useradd.log").read_text().count(f" {user}\n") == 1, (vm / "useradd.log").read_text()
-        assert (vm / "bootstrap.log").read_text() == f"{user} \n", (vm / "bootstrap.log").read_text()
+        assert (vm / "bootstrap.log").read_text() == f"{user} \n" * 2, (vm / "bootstrap.log").read_text()
         logins = [c for c in lap.gh_calls() if c["host"] != "laptop" and c["argv"][:2] == ["auth", "login"]]
         assert len(logins) == 1, logins
         claude = [ln for ln in (vm / "claude.log").read_text().splitlines() if "login" in ln]
@@ -195,7 +200,8 @@ def test_provision_new_pat_replaces_it_everywhere():
 def test_provision_refuses_bad_arguments_before_any_call():
     cases = [(), ("ubuntu",), (TARGET, "--user", "Bad User"), (TARGET, "--name", "x/y"), (TARGET, "--bogus"),
              (TARGET, "--env"), ("a@h", "b@h"), ("--user", "dev1"), ("--new-pat", "--name", "x"),
-             (TARGET, "--ref")]
+             (TARGET, "--ref"), (TARGET, "--gpu-key"), ("--new-pat", "--gpu-key", "k"),
+             (TARGET, "--gpu-key", "a", "--gpu-key", "b")]
     for args in cases:
         with Laptop() as lap:
             refused(lap.provision(*args, stdin=PAT + "\n"), lap)
@@ -206,6 +212,31 @@ def test_provision_has_help():
         r = lap.provision("--help")
         assert r.returncode == 0 and "provision-vm.sh <login>@<address>" in r.stdout and "--new-pat" in r.stdout, r
         assert lap.ssh_calls() == []
+
+
+def test_help_needs_no_sed():
+    with Laptop() as lap:
+        system = path_without(lap.home.parent, {"sed"})
+        r = lap.provision("--help", env={"PATH": f"{lap.bin}:{system}"})
+        assert r.returncode == 0 and "provision-vm.sh <login>@<address>" in r.stdout, (r.returncode, r.stderr)
+        assert "set -euo" not in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
+
+
+def test_provision_needs_bash_4_4():
+    with Laptop() as lap:
+        lines = (lap.clone / "scripts" / "env" / "provision-vm.sh").read_text().splitlines()
+    at = next(i for i, ln in enumerate(lines) if "BASH_VERSINFO" in ln)
+    first_source = next(i for i, ln in enumerate(lines) if ln.startswith((". ", "source ")))
+    assert at + 1 < first_source, "the bash check follows a source"
+    assert not any(ln.startswith(("shopt", "set ")) for ln in lines[:at]), lines[:at]
+    check = "\n".join(lines[at:at + 2]).replace("BASH_VERSINFO", "V").replace("$BASH_VERSION", "$VS")
+    for version, ok in (("3 2", False), ("4 3", False), ("4 4", True), ("5 0", True)):
+        r = subprocess.run(["bash", "-c", f"V=({version}); VS='{version}'\n{check}\necho passed", "provision-vm.sh"],
+                           capture_output=True, text=True, timeout=30)
+        assert ("passed" in r.stdout) is ok, (version, r.returncode, r.stdout, r.stderr)
+        if not ok:
+            assert r.returncode == 2 and r.stderr.startswith("provision-vm.sh: ") and "brew install bash" in r.stderr, r
+            assert len(r.stderr.strip().splitlines()) == 1, r.stderr
 
 
 
@@ -224,14 +255,14 @@ def test_provision_normalises_the_env_file():
             assert vm_env(lap) == lines + f"GPU_SSH_KEY_FILE={key}\n", vm_env(lap)
     with Laptop() as lap:
         lap.add_vm("vm1.test")
-        lap.config.mkdir(parents=True, mode=0o700)
+        lap.config.mkdir(parents=True, mode=0o700, exist_ok=True)
         (lap.config / "peacock.env").write_text(lines.rstrip("\n"))
         ok(lap.provision(TARGET, "--user", "dev1", stdin=PAT + "\n"))
         assert vm_env(lap).splitlines()[:5] == [*lines.splitlines(), vm_env(lap).splitlines()[4]], vm_env(lap)
         assert vm_env(lap).splitlines()[4].startswith("GPU_SSH_KEY_FILE="), vm_env(lap)
     with Laptop() as lap:
         lap.add_vm("vm1.test")
-        lap.config.mkdir(parents=True, mode=0o700)
+        lap.config.mkdir(parents=True, mode=0o700, exist_ok=True)
         own = lap.config / "peacock.env"
         own.write_text(lines)
         ok(lap.provision(TARGET, "--env", own, "--user", "dev1", stdin=PAT + "\n"))
@@ -255,11 +286,54 @@ def test_provision_refuses_a_ref_the_vm_clone_is_not_on():
         assert "ENS-first" in r.stderr and "ENS-second" in r.stderr, r.stderr
         ok(lap.provision(TARGET, "--user", "dev1", "--ref", "ENS-first"))
         ok(lap.provision(TARGET, "--user", "dev1"))
-        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 --ref ENS-first\n"
-        reads = [c["argv"][-1] for c in lap.ssh_calls() if "branch --show-current" in c["argv"][-1]]
-        assert reads, [c["argv"] for c in lap.ssh_calls()]
-        for command in reads:
-            assert "-c core.hooksPath=/dev/null -c core.fsmonitor=false" in command, command
+        runs = ["dev1 --ref ENS-first", "dev1 --ref ENS-second", "dev1 --ref ENS-first", "dev1 "]
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text().splitlines() == runs
+
+
+def test_provision_runs_bootstrap_on_every_run():
+    with Laptop() as lap:
+        readied(lap)
+        ok(lap.provision(TARGET, "--user", "dev1"))
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n" * 2
+
+
+def test_provision_copies_the_named_gpu_key():
+    with Laptop() as lap:
+        key = lap.home / "keys" / "dev_ed25519"
+        private = make_key(key, "Named")
+        default = (lap.config / "gpu_ed25519").read_bytes()
+        readied(lap, "--gpu-key", key)
+        vm_cfg = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock"
+        assert (vm_cfg / "gpu_ed25519").read_text() == private
+        assert (vm_cfg / "gpu_ed25519.pub").read_bytes() == key.with_name("dev_ed25519.pub").read_bytes()
+        for name in ("gpu_ed25519", "gpu_ed25519.pub"):
+            assert mode(vm_cfg / name) == 0o600, (name, oct(mode(vm_cfg / name)))
+        assert f"GPU_SSH_KEY_FILE={vm_cfg / 'gpu_ed25519'}" in vm_env(lap).splitlines(), vm_env(lap)
+        for argv in [c["argv"] for c in lap.ssh_calls()]:
+            assert not any(private.splitlines()[1] in arg for arg in argv), argv
+        assert not lap.keygen_log.exists(), lap.keygen_log.read_text()
+        assert (lap.config / "gpu_ed25519").read_bytes() == default, "the default key was touched"
+
+
+def test_provision_refuses_a_missing_gpu_key():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        r = lap.provision(TARGET, "--env", lap.received, "--gpu-key", lap.home / "no-such-key", stdin=PAT + "\n")
+        refused(r, lap, "--gpu-key", "no-such-key")
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        for name in GPU_KEY_NAMES:
+            (lap.config / name).unlink()
+        refused(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n"), lap, "--gpu-key")
+        assert not lap.vm_home("vm1.test", getpass.getuser()).exists()
+        assert not lap.keygen_log.exists(), lap.keygen_log.read_text()
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        key = lap.home / "keys" / "lone_ed25519"
+        make_key(key, "Lone")
+        key.with_name("lone_ed25519.pub").unlink()
+        r = lap.provision(TARGET, "--env", lap.received, "--gpu-key", key, stdin=PAT + "\n")
+        refused(r, lap, "--gpu-key", "lone_ed25519.pub")
 
 
 if __name__ == "__main__":

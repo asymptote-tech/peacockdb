@@ -6,8 +6,10 @@ a fake VM: a directory per address holding passwd, group, the users' homes, and 
 is written under /etc and /var. A user is reached only with an authorized_keys. On a VM, sudo runs
 its command as the caller; getent, groupadd, useradd, usermod and install act on that directory;
 gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's
-bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude, makes an
-empty clone on the --ref branch and writes the machine marker.
+bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude and makes an
+empty clone on the --ref branch; like the real one, it refuses a --ref other than the branch an
+existing clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by
+default, and ssh-keygen is a fake that records any call.
 """
 import json
 import os
@@ -18,11 +20,7 @@ import tempfile
 
 from machine import KEYS, REPO, git
 
-LAPTOP_FILES = [
-    "scripts/env/provision-vm.sh", "scripts/env/up.sh", "scripts/env/down.sh",
-    "scripts/lib/peacock-config.sh", "scripts/lib/board.sh", "scripts/lib/image-inputs.sh",
-    "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh",
-]
+LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh"]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
 PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
@@ -100,13 +98,35 @@ if sys.argv[1:3] == ["auth", "login"]:
 STUB_BOOTSTRAP = '''#!/usr/bin/env bash
 set -eu
 printf '%s %s\\n' "$(id -un)" "$*" >> "$FAKE_VM/bootstrap.log"
-mkdir -p "$HOME/.local/bin" "$HOME/.config/peacock"
+mkdir -p "$HOME/.local/bin"
 cp "$FAKE_CLAUDE" "$HOME/.local/bin/claude"
+if [ "${1:-}" = --ref ] && [ -e "$HOME/peacockdb" ]; then
+  on=$(git -C "$HOME/peacockdb" branch --show-current)
+  if [ "$on" != "$2" ]; then
+    echo "bootstrap-vm.sh: $HOME/peacockdb is on ${on:-a detached HEAD}, not $2" >&2
+    exit 2
+  fi
+fi
 ref=master
 if [ "${1:-}" = --ref ]; then ref=$2; fi
-git init -q -b "$ref" "$HOME/peacockdb"
-echo bootstrapped > "$HOME/.config/peacock/machine"
+[ -e "$HOME/peacockdb" ] || git init -q -b "$ref" "$HOME/peacockdb"
 '''
+
+FAKE_SSH_KEYGEN = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_SSH_KEYGEN_LOG"\nexit 1\n'
+GPU_KEY_NAMES = {"gpu_ed25519", "gpu_ed25519.pub"}
+
+
+def make_key(path, comment):
+    """A fake ed25519 key pair at <path> and <path>.pub, mode 600; returns the private key's text."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = f"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAB{comment}PrivateValue\n" \
+           "-----END OPENSSH PRIVATE KEY-----\n"
+    path.write_text(text)
+    path.with_name(path.name + ".pub").write_text(f"ssh-ed25519 AAAAC3Nza{comment}Public {comment}\n")
+    for p in (path, path.with_name(path.name + ".pub")):
+        p.chmod(0o600)
+    return text
+
 
 VM_BIN = {
     "sudo": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_VM/sudo.log"\nexec "$@"\n',
@@ -219,18 +239,22 @@ class Laptop:
         git(self.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "scripts")
         git(self.clone, "remote", "add", "origin", ORIGIN)
         self.bin, self.vm_bin = tmp / "bin", tmp / "vm-bin"
-        for d, files in ((self.bin, {"ssh": FAKE_SSH, "gh": FAKE_GH}), (self.vm_bin, {**VM_BIN, "gh": FAKE_GH})):
+        self.config.mkdir(parents=True, mode=0o700)
+        make_key(self.config / "gpu_ed25519", "Default")
+        laptop_bin = {"ssh": FAKE_SSH, "gh": FAKE_GH, "ssh-keygen": FAKE_SSH_KEYGEN}
+        for d, files in ((self.bin, laptop_bin), (self.vm_bin, {**VM_BIN, "gh": FAKE_GH})):
             d.mkdir()
             for name, text in files.items():
                 (d / name).write_text(text)
                 (d / name).chmod(0o755)
         (tmp / "claude").write_text(FAKE_CLAUDE)
         (tmp / "claude").chmod(0o755)
-        self.ssh_log, self.gh_log = tmp / "ssh.log", tmp / "gh.log"
+        self.ssh_log, self.gh_log, self.keygen_log = tmp / "ssh.log", tmp / "gh.log", tmp / "ssh-keygen.log"
         self.received = tmp / "received.env"
         self.write_env(KEYS)
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
+                    "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
                     "FAKE_BASE_PATH": os.environ["PATH"], "FAKE_CLAUDE": str(tmp / "claude")}
         return self
