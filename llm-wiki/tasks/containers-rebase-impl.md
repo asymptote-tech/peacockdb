@@ -110,7 +110,7 @@ own wiki records. The trial cherry-pick stopped once (above) and the replay five
   611b5dcd..origin/ENS-containers` = 16; `git merge-base origin/ENS-optimizer origin/ENS-containers`
   = `611b5dcd…`. Record both tips' hashes in the detail file.
 - [ ] **Step 2: workspace.** In the chain workspace: `git config rerere.enabled false`;
-  `git switch -c ENS-containers-rebase origin/master`.
+  `git switch -C ENS-containers-rebase origin/master` (the workspace may already sit on that branch at master; `-C` resets it there either way).
 - [ ] **Step 3: carry.** `git cherry-pick -x 02f6a4d8`; resolve `benchmark.rs` as the table says;
   `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens --no-run` compiles;
   `git add` and `git cherry-pick --continue`. Tag it locally: `git tag fork-carried HEAD`.
