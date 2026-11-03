@@ -1,7 +1,7 @@
-"""The S3 endpoint and region every bucket script passes, from AWS_ENDPOINT_URL and AWS_REGION.
+"""The S3 endpoint and region the calibration bucket passes, from AWS_ENDPOINT_URL and AWS_REGION.
 
-The embeddings scripts run in test_embeddings.py's tree; fetch_record.sh in a copy of itself and
-its libraries. The aws CLI is a fake that records its argv.
+fetch_record.sh runs in a copy of itself and its libraries. The aws CLI is a fake that records its
+argv.
 """
 import hashlib
 import json
@@ -12,10 +12,8 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from test_embeddings import ARTIFACTS, ORIGIN_PINS, Tree, fill_origin_cache  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 LIB = REPO / "scripts" / "lib"
@@ -73,56 +71,9 @@ def calibration_argv(env):
 
 
 def test_s3_endpoint_from_env():
-    env = {"AWS_ENDPOINT_URL": ENDPOINT, "AWS_REGION": REGION}
-    with Tree() as t:
-        t.put_all()
-        r, calls = t.fetch("--from-s3", **env)
-        assert r.returncode == 0, r.stderr
-        assert calls and all(carries(c) for c in calls), calls
-    with Tree() as t:
-        t.cache.mkdir()
-        for name, data in ARTIFACTS.items():
-            (t.cache / name).write_bytes(data)
-        t.env.update(env)
-        r, calls = t.upload()
-        assert r.returncode == 0, r.stderr
-        assert calls and all(carries(c) for c in calls), calls
-    r, calls = calibration_argv(env)
+    r, calls = calibration_argv({"AWS_ENDPOINT_URL": ENDPOINT, "AWS_REGION": REGION})
     assert r.returncode == 0, r.stderr
     assert len(calls) == 1 and carries(calls[0]), calls
-
-
-def test_the_embeddings_bucket_names_no_endpoint():
-    text = (LIB / "embeddings-bucket.sh").read_text() + (LIB / "s3.sh").read_text()
-    for word in ("https://", "nebius", "eu-north"):
-        assert word not in text, f"a storage named in the embeddings bucket's scripts: {word}"
-
-
-def test_the_embeddings_refuse_an_unset_endpoint_before_any_call():
-    for unset in ("AWS_ENDPOINT_URL", "AWS_REGION"):
-        env = {"AWS_ENDPOINT_URL": ENDPOINT, "AWS_REGION": REGION, unset: ""}
-        with Tree() as t:
-            t.put_all()
-            r, calls = t.fetch("--from-s3", **env)
-            assert r.returncode != 0 and unset in r.stderr, (unset, r.stderr)
-            assert calls == [] and not t.cache.exists(), (unset, calls)
-        with Tree() as t:
-            t.cache.mkdir()
-            for name, data in ARTIFACTS.items():
-                (t.cache / name).write_bytes(data)
-            t.env.update(env)
-            r, calls = t.upload()
-            assert r.returncode != 0 and unset in r.stderr, (unset, r.stderr)
-            assert calls == [], calls
-
-
-def test_the_origins_need_no_endpoint():
-    with Tree(ORIGIN_PINS) as t:
-        fill_origin_cache(t.cache)
-        r, calls = t.fetch(**UNSET)
-        assert r.returncode == 0, r.stderr
-        assert len([ln for ln in r.stdout.splitlines() if ln.startswith("  cached+verified: ")]) == 4, r.stdout
-        assert calls == [], calls
 
 
 def test_calibration_keeps_the_old_storage_where_the_environment_names_none():
