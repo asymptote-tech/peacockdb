@@ -52,3 +52,12 @@ Resolution notes beyond the plan's table:
   `build-test.md`'s header; caught before the branch moved, fixed and amended into the replayed
   commit (`--amend --no-edit`, rk00's author and date kept). No other replayed commit holds a
   marker (`git grep` over each).
+
+Steps 7–9 (2026-11-03):
+- Step 7a committed as a developer commit; Step 7 (`--no-run` for rust-only core and cost-report) green.
+- Step 8: authorship diff empty; 17 rk00 commits with their original author dates.
+- Step 9: commands 1 and 2 print nothing. Command 3 prints one line: `build-test.md`'s up.sh prose
+  ("branches are named unlike their tasks (`ENS-optimizer` for `join-optimizer.md`)", from
+  `b71758e9`). It is an example in launcher prose that Task 2 deletes; not amended into rk00's
+  commit. Task 5 Step 3 re-runs the check on the final tip.
+- `carried` (02f6a4d8 on ENS-optimizer) = `f3db66b1`.
