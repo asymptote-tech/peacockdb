@@ -115,3 +115,29 @@ Task 2 notes:
 - Recount for Task 5: `scripts/env/tests` 208 → 155 cases.
 - dev's `/` was at 100% (819 MB free) after Task 2; the developer had pulled and then removed
   the run images. This worktree's `target/` is 57 GB.
+- 2026-11-03: coordinator removed this worktree's `target-cudf-rapids-cuda-12.2` (31 GB, ignored, rebuildable) to free dev's disk for Task 3.
+
+Task 3 notes:
+- Step 1: `the_benchmark_cases_follow_the_registry` failed as planned: 116 cells enabled and not
+  listed at sf40, 20 listed and not enabled (`anti_join_reorder`, `left_join_fixed`,
+  `left_join_reorder`, `semi_join_reorder`, five modes each: the four named join queries
+  `2bef3b81` added to the registry under containers' base `611b5dcd`; not carried, not on master).
+- Step 2: regenerated from master's registry: 534 → 630 cells (534 + 116 − 20). A second
+  `UPDATE_CANONICAL=1` run left the file byte-identical.
+- Step 3: `test_corpus_goldens` 45/45. `git diff origin/ENS-containers` over
+  `testdata/benchmark-results` and `testdata/calibration/records.sha256` is empty, for the branch
+  and for the working tree. Master has no commit on those paths after `623073da`. The six
+  `h200/` files are `02f6a4d8`'s flat files moved unchanged (`git diff 02f6a4d8 HEAD` shows them
+  as renames with no line changed). Master's older flat `tpch.sf40/tp1_single` and `tp4_sized`
+  are gone from the fork; 02f6a4d8's are the newer of each pair.
+- Step 4: `02f6a4d8` → `f3db66b1 (02f6a4d8 on ENS-optimizer)` in `build-test.md` (three) and
+  `tickets/benchmarks.md` (#226). `f3db66b1`'s case list, `h200/` tree, `records.sha256` and
+  `create_nsys_profile.sh` equal `02f6a4d8`'s, so the sentences stay true. The grep still finds two
+  old references: `tasks.md:107`, the board's chain-L entry, which is the coordinator's; and
+  `h200/cases.inc:2`, which Task 4 replaces. Step 3's empty-diff check forbids editing it now.
+- Step 5, on dev, the worktree's `target/`, `--test-threads=2`: `--lib` 905 passed, 2 ignored;
+  `test_cpu_corpus` 2399; `test_corpus_goldens` 45; `test_cost_model` 3; `test_golden_format` 41;
+  `test_crate_privacy` 1; `cargo build --features rust-only -p peacockdb` built;
+  `cargo test -p cost-report`: the bin 47, `test_source_formatting` 32 (incl. `ci_coverage::*`
+  and `no_core_test_reads_the_checkout`). No failure, no warning. For Task 5's recount:
+  `build-test.md`'s cpu header says `test_corpus_goldens` 44, and the fork has 45.

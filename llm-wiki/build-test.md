@@ -1329,9 +1329,10 @@ What the arrows are there to make checkable:
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
   record by call, not by execution, so its three cases are drawn beside them, and it is still
   a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
-  over them, and that step runs from a checkout carrying the 26-case list: 02f6a4d8, whose case
-  lines are `h200/cases.inc`'s. `create_nsys_profile.sh --metrics` takes every case of the list
-  and checks its merge against the pinned records, which hold the twenty-six.
+  over them, and that step runs from a checkout carrying the 26-case list: f3db66b1 (02f6a4d8 on
+  ENS-optimizer), whose case lines are `h200/cases.inc`'s. `create_nsys_profile.sh --metrics`
+  takes every case of the list and checks its merge against the pinned records, which hold the
+  twenty-six.
 - **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the
   call's executions, and `executions` says how many. A row per execution would be ~255
   thousand rows and 25 MB over the corpus; a row per call is the record's 25,522 calls.
