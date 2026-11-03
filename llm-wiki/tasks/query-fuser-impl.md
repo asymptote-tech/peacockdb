@@ -58,9 +58,41 @@ tree through bench-rows' `parse_benchmark_section` and the H100 `loads.tsv`: `me
   The harness files (`corpus_benchmark.rs`, `benchmark_trailer.rs`, `benchmark_section.rs`,
   `record.rs`, `peacock_gpu_benchmarks.rs`, `create_nsys_profile.sh`) are containers'. Line
   numbers below are `origin/ENS-containers`'s, so find each by the function named beside it.
-- Prototype: the coordinator skips the reviewer and the PR. The tests are the item-6 answer
-  checks, one unit test per hint's arithmetic, the cap rule and the hold rule, and the
-  source-formatting gate. Nothing more.
+- **The pinned host file cache** (pinned-loads), through the same harness as the baseline: the
+  fused run applies the session's option (`apply_pinned_host_cache`) right after the rmm pool, as
+  the benchmark's `process_prefill` does, and never sizes or installs the cache another way;
+  `PEACOCK_PINNED_HOST_CACHE_BYTES` is never set. **Each batch prefills its union**: after the
+  fuse, before the warm-up, `benchmark_fused` prefills `plan_files(&fused_roots)` (pinned-loads
+  Task 4's `plan_files` over the fused DAG's roots: a shared load's file once) through
+  `Session::prefill_pinned_cache`. It is idempotent, so a later batch in the same process pays
+  only for files the earlier ones did not load. The warm-up and every measured run, shared loads
+  and re-reads alike, read pinned host memory, so a re-read costs the device-side load the
+  baseline measured (its `loads.tsv`), not a disk read. A batch whose union exceeds the limit
+  panics `prefill: needs <needed> > limit <limit>` (its section `status=failed reason=…`); a run
+  that filled or fell back panics with pinned-loads' `rounds_were_pinned` reason. Each section's
+  `--- run ---` carries bench-rows' one definition of the cache's keys: `pinned_cache=` (the
+  cache at the batch's end), `prefill_files=`, `prefill_bytes=`, `prefill_us=` (this batch's
+  prefill call, reported per batch). A later batch whose files an earlier batch already loaded
+  legitimately reports `prefill_files=0`; bench-rows' definition applies the `prefill_files > 0`
+  check to tree sections only, and a fused section is vouched for by `pinned_cache=on` and
+  `rounds_were_pinned`. The protocol note is sf40-baseline's.
+- `Kind: production` (decided): the task gets its own PR against `ENS-dag-driver` and the usual
+  reviewer rounds, as every chain task does. The tests are the item-6 answer
+  checks, one unit test per hint's arithmetic, the cap rule and the hold rule, the run-by-name
+  path, and the source-formatting gate.
+- Developers never commit, push, or dispatch a workflow (prompts.md). A step that says
+  *Commit `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs.
+- Host roles (build-test.md, Nebius host, host roles): the staged install is built on
+  nebius-cpu128 by new-hosts' CPU-VM build (new-hosts' Global Constraints: the chain workspace as it
+  stands, by `nebius-sync.sh … --no-data`, never a `git pull`); the batches and profiles run on
+  nebius-h100. VM order: build (CPU VM up only for it), start the H100, run, profile, pull, stop;
+  then the local read-back, regeneration and the commit. No cargo edit, build or test with the
+  H100 up.
+- **The run image is not changed.** `docker/run-tests.sh` is a run-image input
+  (`scripts/lib/image-inputs.sh`), so editing it would make every `prepare` refuse the
+  published image. The fused binary runs in the run image with `--entrypoint` (Task 6).
 - **Prototype code lives apart from the engine.** Everything this task writes in Rust, but
   for the engine helpers it names (`plan/rebuild.rs`, `row_group_metadata`, `node_line_of`,
   `nodes_as_recorded_of_roots`, `timed_load_us_of_roots`, `append_records_to`), is under
@@ -80,6 +112,9 @@ tree through bench-rows' `parse_benchmark_section` and the H100 `loads.tsv`: `me
   exists because of that, and every report of it says "accountant's peak".
 - coding-style.md: files < 1000 lines; each component's API is declared in its `mod.rs` through
   one-expression delegates; tests go in `foo/tests.rs`; rustfmt on the touched leaf files only.
+  Subcomponents are `mod x;`, never `pub(crate) mod x;`; items are `pub(crate)`, never
+  `pub(super)`; no re-exports; a bare `pub` appears only in `prototypes/mod.rs`, under the rules
+  `test_support/mod.rs` has (Task 1 extends the gates to say so).
 - Hosts: nebius-h100 (`computeinstance-e00e6yena4nzjgaym0`, profile `editor-eu`), runs as
   `dmitry`. Every ssh from the Bash tool needs the sandbox off. A VM this task starts is stopped
   by it. Never open `~/.nebius/*` or any `*.pem`.
@@ -116,6 +151,10 @@ git status --short testdata/                                                    
 6. **The H100 `cases.csv` missing from the tree the fused binary runs in** (it is read at run
    time now, not compiled in): a batch must not silently run an empty or default list. → Task 2,
    `ordered_queries_without_the_list_panic_naming_it`; Task 9 Step 2 checks the shipped file.
+7. **A capped batch whose roots hold joins** (every real batch): a false `HoldCycle` would refuse
+   it, and the run panics on any non-OOM error. → Task 2,
+   `a_capped_first10_answers_the_corpus_goldens_on_the_cpu`; Task 5,
+   `settling_a_batch_with_joins_under_a_cap_validates`; dag-driver's `no_valid_dag_is_refused`.
 
 ---
 
@@ -123,22 +162,44 @@ git status --short testdata/                                                    
 
 **Files:**
 - Create: `peacockdb-core/src/plan/rebuild.rs`. Move `rebuild` and `scan_of` out of
-  `src/tests/rebuild.rs:37-163` verbatim. The fixtures and `rebuild_tree` stay and call
-  `crate::plan::rebuild`. Declare it in `plan/mod.rs` as `pub(crate) mod rebuild;`.
+  `src/tests/rebuild.rs:37-163` verbatim. Declare it in `plan/mod.rs` as `mod rebuild;`, with
+  one-expression `pub(crate) fn rebuild(…)` and `pub(crate) fn scan_of(…)` delegates there. The
+  fixtures and `rebuild_tree` stay and call `crate::plan::rebuild`. Its only callers are tests
+  and the prototypes, neither in a release build, so each delegate carries
+  `#[allow(dead_code)] // callers: src/tests and prototypes::fuser, both outside a release build`
+  (coding-style.md, "What `#[cfg(test)]` is not").
 - Modify: `planner/translator/scan_mapping/parquet_meta.rs:34-140`. Extract the per-group loop
   into `pub(crate) fn row_group_metadata(path: &str, projected: &[usize], keep: Option<&[u32]>) -> Result<ScanMetadata, PlanError>`.
-  `survivor_metadata` calls it. Declare it in `planner/mod.rs` so the fuser can reach it.
+  `survivor_metadata` calls it. Declare it in `planner/mod.rs` as a `pub(crate)` one-expression
+  delegate so the fuser can reach it, with the same `#[allow(dead_code)]` and reason.
 - Create: `peacockdb-core/src/prototypes/mod.rs` — the component. In `lib.rs`:
   `#[cfg(feature = "test-support")] pub mod prototypes;`, beside `test_support`. Its module doc:
   what a prototype is (code that measures an idea, not code that ships), that `fuser` runs at
-  sf40 only, and that no engine module may depend on anything here. It declares
-  `pub(crate) mod fuser;` and, from Task 6, the `pub` delegates the integration tests call.
+  sf40 only, and that no engine module may depend on anything here. It declares `mod fuser;`
+  (not `pub(crate) mod`) and, from Task 6, the `pub` one-expression delegates the integration
+  tests call.
 - Create: `prototypes/fuser/mod.rs` (module doc: query-fuser, sf40 only, the detail file),
-  `prototypes/fuser/fuse.rs`, `prototypes/fuser/fuse/tests.rs`.
+  `prototypes/fuser/fuse.rs`, `prototypes/fuser/fuse/tests.rs`, and `prototypes/fuser/tests.rs`
+  (`#[cfg(test)] mod tests;` in `fuser/mod.rs`): the two test choosers, as `pub(crate) fn`s the
+  fuser's own test modules reach through `crate::prototypes::fuser::tests`, so no `#[cfg(test)]`
+  item sits outside a test module; and `prototypes/fuser/tests/end_to_end.rs` (`mod end_to_end;`
+  in `fuser/tests.rs`), the sf1 CPU answer tests, inside the component that can name the fuser.
 - Create: `cost-report/tests/test_source_formatting/prototypes.rs`, declared in
   `cost-report/tests/test_source_formatting.rs`.
+- Modify: `cost-report/tests/test_source_formatting/visibility.rs` — `pub_mod_declares_a_component_and_nothing_else`
+  (:148-160) expects the gated list `[("test_support", "feature = \"test-support\""), ("prototypes", "feature = \"test-support\"")]`;
+  `bare_pub_is_the_surface_and_nothing_else` and `a_components_api_is_declared_in_its_mod_rs`
+  let a bare `pub` appear in `prototypes/mod.rs` as they do in `test_support/mod.rs`;
+  `no_test_support_signature_names_a_component_type` scans `prototypes/mod.rs` too, with
+  `test_support` counted as `prototypes`' own (the harness it is built on), so its surface
+  (`FusedSection.nodes: Vec<BenchNode>`, `fused_report_tables -> Vec<ReportTable>`) passes and an
+  engine component's type there is still refused. Each gets a
+  doctored case: a third gated `pub mod`, and a bare `pub` in `prototypes/fuser/fuse.rs`, still
+  refused. `llm-wiki/coding-style.md` (:178-180, "`pub mod` appears in `lib.rs` and nowhere
+  else"): `test_support` **and `prototypes`** behind the feature, the second under the first's
+  rules, and the gate named.
 - Test: `prototypes/fuser/fuse/tests.rs` (hand-built plans, `src/tests/rebuild.rs` fixtures, the
-  mock backend) and `src/tests/end_to_end/fused.rs` (declared in `end_to_end.rs`, sf1 CPU).
+  mock backend) and `prototypes/fuser/tests/end_to_end.rs` (sf1 CPU).
 - Docs: `llm-wiki/architecture.md` — a new top-level "Prototypes" section after "Execution",
   and its line in "Contents".
 
@@ -180,8 +241,13 @@ pub(crate) struct Origin { pub(crate) query: usize, pub(crate) node: usize /* pr
 pub(crate) type Chooser<'c> = dyn FnMut(&Fused, &HeldReader) -> HoldDecision + 'c;
 pub(crate) fn fuse(queries: &[Query<'_>], batching: Batching, choose: &mut Chooser<'_>) -> Result<Fused, PlanError>;
 pub(crate) fn resolve_cap_holds(fused: Fused, cap: NonZeroUsize, choose: &mut Chooser<'_>) -> Result<Fused, PlanError>;
-#[cfg(test)] pub(crate) fn re_read_every_hold(_: &Fused, _: &HeldReader) -> HoldDecision;   // why = "test: re-read"
-#[cfg(test)] pub(crate) fn buffer_every_hold_lowest(_: &Fused, h: &HeldReader) -> HoldDecision; // Buffer at path[0], why = "test: lowest edge"
+```
+
+In `prototypes/fuser/tests.rs` (a test module, so no `#[cfg(test)]` item outside one):
+
+```rust
+pub(crate) fn re_read_every_hold(_: &Fused, _: &HeldReader) -> HoldDecision;   // why = "test: re-read"
+pub(crate) fn buffer_every_hold_lowest(_: &Fused, h: &HeldReader) -> HoldDecision; // Buffer at path[0], why = "test: lowest edge"
 ```
 
 Rules (a function each in `fuse.rs`):
@@ -201,7 +267,7 @@ Rules (a function each in `fuse.rs`):
   Any other member reads `GpuProject::new(shared, exprs, member_schema)`, where each expr is
   `Expr::column(position_in_union, file_column_name)` and the name is kept. Every other node is
   rebuilt with `plan::rebuild::rebuild`.
-- **Held readers (spec 1a):** after sharing, loop: `validate_dag(&roots, cap)` (the cap the fuser will run with, so capped roots are settled too); on
+- **Held readers (spec 1a):** after sharing, loop: `validate_dag(&roots, None)` (`fuse` takes no cap: the joins' holds only; the roots a cap makes wait are settled afterwards by `resolve_cap_holds`, Task 5's `settle`); on
   `UnbufferedHold { hold, reader, slot, producer, .. }` build the `HeldReader` (the path climbs
   from the crossing edge, or from the edge above an inserted project when `reader` is one, to
   the hold's entry; inside a region every node has one reader, so the path is unique), call
@@ -212,7 +278,7 @@ Rules (a function each in `fuse.rs`):
   - `Buffer { edge }`: `new_hold_buffer` is inserted on that edge.
   A buffer placed higher than the crossing shrinks the hold, so a later named edge is never one
   an earlier choice already covered; the loop ends because each pass removes one named edge.
-- `resolve_cap_holds`: the same loop over `validate_cap(roots, Some(cap))` (dag-driver Task 7).
+- `resolve_cap_holds`: the same loop over `validate_dag(roots, Some(cap))` (dag-driver Tasks 4, 7: `validate_cap`'s refusals, then the wait-for graph, in which a capped root waits only on the roots before it finishing). A `HoldCycle` there is a dag-driver bug, not a fuser outcome: it ends `resolve_cap_holds` with that error.
 - **Reads (spec 1b):** `reads[table]` = distinct `GpuLoadParquet` nodes of that table in
   `PlanDag::of(roots)` — a shared load once, plus one per re-read and per unshared scan.
 - **Origins:** walk each original tree and its fused root together in pre-order. An inserted
@@ -258,19 +324,22 @@ Rules (a function each in `fuse.rs`):
     `"crate::prototypes::fuser::fuse(…)"`, false for `"// prototypes::"` after `code_only`.
     `prototypes_build_only_with_test_support` — in `lib.rs` the line before
     `pub mod prototypes;` is `#[cfg(feature = "test-support")]`.
+  - cost-report (`visibility.rs`): the doctored cases above — `a_third_gated_component_is_refused`,
+    `a_bare_pub_inside_a_prototype_is_refused`.
 - [ ] **Step 2:** `cargo test --features rust-only -p peacockdb-core --lib -- prototypes::fuser::` → FAIL to compile.
 - [ ] **Step 3:** implement as above. `rustfmt` the leaf files.
 - [ ] **Step 4:** the new tests pass. `-- tests::rebuild planner::` pass unchanged.
-  `cargo test -p cost-report --test test_source_formatting` passes; adding a scratch
+  `cargo test -p cost-report --test test_source_formatting` passes (visibility, re-export,
+  `pub(super)`, surface and test-module gates included); adding a scratch
   `use crate::prototypes::fuser;` to `executor/mod.rs` makes `no_engine_file_names_prototypes`
   fail naming that file (then revert it).
-- [ ] **Step 5: sf1 on the CPU** (`src/tests/end_to_end/fused.rs`):
+- [ ] **Step 5: sf1 on the CPU** (`prototypes/fuser/tests/end_to_end.rs`):
   `tpch_q3_q5_q10_fused_answer_as_alone`, once with each test chooser. Plan each with
   `plan_at("tpch","1",q,&MODES[0])` (`test_support/corpus.rs:48`), fuse, and
   `run_roots::<CpuBackend>` with no budget and no cap. Each `answers[i]`, as
   `batches_to_sorted_str`, equals that query's `run_cpu` answer. With
   `buffer_every_hold_lowest`, `shared` names `lineitem`, `orders` and `customer`. Run
-  `cargo test --features rust-only -p peacockdb-core --lib -- tests::end_to_end::fused` → PASS.
+  `cargo test --features rust-only -p peacockdb-core --lib -- prototypes::fuser::tests::end_to_end` → PASS.
 - [ ] **Step 6:** golden check. `architecture.md` "Prototypes" (new section, short):
   prototype code lives in `peacockdb-core/src/prototypes/<name>/`, compiled only under
   `test-support` as `test_support/` is, so `cargo build` cannot name it; each prototype's module
@@ -285,7 +354,7 @@ Rules (a function each in `fuse.rs`):
 
 **Files:**
 - Create: `prototypes/fuser/lists.rs`, `prototypes/fuser/lists/tests.rs`
-- Test: `src/tests/end_to_end/fused.rs`
+- Test: `prototypes/fuser/tests/end_to_end.rs`
 
 **Interfaces:**
 - Consumes: sf40-baseline's one ordered list, the H100 tree's
@@ -320,7 +389,13 @@ Rules (a function each in `fuse.rs`):
   `author_mode` is the `mode=` line of the section, and `order` is the one the CPU corpus tier
   uses for that query. A query whose section holds no rows (a marker) is compared against its
   own unfused `run_cpu` answer instead, and the test names it.
-- [ ] **Step 2:** run `-- tests::end_to_end::fused prototypes::fuser::lists` → FAIL.
+  `a_capped_first10_answers_the_corpus_goldens_on_the_cpu` (dag-driver's cap with joins, before
+  any device run): for tpch and tpcds, the same `first10` batch, fused with
+  `buffer_every_hold_lowest`, then `resolve_cap_holds(fused, NonZeroUsize::new(1).unwrap(), &mut buffer_every_hold_lowest)`;
+  `validate_dag(&roots, Some(1))` is `Ok` (the batch's joins sit inside capped roots, so a
+  `HoldCycle` here is the false refusal dag-driver's `no_valid_dag_is_refused` rules out), and
+  `run_roots::<CpuBackend>(…, None, Some(1))` answers each query as the uncapped run does.
+- [ ] **Step 2:** run `-- prototypes::fuser::tests::end_to_end prototypes::fuser::lists` → FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** PASS. Record the wall time in the detail file. If it is over 120 s, mark the
   test `#[ignore = "sf1 corpus, run with --ignored"]` and name the command in build-test.md.
@@ -332,7 +407,8 @@ Rules (a function each in `fuse.rs`):
 **Files:**
 - Create: `prototypes/fuser/merge.rs`, `prototypes/fuser/merge/tests.rs`, `prototypes/fuser/baseline.rs`, `prototypes/fuser/baseline/tests.rs`
 - Modify: `plan_text/mod.rs`, which adds `pub(crate) fn node_line_of(node: &dyn GpuNode) -> String`
-  delegating to `node_text::node_line` (now `pub(super)`)
+  delegating to `node_text::node_line` (now `pub(crate)`; `node_text` stays `mod node_text;`).
+  Its only caller is the fuser: `#[allow(dead_code)]` with that reason at the delegate.
 
 **Interfaces:**
 - Consumes: `Fused`, `Origin` (Task 1); `PlanDag` (dag-driver); `BenchSection`, `BenchNode`,
@@ -529,7 +605,10 @@ pub(crate) fn settle(fused: Fused, baseline: &Baseline, ledger: &mut HoldLedger<
   `scaling_is_by_planned_bytes` (`scaled_bytes(100, 50, 75) == 150`, and no overflow at
   `u64::MAX / 2`). `a_root_is_charged_its_peak_less_its_shared_loads`.
   `settling_buffers_the_roots_that_wait` (mock plans: three roots over one source, a cap that
-  comes out at 2: root 2's reader gets a decision, the result validates under `validate_cap`).
+  comes out at 2: root 2's reader gets a decision, the result validates under `validate_dag(…, Some(cap))`).
+  `settling_a_batch_with_joins_under_a_cap_validates` (three roots `unload(join(b_i, filter(S)))`,
+  a cap that comes out at 1: `settle` returns `Ok`, never `HoldCycle`, and the roots validate
+  under `validate_dag(…, Some(1))`).
 - [ ] **Step 2:** run `-- prototypes::fuser::holds prototypes::fuser::loads prototypes::fuser::cap` → FAIL. **Step 3:** implement. **Step 4:** PASS.
 - [ ] **Step 5:** golden check. Commit `fuser: buffer or re-read, and the concurrency cap rule`.
 
@@ -552,7 +631,10 @@ pub(crate) fn settle(fused: Fused, baseline: &Baseline, ledger: &mut HoldLedger<
   "prototype_fused_benchmarks"`, `required-features = ["gpu", "test-support"]`, which keeps it
   out of every CPU mode's build)
 - Modify: `scripts/env/stage-install.sh` and `scripts/env/run-gpu.sh` (stage and run it by name),
-  `scripts/env/tests/test_gpu.py`
+  `scripts/env/tests/test_run_gpu.py`, `scripts/env/tests/test_stage_install.py`
+- Modify: `scripts/nebius/idle_watch.py` (`TEST_NAMES` gains `"prototype_fused"`, the binary's
+  15-character comm, so the 4-hour cap and the idle rule see a fused run as a test),
+  `scripts/nebius/tests/test_idle_watch_kinds.py` (`test_a_fused_run_is_a_test_process`)
 - Modify: `cost-report/tests/test_source_formatting/ci_coverage.rs` (the wiring guard's
   "manual, prototype" entry)
 - Modify: `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (the fused-tree check), `.gitignore`
@@ -563,7 +645,10 @@ pub(crate) fn settle(fused: Fused, baseline: &Baseline, ledger: &mut HoldLedger<
 **Interfaces:**
 - Consumes: Tasks 1-5; `Session::open_roots`, `run_roots`, `attach_recipes_for_roots`,
   `render_timings_of_roots(roots, times, report)` (dag-driver Tasks 5, 9, 10); `RunTotals`,
-  `run_section` (bench-rows Task 2); `measure_into`, `Resume`, `MEASURED_RUNS` (= 10),
+  `run_section(totals, spread, allocator, &PinnedCache, &PrefillStats, provenance)` (bench-rows
+  Task 2); `apply_pinned_host_cache(config)`, `pinned_host_cache() -> PinnedCache`, `plan_files`,
+  `Session::prefill_pinned_cache`, `PrefillStats`, `PrefillError` (pinned-loads Task 4);
+  `rounds_were_pinned` (pinned-loads Task 4b); `measure_into`, `Resume`, `MEASURED_RUNS` (= 10),
   `record_rows`, `declared_steps`, `rows_match_the_recipes`, `of_this_run`, `device_slug`,
   `install_rmm_pool`, `nvtx_range`.
 - Produces (declared in `prototypes/mod.rs`, delegating to `fuser`):
@@ -577,9 +662,17 @@ pub(crate) fn settle(fused: Fused, baseline: &Baseline, ledger: &mut HoldLedger<
     nothing else: no case macro, no `include!`.
   - `stage-install.sh`: `cargo test --no-run --release --features gpu,test-support --test
     prototype_fused_benchmarks` into `cpp/install/rust-benchmarks/`, stripped as the others.
-    `run-gpu.sh <vm options> run prototype_fused_benchmarks`: runs that staged binary by name in the run
-    image with `PCK_TEST_FILTER` and `PEACOCK_BENCH_RESUME`, `--nocapture --test-threads=1`, as
-    `run bench` runs `peacock_gpu_benchmarks`.
+    `run-gpu.sh <vm options> run prototype_fused_benchmarks [--exact <test>]`: a `run` argument
+    other than `list|filter|bench` names a staged binary; `run-gpu.sh` refuses (exit 2) a name
+    with no executable `~/peacock/<i>/cpp/install/rust-benchmarks/<name>`. It runs that binary
+    in the unchanged run image with `docker run … --entrypoint /peacock/install/rust-benchmarks/<name>`,
+    the same mounts, user and hostname as `run`, and run-tests.sh's environment set by `-e`:
+    `LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib`, `PEACOCK_TESTDATA_DIR=/peacock/testdata`,
+    `PCK_TEST_FILTER` and `PEACOCK_BENCH_RESUME` when set. `PEACOCK_RECORD_PATH` is not set:
+    `benchmark_fused` writes the fused record by path (`append_records_to`). Arguments:
+    `--nocapture --test-threads=1`, then `--exact <test>` or the filter. run-gpu.sh then judges
+    as run-tests.sh does: a non-zero `docker wait`, a signal, `Segmentation fault` or
+    `core dumped` in `docker logs`, or `running 0 tests` → exit 1.
   - No CI step runs or stages it. `ci_coverage.rs` gains `Exemption::ManualPrototype` ("manual,
     prototype: run by hand through `run-gpu.sh <vm options> run <target>`") and the entry
     `("prototype_fused_benchmarks", Exemption::ManualPrototype)` in `INTENTIONALLY_NOT_IN_CI`.
@@ -589,7 +682,10 @@ pub(crate) fn settle(fused: Fused, baseline: &Baseline, ledger: &mut HoldLedger<
     `benchmark-results/<device>/fused/<ds>.sf<sf>/tp1_single.fused.txt`. The extension keeps it
     out of the `.benchmark.txt` checks.
   - Record: `testdata/calibration/fused/<ds>.sf<sf>/records.tsv`, written on every clean run
-    (gitignored; the metrics pass reads it).
+    (gitignored; the metrics pass reads it). A batch's run first drops the rows of its own case
+    (`bench_fused_<ds>_sf40_<batch>_tp1_single`), then appends, so a rerun replaces its rows and
+    never duplicates them; test `a_rerun_batch_replaces_its_record_rows` (two writes of one
+    batch → one batch's rows; another batch's rows kept).
   - `pub const FUSED_ALL_RUNS: usize = 3;`. The `all` batch measures 3 runs after the warm-up,
     and reports the 2nd-min. The others measure `MEASURED_RUNS`.
   - `pub(crate) fn is_out_of_memory(error: &RunError) -> bool` (in `fuser`): the text contains,
@@ -642,21 +738,35 @@ model lines of `--- pipeline ---`, writes no `--- tree ---`, and its `--- run --
 five provenance keys, so resume still recognises it. A first20 marker is
 `SKIPPED<the batches() marker>`, as `declared_for` writes markers.
 
-Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark_case`/`measure`:
-1. Refuse any sf but 40. Install the pool, set events timing and run `assert_fit_to_measure`.
+Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark_case`/`measure`.
+Steps 2-7 run **inside the future handed to `measure_into`**, as `benchmark_case` hands it
+`measure` (pinned-loads Task 4b), so a panic in any of them (`prefill:`, `pinned cache:`, an
+answer mismatch, a plan error) is the batch's recorded section `status=failed reason=…`:
+1. Refuse any sf but 40. Install the pool, apply the pinned host cache from the first query's
+   session (`apply_pinned_host_cache`), set events timing and run `assert_fit_to_measure`.
 2. Plan each query with `plan_at` at sf40 tp1_single. Build the baseline: parse the baseline's
    `tp1_single.benchmark.txt` sections, then `Baseline::check`. Read `loads.tsv` with
    `read_load_times`, and each query's own `CudfScan` seqs through `attach_recipes`.
 3. `fuse` with a `HoldLedger` as the chooser, then `settle` → the fused plan and its
    `CapDecision`.
 4. Compute `merge_hint`.
-5. One warm-up, then the measured runs, each through `Session::open_roots` and `run_roots`
+5. Prefill the batch's union: `plan_files(&roots)` of the fused plan, through
+   `Session::prefill_pinned_cache` on a `Session::open_roots` of that plan, dropped before the
+   warm-up; `Err(DoesNotFit | Io)` panics `prefill: {error}`, `Err(Off)`
+   goes on with `PrefillStats::default()` (never the case on the H100: the env var is unset).
+   Print `[pinned-cache] prefill {ds} {batch}: files=<n> bytes=<n> us=<n> needed=<n> limit=<n>`.
+   Then `let before = pinned_host_cache()`, one warm-up, the measured runs, `let after =
+   pinned_host_cache()`, and `rounds_were_pinned(&before, &after)` (an `Err` panics with it). The
+   warm-up and the measured runs are each through `Session::open_roots` and `run_roots`
    with `Some(cap)`, inside `nvtx_range("{ds}.sf{sf} {batch} tp1-single")`. An `is_out_of_memory`
-   error on any run makes the out-of-memory body; any other error panics.
+   error on any run makes the out-of-memory body (no `rounds_were_pinned` check then: the body
+   has no numbers); any other error panics.
 6. Take the 2nd-min run, then `pipeline_hint` with the measured totals.
 7. Check the answers: run each query alone (`Session::open` + `run`), then
    `assert_results_match(&alone, &answers[i], Some(1e-9), what)`.
-8. Write the record rows to the fused record, then `measure_into` the section.
+8. The future returns `(body, rows)`, its `--- run ---` built with `&after` and the batch's
+   `PrefillStats` through `run_section`; `measure_into`'s `before_section` appends the rows to
+   the fused record, then the section is written.
 
 - [ ] **Step 1: failing tests.** `section/tests.rs`: `a_measured_section_reads_back`
   (a literal section: `count("cap") == Some(2)`; `load_us + execute_us == device_us`;
@@ -666,7 +776,11 @@ Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark
   Some("out-of-memory")`, trailer = the five keys, holds kept). `a_marker_is_not_timed`.
   `benchmark/tests.rs`: `an_out_of_memory_error_is_recognised` (`RunError` texts from rmm's
   `std::bad_alloc: out_of_memory: RMM failure` and cuDF's `CUDA error … out of memory`: true;
-  `"no plan loaded"`: false). `test_corpus_goldens/benchmark.rs`: `every_fused_section_adds_up`,
+  `"no plan loaded"`: false). `plan_files_of_a_fused_batch_is_its_queries_union` (rust-only:
+  `plan_at("tpch", "1", "q3"|"q6", tp1_single)`, sf1, since tpch.minimal has no `lineitem` or
+  `orders`, shared with dag-driver's `share_sources` fixture
+  → `plan_files` over the two shared roots equals `plan_files(&[q3]) ∪ plan_files(&[q6])`, and
+  `lineitem` appears once although both roots read it through one `SharedSource`). `test_corpus_goldens/benchmark.rs`: `every_fused_section_adds_up`,
   which walks every `*.fused.txt` (passing when there is none). For measured sections it checks
   the bench-rows arithmetic, `runs` has `MEASURED_RUNS` entries (`FUSED_ALL_RUNS` for `all`),
   `run_us` is its 2nd-smallest, `estimate_bytes <= budget_bytes` unless `over_budget`, the merge
@@ -677,17 +791,25 @@ Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark
   the tree, and the tree's `GpuHoldBuffer` lines number `buffers`.
   In `ci_coverage.rs`: `a_manual_prototype_is_wired_nowhere` (the check over a workflow text
   holding `--test prototype_fused_benchmarks` → `Err` naming it; over today's workflows → `Ok`).
-  In `test_gpu.py`: `test_run_names_a_staged_binary` (`run prototype_fused_benchmarks` → the
-  docker command runs `rust-benchmarks/prototype_fused_benchmarks` with the filter) and, in the
-  suite that covers `stage-install.sh`, `test_stage_install_builds_the_prototype_target`.
+  In `test_run_gpu.py`: `test_run_names_a_staged_binary` (`run prototype_fused_benchmarks --exact bench_fused_tpch_sf40_first3_tp1_single` → the
+  docker argv holds `--entrypoint /peacock/install/rust-benchmarks/prototype_fused_benchmarks`,
+  both `-e` lines above, and `--exact` with the test; no `run-tests.sh` mode word);
+  `test_run_staged_fails_on_a_segfault_in_the_log` (fake `docker logs` prints `Segmentation fault`,
+  `docker wait` 0 → exit 1); `test_run_staged_fails_when_no_test_ran`;
+  `test_run_staged_refuses_an_unstaged_name` (exit 2, no `docker run`). In `test_stage_install.py`:
+  `test_stage_install_builds_the_prototype_target`. In `test_idle_watch_kinds.py`:
+  `test_a_fused_run_is_a_test_process` (ps `" 7 60 prototype_fused\n"` on a gpu install → keep;
+  at 14411 s → `cap-stop`).
 - [ ] **Step 2:** run `cargo test --features rust-only -p peacockdb-core --lib -- prototypes::fuser::section prototypes::fuser::benchmark`
   → FAIL to compile; `cargo test -p cost-report --test test_source_formatting -- manual_prototype`
-  and `python3 scripts/env/tests/test_gpu.py` → FAIL.
+  and `python3 scripts/env/tests/test_run_gpu.py`, `test_stage_install.py`,
+  `python3 scripts/nebius/tests/test_idle_watch_kinds.py` → FAIL.
 - [ ] **Step 3:** implement. `prototype_fused_benchmarks.rs` (`#![cfg(feature = "gpu")]`) gets
   `macro_rules! fused_benchmark { ($dataset:ident, $batch:ident) => { paste::paste! { #[tokio::test] async fn [<bench_fused_ $dataset _sf40_ $batch _tp1_single>]() { peacockdb_core::prototypes::benchmark_fused(stringify!($dataset), "40", stringify!($batch)).await; } } } }`
   and its eight invocations.
 - [ ] **Step 4:** the new tests pass; `cargo test -p cost-report --test test_source_formatting`
-  → PASS, `every_rust_test_target_is_named_by_ci` included. Then `cargo check -p peacockdb-core
+  → PASS, `every_rust_test_target_is_named_by_ci` included; `git diff --quiet ENS-dag-driver -- docker/`
+  (the run image's inputs unchanged). Then `cargo check -p peacockdb-core
   --features gpu,test-support --tests` where `cpp/install` exists. Otherwise Task 9's staged build is that check.
 - [ ] **Step 5:** golden check (the prototypes gate included: nothing in `test_support/`, `executor/` or
   `plan_text/` names `prototypes::`). Docs: build-test.md "Benchmarks" gets a short paragraph:
@@ -732,7 +854,7 @@ Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark
 
 **Files:**
 - Modify: `scripts/create_nsys_profile.sh` (as new-hosts and pinned-loads left it)
-- Test: `scripts/env/tests/test_gpu.py` (new-hosts' fakes for ssh and rsync)
+- Test: `scripts/env/tests/test_run_gpu.py` (new-hosts' fakes for ssh and rsync)
 - Docs: `llm-wiki/build-test.md`, under "Benchmark data flow"
 
 **Interfaces:**
@@ -760,7 +882,7 @@ Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark
   `test_fused_profile_refuses_a_filter` (exit non-zero, both flags named, no ssh call).
   `test_fused_profile_lists_a_failed_capture_and_goes_on`: the fake ssh fails for `all`, so
   `failed.tsv` names `all` and `trace`, the other three `calls.tsv` exist, and the exit is non-zero.
-- [ ] **Step 2:** `python3 scripts/env/tests/test_gpu.py` → the three FAIL.
+- [ ] **Step 2:** `python3 scripts/env/tests/test_run_gpu.py` → the three FAIL.
 - [ ] **Step 3:** implement. `bash -n` and `shellcheck scripts/create_nsys_profile.sh` show no
   new finding.
 - [ ] **Step 4:** every `scripts/env/tests/test_*.py` that needs no image → `0 failed`.
@@ -768,63 +890,87 @@ Flow of `benchmark_fused`, in this order, mirroring `corpus_benchmark::benchmark
   layout `testdata/calibration/h100-80gb-hbm3/fused/<ds>.sf40/{<batch>.calls.tsv,<batch>.loads.tsv,hbm.tsv,failed.tsv}`.
   Commit `fuser: an Nsight profile per fused batch`.
 
-### Task 9: the runs on the H100
+### Task 9: one H100 session — the runs and the profiles
 
-**Files:** `testdata/benchmark-results/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/tp1_single.fused.txt`;
-the detail file.
+Build first, then one H100 session that runs, profiles and pulls everything, then stop. Nothing
+local (no cargo, no regeneration, no commit) happens while the H100 is up; that is Task 10.
+`N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`,
+`G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`.
 
-- [ ] **Step 1: Build first.** Make the staged install the way new-hosts' build-test.md section
-  does: `stage-install.sh` in the build image on nebius-cpu128, then rsync to `dev`; stop the CPU VM.
-- [ ] **Step 2: Start the H100 and ship** on `dev`:
-  `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`
-  (exit 0: RUNNING; exit 75, no capacity: record it, retry later). Then `scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu prepare && scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu ship --install <dir>`.
-  Expected: exit 0 from both, and `<dir>/rust-benchmarks/prototype_fused_benchmarks*` exists.
-  Then the files the batches read at run time are in the shipped tree:
-  `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu ssh 'ls /home/dmitry/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/cases.csv /home/dmitry/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/tp1_single.benchmark.txt /home/dmitry/peacock/<i>/testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/loads.tsv'`
-  → five paths. A missing one: `ship` is extended to carry it (with a `test_gpu.py` case), not
-  copied by hand.
-- [ ] **Step 3: TPC-H.** `PCK_TEST_FILTER=bench_fused_tpch_sf40_ scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu run prototype_fused_benchmarks && scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu pull`.
-  Pass: exit 0 (an out-of-memory batch still passes), and the file holds four sections. Each is
-  measured, out-of-memory, or the first20 marker. Every measured section says `answers=match`.
-  If the 4-hour watcher stops the process, run again with `PEACOCK_BENCH_RESUME=1`, and record
-  the segments.
-- [ ] **Step 4: TPC-DS.** Same as Step 3 with `bench_fused_tpcds_sf40_`.
-- [ ] **Step 5: Read back.** On `dev`:
-  `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- every_fused_section_adds_up`
-  → PASS over both files. A case that failed for another reason (a panic, or a wrong answer
-  naming a query) is a bug. File a ticket if it is the engine's. If it is the fuser's, fix it
-  with a regression test in Task 1 (or Task 5, for a hold or cap decision), then rerun that batch.
-- [ ] **Step 6:** keep the VM up for Task 10. The detail file records, per batch: queries,
-  shared and unshared counts, reads per table, buffers and re-reads with their bytes and
-  `reread_us`, cap, outcome, load/execute/peak, and the wall time. It also names the protocol:
-  1 warm-up, 2nd-min of 10, and of 3 for `all`. Regenerate the page:
-  `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_benchmark_report_matches_the_trees`
-  → the two fused tables appear; without `UPDATE_CANONICAL` → PASS. Commit the fused files and
-  `testdata/benchmark-report.html` together:
-  `fuser: fused batches on the H100, tpch and tpcds sf40`.
+**Files:** `testdata/benchmark-results/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/tp1_single.fused.txt`,
+`testdata/calibration/fused/{tpch,tpcds}.sf40/` (pulled, not yet committed); the detail file's
+`## VM time`.
 
-### Task 10: the profiles on the H100
+- [ ] **Step 1: Build first.** new-hosts' CPU-VM build (new-hosts' Global Constraints): the chain
+  workspace synced to nebius-cpu128 by `nebius-sync.sh … --no-data`, `stage-install.sh` in the
+  build image there, the install rsynced back to `<dir>` on `dev`, the CPU VM stopped.
+  `<dir>/rust-benchmarks/prototype_fused_benchmarks*` exists.
+- [ ] **Step 2: Start the H100, refresh its watcher, ship.** `$N start` (exit 75, no capacity:
+  report it to the coordinator, which retries the start itself and re-dispatches you here once the H100 is up). `$N install-watch --key-file ~/.nebius/sa-key.pem`
+  (Task 6's `TEST_NAMES` must be on the VM before a fused run; the path is passed, never opened).
+  `$G prepare && $G ship --install <dir>` → exit 0 from both. The files the batches read at run
+  time are in the shipped tree:
+  `$N ssh 'ls /home/dmitry/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/cases.csv /home/dmitry/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/tp1_single.benchmark.txt /home/dmitry/peacock/<i>/testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/loads.tsv'`
+  → five paths. A missing one: stop the H100, extend `ship` to carry it (with a `test_run_gpu.py`
+  case), and start again; never copied by hand.
+- [ ] **Step 3: TPC-H, one process per batch** (each `--exact`, so no process holds the 4-hour
+  cap's clock for four batches):
 
-**Files:** `testdata/calibration/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/`; the detail file.
-
-- [ ] **Step 1:** for `ds` in `tpch.sf40 tpcds.sf40`:
-  `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 scripts/create_nsys_profile.sh --fused $ds --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
+```bash
+for b in first3 first10 first20 all; do
+  [ "$b" = first3 ] && r= || r=1      # later batches keep the sections already written
+  PEACOCK_BENCH_RESUME=$r $G run prototype_fused_benchmarks --exact bench_fused_tpch_sf40_${b}_tp1_single || echo "FAIL $b"
+done
+```
+  Pass: no `FAIL` (an out-of-memory batch still exits 0), and the host's file holds four
+  sections, each measured, out-of-memory, or the first20 marker. If the watcher stops a process,
+  rerun that batch with `PEACOCK_BENCH_RESUME=1` and record it.
+- [ ] **Step 4: TPC-DS.** The same loop with `bench_fused_tpcds_sf40_`.
+- [ ] **Step 5: Profiles**, while the binaries are there: for `ds` in `tpch.sf40 tpcds.sf40`:
+  `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 scripts/create_nsys_profile.sh --fused $ds --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
   Here `<i>` is the `--dir` `run-gpu.sh` shipped to. Expected: both passes run, a
   `<batch>.calls.tsv` and `<batch>.loads.tsv` per batch, and one `hbm.tsv`. An out-of-memory
   batch shows up in `failed.tsv` with its reason. A non-zero exit that comes only from
   `failed.tsv` batches is a pass.
-- [ ] **Step 2: Check.** Every `loads.tsv` row has `load_us > 0`, `host_read_us ≤ load_us` and
+- [ ] **Step 6: Pull and stop.** `$G pull`; `$N stop` → `STOPPED`. Record the session in
+  `## VM time`.
+
+### Task 10: read back, regenerate, commit
+
+All local, with every VM stopped. A rerun this needs is a new H100 session (Task 9's Steps 1-6
+for that batch), recorded as its own row in `## VM time`.
+
+**Files:** `testdata/benchmark-results/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/tp1_single.fused.txt`,
+`testdata/calibration/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/`, `testdata/benchmark-report.html`;
+the detail file.
+
+- [ ] **Step 1: Read back.**
+  `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- every_fused_section_adds_up`
+  → PASS over both files. Every measured section says `answers=match`. A case that failed for
+  another reason (a panic, or a wrong answer naming a query) is a bug. File a ticket if it is
+  the engine's. If it is the fuser's, fix it with a regression test in Task 1 (or Task 5, for a
+  hold or cap decision), then rerun that batch in a new session.
+- [ ] **Step 2: Check the profiles.** Every `loads.tsv` row has `load_us > 0`, `host_read_us ≤ load_us` and
   `unattributed_us ≤ load_us` (both clipped to the load's windows), and `off_thread_device_us ≤
   h2d_us + decompress_us + decode_us + other_device_us` — only what pinned-loads-impl.md's column
   semantics guarantee. No sum of the parts is held to `load_us`: kvikio's host read contains its
-  bounce copies, and off-thread device time overlaps. Paste one batch's per-load read+copy vs decode split into the
-  detail file.
-- [ ] **Step 3:** `git mv`/copy `testdata/calibration/fused/<ds>/` (except `records.tsv`) to
-  `testdata/calibration/h100-80gb-hbm3/fused/<ds>/`. Captures stay on the host.
-- [ ] **Step 4: Stop the VM.**
-  `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu stop`
-  → `STOPPED`. Run the golden check (`git status --short testdata/` shows only the new
-  committed files before the commit). Commit `fuser: Nsight profiles of every fused batch on the H100`.
+  bounce copies, and off-thread device time overlaps. Paste one batch's per-load read+copy vs
+  decode split into the detail file. Then `cp -p` (the coordinator stages) `testdata/calibration/fused/<ds>/`
+  (except `records.tsv`) to `testdata/calibration/h100-80gb-hbm3/fused/<ds>/`. Captures stay on
+  the host.
+- [ ] **Step 3: The detail file** records, per batch: queries, shared and unshared counts, reads
+  per table, buffers and re-reads with their bytes and `reread_us`, cap, outcome,
+  load/execute/peak, the cache (`pinned_cache=`'s `resident`; `prefill_files`, `prefill_bytes`,
+  `prefill_us`), and the wall time. It also names the protocol: the batch's files prefilled once
+  into the pinned host cache before any run, then 1 warm-up and 2nd-min of 10, and of 3 for
+  `all`, every run reading pinned buffers; a batch that failed `prefill:` or `pinned cache:` is
+  named with its reason.
+- [ ] **Step 4: Regenerate the page.**
+  `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_benchmark_report_matches_the_trees`
+  → the two fused tables appear; without `UPDATE_CANONICAL` → PASS. Golden check
+  (`git status --short testdata/` shows only the new files). Commit the fused files and
+  `testdata/benchmark-report.html` together, `fuser: fused batches on the H100, tpch and tpcds sf40`,
+  and then the profiles, `fuser: Nsight profiles of every fused batch on the H100`.
 
 ---
 
@@ -841,7 +987,7 @@ the detail file.
   separate, cap, peak, hints, protocol, OOM as an outcome) → Tasks 6, 9. 6 (device answers per
   batch; CPU sf1 against the goldens) → Task 6 step 7 of the flow, Tasks 1, 2. 7 (results path,
   format documented) → Task 6. 8 (the page's fused-batches table, through
-  `parse_fused_section`) → Tasks 7, 9. Profiles → Tasks 8, 10. Constraints: `prototypes/fuser/` under
+  `parse_fused_section`) → Tasks 7, 9. Profiles → Tasks 8, 9 (captured in the one H100 session), 10 (checked and committed). Constraints: `prototypes/fuser/` under
   `test-support`, module docs, the source-formatting gate and architecture.md "Prototypes" →
   Task 1.
 - Names used across tasks: `Query`, `Fused`, `Origin`, `Unshared`, `ShareGroup`, `HeldReader`,
@@ -858,6 +1004,10 @@ the detail file.
 - dag-driver names consumed match its plan: `render_timings_of_roots(roots, times, report)`
   (its Task 9), `run_roots`/`FusedRun` (Task 5), `new_hold_buffer`/`UnbufferedHold` (Task 4),
   `validate_cap` (Task 7).
+- Run by name (spec Scope, `run-gpu.sh`): decided as `docker run --entrypoint` the staged binary
+  in the unchanged run image, with run-tests.sh's environment and its judge (exit, signal,
+  segfault, zero tests) redone in `run-gpu.sh` (Task 6), because editing `docker/run-tests.sh`
+  changes a run-image input and needs a republish no task schedules.
 - Spec gaps, decided: (a) item 6's sf1 CPU check has no sf1 baseline for the hold rule, so it
   passes the fuser an explicit test chooser; the benchmark path has no fallback. (b) "reads per
   table: once, plus one per re-read" leaves out unshared scans, which also read the table; they

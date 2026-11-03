@@ -13,7 +13,8 @@ hand-built way to build and run:
   `conda install` steps: `dataset-matrix` on 25.10a and 25.02, and `cpp-build-2502`.
   `exec-model-corpus.yml` and `validate-large.yml` have their own setups.
 - **The L40S** (nebius-gpu): `nebius-sync.sh` and `nebius-test.sh` (renamed by new-hosts) run
-  against a conda env installed by hand on the VM. CI's `gpu-tests` job uses them.
+  against a conda env installed by hand on the VM. CI's `gpu-tests` job uses them. new-hosts'
+  CPU-VM build uses `nebius-sync.sh --no-data` for the tree alone.
 - **Local and verda:** `build-test.sh`, `build.sh` and `cargo-cudf.sh`, against a conda cuDF env
   from `conda-install-cudf.sh` / `conda-install-cudf-2506.sh`, on machines set up by `init.sh`,
   `init_fedora43.sh` and `create_verda_instance.sh`.
@@ -36,11 +37,15 @@ one: the images, everywhere but shad-gpu.
      closes #129 part (a). `build-test.md` and every place that names the 26.02 CI leg say 25.10.
      The 26.02 images stay for developer and device use.
    - CI stays green on the task's PR, the cost-report job included, with the same case counts
-     per tier. Any count that moves is explained.
+     per tier as the parent branch's last green run. Any count that moves is explained.
+   - A branch's image publication never moves the `:cudf-<v>` tags; only master's does, so the
+     chain's earlier trees keep passing their image checks.
 2. **The L40S runs through `run-gpu.sh`.** `gpu-tests` prepares, ships and runs on nebius-gpu
    through `run-gpu.sh` and the run image. The hand-built conda env on the VM is no longer read.
-   `nebius-test.sh` and `nebius-sync.sh` are deleted, or reduced to what `run-gpu.sh` lacks, each
-   kept line justified. The CI wiring guard (`cost-report` `test_source_formatting`) follows:
+   `run-gpu.sh prepare` runs on nebius-gpu by hand once, its disk use recorded, before the first
+   CI run. `nebius-test.sh` is deleted. `nebius-sync.sh` is kept, reduced to what `run-gpu.sh`
+   lacks, each kept line justified: the transfer of the uncommitted tree to a VM, which the
+   CPU-VM build and the wiki use; its conda-based sf1 generation goes. The CI wiring guard (`cost-report` `test_source_formatting`) follows:
    - the three GPU target lists still agree;
    - `--test-threads=1` is still asserted for both GPU runners.
 3. **Local and verda builds go through the build image.** One documented command builds every
@@ -70,7 +75,9 @@ one: the images, everywhere but shad-gpu.
 | `.github/workflows/pipeline.yml`, `exec-model-corpus.yml`, `validate-large.yml`, `.github/actions/` | jobs in the build image |
 | `docker/conda/cudf-25.10.spec`, `docker/pins.env`, `docker/build.Dockerfile`, `scripts/env/image.sh`, `.github/workflows/images.yml` | the CI-only 25.10 build image |
 | `llm-wiki/tickets/testinfra.md` | #129 |
-| `scripts/build-test.sh`, `scripts/build.sh`, `scripts/cargo-cudf.sh`, `scripts/conda-install-cudf*.sh`, `scripts/init.sh`, `scripts/init_fedora43.sh`, `scripts/create_verda_instance.sh`, `scripts/nebius-sync.sh`, `scripts/nebius-test.sh` | reduced or deleted |
+| `scripts/build-test.sh`, `scripts/build.sh`, `scripts/cargo-cudf.sh`, `scripts/conda-install-cudf*.sh`, `scripts/init.sh`, `scripts/init_fedora43.sh`, `scripts/create_verda_instance.sh`, `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh` | reduced or deleted |
+| `scripts/nebius-sync.sh` | kept: the tree transfer only |
+| `.gitignore` | `/target-img-*/`, `/.home-img/` if absent |
 | `scripts/env/` | the local build command; whatever `run-gpu.sh` needs for CI |
 | `cost-report/tests/test_source_formatting/` | the CI wiring guard |
 | `llm-wiki/build-test.md`, `llm-wiki/prompts.md`, `.claude/agents/*.md` where they name the old paths | one path |

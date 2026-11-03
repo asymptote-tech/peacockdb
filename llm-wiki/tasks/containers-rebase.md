@@ -82,6 +82,8 @@ resolved blindly, only to count them. It needed:
    - task 7 (the device runner, now `scripts/env/run-gpu.sh`) goes to new-hosts, without
      containers' host adapters: it calls `scripts/nebius.sh` directly;
    - task 10 is this task;
+   - containers' own spec, plan and detail file, which the replay brings into `llm-wiki/tasks/`,
+     are archived as a merged task's are;
    - task 11 (the 80 GB benchmark) goes to sf40-baseline and tp4-sized, those two modes only;
      other modes are dropped.
 
@@ -94,7 +96,9 @@ resolved blindly, only to count them. It needed:
 6. **Containers was mid-build.** Its tip is not known to be green. This task's bar is the fork's
    own gates, not containers' done-when:
    - the workspace builds in every shape;
-   - the CPU and FFI tiers and `cost-report` pass;
+   - the CPU and FFI tiers and `cost-report` pass. That includes master's rule that no core
+     test reads the checkout (`no_core_test_reads_the_checkout`), which containers' case-list
+     code breaks: the list is compiled in instead, in a commit of the developer's own;
    - `scripts/env/tests` pass;
    - the build image builds from the fork.
 

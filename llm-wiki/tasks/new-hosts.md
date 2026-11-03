@@ -81,15 +81,20 @@ them serve three. Below, every name is the new one.
    - the human's one-time setup: the eu-west1 key pair uploaded in the web console, the
      `nebius profile create` line, and the `gh secret set` lines.
 
-9. **The guarding reaches master when this task is done.** GitHub runs `nebius-watch.yml` on its
-   schedule from master's copy only, and this chain sits on an unmerged base. So the VM-guarding
-   part goes to master as one small commit, approved in advance:
+9. **The guarding reaches master during this task.** GitHub runs and dispatches `nebius-watch.yml`
+   from master's copy only, and this chain sits on an unmerged base. So the VM-guarding part goes
+   to master as one small commit, `ENS-nebius-guard`, approved in advance:
    - item 10's rename, on master's files;
    - `nebius.sh`'s instance and profile selection;
    - the idle watcher, its install, and its tests;
    - the workflow and the setup action.
 
-   That commit goes in once the task is `done`, and the guards' tests must pass on master. The rest
+   That commit is prepared as soon as the guards' offline tests pass, and the human lands it on
+   master mid-task; the guards' tests must pass on master. Item 4's live check of all three VMs
+   is then dispatched from master, before `done`; it never holds the task back from review.
+   Landing is read from master's content (the workflow is there and matches), not from a hash,
+   since a landing may squash or rebase. No VM is kept up across that wait: the check runs with
+   the VMs stopped, and one VM started just for it. Nobody in the chain pushes master. The rest
    of the task stays on the chain.
 10. **Every file and directory named `gpu-host` is named `nebius`:**
     - `scripts/gpu-host.sh` → `scripts/nebius.sh`, `scripts/gpu-host-sync.sh` →
@@ -104,7 +109,36 @@ them serve three. Below, every name is the new one.
     guard in `cost-report/tests/test_source_formatting/runners.rs`, `build-test.md`, `prompts.md`,
     `.claude/commands/ensemble.md`, `.gitignore`, the tickets, and every later chain L plan. The
     watcher's own names on the VMs stay: `peacock-gpu-idle.service`, `.timer` and its log. Records
-    (`llm-wiki/archive/`, `llm-wiki/reports/`, other chains' task files) keep the old names.
+    (`llm-wiki/archive/`, `llm-wiki/reports/`, other chains' task files) keep the old names. So
+    does `docker/`: its files are hashed into the published images' labels, and an edit there
+    would make every image refuse the tree. A stale name there is recorded in the detail file.
+11. **The standing rules name the three hosts and their roles.** `prompts.md` (the developer's
+    GPU step, the coordinator's host and hard-stop rules), `.claude/commands/ensemble.md` and
+    `build-test.md` say, for every chain from now on:
+    - the L40S (nebius-gpu) is for correctness tests, the L40S list; no sf40 and no benchmarks
+      there;
+    - the H100 (nebius-h100) runs sf40, the benchmarks and Nsight, through `run-gpu.sh`;
+    - the 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries
+      for H100 runs are built on the CPU VM; local and verda builds stay for development. The
+      recipe, "The CPU-VM build", is in `build-test.md`, "Nebius host";
+    - the coordinator pre-starts no VM: a VM starts right before its first remote command and
+      stops after its last pull (the VM-time rule); its one start is the exit-75 retry, once a
+      developer's build is done;
+    - the coordinator's hard stops cover all three VMs.
+      On every exit trigger the coordinator hard-stops all three (`stop --force`), whichever chain
+      started them. The human accepts the risk that this cuts another chain's run short (decided
+      2026-11-03). That run resumes with `PEACOCK_BENCH_RESUME=1`, and the standing rule says so.
+
+    The rules cite `build-test.md`, never a task plan (plans are deleted at archive). A
+    coordinator holds `prompts.md` and `ensemble.md` from its startup, so right after the
+    rename (item 10) and these rules land on the chain branch it re-reads `prompts.md`,
+    `.claude/commands/ensemble.md` and `build-test.md` in place and notes it in the detail file.
+    It does not exit or restart: a restart with the board unchanged spends the watchdog's idle
+    allowance. Until the rename lands it uses the old names. The exit-75 retry is the
+    coordinator's: it retries the VM's `start` itself, never a developer dispatch per try.
+
+    `build-test.md`'s "Out until further notice: the sf40 binaries, `--run-benchmarks`, Nsight"
+    goes. Later chain L tasks rely on these rules and carry no host override.
 
 ## Scope
 
@@ -115,7 +149,8 @@ them serve three. Below, every name is the new one.
 | `scripts/nebius/idle_watch.py`, `check.py`, `*.service`, `*.timer`, `tests/` | instance id from the install; the CPU-VM activity rule |
 | `.github/workflows/nebius-watch.yml`, `.github/actions/nebius-setup/` | three VMs, each skippable; a named profile per region |
 | `scripts/env/` (containers' tree) | `run-gpu.sh` for `nebius-h100`, over `scripts/nebius.sh`; data fetch for the two new VMs; fixes `provision-vm.sh`/`bootstrap-vm.sh` need |
-| `llm-wiki/build-test.md` | "Nebius host": hosts, data, secrets, setup steps |
+| `llm-wiki/build-test.md` | "Nebius host": hosts, their roles, data, secrets, setup steps |
+| `llm-wiki/prompts.md`, `.claude/commands/ensemble.md` | the rename; the three hosts' roles and hard stops (item 11) |
 
 Component-level API: none.
 

@@ -68,7 +68,7 @@ commit. A case whose capture fails is listed with the reason, as a failed benchm
 
 | path | change |
 |---|---|
-| `benchmarks/duckdb_minimal.sh` | the corpus queries, both datasets |
+| `benchmarks/duckdb_minimal.sh`, `benchmarks/tests/` (new) | the corpus queries, both datasets; its tests |
 | `testdata/benchmark-results/h100-80gb-hbm3/`, `testdata/benchmark-results/duckdb-cpu128/` | results |
 | `testdata/calibration/h100-80gb-hbm3/` | the profiles' derived files |
 | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | a device list's rows held to the main list; the test that writes and checks the H100's `cases.csv`; the page's DuckDB input |

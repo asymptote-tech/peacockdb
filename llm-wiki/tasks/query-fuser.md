@@ -1,9 +1,9 @@
-# Prototype: fuse N queries' plans into one DAG that loads each table once, and run batches of them
+# Fuse N queries' plans into one DAG that loads each table once, and run batches of them
 
-Kind: prototype
+Kind: production
 
 On sf40 a query's load is 400-690 ms against 19-48 ms of execute (`reports/benchmark-minimal.md`).
-Queries that read the same tables pay that load again each time. This prototype takes the plans of
+Queries that read the same tables pay that load again each time. This task takes the plans of
 N queries in tp1_single mode and fuses them into one plan, built on dag-driver, in which each table
 is read once and feeds every query that needs it. It runs batches of the first 3, 10, 20 and all
 queries of each dataset on the H100, and records what batching saves.
@@ -33,7 +33,7 @@ queries of each dataset on the H100, and records what batching saves.
    that join early, so the choice also charges that join's build table. It is placed above a
    join only when the recorded rows say the join did not increase cardinality there. The choice
    between re-read and buffer is a plain function of those numbers and the memory budget,
-   testable without a device. Its inputs come from the sf40 benchmark files. The prototype runs
+   testable without a device. Its inputs come from the sf40 benchmark files. The fuser runs
    at sf40 only, and has no fallback for a scale without them.
 1b. **Reads per table.** For each batch, the fuser reports how many times each table is read:
    once, plus one per re-read it chose.
@@ -86,20 +86,29 @@ commit. A case whose capture fails is listed with the reason, as a failed benchm
 |---|---|
 | `peacockdb-core/src/prototypes/fuser/` (new) | the fuser, the hints, the cap rule, buffer placement |
 | `peacockdb-core/tests/prototype_fused_benchmarks.rs` (new test target, features `gpu` + `test-support`; its case code in `src/prototypes/fuser/`) | the runs: eight fixed tests, `bench_fused_{tpch,tpcds}_sf40_{first3,first10,first20,all}_tp1_single`, each reading the H100 `cases.csv` at run time for its batch. Not in `peacock_gpu_benchmarks` |
-| `scripts/env/run-gpu.sh`, `scripts/env/stage-install.sh` | stage and run `prototype_fused_benchmarks` by name. No CI step runs it |
+| `scripts/env/run-gpu.sh`, `scripts/env/stage-install.sh` | stage and run `prototype_fused_benchmarks` by name, in the run image without changing it (no `docker/` file is edited). No CI step runs it |
+| `scripts/nebius/idle_watch.py` | the 4-hour cap sees the fused binary as a test process |
 | `cost-report/tests/test_source_formatting/` (`ci_coverage.rs`) | the CI wiring guard's explicit "manual, prototype" entry for the target, checked not wired into CI |
 | `testdata/benchmark-results/h100-80gb-hbm3/fused/` | results |
 | `testdata/calibration/h100-80gb-hbm3/fused/` | the profiles' derived files, one capture per batch |
 | `scripts/create_nsys_profile.sh` (`--fused`), `peacockdb-core/src/plan/rebuild.rs` | profiling fused batches; the plan rebuild helper moved out of tests |
+| `peacockdb-core/src/lib.rs`, `cost-report/tests/test_source_formatting/visibility.rs`, `llm-wiki/coding-style.md` | `prototypes` admitted as a second component behind `test-support`, under `test_support`'s rules |
+| `planner/translator/scan_mapping/parquet_meta.rs`, `planner/mod.rs`, `plan_text/` (`node_text.rs`, `bench_text.rs`, `mod.rs`), `executor/driver/index.rs`, `executor/mod.rs`, `test_support/{record,corpus_benchmark}.rs`, `.gitignore` | small engine and harness helpers the fuser calls, each a delegate or a visibility change, no behaviour change |
 | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`, `testdata/benchmark-report.html` | the page's fused-batches table |
 
 Component-level API: none beyond what dag-driver adds.
 
 ## Constraints
 
-- Prototype: the coordinator skips the reviewer and the PR. The code is tested enough to trust
-  the numbers: the answer checks in item 6 and a unit test for each hint's arithmetic.
+- `Kind: production` (the human's decision, 2026-11-03): a PR against its parent branch and the
+  usual reviewer rounds. The code stays prototype code: it lives under `src/prototypes/`, runs at
+  sf40 only, and is tested enough to trust the numbers. That means the answer checks in item 6
+  and a unit test for each hint's arithmetic.
 - No planner change for single queries; every existing golden is unchanged.
+- Fused runs go through the same benchmark harness as the baseline: its 69 GiB rmm pool, and the
+  engine's pinned host file cache from pinned-loads, prefilled with the batch's files before the
+  warm-up. Neither is
+  installed a second way.
 - **Prototype code lives apart from the engine.** Rust: `peacockdb-core/src/prototypes/<name>/`,
   compiled only under `test-support`, as `test_support/` is, so `cargo build` cannot name it.
   Each prototype's module doc says what it is, that it runs

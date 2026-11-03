@@ -20,10 +20,20 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
 
 **Spec:** `llm-wiki/tasks/tp4-sized.md`. Siblings consumed: `sf40-baseline.md` (and its plan `sf40-baseline-impl.md`, whose names this plan uses),
 `new-hosts-impl.md`, `bench-rows-impl.md`, `pinned-loads-impl.md`, `batching-report-impl.md`.
+Branch `ENS-tp4-sized`, from `ENS-batching-report`; its PR targets `ENS-batching-report`.
 
 ## Global Constraints
 
 
+- Developers never commit, push, or dispatch a workflow (prompts.md). A step that says *Commit
+  `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs.
+- **VM order** (C4): the H100 starts once the install is staged, then run, profile, pull, stop.
+  No cargo edit, build or test runs while it is up: `cases.csv`, the page and every
+  `test_corpus_goldens` run come after Task 2 Step 8's stop.
+- Hosts (build-test.md, Nebius host, host roles): the H100 runs the benchmark and Nsight; a
+  rebuilt install comes from new-hosts' CPU-VM build on nebius-cpu128.
 - **VM time is minimal** (the human's rule, 2026-11-03). A VM starts right before its first
   remote command and stops right after its last `pull`. It is never left up across a wait: a local
   build, CI, a review, the human. Binaries are built and staged first, and the H100 starts only
@@ -44,7 +54,18 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
 - Records: one per dataset, named `h100-80gb-hbm3/<ds>.sf40` (sf40-baseline's), holding both modes' rows;
   `records.sha256` keeps one line per dataset.
 - The H100's watcher stops one process after 4 hours: segments with `PEACOCK_BENCH_RESUME=1`.
-- H100 counters: `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12` (pinned-loads-impl.md:39).
+- H100 counters: `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12` (pinned-loads-impl.md, Global Constraints).
+- **The pinned host file cache** (pinned-loads), as sf40-baseline runs it: on by default
+  (`min(host RAM, the cgroup limit) × 3/4`), per process. Under `bench-each.sh`'s one process per
+  query, each process prefills that query's files once, before its case (pinned-loads Task 4b),
+  and every warm-up and measured round, all four lanes' loads included, reads the same pinned
+  buffers. A refusal is the failed section `status=failed reason=prefill: needs <needed> > limit
+  <limit>`; a round that filled or fell back fails its case (`reason=pinned cache: …`).
+  `PEACOCK_PINNED_HOST_CACHE_BYTES` is never set. Each timed section's trailer records the cache
+  and the prefill (bench-rows' one definition: `pinned_cache=`, `prefill_files=`,
+  `prefill_bytes=`, `prefill_us=`); Step 4 checks them. The protocol note is sf40-baseline's (its
+  detail file): warm numbers read files resident in pinned host memory, prefilled once per query
+  process, against DuckDB's warm buffer manager; the prefill is reported apart.
 - `testdata/benchmark-report.html` is regenerated in the commit that adds the files.
 - The VM is stopped when the run ends. Never open any file under `~/.nebius/` or any `*.pem`.
 
@@ -91,7 +112,7 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
   `the_h100_tree_is_held_to_both_modes_of_its_list`: `synthesized_tree("h100-two-modes",
   "h100-80gb-hbm3", Some("NVIDIA H100 80GB HBM3"))` holding only `tp1_single` files and a
   `cases.csv` row `tpch,40,q1,tp1_single|tp4_sized,ok,` → `missing_case_problem(&tree,
-  &declared_files(&case_list_path()))` is `Err` containing `tp4_sized.benchmark.txt`; with the
+  &declared_files(CASE_LIST))` is `Err` containing `tp4_sized.benchmark.txt`; with the
   tp4_sized file added (a renamed copy) → `Ok`, no error mentioning `tp4_rowgroup`, `tp4_single`
   or `tp1_rowgroup`.
 - [ ] **Step 2: Run** `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_h100_list_is_written the_h100_tree_is_held`
@@ -101,7 +122,7 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
 - [ ] **Step 4: Run** `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens`
   → all PASS: no `tp4_sized.benchmark.txt` exists yet, so `the_h100_list_is_the_lists_measured`
   still writes `tp1_single` rows and the committed `cases.csv` is unchanged.
-- [ ] **Step 5: Commit** (developer identity) `tp4-sized: the h100 list is written at tp1_single and tp4_sized`.
+- [ ] **Step 5: Commit** `tp4-sized: the h100 list is written at tp1_single and tp4_sized`.
 
 ### Task 2: run and profile tp4_sized on the H100
 
@@ -116,7 +137,7 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
 - Consumes: `run-gpu.sh <vm options> prepare | ship [--install <dir>] | run bench | pull` (new-hosts Task 9's Interfaces);
   `create_nsys_profile.sh --trace|--metrics --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`
   (new-hosts Task 10 Step 5); `nsys_loads.py --capture <sqlite> --out <tsv>` run by `--trace`
-  (pinned-loads-impl.md:86-87); bench-rows' trailer keys `load_us`, `execute_us`, `peak_bytes`;
+  (pinned-loads-impl.md, Task 1's Interfaces); bench-rows' trailer keys `load_us`, `execute_us`, `peak_bytes`, `pinned_cache`, `prefill_files`, `prefill_bytes`, `prefill_us`;
   sf40-baseline's H100 `cases.csv` (containers-rebase Task 4's format: `ok`, `skipped` and
   `wrong` rows), `scripts/calibration/device_cases.py`, `scripts/env/bench-each.sh --cases … --within …`,
   `scripts/calibration/join_records.py`,
@@ -130,10 +151,13 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
   whose modes contain `tp4_sized` (by dataset and query). Write both lists and counts into the
   detail file. Expected: every H100 line is in the intersection (Review Focus 1); any that is not
   is named there.
-- [ ] **Step 2: Ship** sf40-baseline's staged install (same commit, pinned-loads in the build):
+- [ ] **Step 2: Ship** sf40-baseline's staged install (same commit, pinned-loads in the build),
+  `/build/peacock/sf40-baseline/install`. If that dir is gone, first run new-hosts' CPU-VM build
+  from this branch's workspace into it, with the H100 still stopped, and record in the detail file
+  that the engine is this branch's, not sf40-baseline's. Then
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`;
   `G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"; $G prepare && $G ship --install /build/peacock/sf40-baseline/install`.
-  If that dir is gone, restage it from sf40-baseline's commit as its Task 8 Step 1 does. Expected: both exit 0.
+  Expected: both exit 0.
 - [ ] **Step 3: Run, one process per query.** `scripts/env/bench-each.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --within testdata/benchmark-results/h100-80gb-hbm3/cases.csv --mode tp4_sized --timeout 1800 --records <scratch>/records`
   (both datasets, the main list's order), as sf40-baseline does for tp1_single. If the watcher stops a segment or ssh drops,
   restart the VM and rerun the same command: it resumes. Pass: exit 0, and
@@ -142,25 +166,26 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
 - [ ] **Step 4: Failures.** `grep -A1 -E '^== ' <file> | grep -B1 '^status=failed'` → each failed
   query and its reason (the text after `reason=`) into the detail file's "Failed at sf40 tp4_sized"
   table. A wrong answer is a ticket (tickets.md conventions); an error/OOM/timeout is not.
-- [ ] **Step 5: `cases.csv`, the page and the records.**
-  `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_h100_list_is_the_lists_measured the_benchmark_report_matches_the_trees`
-  → each row whose query has a non-failed tp4_sized section has modes `tp1_single|tp4_sized`, one
-  whose tp4_sized failed keeps `tp1_single`; the `skipped` and `wrong` rows keep their status and
-  note (`git diff` of `cases.csv` shows only the `modes` column changing); the page gains the
-  tp4_sized rows; rerun without `UPDATE_CANONICAL` → PASS. Then join tp4_sized with the published tp1_single records:
-  `scripts/calibration/fetch_record.sh h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40`;
-  `python3 scripts/calibration/join_records.py --record testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/records.tsv <scratch>/records/*-tp4_sized.tsv --out <scratch>/joined.tsv`
+  A `reason=pinned cache: …` section is a defect, explained there, not a skip. Then the cache:
+  `f=testdata/benchmark-results/h100-80gb-hbm3/*.sf40/tp4_sized.benchmark.txt; grep -h '^pinned_cache=' $f | grep -v '^pinned_cache=on '; grep -h '^prefill_files=0$' $f`
+  → nothing, else each query and value into the detail file's "Cache" section, which also gives
+  per dataset the largest `resident` bytes and the largest `prefill_bytes` with its `prefill_us`.
+- [ ] **Step 5: the records** (scripts only, no cargo). Join tp4_sized with the published tp1_single records:
+  `for d in tpch tpcds; do scripts/calibration/fetch_record.sh h100-80gb-hbm3/$d.sf40; done` (one dataset per call);
+  `python3 scripts/calibration/join_records.py --record testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/records.tsv <scratch>/records/*-tp4_sized.*.tsv --out <scratch>/joined.tsv`
+  (bench-each's attempt-numbered segments; join orders them by attempt)
   → exit 0 (a refused heading stops the task, naming the line);
   `python3 scripts/calibration/split_record.py --record <scratch>/joined.tsv --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --out-dir <scratch>/split`;
   `scripts/calibration/publish_record.sh --from <scratch>/split h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40`
   → `grep -c 'h100-80gb-hbm3/' testdata/calibration/records.sha256` is still 2, both lines
-  rewritten; `fetch_record.sh h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40` → `checked`, and
-  each fetched record holds rows of both `tp1-single` and `tp4-sized`.
+  rewritten; `for d in tpch tpcds; do scripts/calibration/fetch_record.sh h100-80gb-hbm3/$d.sf40; done`
+  → `checked` twice, and each fetched record holds rows of both `tp1-single` and `tp4-sized`.
 - [ ] **Step 6: Trace pass.** Per dataset (no `PCK_TEST_FILTER`: `--cases` sets the filter),
   `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 scripts/create_nsys_profile.sh --trace <Interfaces' H100 arguments>`
-  with `--cases <scratch>/<dataset>-tp4.csv --device h100-80gb-hbm3`, as sf40-baseline does. That file is
-  `awk -F, -v OFS=, -v ds=<dataset> 'NR == 1 { print; next } $1 == ds && $4 ~ /(^|[|])tp4_sized($|[|])/ { $4 = "tp4_sized"; print }' testdata/benchmark-results/h100-80gb-hbm3/cases.csv`
-  (an `ok` or `wrong` row's note holds no comma, so the fields survive the rewrite). Expected: `the trace pass ran
+  with `--cases <scratch>/<dataset>-tp4.csv --device h100-80gb-hbm3`, as sf40-baseline does. That file
+  is built from the run itself, since `cases.csv` is regenerated only after the stop (Step 9): the
+  header, then one row `<dataset>,40,<query>,tp4_sized,ok,` per query of Step 1's intersection that
+  Step 4 did not list as failed, in the main list's order. Expected: `the trace pass ran
   N tests`, `calls.tsv` and `loads.tsv` written, `loads.tsv` holding one row per load node per
   case with `mode` = `tp4-sized`.
 - [ ] **Step 7: Metrics pass.** With Step 5's records fetched:
@@ -168,13 +193,20 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
   With `--cases <the tp4_sized case file> --device h100-80gb-hbm3` (sf40-baseline's options).
   Expected: exit 0, `hbm.tsv` with rows for `tp4-sized`. Move the derived rows into
   `testdata/calibration/h100-80gb-hbm3/<dataset>.sf40/`: drop existing `tp4-sized` rows, append
-  the new ones, keep the header once; then `git checkout -- testdata/calibration/calls.tsv
-  testdata/calibration/hbm.tsv` (the flat files are the H200's). A case with no rows in a file
+  the new ones, keep the header once; then restore the flat files, which are the H200's, by a read:
+  `for f in calls hbm; do git show HEAD:testdata/calibration/$f.tsv > testdata/calibration/$f.tsv; done`. A case with no rows in a file
   goes into the detail file's "Capture failed" table with the script's message.
 - [ ] **Step 8: Stop the VM.** `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu stop`; then
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu status`
   → `STOPPED`. Captures stay on the VM or in the scratch area; `git status --short testdata/calibration`
   lists no `capture*`.
+- [ ] **Step 9: `cases.csv` and the page, with the VM stopped.**
+  `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_h100_list_is_the_lists_measured the_benchmark_report_matches_the_trees`
+  → each row whose query has a non-failed tp4_sized section has modes `tp1_single|tp4_sized`, one
+  whose tp4_sized failed keeps `tp1_single`; the `skipped` and `wrong` rows keep their status and
+  note (`git diff` of `cases.csv` shows only the `modes` column changing); the page gains the
+  tp4_sized rows; rerun without `UPDATE_CANONICAL` → PASS. The tp4_sized rows of `cases.csv` equal
+  Step 6's case files (same queries, same order).
 
 ### Task 3: commit results
 
@@ -185,9 +217,10 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
   → all PASS, including `every_declared_case_has_a_section_in_the_tree`,
   `the_h100_list_is_the_lists_measured`, `the_benchmark_report_matches_the_trees`, the device-tree and
   rows checks (`device_tree_problem`, bench-rows' `every_section_outside_h200…`), with Task 2's files in place.
-- [ ] **Step 2: Commit** (developer identity):
-  `git add testdata/benchmark-results/h100-80gb-hbm3 testdata/benchmark-report.html testdata/calibration/h100-80gb-hbm3 testdata/calibration/records.sha256 llm-wiki/tasks/tp4-sized-detail.md`
-  `git commit -m "tp4-sized: sf40 tp4_sized on the H100, profiled; the h100 tree carries two modes"`
+- [ ] **Step 2: Commit** `tp4-sized: sf40 tp4_sized on the H100, profiled; the h100 tree carries two modes`,
+  naming the paths for the coordinator to stage: `testdata/benchmark-results/h100-80gb-hbm3`,
+  `testdata/benchmark-report.html`, `testdata/calibration/h100-80gb-hbm3`,
+  `testdata/calibration/records.sha256`, `llm-wiki/tasks/tp4-sized-detail.md`.
 
 ### Task 4: the report's tp4_sized sums
 
@@ -206,12 +239,12 @@ Python (`nsys_loads.py`, `join_records.py`, `batching_report.py`).
   → exit 0; then `… --check` → exit 0.
 - [ ] **Step 2: Verify.** Both tables carry the two tp4_sized columns; for the batch of 3, the sums
   equal the three trailers' `load_us`/`execute_us` added (ms); Task 2 Step 4's failures show as
-  `(n/N)`. `git diff --stat` touches only `llm-wiki/reports/query-batching.md`. Commit:
+  `(n/N)`. `git diff --stat` touches only `llm-wiki/reports/query-batching.md`. Commit
   `tp4-sized: the report's unfused tp4_sized sums per batch`.
 
 ## Self-review
 
-- Spec Done-when 1 → Tasks 1-3; 2 → Task 2 Step 4; 3 → Task 4; 4 → Task 2 Step 5, Task 3;
+- Spec Done-when 1 → Tasks 1-3; 2 → Task 2 Step 4; 3 → Task 4; 4 → Task 2 Step 9, Task 3;
   Profiles → Task 2 Steps 6-8.
 - Names aligned with sf40-baseline-impl (`cases.csv` as the one list, `device_lines`, `H100_MODES`,
   `device_cases.py`, containers-rebase's `parse_device_cases`, bench-rows' `the_benchmark_report_matches_the_trees`,

@@ -1,6 +1,6 @@
 # Report: what query batching buys on the H100 against DuckDB on 128 cores
 
-Kind: prototype
+Kind: production
 
 The chain's output for the human is one page, `llm-wiki/reports/query-batching.md`, in the shape of
 the TPC-H section of `reports/benchmark-minimal.md`: load and execute as separate columns,
@@ -25,9 +25,13 @@ DuckDB warm alongside.
 3. **Load against decode:** per dataset, from the profiles, how much of the unfused and the fused
    load is reading and copying, against decoding. That says whether sharing a scan saves copies,
    decodes, or both.
-4. **Provenance:** device, driver, CUDA, cuDF and host for the H100 runs; DuckDB version, threads
-   and host for the CPU runs. Also the queries skipped at sf40 and why, and the protocol (runs,
-   which minimum).
+4. **Provenance:** device, driver, CUDA, cuDF and host for the H100 runs, and the pinned host
+   file cache they ran with (pinned-loads; bench-rows' `pinned_cache=`: on or off, its capacity,
+   the largest resident bytes, and any run that fell back or re-read from disk); DuckDB version,
+   threads and host for the CPU runs. Also the queries skipped at sf40 and why, and the protocol
+   (runs, which minimum, and that each query process, or each fused batch, prefills the cache
+   before any run: peacockdb's warm loads read pinned host memory, DuckDB's its buffer manager
+   over a warm page cache).
 4a. **One reader per format.** The generator reads `cases.csv` through
    `scripts/calibration/device_cases.py` (sf40-baseline), not a parser of its own. Its reader of
    `duckdb.tsv` is tested against the committed fixture `testdata/fixtures/duckdb-results.tsv`,

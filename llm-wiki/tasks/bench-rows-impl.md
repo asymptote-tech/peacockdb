@@ -3,7 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** every timed node in a `.benchmark.txt` section carries its `batch_rows` and
-`batch_bytes`, and the `--- run ---` trailer carries `load_us`, `execute_us` and `peak_bytes`,
+`batch_bytes`, and the `--- run ---` trailer carries `load_us`, `execute_us`, `peak_bytes`, the
+pinned host cache's state (`pinned_cache`) and the process's prefill (`prefill_files`,
+`prefill_bytes`, `prefill_us`),
 with one parser that reads both the new sections and the committed H200 ones; and a committed
 page, `testdata/benchmark-report.html`, that shows every device tree side by side through that
 parser.
@@ -39,13 +41,36 @@ so find each by the function named beside it.
   once they are ready to ship. No step leaves a VM running for a later task. Each start and stop
   goes into the detail file's `## VM time` table, in the host's local time, with the hours per VM
   for the task. The watchers (1 h idle, 4 h per process, the hourly GitHub check) are the backstop,
-  not the plan.
+  not the plan. Order: the CPU-VM build first (CPU VM stopped after it); then start the H100,
+  run, pull, stop; only then the local read-back, tests and the commit.
+- **Developers never commit, push, or dispatch a workflow** (`prompts.md`). A step that says
+  *Commit `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs.
+- **The staged install is new-hosts' "CPU-VM build"** (new-hosts' Global Constraints): the chain
+  workspace as it stands, uncommitted, sent to nebius-cpu128 by `scripts/nebius-sync.sh
+  --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data`, built there,
+  `cpp/install/` rsynced back over `-e "$C rsh"`. Never a `git pull` on a VM: this task's
+  format change must be in the binary the H100 runs.
+- Visibility (`coding-style.md`, the layout gates in `cost-report/tests/test_source_formatting/visibility.rs`):
+  no `pub(super)`, no re-export (`pub use`) at any visibility. Items shared inside a component
+  are `pub(crate)`; what the corpus binaries reach is declared in `test_support/mod.rs` (types
+  with their inherent `impl`, functions as one-expression `pub fn` delegates to the
+  implementation module's `pub(crate)` ones).
 - The node line is "in the same notation as `.cpu.txt`": `batch_rows=[[…],[…]]` and
   `batch_bytes=[[…],[…]]`, by this node's output lane, then by batch — `run_text`'s rendering,
   shared, not copied.
 - Taken from the reported run (the 2nd-smallest), the same `Run` the tree's `time_us` comes from.
 - `load_us` = Σ `total_us` of the `GpuLoadParquet` nodes; `execute_us` = `device_us − load_us`.
 - `peak_bytes` = the most bytes the run's memory accountant held at once.
+- `load_us` stays the device-side load. pinned-loads' pinned host file cache is filled once per
+  benchmark process, before its first case, by the prefill (pinned-loads Task 4b); every warm-up
+  and measured round reads those pinned buffers, and a case whose rounds filled or fell back is a
+  failed section, never a timed one. The prefill's host IO goes in the trailer's `prefill_*` keys,
+  never into `load_us`. Names from pinned-loads Tasks 4 and 4b:
+  `executor::pinned_host_cache() -> PinnedCache` (its `Display` is one line with no newline),
+  `executor::pinned_cache::PrefillStats { files, bytes, us, needed, limit }`,
+  `test_support::corpus_benchmark::process_prefill`, `test_support::benchmark_prefill::ProcessPrefill`.
 - The existing H200 files still parse. Re-measuring them is not required.
 - The trailer still **ends** with the five provenance keys: `holds_measured`
   (`benchmark_section.rs:61-79`) keeps a resumed section only when its trailer `ends_with` them.
@@ -55,9 +80,10 @@ so find each by the function named beside it.
   `the_benchmark_report_matches_the_trees` under `UPDATE_CANONICAL=1`; no timestamp, no machine
   path, so the same trees always give the same bytes; `peak_bytes` labelled "accountant's peak,
   a lower bound on device memory"; the look of `testdata/report.html`.
-- Gates: `cargo test -p peacockdb-core --features rust-only --lib` and
-  `cargo test -p peacockdb-core --features rust-only --test test_corpus_goldens` green at every
-  commit; the cost-report crate unaffected.
+- Gates: `cargo test -p peacockdb-core --features rust-only --lib`,
+  `cargo test -p peacockdb-core --features rust-only --test test_corpus_goldens` and
+  `cargo test -p cost-report --test test_source_formatting` (the visibility and checkout-read
+  gates) green at every commit.
 
 ## The format this task defines (query-fuser and batching-report parse this)
 
@@ -78,6 +104,10 @@ peak_bytes=2147483648
 runs=[168555,167161,…]
 build=release
 allocator=rmm-pool initial=69.0GiB …
+pinned_cache=on cap=136.9GiB resident=12.3GiB files=8 fills=8 fill_us=812345 fallbacks=0 evictions=0 reloads=0 source=default
+prefill_files=8
+prefill_bytes=13207024435
+prefill_us=812345
 device=NVIDIA H100 80GB HBM3
 driver=…
 cuda=…
@@ -91,8 +121,29 @@ host=…
   emitted batch**. They are different axes: an accumulator makes many calls and emits one batch;
   a source makes one call per batch. A lane that emitted nothing is `[]`.
 - **Trailer keys, in order**: `run_us`, `device_us`, `load_us`, `execute_us`, `peak_bytes`,
-  `runs`, `build`, `allocator`, `device`, `driver`, `cuda`, `cudf`, `host`. Values are integers
-  except `runs` (`[a,b,…]`), `build`, `allocator` and the five.
+  `runs`, `build`, `allocator`, `pinned_cache`, `prefill_files`, `prefill_bytes`, `prefill_us`,
+  `device`, `driver`, `cuda`, `cudf`, `host` (17). Values are integers except `runs` (`[a,b,…]`),
+  `build`, `allocator`, `pinned_cache` and the five.
+- **The one definition of the cache's keys** (every later chain L plan reads these, and only
+  these):
+  - `pinned_cache` is the cache's `PinnedCache` text at the end of the case, nothing appended:
+    `on cap=… resident=… files=… fills=… fill_us=… fallbacks=… evictions=… reloads=… source=…`,
+    `off source=env`, `off integrated`, or `off no-device`. Its counters are the process's,
+    cumulative.
+  - `prefill_files`, `prefill_bytes`, `prefill_us` are **the prefill call that covered the
+    section** (`PrefillStats::{files, bytes, us}`): what that call read from disk, and its wall
+    time. A tree section's call is the process's one prefill: every section one process writes
+    carries the same three, and under one process per query they are that query's, so
+    `prefill_files > 0` whenever the cache is on. A fused section's call is its batch's own
+    (query-fuser), which is idempotent across batches: a batch whose files an earlier batch already
+    loaded legitimately reports `prefill_files=0`. So the `prefill_files > 0` check applies to tree
+    sections only; a fused section is vouched for by `pinned_cache=on` and `rounds_were_pinned`,
+    which fails it otherwise. With the cache off (`PrefillError::Off`) all three are `0`.
+  - There is no per-round fill key: a round that filled, reloaded, evicted or fell back fails its
+    case (`status=failed reason=pinned cache: … during the rounds`, pinned-loads Task 4b), and a
+    prefill that does not fit fails every case of the process (`status=failed reason=prefill:
+    needs <needed> > limit <limit>`). So a timed section's numbers read pinned buffers only
+    whenever its `pinned_cache` starts `on`.
 - `peak_bytes` is the accountant's peak of its resident figure: driver-held batches plus every
   live executor's `resident_bytes()`, observed at every hold and every call's end
   (`driver/accounting.rs:116-212`). It is exact for that figure. As **device memory** it is a
@@ -101,14 +152,16 @@ host=…
   inside a call, pool fragmentation and the parquet reader's staging. It is at least every
   `batch_bytes` entry in its section, since every emitted batch is held first.
 - **Legacy sections** (the committed `h200/` tree): the line beneath a node is only
-  `time_us=… total_us=…`, and the trailer has no `load_us`, `execute_us` or `peak_bytes`. The
+  `time_us=… total_us=…`, and the trailer has no `load_us`, `execute_us`, `peak_bytes`,
+  `pinned_cache` or `prefill_*`. The
   reader returns `None` for each; it never derives `peak_bytes`. `load_us` can be derived from
   a legacy tree with `BenchSection::tree_load_us()`.
 
 ## Review Focus
 
 1. **A trailer whose new keys land after the provenance** — a resumed run then measures every
-   case again, silently, because `holds_measured` no longer matches. → Task 2,
+   case again, silently, because `holds_measured` no longer matches (`pinned_cache` and the three
+   `prefill_*` go after `allocator`, before the five). → Task 2,
    `trailer_names_its_provenance` pins the full key order, and Task 3's
    `a_new_section_with_its_provenance_last_is_read` reads it back.
 2. **The committed H200 tree, which has none of the new fields** — must parse and pass every
@@ -149,9 +202,10 @@ host=…
 - Consumes: `RunReport::emitted: Vec<Vec<Vec<EmittedBatch>>>` (`executor/mod.rs:661`),
   `EmittedBatch { rows: u64, bytes: usize }` (`executor/mod.rs:624`).
 - Produces:
-  - `pub(super) fn lanes_of<T>(lanes: &[Vec<T>], of: impl Fn(&T) -> u64) -> String` and
-    `pub(super) fn numbers(values: &[u64]) -> String` in `node_text.rs` (moved verbatim from
-    `run_text.rs`; `run_text` calls them from there).
+  - `pub(crate) fn lanes_of<T>(lanes: &[Vec<T>], of: impl Fn(&T) -> u64) -> String` and
+    `pub(crate) fn numbers(values: &[u64]) -> String` in `node_text.rs` (moved verbatim from
+    `run_text.rs`; `run_text` calls them from there; `node_text` stays a private `mod`, so
+    `pub(crate)` reaches no further than `plan_text`).
   - `pub(crate) fn render_timings(root: &dyn GpuNode, times: &Measurements, report: &RunReport) -> String`
     (in `bench_text.rs` and its `plan_text/mod.rs` wrapper). `bench_text`'s own time-list
     helper is renamed `time_lanes` so it does not shadow the shared `lanes_of`.
@@ -211,7 +265,8 @@ Expected: compile errors (`render_timings` takes 2 arguments; no `timed_load_us`
 - [ ] **Step 4: Run to see them pass**
 
 Run: `cargo test -p peacockdb-core --features rust-only --lib -- driver::tests::render plan_text`
-Expected: PASS. Then the whole `--lib` gate: PASS.
+Expected: PASS. Then the whole `--lib` gate and `cargo test -p cost-report --test
+test_source_formatting`: PASS.
 
 - [ ] **Step 5: Docs.** `architecture.md` "Node display": a benchmark line has
   `time_us=[[…]] total_us=N batch_rows=[[…]] batch_bytes=[[…]]` beneath it, the first by lane
@@ -219,13 +274,9 @@ Expected: PASS. Then the whole `--lib` gate: PASS.
   tree**: the example line and one sentence on the two axes. Update `build-test.md`'s
   `executor::driver::tests` count (line ~362) and the `--lib` total in the cpu heading.
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add peacockdb-core/src/plan_text peacockdb-core/src/executor/driver/tests/render.rs \
-        peacockdb-core/src/test_support/corpus_benchmark.rs llm-wiki/architecture.md llm-wiki/build-test.md
-git commit -m "bench-rows: each benchmark node carries the chosen run's batch rows and bytes"
-```
+- [ ] **Step 6: Commit** `bench-rows: each benchmark node carries the chosen run's batch rows and bytes`
+  (paths: `peacockdb-core/src/plan_text`, `peacockdb-core/src/executor/driver/tests/render.rs`,
+  `peacockdb-core/src/test_support/corpus_benchmark.rs`, `llm-wiki/architecture.md`, `llm-wiki/build-test.md`).
 
 ### Task 2: the trailer carries `load_us`, `execute_us` and `peak_bytes`
 
@@ -237,7 +288,9 @@ git commit -m "bench-rows: each benchmark node carries the chosen run's batch ro
   "Benchmark trailer" test row (line ~465)
 
 **Interfaces:**
-- Consumes: Task 1's `timed_load_us`, `timed_device_us`; `RunReport::peak_bytes: usize`
+- Consumes: Task 1's `timed_load_us`, `timed_device_us`; pinned-loads' `pinned_host_cache() -> PinnedCache`
+  (`executor/pinned_cache.rs`, `Display`), `PrefillStats`, and Task 4b's `process_prefill()`
+  (`&'static Result<ProcessPrefill, PrefillError>`); `RunReport::peak_bytes: usize`
   (`executor/mod.rs:639`, `pub(crate)`, so reachable from `test_support`).
 - Produces, in `benchmark_trailer.rs`:
 
@@ -249,7 +302,9 @@ pub(crate) struct RunTotals {
     pub load_us: u64,
     pub peak_bytes: u64,
 }
-pub(crate) fn run_section(totals: &RunTotals, spread: &[u64], allocator: &str, provenance: &Provenance) -> String;
+/// `pinned_cache` is `end`'s Display; `prefill` gives `prefill_files`, `prefill_bytes`,
+/// `prefill_us` (`PrefillStats::default()` when the cache is off).
+pub(crate) fn run_section(totals: &RunTotals, spread: &[u64], allocator: &str, end: &PinnedCache, prefill: &PrefillStats, provenance: &Provenance) -> String;
 ```
 
 `run_section` writes `execute_us = device_us − load_us` (plain subtraction: `load_us` is a
@@ -261,9 +316,13 @@ subset of the same sum, so it cannot exceed it).
 #[test]
 fn trailer_names_its_provenance() {          // existing; the key list grows
     let totals = RunTotals { run_us: 7, device_us: 5, load_us: 3, peak_bytes: 4096 };
-    let trailer = run_section(&totals, &[7, 6, 9], "rmm-pool initial=69.0GiB", &provenance);
+    let off = PinnedCache { state: PinnedCacheState::Off, source: PinnedCacheSource::Env, ..Default::default() };
+    let trailer = run_section(&totals, &[7, 6, 9], "rmm-pool initial=69.0GiB", &off, &PrefillStats::default(), &provenance);
     assert_eq!(keys, ["run_us", "device_us", "load_us", "execute_us", "peak_bytes", "runs",
-                      "build", "allocator", "device", "driver", "cuda", "cudf", "host"]);
+                      "build", "allocator", "pinned_cache", "prefill_files", "prefill_bytes",
+                      "prefill_us", "device", "driver", "cuda", "cudf", "host"]);
+    assert!(trailer.lines().any(|l| l == "pinned_cache=off source=env"));
+    assert!(trailer.lines().any(|l| l == "prefill_bytes=0"));
     // the five value lines, and starts_with("--- run ---\n"), as today
 }
 
@@ -271,6 +330,19 @@ fn trailer_names_its_provenance() {          // existing; the key list grows
 fn execute_is_the_device_time_outside_the_loads() {
     let trailer = run_section(&RunTotals { run_us: 9, device_us: 8, load_us: 5, peak_bytes: 1 }, …);
     for line in ["load_us=5", "execute_us=3", "peak_bytes=1"] {
+        assert!(trailer.lines().any(|l| l == line), "no {line:?} in {trailer}");
+    }
+}
+
+#[test]
+fn the_prefill_is_reported_apart_from_the_load() {
+    let end = PinnedCache { state: PinnedCacheState::On, capacity_bytes: 147_000_000_000, fill_us: 900, ..Default::default() };
+    let prefill = PrefillStats { files: 8, bytes: 13_207_024_435, us: 812_345, needed: 13_207_024_435, limit: 147_000_000_000 };
+    let trailer = run_section(&RunTotals { run_us: 9, device_us: 8, load_us: 5, peak_bytes: 1 }, &[9, 9], "x", &end, &prefill, &provenance);
+    let cache = trailer.lines().find(|l| l.starts_with("pinned_cache=")).unwrap();
+    assert!(cache.starts_with("pinned_cache=on cap="), "{cache}");
+    assert!(cache.ends_with(" source=default"), "{cache}");            // nothing appended
+    for line in ["prefill_files=8", "prefill_bytes=13207024435", "prefill_us=812345", "load_us=5"] {
         assert!(trailer.lines().any(|l| l == line), "no {line:?} in {trailer}");
     }
 }
@@ -286,6 +358,11 @@ Expected: compile error, no `RunTotals`.
   (the list in "The format" above, in two lines). In `corpus_benchmark.rs::measure`, build
   `RunTotals { run_us: chosen.total_us, device_us: timed_device_us(&costed),
   load_us: timed_load_us(tree.as_ref(), &costed), peak_bytes: chosen.report.peak_bytes as u64 }`.
+  In `measure` (where pinned-loads Task 4b's checks now run, inside the future `measure_into`
+  records), pass Task 4b's `after` snapshot (the one `rounds_were_pinned` just checked) as `end`, and `process_prefill()`'s stats (`Ok(p)` → `p.stats`, `Err(Off)` →
+  `PrefillStats::default()`; the other errors never reach here, the case has failed) as
+  `prefill`; pinned-loads' `eprintln!("[pinned-cache] {what}: …")` after the runs is removed (the
+  trailer carries it now). The `[pinned-cache] prefill:` and `[load-bytes]` lines stay.
   Drop the stale "Printed until there is a file to write it to" `println!` only if it is in the
   way; otherwise leave it.
 
@@ -297,15 +374,14 @@ has none, Task 5's build is this check) → no error in `corpus_benchmark.rs`.
 
 - [ ] **Step 5: Docs.** `build-test.md` **The tree**: the trailer sentence lists the keys in
   order, defines `load_us` and `execute_us`, and says `peak_bytes` is the accountant's peak and
-  a lower bound on device memory, naming what it excludes. The "Benchmark trailer" row's
-  description and count (2).
+  a lower bound on device memory, naming what it excludes; and defines `pinned_cache` and the
+  three `prefill_*` keys as "The format" does (the one definition: the process's one prefill,
+  its host IO apart from `load_us`; no per-round key, since a round that filled fails its case). The "Benchmark trailer" row's
+  description and count (3).
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add peacockdb-core/src/test_support/benchmark_trailer* peacockdb-core/src/test_support/corpus_benchmark.rs llm-wiki/build-test.md
-git commit -m "bench-rows: the trailer splits load from execute and names the accountant's peak"
-```
+- [ ] **Step 6: Commit** `bench-rows: the trailer splits load from execute and names the accountant's peak`
+  (paths: `peacockdb-core/src/test_support/benchmark_trailer*`, `peacockdb-core/src/test_support/corpus_benchmark.rs`,
+  `llm-wiki/build-test.md`).
 
 ### Task 3: one reader for the tree, and the checks on it
 
@@ -326,7 +402,10 @@ git commit -m "bench-rows: the trailer splits load from execute and names the ac
 **Interfaces:**
 - Consumes: `parse_node_line`, `NodeLine<'a>` (`test_support/mod.rs:254-299`), `SKIPPED`,
   `FAILED`.
-- Produces (declared in `test_support/mod.rs`, so `peacockdb_core::test_support::…`):
+- Produces (declared in `test_support/mod.rs`, so `peacockdb_core::test_support::…`: the two
+  structs and their inherent `impl` there, each method body one expression;
+  `parse_benchmark_section` a one-expression `pub fn` delegating to
+  `benchmark_tree::parse_benchmark_section`, which is `pub(crate)`):
 
 ```rust
 pub struct BenchNode<'a> {
@@ -411,7 +490,8 @@ Expected: compile error, no `parse_benchmark_section`.
   - `const PREDATES_ROWS: &[&str] = &["h200"];` beside `PREDATES_PROVENANCE` (line ~625), and
     `fn rows_problem(device: &str, body: &str, at: &str) -> Result<(), String>`: outside
     `PREDATES_ROWS`, a timed section with a node lacking `batch_rows` or `batch_bytes`, or a
-    trailer lacking `load_us`, `execute_us` or `peak_bytes`, is refused with
+    trailer lacking `load_us`, `execute_us`, `peak_bytes`, `pinned_cache`, `prefill_files`,
+    `prefill_bytes` or `prefill_us`, is refused with
     `"{at}: carries no {field}, and only {PREDATES_ROWS:?} were written before bench-rows"`.
   - `#[test] fn every_section_outside_h200_carries_batches_and_the_load()`: `rows_problem` over
     every timed section of the committed tree (passes today: only `h200/` exists).
@@ -437,18 +517,17 @@ Expected: compile error, no `parse_benchmark_section`.
   every tree but `h200/` must carry the fields; the new reader's test row; the
   `test_corpus_goldens` and `--lib` counts in the cpu heading.
 
-- [ ] **Step 9: Commit**
-
-```bash
-git add peacockdb-core/src/test_support peacockdb-core/tests/test_corpus_goldens/benchmark.rs llm-wiki/build-test.md
-git commit -m "bench-rows: one reader for the benchmark tree; new sections must carry batches and the load"
-```
+- [ ] **Step 9: Commit** `bench-rows: one reader for the benchmark tree; new sections must carry batches and the load`
+  (paths: `peacockdb-core/src/test_support`, `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`,
+  `llm-wiki/build-test.md`), after `cargo test -p cost-report --test test_source_formatting` passes.
 
 ### Task 4: the benchmark report page
 
 **Files:**
 - Create: `peacockdb-core/src/test_support/benchmark_report.rs`, `…/benchmark_report/tests.rs`
-  (`mod benchmark_report;` and the `pub use` in `test_support/mod.rs`, no feature gate)
+  (`mod benchmark_report;` in `test_support/mod.rs`, no feature gate; no `pub use`: the types and
+  `REPORT_REPO` are declared in `mod.rs`, the three functions are one-expression `pub fn`
+  delegates there to `benchmark_report`'s `pub(crate)` ones)
 - Create: `testdata/benchmark-report.html`
 - Modify: `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (the page's test)
 - Docs: `llm-wiki/build-test.md` — the generated-files table (the `corpus_benchmark_cases.inc`
@@ -522,8 +601,9 @@ pub fn section_href(rel: &str, line: usize) -> String;
 - [ ] **Step 2:** `cargo test -p peacockdb-core --features rust-only --lib -- benchmark_report` → compile error.
 - [ ] **Step 3: implement**; **Step 4:** the same command → PASS.
 - [ ] **Step 5: the page's test** in `benchmark.rs`:
-  `the_benchmark_report_matches_the_trees` — `order` = `macro_invocations(&case_list_path(),
-  "corpus_query_benchmark!")`'s (dataset, query); text = `render_benchmark_report(&root, &order,
+  `the_benchmark_report_matches_the_trees` — `order` = `macro_invocations_in(CASE_LIST,
+  "corpus_query_benchmark!")`'s (dataset, query) (the list compiled in, as containers-rebase
+  left it; no path into `tests/`); text = `render_benchmark_report(&root, &order,
   &[])`. Under `UPDATE_CANONICAL=1` it writes `benchmark_report_path()` (staged and renamed, as
   `the_benchmark_cases_follow_the_registry` does); without, the file must equal the text, else a
   panic naming the first differing line and the command
@@ -531,12 +611,10 @@ pub fn section_href(rel: &str, line: usize) -> String;
   A missing page fails the same way.
 - [ ] **Step 6: run** it → FAIL (no page); with `UPDATE_CANONICAL=1` → PASS; without → PASS.
   Open the page in a browser once: the H200's rows, every mode, loads derived, peaks `—`.
-- [ ] **Step 7: docs** (Files above) and commit:
-
-```bash
-git add peacockdb-core/src/test_support peacockdb-core/tests/test_corpus_goldens/benchmark.rs testdata/benchmark-report.html llm-wiki/build-test.md
-git commit -m "bench-rows: a committed page of every device tree, side by side, held to the trees"
-```
+- [ ] **Step 7: docs** (Files above); `cargo test -p cost-report --test test_source_formatting` → PASS.
+  Commit `bench-rows: a committed page of every device tree, side by side, held to the trees`
+  (paths: `peacockdb-core/src/test_support`, `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`,
+  `testdata/benchmark-report.html`, `llm-wiki/build-test.md`).
 
 ### Task 5: one case on the H100, end to end
 
@@ -545,32 +623,37 @@ real run. The file is not committed: sf40-baseline writes the h100 tree in full.
 
 **Files:** none in git; the section goes into `llm-wiki/tasks/bench-rows-detail.md`.
 
-- [ ] **Step 1: Build first.** Stage the install on nebius-cpu128 (new-hosts Task 10 Step 2) and
-  rsync its `cpp/install/` into this tree's `cpp/install/` (`ship`'s default `--install`); stop the
-  CPU VM.
+- [ ] **Step 1: Build first.** The CPU-VM build (Global Constraints), from this worktree with
+  Tasks 1-4 in it, into this tree's `cpp/install/` (`ship`'s default `--install`); the CPU VM
+  stopped.
 - [ ] **Step 2: Start the H100, ship and run one case** on host `dev`, with new-hosts'
   `scripts/env/run-gpu.sh` as `build-test.md` "Benchmarks" documents it after new-hosts:
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`
-  (exit 0, RUNNING with ssh; exit 75, no capacity: retry later, record it), then
+  (exit 0, RUNNING with ssh; exit 75, no capacity: report it and stop; the coordinator retries the start and re-dispatches you here once the H100 is up), then
   `G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"; $G prepare && $G ship && PCK_TEST_FILTER=bench_tpch_sf40_q3_tp1_single $G run bench && $G pull`
   (q3: three loaders under joins. If the registry does not enable q3 at `gpu_tp1_single`, use the
   first tpch query that it does and that reads two or more tables.)
   Expected: the case passes; `testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt`
-  came home.
+  came home. Then remove the host record
+  (`scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu ssh 'rm -f ~/peacock/<i>/testdata/calibration/records.tsv'`)
+  and stop the H100:
+  `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu stop`.
+  Everything below runs with every VM stopped.
 - [ ] **Step 3: Read it back.** On `dev`:
-  `f=testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt; [ "$(grep -c '^ *time_us=' $f)" = "$(grep -c 'batch_bytes=' $f)" ] && grep -E '^(load_us|execute_us|peak_bytes)=' $f`
-  Expected: three lines, `load_us` > 0, `peak_bytes` > 0. (The directory is `device_slug`'s for
+  `f=testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt; [ "$(grep -c '^ *time_us=' $f)" = "$(grep -c 'batch_bytes=' $f)" ] && grep -E '^(load_us|execute_us|peak_bytes|pinned_cache|prefill_files|prefill_bytes|prefill_us)=' $f`
+  Expected: seven lines, `load_us` > 0, `peak_bytes` > 0, `pinned_cache=on … fallbacks=0 …`,
+  `prefill_files` > 0, `prefill_bytes` > 0 and `prefill_us` > 0 (the process prefilled the case's
+  files once; its rounds read them pinned), and no `status=failed` in the file. (The directory is `device_slug`'s for
   "NVIDIA H100 80GB HBM3"; if the card names itself otherwise, use the directory that came home.)
   Then copy the file to `<scratch>/benchmark-results/h100-80gb-hbm3/tpch.sf40/` and run
   `PEACOCK_TESTDATA_DIR=<scratch> cargo test -p peacockdb-core --features rust-only --test test_corpus_goldens -- every_total_us every_section_outside_h200`
   Expected: PASS (the arithmetic and the presence checks hold on a real section). Render the
   page over `<scratch>` once (the `UPDATE_CANONICAL=1` page test with `PEACOCK_TESTDATA_DIR=<scratch>`)
   and check the H100 column shows the case's load, execute, total and peak.
-- [ ] **Step 4: Stop the VM and clean up.**
-  `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu stop`;
-  delete the h100 file from the checkout (`git status` shows nothing under `testdata/benchmark-results/`).
-  Paste the section, the run command and the q3-or-substitute choice into the detail file and
-  commit that file alone: `git commit -m "bench-rows: the format read back from one H100 case"`.
+- [ ] **Step 4: Clean up.** `status` shows the H100 stopped (Step 2); delete the h100 file from
+  the checkout (`git status` shows nothing under `testdata/benchmark-results/`).
+  Paste the section, the run command and the q3-or-substitute choice into the detail file.
+  Commit that file alone: `bench-rows: the format read back from one H100 case`.
 
 ## Self-review
 
@@ -581,6 +664,6 @@ real run. The file is not committed: sf40-baseline writes the h100 tree in full.
 - `peak_bytes` needs no driver change: `ResidentAccountant::peak` already is the spec's quantity
   and `RunReport` already carries it; `executor/` is untouched.
 - Names used across tasks: `render_timings(root, times, report)`, `timed_load_us`, `LOAD_NODE`,
-  `RunTotals`, `run_section(&RunTotals, …)`, `parse_benchmark_section`, `BenchSection`,
+  `RunTotals`, `run_section(&RunTotals, …, &PinnedCache, &PrefillStats, …)`, `parse_benchmark_section`, `BenchSection`,
   `BenchNode`, `PREDATES_ROWS`, `rows_problem`, `render_benchmark_report`, `ReportTable`,
   `ReportCell`, `section_href`, `benchmark_report_path`, `the_benchmark_report_matches_the_trees`.

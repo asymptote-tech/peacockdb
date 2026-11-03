@@ -37,7 +37,8 @@ run/build images.
 `PREDATES_ROWS`, `rows_problem`, `render_benchmark_report`, `ReportCell`, `the_benchmark_report_matches_the_trees`),
 [`pinned-loads-impl.md`](pinned-loads-impl.md) (`nsys_loads.py`, `loads.tsv`),
 [`containers-rebase-impl.md`](containers-rebase-impl.md) (case list from master's registry,
-`PREDATES_PROVENANCE`, `DEVICE_LIST`, `device_list_files`, and Task 3's `DeviceCase`,
+`PREDATES_PROVENANCE`, `DEVICE_LIST`, `device_list_files`, the compiled-in `CASE_LIST` and
+`macro_invocations_in`, and Task 4's `DeviceCase`,
 `CaseStatus`, `device_cases_path`, `parse_device_cases`, `render_device_cases`). Line numbers are `origin/ENS-containers`'s for
 harness files and master's for the rest; find each by the function named beside it.
 
@@ -50,7 +51,30 @@ harness files and master's for the rest; find each by the function named beside 
   once they are ready to ship. No step leaves a VM running for a later task. Each start and stop
   goes into the detail file's `## VM time` table, in the host's local time, with the hours per VM
   for the task. The watchers (1 h idle, 4 h per process, the hourly GitHub check) are the backstop,
-  not the plan.
+  not the plan. Order: the CPU-VM build first (Task 8), the CPU VM stopped; the H100 starts for
+  the run and stops after it; local cargo work (the `cases.csv` test, the page) runs with every VM
+  stopped; the H100 starts again for the profiles and stops after them; the CPU VM starts again
+  for DuckDB. Never a cargo edit, build or test with a VM up.
+- **Developers never commit, push, or dispatch a workflow** (`prompts.md`). A step that says
+  *Commit `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs. Files "kept for a later commit" stay
+  uncommitted in the chain workspace; the developer never runs `git add`.
+- **What runs on nebius-cpu128 comes from the chain workspace as it stands, uncommitted, never a
+  `git pull`** (new-hosts' "CPU-VM build", in new-hosts' Global Constraints):
+  `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`
+  after `$C start`, then every command in `~/$D`. That carries this task's own scripts
+  (`duckdb_minimal.sh`'s new flags) and the H100's `cases.csv` before either is committed. A file a
+  VM step reads is checked first: `sha256sum` on dev and over `$C ssh` agree.
+- Host roles (`build-test.md`, "Nebius host", host roles): the H100 runs the sf40 benchmark and
+  Nsight through `run-gpu.sh`; the CPU VM runs DuckDB and stages the H100's install. The L40S
+  runs its correctness list once, bracketed as `prompts.md` says, after the last harness change
+  (this task edits `corpus_benchmark.rs` and `corpus_gpu.rs`, which that list runs): the
+  Definition of done's "GPU tests green on nebius-gpu's L40S list". No sf40 there.
+- Visibility (`coding-style.md`, `cost-report/tests/test_source_formatting/visibility.rs`): no
+  `pub(super)`, no `pub use`. Shared items inside a component are `pub(crate)`; what a test binary
+  reaches is declared in `test_support/mod.rs` (types there, functions as one-expression `pub fn`
+  delegates).
 - Candidates: every line of the main case list `peacockdb-core/tests/common/corpus_benchmark_cases.inc`
   carrying `tp1_single`, in file order: TPC-H 44 (q1-q22 and the micro queries), TPC-DS 82. The
   batching set (query-fuser) is TPC-H q1-q22 and every TPC-DS line.
@@ -63,7 +87,8 @@ harness files and master's for the rest; find each by the function named beside 
   (every script: `bench-each.sh --within`, `duckdb_minimal.sh --cases`, `create_nsys_profile.sh
   --cases`, `split_record.py --cases`); both are tested against `testdata/fixtures/device-cases.csv`.
   A reader takes `ok` and `wrong` rows as cases; a `skipped` row is no case. The main list
-  `corpus_benchmark_cases.inc` stays in macro form and is read as today.
+  `corpus_benchmark_cases.inc` stays in macro form and is read as containers-rebase left it:
+  compiled in (`CASE_LIST`), never by a path into `tests/` (`no_core_test_reads_the_checkout`).
 - DuckDB's results, `duckdb-cpu128/<ds>.sf40/duckdb.tsv`: written by `duckdb_minimal.sh --results`,
   read by `test_support::duckdb_results::parse_duckdb_results`, the format's owner; its fixture
   `testdata/fixtures/duckdb-results.tsv` is what batching-report's Python reader is tested against.
@@ -72,6 +97,25 @@ harness files and master's for the rest; find each by the function named beside 
 - Device tree name `h100-80gb-hbm3`; DuckDB tree `duckdb-cpu128`.
 - DuckDB protocol (unchanged from `duckdb_minimal.sh`): native storage, warm page cache with
   residency checked, all cores (no `--threads`), 2nd-min of 6. Pinned `DUCKDB_VERSION=1.5.4`.
+- **The pinned host file cache** (pinned-loads; `build-test.md` beside `PEACOCK_RMM_POOL_BYTES`)
+  is on by default on the H100: `min(host RAM, the cgroup limit) × 3/4`, about 147 GB (the run container
+  sets no limit). It lives per process, and under `bench-each.sh`'s one process per query each
+  process **prefills that query's files once**, before its case (pinned-loads Task 4b: the process
+  plans the case its `PCK_TEST_FILTER` selects, prefills `plan_files` of it, then runs the warm-up
+  and the measured rounds, all of which read the pinned buffers). The prefill is the only read
+  from disk; it runs inside the case (inside `measure`, the future `measure_into` records), so it
+  counts against `PEACOCK_BENCH_CASE_TIMEOUT_S` and a refusal is always written. A query
+  whose files exceed the limit is a failed section `status=failed reason=prefill: needs <needed> >
+  limit <limit>`, skipped as any failure is (its `cases.csv` row `skipped` with that reason); a
+  round that filled or fell back is `status=failed reason=pinned cache: … during the rounds`, which
+  is a defect to explain, not a skip. The baseline never sets `PEACOCK_PINNED_HOST_CACHE_BYTES`.
+  Every timed section's trailer records the cache and the prefill (bench-rows' one definition:
+  `pinned_cache=`, `prefill_files=`, `prefill_bytes=`, `prefill_us=`): Task 9 Step 4 checks each
+  timed section for `pinned_cache=on` and `prefill_files` > 0, and names any other in the detail
+  file with its value. **The protocol note** (detail file and build-test.md): peacockdb's warm
+  numbers read files resident in pinned host memory, prefilled once per query process before any
+  round; DuckDB's read its buffer manager over a warm page cache; neither counts the first read
+  from disk, and the prefill's bytes and time (`prefill_bytes`, `prefill_us`) are reported apart.
 - The H100's watcher stops one process at 4 h; segments resume with `PEACOCK_BENCH_RESUME=1`.
   On the CPU VM only `duckdb`/`aws` processes and terminals count as use (new-hosts Task 3): long
   work there runs as the `duckdb` CLI, never as `python3`.
@@ -82,7 +126,8 @@ harness files and master's for the rest; find each by the function named beside 
 - Never open `~/.nebius/*` or any `*.pem`. Captures (`*.nsys-rep`, `*.sqlite`) are never committed.
 - Gates at every commit: `cargo test -p peacockdb-core --features rust-only --lib`, `--test
   test_corpus_goldens`, `--test test_cpu_corpus`, `--test test_golden_format`;
-  `cargo test -p cost-report --test test_source_formatting`; every changed Python suite.
+  `cargo test -p cost-report --test test_source_formatting`; every changed Python suite
+  (`benchmarks/tests/test_duckdb_minimal.py` included).
 
 ## Review Focus
 
@@ -93,7 +138,9 @@ harness files and master's for the rest; find each by the function named beside 
    enables at the file's sf, and the registry has no sf40 rows. → Task 3,
    `an_sf40_answer_keeps_the_other_sf40_answers`.
 3. **A segment killed between its rows and its section**: the case is measured again, so its rows
-   are in two records. → Task 6, `test_join_takes_the_later_segment_of_a_case`.
+   are in two records, and the killed run's record still sits on the host, where `run-tests.sh`
+   refuses the rerun. → Task 6, `test_bench_each_sets_aside_a_record_a_killed_run_left`,
+   `test_join_takes_the_later_segment_of_a_case`, `test_join_orders_segments_by_attempt_not_argv`.
 4. **The DuckDB tree read as a device tree** — held to the whole case list, red. → Task 2,
    `the_duckdb_tree_is_no_device_tree`.
 5. **A wrong-answer mark that outlives its fix** — a `wrong` row must still disagree with
@@ -217,11 +264,11 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
 
 **Files:**
 - Modify: `peacockdb-core/src/test_support/corpus_benchmark.rs` (`benchmark_case` :110, `measure` :175)
-- Modify: `peacockdb-core/src/test_support/corpus_gpu.rs` (`record_gpu_result` :88 → `pub(super)`)
+- Modify: `peacockdb-core/src/test_support/corpus_gpu.rs` (`record_gpu_result` :88 → `pub(crate)`)
 - Modify: `peacockdb-core/src/test_support/corpus_golden.rs` (`merged_cells` :316)
 - Modify: `peacockdb-core/src/test_support/mod.rs` (`CASE_TIMEOUT_ENV`)
 - Modify: `scripts/env/run-gpu.sh` (`run`: `-e PEACOCK_BENCH_CASE_TIMEOUT_S -e PCK_WRITE_GPU_RESULT`;
-  `pull`: also `testdata/goldens/*/gpu-result*.txt`), `scripts/env/tests/test_gpu.py`
+  `pull`: also `testdata/goldens/*/gpu-result*.txt`), `scripts/env/tests/test_run_gpu.py`
 - Test: `peacockdb-core/src/test_support/corpus_golden/tests.rs` (or the module's existing tests file),
   `peacockdb-core/src/test_support/benchmark_section` tests
 
@@ -247,10 +294,10 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
   (`timeout_record(1800, &p)` starts `status=failed reason=timeout: the case ran past 1800 s` and ends with the
   five keys, so `device_tree_problem`'s failed-record branch accepts it — assert by running the
   same check bench-rows' reader applies: `parse_benchmark_section(body) == None`).
-  In `test_gpu.py`: `test_run_passes_the_case_timeout_and_the_answer_switch`,
+  In `test_run_gpu.py`: `test_run_passes_the_case_timeout_and_the_answer_switch`,
   `test_pull_brings_the_gpu_answers`.
 - [ ] **Step 2:** `cargo test -p peacockdb-core --features rust-only --lib -- corpus_golden benchmark_section`
-  and `python3 scripts/env/tests/test_gpu.py` → FAIL.
+  and `python3 scripts/env/tests/test_run_gpu.py` → FAIL.
 - [ ] **Step 3: implement.** `measure` returns the chosen run's batches beside `(body, rows)`; the
   recording happens only on `CaseOutcome::Measured`, after the section is written. The watchdog is
   started in `benchmark_case` after the provenance is read and before `measure`; it holds the
@@ -276,16 +323,20 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
 
 - [ ] **Step 1: failing tests** in `test_cpu_corpus.rs`:
   `every_sf40_device_answer_meets_duckdb` — for each row of
-  `parse_device_cases(device_cases_path("h100-80gb-hbm3"))`: `ok` → `Ok`; `wrong` → `Err`;
-  `skipped` → no section expected; all failures collected and reported together.
+  `parse_device_cases(&std::fs::read_to_string(device_cases_path("h100-80gb-hbm3"))…)`: `ok` → `Ok`; `wrong` → `Err`;
+  `skipped` → no section expected; all failures collected and reported together. When the tree
+  `testdata/benchmark-results/h100-80gb-hbm3/` exists and its `cases.csv` does not, it fails naming
+  the file; only with neither does it pass with nothing read (before Task 9). That judgment is a
+  pure `fn list_problem(tree_exists: bool, list_exists: bool) -> Option<String>`, tested directly:
+  `a_tree_without_its_list_is_refused`.
   `a_stale_wrong_mark_is_refused` — a row `tpch,40,q6,tp1_single,wrong,#NN` over a section pair
   that agrees → the check's message contains `"meets DuckDB"` and `"ok"` (the row judgment is a
   pure `fn row_problem(row: &DeviceCase, verdict: Option<Result<(), String>>) -> Option<String>`,
   tested directly). `an_ok_row_without_an_answer_is_refused` (no gpu-result section →
   message names `PCK_WRITE_GPU_RESULT`).
 - [ ] **Step 2:** `cargo test -p peacockdb-core --features rust-only --test test_cpu_corpus -- sf40 stale ok_row`
-  → FAIL (no `device_verdict`). Before Task 9 the H100's `cases.csv` does not exist: the test
-  reads no file and passes vacuously.
+  → FAIL (no `device_verdict`). Before Task 9 neither the H100 tree nor its `cases.csv` exists:
+  the test reads no file and passes.
 - [ ] **Step 3: implement.** **Step 4:** whole `test_cpu_corpus` → PASS (the sf1 `duckdb_gpu_*` cases
   unchanged). **Step 5: commit** `sf40-baseline: the H100's sf40 answers held to DuckDB's`.
 
@@ -342,23 +393,36 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
   owns this format. `threads` is DuckDB's `current_setting('threads')`.
   `--cases` with `--skip-verify` and `--answers` refused (exit 2). Golden verify stays for the
   minimal set only; a corpus run has no sf40 goldens and says so once.
+  `--build-only`: build `<ds>`'s database (import and the row-count check against the parquet),
+  then exit 0 without warming or timing any query; refused with `--cases`, `--answers` or
+  `--results` (exit 2).
 - Produces `bench-each.sh [--instance-id <id>] [--profile <name>] --cases <file> --mode <mode> [--within <csv>] --timeout <s> --records <dir> [--dir <i>]`;
-  `<vm options>` below are its `--instance-id`, `--profile` and `--dir`, passed on as given:
+  `<vm options>` below are its `--instance-id`, `--profile` and `--dir`, passed on as given to
+  `run-gpu.sh`; `<nebius options>` are `--instance-id` and `--profile` alone (`nebius.sh` has
+  no `--dir` and exits 64 on it):
   per `corpus_query_benchmark!` line of `--cases` (the main list) whose modes carry `<mode>`, in
   file order, and with `--within` only a query that has an `ok` or `wrong` row there, read
   through `device_cases.py` (tp4-sized: `--within` the H100 `cases.csv`, so a query skipped at
   tp1_single is not run): skip it if the local `testdata/benchmark-results/<slug>/<ds>.sf40/<mode>.benchmark.txt`
   holds its section (timed with this card, or `status=failed`); else
   `PCK_TEST_FILTER=bench_<ds>_sf40_<q>_<mode> PEACOCK_BENCH_RESUME=1 PEACOCK_BENCH_CASE_TIMEOUT_S=<s> PCK_WRITE_GPU_RESULT=1 run-gpu.sh <vm options> run bench`,
-  then `run-gpu.sh <vm options> pull`, move `testdata/calibration/records.tsv` to `<dir>/<ds>-<q>-<mode>.tsv`
-  and remove the host's copy (`run-tests.sh bench` refuses a record holding rows). A run exit ≠ 0
-  continues to the next query (the section says why). Exits 1 if any section is missing at the end.
+  then `run-gpu.sh <vm options> pull`, move `testdata/calibration/records.tsv` to
+  `<dir>/<ds>-<q>-<mode>.<attempt>.tsv` and remove the host's copy (`run-tests.sh bench` refuses a
+  record holding rows). `<attempt>` is 1 + the highest attempt already in `<dir>` for that case,
+  so a rerun never overwrites an earlier segment. **Before each case's run**, a non-empty host
+  record (`nebius.sh <nebius options> ssh 'test -s ~/peacock/<i>/testdata/calibration/records.tsv'`),
+  which a killed run (a preemption, the watcher) left behind, is pulled and set aside the same
+  way under the case it belongs to (its last `# case` line), then removed on the host. A run
+  exit ≠ 0 continues to the next query (the section says why). Exits 1 if any section is missing
+  at the end.
   `<slug>` is read from the first pulled section's `device=`.
 - Produces `join_records.py --record <seg>… --out <file>`: every segment `capture=none`, headings
   equal except `# run: allocator=`, whose lines must agree on every token but the free-memory one;
   the joined line gives that token as `<min>-<max>` (a token already `<a>-<b>`, a published joined
-  record that tp4-sized joins again, counts as both ends). A case's rows come from the last segment
-  holding it. Refuses (exit 1, nothing written) a heading that differs otherwise, naming the line.
+  record that tp4-sized joins again, counts as both ends). Segments are ordered by the attempt
+  number in their name (`<ds>-<q>-<mode>.<attempt>.tsv`; a name without one, a published joined
+  record, counts as attempt 0), never by argv or glob order; a case's rows come from its highest
+  attempt holding it. Refuses (exit 1, nothing written) a heading that differs otherwise, naming the line.
 - Produces `publish_record.sh --from <split dir> <device>/<ds>.sf<sf>…` on dev: uploads each
   `records.tsv` to `s3://calibration/<name>/<sha>.tsv` with `CALIBRATION_S3`, re-reads its sha,
   and rewrites its line in `testdata/calibration/records.sha256` (the code of
@@ -377,14 +441,21 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
   and `q9` `skipped` → results rows `q6`,`q1`, `status ok`); `test_answers_hold_one_table_per_query` (answers db tables `q1`,`q6`; `q1` row count
   = sf1's 4); `test_results_name_version_threads_host`; `test_tpcds_tables_from_the_parquet`
   (`--dataset tpcds` imports every `tpcds.sf1/*.parquet` stem); `test_answers_without_cases_is_2`;
+  `test_build_only_runs_no_query` (`--dataset tpcds --build-only` → the database exists, the row
+  counts are checked, no query timed; with `--cases` → 2);
   `test_default_run_is_unchanged` (no new flag → stdout's `=== results ===` table holds q6,q1,q3,q8).
   `test_bench_each.py` (fake `run-gpu.sh` on PATH writing sections and a record):
   `test_bench_each_runs_one_process_per_query`; `test_bench_each_resumes_and_sets_the_timeout`
   (env of each call); `test_bench_each_skips_a_failed_case_on_rerun`;
-  `test_bench_each_moves_each_record_aside`; `test_bench_each_takes_the_mode_s_lines_only`
+  `test_bench_each_moves_each_record_aside` (names `<ds>-<q>-<mode>.1.tsv`; a rerun of the case
+  writes `.2.tsv`, `.1.tsv` unchanged); `test_bench_each_sets_aside_a_record_a_killed_run_left`
+  (the fake host holds a non-empty record before the first case → it is pulled to that case's
+  next attempt, the host copy removed, then the run goes ahead); `test_bench_each_takes_the_mode_s_lines_only`
   (lines without `<mode>` are not run); `test_bench_each_within_narrows_the_queries` (a `--within`
   CSV whose `skipped` row's query is not run, whose `wrong` row's is).
   `test_join_records.py`: `test_join_takes_the_later_segment_of_a_case`;
+  `test_join_orders_segments_by_attempt_not_argv` (`q1.2.tsv` given before `q1.1.tsv`, and
+  `q1.10.tsv` beside `q1.9.tsv` → the higher attempt's rows win);
   `test_join_spans_the_free_memory`; `test_join_takes_a_joined_record`; `test_join_refuses_another_device`; `test_join_refuses_a_capture`.
   Options test: `test_cases_and_device_reach_the_passes` (fake ssh: the trace filter holds exactly
   the `ok` and `wrong` rows' test names, the `skipped` row's absent; `--record` paths under
@@ -401,7 +472,9 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
 
 **Files:**
 - Create: `peacockdb-core/src/test_support/duckdb_results.rs`, `…/duckdb_results/tests.rs`
-  (`mod duckdb_results;` and the `pub use` in `test_support/mod.rs`)
+  (`mod duckdb_results;` in `test_support/mod.rs`; no `pub use`: `DuckdbStatus`, `DuckdbRow` and
+  `DuckdbResults` are declared in `mod.rs`, `parse_duckdb_results` is a one-expression `pub fn`
+  there delegating to the module's `pub(crate)` one)
 - Create: `testdata/fixtures/duckdb-results.tsv` (its row in `testdata/fixtures/README.md`: the
   format's shared fixture; batching-report's Python reader is tested against it too)
 - Modify: `peacockdb-core/src/test_support/benchmark_report.rs`, `…/benchmark_report/tests.rs`
@@ -452,13 +525,13 @@ pub fn parse_duckdb_results(text: &str) -> DuckdbResults;   // panics naming the
 
 **Files:** none; detail file.
 
-- [ ] **Step 1: the staged install, on the CPU VM** (new-hosts Task 10 Step 2): `$C start`; on it,
-  `cd ~/peacockdb && git fetch && git checkout ENS-sf40-baseline && git pull --ff-only`, then the
-  `stage-install.sh` command in the 25.02 build image → exit 0; rsync `cpp/install/` to dev
-  `/build/peacock/sf40-baseline/install` with `-e "$C rsh"`. Record that the tip carries
-  pinned-loads (`git log --oneline | grep pinned-loads`) — Done-when 1.
+- [ ] **Step 1: the staged install, on the CPU VM** (new-hosts' CPU-VM build, Global
+  Constraints): `$C start`; `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`;
+  the `stage-install.sh` command in the 25.02 build image in `~/$D` → exit 0; rsync
+  `cpp/install/` to dev `/build/peacock/sf40-baseline/install` with `-e "$C rsh"`. Record that
+  the worktree carries pinned-loads (`git log --oneline | grep pinned-loads` on dev) — Done-when 1.
 - [ ] **Step 2: the tpcds database.** `$C ssh 'df -h /var/lib/peacock'` ≥ 30 GB free, else stall.
-  `$C ssh 'cd ~/peacockdb && benchmarks/duckdb_minimal.sh --dataset tpcds --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --runs 1 --skip-verify'`
+  `$C ssh "cd ~/$D && benchmarks/duckdb_minimal.sh --dataset tpcds --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --build-only"`
   → `row counts verified against the parquet`, `/var/lib/peacock/tpcds.sf40.duckdb` exists.
   `$C stop` → `STOPPED` (record the stop).
 
@@ -478,12 +551,19 @@ pub fn parse_duckdb_results(text: &str) -> DuckdbResults;   // panics naming the
 - [ ] **Step 3: run, tpch then tpcds** (foreground on dev; each call is one query's process):
   `scripts/env/bench-each.sh $VM --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --mode tp1_single --timeout 1800 --records <scratch>/records`
   (both datasets, tpch first, the file's order) → exits 0. Rerun after any interruption (VM stop,
-  ssh loss): it resumes. Expected: every candidate has a section; record per-query wall time and
-  the total in the detail file.
-- [ ] **Step 4: skips.** Each section matching `^status=failed`: query and reason (the text after
-  `reason=`) into the detail file's skip table.
+  ssh loss): it resumes, setting aside any record a killed run left. Expected: every candidate has
+  a section; record per-query wall time and the total in the detail file. Then `$H stop` →
+  `STOPPED`: Steps 4-8 are local.
+- [ ] **Step 4: skips, and the cache.** Each section matching `^status=failed`: query and reason
+  (the text after `reason=`) into the detail file's skip table; a `reason=pinned cache: …` one
+  is a defect (Global Constraints), explained in the detail file before Step 5, not a skip. Then
+  the cache: `f=testdata/benchmark-results/h100-80gb-hbm3/*.sf40/tp1_single.benchmark.txt;
+  grep -h '^pinned_cache=' $f | grep -v '^pinned_cache=on '; grep -h '^prefill_files=0$' $f`
+  → nothing, else each section's query and value into the detail file's "Cache" section. That
+  section also gives, per dataset, the largest `resident`, the largest `prefill_bytes` with its
+  `prefill_us`, and the sum of `prefill_us` over the dataset's queries.
 - [ ] **Step 5: `cases.csv`.** Add to `benchmark.rs` `the_h100_list_is_the_lists_measured`:
-  candidates = the main list's lines carrying `tp1_single` (`macro_invocations(&case_list_path(), "corpus_query_benchmark!")`,
+  candidates = the main list's lines carrying `tp1_single` (`macro_invocations_in(CASE_LIST, "corpus_query_benchmark!")`,
   file order); rows = Task 1's `device_lines(candidates, H100_MODES, the tree's sections, the
   `wrong` rows' notes of the committed file)`; text = `render_device_cases`. Under
   `UPDATE_CANONICAL=1` it writes `device_cases_path("h100-80gb-hbm3")` (staged and renamed, as
@@ -502,28 +582,31 @@ pub fn parse_duckdb_results(text: &str) -> DuckdbResults;   // panics naming the
   → PASS, including `every_declared_case_has_a_section_in_the_tree`,
   `every_section_outside_h200_carries_batches_and_the_load`, `every_total_us_is_the_sum_of_the_time_us_beside_it`
   and `the_benchmark_report_matches_the_trees` over the new tree. `test_cpu_corpus -- sf40` fails until DuckDB's answers land (Task 11): do not
-  commit before then; leave the H100 running only for Task 10.
-- [ ] **Step 8:** `git add` the files above and keep them staged for Task 11's commit.
+  report a commit before then.
+- [ ] **Step 8:** the files above stay uncommitted in the worktree for Task 11's commit (no `git add`).
 
 ### Task 10: both Nsight passes on the H100, per dataset
 
 **Files:** Create `testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/{calls,loads,hbm}.tsv`.
 
 - [ ] **Step 1: cases per dataset.** `f=testdata/benchmark-results/h100-80gb-hbm3/cases.csv; { head -1 $f; grep '^tpch,' $f; } > <scratch>/tpch.csv` (and tpcds).
-- [ ] **Step 2: both passes**, per `<ds>`, with new-hosts' H100 arguments
+- [ ] **Step 2: both passes**, per `<ds>`. `$H start` first (the shipped install is still on the
+  H100's disk; `$G ship --install /build/peacock/sf40-baseline/install` again if `status` says the
+  VM was rebuilt). With new-hosts' H100 arguments
   (`--ssh "$H rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`):
   `scripts/calibration/fetch_record.sh h100-80gb-hbm3/<ds>.sf40`, then
   `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 scripts/create_nsys_profile.sh --cases <scratch>/<ds>.csv --device h100-80gb-hbm3 <H100 arguments>`
   → `the trace pass ran N tests` (N = the file's `ok` and `wrong` rows), `the call breakdown: … rows`,
   `the load breakdown: … rows` (pinned-loads), every counters case joined, `hbm.tsv` home.
   A trace pass longer than 3.5 h is split by halving the cases file and joining the two `calls.tsv`/
-  `loads.tsv` bodies under one preamble (record it).
+  `loads.tsv` bodies under one preamble (record it). After both datasets: `$H stop` → `STOPPED`.
 - [ ] **Step 3:** move `testdata/calibration/{calls,loads,hbm}.tsv` to `…/h100-80gb-hbm3/<ds>.sf40/`;
-  `git checkout -- testdata/calibration/calls.tsv testdata/calibration/hbm.tsv` (the H200's).
+  `for f in calls hbm; do git show HEAD:testdata/calibration/$f.tsv > testdata/calibration/$f.tsv; done`
+  (the H200's, restored by a read, no git write).
   A case whose capture failed: its reason in the detail file. Captures stay on the host.
 - [ ] **Step 4: the load split, read.** In the detail file, per dataset: Σ `load_us`, Σ
   `host_read_us + h2d_us` against Σ `decompress_us + decode_us`, from `loads.tsv` — the spec's
-  "reading and copying against decoding". `$H stop` → `STOPPED`.
+  "reading and copying against decoding". The H100 is already stopped (Step 2).
 
 ### Task 11: DuckDB on 128 cores; the answers compared; tickets
 
@@ -531,8 +614,12 @@ pub fn parse_duckdb_results(text: &str) -> DuckdbResults;   // panics naming the
 `testdata/goldens/{tpch,tpcds}.sf40/duckdb-result.txt`; Modify the H100 `cases.csv` (`wrong`
 rows), `testdata/benchmark-report.html` (the DuckDB column); tickets.
 
-- [ ] **Step 1: timing and answers, per dataset** on the CPU VM (`cases.csv` copied over with the branch):
-  `$C ssh 'cd ~/peacockdb && git pull --ff-only && benchmarks/duckdb_minimal.sh --dataset <ds> --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --answers /var/lib/peacock/answers-<ds>.duckdb --results /tmp/duckdb-<ds>.tsv'`
+- [ ] **Step 1: timing and answers, per dataset** on the CPU VM. `$C start`;
+  `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`
+  (the worktree, uncommitted: Task 9's `cases.csv` and Task 6's script with it); then
+  `sha256sum testdata/benchmark-results/h100-80gb-hbm3/cases.csv` on dev equals
+  `$C ssh "sha256sum ~/$D/testdata/benchmark-results/h100-80gb-hbm3/cases.csv"`, else stop. Then
+  `$C ssh "cd ~/$D && benchmarks/duckdb_minimal.sh --dataset <ds> --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --answers /var/lib/peacock/answers-<ds>.duckdb --results /tmp/duckdb-<ds>.tsv"`
   → exit 0; `resident` 100.0 %, every `warm` `yes` (a `partial`/`NO` row is named in the detail
   file, not hidden); `threads=128` in the preamble. Copy both TSVs and answers dbs to dev
   (`rsync -e "$C rsh"`). `$C stop`.
@@ -541,7 +628,13 @@ rows), `testdata/benchmark-report.html` (the DuckDB column); tickets.
   `the_benchmark_report_matches_the_trees` under `UPDATE_CANONICAL=1` reads them through
   `parse_duckdb_results` and writes the page with its DuckDB column.
 - [ ] **Step 3: compare.** `cargo test -p peacockdb-core --features rust-only --test test_cpu_corpus -- every_sf40_device_answer_meets_duckdb`.
-  Each failing `ok` row: confirm by reading both sections, then a ticket in the milestone file
+  Each failing `ok` row: confirm by reading both sections. **Ties under LIMIT first:** where the
+  query ends `ORDER BY … LIMIT n` and the first difference lies among rows tied on the sort keys
+  at the limit's edge, the engines may each be right. Name the oracle's tie rule for that query
+  (its `duckdb_oracle`/`gpu_oracle` in the registry and what `duckdb_oracle.rs`'s comparison does
+  with ties) in the detail file. If the oracle should have accepted the tie, that is a ticket
+  against the oracle in `tickets/testinfra.md`, and the row stays `ok` only once the oracle is
+  fixed; it is never an operator ticket. Otherwise a ticket in the milestone file
   that owns the operator (Shared rules' header form, label naming the wrong answer, "sf40, H100,
   tp1_single", both sections' first difference), and its row's status set to `wrong`, note
   `#NN`, by hand. `the_h100_list_is_the_lists_measured` (no `UPDATE_CANONICAL`) → PASS: the writer
@@ -550,7 +643,9 @@ rows), `testdata/benchmark-report.html` (the DuckDB column); tickets.
   `python3 scripts/ticket_widget.py` only if the registry changed (it should not).
 - [ ] **Step 4: gates** (Global Constraints list) → all PASS. Commit Tasks 9-11's files:
   `sf40-baseline: H100 tp1_single and DuckDB on 128 cores at sf40, the H100 case list, the profiles`
-  (`testdata/benchmark-report.html` in the same commit).
+  (`testdata/benchmark-report.html` in the same commit). If a ticket was filed, `tickets.md`'s
+  per-file count, its total open count (`77 open tickets`, `:22`) and the next free number
+  (`currently <N>`, `:15`) are recounted.
 
 ### Task 12: `build-test.md` and the detail file
 
@@ -558,14 +653,20 @@ rows), `testdata/benchmark-report.html` (the DuckDB column); tickets.
 
 - [ ] **Step 1: `build-test.md`**, a section "sf40 baseline": the H100 `cases.csv` as the one
   ordered list (written from the tree by `the_h100_list_is_the_lists_measured`; `skipped` and
-  `wrong` rows; `device_cases.py` the scripts' reader); a device list's rows held to the main
+  `wrong` rows; `device_cases.py` the scripts' reader); the protocol note (the pinned host cache
+  prefilled once by each query's process, before any round, against DuckDB's warm buffer
+  manager; `prefill_*` reported apart); a device list's rows held to the main
   list; `duckdb.tsv`'s format and its owner reader; the page's DuckDB column; re-running the H100 side (Task 8 Step 1, Task 9 Steps 2-6,
   Task 10 commands, verbatim); the DuckDB side (Task 8 Step 2, Task 11 Steps 1-2); the sf40 answer
   check; `bench-each.sh`, `join_records.py`, `publish_record.sh`, the new `duckdb_minimal.sh`,
   `create_nsys_profile.sh` and `run-gpu.sh` options; "Benchmark data flow" gains the gpu-result and
   duckdb-result arrows at sf40; test counts recounted.
 - [ ] **Step 2: detail file:** the run commands as run, wall times, the skip table (query, reason),
-  wrong answers and tickets, warm verdicts, the load split, VM ids and their stops.
+  wrong answers and tickets, warm verdicts, the load split, the cache (Task 9 Step 4) and the
+  protocol note (Global Constraints), VM ids and their stops, and `## Suites`:
+  each suite this task ran and where. `benchmarks/tests/test_duckdb_minimal.py` is a new
+  directory no CI job runs yet (containers-only adds it to the image's script step); the new
+  `scripts/env/tests` suites likewise run on dev only until then. Say so there.
 - [ ] **Step 3:** `cargo test -p cost-report --test test_source_formatting` → PASS. Commit
   `sf40-baseline: build-test.md documents both sides of the sf40 baseline`.
 

@@ -16,15 +16,16 @@ uses is found by its inputs, not by a moving tag. `image.sh` adds a third tag,
 `:cudf-<v>-in-<hash12>`, where the hash covers the `peacockdb.inputs` label.
 `scripts/env/image-ref.sh` computes that tag from the tree and resolves it to a digest after the
 label check. So a branch that publishes images never moves what master's CI runs. The GPU job
-ships the staged install with `run-gpu.sh` and runs it in the run image. The old L40S runner and
-transfer scripts go.
+ships the staged install with `run-gpu.sh` and runs it in the run image. The old L40S runner
+(`nebius-test.sh`, `ci-ship.sh`) goes; `nebius-sync.sh` stays, cut down to the tree transfer that
+new-hosts' CPU-VM build and the wiki use.
 
 **Tech Stack:** bash, Docker (BuildKit, `docker buildx imagetools`), GitHub Actions (composite
 actions, `Swatinem/rust-cache`, `actions/cache`), Python 3 script tests (fakes on PATH, the
 `scripts/env/tests` harness), Rust guard tests in `cost-report/tests/test_source_formatting/`.
 
 **Spec:** [`containers-only.md`](containers-only.md). Branch `ENS-containers-only`, on the chain's
-previous task branch. Code base: master's engine plus containers' `docker/`, `scripts/env/`,
+previous task branch, `ENS-tp4-sized`; its PR targets that branch. Code base: master's engine plus containers' `docker/`, `scripts/env/`,
 `scripts/lib/{image-inputs,machine}.sh` (read with `git show origin/ENS-containers:<path>` until
 the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/nebius-sync.sh`,
 `scripts/nebius-test.sh`, `scripts/nebius/` (watcher, `check-actor.sh`, `ci-ship.sh`, `tests/`),
@@ -33,6 +34,16 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 ## Global Constraints
 
 
+- Developers never commit, push, or dispatch a workflow (prompts.md). A step that says *Commit
+  `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs. The coordinator's steps are every push, workflow dispatch and
+  reading of a CI run or its log. A CI failure reaches the developer as a failing test, with its signature.
+- **Count baseline** (spec item 1): the parent branch's last green PR run (`ENS-tp4-sized`), or,
+  when it has none, this branch's own first PR run before any job moves. Not master: the chain's
+  earlier tasks add tests. The coordinator records it in the detail file's `## Counts before`.
+- Hosts (build-test.md, Nebius host, host roles): nebius-gpu, the L40S, is the correctness host
+  and runs the L40S list only; the H100 is for sf40, benchmarks and Nsight.
 - **VM time is minimal** (the human's rule, 2026-11-03). A VM starts right before its first
   remote command and stops right after its last `pull`. It is never left up across a wait: a local
   build, CI, a review, the human. Binaries are built and staged first, and the H100 starts only
@@ -44,7 +55,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   the image and passed outside it is a finding: fix the image or ticket it. The one source touch is
   the text of `device_answer.rs`'s panic message, which names the deleted `cargo-cudf.sh`.
 - CI stays green at every commit of the branch, the cost-report job included, with the same case
-  counts per tier. Any count that moves is explained in the detail file.
+  counts per tier as the count baseline. Any count that moves is explained in the detail file.
 - `gpu-tests` keeps its actor allowlist (`check-actor.sh` on both actors), `environment: nebius-gpu`,
   `permissions: contents: read`, `concurrency: nebius-gpu`, the push-to-master/dispatch `if:`, and
   never runs on a pull_request.
@@ -54,7 +65,9 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `validate-large.yml`'s ssh-to-shad-gpu steps and their docs.
 - The per-worktree `CARGO_TARGET_DIR` rule stays: a build script bakes `CARGO_MANIFEST_DIR`.
   Never share a target dir across worktrees. The image's target dir is
-  `<worktree>/target-image-<cudf>`.
+  `<worktree>/target-img-<cudf>` (the name containers-rebase uses), and the image runs' home is
+  `<worktree>/.home-img`; both are gitignored (`/target-img-*/`, `/.home-img/`; Task 2 adds the
+  lines if the fork's `.gitignore` lacks them).
 - `docker/run-tests.sh` and `docker/run.Dockerfile` are not edited (run-image inputs). The only
   build-image inputs edited are those of Task 1, so one image publication serves the whole branch.
 - No secret value in any argv. Secrets reach a container as `-e NAME`, which reads the
@@ -98,7 +111,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Produces: `image_inputs_tag <tree> <build|run> <cudf>` → `cudf-<v>-in-<h>`, where `<h>` is the
   first 12 hex of `sha256` over `image_inputs` output (its lines as printed, newline-terminated).
 - Produces: `image.sh build` tags `:cudf-<v>`, `:cudf-<v>-in-<h>` (always), `:cudf-<v>-<commit>`
-  (clean tree). `image.sh push` pushes all three, under the same refusal rules.
+  (clean tree). `image.sh push [--moving]` pushes `:cudf-<v>-in-<h>` and `:cudf-<v>-<commit>`,
+  under the same refusal rules, and `:cudf-<v>` only with `--moving`. `images.yml` passes
+  `--moving` only when `github.ref` is the default branch's, so a dispatch from any other ref never
+  moves `:cudf-<v>`: `:cudf-<v>` moves only from master, and every earlier chain tree keeps passing
+  its label check.
 - Produces: **a build-only version** is one with a spec and no `DRIVER_MINIMUM_<v_>` in
   `pins.env`. `image.sh build run <v>` and `push run <v>` refuse it, exit 2, with one line naming
   `DRIVER_MINIMUM_25_10`.
@@ -123,10 +140,13 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     docker call. `test_build_adds_the_inputs_tag`: on both a dirty and a clean `Repo()`, the
     `-t` values include `…:cudf-25.02-in-<h>`, where `<h>` equals what
     `bash -c '. scripts/lib/image-inputs.sh; image_inputs_tag …'` prints.
-    `test_push_pushes_the_inputs_tag`.
+    `test_push_pushes_the_inputs_tag`. `test_push_leaves_the_moving_tag_without_moving`: `push`
+    without `--moving` pushes the inputs and commit tags and no bare `:cudf-25.02`; with it, all three.
   - `test_images_workflow.py`: `test_a_build_only_version_has_no_run_job`:
     `job()["strategy"]["matrix"]["exclude"] == [{"kind": "run", "cudf": v}]` for each build-only
     `v`. Update `test_all_runs_every_other_choice…` so `exclude` is not read as a matrix axis.
+    `test_only_the_default_branch_moves_the_tag`: the push step passes `--moving` only under a
+    condition on `github.ref` equal to the default branch's ref.
 - [ ] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
   → FAIL on the new tests only.
 - [ ] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
@@ -136,19 +156,21 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   → `0 failed`.
 - [ ] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
   Then, in `docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/h -v "$PWD:$PWD" -w "$PWD"
-  -e CARGO_TARGET_DIR="$PWD/target-image-25.10" <image>`, run `scripts/build.sh --configure
+  -e CARGO_TARGET_DIR="$PWD/target-img-25.10" <image>`, run `scripts/build.sh --configure
   --build --install --cudf_ROOT /opt/cudf --gcc-version 14`, then `cargo test --no-run -p
   peacockdb-core --lib` → both succeed. Record the image size in the detail file.
 - [ ] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
-- [ ] **Step 8: publish.** `images.yml` must be on master, because GitHub dispatches only the
-  default branch's workflows. If `gh workflow list --all | grep -w images.yml` finds nothing, stop,
-  `blocked(building)`, and ask the human to land this branch's `.github/workflows/images.yml` alone
-  on master, as a separate commit (approved in advance). Do not push to master. Then push the branch and run `gh workflow run images.yml --ref
+- [ ] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
+  only the default branch's workflows. If `gh workflow list --all | grep -w images.yml` finds
+  nothing, stop, `blocked(building)`, and ask the human to land this branch's
+  `.github/workflows/images.yml` alone on master, as a separate commit (approved in advance). Never
+  push to master. Then the coordinator pushes the branch and runs `gh workflow run images.yml --ref
   ENS-containers-only -f kind=all -f cudf=all`. Expect five jobs green: the build images for
-  25.02, 25.10 and 26.02, and the run images for 25.02 and 26.02. Then, for each, `docker buildx
-  imagetools inspect ghcr.io/asymptote-tech/peacockdb-<kind>:$(bash -c '. scripts/lib/image-inputs.sh;
-  image_inputs_tag . <kind> <v>')` → a digest. Record the five digests. This moves `:cudf-<v>`, so
-  trees before this commit fail the inputs check by name. That is expected.
+  25.02, 25.10 and 26.02, and the run images for 25.02 and 26.02. Then the developer, for each,
+  `docker buildx imagetools inspect ghcr.io/asymptote-tech/peacockdb-<kind>:$(bash -c '. scripts/lib/image-inputs.sh;
+  image_inputs_tag . <kind> <v>')` → a digest, and `docker buildx imagetools inspect
+  ghcr.io/asymptote-tech/peacockdb-<kind>:cudf-<v>` → the digest it had before the dispatch (the
+  branch did not move it). Record the five digests.
 
 ### Task 2: `build-test.sh` is the image command; `image-ref.sh`
 
@@ -165,6 +187,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `peacockdb-core/src/test_support/device_answer.rs:62` (message text: "build in the build image,
   which sets CUDF_ROOT (scripts/build-test.sh)")
 - Delete: `scripts/cargo-cudf.sh`
+- Modify: `.gitignore` (`/target-img-*/`, `/.home-img/`, if absent)
 
 **Interfaces:**
 - Consumes: Task 1's `image_inputs_tag`; `image_inputs_differ` (`scripts/lib/image-inputs.sh`).
@@ -186,10 +209,16 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - **Outside the image** (no `PEACOCK_IN_IMAGE=1`), it re-execs itself:
     `docker run --rm --user <uid>:<gid> -v <root>:<root>`, plus `-v <git common dir>:<same>` when
     it lies outside `<root>`, `-w <root> -e PEACOCK_IN_IMAGE=1 -e PEACOCK_CUDF=<v> -e
-    HOME=/tmp/home -e CARGO_TARGET_DIR=<root>/target-image-<v> -v <registry>:/opt/rust/cargo/registry
+    HOME=/tmp/home -e CARGO_TARGET_DIR=<root>/target-img-<v> -v <registry>:/opt/rust/cargo/registry
     -v <ccache>:/tmp/ccache`, then `-e NAME` for each of `RUSTFLAGS CMAKE_GENERATOR LDFLAGS
     LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH` that is set and
     each `--pass-env NAME`, then `<image> scripts/build-test.sh <args>`.
+  - When `RUNNER_TEMP` is set (a CI runner), it is mounted at its own path (`-v
+    $RUNNER_TEMP:$RUNNER_TEMP`) and passed (`-e RUNNER_TEMP`), so cost-report's `--md`/`--html
+    "$RUNNER_TEMP/…"` files land where the later github-script steps read them.
+    `$GITHUB_OUTPUT`, `$GITHUB_ENV` and `$GITHUB_STEP_SUMMARY` are never mounted: a step writes
+    them on the runner, redirecting the wrapped command's stdout (`scripts/build-test.sh -- <cmd>
+    >> "$GITHUB_OUTPUT"`).
   - `<registry>` = `${PEACOCK_CARGO_REGISTRY:-${XDG_CACHE_HOME:-$HOME/.cache}/peacock/cargo-registry}`,
     and `<ccache>` = `${PEACOCK_CCACHE_DIR:-…/peacock/ccache-<v>}`; both are created if missing.
   - A caller's `CARGO_TARGET_DIR` outside `<root>` is refused with exit 2.
@@ -226,7 +255,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     - `test_runs_in_the_image_as_the_caller` (`--user <uid>:<gid>`, `-v <root>:<root>`, `-w
       <root>`, `PEACOCK_IN_IMAGE=1`, image = `$PEACOCK_BUILD_IMAGE`);
     - `test_target_dir_is_per_worktree_and_version` (`--cudf 26.02` →
-      `CARGO_TARGET_DIR=<root>/target-image-26.02`; `CARGO_TARGET_DIR=/elsewhere` → exit 2);
+      `CARGO_TARGET_DIR=<root>/target-img-26.02`; `CARGO_TARGET_DIR=/elsewhere` → exit 2);
     - `test_worktree_mounts_its_git_dir` (a `git worktree add` tree → the common dir mounted);
     - `test_pass_env_never_puts_a_value_in_argv` (`AWS_SECRET_ACCESS_KEY=s3cr3t`, `--pass-env
       AWS_SECRET_ACCESS_KEY` → `-e AWS_SECRET_ACCESS_KEY` in argv, `s3cr3t` in none);
@@ -238,7 +267,9 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     - `test_removed_flags_name_their_replacement` (`--host x`, `--push-goldens`, `--gcc-version
       12`);
     - `test_run_runs_every_target_after_a_failure`;
-    - `test_command_form_passes_the_exit_code` (`-- false` → 1).
+    - `test_command_form_passes_the_exit_code` (`-- false` → 1);
+    - `test_runner_temp_is_mounted_when_set` (`RUNNER_TEMP=<tmp>` → `-v <tmp>:<tmp>` and `-e
+      RUNNER_TEMP` in argv; unset → neither).
 - [ ] **Step 2: run** both files → FAIL (no script).
 - [ ] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
   runners.rs, replace `build_test_gpu_lib()` with `container_gpu_lib()`. It returns the staged
@@ -274,37 +305,54 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
      cpp-build.
 - Produces: `ci_images.rs` with `IN_IMAGE_JOBS: &[(&str, &str)]` (workflow, job). Each job listed
   uses `./.github/actions/build-image`, has no `container:`, and none of its lines contain `conda
-  install`, `pip install`, `rapidsai/` or `dtolnay/rust-toolchain`. This task lists
-  `pipeline.yml` `cost-report` and `s3-datasets`.
+  install`, `pip install`, `rapidsai/` or `dtolnay/rust-toolchain`. In a listed job, every `run:`
+  line that invokes `cargo`, `ctest`, `python3` or a `testdata/` script starts its command with
+  `scripts/build-test.sh`, unless the line is in `RUNNER_SIDE: &[(&str, &str, &str)]` (job, line
+  prefix, reason). Every `$NAME` a wrapped command's arguments name is `RUNNER_TEMP` or a
+  checkout path (both mounted); `GITHUB_OUTPUT`, `GITHUB_ENV` and `GITHUB_STEP_SUMMARY` appear only
+  as the runner shell's redirect after the wrapped command. This task lists `pipeline.yml`
+  `cost-report` and `s3-datasets`.
 
-- [ ] **Step 1: counts before.** Run `id=$(gh run list --workflow pipeline.yml --branch master
-  --status success -L1 --json databaseId -q '.[0].databaseId'); gh run view $id --log >
-  <scratch>/master.log`. Save, per job, the lines matching `test result:`, `\[  PASSED  \]`
-  and the Python harness's summary, to the detail file `## Counts on master`.
-- [ ] **Step 2: failing test** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
-  Interfaces). Run `scripts/build-test.sh -- cargo test -p cost-report --test
+- [ ] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
+  run list --workflow pipeline.yml --branch ENS-tp4-sized --event pull_request --status success -L1
+  --json databaseId -q '.[0].databaseId'); gh run view $id --log > <scratch>/before.log` (this
+  branch's own first PR run, before Step 3, if the parent has none). Save, per job, the lines
+  matching `test result:`, `\[  PASSED  \]` and the Python harness's summary, to the detail file
+  `## Counts before`, naming the run.
+- [ ] **Step 2: failing tests** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
+  Interfaces), and its doctored-workflow cases: `a_bare_cargo_line_in_a_listed_job_is_refused`
+  (a `cost-report`-shaped job with `run: cargo test -p cost-report` → refused, naming the job and
+  line; the same line in `RUNNER_SIDE` → accepted) and `a_wrapped_command_writing_an_unmounted_path_is_refused`
+  (`scripts/build-test.sh -- cargo run -p cost-report -- --md "$GITHUB_OUTPUT"` → refused;
+  `--md "$RUNNER_TEMP/r.md"` and `scripts/build-test.sh -- … >> "$GITHUB_OUTPUT"` → accepted). Run `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting ci_images` → FAIL (the action is absent; cost-report still has
   `dtolnay`).
 - [ ] **Step 3: move the jobs.**
   - `cost-report`: after checkout (fetch-depth 0), use the action with `cudf: "25.02"`, then
     Swatinem with `shared-key: rust-cost-report-image` and `workspaces: ". ->
-    target-image-25.02"`. Every `python3 …`/`cargo …` line becomes `scripts/build-test.sh -- <same
+    target-img-25.02"`. Every `python3 …`/`cargo …` line becomes `scripts/build-test.sh -- <same
     command>`, and each self-heal `pip install` line goes. The `"Generate report"` and
     cost-regression steps add `--pass-env` for each env var they set (`REPORT_SHA PAGES_URL
     GITHUB_REPOSITORY BASE_SHA …`, as the step lists them).
   - The nebius script step: the Python tests run in the image, and `shellcheck` stays on the
     runner. It is a linter over the scripts, not project code, and the runner has it. Say so in
-    the step's comment.
+    the step's comment and in its `RUNNER_SIDE` entry.
+  - `$GITHUB_OUTPUT` writes (master's `pipeline.yml:814`) stay on the runner, as the wrapped
+    command's redirected stdout; the `$RUNNER_TEMP` report files go through Task 2's mount.
   - Add the step "Image and run script tests":
     `scripts/build-test.sh -- python3 <f>` for each `scripts/env/tests/test_*.py`, except a
     named list `needs_docker=(test_image_any_user.py test_run_image.py test_run_tests.py)`. Each
-    name on that list must exist, as the exec-model step's `elsewhere` list does.
+    name on that list must exist, as the exec-model step's `elsewhere` list does. The same step
+    runs each `benchmarks/tests/test_*.py` (sf40-baseline's `test_duckdb_minimal.py` among them;
+    the image has duckdb), so no script suite is left without a CI job.
   - `s3-datasets`: use the action, then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID
     --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py --endpoint …`. Its
     fork guard and `exit 0` on missing keys stay on the runner.
-- [ ] **Step 4: run** the guard locally → PASS. Push. On the branch's PR run, `cost-report` and
-  `s3-datasets` are green. Diff the counts against Step 1: they should be identical. Explain any
-  that moved, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first suspect.
+- [ ] **Step 4: run** the guard locally → PASS. Then (coordinator) push; on the branch's PR run,
+  `cost-report` and `s3-datasets` are green, and the counts equal Step 1's baseline, plus the
+  `benchmarks/tests` suites now run. The coordinator hands any red job or moved count to the
+  developer as a failing test, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first
+  suspect for a count; the developer explains it in the detail file.
 - [ ] **Step 5: commit** `containers-only: cost-report and s3-datasets run in the build image`.
 
 ### Task 4: `dataset-matrix` in the image, legs 25.02 and 25.10 (#129 a)
@@ -313,7 +361,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Modify: `.github/workflows/pipeline.yml:87–305`, `.github/actions/cpp-build/action.yml`
 - Modify: `cost-report/tests/test_source_formatting/ci_images.rs`, `ci_coverage.rs:400–408`
   (doc comment naming #129)
-- Modify: `llm-wiki/tickets/testinfra.md` (#129), `llm-wiki/tickets.md` (index line 36),
+- Modify: `llm-wiki/tickets/testinfra.md` (#129), `llm-wiki/tickets.md` (index line 36, the
+  "N open tickets" total at :22),
   `llm-wiki/archive/archived-tickets.md` (Done), every place in `llm-wiki/` naming the 26.02 CI leg
   (`grep -rn '26\.02' llm-wiki/build-test.md | grep -i 'ci\|leg\|matrix'`)
 
@@ -344,7 +393,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - [ ] **Step 4: move the job.** Remove `container:`, `Install git`, `dtolnay` and the DuckDB curl.
   Checkout keeps `submodules: recursive`. Use the action with `cudf: ${{ matrix.cudf }}` and the
   cpp-build action. Swatinem gets `shared-key: rust-image-${{ matrix.cudf }}` and
-  `workspaces: ". -> target-image-${{ matrix.cudf }}"`. Every `ctest`/`cargo`/`python3`/
+  `workspaces: ". -> target-img-${{ matrix.cudf }}"`. Every `ctest`/`cargo`/`python3`/
   `testdata/…` line becomes `scripts/build-test.sh -- <same command>`, and the `pip install`
   self-heals go. Job env keeps `CMAKE_GENERATOR` and `RUSTFLAGS`; the step env loses
   `CUDF_ROOT: /opt/conda` and `LD_LIBRARY_PATH: /opt/conda/lib`. Every comment that names the
@@ -352,13 +401,15 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   per leg, and a target dir per leg.
 - [ ] **Step 5: #129.** Close it the way `tickets.md` line 17 says. Its text records that the
   second leg is now `25.10` in `peacockdb-build:cudf-25.10` and that (b) was closed earlier.
-  Update `testinfra.md`'s Contents and count, and the index line. Update `build-test.md`'s CI
+  Update `testinfra.md`'s Contents and count, the index line, and `tickets.md`'s open-ticket
+  total (line 22, one fewer). Update `build-test.md`'s CI
   section and every other line that names a 26.02 CI leg to 25.10. The 26.02 images stay for
   developer and device use.
 - [ ] **Step 6: run** `scripts/build-test.sh -- cargo test -p cost-report --test
-  test_source_formatting` → PASS. Push. Both legs are green on the PR. Their counts per step
-  equal master's 25.02 leg, and the 25.10 leg's equal master's "26.02" leg; explain any that
-  moved. `Generate SF-1` logs `generate_pbench.sh --check` passing.
+  test_source_formatting` → PASS. Then (coordinator) push; both legs are green on the PR, their
+  counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
+  "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
+  step reaches the developer as a failing test; the developer explains it in the detail file.
 - [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
@@ -368,14 +419,17 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Test: `scripts/env/tests/test_run_gpu.py` (new-hosts' file for `run-gpu.sh`; extend it)
 
 **Interfaces:**
-- Consumes: `run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <d>] | run list|<filter>|bench | pull` (new-hosts; with no VM option it targets nebius-gpu, the L40S),
+- Consumes: `run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <d>] | run list|filter|bench|<staged binary> | pull` (new-hosts, `filter` a mode word read with `PCK_TEST_FILTER`; query-fuser, any other word a staged binary; with no VM option it targets nebius-gpu, the L40S),
   exit codes 0, 1 run failed, 2 bad input/stale image/busy, 3 old driver, 4 restart needed;
   container `peacock-<instance>`, instance = the repo root's basename; it calls
   `scripts/nebius.sh` for the host.
 - Produces, each added only where the as-built script lacks it (the test fails first either way):
   - `PEACOCK_RUN_IMAGE=<ref>`: when it is set, `prepare` and `run` use that ref instead of
     `:cudf-<v>`, with the same inputs and driver checks.
-  - `prepare --no-sf40`: no sf40 fetch and no env file read. The L40S list reads none.
+  - `prepare --no-sf40`: no sf40 fetch and no env file read, and none of the Nsight-only setup:
+    no `/opt/cudf` copy to `~/peacock/cudf-<v>/` and no profiling-counters setting (so no exit 4
+    from it). The L40S list reads none of them. This changes new-hosts' `run-gpu.sh prepare`; with
+    the flag absent, `prepare` is as new-hosts left it.
   - `ship`: each rsync is retried 5 times with pauses of attempt × 15 s, using
     `--partial-dir=.rsync-partial --compress-choice=zstd --compress-level=3 --checksum --timeout=120`.
     `cpp/install/lib`, `cpp/install/bin`, `cpp/install/rust-tests` and testdata go as four
@@ -388,6 +442,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
 - [ ] **Step 1: failing tests**: `test_run_uses_the_given_run_image`,
   `test_prepare_no_sf40_reads_no_env_file` (no env read from stdin, no `fetch-sf40.sh` call),
+  `test_prepare_no_sf40_skips_the_nsight_setup` (counters admin-only on the fake host → exit 0, no
+  `peacock-profiling.conf` written, no `/opt/cudf` copy),
   `test_ship_retries_a_failed_stream_and_resumes` (fake rsync fails twice, then passes → exit 0,
   3 calls with `--partial-dir`), `test_ship_gives_up_after_five` (exit 1, stderr names the
   stream), `test_status_reports_running_then_exit`, `test_detached_run_returns_while_running`.
@@ -402,12 +458,21 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
 **Files:**
 - Modify: `.github/workflows/pipeline.yml:310–563`, `scripts/env/stage-install.sh`
-- Modify: `cost-report/tests/test_source_formatting/runners.rs` (`GPU_HOST_TEST` →
-  `RUN_TESTS = "docker/run-tests.sh"`, the staging list from `stage-install.sh`, the run step),
+- Modify: `cost-report/tests/test_source_formatting/runners.rs` (`NEBIUS_TEST`, new-hosts' name
+  for the old `GPU_HOST_TEST` → `RUN_TESTS = "docker/run-tests.sh"`, the staging list from
+  `stage-install.sh`, the run step),
   `ci_coverage.rs:32–35, 556–578` (F5 reads stage-install.sh), `ci_images.rs`
-- Delete: `scripts/nebius-test.sh`, `scripts/nebius-sync.sh`, `scripts/nebius/ci-ship.sh`, and
-  their tests under `scripts/nebius/tests/` (`test_ci_ship.py` and the nebius-test one)
-- Modify: the cost-report nebius-script step's `shellcheck` list (drop the three deleted files,
+- Delete: `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh`, and their tests under
+  `scripts/nebius/tests/` (`test_ci_ship.py`, `test_nebius_test.py`)
+- Modify (kept, spec item 2's "reduced to what `run-gpu.sh` lacks"): `scripts/nebius-sync.sh`
+  becomes the tree transfer alone, the uncommitted workspace to a VM, which new-hosts' CPU-VM
+  build and the wiki's recipes use. Its sf1 generation goes (it sourced the conda
+  `peacock-env.sh`; sf1 on a VM now comes from `run-gpu.sh prepare` or `bootstrap-vm.sh`);
+  `--no-data` stays accepted, a no-op, so every caller keeps working. new-hosts'
+  `test_sync_passes_the_instance_through` and `test_sync_no_data_skips_generation` stay and
+  pass; a new `test_sync_never_generates_data` (no `generate_testdata` in any recorded ssh, with
+  or without `--no-data`) replaces any test of the old default
+- Modify: the cost-report nebius-script step's `shellcheck` list (drop the two deleted files,
   add `scripts/build-test.sh scripts/env/run-gpu.sh scripts/env/image-ref.sh scripts/env/stage-install.sh`)
 
 **Interfaces:**
@@ -432,7 +497,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
       || echo …`.
 - Produces: `cpp-build-2502`:
   1. the action with `cudf: "25.02"`;
-  2. Swatinem (`shared-key: rust-gpu-build-image`, `workspaces: ". -> target-image-25.02"`);
+  2. Swatinem (`shared-key: rust-gpu-build-image`, `workspaces: ". -> target-img-25.02"`);
   3. step `Build and stage rust GPU test binaries`:
      `scripts/build-test.sh --gpu --build --no-release-bench`;
   4. pack and upload as today.
@@ -460,22 +525,31 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
   Run → FAIL.
 - [ ] **Step 2: implement** the pipeline, the `stage-install.sh` flag, the guard readers and
-  the deletions. Then `grep -rn 'nebius-test\.sh\|nebius-sync\.sh\|ci-ship\.sh\|peacock-env\.sh\|miniforge'
-  --exclude-dir=archive --exclude-dir=tasks .` → only shad-gpu's files and their docs.
+  the deletions. Then `grep -rn 'nebius-test\.sh\|ci-ship\.sh\|peacock-env\.sh\|miniforge'
+  --exclude-dir=archive --exclude-dir=tasks .` → only shad-gpu's files and their docs; `grep -n
+  'generate_testdata\|peacock-env' scripts/nebius-sync.sh` → nothing.
 - [ ] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Run `python3` on each `scripts/nebius/tests/test_*.py` →
   `0 failed`.
-- [ ] **Step 4: commit, push; the PR is green.** `cpp-build-2502` uploads an artifact that holds
-  `lib/libpeacock_gpu.so`, `bin/peacock_*_tests` and the four `rust-tests/` files.
-- [ ] **Step 5: device run through CI.** Run `gh workflow run pipeline.yml --ref
-  ENS-containers-only`; the dispatching actor must be in `GPU_ALLOWED_ACTORS`. Watch with `gh run
-  watch`. Pass means `gpu-tests` green and its log shows the run image's digest, `run-tests.sh
-  list: green`, no `miniforge`, and per-binary counts equal master's last green `gpu-tests`
-  (`gh run list --workflow pipeline.yml --branch master --event push --status success`).
-  Explain any difference. Record wall times for prepare, ship and run, and `df -h /` on the VM
-  (`scripts/nebius.sh ssh 'df -h /'` while it is up, or in the job log). Pass also means the job
-  stopped the VM, or the watcher did.
-- [ ] **Step 6: commit** any fix with its failing test first:
+- [ ] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
+  artifact that holds `lib/libpeacock_gpu.so`, `bin/peacock_*_tests` and the four `rust-tests/`
+  files.
+- [ ] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
+  off: `scripts/nebius.sh start`; `scripts/nebius.sh ssh 'df -h /'` (below 10 GB free: stop, an
+  obstacle in the detail file, build-test.md "Disk"); `timeout 2400 scripts/env/run-gpu.sh prepare
+  --no-sf40` → exit 0 (Docker, the toolkit, sf1 and the run image in place). An exit 4 is handled
+  by `scripts/nebius.sh stop --force && scripts/nebius.sh start` and a second `prepare --no-sf40`.
+  `scripts/nebius.sh ssh 'df -h /'` again; record both, the wall time and what the run image and
+  sf1 took; `scripts/nebius.sh stop`.
+- [ ] **Step 6: device run through CI (coordinator).** The coordinator runs `gh workflow run
+  pipeline.yml --ref ENS-containers-only` (its actor is in `GPU_ALLOWED_ACTORS`) and watches the
+  run. Pass means `gpu-tests` green and its log shows the run image's digest, `run-tests.sh
+  list: green`, no `miniforge`, and per-binary counts equal the count baseline's `gpu-tests`, or
+  master's last green `gpu-tests` when the baseline holds none. The coordinator records wall
+  times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
+  count to the developer as a failing test. Pass also means the job stopped the VM, or the
+  watcher did.
+- [ ] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job
@@ -508,8 +582,9 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     image).
 - [ ] **Step 3: run** the guard → PASS.
 - [ ] **Step 4: live.**
-  - Run `gh workflow run exec-model-corpus.yml --ref ENS-containers-only -f filter=q1`. Pass
-    means three shards green, each running ≥ 1 test.
+  - (coordinator) `gh workflow run exec-model-corpus.yml --ref ENS-containers-only -f filter=q1`.
+    Pass means three shards green, each running ≥ 1 test; a red shard reaches the developer as a
+    failing test.
   - validate-large dispatches only against shad-gpu, which is down. Prove its S3 step on dev
     instead: `set -a; . ~/.config/peacock/peacock.env; set +a; scripts/build-test.sh --pass-env
     AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py
@@ -531,13 +606,13 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   machine installs Docker by hand; the wiki says so in one line. No script is reduced to a
   Docker installer, since both installs already exist.
 
-- [ ] **Step 1:** `git rm` the five files.
+- [ ] **Step 1:** delete the five files (`rm`; the coordinator stages the deletions).
 - [ ] **Step 2:** run the grep → empty outside `llm-wiki/archive/` and `llm-wiki/tasks/`. Run
   `grep -rn 'conda install\|miniforge\|rapids-cuda-12.2\|envs/rapids' --exclude-dir=archive
   --exclude-dir=tasks . | grep -v 'third_party/'` → only shad-gpu's files (`build-test-shadgpu.sh`,
   `lib/shadgpu-env.sh`, `setup-glibc.sh`) and the shad-gpu wiki section.
-- [ ] **Step 3:** push; the PR is green.
-- [ ] **Step 4: commit** `containers-only: the conda installers and machine-setup scripts go`.
+- [ ] **Step 3: commit** `containers-only: the conda installers and machine-setup scripts go`;
+  (coordinator) push; the PR is green.
 
 ### Task 9: the wiki describes one path
 
@@ -550,17 +625,22 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - "Remote hosts": verda builds and runs `build-test.sh` on itself; no `--host`;
   - "Datasets": `generate_testdata.sh` in the image;
   - shad-gpu's section says it is the one exception: no Docker.
-- Modify: `llm-wiki/prompts.md` (line 192: the verda dispatch rule; lines 376–381: the GPU step
-  bracket becomes `scripts/nebius.sh start` → `scripts/build-test.sh --gpu --build` →
+- Modify: `llm-wiki/prompts.md` (line 192: the verda dispatch rule; lines 376–381: the L40S
+  bracket builds first, then starts the VM: `scripts/build-test.sh --gpu --build` (local, in
+  the build image, the L40S stopped) → `scripts/nebius.sh start` →
   `scripts/env/run-gpu.sh ship` → `run --detach list`, polled with `status` →
-  `scripts/nebius.sh stop`), `.claude/agents/*.md` wherever they name a removed path,
+  `scripts/nebius.sh stop`; the host roles and the H100 bracket new-hosts wrote beside it stay:
+  nebius-gpu runs the L40S list only, the H100 sf40, benchmarks and Nsight, nebius-cpu128
+  DuckDB and the H100's staged install (binaries for H100 runs are built on the CPU VM; local
+  and verda builds stay for development), the CPU-VM build through `nebius-sync.sh`),
+  `.claude/agents/*.md` wherever they name a removed path,
   `llm-wiki/architecture.md` if it names one
 
 **Interfaces:**
 - Produces: the detail file's `## Wiki commands run`: every command in the edited sections,
   with the host it ran on and its exit code.
 
-- [ ] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|nebius-sync\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
+- [ ] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
   llm-wiki/*.md .claude/agents/` → the list to rewrite. Rewrite it in short sentences
   (prompts.md "Shared rules"). Name the CI-only 25.10 image once in "Images", with "no run image".
 - [ ] **Step 2: run every command once on dev** in a fresh worktree:
@@ -574,12 +654,14 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
   Then, with the sandbox off:
   - `scripts/nebius.sh start`;
-  - `scripts/env/run-gpu.sh prepare --no-sf40`;
+  - `scripts/env/run-gpu.sh prepare --no-sf40` (Task 6 Step 5 ran it first; this rerun is a no-op);
   - `ship`;
   - `run --detach list`;
   - `status` until it exits 0;
   - `scripts/nebius.sh stop`.
 
+  The CPU-VM build (`build-test.md`, "Nebius host", "The CPU-VM build") runs once as written,
+  the CPU VM up only for it, over the cut-down `nebius-sync.sh`.
   Every command named in nebius-h100's section runs on the H100 the same way, with
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu`, as
   new-hosts' section words them. Record each in `## Wiki commands run`. A command that fails is
@@ -594,7 +676,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - **Spec coverage.**
   - Done-when 1 (CI in the image, 25.10 leg, images.yml, label check, no conda): Tasks 1, 3, 4
     and 7.
-  - Green with counts: Steps 3.1/3.4, 4.6, 6.5 and 7.4.
+  - Green with counts: Steps 3.1/3.4, 4.6, 6.6 and 7.4, against the count baseline.
   - Done-when 2 (L40S through `run-gpu.sh`, old scripts deleted, guard follows): Tasks 5 and 6.
   - Done-when 3 (one command, `cargo-cudf.sh` gone, per-worktree target dir): Task 2.
   - Done-when 4 (deletions): Task 8.
@@ -602,5 +684,5 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - Done-when 6 (wiki): Task 9.
   - #129 (b) is already closed (`testinfra.md`). Task 4 records that and changes no comment.
 - **Interfaces.** These names are used the same way throughout: `image_inputs_tag`,
-  `image-ref.sh`, `PEACOCK_BUILD_IMAGE`/`PEACOCK_RUN_IMAGE`/`PEACOCK_CUDF`, `target-image-<v>`,
+  `image-ref.sh`, `PEACOCK_BUILD_IMAGE`/`PEACOCK_RUN_IMAGE`/`PEACOCK_CUDF`, `target-img-<v>`,
   `IN_IMAGE_JOBS`/`HOST_JOBS`, `RUN_TESTS`, `--no-release-bench` and `--no-sf40`.

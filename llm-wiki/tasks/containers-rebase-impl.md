@@ -6,8 +6,9 @@
 `ENS-optimizer`, then containers' 16 commits replayed, each keeping rk00's authorship and date;
 case list regenerated from master's registry; the H200's case list converted once to
 `h200/cases.csv`, the per-device list format every chain L task reads; the agent-container
-launcher and the embeddings' S3 path removed; green on the fork's gates; the four images built
-from the fork by `images.yml` and pulled anonymously.
+launcher and the embeddings' S3 path removed; green on the fork's gates; the four published
+images shown to serve the fork (their input label equals the fork's; rebuilt by `images.yml`
+only if a label differs) and pulled anonymously.
 
 **Architecture:** git history surgery, no new behaviour. One cherry-pick (`-x`) and one
 `rebase --empty=keep`; every conflict resolved by hand, amended into the commit it belongs to.
@@ -41,6 +42,24 @@ replayed piece is: `git show origin/ENS-containers:llm-wiki/tasks/containers-imp
   `image-inputs.sh`, `images.yml`.
 - PR 192 and `ENS-containers` are left untouched; the fork is a new branch and a new PR.
 - Never open `~/.nebius/*` or any `*.pem`.
+- **Who does what** (`prompts.md`: the coordinator performs every git operation; the developer
+  never mutates git state; the coordinator cannot build). Every git command that writes
+  (`config`, `tag`, `switch`, `cherry-pick`, `rebase`, `add`, `checkout --ours`, `commit`,
+  `branch`, `push`) is the coordinator's, marked *(coordinator)*. The developer prepares: at each
+  stop the coordinator dispatches the developer, who resolves the conflicted files in the working
+  tree per Task 1's table (edits only, no `git add`), runs the compile check and reports green;
+  the coordinator then `git add`s and continues. Read-only git (`log`, `diff`, `show`,
+  `rev-list`) is anyone's. From Step 7a on, a step that says *Commit `<msg>`* (or "report a
+  checkpoint") means: the developer reports a checkpoint `<msg>` and stops; the coordinator
+  stages and commits, then dispatches the next step. In Task 1 that commit is not pushed:
+  **Task 1's only push is Step 10** (its lease is taken against `fork-board`). From Task 2 on,
+  the coordinator also pushes each checkpoint. A stop's compile green is also a checkpoint. Only the plan's last step is green. Dispatching a workflow and reading its run are
+  the coordinator's.
+- **The board commit survives the replay.** The coordinator commits `building` on
+  `ENS-containers-rebase` before dispatching (`prompts.md`, "Board protocol"). Task 1 tags that
+  tip `fork-board` before anything moves, builds the fork on a separate branch, and re-applies
+  the board commits on top of the 17 replayed ones. Nothing resets `ENS-containers-rebase` with
+  `switch -C`.
 
 ## Review focus
 
@@ -80,12 +99,14 @@ were blind; expect these, possibly a few more on `build-test.md`):
 
 | commit | file(s) | resolution |
 |---|---|---|
-| `02f6a4d8` (cherry-pick) | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (2 hunks: the `use` list at :9, the tests after `every_timed_case_is_enabled_on_a_device`) | keep master's `TimedDeclaration`/`LineDeclaration` inventories and its mask test; add 02f6a4d8's imports (`RECORD_PATH_ENV`, `append_records`, `macro_invocations`) and its tests |
+| `02f6a4d8` (cherry-pick) | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (2 hunks: the `use` list at :9, the tests after `every_timed_case_is_enabled_on_a_device`); `peacockdb-core/src/test_support/{corpus.rs,mod.rs}` (no conflict; edited) | keep master's `TimedDeclaration`/`LineDeclaration` inventories and master's `every_timed_case_is_enabled_on_a_device` and mask test; add 02f6a4d8's imports `RECORD_PATH_ENV`, `append_records` (both on master) and its tests. Master has no `macro_invocations` (`272819bd` deleted it; master reads the lists through the inventories), so the resolution adds its text form: `pub(crate) fn macro_invocations_in(text: &str, name: &str) -> Vec<Vec<String>>` in `corpus.rs` (the body of `02f6a4d8^`'s `macro_invocations` and `split_arguments` with the file read removed; a malformed line panics quoting the line) and the `pub fn` one-expression delegate in `test_support/mod.rs`, imported instead of `macro_invocations`. 02f6a4d8's `every_declared_case_has_a_section_in_the_tree` reads the list as `macro_invocations_in(CASE_LIST, "corpus_query_benchmark!")` with `const CASE_LIST: &str = include_str!("../common/corpus_benchmark_cases.inc");`, never `CARGO_MANIFEST_DIR` |
 | `462ed26b` spec | `llm-wiki/tasks/tasks.md` | HEAD's (master's board, chain L); containers' spec/impl/detail files come as they are |
 | `8437d6cd` building | `llm-wiki/tasks/tasks.md` | HEAD's; commit becomes empty, kept |
 | `f75cba7e` images' docs | `llm-wiki/build-test.md` | containers' "Images" section and `images.yml` CI line onto master's text |
 | `199bde5f` embeddings | `scripts/exec_model/README.md` | the one-line change ("which no CI job fetches") onto master's line |
 | `d2a0f88c` provenance | `peacockdb-core/src/test_support/device_answer.rs` | master's (`8f054f5c`, `272819bd`) changes plus containers' provenance |
+| `d2a0f88c` provenance | `benchmark.rs` `use` list (expected now: its context names `macro_invocations`) | the carried list plus `device_slug` and `Provenance`; `macro_invocations_in`, not `macro_invocations` |
+| `cb8c3637` registry-driven case list | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`: **stops twice**, in the `use` list and in the body (cb8c3637 deletes 02f6a4d8's three `let cases = macro_invocations(…)` lines, which the carry rewrote to `macro_invocations_in(CASE_LIST, …)`, and puts `the_benchmark_cases_follow_the_registry` in their place) | take **cb8c3637's side of the body whole** (its registry test in place of `every_declared_case_has_a_section_in_the_tree`'s rewritten lines; keeping "ours" truncates cb8c3637's new code); in the `use` list add `load_csv` and keep `macro_invocations_in`. **No compile check** at this stop: the tip calls `macro_invocations(&path, …)` (containers' `:460`, `:490`) and adds `case_list_path()` (`env!("CARGO_MANIFEST_DIR")`, `:379-381`). Not amended into rk00's commit: Step 7a ports it, in a developer commit, before anything else compiles the tip |
 
 Auto-merged in the trial and to be read once: `.github/workflows/pipeline.yml` (02f6a4d8's
 comment hunk at :384, far from dphyp's at :693), `scripts/build-test-shadgpu.sh`,
@@ -104,33 +125,72 @@ own wiki records. The trial cherry-pick stopped once (above) and the replay five
   replayed commits, in containers' order; `carried` = the new hash of `02f6a4d8` (named in later
   tasks and the detail file).
 
-- [ ] **Step 1: preconditions.** `git fetch origin`; `git cat-file -e
-  origin/master:llm-wiki/tasks/containers-rebase.md` succeeds (the chain L specs and board are on
-  master; if not, stop: `blocked(building)`, the human commits them). `git rev-list --count
+- [ ] **Step 1: preconditions.** *(coordinator)* `git fetch origin`. Then `git show
+  origin/master:llm-wiki/tasks/containers-rebase-impl.md | grep -q 'Step 7a'` succeeds (this
+  version of the plan is on master; if not, stop: `blocked(building)`, the human commits it). `git rev-list --count
   611b5dcd..origin/ENS-containers` = 16; `git merge-base origin/ENS-optimizer origin/ENS-containers`
   = `611b5dcd…`. Record both tips' hashes in the detail file.
-- [ ] **Step 2: workspace.** In the chain workspace: `git config rerere.enabled false`;
-  `git switch -C ENS-containers-rebase origin/master` (the workspace may already sit on that branch at master; `-C` resets it there either way).
-- [ ] **Step 3: carry.** `git cherry-pick -x 02f6a4d8`; resolve `benchmark.rs` as the table says;
-  `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens --no-run` compiles;
-  `git add` and `git cherry-pick --continue`. Tag it locally: `git tag fork-carried HEAD`.
-- [ ] **Step 4: replay.** `git branch -f containers-replay origin/ENS-containers`;
+- [ ] **Step 2: workspace (coordinator).** First, write the surgery state into
+  `.claude/ensemble/L.surgery` in the chain workspace. It is git-ignored (`.gitignore` ignores
+  `.claude/*`), so no switch, cherry-pick or detached HEAD touches it; the tracked detail file
+  is never written while HEAD is off the branch. It holds the step about to run, the tags
+  (`fork-board`, `fork-carried`) and their hashes, and the rebase's state; update it at every
+  stop and after Steps 3, 4, 5, 7a and 10. A restarted coordinator resumes from it (`tasks.md`
+  Chain L, Checkpoints). Then, in the chain workspace: `git config rerere.enabled false`;
+  `git tag -f fork-board ENS-containers-rebase` (the branch as the board left it: master plus the
+  coordinator's board commits, `git rev-list origin/master..fork-board`, possibly none);
+  `git switch --detach origin/master`. The branch itself is not touched until Step 5.
+- [ ] **Step 3: carry (coordinator; the developer resolves).** `git cherry-pick -x 02f6a4d8`; the
+  developer resolves `benchmark.rs` as the table says and runs
+  `cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens --no-run` → compiles;
+  the coordinator `git add`s and `git cherry-pick --continue`, then `git tag -f fork-carried HEAD`.
+- [ ] **Step 4: replay (coordinator; the developer resolves).** `git branch -f containers-replay origin/ENS-containers`;
   `git rebase --empty=keep --onto fork-carried 611b5dcd containers-replay`. At each stop:
-  - `llm-wiki/tasks/tasks.md`: `git checkout --ours -- llm-wiki/tasks/tasks.md` (in a rebase,
-    "ours" is the new base: master's board).
-  - Other files: by hand, per the table. A Rust file resolved → `cargo check --features rust-only
-    -p peacockdb-core --tests` before continuing.
+  - `llm-wiki/tasks/tasks.md` (coordinator): `git checkout --ours -- llm-wiki/tasks/tasks.md`
+    (in a rebase, "ours" is the new base: master's board).
+  - Other files: the developer, by hand, per the table. A Rust file resolved → the developer runs
+    `cargo check --features rust-only -p peacockdb-core --tests` and reports green before the
+    coordinator continues; at `cb8c3637`'s stop, if there is one, the table's no-compile rule.
   - If `git diff --cached --quiet` after `git add` (8437d6cd): `git commit --allow-empty -C
     REBASE_HEAD`, then `git rebase --continue`. `-C` keeps author, date and message.
-  - Note each stop (commit, files, how resolved) for the detail file as you go.
-- [ ] **Step 5:** `git branch -f ENS-containers-rebase containers-replay`;
-  `git switch ENS-containers-rebase`; `git branch -D containers-replay`.
-- [ ] **Step 6: a resolution found wrong later** (here or in Tasks 2-4) belongs in the commit it
-  resolved, not in a fix-up commit, and `rebase -i` is unavailable: re-run Steps 2–5 from
-  scratch (`git switch -C ENS-containers-rebase origin/master`) with the corrected resolution.
-  Cheap: six stops. Before Task 1 is pushed only; after the push, a wrong resolution is fixed in
-  a developer commit and named in the detail file.
-- [ ] **Step 7: compile in the fork's rust-only shape.** `cargo test --features rust-only -p
+  - The developer notes each stop (commit, files, how resolved) for the detail file as it goes.
+- [ ] **Step 5 (coordinator):** `git branch -f ENS-containers-rebase containers-replay`;
+  `git switch ENS-containers-rebase`; re-apply the board commits:
+  `git rev-list --reverse origin/master..fork-board | xargs -r git cherry-pick` (they touch
+  `tasks.md` and `containers-rebase-detail.md`; a conflict in `tasks.md` is resolved by the
+  board's ownership rule);
+  `git branch -D containers-replay`. Then fold `.claude/ensemble/L.surgery` into the detail
+  file as its `## Surgery` section (the file is back in the tree now), and keep updating that
+  section, with the ignored file, through Step 10. The fold is committed with Step 7a's
+  checkpoint.
+- [ ] **Step 6: a resolution found wrong before Step 10's push** belongs in the commit it
+  resolved, not in a fix-up commit, and `rebase -i` is unavailable: *(coordinator)* re-run
+  Steps 3–5 from `git switch --detach origin/master`, with the corrected resolution, and redo
+  Step 7a. Step 2's `fork-board` tag is kept, never re-taken from the replayed branch. Cheap: six
+  stops. Found after the push (Tasks 2–4): fixed in a developer commit, named in the detail file.
+- [ ] **Step 7a: the case list compiled in (developer).** Right after the
+  replay, before any other work on the tip. Failing first: `cargo check --features rust-only -p
+  peacockdb-core --tests` → FAIL in `benchmark.rs` only, on `macro_invocations` (not imported;
+  `case_list_path` itself compiles).
+  Then, per Task 3's Interfaces (the names every later chain L plan uses):
+  - every reader of the main list takes `CASE_LIST`: `declared_files(list: &str)` over
+    `macro_invocations_in(list, "corpus_query_benchmark!")`; `declared_files(CASE_LIST)` in
+    `every_declared_case_has_a_section_in_the_tree` and
+    `a_new_device_tree_is_held_to_every_declared_case`; the registry check's listed set from
+    `macro_invocations_in(CASE_LIST, …)`;
+  - `missing_case_problem`'s `h200/cases.inc` read (a testdata file, through `testdata_root()`)
+    becomes `declared_files(&std::fs::read_to_string(device.join(PREDATES_LIST))…)`;
+  - `the_benchmark_cases_follow_the_registry` compares the registry's text with `CASE_LIST`;
+    under `UPDATE_CANONICAL=1` it writes the text to
+    `source_file("tests/common/corpus_benchmark_cases.inc")` (staged `.inc.new`, renamed) and
+    passes; the next build recompiles the list. `case_list_path()` is deleted.
+  `cargo test -p cost-report --test test_source_formatting -- no_core_test_reads_the_checkout`
+  → PASS; `git grep -n CARGO_MANIFEST_DIR -- peacockdb-core/src peacockdb-core/tests` → only
+  `testdata.rs` and `build.rs`. Report a checkpoint `containers-rebase: the benchmark case list
+  compiled in, as master's checkout rule asks`; the coordinator commits it under the
+  developer's identity on `ENS-containers-rebase`, with the `## Surgery` fold, and does **not**
+  push (Task 1's only push is Step 10).
+- [ ] **Step 7: compile in the fork's rust-only shape (developer).** `cargo test --features rust-only -p
   peacockdb-core --no-run` and `cargo test -p cost-report --no-run`. Expected: both finish.
 - [ ] **Step 8: authorship check (Done-when 1).** Expected: no output from `diff`, and `17`.
 
@@ -147,8 +207,8 @@ join -t'|' <({ git log --format='%s|%h %an <%ae> %ad' 611b5dcd..origin/ENS-conta
                origin/master..ENS-containers-rebase | sort)
 ```
   (`join` prints 17 lines, subject|old|new; the two `%an <%ae> %ad` fields of each line are
-  equal. The developer's own commits from Task 2 on are by `dmitry`, so the `--author` filter
-  leaves them out.)
+  equal. The developer's own commits, Step 7a's and Task 2 on, are by `dmitry`, so the
+  `--author` filter leaves them out.)
 - [ ] **Step 9: no optimizer (Done-when 3).** Each prints nothing:
 
 ```bash
@@ -156,7 +216,11 @@ git diff --name-only origin/master ENS-containers-rebase | grep -E 'peacockdb-dp
 git diff --name-only origin/master ENS-containers-rebase -- scripts/exec_model Cargo.toml Cargo.lock | grep -v '^scripts/exec_model/README.md$'
 git diff origin/master ENS-containers-rebase -- . ':!llm-wiki/tasks/containers*' | grep '^+' | grep -i -E 'dphyp|join.optimi|optimizer\.txt'
 ```
-- [ ] **Step 10:** push: `git push -u origin ENS-containers-rebase` (a new branch; no force).
+- [ ] **Step 10 (coordinator):** push. If origin has no `ENS-containers-rebase`:
+  `git push -u origin ENS-containers-rebase`. If the board commit was pushed already, the branch
+  was rewritten under it: `git push --force-with-lease=ENS-containers-rebase:$(git rev-parse fork-board) -u origin ENS-containers-rebase`.
+  Then `git tag -d fork-board fork-carried` (local tags only; `carried`'s hash goes in the
+  detail file first).
 
 ### Task 2: drop the launcher and the embeddings' S3 path (spec item 8)
 
@@ -281,7 +345,7 @@ git grep -n -E 'up\.sh|down\.sh|board\.sh|upload-embeddings|from-s3|embeddings-b
 git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/env/upload-embeddings.sh \
   scripts/lib/embeddings-bucket.sh scripts/env/tests/test_up.py scripts/env/tests/test_up_branch.py
 ```
-  Push.
+  The coordinator pushes.
 
 ### Task 3: the case list from master's registry, the H200 tree, the gates
 
@@ -292,10 +356,27 @@ git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/
   26-case list", "as it stood at", the record comment) → `<carried> (02f6a4d8 on ENS-optimizer)`,
   so they survive that branch's deletion. `h200/cases.inc:2` says it too; Task 4 replaces that
   file, and its header's sentence moves into build-test.md there.
-- Test: `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (containers' tests, unchanged)
+- Already done in Task 1 (02f6a4d8's resolution and Step 7a): `macro_invocations_in` in
+  `test_support/corpus.rs` and `mod.rs`; `benchmark.rs`'s reads through `CASE_LIST`;
+  `source_file` in `peacockdb-core/src/test_support/testdata.rs`, with its `mod.rs` delegate
+- Test: `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` (containers' tests, reading the
+  compiled-in list); `cost-report/tests/test_source_formatting/checkout_reads.rs` (master's, unchanged)
 
 **Interfaces:**
 - Consumes: Task 1's branch.
+- Produces (made in Task 1: `macro_invocations_in` by 02f6a4d8's resolution, the rest by
+  Step 7a; every later chain L plan uses these names): in `benchmark.rs`,
+  `const CASE_LIST: &str = include_str!("../common/corpus_benchmark_cases.inc");` and
+  `fn declared_files(list: &str) -> Files` over the list's text (`declared_files(CASE_LIST)`;
+  `case_list_path()` is gone); in `test_support`,
+  `pub fn macro_invocations_in(text: &str, name: &str) -> Vec<Vec<String>>` (there is no path
+  form: master deleted `macro_invocations` in `272819bd`; a testdata list is read, then passed as
+  text), and `pub fn source_file(rel: &str) -> PathBuf` in `testdata.rs` (the file
+  `no_core_test_reads_the_checkout` allows): `CARGO_MANIFEST_DIR` joined with `rel`, relative to
+  `peacockdb-core/`, for `UPDATE_CANONICAL` writes only, since a staged host never sets it.
+  `testdata` is private, so `test_support/mod.rs` gets the one-line `pub fn source_file(rel:
+  &str) -> PathBuf` delegate, as `testdata_root` has (`mod.rs:64`); integration tests call
+  `test_support::source_file`.
 - Produces: `corpus_benchmark_cases.inc` = every tpch/tpcds `gpu_*` enabled cell of master's
   `testdata/cost-registry.csv` at sf40 (the list sf40-baseline and tp4-sized read);
   `h200/` held to its own list, `h200/cases.inc` until Task 4 converts it, through
@@ -312,8 +393,8 @@ git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/
 - [ ] **Step 3: the H200 tree.** `cargo test --features rust-only -p peacockdb-core --test
   test_corpus_goldens` → PASS, including `every_declared_case_has_a_section_in_the_tree` and
   `every_timed_case_is_enabled_on_a_device`. If the tree check fails on h200, `h200` is missing
-  from `PREDATES_PROVENANCE` or `h200/cases.inc` was altered by a resolution: fix the
-  resolution (Task 1 Step 6), never the list. Then `git diff origin/ENS-containers
+  from `PREDATES_PROVENANCE` or `h200/cases.inc` was altered by a resolution: fix it in a
+  developer commit named in the detail file (Task 1 Step 6, after the push), never the list. Then `git diff origin/ENS-containers
   ENS-containers-rebase -- testdata/benchmark-results testdata/calibration/records.sha256` →
   empty (master never touched these since `623073da`; 02f6a4d8's copies are the newer of each
   pair, so the h200 tp1_single/tp4_sized files are 02f6a4d8's — name this in the detail file).
@@ -328,8 +409,8 @@ git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/
   `… --test test_golden_format`, `… --test test_crate_privacy`,
   `cargo build --features rust-only -p peacockdb`,
   `cargo test -p cost-report` (bin and `test_source_formatting`, incl. the CI coverage guard).
-- [ ] **Step 6: the build image from the fork.** `git submodule update --init third_party/cudf`;
-  from a clean tree, `scripts/env/image.sh build build 25.02` and `… build build 26.02`. Expected:
+- [ ] **Step 6: the build image from the fork.** *(coordinator)* `git submodule update --init
+  third_party/cudf`; then the developer, from a clean tree, `scripts/env/image.sh build build 25.02` and `… build build 26.02`. Expected:
   both succeed and `docker image inspect ghcr.io/asymptote-tech/peacockdb-build:cudf-25.02-$(git
   rev-parse --short=12 HEAD)` exists. Record sizes.
 - [ ] **Step 7: gates in the build image, every shape** (per cuDF version `<v>`), each
@@ -339,12 +420,13 @@ git ls-files scripts/env/up.sh scripts/env/down.sh scripts/lib/board.sh scripts/
   `cargo test -p peacockdb-ffi --test test_ffi` (3 pass); gpu shape compiles:
   `cargo test --no-run -p peacockdb-core --features gpu --lib --tests`. A failure that also
   fails on `origin/ENS-containers` is recorded in the detail file, fixed only if a later chain L
-  task needs it.
+  task needs it. `.gitignore` gains `/target-img-*/` and `/.home-img/` (containers' ignores only
+  `target/` and `target-cudf*/`); `git status --short` after the runs → nothing under either.
 - [ ] **Step 8: script tests.** `for f in scripts/env/tests/test_*.py
   scripts/calibration/tests/test_*.py; do python3 "$f" || echo "FAIL $f"; done` → no `FAIL`.
   The image-dependent ones (`test_image_any_user`, `test_run_image`, `test_no_static_cudart`) need
   the run image: `scripts/env/image.sh build run <v>` first.
-- [ ] **Step 9:** commit any gate fix separately, `containers-rebase: <what>`; push.
+- [ ] **Step 9:** commit any gate fix separately, `containers-rebase: <what>`; the coordinator pushes.
 
 ### Task 4: per-device case lists as CSV; the H200's converted
 
@@ -354,8 +436,10 @@ presence, not the device's name. sf40-baseline writes the H100's on this reader.
 
 **Files:**
 - Create: `peacockdb-core/src/test_support/device_cases.rs`, `…/device_cases/tests.rs`
-  (`mod device_cases;` and the `pub use` in `test_support/mod.rs`, no feature gate: rust-only
-  reads it)
+  (`mod device_cases;` in `test_support/mod.rs`, no feature gate: rust-only reads it). No
+  re-export (`coding-style.md`, "A re-export is not allowed"): the constant and the two types
+  below are declared in `test_support/mod.rs`, and the three functions are `pub fn`s there whose
+  bodies are one expression delegating to `pub(crate)` functions in `device_cases.rs`
 - Create: `testdata/benchmark-results/h200/cases.csv`; Delete: `testdata/benchmark-results/h200/cases.inc`
 - Modify: `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` — `PREDATES_LIST` (:512),
   `missing_case_problem` and its doc (:563-600), `PREDATES_PROVENANCE`'s doc (:619-625)
@@ -413,7 +497,7 @@ fn device_list_files(path: &Path) -> Files;
   `a_wrong_header_is_refused`; `an_unknown_mode_is_refused`; `a_case_twice_is_refused`.
   `benchmark.rs`: `a_tree_with_its_own_list_is_held_to_it` — `synthesized_tree("own-list",
   "h100-80gb-hbm3", Some("NVIDIA H100 80GB HBM3"))` plus a `cases.csv` with `q1` `ok` at
-  `tp1_single` → `missing_case_problem(&tree, &declared_files(&case_list_path()))` is `Ok`; a row
+  `tp1_single` → `missing_case_problem(&tree, &declared_files(CASE_LIST))` is `Ok`; a row
   `q2` that the file lacks → `Err` naming `q2`; `q2` as `skipped` instead → `Ok`.
   `every_device_list_parses` — `parse_device_cases` over every `benchmark-results/*/cases.csv`.
   `a_new_device_tree_is_held_to_every_declared_case` stays as it is: its tree holds no list.
@@ -427,7 +511,7 @@ fn device_list_files(path: &Path) -> Files;
   git show origin/ENS-containers:testdata/benchmark-results/h200/cases.inc |
     sed -n 's/^corpus_query_benchmark!(\([a-z]*\), \([0-9]*\), \([a-z0-9_]*\), \(.*\));$/\1,\2,\3,\4,ok,/p' |
     sed 's/ | /|/g'; } > testdata/benchmark-results/h200/cases.csv
-git rm -q testdata/benchmark-results/h200/cases.inc
+rm testdata/benchmark-results/h200/cases.inc   # the coordinator stages the deletion
 ```
   Expected: 15 lines (the header and 14 rows); `grep -c ',ok,$'` → 14.
 - [ ] **Step 5: the conversion kept every case, in order.** `diff <(git show
@@ -437,9 +521,10 @@ git rm -q testdata/benchmark-results/h200/cases.inc
 - [ ] **Step 6: run** Step 2's commands → PASS; then the whole `test_corpus_goldens` and `--lib`
   (Task 3 Step 5's rust-only gates) → PASS, `every_declared_case_has_a_section_in_the_tree`
   holding `h200/` to the CSV. `git grep -n 'h200/cases.inc' -- ':!llm-wiki/tasks' ':!llm-wiki/archive'`
-  → nothing.
+  → nothing. `cargo test -p cost-report --test test_source_formatting` → PASS (the visibility
+  and re-export gates read the new module).
 - [ ] **Step 7: docs** (Files above) and commit (developer identity):
-  `containers-rebase: per-device case lists as CSV; the H200's converted once`. Push.
+  `containers-rebase: per-device case lists as CSV; the H200's converted once`. The coordinator pushes.
 
 ### Task 5: the shared docs and the detail file
 
@@ -451,7 +536,16 @@ git rm -q testdata/benchmark-results/h200/cases.inc
   written in words on master's sentence (`:1117`).
 - Modify: `llm-wiki/tickets/benchmarks.md`, `llm-wiki/tickets.md` — #226 closed as containers
   wrote it, on master's text.
-- Create: `llm-wiki/tasks/containers-rebase-detail.md`
+- Complete and commit: `llm-wiki/tasks/containers-rebase-detail.md` (its `## Surgery` section,
+  folded in from `.claude/ensemble/L.surgery` at Task 1 Step 5, is closed with "done" here; the
+  coordinator deletes the ignored `L.surgery`)
+- Archive containers' task files, which the replay brought into `llm-wiki/tasks/` for a task
+  this board does not hold, as `prompts.md` ("After a merge, archive the task specs") does:
+  `containers.md` becomes an entry at the top of `llm-wiki/archive/archived-tasks.md`, marked
+  "absorbed by chain L's containers-rebase, unmerged"; `containers-impl.md` and
+  `containers-detail.md` are deleted, the detail file's still-useful notes moved into
+  `containers-rebase-detail.md`; links to them follow (`git show origin/ENS-containers:<path>`
+  keeps the originals readable)
 
 **Interfaces:**
 - Produces: the detail file's sections `## Commit mapping` (table old → new, subject, author
@@ -469,8 +563,10 @@ git rm -q testdata/benchmark-results/h200/cases.inc
   Dropped by the human: the launcher (`up.sh`, `down.sh`, `board.sh` and their tests, deleted in
   Task 2), task 12, task 5 step 3 and the embeddings' S3 path (deleted in Task 2). Then
   `## Refusals read`: Task 2's table as done.
-- [ ] **Step 3:** Step 9 of Task 1 re-run on the new tip → nothing printed. Commit
-  `containers-rebase: the wiki's counts on the fork; the record of the fork`; push.
+- [ ] **Step 3:** Step 9 of Task 1 re-run on the new tip, its third command with
+  `':!llm-wiki/archive/archived-tasks.md'` added beside `':!llm-wiki/tasks/containers*'` (the
+  archived containers spec names the branch it was stacked on) → nothing printed. Commit
+  `containers-rebase: the wiki's counts on the fork; the record of the fork`; the coordinator pushes.
 
 ### Task 6: the published images serve the fork
 
@@ -500,8 +596,11 @@ done; done
   `. scripts/lib/image-inputs.sh; image_inputs_differ "$(docker image inspect --format '{{index .Config.Labels "peacockdb.inputs"}}' <ref>)" . <k> <v>`
   → prints nothing. Record each digest and its empty diff.
 - [ ] **Step 3: only if a diff is non-empty**, rebuild. `images.yml` is dispatchable only from the
-  default branch, and master has none. Stop, `blocked(building)`, naming the differing inputs and
-  asking the human to land `.github/workflows/images.yml` alone on master, as a separate commit
-  (approved in advance). Then `gh workflow run images.yml --ref ENS-containers-rebase -f kind=all -f cudf=all`,
-  `gh run watch <id> --exit-status` → four jobs green, and repeat Steps 1–2. Do not push to master.
-- [ ] **Step 4:** record tags, digests, and whether a rebuild happened; commit the detail file; push.
+  default branch, and master has none. The developer reports the differing inputs; the
+  coordinator stops, `blocked(building)`, asking the human to land `.github/workflows/images.yml`
+  alone on master, as a separate commit (approved in advance). Then *(coordinator)*
+  `gh workflow run images.yml --ref ENS-containers-rebase -f kind=all -f cudf=all`,
+  `gh run watch <id> --exit-status` → four jobs green; a failed job reaches the developer as a
+  failing build with its log lines. The developer repeats Steps 1–2. Nobody here pushes master.
+- [ ] **Step 4:** record tags, digests, and whether a rebuild happened; commit the detail file
+  (the coordinator commits and pushes).

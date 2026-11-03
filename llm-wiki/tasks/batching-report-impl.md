@@ -24,12 +24,18 @@ task (tp4-sized) reruns the generator instead of hand-editing numbers.
 [`sf40-baseline-impl.md`](sf40-baseline-impl.md) (Task 1 `device_cases.py`, the scripts' one
 reader of `cases.csv`; Task 6 `duckdb.tsv` format; Task 7 its owner reader
 `parse_duckdb_results` and the fixture `testdata/fixtures/duckdb-results.tsv`; Tasks 9-11 trees), [`bench-rows-impl.md`](bench-rows-impl.md) ("The format":
-trailer keys), [`pinned-loads-impl.md`](pinned-loads-impl.md) (Task 1 `loads.tsv` columns),
+trailer keys), [`pinned-loads-impl.md`](pinned-loads-impl.md) (Task 1 `loads.tsv` columns; Task 4 the cache's `PinnedCache` text and `PrefillStats`; Task 4b the prefill per process),
 [`tp4-sized-impl.md`](tp4-sized-impl.md) (Task 4 column names).
 
 ## Global Constraints
 
-- Kind: prototype. The coordinator skips the reviewer and the PR; the tests are the generator's.
+- `Kind: production` (decided): the task gets its own PR against `ENS-query-fuser` and the
+  usual reviewer rounds, as every chain task does, so tp4-sized's PR has a base. The tests are
+  the generator's.
+- Developers never commit, push, or dispatch a workflow (prompts.md). A step that says
+  *Commit `<msg>`* means: report a checkpoint `<msg>` and stop; the coordinator stages, commits and pushes, then
+  dispatches the next step. Only the plan's last step is green. A step marked *(coordinator)* is the coordinator's; the developer stops before it
+  and says what it needs.
 - Branch `ENS-batching-report` on `ENS-query-fuser`. Code base: master's engine + containers'
   scripts (`ENS-containers-rebase`) + every chain L task above it.
 - Shape: the TPC-H section of `reports/benchmark-minimal.md` (lines 30-44): a provenance table,
@@ -123,8 +129,21 @@ first `=` (the `model=` value keeps its spaces; `entry …` merge lines are coun
 `render` writes, in order:
 1. **Provenance** table: H100 (`device driver cuda cudf host` from every timed trailer of the
    unfused and fused files, distinct values with counts) and DuckDB (`duckdb threads host cpu
-   cores` from each preamble). Protocol line: unfused runs = `len(runs)` (distinct values), fused
-   `all` = `FUSED_ALL_RUNS` (3) read from its `runs`, DuckDB = `len(runs_ms)`; "2nd-minimum".
+   cores` from each preamble). The cache row: from every timed trailer's `pinned_cache=`,
+   `prefill_files=`, `prefill_bytes=` and `prefill_us=` (bench-rows' one definition: the
+   `PinnedCache` text at the section's end, nothing appended; then the process's, or the fused
+   batch's, one prefill), the distinct state/`cap=`/`source=` values with counts, the largest
+   `resident=`, the largest `prefill_bytes` with its `prefill_us`, and every timed section whose
+   `pinned_cache` does not start `on`, or every timed **tree** section whose `prefill_files` is 0,
+   named. A fused section's `prefill_files=0` is not flagged: its prefill is its batch's own and
+   idempotent across batches, so a batch whose files an earlier batch loaded reports 0
+   (bench-rows' one definition); its rounds are vouched for by `rounds_were_pinned`. (A round that read a
+   file from disk cannot be timed: its case failed `pinned cache: …`, and is counted out with the
+   other failures.) Protocol line: unfused runs = `len(runs)` (distinct values), fused
+   `all` = `FUSED_ALL_RUNS` (3) read from its `runs`, DuckDB = `len(runs_ms)`; "2nd-minimum";
+   "each query's files (each fused batch's union) prefilled once into the pinned host cache before
+   any run, then 1 warm-up: every peacockdb run reads files resident in pinned host memory,
+   DuckDB's its buffer manager over a warm page cache; the prefill's disk read is reported apart".
    Skipped queries and wrong answers: every `notes` entry, `query — note`, per dataset (the TPC-H
    micro queries' too: sf40-baseline measured them).
 2. Per dataset, **the table**: `batch | queries | fused load (ms) | fused execute (ms) | unfused
@@ -157,7 +176,8 @@ first `=` (the `model=` value keeps its spaces; `entry …` merge lines are coun
   - `test_duckdb_reads_the_shared_fixture`: `duckdb(read(testdata/fixtures/duckdb-results.tsv))`
     gives the values sf40-baseline's `the_shared_fixture_reads_as_expected` asserts in Rust, the
     format's owner (preamble `duckdb`, `threads`; the `ok` row's ms; the `failed` row's `None`).
-  - `test_sections_and_trailer_read_bench_rows_format`: a section with the 13 trailer keys →
+  - `test_sections_and_trailer_read_bench_rows_format`: a section with the 17 trailer keys (bench-rows' order, `pinned_cache`, `prefill_files`,
+    `prefill_bytes`, `prefill_us` after `allocator`) →
     `trailer(body)["load_us"] == "101308"`; a `skipped: …` and a `status=failed reason=…` body → `None`.
   - `test_batches_take_prefixes_and_mark_short_ones`: 25 names → lengths 3/10/20/25; 18 names →
     `first20` is `None`, `all` has 18; 2 names → `first3` has 2.
@@ -175,6 +195,15 @@ first `=` (the `model=` value keeps its spaces; `entry …` merge lines are coun
     stderr names `first3`.
   - `test_provenance_lists_every_distinct_value`: two trailers with `cudf=25.02.01` and
     `cudf=25.02.02` → both appear, each with its count.
+  - `test_provenance_states_the_cache`: trailers `pinned_cache=on cap=136.9GiB resident=12.3GiB files=8 fills=8 fill_us=9 fallbacks=0 evictions=0 reloads=0 source=default`
+    with `prefill_files=8 prefill_bytes=13207024435 prefill_us=812345` on `q1`, the same with
+    `resident=14.0GiB` and `prefill_bytes=15032385536 prefill_us=901000` on `q3`, and
+    `pinned_cache=off source=env` with the three `prefill_*=0` on `q9` → the cache row says
+    `on cap=136.9GiB source=default (2)` and `off source=env (1)`, `resident ≤ 14.0GiB`, the
+    largest prefill `15032385536 B in 901000 µs` (`q3`), and names `q9`; a trailer with no
+    `pinned_cache` (a legacy section) is counted as `unknown`, never as on. A fused `first10`
+    section with `pinned_cache=on …` and `prefill_files=0` is not named; a tree section with
+    `pinned_cache=on …` and `prefill_files=0` is.
   - `test_tp4_columns_appear_only_with_their_file`; a tp4 `FAILED` section gives `(n/N)`.
   - `test_load_split_sums_columns_and_keeps_read_and_copy_apart`: two rows → Σ per column; the
     rendered row has separate host-read and H2D cells.

@@ -68,17 +68,22 @@ one-root, unshared case, and must run exactly as today.
    - the structure: every root a sink and no sink elsewhere; only a `GpuLoadParquet` shared;
      acyclic;
    - rule 3b, for every join's hold and, under a cap, for every root that may wait;
-   - **the wait-for graph is acyclic.** A hold H (a join in its build phase, or a capped root)
-     waits for hold H′ when a node H's release needs (its build region, or the root's own
-     region) lies inside H′'s held region, holds stopping at buffers. A cycle is refused as
+   - **the wait-for graph is acyclic.** A join in its build phase waits for hold H′ when a node
+     of its build region lies inside H′'s held region, holds stopping at buffers. A capped root
+     waits only for its admission, that is, for the roots admitted before it to finish: it waits
+     for H′ when a node of one of those roots lies inside H′'s held region. It never waits on its
+     own region, and a join inside a root never waits on that root's cap. A cycle is refused as
      `PlanError::HoldCycle` listing the holds in order. Under 3b the argument says no cycle can
      form, but the check is kept: it is the mechanical form of the argument, and what a later
      rule change breaks first.
 
-   A property test ties the check to the driver. Random DAGs, shared sources and buffers placed
-   at random, run on the CPU or mock backend. Every DAG `validate_dag` accepts runs to completion,
-   with `holds == releases`. Every DAG on which the driver stops with work left, caught by a step
-   bound, is one `validate_dag` refused.
+   A property test ties the check to the driver, both ways. Random DAGs, shared sources and
+   buffers placed at random, with and without a cap, run on the CPU or mock backend. Every DAG
+   `validate_dag` accepts runs to completion, with `holds == releases`. Every DAG on which the
+   driver stops with work left, caught by a step bound, is one `validate_dag` refused. And no
+   refusal is false: every DAG that passes the structure and rule 3b, capped or not, is accepted
+   and runs to completion, so `HoldCycle` never fires on it. A capped plan with a join is among
+   them.
 4. **A limit's early exit is per consumer.** One root satisfying its limit does not stop a
    shared source another root still reads. The source stops when every consumer is satisfied or
    done.
@@ -111,7 +116,9 @@ one-root, unshared case, and must run exactly as today.
 | `peacockdb-core/src/planner/memory_estimation.rs` | shared-batch lifetime |
 | `peacockdb-core/src/plan/validate.rs`, `plan_text/` | single visit, display |
 | `peacockdb-core/src/wire/`, `flatbuffers/gpu_plan.fbs`, `cpp/src/node_session.cpp` | several roots; DAG numbering |
-| `cpp/include/peacock_gpu.h`, `cpp/src/` | the handle duplicate, additive |
+| `cpp/include/peacock_gpu.h`, `cpp/src/`, `peacockdb-ffi/src/lib.rs` | the handle duplicate, additive |
+| `peacockdb-core/src/planner/nullability.rs`, `plan_text/`, `wire/attach.rs` | the hold buffer's arm in each walk over node kinds |
+| `peacockdb-core/src/test_support/gpu_session.rs` | a session over several roots, for the device tests |
 | `llm-wiki/architecture.md` | the DAG rules |
 
 Component-level API:

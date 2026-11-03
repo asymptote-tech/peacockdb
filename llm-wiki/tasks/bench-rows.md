@@ -25,7 +25,13 @@ both and does not redo them.
    `execute_us` (`device_us − load_us`), plus `peak_bytes`: the most bytes the run's memory
    accountant held at once. It is the number query-fuser's hint reads. If the accountant cannot
    give a true peak without a change in the driver, the builder says so and gives the closest
-   bound it can, named as a bound.
+   bound it can, named as a bound. `load_us` stays the device-side load: the benchmark prefills
+   pinned-loads' host file cache before its first case, so every round's load reads pinned
+   memory. The trailer also carries `pinned_cache`, the cache's state at the end of the case
+   (pinned-loads' `PinnedCache`, e.g. `on cap=136.9GiB resident=12.3GiB … source=default`, or
+   `off source=env`), followed by `prefill_files=<n> prefill_bytes=<n> prefill_us=<n>`: the
+   prefill's host IO, reported apart from the device load. A round that filled, reloaded, evicted
+   or fell back fails its case instead of being timed.
 3. The parsers and checks that read the tree accept the new fields, and the existing H200 files
    still parse. Re-measuring them is not required.
 4. `build-test.md` documents the format.
@@ -46,10 +52,12 @@ both and does not redo them.
 | path | change |
 |---|---|
 | `peacockdb-core/src/test_support/corpus_benchmark.rs`, `benchmark_trailer.rs`, `plan_text/bench_text.rs` | the fields |
+| `peacockdb-core/src/plan_text/node_text.rs`, `plan_text/run_text.rs` | the batch-list renderer, shared rather than copied |
 | `peacockdb-core/src/executor/` (accounting) | only if a peak needs recording |
 | `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`, `scripts/calibration/` | readers of the format |
 | `peacockdb-core/src/test_support/benchmark_report.rs` (new), `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | the report page's renderer and its test |
 | `testdata/benchmark-report.html` (new) | the page |
 | `llm-wiki/build-test.md` | the format; the page and its regeneration rule |
+| `llm-wiki/architecture.md` "Node display" | the benchmark line's new fields |
 
 Component-level API: none.
