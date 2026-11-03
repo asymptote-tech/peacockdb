@@ -144,7 +144,7 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
     means containers-rebase is mid-surgery: resume from `.claude/ensemble/L.surgery` (or the
     detail file's `## Surgery` once Step 5 has folded it in).
 
-### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: approved to build
+### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: building
 
 `ENS-containers-rebase`: containers' 16 commits replayed on master, plus the optimizer's benchmark
 commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list regenerated from
