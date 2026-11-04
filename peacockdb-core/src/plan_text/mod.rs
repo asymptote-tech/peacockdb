@@ -26,6 +26,10 @@ use crate::executor::{Measurements, RunReport};
 use crate::plan::GpuNode;
 use crate::planner::MemoryModel;
 
+/// The node the device loads a table with: its `total_us` is a benchmark run's load, as the
+/// renderer adds it and as the tree's reader adds it back.
+pub(crate) const LOAD_NODE: &str = "GpuLoadParquet";
+
 /// The plan under `root`, one line per node. The plan golden carries the declared schema
 /// per node; an execution golden does not, since what it records is what ran.
 pub(crate) fn render_plan(root: &dyn GpuNode) -> String {

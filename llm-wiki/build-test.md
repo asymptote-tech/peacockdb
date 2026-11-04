@@ -88,7 +88,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 47 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 50 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -96,9 +96,17 @@ abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's
 prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and the
 tree the indentation draws. The golden is written by the run it will later check, so a file that
 contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets the
-same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree reports
-a release build, every timed (query, mode) is enabled on a device in `corpus_cases.inc`, and the
-case list is, byte for byte, what the registry's enabled device cells for tpch and tpcds write.
+same reading, through its one reader, `parse_benchmark_section`: every `total_us` is the sum of
+the `time_us` beside it and `device_us` the sum of the totals. Where a section carries them,
+`load_us` is the `GpuLoadParquet` totals, `load_us + execute_us` is `device_us`, each node's
+`batch_rows` and `batch_bytes` have one shape, and `peak_bytes` is at least every `batch_bytes`
+entry. Every timed section outside `h200/` must carry the batches and the seven keys bench-rows
+added; `h200/`'s own section under another device's name is refused, naming `batch_rows`. Every
+committed tree reports a release build, every timed (query, mode) is enabled on a device in
+`corpus_cases.inc`, and the case list is, byte for byte, what the registry's enabled device cells
+for tpch and tpcds write. `testdata/benchmark-report.html` is, byte for byte, what the trees render
+through that reader; a page that is missing or stale fails, naming its first moved line and the
+command that rewrites it.
 Every case the list declares has its section, timed or a failure's record, in every device's tree
 that holds no `cases.csv`. A tree that holds one is held to its `ok` and `wrong` rows instead:
 `h200/` is held to `h200/cases.csv`, the list it was measured from. Every device list parses.
@@ -522,6 +530,25 @@ module line, two, or one naming no release or two, and an unreadable file refuse
 the `--- run ---` trailer a section ends with: its seventeen keys in order, the five provenance
 keys last, each with the run's own value; `execute_us` is `device_us` less `load_us`; the
 pinned cache's line as it prints, and the prefill's three numbers apart from `load_us`
+
+| Benchmark tree reader | [test_support::benchmark_tree::tests](../peacockdb-core/src/test_support/benchmark_tree/tests.rs) | 6 |
+|---|---|--:|
+
+`parse_benchmark_section`, the tree's one reader: a section written now, two loaders under a
+join and the trailer's seventeen keys, reads its batches, its children and its load, execute and
+peak, provenance last; an `h200/` section reads with no batches and no `load_us` or `peak_bytes`,
+its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
+record are not timed; an unknown key beneath a node and a trailer key held twice are refused
+
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 12 |
+|---|---|--:|
+
+the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
+`== ` line; an `h200/`-shaped section's load derived and its peak `—`; a failure's and a marker's
+reason, and the device list's `skipped` note over both; a `wrong` row's `wrong answer #NN`; two
+devices side by side, a case one lacks `—`; a directory with no mode file is no column; rows in
+the main list's order, then by name, modes in `MODES` order; text escaped; the same page twice,
+with no temp path in it; a later task's extra table under its heading; `section_href`'s line
 
 | Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
 |---|---|--:|
@@ -2712,7 +2739,29 @@ Then a `--- run ---` trailer, one `key=value` a line, seventeen keys in this ord
   when its trailer ends with this run's five.
 
 The `h200/` sections predate `load_us`, `execute_us`, `peak_bytes`, `pinned_cache` and the three
-`prefill_*` keys. A failed case's section is its record instead (above). The reported execution is the
+`prefill_*` keys. Only `h200/` may lack them (`PREDATES_ROWS` in `test_corpus_goldens`); a section
+in any other tree without them is refused. One reader, `parse_benchmark_section` in
+`test_support`, reads a section in either shape: a field a section lacks reads as `None`, never as
+a derived value, and `tree_load_us()` gives an old section's load. A failed case's section is its
+record instead (above).
+
+**The page**, `testdata/benchmark-report.html`, is committed: every device tree side by side. One
+row per (dataset, query, mode) that some tree has a section for, a table per (dataset, sf), in the
+main list's order; four columns per device, by name. A timed section shows load, execute, total
+(each in ms, the total `device_us` linked to the section) and `peak_bytes` in GiB, labelled the
+accountant's peak, a lower bound on device memory. An `h200/` section's load is `tree_load_us()`
+and its peak `—`. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; where the
+device's `cases.csv` has a `skipped` row for the query, its note is shown instead, and a `wrong`
+row adds `wrong answer #NN`. Any other cell is `—`. `render_benchmark_report` in `test_support`
+writes it through `parse_benchmark_section`, with no time, host or absolute path, in
+`testdata/report.html`'s look. **A commit that changes a results tree regenerates the page**:
+
+```
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens \
+    -- the_benchmark_report_matches_the_trees
+```
+
+The same test without the variable enforces it: a page that differs from the render fails. The reported execution is the
 second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
 likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
 minimum, which would be a tree belonging to no execution. Both counts are constants in

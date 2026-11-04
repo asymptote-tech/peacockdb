@@ -1,15 +1,15 @@
-//! The benchmark tree, read back against its own redundancy, and the calibration record's
-//! format, with no device and no run: the trailer's arithmetic, the release build, the
-//! record's preamble against what the writer produces today, the checker's refusals, and the
-//! timed set against the device-enabled set.
+//! The benchmark tree, read back against its own redundancy, with no device and no run: the
+//! tree's and the trailer's arithmetic, the release build, the fields a section must carry, the
+//! timed set against the device-enabled set, and the device trees' layout.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, DEVICE_CASES_HEADER, FAILED, MEASURED_RUNS, MODES, Mode, Provenance,
-    RECORD_PATH_ENV, RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections,
-    parse_device_cases, record_header, rewrite_source_file, rows_match_the_recipes, testdata_root,
+    BUILD, DEVICE_CASES_HEADER, FAILED, MEASURED_RUNS, MODES, Mode, SKIPPED, benchmark_report_path,
+    device_slug, line_difference, load_csv, ordered_sections, parse_benchmark_section,
+    parse_device_cases, render_benchmark_report, rewrite_source_file, testdata_root,
+    write_benchmark_report,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -101,36 +101,16 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// The `--- run ---` trailer of one section, as `key=value` in file order.
-///
-/// `allocator=` carries `=` inside its value, so the split is at the first one only.
-fn run_trailer(body: &str, at: &str) -> Vec<(String, String)> {
-    let (_, trailer) = body
-        .split_once("--- run ---\n")
-        .unwrap_or_else(|| panic!("{at}: the section has no `--- run ---` trailer"));
-    key_values(trailer.lines(), at)
-}
-
-/// `key=value` lines in order, split at the first `=`.
-fn key_values<'a>(lines: impl Iterator<Item = &'a str>, at: &str) -> Vec<(String, String)> {
+/// `key=value` lines in order, split at the first `=`: a failed case's record, which is no
+/// timed section and so not `parse_benchmark_section`'s.
+fn key_values<'a>(lines: impl Iterator<Item = &'a str>, at: &str) -> Vec<(&'a str, &'a str)> {
     lines
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let (key, value) = line
-                .split_once('=')
-                .unwrap_or_else(|| panic!("{at}: trailer line {line:?} is not `key=value`"));
-            (key.to_string(), value.to_string())
+            line.split_once('=')
+                .unwrap_or_else(|| panic!("{at}: record line {line:?} is not `key=value`"))
         })
         .collect()
-}
-
-fn trailer_field(trailer: &[(String, String)], key: &str, at: &str) -> String {
-    trailer
-        .iter()
-        .find(|(name, _)| name == key)
-        .unwrap_or_else(|| panic!("{at}: the trailer has no {key}"))
-        .1
-        .clone()
 }
 
 fn number(text: &str, what: &str) -> u64 {
@@ -139,15 +119,14 @@ fn number(text: &str, what: &str) -> u64 {
 }
 
 /// Every `total_us` in a benchmark file is the sum of the `time_us` beside it, and the
-/// trailer's `device_us` is the sum of those totals.
+/// trailer's `device_us` is the sum of those totals. Where a section carries them, `load_us` is
+/// the loaders' totals, `load_us + execute_us` is `device_us`, `batch_rows` and `batch_bytes`
+/// have one shape, and `peak_bytes` is at least every batch, since every batch is held first.
 ///
-/// Checkable without a device and without a second oracle: the renderer writes both
-/// numbers from one measurement, so a file where they disagree is a file it got wrong.
-/// `run_us` is not summed into anything — it is the wall clock, and the gap between it and
-/// `device_us` is what the run spent outside the calls.
-///
-/// Every entry is a number, so a total is a plain sum. A `0` is a call that opened no
-/// region; a `1` is a region the clock rounded down — not the same digit.
+/// Checkable without a device and without a second oracle: the renderer writes them all from
+/// one measurement, so a file where they disagree is a file it got wrong. `run_us` is the wall
+/// clock and is summed into nothing. A `0` entry is a call that opened no region; a `1` is a
+/// region the clock rounded down.
 #[test]
 fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
     let mut checked = 0;
@@ -157,43 +136,65 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
             let at = format!("{} {query}", path.display());
             // A query declared with no mode to time it at writes a marker and no tree, and a
             // failed case its record.
-            if !is_timed(&body) {
+            let Some(section) = parse_benchmark_section(&body) else {
                 continue;
-            }
-            let mut tree_us = 0;
-            for (n, line) in body.lines().enumerate() {
-                let Some(rest) = line.trim().strip_prefix("time_us=") else {
-                    continue;
-                };
-                let (array, total) = rest
-                    .split_once(" total_us=")
-                    .unwrap_or_else(|| panic!("{at}:{}: no total_us on {line:?}", n + 1));
-                // Every number between the brackets, in one pass: the nesting says which
-                // lane a call was on and the sum does not care.
-                let numbers: Vec<u64> = array
-                    .split(|c| c == ',' || c == '[' || c == ']')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|e| number(e, &format!("{at}:{}", n + 1)))
-                    .collect();
+            };
+            for node in &section.nodes {
+                let entries: Vec<u64> = node.time_us.iter().flatten().copied().collect();
                 assert_eq!(
-                    total,
-                    numbers.iter().sum::<u64>().to_string(),
-                    "{at}:{}: total_us disagrees with the {} entries beside it — {line:?}",
-                    n + 1,
-                    numbers.len()
+                    node.total_us,
+                    entries.iter().sum::<u64>(),
+                    "{at}: {}'s total_us disagrees with the {} entries beside it",
+                    node.line.name,
+                    entries.len()
                 );
-                tree_us += numbers.iter().sum::<u64>();
+                let shape = |lists: &Option<Vec<Vec<u64>>>| {
+                    lists
+                        .as_ref()
+                        .map(|lanes| lanes.iter().map(Vec::len).collect::<Vec<_>>())
+                };
+                assert_eq!(
+                    shape(&node.batch_rows),
+                    shape(&node.batch_bytes),
+                    "{at}: {}'s batch_rows and batch_bytes differ in shape",
+                    node.line.name
+                );
                 checked += 1;
             }
-
-            let trailer = run_trailer(&body, &at);
+            let device_us = section.count("device_us");
             assert_eq!(
-                trailer_field(&trailer, "device_us", &at),
-                tree_us.to_string(),
+                device_us,
+                Some(section.tree_device_us()),
                 "{at}: the trailer's device_us is not the sum of the tree's total_us"
             );
-            let spread: Vec<u64> = trailer_field(&trailer, "runs", &at)
+            if let Some(load_us) = section.count("load_us") {
+                assert_eq!(
+                    load_us,
+                    section.tree_load_us(),
+                    "{at}: load_us is not the loaders' total_us"
+                );
+                assert_eq!(
+                    section.count("execute_us").map(|execute| load_us + execute),
+                    device_us,
+                    "{at}: load_us + execute_us is not device_us"
+                );
+            }
+            if let Some(peak) = section.count("peak_bytes") {
+                let batches = section
+                    .nodes
+                    .iter()
+                    .flat_map(|node| node.batch_bytes.iter());
+                let largest = batches.flatten().flatten().max().copied().unwrap_or(0);
+                assert!(
+                    peak >= largest,
+                    "{at}: peak_bytes={peak} is below a batch of {largest} bytes, which the \
+                     accountant held"
+                );
+            }
+            let runs = section
+                .field("runs")
+                .unwrap_or_else(|| panic!("{at}: the trailer has no runs"));
+            let spread: Vec<u64> = runs
                 .trim_matches(|c| c == '[' || c == ']')
                 .split(',')
                 .map(|e| number(e, &at))
@@ -210,8 +211,8 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
             let mut sorted = spread.clone();
             sorted.sort_unstable();
             assert_eq!(
-                trailer_field(&trailer, "run_us", &at),
-                sorted[1].to_string(),
+                section.count("run_us"),
+                Some(sorted[1]),
                 "{at}: run_us is not the second-smallest of {spread:?}"
             );
         }
@@ -233,157 +234,13 @@ fn every_committed_tree_reports_a_release_build() {
     for path in benchmark_files() {
         let text = std::fs::read_to_string(&path).expect("a benchmark file");
         for (query, body) in ordered_sections(&text) {
-            if !is_timed(&body) {
+            let Some(section) = parse_benchmark_section(&body) else {
                 continue;
-            }
+            };
             let at = format!("{} {query}", path.display());
-            assert_eq!(
-                trailer_field(&run_trailer(&body, &at), "build", &at),
-                BUILD,
-                "{at}"
-            );
+            assert_eq!(section.field("build"), Some(BUILD), "{at}");
         }
     }
-}
-
-/// A record's preamble, read as its readers read it, is the one `record_header` writes.
-///
-/// Three Python scripts and a person read the record, and none can ask this source what a
-/// column means, so the preamble is the column documentation. They take every `#` line, then
-/// one column line: a note that lost its `#` ends the preamble early and fails here.
-///
-/// Written by the harness's own writer into a temp dir, since the measured record is not in
-/// git. `allocator=` is read back, as it names the host that measured and no build can know
-/// it; its value carries `=` and spaces, as a pool's does. `capture=none` is not read back: a
-/// captured run's rows are the distorted ones, and a published record must not be one.
-#[test]
-fn the_records_preamble_is_what_record_header_writes() {
-    let dir = std::env::temp_dir().join(format!("peacock-corpus-{}-record", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let path = dir.join("records.tsv");
-    let provenance = Provenance {
-        device: "NVIDIA H200".to_string(),
-        driver: "570.172.08".to_string(),
-        cuda: "12.2".to_string(),
-        cudf: "25.02.02".to_string(),
-        host: "gpu-host".to_string(),
-    };
-    let run = RunMeta {
-        dataset: "tpch",
-        sf: "40",
-        query: "q6",
-        mode: "tp1-single",
-        allocator: "rmm-pool initial=1.0GiB max=1.0GiB of 2.0GiB free on a discrete device",
-        capture: Capture::None,
-        provenance: &provenance,
-    };
-    let row = vec!["0"; COLUMNS.len()].join("\t");
-    let restore = std::env::var_os(RECORD_PATH_ENV);
-    // SAFETY: `append_records` is the variable's only reader, and this is the only case in
-    // this binary that calls it.
-    unsafe { std::env::set_var(RECORD_PATH_ENV, &path) };
-    let wrote = std::panic::catch_unwind(|| append_records(std::slice::from_ref(&row), &run));
-    match restore {
-        Some(value) => unsafe { std::env::set_var(RECORD_PATH_ENV, value) },
-        None => unsafe { std::env::remove_var(RECORD_PATH_ENV) },
-    }
-    if let Err(panic) = wrote {
-        std::panic::resume_unwind(panic);
-    }
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} — the writer wrote nothing", path.display()));
-    let _ = std::fs::remove_dir_all(&dir);
-
-    let mut found: Vec<&str> = text.lines().take_while(|l| l.starts_with('#')).collect();
-    let columns = text
-        .lines()
-        .find(|l| !l.starts_with('#'))
-        .unwrap_or_else(|| panic!("{}: no column line", path.display()));
-    found.push(columns);
-
-    let allocator = found
-        .iter()
-        .find_map(|l| l.strip_prefix("# run: allocator="))
-        .unwrap_or_else(|| panic!("{}: no `# run: allocator=` line", path.display()));
-    assert_eq!(allocator, run.allocator, "the allocator line is the run's");
-    let meta = RunMeta {
-        dataset: "",
-        sf: "",
-        query: "",
-        mode: "",
-        allocator,
-        capture: Capture::None,
-        provenance: &provenance,
-    };
-    assert_eq!(found.join("\n"), record_header(&meta), "{}", path.display());
-}
-
-/// A row that lost a cell is refused before anything joins on it.
-///
-/// The one defect this record cannot survive quietly: every column is a number or a name,
-/// so a row missing one still parses — each later cell moves into the column to its left,
-/// and `device_us` then reads whatever `host_us` measured. Checked here rather than in the
-/// benchmark binary because it needs no device.
-#[test]
-fn a_row_that_lost_a_cell_is_refused() {
-    let at = |column: &str| COLUMNS.iter().position(|name| *name == column).unwrap();
-    let mut fields = vec!["0".to_string(); COLUMNS.len()];
-    fields[at("node_seq")] = "0".to_string();
-    fields[at("recipe_seq")] = "0".to_string();
-    let declared = BTreeMap::from([(0, BTreeSet::from([0]))]);
-
-    let whole = [fields.join("\t")];
-    assert_eq!(rows_match_the_recipes(&whole, &declared), Ok(()));
-
-    fields.pop();
-    let short = [fields.join("\t")];
-    let refused = rows_match_the_recipes(&short, &declared)
-        .expect_err("a row one cell short is not a row of this record");
-    assert!(
-        refused.contains(&format!("{} columns", COLUMNS.len())),
-        "the refusal should name the width it wanted: {refused}"
-    );
-}
-
-/// A bare call's row names the seq it was handed, which is never its own node's.
-///
-/// `result_from_handle` and `slice_handle` publish no step: the plan's recipes line for a
-/// `GpuUnload` or a `GpuLimit` names no `#seq` at all. They are charged to the node that
-/// made the call and carry the seq of the node whose output they were handed — below them
-/// in the tree, since post-order is children first. So the pair a row of theirs carries is
-/// two nodes' and the check has to say so, which is what q6 found at sf40: every case
-/// panicked on the export row, one call before it could write anything.
-#[test]
-fn a_bare_calls_row_names_the_seq_it_was_handed() {
-    let at = |column: &str| COLUMNS.iter().position(|name| *name == column).unwrap();
-    let row = |node: usize, seq: usize| {
-        let mut fields = vec!["0".to_string(); COLUMNS.len()];
-        fields[at("node_seq")] = node.to_string();
-        fields[at("recipe_seq")] = seq.to_string();
-        [fields.join("\t")]
-    };
-    // q6's shape: a scan, a project, and an unload that publishes nothing above them.
-    let declared = BTreeMap::from([
-        (0, BTreeSet::from([0])),
-        (1, BTreeSet::from([1])),
-        (2, BTreeSet::new()),
-    ]);
-
-    assert_eq!(rows_match_the_recipes(&row(2, 1), &declared), Ok(()));
-
-    let refused = rows_match_the_recipes(&row(2, 7), &declared)
-        .expect_err("no node publishes step #7, so no handle can have come from one");
-    assert!(
-        refused.contains("#7"),
-        "the refusal should name the step: {refused}"
-    );
-
-    let above = rows_match_the_recipes(&row(1, 0), &declared)
-        .expect_err("node 1 publishes step #1, and a row of its own may not name another");
-    assert!(
-        above.contains("#0"),
-        "the refusal should name the step: {above}"
-    );
 }
 
 /// Every (query, mode) the benchmark list times is one the corpus enables on a device.
@@ -596,6 +453,37 @@ fn the_benchmark_cases_follow_the_registry() {
     );
 }
 
+/// The committed page is, byte for byte, what the trees under `testdata/benchmark-results/`
+/// render through `parse_benchmark_section`, the main list's order giving the row order: the
+/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). Under
+/// `UPDATE_CANONICAL=1` the page is rewritten and the test passes. A commit that changes a tree
+/// and not the page fails here, naming the first line that moved.
+#[test]
+fn the_benchmark_report_matches_the_trees() {
+    let order: Vec<(String, String)> = registry_cases()
+        .into_iter()
+        .map(|(dataset, query, _)| (dataset, query))
+        .collect();
+    let want = render_benchmark_report(&testdata_root().join("benchmark-results"), &order, &[]);
+    if std::env::var("UPDATE_CANONICAL").is_ok() {
+        write_benchmark_report(&want);
+        return;
+    }
+    let path = benchmark_report_path();
+    let rewrite = "UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test \
+                   test_corpus_goldens -- the_benchmark_report_matches_the_trees";
+    let have = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e} — write the page with {rewrite}", path.display()));
+    if have != want {
+        panic!(
+            "{} is not what the trees under testdata/benchmark-results/ render: {}. Rewrite it \
+             with {rewrite}",
+            path.display(),
+            line_difference(&have, &want)
+        );
+    }
+}
+
 /// The `(dataset, sf, mode)` files a case list declares, each with the sections it is to hold.
 type Files = BTreeMap<(String, String, String), BTreeSet<String>>;
 
@@ -798,6 +686,51 @@ const PROVENANCE_KEYS: [&str; 5] = ["device", "driver", "cuda", "cudf", "host"];
 /// verda-gpu, are H200s. A tree copied or written under any other name is held to the five.
 const PREDATES_PROVENANCE: &[&str] = &["h200"];
 
+/// The device trees written before bench-rows, whose sections carry no batches and no load,
+/// execute, peak, cache or prefill keys. Only the H200's, for the same reason as above.
+const PREDATES_ROWS: &[&str] = &["h200"];
+
+/// The trailer keys bench-rows added, which every section outside `PREDATES_ROWS` carries.
+const ROWS_KEYS: [&str; 7] = [
+    "load_us",
+    "execute_us",
+    "peak_bytes",
+    "pinned_cache",
+    "prefill_files",
+    "prefill_bytes",
+    "prefill_us",
+];
+
+/// The first field a timed section under `device` lacks, outside `PREDATES_ROWS`: a section an
+/// old binary wrote after the format moved, which the page and the later readers cannot use.
+fn rows_problem(device: &str, body: &str, at: &str) -> Result<(), String> {
+    let Some(section) = parse_benchmark_section(body) else {
+        return Ok(());
+    };
+    if PREDATES_ROWS.contains(&device) {
+        return Ok(());
+    }
+    let lacking = |field: &str| {
+        format!(
+            "{at}: carries no {field}, and only {PREDATES_ROWS:?} were written before bench-rows"
+        )
+    };
+    for node in &section.nodes {
+        for (field, lists) in [
+            ("batch_rows", &node.batch_rows),
+            ("batch_bytes", &node.batch_bytes),
+        ] {
+            if lists.is_none() {
+                return Err(lacking(&format!("{field} under {}", node.line.name)));
+            }
+        }
+    }
+    match ROWS_KEYS.iter().find(|key| section.field(key).is_none()) {
+        Some(key) => Err(lacking(key)),
+        None => Ok(()),
+    }
+}
+
 /// Every file is `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, its device directory a
 /// slug, and every timed section's trailer ends with the five provenance keys, `device=`
 /// slugging to that directory; a failed case's record is its status line and the five. Only a
@@ -891,9 +824,38 @@ fn a_failed_record_without_its_provenance_is_refused() {
     );
 }
 
-/// A section holding a measured tree: neither a marker nor a failed case's record.
-fn is_timed(body: &str) -> bool {
-    !body.starts_with(SKIPPED) && !body.starts_with(FAILED)
+/// Every timed section outside `PREDATES_ROWS` carries its nodes' batches and the trailer's
+/// load, execute, peak, cache and prefill keys.
+#[test]
+fn every_section_outside_h200_carries_batches_and_the_load() {
+    let root = testdata_root().join("benchmark-results");
+    for path in benchmark_files() {
+        let device = path.strip_prefix(&root).unwrap().iter().next().unwrap();
+        let text = std::fs::read_to_string(&path).expect("a benchmark file");
+        for (query, body) in ordered_sections(&text) {
+            let at = format!("{} {query}", path.display());
+            if let Err(problem) = rows_problem(device.to_str().unwrap(), &body, &at) {
+                panic!("{problem}");
+            }
+        }
+    }
+}
+
+/// The committed H200 section, which has none of the fields, under another device's name: an
+/// old binary's output, refused naming the first field it lacks.
+#[test]
+fn a_section_without_batches_outside_h200_is_refused() {
+    let text = std::fs::read_to_string(
+        testdata_root().join("benchmark-results/h200/tpch.sf40/tp1_single.benchmark.txt"),
+    )
+    .expect("the committed file");
+    let (_, body) = ordered_sections(&text)
+        .into_iter()
+        .find(|(query, _)| query == "aggregate-groupby")
+        .expect("the committed aggregate-groupby section");
+    let problem = rows_problem("h100-80gb-hbm3", &body, "x").expect_err("h200's bytes passed");
+    assert!(problem.contains("carries no batch_rows"), "{problem}");
+    assert_eq!(rows_problem("h200", &body, "x"), Ok(()));
 }
 
 /// The first way the tree under `root` breaks the device layout, if any.
@@ -931,11 +893,11 @@ pub(crate) fn device_tree_problem(root: &Path) -> Result<(), String> {
             let failed = body.starts_with(FAILED);
             // A failed case's record is its status line and the five, which the harness
             // wrote with provenance from the start.
-            let trailer = match failed {
-                true => key_values(body.lines().skip(1), &at),
-                false => run_trailer(&body, &at),
+            let trailer = match parse_benchmark_section(&body) {
+                Some(section) => section.trailer,
+                None => key_values(body.lines().skip(1), &at),
             };
-            let keys: Vec<&str> = trailer.iter().map(|(key, _)| key.as_str()).collect();
+            let keys: Vec<&str> = trailer.iter().map(|(key, _)| *key).collect();
             if failed && keys != PROVENANCE_KEYS {
                 return Err(format!(
                     "{at}: a failed case's record holds {keys:?} after its status line, not \
@@ -963,8 +925,9 @@ pub(crate) fn device_tree_problem(root: &Path) -> Result<(), String> {
                      driver= cuda= cudf= host=, each once"
                 ));
             }
-            let named = trailer_field(&trailer, "device", &at);
-            if device_slug(&named) != device {
+            // The first `device=` is the one: the check above holds each of the five once.
+            let (_, named) = trailer.iter().find(|(key, _)| *key == "device").unwrap();
+            if device_slug(named) != device {
                 return Err(format!(
                     "{at}: measured on {named:?}, filed under {device}/"
                 ));

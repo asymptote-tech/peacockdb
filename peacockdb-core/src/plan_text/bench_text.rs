@@ -12,6 +12,7 @@
 
 use std::fmt::Write as _;
 
+use super::LOAD_NODE;
 use super::node_text::{join_parts, lanes_of, node_line_parts};
 use crate::executor::{Measured, Measurements, RunReport};
 use crate::executor::{PlanIndex, ROOT};
@@ -33,9 +34,6 @@ fn call_us(call: &Option<Measured>) -> u64 {
         _ => 0,
     }
 }
-
-/// The node the device loads a table with: its `total_us` is the run's load.
-pub(crate) const LOAD_NODE: &str = "GpuLoadParquet";
 
 /// `root` as it was timed: one node per line with the microseconds its calls spent on the
 /// device beneath it, and the batches `report`, the same run, says it emitted.

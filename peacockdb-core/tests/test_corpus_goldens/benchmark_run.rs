@@ -25,7 +25,7 @@ fn this_run() -> Provenance {
 /// A timed section's body as the harness writes one: a node, the trailer, the five.
 fn timed(provenance: &Provenance, run_us: u64) -> String {
     format!(
-        "0.0 CudfScan\n  time_us=[[{run_us}]] total_us={run_us}\n--- run ---\n\
+        "GpuUnload\n  time_us=[[{run_us}]] total_us={run_us}\n--- run ---\n\
          run_us={run_us}\ndevice_us={run_us}\nruns=[{}]\nbuild=release\nallocator=rmm-pool\n\
          device={}\ndriver={}\ncuda={}\ncudf={}\nhost={}\n",
         vec![run_us.to_string(); 10].join(","),

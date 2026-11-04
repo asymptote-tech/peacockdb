@@ -12,7 +12,9 @@
 // The prefill's pure half: the harness that calls it is not in a rust-only build, its tests are.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 mod benchmark_prefill;
+mod benchmark_report;
 mod benchmark_section;
+mod benchmark_tree;
 // `run_section`, the trailer's writer, serves the benchmark harness, which a rust-only build
 // does not compile; its test runs in every shape.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
@@ -334,6 +336,69 @@ pub fn line_difference(expected: &str, actual: &str) -> String {
 /// One `.cpu.txt` section: the early-exit marker and every node under it, in file order.
 pub fn parse_run_section(body: &str) -> (String, Vec<RunNode<'_>>) {
     golden_text::parse_run_section(body)
+}
+
+/// A node as a `.benchmark.txt` section records it: its line, and the line beneath.
+///
+/// `time_us` is by driving lane and call; `batch_rows` and `batch_bytes` by output lane and
+/// batch, as `RunNode`'s, and `None` in a section written before bench-rows.
+pub struct BenchNode<'a> {
+    pub line: NodeLine<'a>,
+    pub time_us: Vec<Vec<u64>>,
+    pub total_us: u64,
+    pub batch_rows: Option<Vec<Vec<u64>>>,
+    pub batch_bytes: Option<Vec<Vec<u64>>>,
+    /// Indices into the same vector, as `RunNode`'s.
+    pub children: Vec<usize>,
+}
+
+/// A timed `.benchmark.txt` section: the tree in file order (pre-order, `nodes[0]` the root)
+/// and the `--- run ---` trailer's lines in order, each split at its first `=`.
+pub struct BenchSection<'a> {
+    pub nodes: Vec<BenchNode<'a>>,
+    pub trailer: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> BenchSection<'a> {
+    /// The trailer's value for `key`. Every line is read: a key held twice is two runs'
+    /// trailers in one section, and panics.
+    pub fn field(&self, key: &str) -> Option<&'a str> {
+        self.trailer
+            .iter()
+            .filter(|(name, _)| *name == key)
+            .map(|(_, value)| *value)
+            .reduce(|_, _| panic!("the trailer holds `{key}` twice"))
+    }
+
+    /// The field as a count; panics when it is present and not a number, as `NodeLine::count`.
+    pub fn count(&self, key: &str) -> Option<u64> {
+        self.field(key).map(|value| {
+            value
+                .parse()
+                .unwrap_or_else(|e| panic!("trailer `{key}={value}` is not a count: {e}"))
+        })
+    }
+
+    /// Every node's `total_us` added: what the trailer's `device_us` must be.
+    pub fn tree_device_us(&self) -> u64 {
+        self.nodes.iter().map(|node| node.total_us).sum()
+    }
+
+    /// The `GpuLoadParquet` nodes' `total_us` added: what `load_us` must be, and the load of a
+    /// section written before the trailer carried it.
+    pub fn tree_load_us(&self) -> u64 {
+        self.nodes
+            .iter()
+            .filter(|node| node.line.name == crate::plan_text::LOAD_NODE)
+            .map(|node| node.total_us)
+            .sum()
+    }
+}
+
+/// One `.benchmark.txt` section, or `None` for a marker (`SKIPPED`) or a failed case's record
+/// (`FAILED`). Panics on a line the format does not allow, naming it.
+pub fn parse_benchmark_section(body: &str) -> Option<BenchSection<'_>> {
+    benchmark_tree::parse_benchmark_section(body)
 }
 
 // --- the link-time registry ----------------------------------------------------
@@ -1173,6 +1238,53 @@ pub fn parse_device_cases(text: &str) -> Vec<DeviceCase> {
 /// back as `cases`.
 pub fn render_device_cases(cases: &[DeviceCase]) -> String {
     device_cases::render(cases)
+}
+
+// --- the benchmark report page ---------------------------------------------------
+
+/// `ticket_widget.py`'s `DEFAULT_REPO`: the page links each section on GitHub, as `report.html`
+/// links its goldens.
+pub const REPORT_REPO: &str = "asymptote-tech/peacockdb";
+
+/// A table later tasks add below the page's per-dataset ones (query-fuser's fused batches).
+pub struct ReportTable {
+    /// The `<h2>`'s anchor.
+    pub id: String,
+    pub heading: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<ReportCell>>,
+}
+
+/// One cell of a `ReportTable`; `class` is `off`, `skip` or `na`, the page's colours.
+pub struct ReportCell {
+    pub text: String,
+    pub href: Option<String>,
+    pub class: Option<&'static str>,
+}
+
+/// `testdata/benchmark-report.html`.
+pub fn benchmark_report_path() -> PathBuf {
+    benchmark_report::path()
+}
+
+/// Replaces the page with `text`, staged and renamed, for an `UPDATE_CANONICAL` rewrite.
+pub fn write_benchmark_report(text: &str) {
+    testdata::rewrite(&benchmark_report::path(), text)
+}
+
+/// The page for the device trees under `root`, a `benchmark-results/` directory. `order` is the
+/// main case list's (dataset, query) pairs in file order; `extra` follows the datasets' tables.
+pub fn render_benchmark_report(
+    root: &Path,
+    order: &[(String, String)],
+    extra: &[ReportTable],
+) -> String {
+    benchmark_report::render(root, order, extra)
+}
+
+/// `https://github.com/{REPORT_REPO}/blob/master/testdata/{rel}#L{line}`.
+pub fn section_href(rel: &str, line: usize) -> String {
+    benchmark_report::section_href(rel, line)
 }
 
 /// What became of one benchmark case in its mode's file.

@@ -12,14 +12,16 @@
 //! that will later check it — but a file that contradicts itself is a file the renderer got
 //! wrong, and the renderer is most of what could be wrong.
 //!
-//! The benchmark tree, read back the same way, and the calibration record's format are
-//! `benchmark`; what a run writes into the tree when a case fails or is run again is
+//! The benchmark tree, read back the same way, is `benchmark`; the calibration record's format
+//! is `benchmark_record`; what a run writes into the tree when a case fails or is run again is
 //! `benchmark_run`.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps it under a directory named for this one.
 #[path = "test_corpus_goldens/benchmark.rs"]
 mod benchmark;
+#[path = "test_corpus_goldens/benchmark_record.rs"]
+mod benchmark_record;
 #[path = "test_corpus_goldens/benchmark_run.rs"]
 mod benchmark_run;
 
