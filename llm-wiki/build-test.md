@@ -113,13 +113,18 @@ through that reader; a page that is missing or stale fails, naming its first mov
 command that rewrites it.
 Every case the list declares has its section, timed or a failure's record, in every device's tree
 that holds no `cases.csv`. A tree that holds one is held to its `ok` and `wrong` rows instead:
-`h200/` is held to `h200/cases.csv`, the list it was measured from. Every device list parses.
+`h200/` is held to `h200/cases.csv`, the list it was measured from. Those rows must be main-list
+cases, at modes the main list carries for them; `h200/` alone is exempt, measured from an older
+list. Every device list parses. `duckdb-cpu128/`, DuckDB's results, is no device tree: no check
+here lists it or holds it to the main list.
 Every file lies at
 `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` under its device's slug, its timed trailers ending
 with the five provenance keys and a failure's record holding its status line and the five. Only
 `h200/`, from before provenance, may have timed trailers without them. Over synthesized trees: its
 sections under another device's name are refused, and are short of the list there; a tree with
-its own list answers to its rows, a `skipped` row declaring no section; a file short of
+its own list answers to its rows, a `skipped` row declaring no section; a list naming a query
+the main list lacks, or a mode its line lacks, is refused naming it, though the tree holds the
+section; a `duckdb-cpu128/` beside `h200/` is no device; a file short of
 one declared section is named; a trailer naming another card than its directory is refused, and one
 naming its own passes; a failure's record without the five is refused even under `h200/`. Over a
 temp file, a run's write path: a case that panics is recorded on one line and the next case is
@@ -570,13 +575,20 @@ fell back, reloaded or evicted during its rounds, naming each count; when the pr
 fit or could not read a file, with its sizes (`prefill: needs 60 > limit 49`), but not when the
 cache is off; and when one of its files is outside the prefill, naming it
 
-| Device case lists | [test_support::device_cases::tests](../peacockdb-core/src/test_support/device_cases/tests.rs) | 11 |
+| Device case lists | [test_support::device_cases::tests](../peacockdb-core/src/test_support/device_cases/tests.rs) | 24 |
 |---|---|--:|
 
 a device's `cases.csv`, through its one reader and writer: a list round-trips, and a note keeps
 its commas. A skipped row names a reason and no mode. An `ok` or `wrong` row names its modes. A
 `wrong` row's note is its `#NN` ticket, and an `ok` row has none. Refused, naming the line: a
-wrong header, an unknown mode or status, a row short of six fields, and a case listed twice
+wrong header, an unknown mode or status, a row short of six fields, and a case listed twice.
+`testdata/fixtures/device-cases.csv` reads to a literal, the one `test_device_cases.py` asserts.
+And the rows a tree makes of the main list's candidates (`device_lines`): a timed section is an
+`ok` row; a query failed in every mode is `skipped` with the first reason; a mode failed beside a
+timed one drops from the row; a mode whose file is absent, or which the line does not carry, is
+not considered. A missing section is refused naming dataset, query and mode, a missing
+`tp1_single` file too, except a later mode of a query failed at `tp1_single`. A `wrong` mark comes
+back on its measured row; one on a skipped query, or on no candidate, is refused
 
 | Golden merge | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 9 |
 |---|---|--:|
@@ -2547,8 +2559,10 @@ hand-written list stood at a5c852e4 on master, fixed since: `h200/cases.csv`,
 and `h200/` is held to it. It goes with `PREDATES_PROVENANCE` once the H200 is run again (#226).
 
 Every per-device case list is `testdata/benchmark-results/<device>/cases.csv`. A device tree that
-holds one is held to it; a tree without is held to the whole main list. Its first line is
-`dataset,sf,query,modes,status,note`, and a row splits at its first five commas:
+holds one is held to it; a tree without is held to the whole main list. A list's `ok` and
+`wrong` rows are main-list cases, at modes the main list carries for them (`h200/` exempt).
+`duckdb-cpu128/` holds DuckDB's results, not a device's: the tree checks pass it by. A list's
+first line is `dataset,sf,query,modes,status,note`, and a row splits at its first five commas:
 - `dataset`, `sf`: as the main list writes them, `tpch` and `40`;
 - `query`: the main list's ident, `_` kept (`aggregate_groupby`);
 - `modes`: mode idents `|`-joined, no spaces (`tp1_single|tp4_sized`); empty when skipped;
@@ -2557,7 +2571,13 @@ holds one is held to it; a tree without is held to the whole main list. Its firs
   ticket, empty for `ok`.
 
 A case appears once. `parse_device_cases` and `render_device_cases` in `test_support` are the one
-reader and writer; `every_device_list_parses` reads each committed list. The main list,
+reader and writer; `every_device_list_parses` reads each committed list. Scripts read a list
+through `scripts/calibration/device_cases.py`, which prints its `ok` and `wrong` rows
+(`<csv> [--dataset <ds>] [--mode <mode>]`, tab-separated, file order). Both readers are tested
+against `testdata/fixtures/device-cases.csv`. `device_lines` writes a device's rows from its tree:
+an `ok` row at the modes with a timed section, a `skipped` row with the first failure's reason
+when there is none, and a `wrong` row where the list as it stands marked one, since the tree knows
+no tickets. The main list,
 `corpus_benchmark_cases.inc`, is in macro form.
 `nested_loop_join` reads region and nation, which do not grow with sf, so its rows describe the
 host prologue. At the two rowgroup modes a scan is one

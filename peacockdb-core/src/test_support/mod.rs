@@ -1240,6 +1240,29 @@ pub fn render_device_cases(cases: &[DeviceCase]) -> String {
     device_cases::render(cases)
 }
 
+/// What a device's tree holds for a case in one mode's file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Measured {
+    Timed,
+    /// The failed section's reason, the text after `reason=`.
+    Failed(String),
+}
+
+/// The sf40 rows a device's tree makes of `candidates`, `(dataset, query, main-list modes)` in
+/// main-list order, at those of `modes` each carries. `files(dataset, mode)` is that file's
+/// sections by name as the file spells it, `None` without a file; `wrong` is `(dataset, query)` →
+/// `#NN`, the list's `wrong` rows as it stands, since the tree knows no tickets. `Err` names a
+/// section the tree owes and lacks, or a mark on a query not measured. Rules: build-test.md,
+/// "Corpus benchmarks".
+pub fn device_lines(
+    candidates: &[(String, String, Vec<String>)],
+    modes: &[&str],
+    files: &dyn Fn(&str, &str) -> Option<BTreeMap<String, Measured>>,
+    wrong: &BTreeMap<(String, String), String>,
+) -> Result<Vec<DeviceCase>, String> {
+    device_cases::lines(candidates, modes, files, wrong)
+}
+
 // --- the benchmark report page ---------------------------------------------------
 
 /// `ticket_widget.py`'s `DEFAULT_REPO`: the page links each section on GitHub, as `report.html`

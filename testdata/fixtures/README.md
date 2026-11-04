@@ -17,3 +17,8 @@ the loader. Every other widget test builds its rows by hand, downstream of the s
 is written twice, `RowRange::clamp` in Rust and `clamp_row_range` in C++, because the cpu backend
 never crosses the ABI. Each side's test reads this file and asserts its own clamp, so a case added
 here reaches both, and a drift fails the drifting side on the shared line.
+
+`device-cases.csv` is a device case list (`testdata/benchmark-results/<device>/cases.csv`) with one
+row of each kind: `ok` at two modes, `wrong` with its ticket, `skipped` with a reason holding a
+comma, and a tpcds row. `parse_device_cases` in Rust and `device_cases.py` for scripts each read it
+to the same literal, so a drift fails the drifting side.

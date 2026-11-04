@@ -1,7 +1,11 @@
-//! The per-device case list's format, over strings: what it reads back, and what it refuses.
+//! The per-device case list's format, over strings: what it reads back, and what it refuses;
+//! and the rows a device's tree makes of the main list's candidates.
+
+use std::collections::BTreeMap;
 
 use crate::test_support::{
-    CaseStatus, DEVICE_CASES_HEADER, DeviceCase, parse_device_cases, render_device_cases,
+    CaseStatus, DEVICE_CASES_HEADER, DeviceCase, Measured, device_lines, parse_device_cases,
+    render_device_cases, testdata_root,
 };
 
 fn case(query: &str, modes: &[&str], status: CaseStatus, note: &str) -> DeviceCase {
@@ -137,5 +141,270 @@ fn a_case_twice_is_refused() {
     assert!(
         refused.contains("line 4") && refused.contains("line 2"),
         "{refused}"
+    );
+}
+
+// --- the H100 list written from the tree -------------------------------------------------
+
+/// A candidate as the main list writes it: tpch, the query, its modes.
+fn candidate(query: &str, modes: &[&str]) -> (String, String, Vec<String>) {
+    (
+        "tpch".to_string(),
+        query.to_string(),
+        modes.iter().map(|mode| mode.to_string()).collect(),
+    )
+}
+
+/// `(mode, [(section, measured)])` as a tree's files: a mode not named has no file.
+fn tree(
+    files: Vec<(&str, Vec<(&str, Measured)>)>,
+) -> impl Fn(&str, &str) -> Option<BTreeMap<String, Measured>> {
+    let files: BTreeMap<String, BTreeMap<String, Measured>> = files
+        .into_iter()
+        .map(|(mode, sections)| {
+            let sections = sections
+                .into_iter()
+                .map(|(query, measured)| (query.to_string(), measured))
+                .collect();
+            (mode.to_string(), sections)
+        })
+        .collect();
+    move |dataset, mode| match dataset {
+        "tpch" => files.get(mode).cloned(),
+        _ => None,
+    }
+}
+
+fn failed(reason: &str) -> Measured {
+    Measured::Failed(reason.to_string())
+}
+
+const TWO_MODES: &[&str] = &["tp1_single", "tp4_sized"];
+
+/// `device_lines` over `candidates` and the tree, with no `wrong` mark.
+fn lines(
+    candidates: &[(String, String, Vec<String>)],
+    files: &dyn Fn(&str, &str) -> Option<BTreeMap<String, Measured>>,
+) -> Result<Vec<DeviceCase>, String> {
+    device_lines(candidates, TWO_MODES, files, &BTreeMap::new())
+}
+
+#[test]
+fn a_timed_section_makes_an_ok_row() {
+    let files = tree(vec![
+        ("tp1_single", vec![("q1", Measured::Timed)]),
+        ("tp4_sized", vec![("q1", Measured::Timed)]),
+    ]);
+    let rows = lines(&[candidate("q1", TWO_MODES)], &files);
+    assert_eq!(rows, Ok(vec![case("q1", TWO_MODES, CaseStatus::Ok, "")]));
+}
+
+/// A section's name is the query as the file writes it, `_` read as `-`.
+#[test]
+fn a_query_is_found_under_its_section_name() {
+    let files = tree(vec![(
+        "tp1_single",
+        vec![("aggregate-groupby", Measured::Timed)],
+    )]);
+    let rows = lines(&[candidate("aggregate_groupby", &["tp1_single"])], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case(
+            "aggregate_groupby",
+            &["tp1_single"],
+            CaseStatus::Ok,
+            ""
+        )])
+    );
+}
+
+#[test]
+fn a_query_failed_in_every_mode_is_a_skipped_row() {
+    let files = tree(vec![
+        (
+            "tp1_single",
+            vec![("q9", failed("timeout: past 1800 s, killed"))],
+        ),
+        ("tp4_sized", vec![("q9", failed("out of device memory"))]),
+    ]);
+    let rows = lines(&[candidate("q9", TWO_MODES)], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case(
+            "q9",
+            &[],
+            CaseStatus::Skipped,
+            "timeout: past 1800 s, killed"
+        )])
+    );
+}
+
+#[test]
+fn a_mode_failed_beside_a_timed_one_drops_from_the_row() {
+    let files = tree(vec![
+        ("tp1_single", vec![("q1", Measured::Timed)]),
+        ("tp4_sized", vec![("q1", failed("out of device memory"))]),
+    ]);
+    let rows = lines(&[candidate("q1", TWO_MODES)], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case("q1", &["tp1_single"], CaseStatus::Ok, "")])
+    );
+}
+
+/// A mode whose file the tree lacks is not measured yet on this device: no row names it.
+#[test]
+fn a_mode_without_its_file_is_not_considered() {
+    let files = tree(vec![("tp1_single", vec![("q1", Measured::Timed)])]);
+    let rows = lines(&[candidate("q1", TWO_MODES)], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case("q1", &["tp1_single"], CaseStatus::Ok, "")])
+    );
+}
+
+/// A mode the main list's line does not carry is not considered, whatever the tree holds.
+#[test]
+fn a_mode_the_line_does_not_carry_is_not_considered() {
+    let files = tree(vec![
+        ("tp1_single", vec![("q1", Measured::Timed)]),
+        ("tp4_sized", vec![("q1", Measured::Timed)]),
+    ]);
+    let rows = lines(&[candidate("q1", &["tp1_single"])], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case("q1", &["tp1_single"], CaseStatus::Ok, "")])
+    );
+}
+
+#[test]
+fn a_missing_section_is_refused() {
+    let files = tree(vec![
+        ("tp1_single", vec![("q1", Measured::Timed)]),
+        ("tp4_sized", vec![("q6", Measured::Timed)]),
+    ]);
+    let problem = lines(&[candidate("q1", TWO_MODES)], &files)
+        .expect_err("q1 has no tp4_sized section and was written");
+    assert!(
+        problem.contains("tpch") && problem.contains("q1") && problem.contains("tp4_sized"),
+        "{problem}"
+    );
+}
+
+/// `tp1_single` is always considered: the tree without its file has not measured the query.
+#[test]
+fn a_missing_tp1_single_file_is_refused() {
+    let problem = lines(&[candidate("q1", TWO_MODES)], &tree(vec![]))
+        .expect_err("a tree with no file was written");
+    assert!(
+        problem.contains("q1") && problem.contains("tp1_single"),
+        "{problem}"
+    );
+}
+
+/// tp4-sized does not run a query whose `tp1_single` failed, so its file owes it no section.
+#[test]
+fn a_later_mode_of_a_query_failed_at_tp1_single_owes_no_section() {
+    let files = tree(vec![
+        ("tp1_single", vec![("q9", failed("out of device memory"))]),
+        ("tp4_sized", vec![("q1", Measured::Timed)]),
+    ]);
+    let rows = lines(&[candidate("q9", TWO_MODES)], &files);
+    assert_eq!(
+        rows,
+        Ok(vec![case(
+            "q9",
+            &[],
+            CaseStatus::Skipped,
+            "out of device memory"
+        )])
+    );
+}
+
+/// The tree knows no tickets: a `wrong` mark the file carried comes back on the measured row.
+#[test]
+fn a_rewrite_keeps_a_wrong_answer_mark() {
+    let files = tree(vec![
+        (
+            "tp1_single",
+            vec![("q1", Measured::Timed), ("q6", Measured::Timed)],
+        ),
+        (
+            "tp4_sized",
+            vec![("q1", Measured::Timed), ("q6", Measured::Timed)],
+        ),
+    ]);
+    let wrong = BTreeMap::from([(("tpch".to_string(), "q6".to_string()), "#7".to_string())]);
+    let rows = device_lines(
+        &[candidate("q1", TWO_MODES), candidate("q6", TWO_MODES)],
+        TWO_MODES,
+        &files,
+        &wrong,
+    );
+    assert_eq!(
+        rows,
+        Ok(vec![
+            case("q1", TWO_MODES, CaseStatus::Ok, ""),
+            case("q6", TWO_MODES, CaseStatus::Wrong, "#7"),
+        ])
+    );
+}
+
+#[test]
+fn a_wrong_mark_on_a_skipped_query_is_refused() {
+    let files = tree(vec![(
+        "tp1_single",
+        vec![("q9", failed("out of device memory"))],
+    )]);
+    let wrong = BTreeMap::from([(("tpch".to_string(), "q9".to_string()), "#7".to_string())]);
+    let problem = device_lines(&[candidate("q9", TWO_MODES)], TWO_MODES, &files, &wrong)
+        .expect_err("a wrong mark on a query with no measurement was kept");
+    assert!(
+        problem.contains("q9") && problem.contains("#7"),
+        "{problem}"
+    );
+}
+
+/// A mark for a query no candidate names would be dropped by the rewrite without a word.
+#[test]
+fn a_wrong_mark_on_no_candidate_is_refused() {
+    let files = tree(vec![("tp1_single", vec![("q1", Measured::Timed)])]);
+    let wrong = BTreeMap::from([(("tpch".to_string(), "q99".to_string()), "#7".to_string())]);
+    let problem = device_lines(&[candidate("q1", TWO_MODES)], TWO_MODES, &files, &wrong)
+        .expect_err("a wrong mark on no candidate was dropped");
+    assert!(
+        problem.contains("q99") && problem.contains("#7"),
+        "{problem}"
+    );
+}
+
+/// `testdata/fixtures/device-cases.csv`, which `scripts/calibration/device_cases.py`'s test reads
+/// to the same values, field by field.
+#[test]
+fn the_shared_fixture_reads_as_expected() {
+    let path = testdata_root().join("fixtures/device-cases.csv");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let in_tpcds = |mut case: DeviceCase| {
+        case.dataset = "tpcds".to_string();
+        case
+    };
+    assert_eq!(
+        parse_device_cases(&text),
+        [
+            case("q1", &["tp1_single", "tp4_sized"], CaseStatus::Ok, ""),
+            case(
+                "aggregate_groupby",
+                &["tp1_single"],
+                CaseStatus::Wrong,
+                "#7"
+            ),
+            case(
+                "q9",
+                &[],
+                CaseStatus::Skipped,
+                "timeout: the case ran past 1800 s, and was killed"
+            ),
+            in_tpcds(case("q37", &["tp1_single"], CaseStatus::Ok, "")),
+        ]
     );
 }
