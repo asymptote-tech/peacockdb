@@ -23,7 +23,7 @@
 - Task 0 (set up the run): done, committed.
 - Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): done 2026-11-04, checkpoint `comet-research: desk wave amendments` reported, awaiting commit.
 - Task 2 (experiment scripts): Steps 1-4 done 2026-11-04; checkpoint `comet-research: experiment scripts` reported, awaiting commit.
-- Task 3 (experiment 1, VM-to-S3 throughput): todo
+- Task 3 (experiment 1, VM-to-S3 throughput): Steps 1-2 done 2026-11-04 on the L40S; checkpoint `comet-research: S3 throughput (L40S)` reported, awaiting commit.
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
 - Task 5 (analysis and the cost model): todo
 - Task 6 (the report and its audit): todo
@@ -158,9 +158,18 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
 | l40s | guest poweroff | 03:10:51 | the timer fired; ssh stopped answering after 03:10:47 |
 | l40s | STOPPED | 03:13:39 | API state, polled with `vm.sh status l40s` (STOPPING from 03:12:05) |
 | l40s | stop-used | 03:13:46 | logged `lost found STOPPED`; no stop call needed |
+| l40s | use requested | 03:15:47 | Task 3; found STOPPED, start called 03:15:48 |
+| l40s | RUNNING | 03:16:48 | `gpu-host.sh start`; `use started` logged 03:16:49 |
+| l40s | dead-man armed | 03:16:49 | guest, 56 min (the minutes left in the cap) |
+| l40s | run | 03:17:22-03:31:32 | detached driver; ssh timed out about 03:24-03:28 (boot disk saturated), run unaffected |
+| l40s | stop-used | 03:31:49 | `gpu-host.sh stop --force` from 03:31:52 |
+| l40s | STOPPED | 03:32:23 | `vm.sh status l40s` reads STOPPED |
 
 - After Task 2: l40s 0.05 h of the 1 h cap by the log; the wall time from request to STOPPED was
   0.10 h. cpu128 0.00 h of 2 h.
+- After Task 3: l40s **0.33 h** by the log (Task 3's session 0.28 h, request 03:15:47 to stop
+  03:32:23). Wall time, request to STOPPED: 0.28 h this session, 0.38 h over the task. For a cap
+  check, add 10 min for the one `lost` use: 0.50 h of 1 h. cpu128 0.00 h of 2 h.
 - The log undercounts a dead-man stop: `lost` closes a use at its last heartbeat (the plan's
   rule), here 03:10:47, while the VM ran to 03:13:39. A long detached run polled every 9 min can
   lose up to that much per use. Task 6 should report wall times beside the log's hours.
@@ -210,6 +219,27 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
 - Not run anywhere yet: `comet_setup.sh`, `comet_data.py`'s S3 paths, `s3_throughput.py` against S3,
   and the Spark side of `comet_run.py`. `bash -n` passes on both shell scripts; shellcheck is not
   installed here.
+
+## Task 3: S3 throughput on the L40S (2026-11-04)
+
+- Files: `artifacts/comet-research/measurements/s3/{l40s.tsv,summary.tsv,notes.md}`;
+  `measurements/vm-log.tsv` copied from `.claude/ensemble/M.vm-log.tsv`.
+- Object `s3://tpch-sf40/lineitem.parquet` (eu-north1), 9,030,797,348 B, lineitem's only object.
+  S3 ranged GETs: 0.129 / 0.568 / **0.917** / 0.862 GB/s at 1 / 4 / 16 / 64 threads. Boot disk
+  (NETWORK_SSD 100 GiB, O_DIRECT, cache dropped): 0.061-0.062 GB/s at every thread count. The
+  boto3 `download_file` copy to disk ran at 0.152 GB/s.
+- The VM was `started`, not `found`; load was still recorded per row (load average, GPU
+  utilisation, eth0 `rx_bytes`). eth0 took 9.06-9.08 GB per S3 row, so the bytes crossed the NIC.
+- How it ran: `vm.sh push-aws l40s`; the script copied over ssh stdin to `~/comet/s3/` (sha256
+  matched); one detached driver (`setsid nohup`, `status` and `rc` files) ran every row. The
+  driver was scratch in `/tmp` on dev, not committed. VM: Python 3.12.3, boto3 1.34.46, no aws
+  CLI, 24 GB free on `/`; the 9 GB copy was deleted after the reads.
+- **Subtle: the boot disk is the slow source.** Nebius VMs here have no local disk; "local disk" is
+  a network disk at about 0.06 GB/s. While 64 threads saturated it (load 68), ssh timed out in the
+  banner exchange for about 4 min although the API said RUNNING. Task 4 should check cpu128's disk
+  type first, and should not count on ssh while a run saturates the boot disk.
+- Not settled: whether ~0.9 GB/s is the NIC or the Python client (CPU 216-283% of 800%). Listed as
+  a follow-up in `notes.md`.
 
 ## Rulings
 
