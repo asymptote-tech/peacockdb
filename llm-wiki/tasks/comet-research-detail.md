@@ -479,3 +479,5 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   0.66 h, STOPPED. Task 5 dispatched to a fresh developer. Coordinator note for Task 5: the
   "local" runs are RAM-resident (tmpfs), the strictest local baseline; the S3 runs read
   in-region, so no in-region correction is modelled. Fix the `exotic.md` drift noted above.
+- 2026-11-04: Task 5 committed: every headline cell a conditional go, bands straddle 2×. Task 6
+  dispatched to a fresh developer.
