@@ -16,6 +16,7 @@
 - 2026-11-04 (coordinator, restart): Task 1 Steps 4-5 dispatched to a fresh developer. No VM
   in use; `vm.sh` does not exist yet, so no startup `stop-used`.
 - 2026-11-04: Task 1 Steps 4-5 committed (96b2657f). Task 2 dispatched to a fresh developer.
+- 2026-11-04: Task 2 committed (af00cb78). Task 3 (L40S S3 throughput) dispatched to a fresh developer.
 
 ## Tasks
 
