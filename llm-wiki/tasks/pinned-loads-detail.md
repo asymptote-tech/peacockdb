@@ -419,3 +419,38 @@ GitHub PAT; `new-hosts-detail.md`, "Blocked"). The analyst spent on new-hosts' o
 task's H100 work as hitting the same block. Done offline: Tasks 1, 2 Steps 1–2 (+ both cards'
 attribute), 3, 4, 4b, 5. Device-only gtests and `gpu_tests` cases are compiled, not run (Task 7).
 Once new-hosts' Task 10 has proven the H100 path, clear this block and resume at Task 2 Step 3.
+
+## Rebase onto master (2026-11-04)
+
+Chain L's rebase: 9 commits onto `ENS-new-hosts` at `4b636cc3` (itself on master with ENS-optimizer,
+#165). No code conflict. The replay took HEAD's side on `build-test.md`, which lost five pinned-loads
+edits. They are restored by meaning: the ffi rung's `Pinned host cache wrappers` row (module unit, 1);
+the four summary rows pinned-loads changed (Calibration 41→51, C++ CPU/FFI unit 26→63, cuDF GPU smoke
+3→5, Plan-executor 126→131), taken whole, since HEAD's copies still equalled the old base; and the
+headers, recounted from the rows: cpu 3427 (`--lib` 930), gpu 2411 (`gpu_tests::` 742), grand total
+7730 (Rust 5976, C++ 277, Python 1477). Every other pinned-loads line had survived.
+
+Re-proven offline on this base, no VM:
+- `cargo test --features rust-only -p peacockdb-core`: exit 0, no warning. `--lib` 928 + 2 ignored,
+  `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3, `test_crate_privacy` 1,
+  `test_golden_format` 41. `git status --short testdata/` empty before and after.
+- `cargo test -p cost-report`: 49 + `test_source_formatting` 32, exit 0.
+- `scripts/calibration/tests/test_*.py` in the 25.02 build image's venv: 6+3+14+10+7+11 = 51,
+  `test_loads.py` 10/10. On the host `test_plot.py` dies importing matplotlib, which only the venv holds.
+- C++, 25.02 build image, fresh `/tmp/pl-rb25` (`scripts/build.sh --configure --build`): 99/99, two
+  warnings, both in `_deps/flatbuffers`. `ctest -L cpu` 1/1; `peacock_cpu_tests` 63/63;
+  `peacock_plan_tests` lists 131. The binary reads `testdata/fixtures` by absolute path, so a
+  `docker run` without the worktree mounted fails `ClampRowRange.AnswersEveryCaseInTheSharedTable`.
+- Host cuDF 25.02 (`rapids-cuda-12.2`, `scripts/cargo-cudf.sh`, `LD_LIBRARY_PATH` on the env's
+  `lib/`), no device: `--lib -- ffi_tests::` 5/5 and `peacockdb-ffi --test test_ffi` 4/4, both
+  no-device pinned-cache cases among them; `--features gpu --no-run` builds every target, no warning,
+  and its `--lib --list` holds 742 `gpu_tests::` cases.
+- 26.02 not rebuilt: the build image is not on dev (only its run image is).
+
+Unchanged: the device cases and the H100 path wait, as "Blocked" says.
+
+## Blocked (2026-11-04, after the rebase)
+
+Still `blocked(building)` at Task 2 Step 3: the H100 path waits on new-hosts' new block, the two
+VMs' disks (`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared.
+Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
