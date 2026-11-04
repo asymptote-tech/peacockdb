@@ -4,6 +4,7 @@ Run: python3 -m pytest llm-wiki/artifacts/comet-research/scripts/tests
 None of these needs Spark; `--matrix` must not import pyspark.
 """
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -193,3 +194,17 @@ def test_the_walk_skips_the_replaced_scan_behind_a_comet_cache_scan():
     assert not comet_run.follows_subqueries("CometInMemoryTableScanExec")
     assert comet_run.follows_subqueries("CometFilterExec")
     assert comet_run.follows_subqueries("FilterExec")
+
+
+def test_sequential_batch_time_excludes_plan_dumps(tmp_path, monkeypatch):
+    """Task 6 audit finding 1: the S3 sequential batches counted --dump-plans time."""
+    qdir = tmp_path / "q"
+    qdir.mkdir()
+    (qdir / "q1.sql").write_text("SELECT a; SELECT b;")
+    monkeypatch.setattr(comet_run, "dump_plan", lambda *_: time.sleep(0.3))
+    args = comet_run.parse_args(["--dataset", "tpch", "--batch", "1", "--out", str(tmp_path),
+                                 "--queries-dir", str(qdir), "--dump-plans", str(tmp_path / "p")])
+    r = comet_run.Runner(args, FakeSpark({"SELECT a": 1, "SELECT b": 1}), tmp_path)
+    r.sequential(["q1"], "1")
+    rows = {l.split("\t")[0]: l.split("\t") for l in (tmp_path / "runs.tsv").read_text().splitlines()}
+    assert float(rows["batch"][2]) < 300

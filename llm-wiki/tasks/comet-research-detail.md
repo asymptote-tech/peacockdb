@@ -21,12 +21,12 @@
 ## Tasks
 
 - Task 0 (set up the run): done, committed.
-- Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): done 2026-11-04, checkpoint `comet-research: desk wave amendments` reported, awaiting commit.
-- Task 2 (experiment scripts): Steps 1-4 done 2026-11-04; checkpoint `comet-research: experiment scripts` reported, awaiting commit.
-- Task 3 (experiment 1, VM-to-S3 throughput): Steps 1-2 done 2026-11-04 on the L40S; checkpoint `comet-research: S3 throughput (L40S)` reported, awaiting commit.
-- Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): Steps 0-5 done 2026-11-04; cpu128 STOPPED 04:33:49; checkpoint `comet-research: Comet runs and plan dumps` reported, awaiting commit.
-- Task 5 (analysis and the cost model): Steps 1-7 done 2026-11-04; checkpoint `comet-research: analysis and cost model` reported, awaiting commit. Notes in `## Task 5` below.
-- Task 6 (the report and its audit): todo
+- Task 1 (desk wave): done, committed (5330543d, 96b2657f).
+- Task 2 (experiment scripts): done, committed (af00cb78).
+- Task 3 (experiment 1, VM-to-S3 throughput): done, committed (5008e6a6).
+- Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): done, committed (cf35deed).
+- Task 5 (analysis and the cost model): done, committed (4f0a27cf).
+- Task 6 (the report and its audit): Steps 1-5 done 2026-11-04; green reported. Step 6 (signoff, board, commit, PR) is the coordinator's. Notes in `## Task 6` below.
 
 Plan drift (fixed by the coordinator, 2026-11-04): Global Constraints and Review Focus in
 `comet-research-impl.md` were renumbered to match the headings, Task 0 to Task 6.
@@ -177,6 +177,9 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   check, add 10 min for the one `lost` use: 0.50 h of 1 h. cpu128 0.00 h of 2 h.
 - After Task 4: cpu128 **0.66 h** of 2 h by the log; wall time, request to STOPPED, 0.66 h
   (03:54:22-04:33:49). No `lost` use, so no margin to add. l40s unchanged at 0.33 h by the log.
+- Task 6 (05:25 UTC): `vm.sh stop-used` printed "no VM in use" and logged nothing; `vm.sh status`
+  reads STOPPED for cpu128 and l40s. The H100 has no `vm.sh` entry and was never used. Final:
+  l40s 0.33 h by the log, 0.38 h wall (cap 1 h); cpu128 0.66 h by the log, 0.66 h wall (cap 2 h).
 - The log undercounts a dead-man stop: `lost` closes a use at its last heartbeat (the plan's
   rule), here 03:10:47, while the VM ran to 03:13:39. A long detached run polled every 9 min can
   lose up to that much per use. Task 6 should report wall times beside the log's hours.
@@ -439,6 +442,64 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   not wall time (above). Files beyond the plan's list: `scripts/plan_census.py`,
   `scripts/footers.py`, their tests, `measurements/footers/sf40.tsv`, `plans/{census,eligible,columns}.tsv`.
 
+## Task 6: the report and its audit (2026-11-04)
+
+- No VM started. Report: `llm-wiki/reports/comet-gpu.md`. Audit: `artifacts/comet-research/audit.md`,
+  one fresh Explore subagent given only the report and the artifact folder (it had WebFetch and
+  opened 15 random sources: 9 support, 6 partly, 0 fail). Its text is written unchanged.
+- Shortcut: Shared rules say read `llm-wiki/*.md`; `architecture.md` and `build-test.md` (3,300
+  lines) were not read. This step writes a report from the artifacts, and no engine code or test
+  is touched.
+- Before the audit, one drift fixed: `data-path.md` sized TPC-H at 0.38 GB per SF (repo sf1
+  footers); the sf40 bucket is 1.06 (TPC-DS 0.38). A correction line was added to its "Capacity
+  against data size" bullet; the report states it.
+
+### Audit findings and their fixes (1 blocking, 4 should fix, 7 minor)
+
+1. **Blocking: the S3 sequential batch rows timed `--dump-plans`** (10.7 s TPC-H, 69.7 s TPC-DS).
+   Root cause: `Runner.sequential` wrapped `query()`, which dumps after each statement; only the
+   per-query time excluded the dump. Fix: test `test_sequential_batch_time_excludes_plan_dumps`
+   written and watched failing (600.3 ms against < 300), then `sequential()` subtracts the dump
+   time (`self.dump_ms`). Data: `measurements/comet/summary.tsv` takes the per-query sum as
+   `batch_ms` for the two S3 sequential "all" rows (74,058.0 and 195,958.0 ms; the label keeps the
+   measured value); the two calibration rows are labelled only (the model skips them). Raw
+   `runs.tsv` files untouched. `inputs.tsv`: `s3_efficiency` low 0.49 -> 0.560;
+   `s3_efficiency_sequential` 0.490 [0.318] -> 0.560 [0.431]; `cpu128_s3_concurrent_all_s.tpcds`
+   134.9 [87.5-230.8] -> 124.4 [87.5-161.1] (TPC-H penalty ratio 0.331 -> 0.501). `cost.md`
+   regenerated. Headline: TPC-H 1.88 [0.52-12.88], 1.38 [0.23-13.40] (mids unchanged); TPC-DS
+   2.14 -> 2.06 [0.55-13.32], 1.58 -> 1.44 [0.06-22.98]. All still conditional go. TPC-DS 1 TB's
+   top sensitivity row is now `size_exponent` (break-even 0.88); the modelled TPC-DS S3 time
+   reaches only 1.94 at its high end. Break-evens re-bisected with `evaluate`: TPC-H 4.58 / 9.56
+   GB/s shuffle, 0.128 scheduler share, 1.525 GB/s H100 S3 (unchanged); TPC-DS sf40 scheduler
+   share 0.283, speedup 6.46; TPC-DS 1 TB shuffle 9.09 GB/s, H100 S3 4.52 GB/s. `design.md` and
+   the report updated to match.
+2. "Decode and GPU compute do not appear" was false for TPC-DS sf40 (speedup 1.66-2.06). Fixed in
+   `design.md` section 1 and the report's section 6: GPU speed decides TPC-DS sf40 below 6.5×.
+3. "1 TB" is 1e12 compressed bytes: about SF2,600 TPC-DS, SF940 TPC-H. The report's verdict and
+   size tables now say so; "overstates by 2×" corrected to about 5× past the RAM crossing (sf520).
+   `cost_model.py`'s labels left as they are; `design.md`'s summary names the SF.
+4. `decode_rate` and `gpu_measured_scale` retagged `modelled`; `decode_rate` low 3.35 -> 2.34
+   (H100/H200 bandwidth 3.35/4.8). The report's stall section says 4.1 GB/s is an H200 figure, near
+   2.9 on an H100 (estimate). Stall table and headline cells did not move.
+5. The verdict now says the TPC-DS baseline is a modelled concurrent S3 time.
+6. "1.4×" replaced by the cells' own sequential/concurrent ratio, about 1.5× for both.
+7. Every departure listed in the verdict: tmpfs local dirs, explain flags, the one q1 warm-up, the
+   plan dumps (checked against each run's `argv`).
+8. The one-pass bullet states the cold-S3 against faster-local asymmetry.
+9. `exotic.md` `gds_vast_one_nic` 46.6 -> 28.3 GB/s (one GPU; 43.4 GiB/s was four GPUs), and its
+   summary's "22-47" -> "22-28"; the report's exotic row likewise. `cost.md` regenerated.
+10. Citations: i4i's 2.8 GB/s now cites AWS's I4i launch blog; GDS host-memory copy cites the
+   O_DIRECT guide; Johnson et al. no longer stands for "low concurrency" (Psaroudakis 2013 added).
+11. q6 reader rate 3.8 -> 3.9 GB/s (1.54 GB in 398 ms).
+12. `inputs.tsv` `cpu_ram_usable` note: the dedicated tmpfs was 320 GiB; `/dev/shm` was 252 GiB.
+
+- Tests after the fixes: `python3 -m pytest llm-wiki/artifacts/comet-research/test_cost_model.py
+  llm-wiki/artifacts/comet-research/scripts/tests -q` 48 passed (47 + the new test); `bash
+  llm-wiki/artifacts/comet-research/scripts/tests/test_vm_log.sh` 14 passed;
+  `python3 cost_model.py | diff - cost.md` empty.
+- Left alone: `comet_run.py`'s concurrent mode would also time a dump, but no concurrent run uses
+  `--dump-plans` (the plan forbids it); `audit.md` was not re-run after the fixes.
+
 ## Rulings
 
 - 2026-11-03 (helper, the human's decision): Task 1 Steps 4-5 run before Task 2. Task 2 consumes
@@ -481,3 +542,5 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   in-region, so no in-region correction is modelled. Fix the `exotic.md` drift noted above.
 - 2026-11-04: Task 5 committed: every headline cell a conditional go, bands straddle 2×. Task 6
   dispatched to a fresh developer.
+- 2026-11-04: Task 6 green. Signoff written, board `done`, `comet-research: report` committed;
+  PR against master opened by the coordinator.

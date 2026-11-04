@@ -1,10 +1,10 @@
 # Alpha design for a GPU Comet backend, and the conditions for a go
 
 ## Summary
-- **Verdict: conditional go in all four headline cells; three of the four mids are below 2×.** Batch "all", the faster CPU baseline, eight 16-core nodes, the NIC tier (cost.md): TPC-H 1.88 at sf40 and 1.38 at sf200; TPC-DS 2.14 at sf40 and 1.58 at 1 TB. Every band straddles 2× (0.06 to 37), so the spec's rule gives a conditional go. Only TPC-DS sf40's mid is above 2.
-- **The one-pass floor is a no-go at mid values:** the median per-query ratio is 0.81 (TPC-H) and 0.83 (TPC-DS) at sf40 on 8 × 16. One query reading S3 alone leaves a GPU node slower per dollar than the CPU cluster.
-- **The gain is batching's, not the GPU's.** The device factor is below 1 in every headline cell (0.42-0.88); shared scans (sharing factor 2.4-3.7) carry it to about 2. Against a CPU baseline that shares scans the same way, the mids fall to 1.76, 1.23, 1.85 and 1.02.
-- **Settling measurements** (the sensitivity tables' top rows): the H100 node's shuffle throughput on its 16 cores (TPC-H, both sizes; mid reaches 2 at 4.6 GB/s for sf40 and 9.6 GB/s for sf200); Spark's per-query overhead on a GPU node (TPC-DS sf40); and the never-run TPC-DS concurrent S3 time on the CPU (TPC-DS 1 TB; mid reaches 2 if it is at least 166 s).
+- **Verdict: conditional go in all four headline cells; three of the four mids are below 2×.** Batch "all", the faster CPU baseline, eight 16-core nodes, the NIC tier (cost.md): TPC-H 1.88 at sf40 and 1.38 at sf200; TPC-DS 2.06 at sf40 and 1.44 at 1 TB (1,000 GB compressed, about SF2,600). Every band straddles 2× (0.06 to 23), so the spec's rule gives a conditional go. Only TPC-DS sf40's mid is above 2. (Revised after the Task 6 audit: the S3 sequential batch times had counted plan-dump time.)
+- **The one-pass floor is a no-go at mid values:** the median per-query ratio is 0.89 (TPC-H) and 0.90 (TPC-DS) at sf40 on 8 × 16. One query reading S3 alone leaves a GPU node slower per dollar than the CPU cluster.
+- **The gain is batching's, not the GPU's.** The device factor is below 1 in every headline cell (0.38-0.85); shared scans (sharing factor 2.4-3.7) carry it to about 2. Against a CPU baseline that shares scans the same way, the mids fall to 1.76, 1.23, 1.84 and 1.00.
+- **Settling measurements** (the sensitivity tables' top rows): the H100 node's shuffle throughput on its 16 cores (TPC-H, both sizes; mid reaches 2 at 4.6 GB/s for sf40 and 9.6 GB/s for sf200); Spark's per-query overhead on a GPU node (TPC-DS sf40); and how Comet's time grows with data size (TPC-DS 1 TB; mid reaches 2 if the size exponent is at least 0.88, against 0.7 used).
 - **The design** puts the GPU inside Comet's native crate, per task, on a protobuf-to-IR translator; it shares scans passively through an executor-level column cache; and it keeps shuffle, I/O and Spark-exact edge cases on the CPU. The hard part is not the GPU kernels. It is Spark-exact semantics, plus the 16-core CPU path every byte of shuffle crosses.
 
 ## 1. What would turn the conditional go into a go
@@ -16,14 +16,17 @@ Each line is one input moved alone, the others at their values (`cost.md`; break
 | TPC-H sf200 | `shuffle_rate_gpu_node` | 4 | 9.6 GB/s | the same; above about 8 GB/s it needs lz4 on the GPU (nvCOMP) |
 | TPC-H sf40 | `scheduler_share` | 0.25 | 0.13 | per-stage task-launch gaps on a 16-core executor, from the same run |
 | TPC-H sf40 | `rate_h100_s3` | 1.25 GB/s (assumed) | 1.53 GB/s | `s3_throughput.py` on the H100 VM itself (not used in this task) |
-| TPC-DS sf40 | `scheduler_share` | 0.25 | 0.32 (the mid is 2.14 at 0.25) | as above |
-| TPC-DS 1 TB | `cpu128_s3_concurrent_all_s.tpcds` | 134.9 s (modelled) | 165.9 s | Comet TPC-DS sf40 concurrent "all" from S3 on the CPU VM: a few minutes; most of the 2 h cap is unused |
-| TPC-DS 1 TB | `rate_h100_s3` | 1.25 | 2.72 GB/s | as above |
+| TPC-DS sf40 | `scheduler_share` | 0.25 | 0.28 (the mid is 2.06 at 0.25; above 0.28 it falls below 2) | as above |
+| TPC-DS sf40 | `gpu_speedup` | 10.1 (modelled) | 6.5 (below it the mid falls below 2) | a translator prototype on a few TPC-DS queries (follow-up 5) |
+| TPC-DS 1 TB | `size_exponent` | 0.7 (modelled) | 0.88 | Comet at sf40 and a second scale factor on the same CPU VM |
+| TPC-DS 1 TB | `shuffle_rate_gpu_node` | 4 | 9.1 GB/s | as for TPC-H |
+| TPC-DS 1 TB | `rate_h100_s3` | 1.25 | 4.5 GB/s | `s3_throughput.py` on the H100 VM |
+| TPC-DS 1 TB | `cpu128_s3_concurrent_all_s.tpcds` | 124.4 s (modelled) | none in its range (1.94 at 161.1 s) | Comet TPC-DS sf40 concurrent "all" from S3 on the CPU VM: a few minutes |
 
-- **Decode and GPU compute do not appear.** In the batched cells the wire binds before either: at 1.25 GB/s × 0.89 the NIC is below the 4.1 GB/s decode rate, and the speedup moves TPC-H sf40 only between 1.72 and 1.88. A faster GPU or reader buys nothing until the wire and the CPU side do.
-- **Hardware and price.** GH200 at $2.29/h is the one tier whose mid clears 2 in every headline cell (3.7-4.1 at sf40, 3.2-3.8 at the large sizes, batch "all"), and it wins on price, not on its 375 GB/s link. Every tier that only feeds the GPU faster (100-400 Gbit/s NICs, GDS, Nebius's shared filesystem) stays at 2.1-2.3 at sf40 (batch "all"), because the 16-core CPU side then sets the time. Faster and dearer hosts (p5.4xlarge, B200, Azure ND, GB200) fall below the NIC tier at their prices.
+- **Decode does not appear; GPU compute matters only for TPC-DS sf40.** In the batched cells the wire binds before decode: at 1.25 GB/s × 0.89 the NIC is below the 4.1 GB/s decode rate. The speedup moves TPC-H sf40 only between 1.72 and 1.88, but TPC-DS sf40 between 1.66 and 2.06: there the mid stays above 2 only while the speedup is above 6.5 (Task 6 audit finding 2). For TPC-H a faster GPU or reader buys nothing until the wire and the CPU side do.
+- **Hardware and price.** GH200 at $2.29/h is the one tier whose mid clears 2 in every headline cell (3.7-4.1 at sf40, 3.2-3.5 at the large sizes, batch "all"), and it wins on price, not on its 375 GB/s link. Every tier that only feeds the GPU faster (100-400 Gbit/s NICs, GDS, Nebius's shared filesystem) stays at 2.1-2.3 at sf40 (batch "all"), because the 16-core CPU side then sets the time. Faster and dearer hosts (p5.4xlarge, B200, Azure ND, GB200) fall below the NIC tier at their prices.
 - **Workload.** The gain grows with the batch's cut: TPC-DS "all" (cut 8.1) is above TPC-DS batch 10 (cut 1.9). Production sharing is nearer 1.6× (SCOPE, batching.md), about TPC batch 10, where TPC-H is 2.17 and TPC-DS 1.75 at mid. A design partner's real overlap decides which.
-- **The CPU can share too.** If Comet gets the same shared scans (its own cache, or the cache below fed to its CPU operators), the ratio falls by 5-31% at sf40 and up to 63% at 1 TB (cost.md, "CPU with shared scans"). So the GPU case rests on the device factor, which the levers above have to lift past 1.
+- **The CPU can share too.** If Comet gets the same shared scans (its own cache, or the cache below fed to its CPU operators), the ratio falls by 5-26% at sf40 and up to 58% at 1 TB (cost.md, "CPU with shared scans"). So the GPU case rests on the device factor, which the levers above have to lift past 1.
 
 ## 2. The alpha, by component
 
@@ -47,7 +50,7 @@ Each line is one input moved alone, the others at their values (`cost.md`; break
 - Capacity: 200 GB of host RAM holds TPC-H sf40 and TPC-DS up to about sf500; past that the cache serves its share and the NIC the rest (cost.md's tier rule).
 
 ### Local SSD, and the exotic tiers
-- **Target first: local NVMe as a cache in front of the lake** (data-path.md section 5, layout c), but only where the drive is cheap. On the H100 shapes that have one, it buys nothing at its price: p5.4xlarge's drive (3.9 GB/s, $6.88/h) gives 1.47-1.49 at sf40, below the Nebius NIC tier. Nebius's H100 VM has no local disk. So RAM is the cache tier, and NVMe waits for a shape where it comes free.
+- **Target first: local NVMe as a cache in front of the lake** (data-path.md section 5, layout c), but only where the drive is cheap. On the H100 shapes that have one, it buys nothing at its price: p5.4xlarge's drive (3.9 GB/s, $6.88/h) gives 1.42-1.49 at sf40, below the Nebius NIC tier. Nebius's H100 VM has no local disk. So RAM is the cache tier, and NVMe waits for a shape where it comes free.
 - **One exotic tier changes the answer: GH200,** and through its price. Port the executor to aarch64 (it already runs on GB10) and keep the same seam. The fabrics (InfiniBand, CXL, GDS storage) do not move the ratio while the 16-core CPU side is the bottleneck.
 
 ### Batching API and whole-batch CBO
@@ -87,7 +90,7 @@ New and adapted code together come to about 17,600 lines, 0.77× the engine as i
 
 ## Follow-up experiments
 1. **Comet on 16 cores of the CPU VM** (no GPU): TPC-H and TPC-DS sf40, local and S3. It measures shuffle throughput per core, the per-stage scheduling gaps at 16 slots, and the 16-core time of the parts split.md leaves on the CPU. It settles the top sensitivity rows of three of the four cells.
-2. **TPC-DS concurrent "all" from S3** on the CPU VM (the spec's matrix skipped it): settles the 1 TB cell's top row.
+2. **Comet at a second scale factor** on the CPU VM, and **TPC-DS concurrent "all" from S3** (not in the spec's matrix): the 1 TB cell's top row (`size_exponent`) and its fourth.
 3. **S3 throughput on the H100 VM** with `s3_throughput.py`, and on a 16-vCPU CPU VM: replaces the assumed NIC rates.
 4. **A passive-sharing simulation** over the dumped plans' column chunks under FAIR scheduling (batching.md follow-up 4): the cache's hit rate and the real cut at 10, 50 and 200 GB.
 5. **A translator prototype** on TPC-H q1 and q6 inside a Comet fork, against Comet's answers under ANSI mode; then one GH200 hour running the same.

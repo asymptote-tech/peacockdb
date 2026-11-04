@@ -405,6 +405,7 @@ class Runner:
     def __init__(self, args, spark, out: Path):
         self.args, self.spark, self.out = args, spark, out
         self.lock = threading.Lock()
+        self.dump_ms = 0.0
         self.sql = {}
         qdir = Path(args.queries_dir) if args.queries_dir else default_queries_dir(args.dataset)
         for q in set(queries(args.dataset, args.batch)) | ({args.warmup_query} - {None}):
@@ -427,17 +428,21 @@ class Runner:
             df = self.spark.sql(s)
             nrows += len(df.collect())
             ms += (time.perf_counter() - t) * 1000
-            if self.args.dump_plans and run == "1":  # the dump is not timed
+            if self.args.dump_plans and run == "1":
+                t = time.perf_counter()
                 dump_plan(self.spark, q if len(stmts) == 1 else f"{q}-{i + 1}", df, Path(self.args.dump_plans))
+                self.dump_ms += (time.perf_counter() - t) * 1000
         self.record(q, run, ms, nrows)
         return ms
 
     def sequential(self, qs, run):
+        # Plan dumps run between queries; the batch time leaves them out (Task 6 audit).
+        self.dump_ms = 0.0
         t = time.perf_counter()
         for i, q in enumerate(qs, 1):
             set_status(self.out, f"running run {run} query {i}/{len(qs)} {q}")
             self.query(q, run)
-        self.record("batch", run, (time.perf_counter() - t) * 1000)
+        self.record("batch", run, (time.perf_counter() - t) * 1000 - self.dump_ms)
 
     def concurrent(self, qs, run):
         from pyspark import InheritableThread

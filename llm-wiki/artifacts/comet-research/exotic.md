@@ -2,7 +2,7 @@
 
 ## Summary
 - What feeds a GPU faster than a 40 Gbit/s NIC (5 GB/s) falls into two kinds. **Sources** hold the data. **Caches** only hold data that already crossed a source once.
-- Rentable sources reach 12.5–16 GB/s per GPU: AWS p5.4xlarge at 100 Gbps, and Nebius's shared filesystem at "up to" 15 GiB/s per client. Neither is measured by us. Faster sources (GPUDirect Storage at 22–47 GB/s per GPU, S3 over RDMA) are on-prem.
+- Rentable sources reach 12.5–16 GB/s per GPU: AWS p5.4xlarge at 100 Gbps, and Nebius's shared filesystem at "up to" 15 GiB/s per client. Neither is measured by us. Faster sources (GPUDirect Storage at 22–28 GB/s per GPU, S3 over RDMA at an estimated 46) are on-prem.
 - Caches are fast: GH200 C2C 375 GB/s, GB10 205–219 GB/s (in-repo), NVL72 NVLink 900 GB/s, peer RAM over InfiniBand about 24 GB/s. They help batched ETL that re-reads data, not the one-pass floor.
 - CXL memory, Kove:SDM and the research far-memory systems do not beat host RAM over PCIe for a GPU. They are lab-only, unrentable or unpriced. They add capacity, not speed.
 - Spark and Comet use none of these fabrics today: Comet shuffles over Spark's TCP block transfer and reads through object_store or HDFS. The plugin would need its own cuFile or RDMA reader and its own shuffle transport.
@@ -96,7 +96,7 @@ gh200_c2c	375	480	2.29	cloud	H2D 375 GB/s https://arxiv.org/html/2407.07850v1 (a
 gb200_c2c_per_gpu	256	240	10.50	cloud	512 GB/s and 480 GB per Grace, shared by 2 GPUs https://www.nvidia.com/en-us/data-center/gb200-nvl72/ (accessed 2026-11-04); $42 per 4 GPUs https://www.coreweave.com/pricing (accessed 2026-11-04); split (estimate)
 gb200_nvl72_peer_hbm	900	13400	10.50	cloud	NVLink 1.8 TB/s per GPU both ways, 13.4 TB HBM per rack https://www.nvidia.com/en-us/data-center/gb200-nvl72/ (accessed 2026-11-04); https://www.coreweave.com/pricing (accessed 2026-11-04); remote Grace access unverified
 gb10_unified	205	128	0.15	on-prem	kernel reads mapped host memory at 205-219 GB/s, in-repo llm-wiki/reports/dgx-spark.md section 1 @ c7c8568e; $3,999 over 3 y https://www.theregister.com/2025/10/14/dgx_spark_review/ (accessed 2026-11-04) (estimate)
-gds_vast_one_nic	46.6	1000000	4.50	on-prem	43.4 GiB/s into 4 GPUs over one 400 GbE ConnectX-7 (28.3 GB/s for one GPU) https://gds-report.pages.dev/ (accessed 2026-11-04); storage price not public
+gds_vast_one_nic	28.3	1000000	4.50	on-prem	26.4 GiB/s (28.3 GB/s) into one L40S from VAST over one 400 GbE ConnectX-7; 43.4 GiB/s is four GPUs together, not one (Task 6 audit finding 9) https://gds-report.pages.dev/ (accessed 2026-11-04); storage price not public
 gds_parallel_fs_per_gpu	21.7	1000000	4.50	on-prem	162 GiB/s per DGX A100 over 8x200G, divided by 8 https://kb.vastdata.com/documentation/docs/nfs-features-for-enhanced-performance (accessed 2026-11-04); WEKA $1000/TB-y https://aws.amazon.com/marketplace/pp/prodview-2mfqnh6p4yurs (accessed 2026-11-04)
 s3_rdma_cuobject	46	1000000	4.50	on-prem	cuObject in CUDA 13.1.1+ https://docs.nvidia.com/gpudirect-storage/cuobject (accessed 2026-11-04); per-client rate unpublished, one 400G NIC (estimate)
 nebius_shared_fs	16.1	112589990	4.50	cloud	tested up to 15 GiB/s per client, 100 PiB max https://docs.nebius.com/compute/storage/types (accessed 2026-11-04); $0.08/GiB-month extra; rate from the 1-GPU VM unknown (estimate)

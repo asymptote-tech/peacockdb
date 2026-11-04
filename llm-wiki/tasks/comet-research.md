@@ -305,3 +305,15 @@ The report is on `ENS-comet-research`, answers question groups 1-6 to the bar ab
 experiments 1-3 run, skipped under a cap, or their failure recorded. The audit's findings are
 fixed, every VM the chain used is stopped, and a PR against master is open. The human merges
 it after reading the report.
+
+## Signoff (coordinator, 2026-11-04)
+
+Solved under its constraints. The verdict is a conditional go in all four headline cells, each
+band straddling 2×, with the settling measurement named per cell. Experiments 1-3 all ran, none
+skipped or cut; VM hours l40s 0.33 h (cap 1), cpu128 0.66 h (cap 2), H100 unused; both stopped.
+The audit (`artifacts/comet-research/audit.md`) found 1 blocking, 4 should-fix and 7 minor
+issues, all fixed; it was not re-run after the fixes. Shortcuts: the "local" Comet runs are
+RAM-resident on tmpfs (the CPU VM has only a 0.06 GB/s network disk), with off-heap at 256g and a
+5-minute cleanup timer; the two S3 sequential batch times are re-derived from per-query times
+after a timer bug, not re-run; the TPC-DS S3 concurrent baseline is modelled; NIC rates are
+assumptions, since Nebius states none.

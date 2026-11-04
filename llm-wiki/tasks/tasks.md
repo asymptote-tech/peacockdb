@@ -181,7 +181,7 @@ keeps to its VM-hour caps (CPU VM 2 h, L40S 1 h). Every git write and the PR are
   tell the developer the experiment is skipped. Never stall on it.
 - **Never exit voluntarily at a checkpoint**, only with no VM in use and when the window forces it.
 
-### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: building
+### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: done
 
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on

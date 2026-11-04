@@ -73,10 +73,10 @@ Batch "all", the faster CPU baseline, parity with eight 16-core nodes, the NIC t
 
 | dataset | size | fits | ratio [band] | sharing | device | verdict |
 |---|---|---|---|--:|--:|---|
-| tpch | sf40 (42 GB) | vram | 1.88 [0.50-12.88] | 2.38 | 0.79 | conditional go |
-| tpch | sf200 (212 GB) | local_nvme | 1.38 [0.22-13.40] | 2.62 | 0.52 | conditional go |
-| tpcds | sf40 (15 GB) | vram | 2.14 [0.54-18.10] | 2.42 | 0.88 | conditional go |
-| tpcds | 1 TB (1000 GB) | local_nvme | 1.58 [0.06-37.40] | 3.74 | 0.42 | conditional go |
+| tpch | sf40 (42 GB) | vram | 1.88 [0.52-12.88] | 2.38 | 0.79 | conditional go |
+| tpch | sf200 (212 GB) | local_nvme | 1.38 [0.23-13.40] | 2.62 | 0.52 | conditional go |
+| tpcds | sf40 (15 GB) | vram | 2.06 [0.55-13.32] | 2.42 | 0.85 | conditional go |
+| tpcds | 1 TB (1000 GB) | local_nvme | 1.44 [0.06-22.98] | 3.74 | 0.38 | conditional go |
 
 ## Sensitivity of the headline cells
 
@@ -89,9 +89,9 @@ Each input moved to its low and high end with the others at their values; the la
 | `shuffle_rate_gpu_node` | 1.29 | 2.97 | modelled |
 | `scheduler_share` | 2.14 | 1.47 | modelled |
 | `rate_h100_s3` | 1.69 | 2.27 | modelled |
-| `s3_efficiency` | 1.49 | 1.95 | measured |
 | `overhead_overlap` | 2.08 | 1.63 | modelled |
 | `cpu_run_spread` | 1.68 | 2.09 | measured |
+| `s3_efficiency` | 1.58 | 1.95 | measured |
 | `s3_penalty_bandwidth_share` | 2.14 | 1.79 | modelled |
 | `cluster_overhead` | 1.77 | 2.11 | modelled |
 
@@ -104,35 +104,35 @@ Each input moved to its low and high end with the others at their values; the la
 | `rate_h100_s3` | 1.21 | 1.88 | modelled |
 | `scheduler_share` | 1.54 | 1.03 | modelled |
 | `s3_penalty_bandwidth_share` | 1.67 | 1.26 | modelled |
-| `s3_efficiency` | 1.05 | 1.44 | measured |
 | `rate_node16_s3` | 1.47 | 1.13 | modelled |
 | `cpu_run_spread` | 1.22 | 1.53 | measured |
+| `s3_efficiency` | 1.13 | 1.44 | measured |
 
-**tpcds sf40** (mid 2.14)
-
-| input | ratio at low | ratio at high | tag |
-|---|--:|--:|---|
-| `scheduler_share` | 2.81 | 1.58 | modelled |
-| `overhead_overlap` | 2.72 | 1.57 | modelled |
-| `cpu128_s3_concurrent_all_s.tpcds` | 1.81 | 2.81 | modelled |
-| `shuffle_rate_gpu_node` | 1.70 | 2.69 | modelled |
-| `s3_penalty_bandwidth_share` | 2.67 | 1.93 | modelled |
-| `ineligible_weight` | 2.35 | 1.81 | modelled |
-| `gpu_speedup` | 1.72 | 2.14 | modelled |
-| `s3_efficiency` | 1.83 | 2.18 | measured |
-
-**tpcds 1 TB** (mid 1.58)
+**tpcds sf40** (mid 2.06)
 
 | input | ratio at low | ratio at high | tag |
 |---|--:|--:|---|
-| `cpu128_s3_concurrent_all_s.tpcds` | 0.94 | 2.88 | modelled |
-| `shuffle_rate_gpu_node` | 1.05 | 2.64 | modelled |
-| `s3_penalty_bandwidth_share` | 2.62 | 1.18 | modelled |
-| `size_exponent` | 1.26 | 2.66 | modelled |
-| `scheduler_share` | 1.94 | 1.08 | modelled |
-| `rate_h100_s3` | 1.39 | 2.20 | modelled |
-| `rate_node16_s3` | 1.73 | 1.18 | modelled |
-| `spill_factor` | 1.42 | 1.96 | modelled |
+| `scheduler_share` | 2.72 | 1.53 | modelled |
+| `overhead_overlap` | 2.63 | 1.52 | modelled |
+| `shuffle_rate_gpu_node` | 1.64 | 2.60 | modelled |
+| `s3_penalty_bandwidth_share` | 2.48 | 1.90 | modelled |
+| `ineligible_weight` | 2.27 | 1.75 | modelled |
+| `cpu128_s3_concurrent_all_s.tpcds` | 1.81 | 2.32 | modelled |
+| `gpu_speedup` | 1.66 | 2.06 | modelled |
+| `cpu_run_spread` | 1.93 | 2.20 | measured |
+
+**tpcds 1 TB** (mid 1.44)
+
+| input | ratio at low | ratio at high | tag |
+|---|--:|--:|---|
+| `size_exponent` | 1.11 | 2.55 | modelled |
+| `shuffle_rate_gpu_node` | 0.96 | 2.40 | modelled |
+| `s3_penalty_bandwidth_share` | 2.25 | 1.13 | modelled |
+| `cpu128_s3_concurrent_all_s.tpcds` | 0.94 | 1.94 | modelled |
+| `scheduler_share` | 1.80 | 0.93 | modelled |
+| `rate_h100_s3` | 1.26 | 2.01 | modelled |
+| `spill_factor` | 1.28 | 1.82 | modelled |
+| `rate_node16_s3` | 1.57 | 1.09 | modelled |
 
 ## Inputs
 
@@ -146,11 +146,11 @@ From `inputs.tsv`; per-query tables are summarised by their totals.
 | `rate_node16_s3` | 1.0 | 0.78 | 4.0 | GB/s per node | modelled | assumption: data-path.md Rates, 16 vCPU 6.25-32 Gbit/s; value between the two measured Nebius VMs' S3 reads, 0.917 (8 vCPU) and 1.164 (128 vCPU), measurements/s3/summary.tsv |
 | `rate_node8_s3` | 0.917 | 0.39 | 2.0 | GB/s per node | modelled | assumption: data-path.md Rates, 8 vCPU 3.125-16 Gbit/s; value = the measured 8-vCPU L40S VM's S3 read, measurements/s3/summary.tsv |
 | `bucket_cap` | 20 | 20 | 20 | GB/s | published | Nebius Object Storage Standard class, 20 GBps per tenant per region https://docs.nebius.com/object-storage/storage-classes (accessed 2026-11-04), via data-path.md [S7] |
-| `s3_efficiency` | 0.892 | 0.49 | 1.0 | fraction | measured | measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: TPC-H S3 concurrent moved 48.30 GB in 46.49 s, 0.892 of the 1.164 GB/s microbenchmark; low = the sequential S3 run's 0.490 (84.73 s); high = the microbenchmark |
-| `s3_efficiency_sequential` | 0.490 | 0.318 | 0.892 | fraction | measured | measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: one query at a time, as a one-pass job reads; TPC-H sequential S3 48.30 GB in 84.73 s, 0.490 of 1.164 GB/s; low TPC-DS's 98.39 GB in 265.62 s, 0.318; high the concurrent run's 0.892 |
-| `decode_rate` | 4.1 | 3.35 | 18.8 | GB/s compressed | published | llm-wiki/reports/benchmark-minimal.md H200 sf40 load (read_parquet), over the queries' compressed column bytes (measurements/footers/sf40.tsv): q1 1.69 GB/505 ms 3.35, q6 1.54/398 3.87, q3 3.18/741 4.29, q8 5.62/680 8.3; value the median; high = GB10's chunked reader, q6 in 82 ms (18.8) |
+| `s3_efficiency` | 0.892 | 0.560 | 1.0 | fraction | measured | measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: TPC-H S3 concurrent moved 48.30 GB in 46.49 s, 0.892 of the 1.164 GB/s microbenchmark; low = the sequential S3 run's 0.560 (74.06 s, its per-query sum: the batch row also timed --dump-plans, Task 6 audit finding 1); high = the microbenchmark |
+| `s3_efficiency_sequential` | 0.560 | 0.431 | 0.892 | fraction | measured | measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: one query at a time, as a one-pass job reads; TPC-H sequential S3 48.30 GB in 74.06 s (per-query sum; the batch row also timed --dump-plans, Task 6 audit finding 1), 0.560 of 1.164 GB/s; low TPC-DS's 98.39 GB in 195.96 s, 0.431; high the concurrent run's 0.892 |
+| `decode_rate` | 4.1 | 2.34 | 18.8 | GB/s compressed | modelled | derived from llm-wiki/reports/benchmark-minimal.md H200 sf40 load (read_parquet) over the queries' compressed column bytes (measurements/footers/sf40.tsv): q1 1.69 GB/505 ms 3.35, q6 1.54/398 3.87, q3 3.18/741 4.29, q8 5.62/680 8.3; value the median, an H200 figure applied to the H100; low = H200's lowest (3.35) x the H100/H200 HBM ratio 3.35/4.8 = 2.34, in case decode is memory-bound; high = GB10's chunked reader, q6 in 82 ms (18.8) |
 | `gpu_speedup` | 10.1 | 3.4 | 28.3 | x | modelled | llm-wiki/reports/benchmark-minimal.md: DuckDB warm (128-core VM) over H100 G=1 execute, q1 915/269.5 3.4, q6 137/21.8 6.3, q3 577/33.3 17.3, q8 1126/39.8 28.3; value the geometric mean; applied to Comet's time per the plan |
-| `gpu_measured_scale` | 1.0 | 1.0 | 1.73 | x | published | llm-wiki/reports/benchmark-minimal.md: H100 G=1 measured (value, hand-written cuDF pipelines, data in VRAM); high = H200 libcudf 25.02 execute x the HBM ratio 4.8/3.35 over the H100 figure, worst of the four (q3 57.5/33.3) |
+| `gpu_measured_scale` | 1.0 | 1.0 | 1.73 | x | modelled | llm-wiki/reports/benchmark-minimal.md: value 1.0 keeps the H100 G=1 measured times (hand-written cuDF pipelines, data in VRAM); high is derived: H200 libcudf 25.02 execute x the HBM ratio 4.8/3.35 over the H100 figure, worst of the four (q3 57.5/33.3) |
 | `gpu_h100_ms.tpch.q1` | 269.5 | 269.5 | 269.5 | ms | published | llm-wiki/reports/benchmark-minimal.md, Multi-GPU scaling, 8x H100 table, G=1 (libcudf 26.02, 2nd-min of 5) |
 | `gpu_h100_ms.tpch.q3` | 33.3 | 33.3 | 33.3 | ms | published | llm-wiki/reports/benchmark-minimal.md, 8x H100 table, G=1 |
 | `gpu_h100_ms.tpch.q6` | 21.8 | 21.8 | 21.8 | ms | published | llm-wiki/reports/benchmark-minimal.md, 8x H100 table, G=1 |
@@ -174,8 +174,8 @@ From `inputs.tsv`; per-query tables are summarised by their totals.
 | `ram_cpu128_gb` | 512 | 512 | 512 | GB | published | Nebius cpu-d3 128vcpu-512gb, data-path.md Rates |
 | `ram_node16_gb` | 64 | 64 | 64 | GB | published | Nebius cpu-d3 16vcpu-64gb, data-path.md Rates |
 | `ram_node8_gb` | 32 | 32 | 32 | GB | published | Nebius cpu-d3 8vcpu-32gb, data-path.md Rates |
-| `cpu_ram_usable` | 0.5 | 0.5 | 0.5 | fraction | modelled | estimate: share of RAM that can hold RAM-resident data next to Spark (Task 4's tmpfs was 252 GiB of 503) |
-| `cpu128_s3_concurrent_all_s.tpcds` | 134.9 | 87.5 | 230.8 | s | modelled | not run (spec's matrix): TPC-DS local concurrent 87.49 s + its sequential S3 penalty 143.29 s (265.62 - 122.32) x 0.331, TPC-H's concurrent/sequential penalty ratio (10.43/31.51), measurements/comet/summary.tsv; low = penalty hidden; high = penalty as sequential; wire floor 98.4 GB / 1.164 GB/s = 84.5 s |
+| `cpu_ram_usable` | 0.5 | 0.5 | 0.5 | fraction | modelled | estimate: share of RAM that can hold RAM-resident data next to Spark (Task 4's dedicated tmpfs was mounted at 320 GiB of 503, and held 58 GB of data plus shuffle; the first /dev/shm was 252 GiB) |
+| `cpu128_s3_concurrent_all_s.tpcds` | 124.4 | 87.5 | 161.1 | s | modelled | not run (spec's matrix): TPC-DS local concurrent 87.49 s + its sequential S3 penalty 73.64 s (195.96 per-query sum - 122.32) x 0.501, TPC-H's concurrent/sequential penalty ratio (10.43/20.83; the S3 sequential batches also timed --dump-plans, so both use per-query sums, Task 6 audit finding 1), measurements/comet/summary.tsv; low = penalty hidden; high = penalty as sequential; wire floor 98.4 GB / 1.164 GB/s = 84.5 s |
 | `cpu_local_s.tpch` | 46.812 | 46.812 | 46.812 | table | measured | measurements/comet/summary.tsv: per query, the faster of the local (RAM-resident, tmpfs) sequential runs, 1x128 |
 | `cpu_s3_s.tpch` | 74.058 | 74.058 | 74.058 | table | measured | measurements/comet/summary.tsv: per query, the S3 (in-region eu-west1) sequential run, 1x128 |
 | `scan_bytes.tpch` | 4.82974e+10 | 4.82974e+10 | 4.82974e+10 | table | measured | measurements/comet/bytes.tsv: per query, scan bytes of the local sequential run (the S3 runs read the same) |
@@ -201,79 +201,79 @@ Cell: mid [low-high] s(haring) d(evice). The NIC tier. Batches 3, 10 and 20 agai
 
 | workload | batch | baseline | sf40 (vram) | sf200 (local_nvme) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 1.85 [0.61-13.65] s1.03 d1.79 | 1.27 [0.29-14.88] s1.03 d1.22 | 0.88 [0.14-15.16] s1.04 d0.84 | 0.64 [0.05-27.76] s1.04 d0.61 |
-| batched | 10 | sequential | 2.17 [0.58-17.92] s1.92 d1.13 | 1.56 [0.27-18.59] s2.07 d0.75 | 1.14 [0.13-18.73] s2.12 d0.54 | 0.90 [0.06-27.24] s2.14 d0.42 |
-| batched | 20 | sequential | 2.61 [0.69-19.20] s2.18 d1.20 | 1.97 [0.34-20.17] s2.38 d0.83 | 1.50 [0.18-20.38] s2.45 d0.61 | 1.21 [0.09-28.87] s2.48 d0.49 |
-| batched | all | sequential | 2.94 [0.74-21.82] s2.38 d1.24 | 2.29 [0.38-22.92] s2.62 d0.87 | 1.78 [0.20-23.16] s2.71 d0.66 | 1.48 [0.11-31.07] s2.75 d0.54 |
-| batched | all | concurrent | 1.88 [0.50-12.88] s2.38 d0.79 | 1.38 [0.22-13.40] s2.62 d0.52 | 1.04 [0.11-13.51] s2.71 d0.38 | 0.84 [0.06-19.12] s2.75 d0.31 |
-| batched | all | faster | 1.88 [0.50-12.88] s2.38 d0.79 | 1.38 [0.22-13.40] s2.62 d0.52 | 1.04 [0.11-13.51] s2.71 d0.38 | 0.84 [0.06-19.12] s2.75 d0.31 |
-| one-pass | median | sequential | 0.81 [0.26-11.94] s1.00 d0.81 | 0.62 [0.12-14.56] s1.00 d0.62 | 0.50 [0.07-15.04] s1.00 d0.50 | 0.36 [0.03-26.39] s1.00 d0.36 |
-| one-pass | worst | sequential | 0.38 [0.09-3.89] s1.00 d0.38 | 0.25 [0.04-4.85] s1.00 d0.25 | 0.20 [0.02-4.83] s1.00 d0.20 | 0.13 [0.01-4.88] s1.00 d0.13 |
+| batched | 3 | sequential | 1.85 [0.67-13.65] s1.03 d1.79 | 1.27 [0.33-14.88] s1.03 d1.22 | 0.88 [0.16-15.16] s1.04 d0.84 | 0.64 [0.06-27.76] s1.04 d0.61 |
+| batched | 10 | sequential | 2.17 [0.61-17.92] s1.92 d1.13 | 1.56 [0.29-18.59] s2.07 d0.75 | 1.14 [0.14-18.73] s2.12 d0.54 | 0.90 [0.07-27.24] s2.14 d0.42 |
+| batched | 20 | sequential | 2.61 [0.72-19.20] s2.18 d1.20 | 1.97 [0.37-20.17] s2.38 d0.83 | 1.50 [0.19-20.38] s2.45 d0.61 | 1.21 [0.09-28.87] s2.48 d0.49 |
+| batched | all | sequential | 2.78 [0.76-19.62] s2.38 d1.17 | 2.10 [0.39-20.58] s2.62 d0.80 | 1.59 [0.20-20.78] s2.71 d0.59 | 1.28 [0.10-29.13] s2.75 d0.46 |
+| batched | all | concurrent | 1.88 [0.52-12.88] s2.38 d0.79 | 1.38 [0.23-13.40] s2.62 d0.52 | 1.04 [0.12-13.51] s2.71 d0.38 | 0.84 [0.06-19.12] s2.75 d0.31 |
+| batched | all | faster | 1.88 [0.52-12.88] s2.38 d0.79 | 1.38 [0.23-13.40] s2.62 d0.52 | 1.04 [0.12-13.51] s2.71 d0.38 | 0.84 [0.06-19.12] s2.75 d0.31 |
+| one-pass | median | sequential | 0.89 [0.34-11.94] s1.00 d0.89 | 0.68 [0.16-14.56] s1.00 d0.68 | 0.55 [0.09-15.04] s1.00 d0.55 | 0.41 [0.04-26.39] s1.00 d0.41 |
+| one-pass | worst | sequential | 0.42 [0.12-3.89] s1.00 d0.42 | 0.28 [0.05-4.85] s1.00 d0.28 | 0.22 [0.02-4.83] s1.00 d0.22 | 0.15 [0.01-4.88] s1.00 d0.15 |
 
 **tpch, 16x8**
 
 | workload | batch | baseline | sf40 (vram) | sf200 (local_nvme) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 1.81 [0.61-13.68] s1.03 d1.75 | 1.22 [0.29-14.91] s1.03 d1.18 | 0.83 [0.14-15.19] s1.04 d0.80 | 0.59 [0.05-27.79] s1.04 d0.57 |
-| batched | 10 | sequential | 2.06 [0.58-18.01] s1.92 d1.07 | 1.43 [0.27-18.69] s2.07 d0.69 | 1.00 [0.13-18.83] s2.12 d0.47 | 0.75 [0.07-27.32] s2.14 d0.35 |
-| batched | 20 | sequential | 2.45 [0.69-19.28] s2.18 d1.12 | 1.78 [0.35-20.26] s2.38 d0.75 | 1.30 [0.18-20.47] s2.45 d0.53 | 1.01 [0.09-28.95] s2.48 d0.41 |
-| batched | all | sequential | 2.74 [0.74-21.90] s2.38 d1.15 | 2.04 [0.38-23.01] s2.62 d0.78 | 1.53 [0.20-23.25] s2.71 d0.57 | 1.22 [0.11-31.14] s2.75 d0.44 |
-| batched | all | concurrent | 1.76 [0.50-12.97] s2.38 d0.74 | 1.23 [0.22-13.49] s2.62 d0.47 | 0.89 [0.11-13.60] s2.71 d0.33 | 0.68 [0.06-19.20] s2.75 d0.25 |
-| batched | all | faster | 1.76 [0.50-12.97] s2.38 d0.74 | 1.23 [0.22-13.49] s2.62 d0.47 | 0.89 [0.11-13.60] s2.71 d0.33 | 0.68 [0.06-19.20] s2.75 d0.25 |
-| one-pass | median | sequential | 0.76 [0.26-12.00] s1.00 d0.76 | 0.55 [0.12-14.62] s1.00 d0.55 | 0.44 [0.07-15.11] s1.00 d0.44 | 0.31 [0.03-26.48] s1.00 d0.31 |
-| one-pass | worst | sequential | 0.34 [0.09-3.90] s1.00 d0.34 | 0.20 [0.04-4.87] s1.00 d0.20 | 0.15 [0.02-4.85] s1.00 d0.15 | 0.12 [0.01-4.90] s1.00 d0.12 |
+| batched | 3 | sequential | 1.81 [0.67-13.68] s1.03 d1.75 | 1.22 [0.33-14.91] s1.03 d1.18 | 0.83 [0.16-15.19] s1.04 d0.80 | 0.59 [0.06-27.79] s1.04 d0.57 |
+| batched | 10 | sequential | 2.06 [0.61-18.01] s1.92 d1.07 | 1.43 [0.29-18.69] s2.07 d0.69 | 1.00 [0.14-18.83] s2.12 d0.47 | 0.75 [0.07-27.32] s2.14 d0.35 |
+| batched | 20 | sequential | 2.45 [0.72-19.28] s2.18 d1.12 | 1.78 [0.37-20.26] s2.38 d0.75 | 1.30 [0.19-20.47] s2.45 d0.53 | 1.01 [0.10-28.95] s2.48 d0.41 |
+| batched | all | sequential | 2.62 [0.76-19.70] s2.38 d1.10 | 1.91 [0.39-20.67] s2.62 d0.73 | 1.38 [0.20-20.87] s2.71 d0.51 | 1.07 [0.10-29.20] s2.75 d0.39 |
+| batched | all | concurrent | 1.76 [0.52-12.97] s2.38 d0.74 | 1.23 [0.23-13.49] s2.62 d0.47 | 0.89 [0.12-13.60] s2.71 d0.33 | 0.68 [0.06-19.20] s2.75 d0.25 |
+| batched | all | faster | 1.76 [0.52-12.97] s2.38 d0.74 | 1.23 [0.23-13.49] s2.62 d0.47 | 0.89 [0.12-13.60] s2.71 d0.33 | 0.68 [0.06-19.20] s2.75 d0.25 |
+| one-pass | median | sequential | 0.84 [0.34-12.00] s1.00 d0.84 | 0.60 [0.16-14.62] s1.00 d0.60 | 0.49 [0.09-15.11] s1.00 d0.49 | 0.35 [0.04-26.48] s1.00 d0.35 |
+| one-pass | worst | sequential | 0.37 [0.12-3.90] s1.00 d0.37 | 0.22 [0.05-4.87] s1.00 d0.22 | 0.17 [0.02-4.85] s1.00 d0.17 | 0.13 [0.02-4.90] s1.00 d0.13 |
 
 **tpch, 1x128**
 
 | workload | batch | baseline | sf40 (vram) | sf200 (local_nvme) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 1.73 [0.65-10.58] s1.03 d1.68 | 1.20 [0.35-11.36] s1.03 d1.16 | 0.85 [0.20-11.55] s1.04 d0.82 | 0.63 [0.11-21.24] s1.04 d0.61 |
-| batched | 10 | sequential | 2.12 [0.70-13.48] s1.92 d1.10 | 1.56 [0.42-13.92] s2.07 d0.75 | 1.18 [0.30-14.01] s2.12 d0.56 | 0.96 [0.23-20.62] s2.14 d0.45 |
-| batched | 20 | sequential | 2.76 [0.93-15.00] s2.18 d1.27 | 2.22 [0.67-15.68] s2.38 d0.94 | 1.81 [0.54-15.83] s2.45 d0.74 | 1.57 [0.46-22.33] s2.48 d0.63 |
-| batched | all | sequential | 3.33 [1.11-17.45] s2.38 d1.40 | 2.82 [0.89-18.26] s2.62 d1.08 | 2.40 [0.76-18.44] s2.71 d0.89 | 2.14 [0.68-24.41] s2.75 d0.78 |
-| batched | all | concurrent | 1.83 [0.61-9.57] s2.38 d0.77 | 1.36 [0.37-9.87] s2.62 d0.52 | 1.05 [0.27-9.94] s2.71 d0.39 | 0.87 [0.23-14.33] s2.75 d0.32 |
-| batched | all | faster | 1.83 [0.61-9.57] s2.38 d0.77 | 1.36 [0.37-9.87] s2.62 d0.52 | 1.05 [0.27-9.94] s2.71 d0.39 | 0.87 [0.23-14.33] s2.75 d0.32 |
-| one-pass | median | sequential | 0.92 [0.41-9.08] s1.00 d0.92 | 0.71 [0.25-11.42] s1.00 d0.71 | 0.57 [0.19-11.79] s1.00 d0.57 | 0.48 [0.17-19.94] s1.00 d0.48 |
-| one-pass | worst | sequential | 0.40 [0.16-3.14] s1.00 d0.40 | 0.28 [0.07-3.69] s1.00 d0.28 | 0.21 [0.03-3.83] s1.00 d0.21 | 0.15 [0.03-3.87] s1.00 d0.15 |
+| batched | 3 | sequential | 1.73 [0.72-10.58] s1.03 d1.68 | 1.20 [0.38-11.36] s1.03 d1.16 | 0.85 [0.22-11.55] s1.04 d0.82 | 0.63 [0.12-21.24] s1.04 d0.61 |
+| batched | 10 | sequential | 2.12 [0.73-13.48] s1.92 d1.10 | 1.56 [0.45-13.92] s2.07 d0.75 | 1.18 [0.32-14.01] s2.12 d0.56 | 0.96 [0.25-20.62] s2.14 d0.45 |
+| batched | 20 | sequential | 2.76 [0.98-15.00] s2.18 d1.27 | 2.22 [0.72-15.68] s2.38 d0.94 | 1.81 [0.57-15.83] s2.45 d0.74 | 1.57 [0.49-22.33] s2.48 d0.63 |
+| batched | all | sequential | 2.91 [1.01-15.25] s2.38 d1.22 | 2.33 [0.73-15.92] s2.62 d0.89 | 1.88 [0.58-16.07] s2.71 d0.70 | 1.61 [0.49-22.47] s2.75 d0.58 |
+| batched | all | concurrent | 1.83 [0.63-9.57] s2.38 d0.77 | 1.36 [0.39-9.87] s2.62 d0.52 | 1.05 [0.29-9.94] s2.71 d0.39 | 0.87 [0.24-14.33] s2.75 d0.32 |
+| batched | all | faster | 1.83 [0.63-9.57] s2.38 d0.77 | 1.36 [0.39-9.87] s2.62 d0.52 | 1.05 [0.29-9.94] s2.71 d0.39 | 0.87 [0.24-14.33] s2.75 d0.32 |
+| one-pass | median | sequential | 1.02 [0.49-9.08] s1.00 d1.02 | 0.78 [0.31-11.42] s1.00 d0.78 | 0.63 [0.25-11.79] s1.00 d0.63 | 0.53 [0.23-19.94] s1.00 d0.53 |
+| one-pass | worst | sequential | 0.44 [0.20-3.14] s1.00 d0.44 | 0.31 [0.08-3.69] s1.00 d0.31 | 0.24 [0.04-3.83] s1.00 d0.24 | 0.17 [0.03-3.87] s1.00 d0.17 |
 
 **tpcds, 8x16**
 
 | workload | batch | baseline | sf40 (vram) | sf200 (vram) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 3.62 [1.07-20.44] s1.04 d3.48 | 3.30 [0.62-40.32] s1.07 d3.09 | 2.08 [0.19-58.39] s1.08 d1.92 | 1.44 [0.09-61.50] s1.08 d1.34 |
-| batched | 10 | sequential | 1.75 [0.52-13.05] s1.35 d1.29 | 1.37 [0.23-15.16] s1.55 d0.89 | 0.96 [0.07-15.81] s1.68 d0.57 | 0.85 [0.05-23.06] s1.72 d0.49 |
-| batched | 20 | sequential | 2.23 [0.61-15.71] s1.56 d1.42 | 1.83 [0.29-18.30] s1.85 d0.99 | 1.26 [0.09-19.08] s2.03 d0.62 | 1.07 [0.06-26.29] s2.08 d0.52 |
-| batched | all | sequential | 3.51 [0.79-23.45] s2.42 d1.45 | 3.56 [0.49-32.68] s3.20 d1.11 | 3.38 [0.24-46.29] s3.74 d0.90 | 2.94 [0.18-45.07] s3.92 d0.75 |
-| batched | all | concurrent | 2.14 [0.54-18.10] s2.42 d0.88 | 1.85 [0.21-27.10] s3.20 d0.58 | 1.58 [0.06-40.54] s3.74 d0.42 | 1.29 [0.04-41.90] s3.92 d0.33 |
-| batched | all | faster | 2.14 [0.54-18.10] s2.42 d0.88 | 1.85 [0.21-25.93] s3.20 d0.58 | 1.58 [0.06-37.40] s3.74 d0.42 | 1.29 [0.04-37.24] s3.92 d0.33 |
-| one-pass | median | sequential | 0.83 [0.27-9.11] s1.00 d0.83 | 0.59 [0.11-15.91] s1.00 d0.59 | 0.41 [0.04-19.42] s1.00 d0.41 | 0.34 [0.02-26.62] s1.00 d0.34 |
-| one-pass | worst | sequential | 0.20 [0.04-1.22] s1.00 d0.20 | 0.15 [0.02-1.29] s1.00 d0.15 | 0.11 [0.01-1.31] s1.00 d0.11 | 0.09 [0.01-1.32] s1.00 d0.09 |
+| batched | 3 | sequential | 3.62 [1.13-20.44] s1.04 d3.48 | 3.30 [0.69-40.32] s1.07 d3.09 | 2.08 [0.22-58.39] s1.08 d1.92 | 1.44 [0.10-61.50] s1.08 d1.34 |
+| batched | 10 | sequential | 1.75 [0.55-13.05] s1.35 d1.29 | 1.37 [0.25-15.16] s1.55 d0.89 | 0.96 [0.08-15.81] s1.68 d0.57 | 0.85 [0.05-23.06] s1.72 d0.49 |
+| batched | 20 | sequential | 2.23 [0.64-15.71] s1.56 d1.42 | 1.83 [0.32-18.30] s1.85 d0.99 | 1.26 [0.10-19.08] s2.03 d0.62 | 1.07 [0.06-26.29] s2.08 d0.52 |
+| batched | all | sequential | 3.02 [0.78-18.11] s2.42 d1.25 | 2.81 [0.47-22.18] s3.20 d0.88 | 2.44 [0.19-30.80] s3.74 d0.65 | 1.94 [0.13-27.77] s3.92 d0.49 |
+| batched | all | concurrent | 2.06 [0.55-13.32] s2.42 d0.85 | 1.73 [0.22-17.72] s3.20 d0.54 | 1.44 [0.06-25.04] s3.74 d0.38 | 1.14 [0.04-24.53] s3.92 d0.29 |
+| batched | all | faster | 2.06 [0.55-13.32] s2.42 d0.85 | 1.73 [0.22-17.55] s3.20 d0.54 | 1.44 [0.06-22.98] s3.74 d0.38 | 1.14 [0.04-20.54] s3.92 d0.29 |
+| one-pass | median | sequential | 0.90 [0.33-9.11] s1.00 d0.90 | 0.67 [0.14-15.91] s1.00 d0.67 | 0.46 [0.05-19.42] s1.00 d0.46 | 0.39 [0.03-26.62] s1.00 d0.39 |
+| one-pass | worst | sequential | 0.23 [0.06-1.22] s1.00 d0.23 | 0.17 [0.02-1.29] s1.00 d0.17 | 0.12 [0.01-1.31] s1.00 d0.12 | 0.11 [0.01-1.32] s1.00 d0.11 |
 
 **tpcds, 16x8**
 
 | workload | batch | baseline | sf40 (vram) | sf200 (vram) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 3.51 [1.07-20.44] s1.04 d3.38 | 3.12 [0.62-40.32] s1.07 d2.92 | 1.87 [0.19-58.39] s1.08 d1.73 | 1.23 [0.09-61.50] s1.08 d1.14 |
-| batched | 10 | sequential | 1.67 [0.52-13.07] s1.35 d1.23 | 1.25 [0.23-15.18] s1.55 d0.81 | 0.81 [0.07-15.83] s1.68 d0.48 | 0.69 [0.05-23.08] s1.72 d0.40 |
-| batched | 20 | sequential | 2.13 [0.61-15.74] s1.56 d1.36 | 1.68 [0.30-18.33] s1.85 d0.91 | 1.07 [0.09-19.12] s2.03 d0.53 | 0.88 [0.06-26.32] s2.08 d0.43 |
-| batched | all | sequential | 3.20 [0.79-23.49] s2.42 d1.32 | 3.08 [0.49-32.75] s3.20 d0.96 | 2.78 [0.24-46.41] s3.74 d0.74 | 2.30 [0.18-45.21] s3.92 d0.59 |
-| batched | all | concurrent | 2.00 [0.54-18.14] s2.42 d0.83 | 1.64 [0.21-27.18] s3.20 d0.51 | 1.32 [0.06-40.67] s3.74 d0.35 | 1.01 [0.04-42.04] s3.92 d0.26 |
-| batched | all | faster | 2.00 [0.54-18.14] s2.42 d0.83 | 1.64 [0.21-26.01] s3.20 d0.51 | 1.32 [0.06-37.52] s3.74 d0.35 | 1.01 [0.04-37.38] s3.92 d0.26 |
-| one-pass | median | sequential | 0.76 [0.27-9.11] s1.00 d0.76 | 0.52 [0.11-15.96] s1.00 d0.52 | 0.34 [0.04-19.48] s1.00 d0.34 | 0.27 [0.02-26.66] s1.00 d0.27 |
-| one-pass | worst | sequential | 0.18 [0.04-1.22] s1.00 d0.18 | 0.12 [0.02-1.29] s1.00 d0.12 | 0.09 [0.01-1.32] s1.00 d0.09 | 0.07 [0.01-1.32] s1.00 d0.07 |
+| batched | 3 | sequential | 3.51 [1.13-20.44] s1.04 d3.38 | 3.12 [0.69-40.32] s1.07 d2.92 | 1.87 [0.22-58.39] s1.08 d1.73 | 1.23 [0.10-61.50] s1.08 d1.14 |
+| batched | 10 | sequential | 1.67 [0.55-13.07] s1.35 d1.23 | 1.25 [0.25-15.18] s1.55 d0.81 | 0.81 [0.08-15.83] s1.68 d0.48 | 0.69 [0.05-23.08] s1.72 d0.40 |
+| batched | 20 | sequential | 2.13 [0.64-15.74] s1.56 d1.36 | 1.68 [0.32-18.33] s1.85 d0.91 | 1.07 [0.10-19.12] s2.03 d0.53 | 0.88 [0.07-26.32] s2.08 d0.43 |
+| batched | all | sequential | 2.84 [0.78-18.15] s2.42 d1.18 | 2.52 [0.47-22.26] s3.20 d0.79 | 2.09 [0.19-30.84] s3.74 d0.56 | 1.56 [0.13-27.81] s3.92 d0.40 |
+| batched | all | concurrent | 1.95 [0.55-13.36] s2.42 d0.81 | 1.56 [0.22-17.80] s3.20 d0.49 | 1.22 [0.06-25.17] s3.74 d0.33 | 0.90 [0.05-24.67] s3.92 d0.23 |
+| batched | all | faster | 1.95 [0.55-13.36] s2.42 d0.81 | 1.56 [0.22-17.62] s3.20 d0.49 | 1.22 [0.06-23.10] s3.74 d0.33 | 0.90 [0.05-20.68] s3.92 d0.23 |
+| one-pass | median | sequential | 0.84 [0.33-9.11] s1.00 d0.84 | 0.59 [0.14-15.96] s1.00 d0.59 | 0.38 [0.05-19.48] s1.00 d0.38 | 0.31 [0.03-26.66] s1.00 d0.31 |
+| one-pass | worst | sequential | 0.20 [0.06-1.22] s1.00 d0.20 | 0.14 [0.02-1.29] s1.00 d0.14 | 0.10 [0.01-1.32] s1.00 d0.10 | 0.08 [0.01-1.32] s1.00 d0.08 |
 
 **tpcds, 1x128**
 
 | workload | batch | baseline | sf40 (vram) | sf200 (vram) | 1 TB (local_nvme) | 10 TB (none) |
 |---|---|---|---|---|---|---|
-| batched | 3 | sequential | 4.05 [1.40-17.55] s1.04 d3.89 | 4.15 [1.19-33.70] s1.07 d3.89 | 3.23 [0.88-48.95] s1.08 d2.99 | 2.67 [0.79-51.51] s1.08 d2.47 |
-| batched | 10 | sequential | 2.02 [0.73-10.92] s1.35 d1.49 | 1.83 [0.58-12.58] s1.55 d1.19 | 1.58 [0.50-13.27] s1.68 d0.94 | 1.51 [0.49-18.41] s1.72 d0.88 |
-| batched | 20 | sequential | 2.50 [0.83-12.92] s1.56 d1.60 | 2.30 [0.68-15.06] s1.85 d1.24 | 1.89 [0.57-15.41] s2.03 d0.93 | 1.76 [0.55-20.81] s2.08 d0.85 |
-| batched | all | sequential | 4.87 [1.58-20.37] s2.42 d2.01 | 5.77 [1.99-29.38] s3.20 d1.80 | 6.20 [2.18-42.49] s3.74 d1.66 | 5.99 [2.19-42.37] s3.92 d1.53 |
-| batched | all | concurrent | 2.47 [0.59-15.81] s2.42 d1.02 | 2.42 [0.31-24.89] s3.20 d0.76 | 2.34 [0.07-37.73] s3.74 d0.62 | 2.13 [0.02-39.56] s3.92 d0.54 |
-| batched | all | faster | 2.47 [0.59-15.81] s2.42 d1.02 | 2.42 [0.31-23.34] s3.20 d0.76 | 2.34 [0.07-34.24] s3.74 d0.62 | 2.13 [0.02-34.77] s3.92 d0.54 |
-| one-pass | median | sequential | 1.00 [0.42-8.42] s1.00 d1.00 | 0.78 [0.26-13.90] s1.00 d0.78 | 0.59 [0.22-15.57] s1.00 d0.59 | 0.54 [0.21-20.98] s1.00 d0.54 |
-| one-pass | worst | sequential | 0.32 [0.13-1.00] s1.00 d0.32 | 0.27 [0.08-1.01] s1.00 d0.27 | 0.15 [0.02-1.01] s1.00 d0.15 | 0.09 [0.02-1.01] s1.00 d0.09 |
+| batched | 3 | sequential | 4.05 [1.49-17.55] s1.04 d3.89 | 4.15 [1.33-33.70] s1.07 d3.89 | 3.23 [1.00-48.95] s1.08 d2.99 | 2.67 [0.90-51.51] s1.08 d2.47 |
+| batched | 10 | sequential | 2.02 [0.77-10.92] s1.35 d1.49 | 1.83 [0.63-12.58] s1.55 d1.19 | 1.58 [0.56-13.27] s1.68 d0.94 | 1.51 [0.55-18.41] s1.72 d0.88 |
+| batched | 20 | sequential | 2.50 [0.87-12.92] s1.56 d1.60 | 2.30 [0.73-15.06] s1.85 d1.24 | 1.89 [0.63-15.41] s2.03 d0.93 | 1.76 [0.61-20.81] s2.08 d0.85 |
+| batched | all | sequential | 3.59 [1.20-15.03] s2.42 d1.49 | 3.78 [1.26-18.89] s3.20 d1.18 | 3.73 [1.27-25.16] s3.74 d1.00 | 3.36 [1.26-22.95] s3.92 d0.86 |
+| batched | all | concurrent | 2.28 [0.61-11.04] s2.42 d0.94 | 2.12 [0.32-15.51] s3.20 d0.66 | 1.97 [0.07-22.23] s3.74 d0.53 | 1.73 [0.02-22.19] s3.92 d0.44 |
+| batched | all | faster | 2.28 [0.61-11.04] s2.42 d0.94 | 2.12 [0.32-14.78] s3.20 d0.66 | 1.97 [0.07-19.66] s3.74 d0.53 | 1.73 [0.02-18.01] s3.92 d0.44 |
+| one-pass | median | sequential | 1.10 [0.51-8.42] s1.00 d1.10 | 0.86 [0.35-13.90] s1.00 d0.86 | 0.66 [0.29-15.57] s1.00 d0.66 | 0.62 [0.28-20.98] s1.00 d0.62 |
+| one-pass | worst | sequential | 0.36 [0.18-1.00] s1.00 d0.36 | 0.31 [0.10-1.01] s1.00 d0.31 | 0.17 [0.03-1.01] s1.00 d0.17 | 0.10 [0.02-1.01] s1.00 d0.10 |
 
 ## CPU with shared scans (modelled)
 
@@ -281,22 +281,22 @@ The same batches against a CPU baseline that shares scans as the GPU does: its S
 
 | dataset | deployment | size | batch | ratio vs plain CPU | ratio vs sharing CPU |
 |---|---|---|---|---|---|
-| tpch | 8x16 | sf40 | 10 | 2.17 [0.58-17.92] | 2.06 [0.58-16.03] |
-| tpch | 8x16 | sf40 | all | 1.88 [0.50-12.88] | 1.76 [0.49-11.14] |
-| tpch | 8x16 | sf200 | 10 | 1.56 [0.27-18.59] | 1.43 [0.26-16.60] |
-| tpch | 8x16 | sf200 | all | 1.38 [0.22-13.40] | 1.23 [0.21-11.54] |
-| tpch | 1x128 | sf40 | 10 | 2.12 [0.70-13.48] | 1.82 [0.60-11.59] |
-| tpch | 1x128 | sf40 | all | 1.83 [0.61-9.57] | 1.49 [0.50-7.83] |
-| tpch | 1x128 | sf200 | 10 | 1.56 [0.42-13.92] | 1.21 [0.29-11.93] |
-| tpch | 1x128 | sf200 | all | 1.36 [0.37-9.87] | 0.97 [0.22-8.02] |
-| tpcds | 8x16 | sf40 | 10 | 1.75 [0.52-13.05] | 1.64 [0.52-11.44] |
-| tpcds | 8x16 | sf40 | all | 2.14 [0.54-18.10] | 1.85 [0.53-10.12] |
-| tpcds | 8x16 | 1 TB | 10 | 0.96 [0.07-15.81] | 0.74 [0.06-13.64] |
-| tpcds | 8x16 | 1 TB | all | 1.58 [0.06-37.40] | 1.02 [0.05-18.29] |
-| tpcds | 1x128 | sf40 | 10 | 2.02 [0.73-10.92] | 1.72 [0.62-9.30] |
-| tpcds | 1x128 | sf40 | all | 2.47 [0.59-15.81] | 1.71 [0.53-7.84] |
-| tpcds | 1x128 | 1 TB | 10 | 1.58 [0.50-13.27] | 1.01 [0.27-10.77] |
-| tpcds | 1x128 | 1 TB | all | 2.34 [0.07-34.24] | 0.87 [0.04-13.90] |
+| tpch | 8x16 | sf40 | 10 | 2.17 [0.61-17.92] | 2.06 [0.60-16.03] |
+| tpch | 8x16 | sf40 | all | 1.88 [0.52-12.88] | 1.76 [0.51-11.14] |
+| tpch | 8x16 | sf200 | 10 | 1.56 [0.29-18.59] | 1.43 [0.28-16.60] |
+| tpch | 8x16 | sf200 | all | 1.38 [0.23-13.40] | 1.23 [0.22-11.54] |
+| tpch | 1x128 | sf40 | 10 | 2.12 [0.73-13.48] | 1.82 [0.63-11.59] |
+| tpch | 1x128 | sf40 | all | 1.83 [0.63-9.57] | 1.49 [0.52-7.83] |
+| tpch | 1x128 | sf200 | 10 | 1.56 [0.45-13.92] | 1.21 [0.31-11.93] |
+| tpch | 1x128 | sf200 | all | 1.36 [0.39-9.87] | 0.97 [0.23-8.02] |
+| tpcds | 8x16 | sf40 | 10 | 1.75 [0.55-13.05] | 1.64 [0.54-11.44] |
+| tpcds | 8x16 | sf40 | all | 2.06 [0.55-13.32] | 1.84 [0.54-9.53] |
+| tpcds | 8x16 | 1 TB | 10 | 0.96 [0.08-15.81] | 0.74 [0.06-13.64] |
+| tpcds | 8x16 | 1 TB | all | 1.44 [0.06-22.98] | 1.00 [0.05-17.64] |
+| tpcds | 1x128 | sf40 | 10 | 2.02 [0.77-10.92] | 1.72 [0.65-9.30] |
+| tpcds | 1x128 | sf40 | all | 2.28 [0.61-11.04] | 1.69 [0.54-7.25] |
+| tpcds | 1x128 | 1 TB | 10 | 1.58 [0.56-13.27] | 1.01 [0.31-10.77] |
+| tpcds | 1x128 | 1 TB | all | 1.97 [0.07-19.66] | 0.82 [0.05-13.25] |
 
 Measured beside it: Comet's own in-memory cache, tables cached first, TPC-H local on 1 x 128 ran 53.3 s sequential and 36.1 s concurrent, against 53.2 s and 36.1 s without it (`measurements/comet/summary.tsv`). On RAM-resident data it bought nothing.
 
@@ -308,71 +308,71 @@ Batch "all" (faster baseline) and batch 10 (sequential), eight 16-core nodes, at
 
 | tier | GB/s | capacity GB | $/h | kind | all, sf40 | 10, sf40 | all, sf200 | 10, sf200 |
 |---|--:|--:|--:|---|---|---|---|---|
-| nic | 1.25 | unbounded | 4.5 | source | 1.88 [0.50-12.88] | 2.17 [0.58-17.92] | 1.38 [0.22-13.40] | 1.56 [0.27-18.59] |
-| vram | HBM | 80 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.83-15.22] | 1.39 [0.25-11.11] | 1.66 [0.32-15.75] |
-| local-nvme | 3.9 | 3840 | 6.88 | source | 1.49 [0.40-7.60] | 1.98 [0.55-8.91] | 1.23 [0.22-7.85] | 1.52 [0.31-9.13] |
+| nic | 1.25 | unbounded | 4.5 | source | 1.88 [0.52-12.88] | 2.17 [0.61-17.92] | 1.38 [0.23-13.40] | 1.56 [0.29-18.59] |
+| vram | HBM | 80 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.83-15.22] | 1.39 [0.26-11.11] | 1.66 [0.33-15.75] |
+| local-nvme | 3.9 | 3840 | 6.88 | source | 1.49 [0.40-7.60] | 1.98 [0.54-8.91] | 1.23 [0.22-7.85] | 1.52 [0.29-9.13] |
 | nic40_s3 | 5 | 1e+06 | 4.5 | source | 2.27 [0.62-12.70] | 3.05 [0.83-15.26] | 1.88 [0.33-13.19] | 2.34 [0.45-15.70] |
-| nic100_s3_p5_4xlarge | 12.5 | 1e+06 | 6.88 | source | 1.49 [0.40-8.43] | 1.99 [0.55-11.72] | 1.23 [0.22-8.76] | 1.53 [0.31-12.16] |
-| nic200_s3_p6_b200 | 25 | 1e+06 | 14.24 | source | 0.72 [0.19-4.07] | 0.96 [0.26-5.66] | 0.59 [0.11-4.23] | 0.74 [0.15-5.87] |
-| nic400_s3 | 50 | 1e+06 | 4.6 | source | 2.22 [0.60-12.60] | 2.98 [0.82-17.53] | 1.84 [0.33-13.11] | 2.29 [0.46-18.18] |
-| local_nvme_x4_gds | 26.1 | 30720 | 4.73 | source | 2.16 [0.59-12.26] | 2.90 [0.80-17.05] | 1.79 [0.32-12.75] | 2.23 [0.45-17.68] |
-| host_ram_pcie5 | 47.3 | 196 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.83-15.22] | 1.63 [0.32-11.11] | 2.06 [0.45-15.75] |
-| peer_ram_ib400_nebius | 24 | 1718 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.83-15.22] | 1.63 [0.32-11.11] | 2.06 [0.45-15.75] |
+| nic100_s3_p5_4xlarge | 12.5 | 1e+06 | 6.88 | source | 1.49 [0.40-8.43] | 1.99 [0.54-11.72] | 1.23 [0.22-8.76] | 1.53 [0.29-12.16] |
+| nic200_s3_p6_b200 | 25 | 1e+06 | 14.24 | source | 0.72 [0.19-4.07] | 0.96 [0.26-5.66] | 0.59 [0.10-4.23] | 0.74 [0.14-5.87] |
+| nic400_s3 | 50 | 1e+06 | 4.6 | source | 2.22 [0.60-12.60] | 2.98 [0.81-17.53] | 1.84 [0.32-13.11] | 2.29 [0.44-18.18] |
+| local_nvme_x4_gds | 26.1 | 30720 | 4.73 | source | 2.16 [0.59-12.26] | 2.90 [0.79-17.05] | 1.79 [0.31-12.75] | 2.23 [0.42-17.68] |
+| host_ram_pcie5 | 47.3 | 196 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.81-15.22] | 1.63 [0.31-11.11] | 2.06 [0.43-15.75] |
+| peer_ram_ib400_nebius | 24 | 1718 | 4.5 | cache | 2.08 [0.61-10.74] | 2.82 [0.81-15.22] | 1.63 [0.31-11.11] | 2.06 [0.43-15.75] |
 | peer_ram_ib400_azure_nd | 24 | 2040 | 12.29 | cache | 0.76 [0.22-3.93] | 1.03 [0.30-5.57] | 0.60 [0.12-4.07] | 0.75 [0.16-5.77] |
-| peer_ram_efa_p5_48xlarge | 24 | 2199 | 6.88 | cache | 1.36 [0.40-7.02] | 1.84 [0.54-9.96] | 1.07 [0.21-7.27] | 1.35 [0.29-10.30] |
-| memserver_rdma_onprem | 46 | 1024 | 6.21 | cache | 1.51 [0.44-7.78] | 2.04 [0.60-11.03] | 1.18 [0.23-8.05] | 1.49 [0.33-11.41] |
-| kove_sdm | 25 | 4096 | 6.21 | cache | 1.51 [0.44-7.78] | 2.04 [0.60-11.03] | 1.18 [0.23-8.05] | 1.49 [0.33-11.41] |
-| cxl_pool_switch | 20 | 2048 | 7.2 | cache | 1.30 [0.38-6.71] | 1.76 [0.52-9.51] | 1.02 [0.20-6.95] | 1.29 [0.28-9.84] |
-| cxl_expander_local | 40 | 2048 | 6.5 | cache | 1.44 [0.42-7.43] | 1.95 [0.57-10.54] | 1.13 [0.22-7.69] | 1.43 [0.31-10.91] |
-| gh200_c2c | 375 | 480 | 2.29 | cache | 4.09 [1.19-21.10] | 5.54 [1.62-29.91] | 3.20 [0.63-21.84] | 4.05 [0.88-30.95] |
-| gb200_c2c_per_gpu | 256 | 240 | 10.5 | cache | 0.89 [0.26-4.60] | 1.21 [0.35-6.52] | 0.70 [0.14-4.76] | 0.88 [0.19-6.75] |
-| gb200_nvl72_peer_hbm | 900 | 13400 | 10.5 | cache | 0.89 [0.26-4.60] | 1.21 [0.35-6.52] | 0.70 [0.14-4.76] | 0.88 [0.19-6.75] |
-| gds_vast_one_nic | 46.6 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.84-17.92] | 1.88 [0.34-13.40] | 2.34 [0.47-18.59] |
-| gds_parallel_fs_per_gpu | 21.7 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.84-17.92] | 1.88 [0.34-13.40] | 2.34 [0.47-18.59] |
-| s3_rdma_cuobject | 46 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.84-17.92] | 1.88 [0.34-13.40] | 2.34 [0.47-18.59] |
-| nebius_shared_fs | 16.1 | 1.1259e+08 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.84-17.92] | 1.88 [0.34-13.40] | 2.34 [0.47-18.59] |
-| coreweave_caios_lota | 2.47 | 1e+06 | 6.16 | source | 1.64 [0.45-6.93] | 1.97 [0.55-7.76] | 1.24 [0.22-7.09] | 1.47 [0.28-7.88] |
+| peer_ram_efa_p5_48xlarge | 24 | 2199 | 6.88 | cache | 1.36 [0.40-7.02] | 1.84 [0.53-9.96] | 1.07 [0.21-7.27] | 1.35 [0.28-10.30] |
+| memserver_rdma_onprem | 46 | 1024 | 6.21 | cache | 1.51 [0.44-7.78] | 2.04 [0.59-11.03] | 1.18 [0.23-8.05] | 1.49 [0.31-11.41] |
+| kove_sdm | 25 | 4096 | 6.21 | cache | 1.51 [0.44-7.78] | 2.04 [0.59-11.03] | 1.18 [0.23-8.05] | 1.49 [0.31-11.41] |
+| cxl_pool_switch | 20 | 2048 | 7.2 | cache | 1.30 [0.38-6.71] | 1.76 [0.51-9.51] | 1.02 [0.20-6.95] | 1.29 [0.27-9.84] |
+| cxl_expander_local | 40 | 2048 | 6.5 | cache | 1.44 [0.42-7.43] | 1.95 [0.56-10.54] | 1.13 [0.22-7.69] | 1.43 [0.30-10.91] |
+| gh200_c2c | 375 | 480 | 2.29 | cache | 4.09 [1.19-21.10] | 5.54 [1.60-29.91] | 3.20 [0.62-21.84] | 4.05 [0.84-30.95] |
+| gb200_c2c_per_gpu | 256 | 240 | 10.5 | cache | 0.89 [0.26-4.60] | 1.21 [0.35-6.52] | 0.70 [0.13-4.76] | 0.88 [0.18-6.75] |
+| gb200_nvl72_peer_hbm | 900 | 13400 | 10.5 | cache | 0.89 [0.26-4.60] | 1.21 [0.35-6.52] | 0.70 [0.13-4.76] | 0.88 [0.18-6.75] |
+| gds_vast_one_nic | 28.3 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.83-17.92] | 1.88 [0.33-13.40] | 2.34 [0.45-18.59] |
+| gds_parallel_fs_per_gpu | 21.7 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.83-17.92] | 1.88 [0.33-13.40] | 2.34 [0.45-18.59] |
+| s3_rdma_cuobject | 46 | 1e+06 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.83-17.92] | 1.88 [0.33-13.40] | 2.34 [0.45-18.59] |
+| nebius_shared_fs | 16.1 | 1.1259e+08 | 4.5 | source | 2.27 [0.62-12.88] | 3.05 [0.83-17.92] | 1.88 [0.33-13.40] | 2.34 [0.45-18.59] |
+| coreweave_caios_lota | 2.47 | 1e+06 | 6.16 | source | 1.64 [0.45-6.93] | 1.97 [0.56-7.76] | 1.24 [0.22-7.09] | 1.47 [0.29-7.88] |
 | local_nvme_x1_g6e_4xlarge | 0.9 | 600 | 3.004 | source | 2.62 [0.88-7.60] | 2.97 [1.07-7.77] | 1.89 [0.42-7.60] | 2.11 [0.53-7.77] |
 | local_nvme_x2_a3_highgpu_1g | 1.38 | 805 | 11.06 | source | 0.82 [0.25-2.77] | 0.96 [0.31-2.93] | 0.60 [0.12-2.79] | 0.70 [0.16-2.95] |
 | local_nvme_x1_nc40ads_h100_v5 | 2 | 3840 | 6.98 | source | 1.42 [0.40-5.47] | 1.70 [0.52-6.00] | 1.07 [0.21-5.57] | 1.26 [0.28-6.07] |
-| nebius_h100_1gpu_no_local | 0 | 0 | 4.5 | source | 1.88 [0.50-12.88] | 2.17 [0.58-17.92] | 1.38 [0.22-13.40] | 1.56 [0.27-18.59] |
-| local_nvme_x6_nebius_b300_per_gpu | 5.1 | 2880 | 9.74 | source | 1.05 [0.28-5.90] | 1.41 [0.39-7.11] | 0.87 [0.16-6.14] | 1.08 [0.22-7.32] |
-| local_nvme_x8_gen4_gds_onprem | 54 | 61440 | 4.96 | source | 2.06 [0.56-11.69] | 2.76 [0.76-16.26] | 1.71 [0.31-12.16] | 2.12 [0.42-16.86] |
+| nebius_h100_1gpu_no_local | 0 | 0 | 4.5 | source | 1.88 [0.52-12.88] | 2.17 [0.61-17.92] | 1.38 [0.23-13.40] | 1.56 [0.29-18.59] |
+| local_nvme_x6_nebius_b300_per_gpu | 5.1 | 2880 | 9.74 | source | 1.05 [0.28-5.90] | 1.41 [0.38-7.11] | 0.87 [0.15-6.14] | 1.08 [0.21-7.32] |
+| local_nvme_x8_gen4_gds_onprem | 54 | 61440 | 4.96 | source | 2.06 [0.56-11.69] | 2.76 [0.75-16.26] | 1.71 [0.30-12.16] | 2.12 [0.40-16.86] |
 
 **tpcds**
 
 | tier | GB/s | capacity GB | $/h | kind | all, sf40 | 10, sf40 | all, 1 TB | 10, 1 TB |
 |---|--:|--:|--:|---|---|---|---|---|
-| nic | 1.25 | unbounded | 4.5 | source | 2.14 [0.54-18.10] | 1.75 [0.52-13.05] | 1.58 [0.06-37.40] | 0.96 [0.07-15.81] |
-| vram | HBM | 80 | 4.5 | cache | 1.90 [0.59-8.99] | 2.20 [0.78-9.72] | 1.63 [0.06-38.06] | 1.02 [0.07-15.81] |
-| local-nvme | 3.9 | 3840 | 6.88 | source | 1.47 [0.39-11.84] | 1.57 [0.51-6.42] | 1.43 [0.05-17.66] | 1.29 [0.15-7.17] |
-| nic40_s3 | 5 | 1e+06 | 4.5 | source | 2.25 [0.59-18.10] | 2.41 [0.76-10.74] | 2.20 [0.08-28.21] | 2.02 [0.20-12.27] |
-| nic100_s3_p5_4xlarge | 12.5 | 1e+06 | 6.88 | source | 1.47 [0.39-11.84] | 1.58 [0.51-8.54] | 1.44 [0.05-24.46] | 1.32 [0.15-10.34] |
-| nic200_s3_p6_b200 | 25 | 1e+06 | 14.24 | source | 0.71 [0.19-5.72] | 0.76 [0.25-4.13] | 0.70 [0.02-12.74] | 0.64 [0.07-5.67] |
-| nic400_s3 | 50 | 1e+06 | 4.6 | source | 2.21 [0.58-17.70] | 2.36 [0.77-12.77] | 2.16 [0.08-39.45] | 1.98 [0.22-17.55] |
-| local_nvme_x4_gds | 26.1 | 30720 | 4.73 | source | 2.14 [0.56-17.22] | 2.29 [0.75-12.42] | 2.10 [0.07-38.37] | 1.92 [0.22-17.07] |
-| host_ram_pcie5 | 47.3 | 196 | 4.5 | cache | 1.90 [0.59-8.99] | 2.09 [0.76-9.72] | 1.71 [0.06-38.61] | 1.11 [0.08-16.01] |
-| peer_ram_ib400_nebius | 24 | 1718 | 4.5 | cache | 1.90 [0.59-8.99] | 2.09 [0.76-9.72] | 2.20 [0.08-40.33] | 2.02 [0.23-17.94] |
-| peer_ram_ib400_azure_nd | 24 | 2040 | 12.29 | cache | 0.70 [0.21-3.29] | 0.76 [0.28-3.56] | 0.81 [0.03-14.77] | 0.74 [0.08-6.57] |
-| peer_ram_efa_p5_48xlarge | 24 | 2199 | 6.88 | cache | 1.25 [0.38-5.88] | 1.36 [0.50-6.36] | 1.44 [0.05-26.38] | 1.32 [0.15-11.73] |
-| memserver_rdma_onprem | 46 | 1024 | 6.21 | cache | 1.38 [0.43-6.51] | 1.51 [0.55-7.04] | 1.60 [0.06-29.23] | 1.46 [0.17-13.00] |
-| kove_sdm | 25 | 4096 | 6.21 | cache | 1.38 [0.43-6.51] | 1.51 [0.55-7.04] | 1.60 [0.06-29.23] | 1.46 [0.17-13.00] |
-| cxl_pool_switch | 20 | 2048 | 7.2 | cache | 1.19 [0.37-5.62] | 1.30 [0.48-6.07] | 1.38 [0.05-25.21] | 1.26 [0.14-11.21] |
-| cxl_expander_local | 40 | 2048 | 6.5 | cache | 1.32 [0.41-6.22] | 1.44 [0.53-6.73] | 1.53 [0.05-27.92] | 1.40 [0.16-12.42] |
-| gh200_c2c | 375 | 480 | 2.29 | cache | 3.74 [1.15-17.67] | 4.10 [1.50-19.10] | 3.81 [0.15-79.25] | 2.88 [0.22-35.25] |
-| gb200_c2c_per_gpu | 256 | 240 | 10.5 | cache | 0.82 [0.25-3.85] | 0.89 [0.33-4.17] | 0.75 [0.03-16.86] | 0.50 [0.04-7.20] |
-| gb200_nvl72_peer_hbm | 900 | 13400 | 10.5 | cache | 0.82 [0.25-3.85] | 0.89 [0.33-4.17] | 0.94 [0.03-17.28] | 0.87 [0.10-7.69] |
-| gds_vast_one_nic | 46.6 | 1e+06 | 4.5 | source | 2.25 [0.59-18.10] | 2.41 [0.78-13.05] | 2.20 [0.08-40.33] | 2.02 [0.23-17.94] |
-| gds_parallel_fs_per_gpu | 21.7 | 1e+06 | 4.5 | source | 2.25 [0.59-18.10] | 2.41 [0.78-13.05] | 2.20 [0.08-40.33] | 2.02 [0.23-17.94] |
-| s3_rdma_cuobject | 46 | 1e+06 | 4.5 | source | 2.25 [0.59-18.10] | 2.41 [0.78-13.05] | 2.20 [0.08-40.33] | 2.02 [0.23-17.94] |
-| nebius_shared_fs | 16.1 | 1.1259e+08 | 4.5 | source | 2.25 [0.59-18.10] | 2.41 [0.78-13.05] | 2.20 [0.08-39.31] | 2.02 [0.23-16.76] |
-| coreweave_caios_lota | 2.47 | 1e+06 | 6.16 | source | 1.65 [0.43-12.26] | 1.57 [0.50-5.85] | 1.43 [0.06-19.72] | 1.09 [0.10-6.26] |
-| local_nvme_x1_g6e_4xlarge | 0.9 | 600 | 3.004 | source | 3.05 [0.88-16.25] | 2.40 [0.97-6.39] | 2.24 [0.10-32.39] | 1.30 [0.14-8.96] |
-| local_nvme_x2_a3_highgpu_1g | 1.38 | 805 | 11.06 | source | 0.90 [0.24-5.47] | 0.77 [0.29-2.33] | 0.68 [0.03-9.49] | 0.44 [0.05-2.71] |
-| local_nvme_x1_nc40ads_h100_v5 | 2 | 3840 | 6.98 | source | 1.45 [0.38-10.08] | 1.35 [0.48-4.62] | 1.23 [0.05-16.31] | 0.91 [0.12-4.84] |
-| nebius_h100_1gpu_no_local | 0 | 0 | 4.5 | source | 2.14 [0.54-18.10] | 1.75 [0.52-13.05] | 1.58 [0.06-37.40] | 0.96 [0.07-15.81] |
-| local_nvme_x6_nebius_b300_per_gpu | 5.1 | 2880 | 9.74 | source | 1.04 [0.27-8.36] | 1.11 [0.36-5.00] | 1.02 [0.04-13.14] | 0.93 [0.11-5.71] |
-| local_nvme_x8_gen4_gds_onprem | 54 | 61440 | 4.96 | source | 2.05 [0.54-16.42] | 2.19 [0.71-11.84] | 2.00 [0.07-36.59] | 1.83 [0.21-16.28] |
+| nic | 1.25 | unbounded | 4.5 | source | 2.06 [0.55-13.32] | 1.75 [0.55-13.05] | 1.44 [0.06-22.98] | 0.96 [0.08-15.81] |
+| vram | HBM | 80 | 4.5 | cache | 1.90 [0.59-8.99] | 2.20 [0.78-9.72] | 1.48 [0.07-23.38] | 1.02 [0.08-15.81] |
+| local-nvme | 3.9 | 3840 | 6.88 | source | 1.42 [0.39-8.71] | 1.57 [0.50-6.42] | 1.30 [0.05-14.25] | 1.29 [0.13-7.17] |
+| nic40_s3 | 5 | 1e+06 | 4.5 | source | 2.18 [0.59-13.32] | 2.41 [0.76-10.74] | 2.01 [0.08-21.78] | 2.02 [0.20-12.27] |
+| nic100_s3_p5_4xlarge | 12.5 | 1e+06 | 6.88 | source | 1.42 [0.39-8.71] | 1.58 [0.50-8.54] | 1.31 [0.05-15.03] | 1.32 [0.13-10.34] |
+| nic200_s3_p6_b200 | 25 | 1e+06 | 14.24 | source | 0.69 [0.19-4.21] | 0.76 [0.24-4.13] | 0.63 [0.02-7.83] | 0.64 [0.06-5.67] |
+| nic400_s3 | 50 | 1e+06 | 4.6 | source | 2.13 [0.58-13.03] | 2.36 [0.74-12.77] | 1.96 [0.08-24.24] | 1.98 [0.19-17.55] |
+| local_nvme_x4_gds | 26.1 | 30720 | 4.73 | source | 2.07 [0.56-12.67] | 2.29 [0.72-12.42] | 1.91 [0.07-23.57] | 1.92 [0.19-17.07] |
+| host_ram_pcie5 | 47.3 | 196 | 4.5 | cache | 1.90 [0.59-8.99] | 2.09 [0.74-9.72] | 1.55 [0.07-23.72] | 1.11 [0.09-16.01] |
+| peer_ram_ib400_nebius | 24 | 1718 | 4.5 | cache | 1.90 [0.59-8.99] | 2.09 [0.74-9.72] | 2.01 [0.08-24.78] | 2.02 [0.20-17.94] |
+| peer_ram_ib400_azure_nd | 24 | 2040 | 12.29 | cache | 0.70 [0.21-3.29] | 0.76 [0.27-3.56] | 0.73 [0.03-9.07] | 0.74 [0.07-6.57] |
+| peer_ram_efa_p5_48xlarge | 24 | 2199 | 6.88 | cache | 1.25 [0.38-5.88] | 1.36 [0.48-6.36] | 1.31 [0.05-16.21] | 1.32 [0.13-11.73] |
+| memserver_rdma_onprem | 46 | 1024 | 6.21 | cache | 1.38 [0.43-6.51] | 1.51 [0.54-7.04] | 1.45 [0.06-17.96] | 1.46 [0.14-13.00] |
+| kove_sdm | 25 | 4096 | 6.21 | cache | 1.38 [0.43-6.51] | 1.51 [0.54-7.04] | 1.45 [0.06-17.96] | 1.46 [0.14-13.00] |
+| cxl_pool_switch | 20 | 2048 | 7.2 | cache | 1.19 [0.37-5.62] | 1.30 [0.46-6.07] | 1.25 [0.05-15.49] | 1.26 [0.12-11.21] |
+| cxl_expander_local | 40 | 2048 | 6.5 | cache | 1.32 [0.41-6.22] | 1.44 [0.51-6.73] | 1.39 [0.05-17.15] | 1.40 [0.14-12.42] |
+| gh200_c2c | 375 | 480 | 2.29 | cache | 3.74 [1.15-17.67] | 4.10 [1.45-19.10] | 3.47 [0.15-48.69] | 2.88 [0.24-35.25] |
+| gb200_c2c_per_gpu | 256 | 240 | 10.5 | cache | 0.82 [0.25-3.85] | 0.89 [0.32-4.17] | 0.68 [0.03-10.36] | 0.50 [0.04-7.20] |
+| gb200_nvl72_peer_hbm | 900 | 13400 | 10.5 | cache | 0.82 [0.25-3.85] | 0.89 [0.32-4.17] | 0.86 [0.03-10.62] | 0.87 [0.08-7.69] |
+| gds_vast_one_nic | 28.3 | 1e+06 | 4.5 | source | 2.18 [0.59-13.32] | 2.41 [0.76-13.05] | 2.01 [0.08-24.78] | 2.02 [0.20-17.94] |
+| gds_parallel_fs_per_gpu | 21.7 | 1e+06 | 4.5 | source | 2.18 [0.59-13.32] | 2.41 [0.76-13.05] | 2.01 [0.08-24.78] | 2.02 [0.20-17.94] |
+| s3_rdma_cuobject | 46 | 1e+06 | 4.5 | source | 2.18 [0.59-13.32] | 2.41 [0.76-13.05] | 2.01 [0.08-24.78] | 2.02 [0.20-17.94] |
+| nebius_shared_fs | 16.1 | 1.1259e+08 | 4.5 | source | 2.18 [0.59-13.32] | 2.41 [0.76-13.05] | 2.01 [0.08-24.15] | 2.02 [0.20-16.76] |
+| coreweave_caios_lota | 2.47 | 1e+06 | 6.16 | source | 1.59 [0.43-9.03] | 1.57 [0.52-5.85] | 1.30 [0.06-15.91] | 1.09 [0.11-6.26] |
+| local_nvme_x1_g6e_4xlarge | 0.9 | 600 | 3.004 | source | 2.95 [0.88-11.96] | 2.40 [0.97-6.39] | 2.04 [0.11-26.13] | 1.30 [0.15-8.96] |
+| local_nvme_x2_a3_highgpu_1g | 1.38 | 805 | 11.06 | source | 0.87 [0.24-4.03] | 0.77 [0.29-2.33] | 0.62 [0.03-7.66] | 0.44 [0.05-2.71] |
+| local_nvme_x1_nc40ads_h100_v5 | 2 | 3840 | 6.98 | source | 1.40 [0.38-7.42] | 1.35 [0.48-4.62] | 1.12 [0.05-13.16] | 0.91 [0.12-4.84] |
+| nebius_h100_1gpu_no_local | 0 | 0 | 4.5 | source | 2.06 [0.55-13.32] | 1.75 [0.55-13.05] | 1.44 [0.06-22.98] | 0.96 [0.08-15.81] |
+| local_nvme_x6_nebius_b300_per_gpu | 5.1 | 2880 | 9.74 | source | 1.01 [0.27-6.15] | 1.11 [0.35-5.00] | 0.93 [0.04-10.06] | 0.93 [0.09-5.71] |
+| local_nvme_x8_gen4_gds_onprem | 54 | 61440 | 4.96 | source | 1.97 [0.54-12.09] | 2.19 [0.69-11.84] | 1.82 [0.07-22.48] | 1.83 [0.18-16.28] |
 
 ## Where the GPU stalls on the NIC, per TPC-H query
 
