@@ -79,6 +79,14 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 > - new-hosts' Task 6 Step 5 still waits on the human landing `ENS-nebius-guard`. When it is the
 >   only step left, mark new-hosts `blocked(building)` naming that step alone and go on to
 >   pinned-loads; the H100 work needs Task 10, not the guard.
+> - **This rebase is larger than intended, and the human accepts it.** Master now holds the merge
+>   of #165 (`ENS-optimizer`, 17 commits, about 450 files), so the rebase this note arrives
+>   with carries the join optimizer into every chain L branch, from containers-rebase up,
+>   although the chain forked without it. Do not undo it: run the rebase protocol over the
+>   whole chain, lowest branch first. `02f6a4d8` is already on master through the optimizer, so
+>   drop containers-rebase's copy of it. Code conflicts go to a developer. Each branch
+>   re-proves on its new base, and containers-rebase's PR #193 needs a green CI again before
+>   `done` comes back.
 
 - **containers-rebase's history surgery stays in the roles.** The coordinator runs every git
   command (cherry-pick, rebase, each stop's `add` and `continue`, push); at each stop the
