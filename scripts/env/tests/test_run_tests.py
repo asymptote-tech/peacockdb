@@ -278,9 +278,9 @@ def shell_value(text, name):
     return value.strip('"')
 
 
-def test_the_list_rules_are_gpu_host_test_s():
-    """scripts/gpu-host-test.sh is the old path's one list; the run image must run the same one."""
-    old = (REPO / "scripts" / "gpu-host-test.sh").read_text()
+def test_the_list_rules_are_nebius_test_s():
+    """scripts/nebius-test.sh is the old path's one list; the run image must run the same one."""
+    old = (REPO / "scripts" / "nebius-test.sh").read_text()
     new = SCRIPT.read_text()
     assert shell_value(old, "SF40").split() == shell_value(new, "SF40").split()
     ((lib, rung),) = re.findall(r'\[ "\$name" = (\w+) \] && rung=(\S+)', old)
