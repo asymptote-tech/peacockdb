@@ -18,8 +18,10 @@
 | nebius-cpu128 | 2026-11-04 18:58:00 | 19:10:11 | 0.20 | Task 7 Steps 4–6: provision, its checks, the rerun, the key checks |
 | nebius-h100 | 2026-11-04 19:07:41 | 19:09:38 | 0.03 | Task 7 Step 6: the CPU VM's ssh to it |
 | nebius-cpu128 | 2026-11-04 19:13:00 | 19:14:57 | 0.03 | Task 8 Step 5: the disk check (74 G free; stalled) |
+| nebius-cpu128 | 2026-11-04 19:28:33 | 19:40:56 | 0.21 | Task 10 Step 1: the CPU-VM build |
+| nebius-h100 | 2026-11-04 19:41:13 | 19:43:01 | 0.03 | Task 10 Step 2: the disk check (78 G free; stalled before `prepare`) |
 
-Hours so far: nebius-gpu 0.07, nebius-h100 0.13, nebius-cpu128 0.28. Dev's local time is UTC.
+Hours so far: nebius-gpu 0.07, nebius-h100 0.16, nebius-cpu128 0.49. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -274,6 +276,14 @@ STOPPED at 05:07:21 UTC. Step 5 is the coordinator's and waits on the guard's la
 - **`sudo ls -1A /root/.nebius/`**, the same on both: `.last_check_update.yaml`, `config.yaml`,
   `credentials.yaml` (the CLI's token cache, Task 4's caveat). No `.pem`.
 - Task 6 Steps 1–4 done (developer; see Task 6 note). The key-file fix carried to `ENS-nebius-guard` as `95e532bf` (same two files, byte-equal to the chain's; build-test.md sentence and count +1 on master's text). Next: Task 7. Task 6 Step 5 waits on the landing.
+- **Step 5, landed by content (developer, 2026-11-04 19:27 UTC).** After `git fetch origin`,
+  origin/master is `b85a2595` ("board: ENS-nebius-guard on master…", over `e20db7e9` and
+  `bf937124`). `git cat-file -e origin/master:<f>` succeeds for `nebius-watch.yml`,
+  `nebius-setup/action.yml` and `scripts/nebius/watch.sh`. `origin/ENS-nebius-guard` still exists,
+  at `e20db7e9`. `git diff --stat origin/ENS-nebius-guard origin/master -- <the three> scripts/nebius/`:
+  empty. `git diff --stat origin/master HEAD` over the same paths plus `scripts/nebius.sh` and
+  `scripts/nebius-sync.sh`: empty. `status` on all three VMs: `STOPPED`. **Landed.** The two
+  dispatches (all stopped; then the CPU VM running) are the coordinator's and are not done.
 
 ## Task 7: the fresh-VM check on nebius-cpu128
 
@@ -550,6 +560,49 @@ Developer, 2026-11-04, Steps 1–4 (offline: fakes only, no VM, no image pulled 
   every build downloads the crates and compiles C++ cold. `target-img-25.02/` is gitignored, so
   it survives `nebius-sync.sh` on the VM. `third_party/cudf` arrives with the sync (only `.git` is
   excluded).
+
+## Task 10: the H100 runs the device tiers, the benchmark and Nsight
+
+Developer, 2026-11-04. Step 1 done; Step 2 **stalled at the H100's disk**, before `prepare`.
+
+- **The install dir is `/home/dmitry/build/peacock/new-hosts/install`, not the plan's
+  `/build/peacock/new-hosts/install`.** Dev has no `/build` (`/` is root's). Step 3's `ship
+  --install` takes the home path. tp4-sized's plan names `/build/peacock/sf40-baseline/install`
+  and will meet the same thing.
+- **Step 1, the CPU-VM build**, the five commands of Global Constraints, from the workspace at
+  `4c2fa26f` with this file the only change. The `docker run … stage-install.sh` ran under `nohup`
+  on the VM (log `~/stage-install.log`, rc in `~/stage-install.rc`), polled over `$C ssh`, so a
+  dropped ssh could not kill it. rc 0, about 6.5 min wall (launched 19:33:03, done by 19:39:37) on
+  a cold cargo and ccache. The release benchmark took 2 m 08 s of it. Last line: `==> staged into
+  cpp/install: rust-tests/test_gpu_corpus rust-tests/test_node_timing rust-tests/peacock_gpu_benchmarks
+  rust-tests/peacockdb_core_gpu_lib rust-benchmarks/peacock_gpu_benchmarks`. The log's two
+  `warning:` lines are GCC 12's `-Wstringop-overflow` in flatbuffers' own `reflection.cpp` (a
+  `_deps` source), not ours. Sizes on the VM: `cpp/install` 649 M, `target-img-25.02/` 14 G,
+  `cpp/build` 68 M; the CPU VM's free disk went 74 G → 60 G. rsync of `cpp/install/` to dev: rc 0,
+  649 M. Log copy on dev: `/tmp/t10-stage-install.log` (1193 lines). The CPU VM stopped softly, rc 0.
+- **Step 2, the H100's disk**, checked right after `$N start` (89.169.123.170): `/dev/vda1` 96 G,
+  18 G used, **78 G free**. `lsblk`: one 100 G disk, no data disk (`vdb` 1 M). `/var/lib/peacock`
+  does not exist yet. 196 G RAM. The user is not in `docker` yet (permission denied on the socket),
+  as `prepare` expects. Stopped softly at once, rc 0; `prepare` never ran.
+- **What `prepare` puts there, measured** (GiB):
+
+  | item | size | source |
+  |---|---|---|
+  | build image `peacockdb-build:cudf-25.02` | 14.3 (15.4 GB) | `docker images` on dev and the CPU VM |
+  | run image `peacockdb-run:cudf-25.02` | 7.7 (8.32 GB) | `docker images` on dev |
+  | the run image's `/opt/cudf` copy | 4.7 | `du -sh` in the image, on dev |
+  | sf40 parquet, tpch + tpcds | 54.2 | Analyst: disk, above |
+  | sf1 | 1.6 (1.75 GB) | Analyst: disk |
+  | the shipped install | 0.6 | Step 1 |
+  | the NVIDIA Container Toolkit, nsys | not measured | |
+  | **total** | **83.1 + the two packages** | against 78 free |
+
+  Short by at least 5 GiB, before any headroom, any `docker pull`'s temporary layers, or a run's
+  results and logs. The analyst's "about 85–100 G" holds; the run image is 3 GB bigger than its guess.
+- **Unblocks it:** the human grows the H100's boot disk to 150 GiB or more (Analyst: disk, item
+  2), by either layout given there for the CPU VM. Then Step 2 reruns from `$N start` and the `df`
+  check; Step 1's install at the path above is still good unless the tree changes.
+- tpch.sf40's pin from the H100's fetch (the analyst's departure) is not done: no fetch ran.
 
 ## Task 11: `build-test.md`
 
