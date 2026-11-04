@@ -5,6 +5,8 @@
 - 2026-11-04: run started on `ENS-comet-research`; state `building`. The developer is dispatched
   one plan task at a time (`comet-research-impl.md`); each checkpoint is committed by the
   coordinator with the plan's message.
+- Tasks 0 and 1 committed (f4e2767d, 5330543d). Control file said `pause` after the desk wave;
+  next dispatch is Task 2 once it clears.
 
 ## Tasks
 
@@ -125,3 +127,9 @@ wording edits, no change of substance).
 ## VM hours
 
 ## Rulings
+
+- 2026-11-04 (coordinator): the desk wave proposed two additions. An iperf3 run between VMs is
+  allowed in Task 3 if it fits the caps. A Comet run with
+  `spark.comet.exec.inMemoryCache.enabled=true`, as a fairer batching baseline, goes after the
+  spec's whole matrix in Task 4, lowest priority, and is skipped under the cap like any other
+  configuration. The spec's matrix keeps Spark defaults.
