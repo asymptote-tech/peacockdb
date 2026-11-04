@@ -758,8 +758,8 @@ the gpu column of the registry, the other half of the pair
 | Corpus benchmark harness | [peacock_gpu_benchmarks](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | 34 |
 |---|---|--:|
 
-the eight assertions the harness makes about its own output, run on every `gpu-tests` job
-under `--skip bench_`: a mode's results go to one file per (dataset, mode), sections ordered
+the nine assertions the harness makes about its own output and its run. They run on every
+`gpu-tests` job under `--skip bench_`: a mode's results go to one file per (device, dataset, mode), sections ordered
 numerically, a filtered run keeping the sections it did not produce, every declared mode naming
 the queries its file will hold, the record written only when `PEACOCK_RECORD_PATH` names it and
 checked against what the plan declares before a row lands, an append under a different `# run:`
@@ -1300,6 +1300,8 @@ calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.t
 
 `<device>` is the card's slug, `h100-80gb-hbm3` for `NVIDIA H100 80GB HBM3`. The H200's two
 records predate it: they are keyed, pinned and fetched as `<dataset>.sf<sf>`, one level up.
+`create_nsys_profile.sh` reads the pinned records at that level only,
+`calibration/<dataset>.sf<sf>/records.tsv`, one per dataset the case list names.
 
 What the arrows are there to make checkable:
 
@@ -2186,7 +2188,7 @@ the `calibration` bucket under their sha256, and `testdata/calibration/records.s
 ones that go with the committed tree. A full run on an empty H200 takes an hour (3,602 s), most of
 it q1 and `shuffle_additive_avg` at the rowgroup modes, ~90 s and ~44 s a pass, eleven passes each.
 
-It asserts nothing about an answer, so it can never gate a merge. Its eight harness assertions
+It asserts nothing about an answer, so it can never gate a merge. Its nine harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
 
 The run is measured under event timing — a CUDA event pair around every call, no sync inside

@@ -1374,6 +1374,19 @@ pub fn device_slug(name: &str) -> String {
     provenance::device_slug(name)
 }
 
+/// This process's five, read as a benchmark case reads them; panics naming `what` when one
+/// cannot be read.
+#[cfg(not(feature = "rust-only"))]
+pub fn provenance_of_this_run(what: &str) -> Provenance {
+    provenance::of_this_run(what)
+}
+
+/// The cuDF release this binary was built against, `25.02.02`, as a benchmark's `cudf=` says it.
+#[cfg(not(feature = "rust-only"))]
+pub fn cudf_release() -> String {
+    device_answer::cudf_release()
+}
+
 /// The only timing mode a record is written under: the harness sets `NodeTiming::Events`
 /// before it plans. A literal because a reader cannot tell events from a host clock by
 /// looking at the microseconds, and a run under anything else writes no record at all.

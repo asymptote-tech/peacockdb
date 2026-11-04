@@ -375,3 +375,16 @@ ENS-optimizer's `c5d12789`, not carried).
   `--record` per dataset) → developer, from `git show c5d12789:llm-wiki/build-test.md`'s wording
   where it fits the fork.
 - Round 1 fix: `test_bootstrap.py` ran 17 passed after `379a56d5` (developer's report).
+- Completeness fixes (developer, 2026-11-04):
+  - A1: `this_runs_provenance_names_its_device_driver_cuda_cudf_and_host` in
+    `peacock_gpu_benchmarks.rs`, through two delegates in `test_support/mod.rs`
+    (`provenance_of_this_run`, `cudf_release`). Red then green as a compile in the 25.02 build
+    image (`cargo test --no-run -p peacockdb-core --features gpu --tests`): E0432 before the
+    delegates, clean after. 639 tests, 9 under `--skip bench_`. Never run on a device; with none
+    it stops at `of_this_run`'s "the CUDA runtime describes no device".
+  - A2: `build-test-shadgpu.sh:683`, `:702` now say a failed case appends none of its rows.
+  - build-test.md: the five passages, from c5d12789's wording. `create_nsys_profile.sh` reads
+    pinned records only at `calibration/<dataset>.sf<sf>/`, the H200's level; a new device's
+    fetched records sit under `<device>/`, so step 5 does not find them there yet.
+  - `scripts/env/tests/test_run_tests.py` runs `docker run` on a run image that is not there,
+    which pulls it (25.02, 8.3 GB; 26.02 timed out at 120 s). Remove it afterwards.

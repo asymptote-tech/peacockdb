@@ -680,9 +680,9 @@ fi
 
 # publish_record — the pulled record into the bucket by content, a file per dataset, and each
 # sha256 into the pin. Only a whole, plain, passing run: the record must still be the host's (no
-# run started since the pull), the run must have exited 0 (a failing case appends its rows before
-# it panics), and split_record.py refuses a captured run and one short of, or beyond, what this
-# checkout declares. Uploaded through the host's CLI, read back, then pinned and moved where
+# run started since the pull), the run must have exited 0 (a failed case appends none of its rows,
+# so the record lacks it), and split_record.py refuses a captured run and one short of, or beyond,
+# what this checkout declares. Uploaded through the host's CLI, read back, then pinned and moved where
 # fetch_record.sh puts it, so the pin never names an object the bucket lacks.
 publish_record() {
   local here host names name sha key landed s3
@@ -699,7 +699,7 @@ EOF
   fi
   if [ "$(sed -n 2p <<< "$host" | cut -d' ' -f2)" != 0 ]; then
     die "not published: the run that wrote the record ($(sed -n 2p <<< "$host")) did not exit 0,
-     and a failing case appends its rows before it panics. The tree came home."
+     and a failed case appends none of its rows, so the record lacks it. The tree came home."
   fi
   PUBLISH_DIR=$(mktemp -d)
   trap 'rm -rf "$PUBLISH_DIR"' EXIT
