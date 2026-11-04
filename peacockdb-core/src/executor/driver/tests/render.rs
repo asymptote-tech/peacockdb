@@ -12,7 +12,7 @@ use super::plans::*;
 use super::*;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget};
 use crate::executor::{Region, join_regions, nodes_as_recorded};
-use crate::plan_text::{render_plan, render_run, render_timings, timed_device_us};
+use crate::plan_text::{render_plan, render_run, render_timings, timed_device_us, timed_load_us};
 use crate::wire::FbKind;
 
 #[test]
@@ -174,8 +174,8 @@ fn a_run_that_drained_renders_no_abandoned_at_all() {
     assert!(!text.contains("rows_skipped"), "{text}");
 }
 
-/// The same tree the execution golden renders, annotated with what it cost rather than
-/// what it produced; rows and bytes live in the file beside this one.
+/// The same tree the execution golden renders, annotated with what it cost, and beside it the
+/// chosen run's batches as the execution golden writes them.
 ///
 /// The mock addresses no seq, so nothing was journalled and every entry is `0` — a call
 /// that opened no region did no device work. The shape is what is pinned here; that a
@@ -191,15 +191,15 @@ fn a_timing_record_renders_the_tree_and_what_each_node_cost() {
     let report = run(plan.as_ref(), &script);
     let times = join_regions(&report, &[]).expect("nothing was journalled and nothing measured");
     assert_eq!(
-        render_timings(plan.as_ref(), &times),
+        render_timings(plan.as_ref(), &times, &report),
         "\
 GpuUnload
-  time_us=[[0,0]] total_us=0
+  time_us=[[0,0]] total_us=0 batch_rows=[[10,7]] batch_bytes=[[82,57]]
   GpuFilter: predicate=k@0, lanes=1, batches=multiple
-    time_us=[[0,0]] total_us=0
+    time_us=[[0,0]] total_us=0 batch_rows=[[10,7]] batch_bytes=[[80,56]]
     GpuLoadParquet: table=part, projections=[k@0], partition_groups=[[[0]]], lanes=1, \
 batches=multiple
-      time_us=[[0,0]] total_us=0
+      time_us=[[0,0]] total_us=0 batch_rows=[[10,7]] batch_bytes=[[80,56]]
 "
     );
 }
@@ -229,7 +229,7 @@ fn a_region_that_rounds_to_nothing_still_ran() {
     let regions = [region(7, 0, 0), region(8, 0, 30)];
     let times = join_regions(&report, &regions).expect("both regions belong to a journalled call");
 
-    let text = render_timings(plan.as_ref(), &times);
+    let text = render_timings(plan.as_ref(), &times, &report);
     assert!(
         text.contains("time_us=[[1,30]] total_us=31"),
         "a rounded-down region is 1 and the total is the sum of what is printed:\n{text}"
@@ -237,6 +237,43 @@ fn a_region_that_rounds_to_nothing_still_ran() {
     // The trailer's `device_us` is the tree's `total_us` added, under the same rule — a raw
     // sum would say 30 here, and the committed file's own arithmetic pin would go red.
     assert_eq!(timed_device_us(&times), 31);
+}
+
+/// The bench line's batch tokens are the execution golden's, node for node: one renderer
+/// writes both, so a reader holding the two files compares lane for lane.
+#[test]
+fn a_timing_record_carries_the_execution_goldens_batches() {
+    let script = Script::default().source("part", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let plan = unload(filter(source("part", 1)));
+    let report = run(plan.as_ref(), &script);
+    let times = join_regions(&report, &[]).expect("nothing journalled");
+    let bench = render_timings(plan.as_ref(), &times, &report);
+    let exec = render_run(plan.as_ref(), &report);
+    assert_eq!(batch_tokens(&bench), batch_tokens(&exec));
+    assert_eq!(batch_tokens(&bench).len(), 3, "{bench}");
+}
+
+/// The load is every loader's total added, never the first one's: a join reads two tables.
+#[test]
+fn the_load_is_every_loaders_total() {
+    let script = Script::default()
+        .source("a", vec![vec![spec(4, 32)]])
+        .source("b", vec![vec![spec(10, 80)]]);
+    // Pre-order: 0 unload, 1 join, 2 and 3 the loaders.
+    let plan = unload(join(source("a", 1), source("b", 1)));
+    let mut report = run(plan.as_ref(), &script);
+    for (node, seq) in [(1, 7u32), (2, 8), (3, 9)] {
+        let mut made = AbiCalls::armed(true);
+        made.record(call_of(seq, 0));
+        report.abi_calls[node][0][0] = made;
+    }
+    let regions = [region(7, 0, 7), region(8, 0, 40), region(9, 0, 25)];
+    let times = join_regions(&report, &regions).expect("every region belongs to a call");
+    assert_eq!(timed_load_us(plan.as_ref(), &times), 40 + 25);
+    assert_eq!(
+        timed_device_us(&times) - timed_load_us(plan.as_ref(), &times),
+        7
+    );
 }
 
 /// The two node indexes stay apart: `node_seq` is the tree's post-order, and the report is
@@ -319,6 +356,20 @@ fn a_region_without_a_call_is_refused() {
 
     let refused = join_regions(&report, &[region(7, 0, 40)]).expect_err("nobody made that call");
     assert!(refused.contains("(seq 7, call 0)"), "{refused}");
+}
+
+/// The `batch_rows=… batch_bytes=…` pair of every line carrying one, in file order: an
+/// execution line may go on with `abandoned` or `rows_skipped`, which the bench line lacks.
+fn batch_tokens(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let from = line.find("batch_rows=")?;
+            let rest = &line[from..];
+            let bytes = rest.find("batch_bytes=")?;
+            let end = rest[bytes..].find(' ').map_or(rest.len(), |at| bytes + at);
+            Some(rest[..end].to_string())
+        })
+        .collect()
 }
 
 /// `GpuFilter`'s pre-order index, which is what `abi_calls` and `lanes` are keyed by.

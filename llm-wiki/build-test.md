@@ -380,7 +380,7 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 123 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 125 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -516,11 +516,12 @@ name gives a slug with a `/` or a space, or one that slugs to something else. Th
 `/proc/driver/nvidia/version` in both module flavours' wording, nothing out of a text with no
 module line, two, or one naming no release or two, and an unreadable file refused naming it
 
-| Benchmark trailer | [test_support::benchmark_trailer::tests](../peacockdb-core/src/test_support/benchmark_trailer/tests.rs) | 1 |
+| Benchmark trailer | [test_support::benchmark_trailer::tests](../peacockdb-core/src/test_support/benchmark_trailer/tests.rs) | 3 |
 |---|---|--:|
 
-the `--- run ---` trailer a section ends with: its keys in order, the five provenance keys
-last, each with the run's own value
+the `--- run ---` trailer a section ends with: its seventeen keys in order, the five provenance
+keys last, each with the run's own value; `execute_us` is `device_us` less `load_us`; the
+pinned cache's line as it prints, and the prefill's three numbers apart from `load_us`
 
 | Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
 |---|---|--:|
@@ -2670,18 +2671,48 @@ trailers' `cudf=` tells them apart.
 section each. The committed H200 run is under `h200/`. A section is the plan tree with one
 line under every node:
 
-    time_us=[[22,37,40],[55,1,30]] total_us=185
+    time_us=[[22,37,40],[55,1,30]] total_us=185 batch_rows=[[6001215],[5998785]] batch_bytes=[[96019440],[95980560]]
 
-Lanes outermost, one entry per call the lane made, each entry the call's device microseconds summed
-over its output partitions; `1` where the clock rounded a region to zero, since every call opens
+`time_us` is by driving lane and call; `batch_rows` and `batch_bytes` are by output lane and
+emitted batch, as in `.cpu.txt` and from the same reported run. The two axes differ: an
+accumulator makes many calls and emits one batch. The `h200/` sections predate the two batch
+keys and carry only `time_us` and `total_us`. In `time_us`, lanes are outermost, with one entry
+per call the lane made, each entry the call's device microseconds summed over its output
+partitions; `1` where the clock rounded a region to zero, since every call opens
 one; `0` where the call crossed no ABI — the backend answered from what it held, as an accumulator
-taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`. Then a
-`--- run ---` trailer: `run_us` (the chosen execution end to end, after planning), `device_us` (Σ
-of the tree's `total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution,
-in order), `build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default
-every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated
-it, which moves the profile and not just the scale), then the five provenance keys, `device=` to
-`host=`. A failed case's section is its record instead (above). The reported execution is the
+taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`.
+
+Then a `--- run ---` trailer, one `key=value` a line, seventeen keys in this order:
+
+- `run_us`: the chosen execution end to end, after planning.
+- `device_us`: Σ of the tree's `total_us`. The gap to `run_us` is the host.
+- `load_us`: Σ of the `GpuLoadParquet` nodes' `total_us`, 0 in a plan with none. It is the
+  device-side load. The pinned cache's host IO is never in it.
+- `execute_us`: `device_us` − `load_us`.
+- `peak_bytes`: the most bytes the run's memory accountant held at once: driver-held batches
+  plus every live executor's `resident_bytes()`. It is exact for that figure. As device memory it
+  is a lower bound: it leaves out a call's scratch (no device executor measures it), cuDF and rmm
+  temporaries inside a call, pool fragmentation and the parquet reader's staging. It is at least
+  every `batch_bytes` entry of its section, since every emitted batch is held first.
+- `runs=[…]`: every measured execution, in order.
+- `build=release`.
+- `allocator=`: what `install_rmm_pool` reported. With rmm's default every cuDF intermediate is a
+  `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it, which moves the
+  profile and not just the scale.
+- `pinned_cache=`: the pinned host cache as it prints at the end of the case, nothing appended:
+  `on cap=… resident=… files=… fills=… fill_us=… fallbacks=… evictions=… reloads=… source=…`,
+  `off source=<default|session|env>`, `off integrated` or `off no-device`. Its counters are the
+  process's, cumulative.
+- `prefill_files`, `prefill_bytes`, `prefill_us`: the process's one prefill (**The prefill**,
+  above), what it read from disk and its wall time. Every section one process writes carries the
+  same three; under one process per query they are that query's. All three are `0` with the cache
+  off. There is no per-round key: a round that filled, reloaded, evicted or fell back fails its
+  case, so a timed section whose `pinned_cache` starts `on` read pinned buffers only.
+- the five provenance keys, `device=` to `host=`, always last: a resumed run keeps a section only
+  when its trailer ends with this run's five.
+
+The `h200/` sections predate `load_us`, `execute_us`, `peak_bytes`, `pinned_cache` and the three
+`prefill_*` keys. A failed case's section is its record instead (above). The reported execution is the
 second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
 likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
 minimum, which would be a tree belonging to no execution. Both counts are constants in

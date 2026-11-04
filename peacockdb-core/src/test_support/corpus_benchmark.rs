@@ -19,7 +19,7 @@ use crate::executor::{
     set_nvtx_ranges,
 };
 use crate::plan::{GpuLoadParquet, GpuNode};
-use crate::plan_text::{render_timings, timed_device_us};
+use crate::plan_text::{render_timings, timed_device_us, timed_load_us};
 use crate::wire::{attach_recipes, join_scratch_bytes};
 
 use super::benchmark_prefill::{
@@ -27,7 +27,7 @@ use super::benchmark_prefill::{
     unprefilled,
 };
 use super::benchmark_section::{assert_dataset_present, measure_into};
-use super::benchmark_trailer::run_section;
+use super::benchmark_trailer::{RunTotals, run_section};
 use super::corpus::plan_at;
 use super::gpu_session::Session;
 use super::provenance::{device_slug, of_this_run};
@@ -274,16 +274,27 @@ async fn measure(
     let chosen = second_smallest(runs);
     let costed = measured_of(&chosen, what);
     let (compressed, decoded) = load_bytes(tree.as_ref(), &chosen.report, what);
-    eprintln!("[pinned-cache] {what}: {after}");
     eprintln!("[load-bytes] {what}: compressed={compressed} decoded={decoded}");
+    let totals = RunTotals {
+        run_us: chosen.total_us,
+        device_us: timed_device_us(&costed),
+        load_us: timed_load_us(tree.as_ref(), &costed),
+        peak_bytes: chosen.report.peak_bytes as u64,
+    };
+    // A refused prefill failed the case at the top; what reaches here prefilled, or ran with
+    // the cache off and read nothing ahead.
+    let prefilled = prefill
+        .as_ref()
+        .map_or(PrefillStats::default(), |prefill| prefill.stats);
     let body = format!(
         "{}{}",
-        render_timings(tree.as_ref(), &costed),
+        render_timings(tree.as_ref(), &costed, &chosen.report),
         run_section(
-            chosen.total_us,
-            timed_device_us(&costed),
+            &totals,
             &times,
             meta.allocator,
+            &after,
+            &prefilled,
             meta.provenance
         )
     );

@@ -9,29 +9,57 @@ mod tests;
 
 use super::provenance::fields;
 use super::{BUILD, Provenance};
+use crate::executor::{PinnedCache, PrefillStats};
 
-/// The trailer, ending with the run's provenance.
+/// What the chosen run cost, as the trailer reports it.
+pub(crate) struct RunTotals {
+    pub(crate) run_us: u64,
+    pub(crate) device_us: u64,
+    /// The tree's `GpuLoadParquet` totals, a part of `device_us`.
+    pub(crate) load_us: u64,
+    pub(crate) peak_bytes: u64,
+}
+
+/// The trailer, ending with the run's provenance, which a resumed run keeps a section by.
 ///
 /// **Two totals, deliberately named apart.** `run_us` is the whole execution end to end;
-/// `device_us` is the sum of the tree's `total_us`. They do not agree, and the difference
-/// is the point: it is what the run spent outside the calls — the driver's own scheduling
-/// and the host prologue between them. One name for both would read as a discrepancy.
+/// `device_us` is the sum of the tree's `total_us`, and the gap is the host: the driver's
+/// scheduling and the prologue between calls. `execute_us` is `device_us` less `load_us`.
+/// `peak_bytes` is the accountant's peak, a lower bound on device memory: a call's scratch,
+/// cuDF's temporaries, pool fragmentation and the reader's staging are outside it. `prefill_*`
+/// is host IO, kept apart from `load_us`. build-test.md, "The tree", defines every key.
 pub(crate) fn run_section(
-    run_us: u64,
-    device_us: u64,
+    totals: &RunTotals,
     spread: &[u64],
     allocator: &str,
+    end: &PinnedCache,
+    prefill: &PrefillStats,
     provenance: &Provenance,
 ) -> String {
     let spread: Vec<String> = spread.iter().map(u64::to_string).collect();
     let mut trailer = format!(
         "--- run ---\n\
-         run_us={run_us}\n\
-         device_us={device_us}\n\
+         run_us={}\n\
+         device_us={}\n\
+         load_us={}\n\
+         execute_us={}\n\
+         peak_bytes={}\n\
          runs=[{}]\n\
          build={BUILD}\n\
-         allocator={allocator}\n",
+         allocator={allocator}\n\
+         pinned_cache={end}\n\
+         prefill_files={}\n\
+         prefill_bytes={}\n\
+         prefill_us={}\n",
+        totals.run_us,
+        totals.device_us,
+        totals.load_us,
+        totals.device_us - totals.load_us,
+        totals.peak_bytes,
         spread.join(","),
+        prefill.files,
+        prefill.bytes,
+        prefill.us,
     );
     for (key, value) in fields(provenance) {
         trailer.push_str(&format!("{key}={value}\n"));

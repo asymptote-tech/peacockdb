@@ -13,7 +13,7 @@
 
 use std::fmt::Write as _;
 
-use super::node_text::{join_parts, node_line_parts};
+use super::node_text::{join_parts, lanes_of, node_line_parts, numbers};
 use crate::executor::RunReport;
 use crate::executor::{PlanIndex, ROOT};
 use crate::plan::GpuNode;
@@ -98,19 +98,4 @@ fn render_node(
     for child in &index.nodes[node].children {
         render_node(index, report, *child, depth + 1, text);
     }
-}
-
-/// `[[a,b],[c]]` — the bracket style `partition_groups` renders in, so the two nestings a
-/// reader compares index for index also read alike.
-fn lanes_of<T>(lanes: &[Vec<T>], of: impl Fn(&T) -> u64) -> String {
-    let rendered: Vec<String> = lanes
-        .iter()
-        .map(|lane| numbers(&lane.iter().map(&of).collect::<Vec<u64>>()))
-        .collect();
-    format!("[{}]", rendered.join(","))
-}
-
-fn numbers(values: &[u64]) -> String {
-    let rendered: Vec<String> = values.iter().map(u64::to_string).collect();
-    format!("[{}]", rendered.join(","))
 }

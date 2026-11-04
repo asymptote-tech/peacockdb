@@ -42,13 +42,24 @@ pub(crate) fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
     run_text::render_run(root, report)
 }
 
-/// The benchmark tree: the plan with the device microseconds each node's calls spent.
-pub(crate) fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String {
-    bench_text::render_timings(root, times)
+/// The benchmark tree: the plan with the device microseconds each node's calls spent, and
+/// the batches each node emitted in the same run.
+pub(crate) fn render_timings(
+    root: &dyn GpuNode,
+    times: &Measurements,
+    report: &RunReport,
+) -> String {
+    bench_text::render_timings(root, times, report)
 }
 
 /// The tree's `total_us` added under the renderer's rule — what the trailer reports as
 /// `device_us`, so the two cannot disagree by a region the clock rounded to zero.
 pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
     bench_text::timed_device_us(times)
+}
+
+/// The tree's `GpuLoadParquet` totals added — the trailer's `load_us`, a part of
+/// [`timed_device_us`] under the same rule, so `execute_us` never goes below zero.
+pub(crate) fn timed_load_us(root: &dyn GpuNode, times: &Measurements) -> u64 {
+    bench_text::timed_load_us(root, times)
 }
