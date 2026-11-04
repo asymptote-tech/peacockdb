@@ -78,6 +78,23 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 >   chain's rules.
 > - new-hosts' Task 6 Step 5 no longer waits: the guard's files are on master, so the step's
 >   landed-by-content check passes. Run it when the plan reaches it.
+
+> **Disks grown, 2026-11-04, by the human.** This lifts the second block in `new-hosts-detail.md`
+> ("Blocked (2026-11-04, second)"). The Nebius API reads the boot disks as 220 GiB on
+> nebius-cpu128 (asked: 200 or more) and 180 GiB on the H100 (asked: 150 or more); both VMs are
+> stopped. The filesystem may still show the old size until the VM boots and grows its root
+> partition: take `df -h /` on each VM first, and if `/` still reads the old size, grow it
+> (`growpart` and `resize2fs`) before anything is written there.
+>
+> - **Go back to the blocked tasks before dag-driver, in chain order: new-hosts, pinned-loads,
+>   bench-rows, sf40-baseline.** Master marks each `building`, against your branch's
+>   `blocked(building)`: resolve that conflict to `building` for all four, in one commit.
+>   dag-driver stays `building` at its last committed checkpoint and resumes after sf40-baseline.
+> - new-hosts resumes at Task 8 Step 5's `df` check, then Task 10 Step 2. The others resume where
+>   their own "Blocked" sections say: pinned-loads at Task 2 Step 3, bench-rows at Task 5,
+>   sf40-baseline at Task 8. Complete each to its plan's last step under the chain's rules.
+> - This rebase carries documentation alone (this note and these four states), so it re-verifies
+>   nothing, as the rebase protocol says.
 > - **This rebase is larger than intended, and the human accepts it.** Master now holds the merge
 >   of #165 (`ENS-optimizer`, 17 commits, about 450 files), so the rebase this note arrives
 >   with carries the join optimizer into every chain L branch, from containers-rebase up,
@@ -134,7 +151,7 @@ commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list r
 master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
 the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.
 
-### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: rebase needed(building)
+### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: building
 
 The `gpu-host` scripts renamed `nebius`; `nebius.sh --instance-id/--profile` for the H100
 (eu-north1) and the 128-core CPU VM (eu-west1), 1-hour idle watchers with per-VM credentials, the
@@ -142,7 +159,7 @@ hourly GH watch over all three VMs, sf40 data on both, `run-gpu.sh` on the H100 
 (no host adapters), `provision-vm.sh`/`bootstrap-vm.sh` verified on the CPU VM, and the three
 hosts' roles in the standing rules.
 
-### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../tickets/performance.md#t149), [#232](../tickets/performance.md#t232) — state: rebase needed(building)
+### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../tickets/performance.md#t149), [#232](../tickets/performance.md#t232) — state: building
 
 The parquet load reads table files kept resident in a pinned host file cache (on by default on
 a discrete GPU, off with no CUDA device; session option `pinned_host_cache_bytes`, default three
@@ -152,13 +169,13 @@ measured alone and together on the H100. Each benchmark process prefills every c
 before its first case, and every round reads them pinned; every later H100 run records the cache
 and the prefill in the trailer (`pinned_cache=`, `prefill_files=`, `prefill_bytes=`, `prefill_us=`).
 
-### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: rebase needed(building)
+### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: building
 
 Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (device-side), `execute_us`,
 `peak_bytes`, the pinned host cache's state (`pinned_cache`) and the prefill (`prefill_files`,
 `prefill_bytes`, `prefill_us`) in the trailer.
 
-### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: rebase needed(building)
+### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: building
 
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.
