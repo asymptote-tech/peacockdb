@@ -20,6 +20,7 @@
 | nebius-cpu128 | 2026-11-04 19:13:00 | 19:14:57 | 0.03 | Task 8 Step 5: the disk check (74 G free; stalled) |
 | nebius-cpu128 | 2026-11-04 19:28:33 | 19:40:56 | 0.21 | Task 10 Step 1: the CPU-VM build |
 | nebius-h100 | 2026-11-04 19:41:13 | 19:43:01 | 0.03 | Task 10 Step 2: the disk check (78 G free; stalled before `prepare`) |
+| nebius-cpu128 | 2026-11-04 19:45:38 | 19:47:58 | 0.04 | Task 6 Step 5: the running leg of nebius-watch.yml (coordinator) |
 
 Hours so far: nebius-gpu 0.07, nebius-h100 0.16, nebius-cpu128 0.49. Dev's local time is UTC.
 
@@ -825,3 +826,17 @@ the same way. Ask the human to check it in the same visit.
 3. Clear the block.
 
 Task 8 then resumes at Step 5's `df` check.
+
+## Task 6 Step 5 (coordinator, 2026-11-04)
+
+Landed by content (developer, above). All three VMs stopped: `nebius-watch.yml` run 41899844185,
+three legs green, each `not running; nothing to do`. CPU VM running: run 41900251751, its leg
+`RUNNING`, `up 47s, under 10 minutes; keeping it until the next check`; the VM hard-stopped at once.
+
+## Blocked (2026-11-04, second)
+
+`blocked(building)`: both disks are too small. nebius-cpu128 has one 100 G disk, 74 G free, and
+Task 8 Step 5 needs 110 G; the H100 has 78 G free, and `run-gpu.sh prepare` puts at least 83 G on
+it (Task 10 Step 2). Resizing is the human's (analyst, above). Human: grow nebius-cpu128's disk to
+200 GiB or more and the H100's to 150 GiB or more, then clear the block. Resume at Task 8 Step 5's
+`df` check, then Task 10 Step 2. Task 10 Step 1's install is at `/home/dmitry/build/peacock/new-hosts/install`.
