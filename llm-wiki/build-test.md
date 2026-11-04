@@ -2212,6 +2212,14 @@ same with one more line, which `provision-vm.sh` writes:
   (`scripts/lib/data-inputs.sh`). With none for the hash, `bootstrap-vm.sh` generates one in the
   build image, with `--network none`, under a lock. Two runs at once generate it once. A set
   appears only complete. An old set is removed by hand.
+- **sf40**, on the H100 and the CPU VM: `scripts/env/fetch-sf40.sh tpch.sf40 tpcds.sf40` fetches
+  each from its bucket into `<data dir>/<dataset>/`. The keys come from `peacock.env`, or stdin
+  with `--env -`, and reach aws alone. Each file is checked against the bucket's `manifest.json`
+  size, and a second run fetches nothing it holds. Then the set's aggregate sha256 is checked
+  against `scripts/env/sf40.sha256`, one line a dataset; an unpinned one is printed. Without an
+  aws CLI it installs the pinned one into `~/.local/aws-cli`.
+- **DuckDB**, on the CPU VM: `scripts/env/install-duckdb.sh` installs `/usr/local/bin/duckdb` at
+  `DUCKDB_VERSION`, from the zip the build image takes, checked against `DUCKDB_SHA256`.
 
 ## Benchmarks
 

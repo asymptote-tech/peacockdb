@@ -562,14 +562,14 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Produces: `install-duckdb.sh [--prefix <dir>]` → `/usr/local/bin/duckdb` at `DUCKDB_VERSION`
   (sha256 checked); skipped when `duckdb --version` already starts `v1.5.4`.
 
-- [ ] **Step 1: Failing tests** (fake `aws` on PATH reading a fake bucket dir):
+- [x] **Step 1: Failing tests** (fake `aws` on PATH reading a fake bucket dir):
   `test_fetch_takes_endpoint_and_region_from_env` (aws argv holds `--endpoint-url`/`--region`
   values; no key value in any argv); `test_fetch_second_run_fetches_nothing` (second run: no `s3 cp`
   of a parquet, prints `fetched 0, kept N`); `test_fetch_refetches_a_short_object`;
   `test_fetch_refuses_a_wrong_aggregate` (pinned sha differs → rc 1, the dataset named);
   `test_fetch_refuses_an_unknown_dataset` (rc 2); `test_fetch_keys_from_stdin` (`--env -`);
   `test_install_duckdb_checks_the_sha` and `test_install_duckdb_skips_the_pinned_version`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → `0 failed`; commit.
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → `0 failed`; commit.
 - [ ] **Step 5: CPU VM, live.** `$C start`; `$C ssh 'df -h /var/lib/peacock'` — at least 110 GB
   free (parquet 56 GB + the tpch db ~38 GB + 10 %), else stall. The tree reaches the VM as the
   CPU-VM build sends it, never by `git pull`:
