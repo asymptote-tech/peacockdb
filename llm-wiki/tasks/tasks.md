@@ -68,8 +68,9 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 > master yet.
 >
 > - **Go back to the blocked tasks before anything else, in chain order: new-hosts, pinned-loads,
->   bench-rows, sf40-baseline.** In one commit on your branch, reset each `blocked(building)` →
->   `building`. dag-driver stays `building` at its last committed checkpoint and resumes after
+>   bench-rows, sf40-baseline.** Master marks each `rebase needed(building)` against your
+>   branch's `blocked(building)`: resolve that conflict to `building` for all four, in one
+>   commit. dag-driver stays `building` at its last committed checkpoint and resumes after
 >   sf40-baseline.
 > - Each resumes where its detail file's "Blocked" section says: new-hosts at Task 7 Step 3
 >   (provision the CPU VM), then Task 8 live and Task 10; pinned-loads at Task 2 Step 3;
@@ -125,7 +126,7 @@ commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list r
 master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
 the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.
 
-### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: approved to build
+### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: rebase needed(building)
 
 The `gpu-host` scripts renamed `nebius`; `nebius.sh --instance-id/--profile` for the H100
 (eu-north1) and the 128-core CPU VM (eu-west1), 1-hour idle watchers with per-VM credentials, the
@@ -133,7 +134,7 @@ hourly GH watch over all three VMs, sf40 data on both, `run-gpu.sh` on the H100 
 (no host adapters), `provision-vm.sh`/`bootstrap-vm.sh` verified on the CPU VM, and the three
 hosts' roles in the standing rules.
 
-### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../tickets/performance.md#t149), [#232](../tickets/performance.md#t232) — state: approved to build
+### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../tickets/performance.md#t149), [#232](../tickets/performance.md#t232) — state: rebase needed(building)
 
 The parquet load reads table files kept resident in a pinned host file cache (on by default on
 a discrete GPU, off with no CUDA device; session option `pinned_host_cache_bytes`, default three
@@ -143,13 +144,13 @@ measured alone and together on the H100. Each benchmark process prefills every c
 before its first case, and every round reads them pinned; every later H100 run records the cache
 and the prefill in the trailer (`pinned_cache=`, `prefill_files=`, `prefill_bytes=`, `prefill_us=`).
 
-### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: approved to build
+### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: rebase needed(building)
 
 Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (device-side), `execute_us`,
 `peak_bytes`, the pinned host cache's state (`pinned_cache`) and the prefill (`prefill_files`,
 `prefill_bytes`, `prefill_us`) in the trailer.
 
-### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: approved to build
+### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: rebase needed(building)
 
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.
