@@ -311,3 +311,26 @@ The full record and plan: `git show origin/ENS-containers:llm-wiki/tasks/contain
   (now archived). Left: both files are untouched by decision, and `run-tests.sh` is an image input.
 - Master drift seen, not edited: `build-test.md`'s `test_gpu_corpus` paragraph says "987 cells
   today. From tpch, 220 … From tpcds, 410".
+
+## Images
+
+Task 6, developer, 2026-11-04, on `dev`, at `2b471221`. Each image pulled anonymously
+(`DOCKER_CONFIG` an empty `mktemp -d`), one at a time, then removed. Its `peacockdb.inputs` label
+was checked against this worktree with `image_inputs_differ … . <k> <v>`. The digest is the
+manifest's; dev's containerd store gives the same value as the image ID. Pulled size is
+`docker image ls`'s unpacked size; the compressed content is in brackets.
+
+| image | repo digest / image ID | pulled size | label diff |
+|---|---|---|---|
+| `peacockdb-build:cudf-25.02` | `sha256:2a0c84414baaab94e6e085fc2ad98a6d48aec3ea025fdfcae5c4ddb91f6bb786` | 15.4 GB (5.19 GB) | empty |
+| `peacockdb-build:cudf-26.02` | `sha256:146fcbaa2f4197f884416f1eaca60ff2c8afc2f975143180f4f50b585b938e38` | 15.1 GB (5.20 GB) | empty |
+| `peacockdb-run:cudf-25.02` | `sha256:10bf83bb1ba18ce20b4a267f109ecaf906019f3a47f190d88d84fa50656e9158` | 8.32 GB (3.18 GB) | empty |
+| `peacockdb-run:cudf-26.02` | `sha256:bc3ff3712f2c2f61f5a5705f47403f19e6e514131d4c454c6171cd7c07b3a1ad` | 10.2 GB (3.94 GB) | empty |
+
+All four are under `ghcr.io/asymptote-tech/`. **No rebuild**: Step 3 does not apply. Each
+`:cudf-<v>` tag resolves to the same digest as its `:cudf-<v>-b50d9b2a4ea0` tag. The build images'
+labels carry `third_party/cudf=43505bb975f46ce4e140fdaf55192611d6e231ac` and
+`cpp/CMakeLists.txt:flatbuffers=v25.12.19`, the same as the fork. The check can fail when it
+should. With the run 26.02 label, a changed `pins.env` hash printed `docker/pins.env`. A label
+missing `docker/run-tests.sh` printed that input. Checking the label against the 25.02 tree
+printed both specs and `docker/pins.env`.
