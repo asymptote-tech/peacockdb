@@ -335,3 +335,14 @@ should. With the run 26.02 label, a changed `pins.env` hash printed `docker/pins
 missing `docker/run-tests.sh` printed that input. Checking the label against the 25.02 tree
 printed both specs and `docker/pins.env`.
 - PR #193 opened against master (2026-11-04); board `reviewing`.
+
+## Review round 1 (2026-11-04)
+
+1 blocking, 2 important, 7 nits (nits not taken).
+- B1: `test_the_data_directory_is_machine_wide_by_default` (old `test_up.py:538`) went with
+  `test_up.py`; `machine.sh:15`'s default is untested → developer, port into `test_bootstrap.py`.
+- I2: `source_file` is a public path into the checkout the `no_core_test_reads_the_checkout`
+  guard cannot see → developer: make it write-only (`rewrite_source_file(rel, text)`).
+- I3: #226 names `scripts/exec_model/optimizer/call_cost.py` and `exec-model-corpus.yml`'s record
+  fetch, which exist only on `ENS-optimizer` → coordinator edits the ticket.
+- Round 1 fixed: B1, I2 (developer, 379a56d5); I3 (coordinator, #226 loses the optimizer-only call_cost.py and exec-model-corpus.yml references).
