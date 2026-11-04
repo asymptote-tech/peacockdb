@@ -346,3 +346,7 @@ printed both specs and `docker/pins.env`.
 - I3: #226 names `scripts/exec_model/optimizer/call_cost.py` and `exec-model-corpus.yml`'s record
   fetch, which exist only on `ENS-optimizer` → coordinator edits the ticket.
 - Round 1 fixed: B1, I2 (developer, 379a56d5); I3 (coordinator, #226 loses the optimizer-only call_cost.py and exec-model-corpus.yml references).
+
+## Review round 2 (2026-11-04)
+
+B1, I2, I3 resolved; no new findings. Board `completing`.
