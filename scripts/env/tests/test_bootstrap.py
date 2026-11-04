@@ -143,6 +143,14 @@ def test_bootstrap_makes_the_machine_wide_data_directory():
         assert not downloads or lines.index(made) < downloads[0], log
 
 
+def test_the_data_directory_is_machine_wide_by_default():
+    with Machine() as m:
+        env = {k: v for k, v in m.env.items() if k != "PEACOCK_DATA_DIR"}
+        out = subprocess.run(["bash", "-c", f'. "{m.clone}/scripts/lib/machine.sh"; echo "$MACHINE_DATA"'],
+                             env=env, check=True, capture_output=True, text=True, timeout=30).stdout
+        assert out.strip() == "/var/lib/peacock", out
+
+
 def test_bootstrap_leaves_no_marker():
     with Machine() as m:
         bootstrap_whole(m)

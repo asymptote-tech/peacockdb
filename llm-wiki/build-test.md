@@ -576,6 +576,13 @@ dataset would demonstrate nothing. Then pbench's data itself, read off the commi
 that drops one or writes a timestamp at the wrong unit goes red here rather than at the query
 somebody writes a year later
 
+| Source rewrite | [test_support::testdata::tests](../peacockdb-core/src/test_support/testdata/tests.rs) | 1 |
+|---|---|--:|
+
+the one write into the checkout, `rewrite_source_file`, which `UPDATE_CANONICAL` uses to rewrite a
+compiled-in list: the new text replaces the file whole, and the staged `<file>.new` is gone after
+the rename. Nothing hands out a path into the checkout, so no test can read source through it
+
 | Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 12 |
 |---|---|--:|
 

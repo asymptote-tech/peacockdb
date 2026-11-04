@@ -74,10 +74,10 @@ pub fn testdata_root() -> PathBuf {
     testdata::root()
 }
 
-/// A source file under `peacockdb-core/`, for an `UPDATE_CANONICAL` rewrite of a compiled-in
-/// list.
-pub fn source_file(rel: &str) -> PathBuf {
-    testdata::source_file(rel)
+/// Replaces a source file under `peacockdb-core/` with `text`, for an `UPDATE_CANONICAL`
+/// rewrite of a compiled-in list. Write-only: no path into the checkout is handed out.
+pub fn rewrite_source_file(rel: &str, text: &str) {
+    testdata::rewrite_source_file(rel, text)
 }
 
 pub fn data_dir_for(dataset: &str, sf: &str) -> PathBuf {
