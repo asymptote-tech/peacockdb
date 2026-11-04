@@ -13,6 +13,8 @@
   (the desk-wave amendments: `comet-internals.md` `## Recipes`, `data-path.md` `## Rates for
   the cost model`), checkpoint `comet-research: desk wave amendments`. Then Task 2 from its
   Step 1. Read the plan's Task 1 section before dispatching.
+- 2026-11-04 (coordinator, restart): Task 1 Steps 4-5 dispatched to a fresh developer. No VM
+  in use; `vm.sh` does not exist yet, so no startup `stop-used`.
 
 ## Tasks
 
