@@ -645,3 +645,130 @@ rebuilt from `git merge-file --diff3` of HEAD, `687b61fe` and the old tip: 17 co
   peacockdb-core's record and trailer tests, `test_split.py` and the page's sample trailer. The
   old tip has the same matches. It names a host in a sample record, not a script, so it stays.
   `docker/run-tests.sh:7` is still the one recorded exception.
+
+## Analyst: disk (2026-11-04)
+
+The obstacle is Task 8 Step 5's gate (at least 110 GB free) against nebius-cpu128's 74 G. Read
+only: no VM started, no API call; the CLI read was `nebius compute disk update --help` alone.
+**Verdict: the human can resolve it; the ensemble cannot.** No sanctioned way exists for the
+ensemble to grow the disk, and nothing that meets the spec fits in 74 G. Task 6 Step 5 and Task 10
+can go ahead first.
+
+**1. Growing the disk is the human's job.**
+- The shared rules send every cloud call through `scripts/nebius.sh`. Its verbs are `status`,
+  `ip`, `start`, `stop`, `ssh`, `rsh` and `install-watch`, and none of them touches a disk. The
+  spec's Scope gives `nebius.sh` instance and profile selection, host-key aliases and the
+  credential install, and nothing more.
+- build-test.md leaves the VM itself to the human. Exit 69 says "stall; rebuilding it is the
+  human's". Step 2 of "A fresh VM" says "Have someone create the VM", and the spec begins "The
+  human created two VMs". "The human's one-time setup" covers credentials only. The "Disk"
+  section's answer to a full disk is to clean what can be rebuilt and record an obstacle. It
+  never grows a disk.
+- The CLI can do it: `nebius compute disk update --id <disk> --size-gibibytes <n>`. But a bigger
+  disk is billed while the VM is stopped, and it cannot shrink again. That is a standing cost,
+  so it is the human's call, as the VMs were. Chain M's direct CLI use came from its own spec,
+  not from a standing rule.
+
+**2. No spec-compliant way fits in 74 G.** These are measured sizes, not the plan's estimates:
+- sf40 parquet: tpch 42,442,683,465 B + tpcds 15,787,929,533 B = 54.2 GiB. Source: chain M's
+  copy of both buckets, `origin/ENS-comet-research:llm-wiki/tasks/comet-research-detail.md`,
+  Task 4.
+- The native tpch.sf40 database: 32.7 GiB, DuckDB 1.5.4 on a 128-core Nebius VM. Source:
+  `llm-wiki/reports/benchmark-minimal.md`, the setup table.
+- Task 8 alone ends at 86.9 GiB. That is 12.9 GiB more than the 74 free, with no headroom at all.
+  `duckdb_minimal.sh`'s own preflight (local mode, `--skip-download`) wants 1.1 × the local tpch
+  parquet, 43.5 GiB, still free after the fetch. So the fetch needs about 98 GiB free before it
+  starts. The plan's 110 GB is that figure plus some slack.
+- Each way around it fails:
+  - Dropping tpcds's database saves nothing. Only tpch's database is due in this task: item 5
+    asks for the databases "that `benchmarks/duckdb_minimal.sh` builds", and today the script
+    builds only tpch (`DB=…/tpch.sf${SF}.duckdb`). The plan's 110 already leaves tpcds out.
+  - The parquet stays. Item 5 says both sets go "on both VMs".
+  - DuckDB cannot read the parquet directly. Views are not "native" (item 5). They are also not
+    the protocol sf40-baseline's done-when 2 requires: "native storage, page cache warmed and its
+    residency checked". The script's header gives the reason: the numbers would be mostly
+    parquet decode.
+  - Building the database straight from S3 (`--s3-direct`) and removing the local parquet fails
+    item 5 too. It also breaks the plan's later runs. In local mode, every run compares the
+    database's row counts with the local parquet's and deletes the database (`rm -f "$DB"`) if
+    they differ, so once the parquet is gone the next run deletes the database. On top of that,
+    `--s3-direct` lists the bucket with a bare `aws` and reads `~/.aws`, and the VM has neither.
+  - Removing the build image (15.4 GB) and `/var/lib/peacock` (0.8 G) gives about 89 G free.
+    The end state would fit with about 2 G to spare, but the script's preflight still refuses.
+    And the image is needed next, for the CPU-VM build (Task 10 Step 1) and every later chain L
+    build.
+- **tmpfs is the one way that fits, and it does not meet the spec.** The VM has 503 GiB of RAM,
+  and chain M fetched both sets onto a tmpfs in about 110 s. But a tmpfs is lost at every stop,
+  and the VM-time rule stops the VM after every step, so every later session would fetch and
+  import again. Item 5's "a second run fetches nothing it already holds" and the Datasets ✓
+  would then mean nothing past a stop. On a tmpfs, `duckdb_minimal.sh` finds no block device,
+  so `sectors_read` returns 0 and every query reads `warm yes` by construction. sf40-baseline's
+  disk-read check would go blind. Using tmpfs changes both the spec and the protocol, so only
+  the human could choose it. If chosen, mount a tmpfs of its own (`mount -t tmpfs`) rather than
+  using `/dev/shm`: chain M found that logind's RemoveIPC empties `/dev/shm`.
+
+**Size to ask for: 200 GiB or more**, as the developer wrote. On root, after the chain's CPU-VM
+work:
+
+| item | size |
+|---|---|
+| used today | 22 G |
+| sf40 parquet | 54.2 GiB |
+| tpch database | 32.7 GiB |
+| tpcds database | gated at 30 GB by sf40-baseline Task 8 Step 2; its parquet is 14.7 GiB |
+| CPU-VM build: `target-img-25.02/` and the C++ build | not measured; dev's gpu target dir is 8.8 G |
+| total | about 140–160 G |
+
+Either layout works:
+- Grow the boot disk: `nebius compute disk update --id <boot disk> --size-gibibytes 200`, with
+  the VM stopped. cloud-init normally grows `/dev/vda1` at the next boot. If `df -h /` still
+  shows 96 G, run `sudo growpart /dev/vda 1 && sudo resize2fs /dev/vda1`.
+- Or add a data disk, mounted at `/var/lib/peacock` (fstab by UUID, `nofail`), owned
+  `dmitry:peacock`, mode 2775, with sf1 and the cuDF checkout moved onto it.
+
+The boot disk is a NETWORK_SSD at about 0.062 GB/s (chain M measured it with O_DIRECT and with a
+copy). That costs VM time, not space. A rerun after a stop reads all 58 GB cold for the aggregate,
+which takes about 16 minutes.
+
+**The H100 may hit the same wall.** Its disk size is recorded nowhere. `run-gpu.sh prepare`
+puts these on it, beside the OS and the NVIDIA stack:
+- two images: the build image (15.4 GB, as measured on the CPU VM) and the run image (about 5 GB);
+- the run image's `/opt/cudf` copy;
+- sf40 (54.2 GiB) and sf1 (1.75 GB);
+- the shipped install.
+
+That comes to about 85–100 G. If the H100 has the same 100 GiB boot disk, Task 10 Step 2 stalls
+the same way. Ask the human to check it in the same visit.
+
+**3. What can go ahead without the disk.**
+- **Task 6 Step 5 can run now.** It is the coordinator's step and needs no disk. The guard's
+  three files are on master and equal to the branch's: `git diff origin/master HEAD` over
+  `scripts/nebius/`, `scripts/nebius.sh`, `nebius-watch.yml` and `nebius-setup/` is empty.
+- **Task 10 Step 1, the CPU-VM build, can run now.** The build image is already on the VM. Its
+  output is not measured, but 74 G leaves room for it, and the 200 GiB sizing above counts it.
+- **Task 10 Steps 2–6 can run on the H100, if its own disk holds `prepare`.** Run `df -h /
+  /var/lib/peacock` before `prepare`, as build-test.md "Disk" says. One departure, to record:
+  Step 2 checks the H100's tpch.sf40 aggregate against Task 8's pin, and that pin does not exist
+  yet. Pin it from the H100's fetch instead (the unpinned line prints the value). Task 8 Step 5
+  then checks the CPU VM's fetch against it, so two independent fetches are still compared.
+  The H100's `prepare` also checks tpcds's pin live, so a partial fetch on the CPU VM now would
+  prove nothing new.
+- **`install-duckdb.sh` alone fits too.** It is the first half of Task 8 Step 6 and could run in
+  Step 1's CPU VM session. This is optional.
+- **Task 11's live values.** The H100's values follow Task 10: glibc, driver, disk, what
+  `prepare` installs, the corpus counts, the benchmark's wall time and `PCK_BENCH_HBM_PEAK_BW`.
+  The CPU VM's values wait on the disk: the sf40 ✓, the tpch pin line, the fetch and DuckDB wall
+  times, and the database's size.
+- **Waiting on the disk:** Task 8 Steps 5–6, and with them `reviewing`, because the plan lets
+  only Task 6 Step 5 lag behind review. So run Task 6 Step 5 and Task 10 first, then mark Task 8
+  `blocked(building)` with the human action below.
+- **Later in the chain:** pinned-loads and bench-rows use the CPU VM only for the build, which
+  fits. sf40-baseline's Task 8 Step 2 (the tpcds database, at least 30 GB) and Task 11 (DuckDB's
+  timings) need the larger disk.
+
+**The human action, for the block:**
+1. Grow nebius-cpu128's disk to 200 GiB or more, either way above.
+2. Check the H100's boot disk, and grow it to 150 GiB or more if it is 100 GiB.
+3. Clear the block.
+
+Task 8 then resumes at Step 5's `df` check.
