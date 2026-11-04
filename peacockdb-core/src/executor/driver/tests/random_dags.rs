@@ -1,9 +1,18 @@
-//! `validate_dag` over random DAGs: several roots, shared sources, joins, and buffers on random
-//! edges. Once every unbuffered hold has its buffer, no plan may be refused — the wait-for
-//! graph never finds a cycle the buffers left.
+//! `validate_dag` tied to the driver over random DAGs: several roots, shared sources, joins,
+//! and buffers on random edges, run on the mock under a step bound. A DAG it accepts runs to
+//! completion, reconciles, and queues at most one batch per lane anywhere; a DAG the driver
+//! cannot finish is one it refused; and once every unbuffered hold has its buffer, no DAG is
+//! refused and every one finishes.
+//!
+//! A reader's cursor never blocks its producer, so an unbuffered hold does not deadlock: the
+//! queue in front of it grows. That growth is what the buffer rule forbids, and what tells an
+//! accepted DAG from a refused one here.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use super::Driver;
+use super::mock::{Mock, Script, spec};
+use crate::executor::{FusedRun, RunError};
 use crate::plan::{GpuLoadParquet, GpuNode, SharedSource, new_hold_buffer, validate_dag};
 use crate::tests::plans::{coalesce_all, filter, project, projected_join, source, unload};
 use crate::tests::share::buffer_unbuffered_holds;
@@ -74,8 +83,83 @@ fn random_dag(seed: u64) -> Vec<Box<dyn GpuNode>> {
     (0..roots).map(|_| unload(dag.tree(4))).collect()
 }
 
+/// Three batches for every source a DAG can draw.
+fn script() -> Script {
+    (0..3).fold(Script::default(), |script, at| {
+        script.source(
+            &format!("s{at}"),
+            vec![vec![spec(10, 80), spec(20, 160), spec(30, 240)]],
+        )
+    })
+}
+
+/// The mock run under the bound. A driver that stops with work left reports it as a protocol
+/// error, the step bound's included; any other failure is the driver's own and a finding.
+fn simulate(roots: &[&dyn GpuNode], script: &Script) -> Result<FusedRun, String> {
+    match Driver::<Mock>::for_roots(roots, script, None).and_then(|driver| driver.run_fused(10_000))
+    {
+        Ok(fused) => Ok(fused),
+        Err(RunError::Protocol(said)) => Err(said),
+        Err(other) => panic!("the driver failed for a reason no schedule explains: {other:?}"),
+    }
+}
+
+fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
+    roots.iter().map(|root| root.as_ref()).collect()
+}
+
+/// The node whose queues held more than one batch per lane at once, if any.
+fn grown(fused: &FusedRun) -> Option<usize> {
+    let report = &fused.report;
+    (0..report.peak_queued.len()).find(|node| report.peak_queued[*node] > report.lanes_of[*node])
+}
+
+/// Finished, reconciled, and never more than a batch per lane in any queue.
+fn assert_ran_bounded(fused: &FusedRun, seed: u64) {
+    assert_eq!(fused.report.holds, fused.report.releases, "seed {seed}");
+    assert_eq!(fused.report.in_flight_bytes, 0, "seed {seed}");
+    assert_eq!(
+        grown(fused),
+        None,
+        "seed {seed}: a queue grew under a valid plan"
+    );
+}
+
+#[test]
+fn every_dag_validate_dag_accepts_finishes() {
+    let script = script();
+    let (mut accepted, mut grew) = (0, 0);
+    for seed in 0..500 {
+        let roots = random_dag(seed);
+        let refs = refs(&roots);
+        let verdict = validate_dag(&refs, None);
+        match simulate(&refs, &script) {
+            Ok(fused) if verdict.is_ok() => {
+                assert_ran_bounded(&fused, seed);
+                accepted += 1;
+            }
+            Ok(fused) => grew += usize::from(grown(&fused).is_some()),
+            Err(said) => {
+                assert!(
+                    verdict.is_err(),
+                    "seed {seed}: accepted, and the driver stopped: {said}\n{roots:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        accepted > 100,
+        "only {accepted} of 500 accepted: the generator is too strict"
+    );
+    assert!(
+        grew > 50,
+        "only {grew} refused DAGs grew a queue: the refusals are not tested"
+    );
+}
+
 #[test]
 fn no_valid_dag_is_refused() {
+    let script = script();
     let mut buffered = 0;
     for seed in 0..500 {
         let roots = random_dag(seed);
@@ -88,8 +172,11 @@ fn no_valid_dag_is_refused() {
                 .unwrap_or_else(|| "a panic with no message".to_string());
             panic!("seed {seed}: {why}\n{shape}")
         });
-        let refs: Vec<&dyn GpuNode> = roots.iter().map(|root| root.as_ref()).collect();
+        let refs = refs(&roots);
         assert_eq!(validate_dag(&refs, None), Ok(()), "seed {seed}");
+        let fused = simulate(&refs, &script)
+            .unwrap_or_else(|said| panic!("seed {seed}: valid, and the driver stopped: {said}"));
+        assert_ran_bounded(&fused, seed);
         buffered += usize::from(inserted > 0);
     }
     assert!(

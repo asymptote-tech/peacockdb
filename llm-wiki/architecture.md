@@ -801,14 +801,39 @@ again; it stops only at an accumulator or the sink. With N lanes the unit that
 moves is one batch per lane — running every lane of the chosen node is what keeps lanes
 progressing together.
 
-**Queues need no cap.** A producer's out-queue is drained by its parent before the producer runs
-again, so queues are self-bounding at one batch per lane. One shape breaks that on its own:
-**a join in its build phase holds back its probe region**, since without the hold the probe
-side piles into a queue nothing will drain. A **region** is the set of nodes all of whose paths
-to a root pass through a node or an edge; the probe region is the probe edge's, and on a tree it
-is the whole probe subtree. A node also read from outside the region is not in it. The driver
-runs one tree, and there it cannot deadlock: a join's build subtree is disjoint from its probe
-subtree and is never held by this rule, and completing the build is what lifts the hold. Nested joins resolve outermost-first.
+**Queues need no cap.** A producer's out-queue is drained by its readers before the producer
+runs again, so queues are self-bounding at one batch per lane. A queue has a cursor per edge
+into its producer, `driver/queue.rs`'s `OutQueue`: each reader takes every batch once, in
+order, and an entry leaves when the last live reader has taken it. A reader that is not the
+last takes a `Batch::share`; the last takes the original. Still one batch per lane per reader,
+since every reader is lower than the producer and drains first. One shape breaks that on its
+own: **a join in its build phase holds back its probe region**, since without the hold the
+probe side piles into a queue nothing will drain. A **region** is the set of nodes all of whose
+paths to a root pass through a node or an edge; the probe region is the probe edge's, and on a
+tree it is the whole probe subtree. A node also read from outside the region is not in it. A
+hold is answered by a buffer, never by a growing queue: a reader's cursor never blocks its
+producer, so an unbuffered edge into a hold would not deadlock, its queue would grow, and that
+is what validation refuses.
+
+**No deadlock across roots.** A hold that lifts covers only a region, the nodes all of whose
+paths to a root pass through the held edge, and it stops at a hold buffer, which is held while
+its subtree is not. Validation guarantees that every edge entering a held region from outside
+ends at a buffer, and a held buffer takes every batch it is offered, so no producer outside a
+hold ever waits on it: it drains as if the hold were not there. A join's build side is never in
+its own hold, and a shared node is held only when every reader is. If join J′ holds a node of
+J's build side, J′'s probe edge lies on every path from it, so J′ is either inside J's build
+side (it resolves first, by induction) or above J, holding J itself. Holding is acyclic because
+the plan is, so the lowest join no other unfinished join holds can always finish its build. No
+queue grows to make this true: what waits sits in a buffer, which the plan shows and the
+estimator charges. The two shapes: two roots whose builds wait on each other's probe source run
+because each probe edge ends at a buffer, and a join reading one source on both sides runs
+because the source feeds the build directly and the probe through a buffer. On a tree this is
+the old argument: the build subtree is disjoint from the probe subtree, completing the build
+lifts the hold, and nested joins resolve outermost-first.
+
+Several roots run as one plan through `run_roots`, which calls `validate_dag` first and answers
+one batch list per root, each what that root alone answers. A single tree goes through `run`,
+which needs no such proof: a tree never needs a buffer.
 
 Livelock has the same answer: the one thing that can block a batch is a join waiting on its
 other side, and orienting the tree so the build side is the left child removes the wait, because
@@ -902,9 +927,12 @@ batch) between the loader and the merge point. A `GpuHoldBuffer` is charged ever
 emits, counted with the accumulators, and passes its input's batch size on unchanged.
 
 **Run time** the driver keeps a running total incrementally — `resident` is Σ `byte_size` over
-the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors. A batch a
-hold buffer keeps is still in flight: it moves into the store with its figure, and stays held
-until the buffer emits it or the run releases it.
+the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors. A batch is
+held once, however many read it: its `Charge` is refcounted over its holders — the queue entry,
+each share a reader took, a buffer's store — and its bytes leave, and the release is counted,
+when the last holder lets go. That may be a buffer keeping a share after every reader has taken
+the batch. A batch a hold buffer keeps is still in flight: it moves into the store with its
+charge, and stays held until the buffer emits it or the run releases it.
 
 Per call: pre-check `resident + scratch_bytes(rows, bytes)` against the budget; execute; remove
 consumed inputs, add outputs at actual `byte_size()`, refresh that one executor's figure, and

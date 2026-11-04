@@ -1,44 +1,37 @@
 //! A hold buffer's arm: one store per lane. Under a hold it takes each batch its input lane
 //! offers and emits nothing; once the hold lifts it emits the store in arrival order, then
 //! forwards as batches arrive. One batch per lane per step either way, so the queue above it
-//! stays at one. Every batch moves with its accounting, so a kept batch stays held until the
-//! buffer emits it or the run releases it.
+//! stays at one. Every batch moves with its charge, so a kept batch stays held until the
+//! buffer emits it or the run releases it — also once every other reader of a shared source
+//! has taken it, since the buffer keeps a share and a share is a holder.
 
 use super::Driver;
 use crate::executor::driver::StepError;
 use crate::executor::{Backend, CallKind};
 
 impl<B: Backend> Driver<'_, B> {
-    pub(crate) fn run_hold_buffer(&mut self, node: usize) {
-        let child = self.index.nodes[node].children[0];
+    pub(crate) fn run_hold_buffer(&mut self, node: usize) -> Result<(), StepError> {
         let held = self.scheduler.is_held(node);
         for lane in 0..self.index.nodes[node].lanes {
             if !self.hold_buffer_lane_ready(node, lane) {
                 continue;
             }
             if held {
-                let batch = self.states[child].out_queues[lane]
-                    .pop_front()
+                let batch = self
+                    .take_from(node, 0, lane)?
                     .expect("a held lane is ready only when it is offered a batch");
-                self.record_consumed(node, 0, lane, batch.rows());
                 self.states[node].kept[lane].push_back(batch);
                 self.record(node, lane, CallKind::Keep, 0);
                 continue;
             }
             let next = match self.states[node].kept[lane].pop_front() {
                 Some(kept) => Some(kept),
-                None => {
-                    let arrived = self.states[child].out_queues[lane].pop_front();
-                    if let Some(batch) = &arrived {
-                        self.record_consumed(node, 0, lane, batch.rows());
-                    }
-                    arrived
-                }
+                None => self.take_from(node, 0, lane)?,
             };
             match next {
                 Some(batch) => {
                     self.record_emitted(node, lane, &batch);
-                    self.states[node].out_queues[lane].push_back(batch);
+                    self.states[node].out_queues[lane].push(batch);
                     self.record(node, lane, CallKind::Forward, 1);
                 }
                 None => {
@@ -47,6 +40,7 @@ impl<B: Backend> Driver<'_, B> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Held, a lane is ready only when offered a batch: one that stepped with nothing to take
@@ -57,7 +51,7 @@ impl<B: Backend> Driver<'_, B> {
             return false;
         }
         let child = self.index.nodes[node].children[0];
-        let offered = !self.states[child].out_queues[lane].is_empty();
+        let offered = self.offered(node, 0, lane);
         if self.scheduler.is_held(node) {
             return offered;
         }
@@ -87,7 +81,7 @@ impl<B: Backend> Driver<'_, B> {
         for node in 0..self.index.len() {
             for lane in 0..self.states[node].kept.len() {
                 while let Some(batch) = self.states[node].kept[lane].pop_front() {
-                    self.acct.release(batch.bytes)?;
+                    self.acct.release(batch.charge)?;
                 }
             }
         }

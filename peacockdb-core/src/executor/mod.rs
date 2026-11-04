@@ -36,6 +36,7 @@ mod tests;
 mod ffi_tests;
 
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use datafusion::arrow::array::RecordBatch;
@@ -647,7 +648,8 @@ pub(crate) struct EmittedBatch {
 #[derive(Debug)]
 pub struct RunReport {
     /// The answer. Never empty: a query whose sink received no batch answers one of zero rows
-    /// under the sink's input schema. That batch is the driver's, so it appears in neither
+    /// under the sink's input schema. A [`FusedRun`]'s report leaves it empty, its `answers`
+    /// carrying one per root. That batch is the driver's, so it appears in neither
     /// `emitted` nor the accounting totals, and `batches.len()` no longer relates to the
     /// unload's calls.
     pub batches: Vec<CpuBatch>,
@@ -679,9 +681,10 @@ pub struct RunReport {
     /// driver answered itself. A backend that reports nothing leaves every entry
     /// unmeasured rather than empty — the distinction `AbiCalls` carries.
     pub(crate) abi_calls: Vec<Vec<Vec<AbiCalls>>>,
-    /// Per node, per output lane, rows it emitted that nobody consumed — the queues an early
-    /// exit left standing. Zero everywhere on a run that drained, and what closes
-    /// `consumed + abandoned == the child's emitted` into an equality on every run.
+    /// Per node, per output lane, rows it emitted that a reader never took, summed over its
+    /// readers — the queues an early exit left standing. Zero everywhere on a run that
+    /// drained, and what closes `Σ consumed over readers + abandoned == readers × emitted`
+    /// into an equality on every run; on a tree, one reader, the child's emitted.
     pub(crate) abandoned: Vec<Vec<u64>>,
     /// Per node, per child, per that child's lane, the rows this node consumed from it.
     /// Indexed by the child's lane rather than the consumer's, so it lines up with that
@@ -1192,6 +1195,44 @@ pub fn run<B: Backend>(
 /// does. Production passes `None`; the corpus installs `test_support`'s schema validator.
 pub(crate) type OutputHook<'a, B> =
     Box<dyn FnMut(usize, usize, &<B as Backend>::Batch) -> Result<(), String> + 'a>;
+
+/// What a run over several roots answers.
+// Its producer is `run_roots`, whose callers are tests until the fuser runs a fused plan.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct FusedRun {
+    /// One answer per root, in the order the roots were given; each is what that root
+    /// alone answers, in the order it alone answers it.
+    pub(crate) answers: Vec<Vec<CpuBatch>>,
+    /// The run's figures over the whole DAG, indexed by `PlanIndex::build_roots`'s
+    /// pre-order. `batches` is empty here: `answers` carries them.
+    pub(crate) report: RunReport,
+}
+
+/// Run several roots as one plan, each shared source loaded once. `validate_dag` decides
+/// first that the plan cannot deadlock, and its refusal comes back as `RunError::Backend`.
+/// `cap` is how many roots may run at once; no driver takes one yet, so `Some` is refused.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_roots<B: Backend>(
+    roots: &[&dyn GpuNode],
+    ctx: &B::Context,
+    budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
+) -> Result<FusedRun, RunError> {
+    run_roots_with_hook::<B>(roots, ctx, budget, cap, None)
+}
+
+/// [`run_roots`] with an [`OutputHook`].
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_roots_with_hook<B: Backend>(
+    roots: &[&dyn GpuNode],
+    ctx: &B::Context,
+    budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
+    hook: Option<OutputHook<'_, B>>,
+) -> Result<FusedRun, RunError> {
+    driver::run_roots_with_hook::<B>(roots, ctx, budget, cap, hook)
+}
 
 /// [`run`] with an [`OutputHook`]. `pub(crate)`: no caller outside the crate exists, and
 /// its callers inside it are test code — the device corpus, the end-to-end tier and the

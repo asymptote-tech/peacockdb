@@ -10,6 +10,8 @@
 //! holding a reference to each, and the driver owns them mutably. A refresh takes the
 //! figure after the call, never a handle to what produced it.
 
+use std::rc::Rc;
+
 use crate::executor::{Batch, CallStats, Executor, RunError, Underestimate, When};
 
 /// Which executor instance a figure belongs to. Dense `index` for the cache; `node` and
@@ -31,19 +33,39 @@ pub(crate) struct Trip {
     pub budget: usize,
 }
 
-/// A batch and the figure it was accounted at. Reading the size once is what keeps the
+/// The figure one queued batch was accounted at, and its holders: each clone is one. The
+/// readers of a shared source each take a share of one batch, so the batch is charged once
+/// and its bytes leave when the last holder is released, whichever that is — the last
+/// reader, a buffer keeping a share, or the queue itself at the end of a run.
+#[derive(Debug, Clone)]
+pub(crate) struct Charge {
+    pub bytes: usize,
+    holders: Rc<()>,
+}
+
+impl Charge {
+    pub(crate) fn new(bytes: usize) -> Self {
+        Self {
+            bytes,
+            holders: Rc::new(()),
+        }
+    }
+}
+
+/// A batch and the charge it was accounted at. Reading the size once is what keeps the
 /// released figure equal to the held one, and what keeps an arrow batch from walking every
 /// array twice per hop.
 #[derive(Debug)]
 pub(crate) struct Held<T> {
     pub batch: T,
-    pub bytes: usize,
+    pub charge: Charge,
 }
 
 impl<T: Batch> Held<T> {
+    /// The first holder of a fresh charge.
     pub(crate) fn of(batch: T) -> Self {
-        let bytes = batch.byte_size();
-        Self { batch, bytes }
+        let charge = Charge::new(batch.byte_size());
+        Self { batch, charge }
     }
 
     pub(crate) fn rows(&self) -> u64 {
@@ -110,17 +132,23 @@ impl ResidentAccountant {
         &self.underestimates
     }
 
-    /// A batch enters a driver-held queue. Bytes rather than the batch, so the figure is
-    /// read once and the same one is released: an arrow batch recomputes its size by
-    /// walking every array, and two walks are two chances to disagree.
-    pub(crate) fn hold(&mut self, bytes: usize) {
+    /// A batch enters a driver-held queue, once however many readers it has. The charge
+    /// rather than the batch, so the figure is read once and the same one is released: an
+    /// arrow batch recomputes its size by walking every array, and two walks are two chances
+    /// to disagree.
+    pub(crate) fn hold(&mut self, charge: &Charge) {
         self.holds += 1;
-        self.in_flight_bytes += bytes;
+        self.in_flight_bytes += charge.bytes;
         self.observe();
     }
 
-    /// A batch leaves a driver-held queue: consumed, handed to the caller, or dropped.
-    pub(crate) fn release(&mut self, bytes: usize) -> Result<(), RunError> {
+    /// One holder lets go: a batch consumed, handed to the caller, dropped, or a share of it
+    /// consumed. Only the last holder's release moves the totals and counts.
+    pub(crate) fn release(&mut self, charge: Charge) -> Result<(), RunError> {
+        if Rc::strong_count(&charge.holders) > 1 {
+            return Ok(());
+        }
+        let bytes = charge.bytes;
         self.releases += 1;
         self.in_flight_bytes = self.in_flight_bytes.checked_sub(bytes).ok_or_else(|| {
             RunError::Protocol(format!(

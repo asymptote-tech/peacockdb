@@ -8,6 +8,7 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - 2026-11-04: developer dispatched at Task 1 Step 1. Verda unreachable (no VERDA_CLIENT_ID); CPU tests run locally. Device steps on nebius-gpu (L40S).
 - 2026-11-04: developer dispatched at Task 3, all steps, CPU only, local (verda unreachable).
 - 2026-11-04: developer dispatched at Task 4, all steps, CPU only, local (verda unreachable).
+- 2026-11-04: developer dispatched at Task 5, all steps, with Task 4's carry-over (the random-DAG runs), CPU only, local.
 
 ## Task 1 notes
 
@@ -68,6 +69,29 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - Mutation checks, each turning tests red. Regions never stopping at a buffer: 5 red. Build holds masking a buffer: 4 red (the scheduler's differential test stayed green; the targeted tests caught it). No re-check after a lift: 5 red. No buffer exemption in the rule: 3 red, the property test among them.
 - The plan's line references are stale again (`plan/mod.rs`, `executor/mod.rs`).
 - Counts after Task 4: `--lib` 1028 (1026 passed + 2 ignored), +25: `executor::driver::tests` 133 (+8), Driver internals 52 (+3), `plan::validate::tests` 46 (+9), `plan::dag::tests` 10 (+2), memory estimation 15, wire 32, plan text 16. `test_corpus_goldens` 53, `plan_goldens` 25, `test_cpu_corpus` 2403, `testdata/` untouched, `test_source_formatting` 32. The `gpu` test build compiles locally against rapids-cuda-12.2 with no warning; no device run, since Task 4 has no device step. build-test.md: cpu 3487, `--lib` 1028, and the rows above.
+
+## Task 5 notes
+
+- **`run` does not go through `validate_dag`.** The plan has `run`/`run_with_hook` delegate to `run_roots`, which validates. They delegate to the same driver path (`Driver::new` is `for_roots(&[root])`, and `run` is `run_fused` with `answers[0]` moved into `batches`), but keep today's canonical-form check only. Three reasons: `plan/mod.rs` documents that the driver asks only for the canonical form; the hook tests run `merge_sorted(merge(...))` through `executor::run_with_hook`, which full validation refuses; and a tree never needs a buffer. `run_roots` alone calls `validate_dag`. `run_roots_of_one_root_matches_run` shows the two give the same trace.
+- `Driver::for_roots` takes no `cap`. `run_roots` takes one and hands it to `validate_dag`, which refuses `Some` until Task 7, so a cap is never silently ignored. Task 7 adds it to `for_roots`.
+- `Charge` is the plan's `Rc<()>` holder count. To keep a failed call from needing its input's charge, every lane call now releases its input right after the call returns, success or failure, as the emitter already did; `failed` and `hold_all` release nothing. On a tree the order of holds and releases is unchanged: the input is released before the outputs are held, as before.
+- `OutQueue` keeps one holder per entry, the queue's. A non-last reader's share is a second holder (a clone of the charge); the last reader takes the original and the queue's holder. Readers take in order, so the last taker of an entry always takes it from the front. `retire` is implemented and tested, `#[allow(dead_code)]` until Task 6's driver calls it. `drain` gives each entry once with how many live readers never took it; `release_in_flight` adds `rows × untaken` to `abandoned`.
+- `assert_conserved` now checks per node over its readers: Σ consumed + abandoned == readers × emitted. On a tree that is the old per-edge check.
+- **The property tests.** A reader's cursor never blocks its producer, so an unbuffered hold does not deadlock: the queue in front of it grows. The plan's "stuck ⇒ `validate_dag` refused" arm therefore cannot fire on this driver. Both tests also assert what rule 3b actually buys: every DAG `validate_dag` accepts (and every DAG once buffered) finishes, reconciles, and never queues more than one batch per lane (`peak_queued[n] ≤ lanes_of[n]`). `every_dag_validate_dag_accepts_finishes` also requires more than 100 accepted DAGs, and more than 50 refused DAGs whose queues grew, so neither arm is vacuous. Mutation check: validation accepting every unbuffered hold turns both red ("a queue grew under a valid plan", seed 0).
+- Plan tests whose shape or number changed:
+  - `a_shared_batch_is_held_once_and_released_once`: the plan's `holds == 9` is one root's count (three loads, three filters, three unloads). Fused, it is 9 + 9 − 3 = 15, which the test asserts beside that.
+  - `a_four_lane_shared_source_reaches_every_reader_on_every_lane`: the second reader is a `merge`, not `emit(…, 4)`. An emitter reads only its input's lane 0, so it cannot read every lane.
+  - `a_failed_call_with_a_shared_batch_queued_still_reconciles`: A = `unload(coalesce(coalesce(S)))`, so B's filter is the lower reader. It takes a share and fails with the original still queued for A.
+  - `a_buffered_share_keeps_its_charge_after_the_last_reader_takes`: the build path is deeper (`coalesce(project(filter(b)))`), so S runs during the build, as in Task 4's tests.
+  - `an_unbuffered_reader_inside_a_hold_is_refused_by_run_roots` uses `projected_join` and a coalesced build, since `run_roots` validates fully. "No step taken" is checked as no executor built.
+  - `a_batch_is_dropped_after_its_last_reader` is in `tests/dag.rs`, not `partitioned/tests.rs`, which holds the test helpers' `impl`.
+- **Deferred to Task 6:** `a_limit_retiring_a_reader_keeps_the_charge_a_buffer_holds`. It needs the driver to retire a satisfied root's reader, which is Task 6's.
+- `check_canonical_form(root)` lost its last production caller (the driver checks over roots) and is gone. Its callers in `plan/validate/tests.rs` now use `check_canonical_form_of_roots(&[root])`.
+- `partitioned.rs` went over 1000 lines (1043). Its queue section moved to `partitioned/queues.rs` (only `pub(crate)` added), so the file is now 920. rustfmt over `single_partition.rs` also reflowed its two `.made(...)` chains, which were not rustfmt-clean at HEAD.
+- `RunReport.abandoned`'s doc now says it sums over readers; `batches`' doc says a `FusedRun`'s report leaves it empty. architecture.md "Queues need no cap" (one cursor per reader, a hold answered by a buffer, never a growing queue), the no-deadlock argument as a paragraph of its own, `run_roots`, and Memory accounting (one charge per batch, refcounted over its holders).
+- Mutation checks, each turning tests red. A charge released at every holder: 10 red. Readers taking the original and removing it, so they steal from one another: 12 red. Validation accepting every unbuffered hold: both property tests red.
+- Counts after Task 5: `--lib` 1048 (1046 passed + 2 ignored), +22: `executor::driver::tests` 150 (dag 16, random_dags +1), Driver internals 57 (queue 4, accounting +1). `test_corpus_goldens` 53, `test_cost_model` 3, `test_cpu_corpus` 2451, `plan_goldens` 25, `test_source_formatting` 32, `testdata/` untouched. build-test.md: cpu 3555, `--lib` 1048, and the two rows.
+- The `--features gpu --no-run` build against rapids-cuda-12.2 compiles with no warning. No device run; Task 5 has no device step. Task 4's carry-over (the random-DAG runs) is done.
 
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 

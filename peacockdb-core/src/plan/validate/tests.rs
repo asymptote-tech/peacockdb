@@ -94,7 +94,7 @@ fn a_limit_whose_only_consumer_is_the_sink_is_refused() {
         "a limit feeding only the sink is not a node",
     );
     invalid(
-        check_canonical_form(tree.as_ref()),
+        check_canonical_form_of_roots(&[tree.as_ref()]),
         "a limit feeding only the sink is not a node",
     );
 }
@@ -108,7 +108,7 @@ fn a_limit_with_a_real_consumer_above_it_is_the_shape_that_passes() {
             fetch: Some(5),
         },
     )))));
-    assert_eq!(check_canonical_form(tree.as_ref()), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&[tree.as_ref()]), Ok(()));
     assert_eq!(validate(tree.as_ref()), Ok(()));
 }
 
@@ -121,7 +121,7 @@ fn the_unloads_own_interval_is_the_root_adjacent_lowering_and_not_a_finding() {
             fetch: Some(20),
         }),
     ));
-    assert_eq!(check_canonical_form(tree.as_ref()), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&[tree.as_ref()]), Ok(()));
 }
 
 #[test]

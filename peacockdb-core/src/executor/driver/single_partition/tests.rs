@@ -40,7 +40,7 @@ fn batch(
     acct: &mut ResidentAccountant,
 ) -> Held<<Mock as Backend>::Batch> {
     let held = Held::of(super::super::tests::mock::MockBatch { rows, bytes });
-    acct.hold(held.bytes);
+    acct.hold(&held.charge);
     held
 }
 

@@ -410,7 +410,7 @@ a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by colu
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 133 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 150 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -434,9 +434,17 @@ received nothing answering one zero-row batch under its input's columns, which n
 Then the hold buffer under a join's hold: the subtree below it running during the build, held
 taking only what it is offered, emitting in arrival order once the hold lifts, one store per
 lane at 4 lanes, unheld forwarding as if it were not there, its batches held in the accountant,
-and a failed build with batches kept still reconciling; and `validate_dag` over 500 random DAGs
-— several roots, shared sources, joins, buffers on random edges — accepting every one once each
-unbuffered hold has its buffer
+and a failed build with batches kept still reconciling. Then several roots over shared
+sources: each root answering what it answers alone, a shared batch loaded, held and released
+once and taken by every reader in order, the hook seeing it once, the two deadlock shapes
+answering with buffers, an unbuffered hold refused by `run_roots` before any executor is built,
+every reader of a four-lane source taking every lane, a root that received nothing answering
+its own empty batch, a batch's bytes leaving at its last reader or after it, at a buffer
+keeping a share, and a failure with a share queued still reconciling. And `validate_dag` tied
+to the driver over 500 random DAGs — several roots, shared sources, joins, buffers on random
+edges: every DAG it accepts finishes, reconciles and never queues more than a batch per lane;
+every DAG the driver cannot finish it refused; and every DAG with each unbuffered hold buffered
+is accepted and finishes
 
 | CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 92 |
 |---|---|--:|
@@ -486,10 +494,13 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 52 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 57 |
 |---|---|--:|
 
-the accountant's formula, cache and two checks on plain figures; the plan index's numbering,
+the accountant's formula, cache and two checks on plain figures, and a charge released only by
+its last holder; a reader queue's cursors — one reader a FIFO with no share, a non-last reader
+taking a share, a retired last reader handing back the originals, a drain counting the readers
+left; the plan index's numbering,
 readers, regions and per-lane slots, on a tree as before and over shared sources; the
 scheduler's corners enumerated, holds over regions a second root reads into, a held hold
 buffer still picked for intake and a limit still holding one, and then a

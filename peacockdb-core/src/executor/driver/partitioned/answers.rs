@@ -1,4 +1,4 @@
-//! What a run hands back: the sink's batches, and the report over every node.
+//! What a run hands back: each root's batches, and the report over every node.
 //!
 //! A child of `partitioned` so it reads the driver's own fields; apart from it only to keep
 //! that file under its length limit.
@@ -6,27 +6,36 @@
 use datafusion::arrow::array::RecordBatch;
 
 use super::Driver;
-use crate::executor::{Backend, CpuBatch, ROOT, RunReport};
+use crate::executor::{Backend, CpuBatch, FusedRun, RunReport};
 
 impl<B: Backend> Driver<'_, B> {
-    /// The sink's batches, or one of zero rows under its input's columns where none reached it.
-    pub(crate) fn answer(&mut self) -> Vec<CpuBatch> {
-        if !self.results.is_empty() {
-            return std::mem::take(&mut self.results);
-        }
-        let declared = self.index.nodes[ROOT].node.children()[0]
-            .kind()
-            .schema()
-            .expect("a sink's input declares its columns")
-            .fields
-            .clone();
-        vec![CpuBatch::new(RecordBatch::new_empty(declared))]
+    /// Each root's unload batches, or one of zero rows under that sink's input columns where
+    /// none reached it.
+    fn answers(&mut self) -> Vec<Vec<CpuBatch>> {
+        let roots = self.index.shape.roots.clone();
+        roots
+            .iter()
+            .enumerate()
+            .map(|(ordinal, root)| {
+                let answered = std::mem::take(&mut self.results[ordinal]);
+                if !answered.is_empty() {
+                    return answered;
+                }
+                let declared = self.index.nodes[*root].node.children()[0]
+                    .kind()
+                    .schema()
+                    .expect("a sink's input declares its columns")
+                    .fields
+                    .clone();
+                vec![CpuBatch::new(RecordBatch::new_empty(declared))]
+            })
+            .collect()
     }
 
-    pub(crate) fn report(mut self) -> RunReport {
-        let batches = self.answer();
-        RunReport {
-            batches,
+    pub(crate) fn fused(mut self) -> FusedRun {
+        let answers = self.answers();
+        let report = RunReport {
+            batches: Vec::new(),
             peak_bytes: self.acct.peak(),
             in_flight_bytes: self.acct.in_flight(),
             steps: self.steps,
@@ -45,6 +54,7 @@ impl<B: Backend> Driver<'_, B> {
             satisfied: (0..self.index.len())
                 .filter(|node| self.scheduler.is_satisfied(*node))
                 .collect(),
-        }
+        };
+        FusedRun { answers, report }
     }
 }

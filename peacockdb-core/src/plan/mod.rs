@@ -1546,7 +1546,7 @@ pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: 
 ///
 /// Public because the planner is not the only thing that builds a tree: a test that
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
-/// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
+/// ran, and the driver does not make it — [`check_canonical_form_of_roots`] is all it asks for.
 pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
     validate_roots(&[root])
 }
@@ -1562,8 +1562,8 @@ pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
 /// The one check a plan with several roots passes before it runs: [`validate_roots`], then
 /// that no holds wait on each other ([`PlanError::HoldCycle`]). `cap` is how many roots may
 /// run at once; no driver takes one yet, so `Some` is refused as unsupported.
-// The entry point that runs several roots is its caller, and no driver runs several yet.
-#[allow(dead_code)]
+// The entry point that runs several roots is its caller, and only tests run several yet.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn validate_dag(
     roots: &[&dyn GpuNode],
     cap: Option<NonZeroUsize>,
@@ -1572,12 +1572,7 @@ pub(crate) fn validate_dag(
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
-/// plan meets the same refusal a planned one would.
-pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
-    check_canonical_form_of_roots(&[root])
-}
-
-/// [`check_canonical_form`] over a plan with several roots.
+/// plan meets the same refusal a planned one would; one root or several.
 pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     validate::check_canonical_form_of_roots(roots)
 }

@@ -14,21 +14,23 @@ use std::collections::{HashMap, VecDeque};
 use super::StepError;
 use super::accounting::{Held, ResidentAccountant, Slot, Trip};
 use super::index::PROBE_CHILD;
+use super::queue::OutQueue;
 use super::scheduler::Scheduler;
-use super::single_partition::{Avail, LaneCall, LaneDriver, LaneOutputs, LaneSite};
+use super::single_partition::{LaneCall, LaneDriver, LaneOutputs, LaneSite};
 use crate::executor::{
     AbiCalls, Backend, BackendError, Batch, BatchForwarder, CallKind, CpuBatch, EmittedBatch,
-    Forwarder, LaneEvent, NodeExecutors, OutputHook, PartitionAccumulatorExecutor,
+    Forwarder, FusedRun, LaneEvent, NodeExecutors, OutputHook, PartitionAccumulatorExecutor,
     PartitionEmitterExecutor, PlanIndex, ROOT, RowRange, RunError, RunReport, TraceEvent,
 };
 use crate::plan::ExecutorCategory;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::check_canonical_form;
+use crate::plan::check_canonical_form_of_roots;
 use crate::wire::Seq;
 
 mod answers;
 mod hold_buffer;
+mod queues;
 #[cfg(test)]
 mod tests;
 
@@ -57,6 +59,18 @@ pub(crate) fn run_with_hook<'a, B: Backend>(
     driver.run(DEFAULT_MAX_STEPS)
 }
 
+/// Several roots, one answer each. The caller has validated the plan as a DAG.
+pub(crate) fn run_roots_with_hook<'a, B: Backend>(
+    roots: &[&'a dyn GpuNode],
+    ctx: &'a B::Context,
+    budget: Option<usize>,
+    hook: Option<OutputHook<'a, B>>,
+) -> Result<FusedRun, RunError> {
+    let mut driver = Driver::<B>::for_roots(roots, ctx, budget)?;
+    driver.hook = hook;
+    driver.run_fused(DEFAULT_MAX_STEPS)
+}
+
 pub(crate) struct Driver<'a, B: Backend> {
     index: PlanIndex<'a>,
     ctx: &'a B::Context,
@@ -67,7 +81,10 @@ pub(crate) struct Driver<'a, B: Backend> {
     scheduler: Scheduler,
     acct: ResidentAccountant,
     states: Vec<NodeState<B>>,
-    results: Vec<CpuBatch>,
+    /// Per root, in the order the roots were given, what its unload handed back.
+    results: Vec<Vec<CpuBatch>>,
+    /// Per node, which root it is, if it is one: where an unload's batches go.
+    root_of: Vec<Option<usize>>,
     trace: Vec<TraceEvent>,
     steps: usize,
     /// Per unload carrying an interval, rows of its input stream seen so far, summed over
@@ -91,9 +108,10 @@ pub(crate) struct Driver<'a, B: Backend> {
 
 /// Output queues live on the producing node, which is what makes lane remapping free: an
 /// emitter reads its child's one lane, a forwarder reads whichever pair its map names, a
-/// join reads lane p of each side, and no producer knows who consumes it.
+/// join reads lane p of each side, and no producer knows who consumes it. Each queue has a
+/// cursor per edge into the node, the ordinal `IndexedNode::child_readers` names.
 struct NodeState<B: Backend> {
-    out_queues: Vec<VecDeque<Held<B::Batch>>>,
+    out_queues: Vec<OutQueue<B::Batch>>,
     out_done: Vec<bool>,
     lanes: Vec<LaneDriver<B>>,
     cross: Option<CrossExecutor<B>>,
@@ -119,18 +137,28 @@ impl<'a, B: Backend> Driver<'a, B> {
         ctx: &'a B::Context,
         budget: Option<usize>,
     ) -> Result<Self, RunError> {
+        Self::for_roots(&[root], ctx, budget)
+    }
+
+    pub(crate) fn for_roots(
+        roots: &[&'a dyn GpuNode],
+        ctx: &'a B::Context,
+        budget: Option<usize>,
+    ) -> Result<Self, RunError> {
         // The rule the planner applies, applied to a tree that did not come from it: a
         // hand-built plan meets the same refusal a planned one would, and there is one
         // statement of it rather than two.
-        check_canonical_form(root).map_err(RunError::Backend)?;
-        let index = PlanIndex::build(root).map_err(RunError::Backend)?;
+        check_canonical_form_of_roots(roots).map_err(RunError::Backend)?;
+        let index = PlanIndex::build_roots(roots).map_err(RunError::Backend)?;
         let scheduler = Scheduler::new(&index.shape);
         let acct = ResidentAccountant::new(index.slots, budget);
         let states = index
             .nodes
             .iter()
             .map(|node| NodeState {
-                out_queues: (0..node.lanes).map(|_| VecDeque::new()).collect(),
+                out_queues: (0..node.lanes)
+                    .map(|_| OutQueue::new(node.readers.len()))
+                    .collect(),
                 out_done: vec![false; node.lanes],
                 lanes: (0..node.lanes).map(|_| LaneDriver::default()).collect(),
                 cross: None,
@@ -170,14 +198,19 @@ impl<'a, B: Backend> Driver<'a, B> {
                     .collect()
             })
             .collect();
+        let mut root_of = vec![None; nodes];
+        for (ordinal, root) in index.shape.roots.iter().enumerate() {
+            root_of[*root] = Some(ordinal);
+        }
         let mut driver = Self {
+            results: index.shape.roots.iter().map(|_| Vec::new()).collect(),
+            root_of,
             index,
             ctx,
             hook: None,
             scheduler,
             acct,
             states,
-            results: Vec::new(),
             trace: Vec::new(),
             steps: 0,
             rows_seen: vec![0; nodes],
@@ -194,7 +227,17 @@ impl<'a, B: Backend> Driver<'a, B> {
         Ok(driver)
     }
 
-    pub(crate) fn run(mut self, max_steps: usize) -> Result<RunReport, RunError> {
+    /// [`Self::run_fused`] over one root, whose answer becomes the report's batches.
+    pub(crate) fn run(self, max_steps: usize) -> Result<RunReport, RunError> {
+        let FusedRun {
+            mut answers,
+            mut report,
+        } = self.run_fused(max_steps)?;
+        report.batches = answers.swap_remove(ROOT);
+        Ok(report)
+    }
+
+    pub(crate) fn run_fused(mut self, max_steps: usize) -> Result<FusedRun, RunError> {
         let outcome = self.drive(max_steps);
         if outcome.is_err() {
             // A query that ended badly still gives back what it was holding, by the same
@@ -203,7 +246,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             let _ = self.release_in_flight();
         }
         match outcome {
-            Ok(()) => Ok(self.report()),
+            Ok(()) => Ok(self.fused()),
             Err(StepError::Run(error)) => Err(error),
             Err(StepError::Trip(trip)) => Err(self.budget_error(trip)),
         }
@@ -263,8 +306,8 @@ impl<'a, B: Backend> Driver<'a, B> {
             category if category.is_lane_scoped() => self.run_lane_scoped(node)?,
             ExecutorCategory::PartitionEmitter => self.run_emitter(node)?,
             ExecutorCategory::PartitionAccumulator => self.run_partition_accumulator(node)?,
-            ExecutorCategory::BatchForwarder => self.run_forwarder(node),
-            ExecutorCategory::HoldBuffer => self.run_hold_buffer(node),
+            ExecutorCategory::BatchForwarder => self.run_forwarder(node)?,
+            ExecutorCategory::HoldBuffer => self.run_hold_buffer(node)?,
             other => {
                 return Err(RunError::Protocol(format!("{other:?} has no driver arm")).into());
             }
@@ -317,7 +360,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                             .expect("an unload consumes its batch");
                         self.rows_seen[node] += arriving;
                         self.rows_skipped[node] += arriving;
-                        self.acct.release(unwanted.bytes)?;
+                        self.acct.release(unwanted.charge)?;
                         self.record(node, lane, CallKind::ReleaseUnwanted, 0);
                         continue;
                     }
@@ -369,13 +412,16 @@ impl<'a, B: Backend> Driver<'a, B> {
                         }
                         // The lane held this call's whole output at once, so a refusal
                         // gives back the batches behind the refused one as well.
-                        if let Err(refusal) = self.offer(node, lane, &batch) {
-                            for unqueued in batches {
-                                let _ = self.acct.release(unqueued.bytes);
+                        let batch = match self.offer(node, lane, batch) {
+                            Ok(batch) => batch,
+                            Err(refusal) => {
+                                for unqueued in batches {
+                                    let _ = self.acct.release(unqueued.charge);
+                                }
+                                return Err(refusal);
                             }
-                            return Err(refusal);
-                        }
-                        self.states[node].out_queues[lane].push_back(batch);
+                        };
+                        self.states[node].out_queues[lane].push(batch);
                     }
                     produced
                 }
@@ -383,10 +429,11 @@ impl<'a, B: Backend> Driver<'a, B> {
                 // leave the accounted set as they are handed to the caller.
                 LaneOutputs::Host(batches) => {
                     let produced = batches.len();
+                    let root = self.root_of[node].expect("every unload is a root");
                     for batch in batches {
                         self.record_emitted(node, lane, &batch);
-                        self.acct.release(batch.bytes)?;
-                        self.results.push(batch.batch);
+                        self.acct.release(batch.charge)?;
+                        self.results[root].push(batch.batch);
                     }
                     produced
                 }
@@ -409,31 +456,27 @@ impl<'a, B: Backend> Driver<'a, B> {
     // -- cross-lane --------------------------------------------------------------
 
     fn run_emitter(&mut self, node: usize) -> Result<(), StepError> {
-        let child = self.index.nodes[node].children[0];
         let lanes = self.index.nodes[node].lanes;
         let slot = self.slot(node, 0);
-        if self.states[child].out_queues[0].is_empty() {
+        if !self.offered(node, 0, 0) {
             self.states[node].emitter_finished = true;
             self.states[node].out_done = vec![true; lanes];
             self.acct.forget(slot);
             self.record(node, 0, CallKind::EmitDone, 0);
             return Ok(());
         }
-        let batch = self.states[child].out_queues[0]
-            .pop_front()
-            .expect("a batch");
-        self.record_consumed(node, 0, 0, batch.rows());
+        let batch = self.take_from(node, 0, 0)?.expect("a batch");
         self.build_cross(node)?;
         let Some(CrossExecutor::Emitter(emitter)) = &mut self.states[node].cross else {
             return Err(wrong_cross(self.index.nodes[node].node).into());
         };
         let modelled = self
             .acct
-            .begin_call(slot, emitter, batch.rows(), batch.bytes)?;
+            .begin_call(slot, emitter, batch.rows(), batch.charge.bytes)?;
         let emitted = emitter.emit(batch.batch);
         // The batch went into the call either way, so its bytes leave here whether or not
         // the call came back.
-        self.acct.release(batch.bytes)?;
+        self.acct.release(batch.charge)?;
         let (outputs, stats) = emitted.map_err(|e| self.call_failed(node, 0, e))?;
         if outputs.len() != lanes {
             return Err(RunError::Protocol(format!(
@@ -452,10 +495,10 @@ impl<'a, B: Backend> Driver<'a, B> {
                 continue;
             }
             let held = Held::of(out);
-            self.acct.hold(held.bytes);
+            self.acct.hold(&held.charge);
             self.record_emitted(node, lane, &held);
-            self.offer(node, lane, &held)?;
-            self.states[node].out_queues[lane].push_back(held);
+            let held = self.offer(node, lane, held)?;
+            self.states[node].out_queues[lane].push(held);
             emitted += 1;
         }
         let Some(CrossExecutor::Emitter(emitter)) = &self.states[node].cross else {
@@ -471,50 +514,49 @@ impl<'a, B: Backend> Driver<'a, B> {
         let child = self.index.nodes[node].children[0];
         let slot = self.slot(node, 0);
         for lane in 0..self.index.nodes[node].input_lanes {
-            let has = !self.states[child].out_queues[lane].is_empty();
+            let has = self.offered(node, 0, lane);
             let done = self.states[child].out_done[lane] && !self.states[node].lane_done_sent[lane];
             if !has && !done {
                 continue;
             }
-            let batch = has.then(|| {
-                self.states[child].out_queues[lane]
-                    .pop_front()
-                    .expect("a batch")
-            });
+            let batch = match has {
+                true => self.take_from(node, 0, lane)?,
+                false => None,
+            };
             if batch.is_none() {
                 self.states[node].lane_done_sent[lane] = true;
             }
             let (rows, bytes) = batch
                 .as_ref()
-                .map_or((0, 0), |held| (held.rows(), held.bytes));
-            if batch.is_some() {
-                self.record_consumed(node, 0, lane, rows);
-            }
+                .map_or((0, 0), |held| (held.rows(), held.charge.bytes));
             self.build_cross(node)?;
             let Some(CrossExecutor::Accumulator(accumulator)) = &mut self.states[node].cross else {
                 return Err(wrong_cross(self.index.nodes[node].node).into());
             };
             let modelled = self.acct.begin_call(slot, accumulator, rows, bytes)?;
-            let had_batch = batch.is_some();
-            let (event, kind) = match batch {
-                Some(held) => (LaneEvent::Batch(held.batch), CallKind::LaneEvent),
-                None => (LaneEvent::Done, CallKind::LaneDone),
+            let (event, kind, charge) = match batch {
+                Some(held) => (
+                    LaneEvent::Batch(held.batch),
+                    CallKind::LaneEvent,
+                    Some(held.charge),
+                ),
+                None => (LaneEvent::Done, CallKind::LaneDone, None),
             };
             let accumulated = accumulator.accumulate_and_fetch(lane, event);
             // A lane's end carries no batch, so there is nothing to release: counting one
             // anyway made holds and releases disagree on every plan with a cross-lane
             // accumulator, which is what the report says they never do.
-            if had_batch {
-                self.acct.release(bytes)?;
+            if let Some(charge) = charge {
+                self.acct.release(charge)?;
             }
             let (outputs, stats) = accumulated.map_err(|e| self.call_failed(node, lane, e))?;
             let produced = outputs.len();
             for out in outputs {
                 let held = Held::of(out);
-                self.acct.hold(held.bytes);
+                self.acct.hold(&held.charge);
                 self.record_emitted(node, 0, &held);
-                self.offer(node, 0, &held)?;
-                self.states[node].out_queues[0].push_back(held);
+                let held = self.offer(node, 0, held)?;
+                self.states[node].out_queues[0].push(held);
             }
             let Some(CrossExecutor::Accumulator(accumulator)) = &self.states[node].cross else {
                 return Err(wrong_cross(self.index.nodes[node].node).into());
@@ -532,12 +574,12 @@ impl<'a, B: Backend> Driver<'a, B> {
 
     /// One batch per visit, cycling the lane's map in order from its cursor. The merge's
     /// round-robin and the interleave's child rotation are this one rule.
-    fn run_forwarder(&mut self, node: usize) {
+    fn run_forwarder(&mut self, node: usize) -> Result<(), StepError> {
         for lane in 0..self.index.nodes[node].lanes {
             if self.states[node].out_done[lane] {
                 continue;
             }
-            match self.forward_one(node, lane) {
+            match self.forward_one(node, lane)? {
                 true => self.record(node, lane, CallKind::Forward, 1),
                 false if self.states[node].retired[lane].iter().all(|gone| *gone) => {
                     self.states[node].out_done[lane] = true;
@@ -546,9 +588,10 @@ impl<'a, B: Backend> Driver<'a, B> {
                 false => {}
             }
         }
+        Ok(())
     }
 
-    fn forward_one(&mut self, node: usize, lane: usize) -> bool {
+    fn forward_one(&mut self, node: usize, lane: usize) -> Result<bool, StepError> {
         let sources = self.states[node].forward_map[lane].len();
         let start = self.states[node].cursors[lane];
         for offset in 0..sources {
@@ -559,18 +602,17 @@ impl<'a, B: Backend> Driver<'a, B> {
             let (child_index, child_lane) = self.states[node].forward_map[lane][index];
             let child = self.index.nodes[node].children[child_index];
             // A move between queues: the batch stays in flight, so nothing is accounted.
-            if let Some(batch) = self.states[child].out_queues[child_lane].pop_front() {
-                self.record_consumed(node, child_index, child_lane, batch.rows());
+            if let Some(batch) = self.take_from(node, child_index, child_lane)? {
                 self.record_emitted(node, lane, &batch);
-                self.states[node].out_queues[lane].push_back(batch);
+                self.states[node].out_queues[lane].push(batch);
                 self.states[node].cursors[lane] = (index + 1) % sources;
-                return true;
+                return Ok(true);
             }
             if self.states[child].out_done[child_lane] {
                 self.states[node].retired[lane][index] = true;
             }
         }
-        false
+        Ok(false)
     }
 
     // -- schedule ----------------------------------------------------------------
@@ -593,12 +635,12 @@ impl<'a, B: Backend> Driver<'a, B> {
             }
             ExecutorCategory::PartitionEmitter => {
                 let child = indexed.children[0];
-                let has = !self.states[child].out_queues[0].is_empty();
-                has || (self.states[child].out_done[0] && !self.states[node].emitter_finished)
+                self.offered(node, 0, 0)
+                    || (self.states[child].out_done[0] && !self.states[node].emitter_finished)
             }
             ExecutorCategory::PartitionAccumulator => {
                 let child = indexed.children[0];
-                !self.states[child].out_queues[lane].is_empty()
+                self.offered(node, 0, lane)
                     || (self.states[child].out_done[lane]
                         && !self.states[node].lane_done_sent[lane])
             }
@@ -622,7 +664,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                 continue;
             }
             let child = self.index.nodes[node].children[*child_index];
-            if !self.states[child].out_queues[*child_lane].is_empty() {
+            if self.offered(node, *child_index, *child_lane) {
                 return true;
             }
             if !self.states[child].out_done[*child_lane] {
@@ -661,102 +703,6 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.scheduler.satisfy(node);
         self.states[node].out_done = vec![true; lanes];
         Ok(())
-    }
-
-    // -- queues ------------------------------------------------------------------
-
-    fn avail(&self, node: usize, lane: usize) -> Avail {
-        let mut avail = Avail::default();
-        for (slot, child) in self.index.nodes[node].children.iter().enumerate().take(2) {
-            let queue = &self.states[*child].out_queues[lane];
-            avail.has[slot] = !queue.is_empty();
-            avail.done[slot] = self.states[*child].out_done[lane] && queue.is_empty();
-        }
-        avail
-    }
-
-    fn peek_rows(&self, node: usize, lane: usize, call: LaneCall) -> u64 {
-        let slot = call.consumes().expect("a consuming call");
-        let child = self.index.nodes[node].children[slot];
-        self.states[child].out_queues[lane]
-            .front()
-            .map_or(0, Held::rows)
-    }
-
-    /// `None` only for a `SetBuild` whose build side finished without a batch — the one
-    /// call that reads its slot if there is something in it and is made either way.
-    fn take_input(
-        &mut self,
-        node: usize,
-        lane: usize,
-        call: LaneCall,
-    ) -> Result<Option<Held<B::Batch>>, StepError> {
-        let slot = call.consumes().expect("a consuming call");
-        let child = self.index.nodes[node].children[slot];
-        match self.states[child].out_queues[lane].pop_front() {
-            Some(batch) => {
-                self.record_consumed(node, slot, lane, batch.rows());
-                Ok(Some(batch))
-            }
-            None if !call.needs_its_batch() => Ok(None),
-            None => Err(StepError::Run(RunError::Protocol(format!(
-                "{}: the schedule offered a batch that is not there",
-                self.index.nodes[node].node.name()
-            )))),
-        }
-    }
-
-    fn queued(&self, node: usize) -> usize {
-        self.states[node].out_queues.iter().map(VecDeque::len).sum()
-    }
-
-    fn release_in_flight(&mut self) -> Result<(), StepError> {
-        for node in 0..self.index.len() {
-            for lane in 0..self.states[node].out_queues.len() {
-                while let Some(batch) = self.states[node].out_queues[lane].pop_front() {
-                    self.abandoned[node][lane] += batch.rows();
-                    self.acct.release(batch.bytes)?;
-                }
-            }
-        }
-        self.release_kept()
-    }
-
-    fn assert_drained(&self) -> Result<(), StepError> {
-        // The root not being done is the same failure seen from the other end: a node that
-        // never learned its input had ended never emitted, and no queue holds the evidence.
-        if !self.states[ROOT].out_done.iter().all(|done| *done) {
-            return Err(RunError::Protocol(format!(
-                "nothing is runnable and {} has lanes that never ended",
-                self.index.nodes[ROOT].node.name()
-            ))
-            .into());
-        }
-        let mut stranded: Vec<String> = (0..self.index.len())
-            .flat_map(|node| {
-                self.states[node]
-                    .out_queues
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, queue)| !queue.is_empty())
-                    .map(move |(lane, queue)| {
-                        format!(
-                            "{} lane {lane} holds {}",
-                            self.index.nodes[node].node.name(),
-                            queue.len()
-                        )
-                    })
-            })
-            .collect();
-        stranded.extend(self.kept_stranded());
-        if stranded.is_empty() {
-            return Ok(());
-        }
-        Err(RunError::Protocol(format!(
-            "nothing is runnable and batches remain: {}",
-            stranded.join("; ")
-        ))
-        .into())
     }
 
     // -- wiring ------------------------------------------------------------------
@@ -876,7 +822,7 @@ impl<'a, B: Backend> Driver<'a, B> {
     ) {
         self.emitted[node][lane].push(EmittedBatch {
             rows: batch.rows(),
-            bytes: batch.bytes,
+            bytes: batch.charge.bytes,
         });
     }
 
@@ -921,21 +867,29 @@ impl<'a, B: Backend> Driver<'a, B> {
         )))
     }
 
-    /// The hook's look at a batch `node` is about to queue on `lane`; its refusal ends the
-    /// query where a failed call would. The batch is held and not yet queued, so no queue
-    /// will give it back: the refusal releases it here, as `single_partition::failed`
-    /// releases a failed call's input.
-    fn offer(&mut self, node: usize, lane: usize, held: &Held<B::Batch>) -> Result<(), StepError> {
+    /// The hook's look at a batch `node` is about to queue on `lane`, handed back to be
+    /// queued; its refusal ends the query where a failed call would. The batch is held and
+    /// not yet queued, so no queue will give it back: the refusal releases it here, as a
+    /// failed lane call releases its input.
+    fn offer(
+        &mut self,
+        node: usize,
+        lane: usize,
+        held: Held<B::Batch>,
+    ) -> Result<Held<B::Batch>, StepError> {
         let Some(hook) = self.hook.as_mut() else {
-            return Ok(());
+            return Ok(held);
         };
-        hook(node, lane, &held.batch).map_err(|why| {
-            let _ = self.acct.release(held.bytes);
-            StepError::Run(RunError::CallFailed(format!(
-                "{} lane {lane}: the output hook refused a batch: {why}",
-                self.index.nodes[node].node.name()
-            )))
-        })
+        match hook(node, lane, &held.batch) {
+            Ok(()) => Ok(held),
+            Err(why) => {
+                let _ = self.acct.release(held.charge);
+                Err(StepError::Run(RunError::CallFailed(format!(
+                    "{} lane {lane}: the output hook refused a batch: {why}",
+                    self.index.nodes[node].node.name()
+                ))))
+            }
+        }
     }
 
     fn budget_error(&self, trip: Trip) -> RunError {

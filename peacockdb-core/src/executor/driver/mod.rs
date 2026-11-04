@@ -12,17 +12,21 @@ mod index;
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 mod measurements;
 mod partitioned;
+mod queue;
 mod scheduler;
 mod single_partition;
 
 #[cfg(test)]
 mod tests;
 
+use std::num::NonZeroUsize;
+
 use crate::executor::{
-    Backend, Measured, Measurements, OutputHook, PlanIndex, Region, RunError, RunReport,
+    Backend, FusedRun, Measured, Measurements, OutputHook, PlanIndex, Region, RunError, RunReport,
 };
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
+use crate::plan::validate_dag;
 use accounting::Trip;
 
 /// Run `root` to completion on `B`. `budget` of `None` accounts without ever tripping.
@@ -42,6 +46,23 @@ pub(crate) fn run_with_hook<B: Backend>(
     hook: Option<OutputHook<'_, B>>,
 ) -> Result<RunReport, RunError> {
     partitioned::run_with_hook::<B>(root, ctx, budget, hook)
+}
+
+/// Several roots run as one plan, once `validate_dag` has accepted it. A single tree never
+/// needs that proof, which is why [`run`] asks only for the canonical form.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_roots_with_hook<B: Backend>(
+    roots: &[&dyn GpuNode],
+    ctx: &B::Context,
+    budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
+    hook: Option<OutputHook<'_, B>>,
+) -> Result<FusedRun, RunError> {
+    if roots.is_empty() {
+        return Err(RunError::Protocol("a run needs at least one root".to_string()));
+    }
+    validate_dag(roots, cap).map_err(RunError::Backend)?;
+    partitioned::run_roots_with_hook::<B>(roots, ctx, budget, hook)
 }
 
 /// The plan indexed once — heights, numbering, regions, lane counts and slot ranges.
