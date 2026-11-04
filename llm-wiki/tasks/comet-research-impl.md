@@ -23,7 +23,7 @@ Apache Spark standalone with Comet, Python 3 with pytest.
 
 - **Roles.** A step ending "report a checkpoint `<msg>`" is a checkpoint, not the task's green:
   the developer stops and reports; the coordinator commits with that message, pushes, and
-  dispatches the developer at the next step. The developer never runs a git write. Only Task 7's
+  dispatches the developer at the next step. The developer never runs a git write. Only Task 6's
   last step is green: the coordinator opens the PR against master and marks the task `done`. No
   reviewer rounds, no completeness pass and no wait on CI (spec: prototype with a PR). The
   coordinator writes the signoff from `audit.md`.
@@ -68,15 +68,15 @@ Apache Spark standalone with Comet, Python 3 with pytest.
 ## Review Focus
 
 1. **A ratio manufactured by the baseline.** A weak CPU baseline (sequential only, S3 read
-   across regions, a mistuned Spark) makes 2× easy. Pinned in Task 5 (both modes, `conf.txt`
-   records the tuning), Task 6 (the cross-region correction is a separate, tagged input) and
-   Task 7's audit.
-2. **Modelled GPU numbers presented as measured.** Pinned by the input tags in Task 6, which a
+   across regions, a mistuned Spark) makes 2× easy. Pinned in Task 4 (both modes, `conf.txt`
+   records the tuning), Task 5 (the cross-region correction is a separate, tagged input) and
+   Task 6's audit.
+2. **Modelled GPU numbers presented as measured.** Pinned by the input tags in Task 5, which a
    test enforces, and the report's inputs table.
 3. **`spark-plugin.md` repeated rather than checked.** Every fact taken from it is re-verified at
-   the pinned Comet commit. Pinned in Task 1's prompt and Task 7's audit.
+   the pinned Comet commit. Pinned in Task 1's prompt and Task 6's audit.
 4. **A VM left running, or chain L's VM stopped.** Pinned by `vm.sh`'s started-by-me log, tested
-   in Task 2, by `stop-mine` at the end of every experiment task, and by Task 7's final check.
+   in Task 2, by `stop-mine` at the end of every experiment task, and by Task 6's final check.
 5. **The developer's window filling with bulk** (plan dumps, raw timings). Raw output goes to
    files; the developer reads summaries. `-detail.md` is written after every task, so a
    restarted coordinator resumes from it.
