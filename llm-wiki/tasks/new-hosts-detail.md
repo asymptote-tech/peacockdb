@@ -973,3 +973,4 @@ Task 8 Step 5 needs 110 G; the H100 has 78 G free, and `run-gpu.sh prepare` puts
 it (Task 10 Step 2). Resizing is the human's (analyst, above). Human: grow nebius-cpu128's disk to
 200 GiB or more and the H100's to 150 GiB or more, then clear the block. Resume at Task 8 Step 5's
 `df` check, then Task 10 Step 2. Task 10 Step 1's install is at `/home/dmitry/build/peacock/new-hosts/install`.
+- 2026-11-04: green at af557d5c; PR #195 (base ENS-containers-rebase); reviewer round 1 dispatched.
