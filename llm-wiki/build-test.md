@@ -1943,7 +1943,9 @@ No image holds a secret, a host or Claude Code. Both run as any uid: pass
 ### The build image
 
 - `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the nebius-gpu environment the
-  committed device answers came from. Its `bin/` is not on PATH.
+  committed device answers came from. Its `bin/` is not on PATH, and its `lib/` is not on the
+  loader path: an FFI test binary run in the image needs `-e LD_LIBRARY_PATH=/opt/cudf/lib`, or
+  it exits 127 on `libcudf.so`.
 - nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (26.02) as `CC`/`CXX`, cmake, ninja, rust,
   ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
 - DuckDB 1.5.4 with its tpch and tpcds extensions in `/opt/duckdb-ext`. The image sets

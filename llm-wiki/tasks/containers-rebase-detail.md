@@ -141,3 +141,44 @@ Task 3 notes:
   `cargo test -p cost-report`: the bin 47, `test_source_formatting` 32 (incl. `ci_coverage::*`
   and `no_core_test_reads_the_checkout`). No failure, no warning. For Task 5's recount:
   `build-test.md`'s cpu header says `test_corpus_goldens` 44, and the fork has 45.
+- Steps 6–8, on dev, one cuDF version at a time for disk. The worktree's `target/` (25 GB,
+  rust-only) was deleted first: dev had 7.2 GB free with one build image on disk. Each image was
+  built from the clean tree at `19f57fb7` and carries both tags. dev's docker uses the containerd
+  store, so `docker image ls` reports compressed content plus unpacked layers. The table gives
+  `.Size` (compressed) and the `ls` figure. The unpacked size, the difference, matches
+  build-test.md's table.
+
+  | image | ID | `.Size` | `docker image ls` | build time |
+  |---|---|---|---|---|
+  | build 25.02 | `f05ac6dfae6b` | 5.19 GB | 15.4 GB | 4 min 27 s |
+  | run 25.02 | `cb23e758511f` | 3.18 GB | 8.32 GB | 2 min 30 s |
+  | build 26.02 | `e03d286d67b8` | 5.20 GB | 15.1 GB | 4 min 7 s |
+  | run 26.02 | `11a7ae997d55` | 3.94 GB | 10.2 GB | 2 min 44 s |
+
+  Revision label `19f57fb73e6b` on all four. Driver labels: 535.104.05 (25.02), 575.57.08 (26.02).
+  A build image held about 24 GB of `/var/lib/containerd` while it was on disk.
+- Step 7, both versions. The plan's literal commands: the gpu `--no-run` compile passes, with
+  no warning. Both FFI tiers exit 127, because the test binaries cannot load `libcudf.so`. The
+  build image sets no `LD_LIBRARY_PATH`, and the FFI install bundles Arrow's dependencies but
+  not libcudf (`cpp/CMakeLists.txt`'s install(CODE)). CI's FFI step sets
+  `LD_LIBRARY_PATH: /opt/conda/lib` (`pipeline.yml`). **Shared:** `origin/ENS-containers`
+  (exported with `git archive`, the same 25.02 image, the same `third_party/cudf`) fails
+  `ffi_tests::` the same way. The image inputs match: `git diff origin/ENS-containers` over
+  `docker/`, `image.sh`, `image-inputs.sh` and the cudf gitlink is empty. With
+  `-e LD_LIBRARY_PATH=/opt/cudf/lib` added, `ffi_tests::` passes 4/4 and `test_ffi` 3/3 on each
+  version. Not fixed. For Task 5's docs: build-test.md's "The build image" should say that the
+  FFI test binaries need `-e LD_LIBRARY_PATH=/opt/cudf/lib`.
+- Step 8. Every file under `scripts/env/tests/` and `scripts/calibration/tests/` passes, with
+  these conditions:
+  - `test_plot.py` needs matplotlib, which dev lacks. It passed 7/7 in each build image.
+  - `test_image_any_user.py` needs both build images on disk at once, and dev cannot hold them
+    beside the run images. It passed by name per version, each with its own image present.
+  - `test_run_image.py` 9/9 and `test_run_tests.py` 24/24 ran with both run images present.
+    The 25.02 run image was saved and reloaded under the same ID.
+  - `PEACOCK_STAGED_INSTALLS` was a tmpfs dir holding, per version, the FFI build's cmake
+    install (`lib/`, `bin/`) and the four gpu test binaries, stripped, as
+    `build-test-shadgpu.sh --build` stages them.
+- After the runs: the images, build cache, `target-img-*`, `.home-img` and the staging are all
+  removed. `.gitignore` gains `/target-img-*/` and `/.home-img/`; `git check-ignore` matches
+  both, and `git status --short` showed only `.gitignore` while `target-img-26.02/` and
+  `.home-img/` existed.
