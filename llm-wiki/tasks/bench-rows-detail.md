@@ -135,3 +135,10 @@
 
 | VM | start (UTC) | stop (UTC) | hours | why |
 |---|---|---|---|---|
+
+## Blocked (2026-11-04)
+
+`blocked(building)`: Task 5 (one case on the H100, end to end) needs the H100 path, which waits on
+new-hosts' block (the human's GitHub PAT; `new-hosts-detail.md`, "Blocked"); the same obstacle the
+analyst diagnosed there. Tasks 1–4 are committed (`d0866f27`, `bcefeab4`). Resume at Task 5 once
+new-hosts' Task 10 has proven the H100 path and pinned-loads is through its H100 runs.
