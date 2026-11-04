@@ -1,9 +1,8 @@
 # shellcheck shell=bash
 #
-# A CPU VM's layout for the ensemble's containers, and the steps bootstrap-vm.sh and up.sh both
-# take in the build image (llm-wiki/build-test.md, "Containers"). Every path but the data
-# directory comes from $HOME, and every container runs as the caller's uid:gid. Sourced after
-# image-inputs.sh and data-inputs.sh.
+# A CPU VM's layout, and the steps bootstrap-vm.sh takes in the build image (llm-wiki/build-test.md,
+# "Containers"). Every path but the data directory comes from $HOME, and every container runs as
+# the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
 # A step function (machine_image_checked, machine_cargo_fetch, machine_data_set,
 # machine_cudf_source) is called as a statement of its own, never in `$(…)` or before `||`: set -e
 # is what stops it at a failed step, and both turn it off inside. The others print a value for `$(…)`.
@@ -15,26 +14,20 @@ MACHINE_USER=$(id -u):$(id -g)
 # crashed .partial left by the first.
 MACHINE_DATA=${PEACOCK_DATA_DIR:-/var/lib/peacock}
 MACHINE_REGISTRY=$HOME/.cache/peacock/cargo-registry
-MACHINE_CCACHE=$HOME/.cache/peacock/ccache
-MACHINE_INSTANCES=$HOME/peacock-instances
 # Where the build image's cargo keeps downloaded crates (CARGO_HOME=/opt/rust/cargo).
 IMAGE_REGISTRY=/opt/rust/cargo/registry
 
-# machine_git <arg>... — git on the machine. An instance writes the clone's .git, so a hook or an
-# fsmonitor it planted there would run as the machine user on the next call: none ever runs.
-machine_git() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
-
 # machine_cudf_gitlink <tree> — the third_party/cudf commit <tree>'s index pins.
-machine_cudf_gitlink() { machine_git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
+machine_cudf_gitlink() { git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
 
 # machine_cudf_source <tree> — sets CUDF_SOURCE to the machine's checkout of the third_party/cudf
 # commit <tree> pins, with the paths the build image's prefetch takes, which the FFI build's
-# configure reads. One a commit, so an instance's never moves under it; fetched under a lock when
-# the machine has none, and appearing only whole. A clone's own third_party/cudf is never read.
+# configure reads. One a commit, so a build's never moves under it; fetched under a lock when the
+# machine has none, and appearing only whole. A clone's own third_party/cudf is never read.
 machine_cudf_source() {
   local tree=$1 commit url stage lock mask
   commit=$(machine_cudf_gitlink "$tree")
-  url=$(machine_git config --file "$tree/.gitmodules" --get submodule.third_party/cudf.url || true)
+  url=$(git config --file "$tree/.gitmodules" --get submodule.third_party/cudf.url || true)
   if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || [ -z "$url" ]; then
     echo "${0##*/}: $tree pins no third_party/cudf commit, or its .gitmodules names no URL" >&2
     return 2
@@ -48,14 +41,14 @@ machine_cudf_source() {
   if [ ! -d "$CUDF_SOURCE" ]; then
     stage=$CUDF_SOURCE.partial
     rm -rf "$stage"
-    machine_git init -q "$stage"
-    if ! machine_git -C "$stage" fetch -q --depth 1 --filter=blob:none "$url" "$commit"; then
+    git init -q "$stage"
+    if ! git -C "$stage" fetch -q --depth 1 --filter=blob:none "$url" "$commit"; then
       rm -rf "$stage"
       echo "${0##*/}: cannot fetch third_party/cudf $commit from $url" >&2
       return 2
     fi
-    machine_git -C "$stage" sparse-checkout set --no-cone /cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH
-    machine_git -C "$stage" checkout -q FETCH_HEAD
+    git -C "$stage" sparse-checkout set --no-cone /cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH
+    git -C "$stage" checkout -q FETCH_HEAD
     mv "$stage" "$CUDF_SOURCE"
   fi
   exec {lock}>&-
@@ -80,9 +73,8 @@ machine_image_checked() {
 }
 
 # machine_cargo_fetch <ref> <tree> — fills the machine's registry with what <tree>'s Cargo.lock
-# names. The one step that writes it: an instance mounts it read-only, which is what makes it safe
-# to share. cargo's own package lock lies in each container, so the machine's lock is what keeps
-# two fetches from writing the registry at once.
+# names. cargo's own package lock lies in each container, so the machine's lock is what keeps two
+# fetches from writing the registry at once.
 machine_cargo_fetch() {
   local lock
   mkdir -p "$MACHINE_REGISTRY"

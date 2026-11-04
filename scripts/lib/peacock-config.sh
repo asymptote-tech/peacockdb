@@ -1,18 +1,15 @@
 # shellcheck shell=bash
 #
 # ~/.config/peacock/, on a person's own machine (the laptop) and on a VM (llm-wiki/build-test.md,
-# "Containers"): the storage keys, the person's PAT and GPU key, the VMs this laptop provisioned,
-# and the marker bootstrap-vm.sh leaves on a machine that runs instances. A function that refuses
-# prints one line to stderr and returns 2; it is called as a statement, so set -e stops the caller.
+# "Containers"): the storage keys, the person's PAT and GPU key, and the VMs this laptop
+# provisioned. A function that refuses prints one line to stderr and returns 2; it is called as a
+# statement, so set -e stops the caller.
 
 PEACOCK_CONFIG=$HOME/.config/peacock
 PEACOCK_ENV=$PEACOCK_CONFIG/peacock.env
 PEACOCK_PAT=$PEACOCK_CONFIG/github-pat
 PEACOCK_GPU_KEY=$PEACOCK_CONFIG/gpu_ed25519
 PEACOCK_VMS=$PEACOCK_CONFIG/vm
-PEACOCK_MARKER=$PEACOCK_CONFIG/machine
-# bootstrap-vm.sh's clone, relative to the home of the user who ran it.
-PEACOCK_CLONE_IN_HOME=peacockdb
 # What peacock.env holds on a laptop, and must hold on a VM.
 PEACOCK_STORAGE_KEYS=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL AWS_REGION)
 
@@ -73,44 +70,4 @@ peacock_env_is_storage_only() {
       return
     fi
   done < "$1"
-}
-
-# peacock_vm_target <name> — sets PEACOCK_VM_TARGET to <user>@<address> of VM <name> in the vm
-# file, of its last line when <name> is empty.
-peacock_vm_target() {
-  local name=$1 n=0 line words found=""
-  [ -s "$PEACOCK_VMS" ] || {
-    peacock_refuse "this machine runs no instances and knows no VM: run scripts/env/provision-vm.sh <login>@<address> first"
-    return
-  }
-  while IFS= read -r line || [ -n "$line" ]; do
-    n=$((n + 1))
-    read -r -a words <<< "$line"
-    [ ${#words[@]} = 2 ] && [[ "${words[1]}" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] \
-      || { peacock_refuse "$PEACOCK_VMS: line $n is not <name> <user>@<address>"; return; }
-    if [ -z "$name" ] || [ "${words[0]}" = "$name" ]; then found=${words[1]}; fi
-  done < "$PEACOCK_VMS"
-  [ -n "$found" ] || { peacock_refuse "no VM $name in $PEACOCK_VMS"; return; }
-  PEACOCK_VM_TARGET=$found
-}
-
-# peacock_forward <script> <vm> <arg>... — on a machine without the marker, runs the VM's
-# scripts/env/<script> with <arg>... over ssh, as the user the vm file records, on VM <vm> or the
-# default, and exits with its status. On a machine with the marker it returns, refusing a <vm>.
-# A forwarded call that lands on a machine without the marker stops there rather than hop again.
-peacock_forward() {
-  local script=$1 vm=$2
-  shift 2
-  if [ -e "$PEACOCK_MARKER" ]; then
-    [ -z "$vm" ] || peacock_refuse "--vm is for a machine that forwards to a VM; this one runs instances"
-    return
-  fi
-  if [ -n "${PEACOCK_FORWARDED:-}" ]; then
-    peacock_refuse "forwarded here, to a machine without $PEACOCK_MARKER: provision this VM with provision-vm.sh"
-    return
-  fi
-  peacock_vm_target "$vm"
-  # One string, as ssh hands it to the remote shell: each argument quoted, $HOME left to the VM.
-  exec ssh -- "$PEACOCK_VM_TARGET" \
-    "PEACOCK_FORWARDED=1 \$HOME/$PEACOCK_CLONE_IN_HOME/scripts/env/$script$(printf ' %q' "$@")"
 }

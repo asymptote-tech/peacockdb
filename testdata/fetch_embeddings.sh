@@ -4,17 +4,14 @@
 # testdata/embeddings-cache/ beside this script (~1.1GB at SF=1), each checked against
 # testdata/embeddings.sha256; one already matching is not fetched again. The pinned, immutable
 # origins: DEEP1B (96-dim float32, CC BY 4.0) at storage.yandexcloud.net, GloVe6B (100-dim,
-# PDDL) at downloads.cs.stanford.edu; --from-s3 fetches the same files from our bucket. Which
-# hosts may fetch from where: llm-wiki/build-test.md, "Datasets".
-#   ./testdata/fetch_embeddings.sh [--sf N] [--from-s3]   # the first 800000*N DEEP base vectors
+# PDDL) at downloads.cs.stanford.edu. Which hosts may fetch: llm-wiki/build-test.md, "Datasets".
+#   ./testdata/fetch_embeddings.sh [--sf N]   # the first 800000*N DEEP base vectors
 set -euo pipefail
 
 SF=1
-SOURCE=origin
 while [ $# -gt 0 ]; do
   case "$1" in
     --sf) SF="$2"; shift ;;
-    --from-s3) SOURCE=s3 ;;
     *) echo "Unknown flag: $1" >&2; exit 1 ;;
   esac
   shift
@@ -23,23 +20,19 @@ done
 # HARD GUARD, on the ENVIRONMENT rather than the host: no automated run fetches the origins
 # (network policy, and the bytes are pinned once). The GPU host is both a CI runner and the only
 # machine with the disk for the large SFs, so a manual run there is allowed and a CI run is not.
-# CI/GITHUB_ACTIONS refuse the origins only, since --from-s3 reads our own pinned bucket, which a
-# CI job may; PEACOCK_NO_FETCH refuses both. ssh does NOT carry the runner's CI/GITHUB_ACTIONS,
-# so automation that shells in sets PEACOCK_NO_FETCH=1 itself, as pipeline.yml's ssh commands do.
-if [ -n "${PEACOCK_NO_FETCH:-}" ] \
-   || { [ "$SOURCE" = origin ] && { [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; }; }; then
+# ssh does NOT carry the runner's CI/GITHUB_ACTIONS, so automation that shells in sets
+# PEACOCK_NO_FETCH=1 itself, as pipeline.yml's ssh commands do.
+if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${PEACOCK_NO_FETCH:-}" ]; then
   echo "error: fetch_embeddings.sh must not run from CI/automation" >&2
   echo "       (detected via CI / GITHUB_ACTIONS / PEACOCK_NO_FETCH)." >&2
-  echo "       Automated jobs read generated parquet, or --from-s3 without PEACOCK_NO_FETCH;" >&2
-  echo "       they never fetch the origins." >&2
+  echo "       Automated jobs consume generated parquet; they never fetch sources." >&2
   exit 1
 fi
 
 # The cache goes beside $0, a symlink included (a cache kept outside the tree is made that way);
-# the pin and the bucket are the tree's.
+# the pin is the tree's.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TREE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
-. "${TREE_DIR}/../scripts/lib/embeddings-bucket.sh"
 CACHE="${SCRIPT_DIR}/embeddings-cache"
 PIN="${TREE_DIR}/embeddings.sha256"
 
@@ -55,6 +48,9 @@ DEEP_DIMS=96
 N=$(( 800000 * SF ))
 BASE_BYTES=$(( 8 + N * DEEP_DIMS * 4 ))
 
+# embeddings_pinned_sha <pin file> <file> — every sha256 the pin names for <file>, one a line.
+embeddings_pinned_sha() { awk -v name="$2" '$2 == name { print $1 }' "$1"; }
+
 # pin <var> <file> — set <var> to the one sha256 the pin names for <file>, or stop.
 pin() {
   local sha
@@ -69,16 +65,6 @@ pin SHA_BASE_SF1 deep_base.sf1.fbin
 pin SHA_QUERY deep_query.public.10K.fbin
 pin SHA_GT deep_groundtruth.public.10K.ibin
 pin SHA_GLOVE_ZIP glove.6B.zip
-# S3 holds whole files, so its base slice needs a whole-file pin for this SF.
-if [ "$SOURCE" = s3 ]; then
-  if [ -z "$(embeddings_pinned_sha "$PIN" "deep_base.sf${SF}.fbin")" ]; then
-    echo "error: --from-s3 serves only the scale factors $PIN names, not SF=$SF;" >&2
-    echo "       without --from-s3, SF=$SF is fetched from the origins." >&2
-    exit 1
-  fi
-  pin SHA_BASE "deep_base.sf${SF}.fbin"
-  s3_args EMBEDDINGS_S3
-fi
 mkdir -p "$CACHE"
 
 BASE_FILE="$CACHE/deep_base.sf${SF}.fbin"
@@ -90,28 +76,9 @@ GLOVE_100D="$CACHE/glove.6B.100d.txt"
 # verify <file> <sha256>  — empty sha means "cannot verify" (returns non-zero).
 verify() { [ -n "$2" ] && [ -f "$1" ] && echo "$2  $1" | sha256sum -c --status; }
 
-# fetch_s3 <outfile> <sha> — skip if already verified. The object lands beside <outfile>
-# and is moved over it only once its sha256 is the pin's, so a refused file is never left.
-fetch_s3() {
-  local out="$1" sha="$2" url
-  url="s3://$EMBEDDINGS_BUCKET/$(embeddings_key "$sha" "$(basename "$out")")"
-  if verify "$out" "$sha"; then echo "  cached+verified: $(basename "$out")"; return 0; fi
-  echo "  fetching $url ..."
-  aws "${EMBEDDINGS_S3[@]}" s3 cp --only-show-errors "$url" "$out.partial" \
-    || { rm -f "$out.partial"; echo "error: fetching $url failed (above)" >&2; exit 1; }
-  if ! verify "$out.partial" "$sha"; then
-    echo "error: $url arrived with sha256 $(sha256sum "$out.partial" | cut -d' ' -f1), not the pinned $sha" >&2
-    rm -f "$out.partial"
-    exit 1
-  fi
-  mv -f "$out.partial" "$out"
-  echo "  ok (sha256 verified): $(basename "$out")"
-}
-
 # fetch <url> <outfile> <sha> [extra curl args...]  — skip if already verified.
 fetch() {
   local url="$1" out="$2" sha="$3"; shift 3
-  if [ "$SOURCE" = s3 ]; then fetch_s3 "$out" "$sha"; return; fi
   if verify "$out" "$sha"; then echo "  cached+verified: $(basename "$out")"; return 0; fi
   echo "  fetching $(basename "$out") ..."
   # Same stall guard as the base slice: some origins are unreachable from some hosts
@@ -180,9 +147,7 @@ if [ "$need" -gt "${avail:-0}" ]; then
 fi
 echo "  pre-flight: need ~$(( need / 1048576 )) MiB, have $(( ${avail:-0} / 1048576 )) MiB free"
 
-if [ "$SOURCE" = s3 ]; then
-  fetch_s3 "$BASE_FILE" "$SHA_BASE"
-elif base_prefix_ok "$BASE_FILE" && [ "$(stat -Lc%s "$BASE_FILE")" -ge "$BASE_BYTES" ]; then
+if base_prefix_ok "$BASE_FILE" && [ "$(stat -Lc%s "$BASE_FILE")" -ge "$BASE_BYTES" ]; then
   echo "  cached+verified: $(basename "$BASE_FILE") ($(stat -Lc%s "$BASE_FILE") bytes, need $BASE_BYTES)"
 elif donor=$(larger_slice_for "$BASE_BYTES"); then
   ln -sfn "$donor" "$BASE_FILE"

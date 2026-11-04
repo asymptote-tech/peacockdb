@@ -503,6 +503,14 @@ module line, two, or one naming no release or two, and an unreadable file refuse
 the `--- run ---` trailer a section ends with: its keys in order, the five provenance keys
 last, each with the run's own value
 
+| Device case lists | [test_support::device_cases::tests](../peacockdb-core/src/test_support/device_cases/tests.rs) | 11 |
+|---|---|--:|
+
+a device's `cases.csv`, through its one reader and writer: a list round-trips, and a note keeps
+its commas. A skipped row names a reason and no mode. An `ok` or `wrong` row names its modes. A
+`wrong` row's note is its `#NN` ticket, and an `ok` row has none. Refused, naming the line: a
+wrong header, an unknown mode or status, a row short of six fields, and a case listed twice
+
 | Golden merge | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 9 |
 |---|---|--:|
 
@@ -568,7 +576,7 @@ dataset would demonstrate nothing. Then pbench's data itself, read off the commi
 that drops one or writes a timestamp at the wrong unit goes red here rather than at the query
 somebody writes a year later
 
-| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 10 |
+| Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 12 |
 |---|---|--:|
 
 the cpu helper shown failing, which is what keeps the corpus honest: a wrong row, a missing row,
@@ -576,7 +584,8 @@ a digit past the tolerance, a section another mode wrote, and under `no_sort` a 
 the right rows in the wrong order; plus every `CpuOracle` and `GpuResultMode` variant being named
 by some registry row, `data_fusion` decoded through `stringify!`'s spacing, and
 `data_fusion(no_sort, …)` refused; and the line's one row order, a `duckdb_none` line's being its
-golden's
+golden's. And the case lists' reader: a list reads as one argument vector per invocation of the
+named macro, a trailing comment dropped, and a line that never closes is refused, quoting itself
 
 | Registry CSV split | [test_support::registry::tests](../peacockdb-core/src/test_support/registry/tests.rs) | 9 |
 |---|---|--:|
@@ -906,7 +915,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py) | cost-report | 170 |
 | Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 100 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 26 |
-| cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 3 |
+| cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp), [PeacockGpu.DeviceInfoDescribesTheDevice](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 3 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249 | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp) | shad-gpu | 126 |
 | Join session (C++) | the four `peacock_join_*` symbols through the C ABI alone — plan bytes in, Arrow batches up, IPC answers down — over the matrix of [join-rewrite-design.md](tasks/join-rewrite-design.md) §5.6: all nine join types against keys only, a cross residual the AST takes and one it refuses, a residual reading one side alone, a nested loop whose conjuncts are all AST-able, partly so, or not at all, and a cross join; NULL keys on both sides under either `null_equals_null`, many-to-many keys, a composite key with a NULL in its second column; a build that is absent, zero rows or all-NULL keys, a probe that is absent, one batch, or three with a zero-row batch between; a projection absent, crossing sides, or empty and refused. Left and Full pad a NULL-key build row rather than dropping it. Five cases probe three batches with a zero-row batch between, no batch matching what another did, because `matched` is an OR folded across calls and a single batch cannot tell that from the last call's answer — which is the whole of #136. Four properties no answer can show get a case each — hoisting a one-side operand keeps a nested loop off the cross product, bounded by the same join whose condition needs no hoisting plus the build's own bytes; a probe hands its gathered columns over without a copy (#154), its peak bounded by the same cuDF calls on tables of the same shape and its `net` bounded *both* ways, since an upper bound is the only thing that sees a session retaining the batch it consumed; releasing a session, and ending the plan under a live one, give back the build side's own measured bytes; each call opens exactly one region; and the two `size_type` ceilings refuse by name rather than wrapping, asked on sizes because no test host holds a table that big | [JoinSession.LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey](../cpp/tests/gpu/test_join_session.cpp), [JoinSession.HoistingKeepsANestedLoopOffTheCrossProduct](../cpp/tests/gpu/test_join_session.cpp) | shad-gpu | 56 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
@@ -963,9 +972,8 @@ Host columns are audited, not assumed: they say whether the bytes were actually 
 there (`ls` + `sha256sum`, 2026-08-05). tpch.minimal and pbench.sf1 are in git; everything
 else is generated or fetched per host. S3 is Nebius object storage, endpoint
 `https://storage.eu-north1.nebius.cloud:443`. It accepts region `eu-north-1` and `eu-north1`
-alike; both were checked against it. `scripts/lib/calibration-bucket.sh` and
-`scripts/lib/embeddings-bucket.sh` take the endpoint and region from `AWS_ENDPOINT_URL` and
-`AWS_REGION` (`scripts/lib/s3.sh`). `upload_datasets.sh` and `check_s3_datasets.py` still name the
+alike; both were checked against it. `scripts/lib/calibration-bucket.sh` takes the endpoint and
+region from `AWS_ENDPOINT_URL` and `AWS_REGION` (`scripts/lib/s3.sh`). `upload_datasets.sh` and `check_s3_datasets.py` still name the
 endpoint themselves. With `AWS_ENDPOINT_URL` unset, the calibration bucket uses the endpoint and
 region above, for `build-test-shadgpu.sh`.
 
@@ -1330,9 +1338,10 @@ What the arrows are there to make checkable:
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
   record by call, not by execution, so its three cases are drawn beside them, and it is still
   a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
-  over them, and that step runs from a checkout carrying the 26-case list: 02f6a4d8, whose case
-  lines are `h200/cases.inc`'s. `create_nsys_profile.sh --metrics` takes every case of the list
-  and checks its merge against the pinned records, which hold the twenty-six.
+  over them, and that step runs from a checkout carrying the 26-case list: f3db66b1 (02f6a4d8 on
+  ENS-optimizer), whose case lines are `h200/cases.csv`'s rows. `create_nsys_profile.sh --metrics`
+  takes every case of the list and checks its merge against the pinned records, which hold the
+  twenty-six.
 - **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the
   call's executions, and `executions` says how many. A row per execution would be ~255
   thousand rows and 25 MB over the corpus; a row per call is the record's 25,522 calls.
@@ -1943,7 +1952,9 @@ No image holds a secret, a host or Claude Code. Both run as any uid: pass
 ### The build image
 
 - `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the nebius-gpu environment the
-  committed device answers came from. Its `bin/` is not on PATH.
+  committed device answers came from. Its `bin/` is not on PATH, and its `lib/` is not on the
+  loader path: an FFI test binary run in the image needs `-e LD_LIBRARY_PATH=/opt/cudf/lib`, or
+  it exits 127 on `libcudf.so`.
 - nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (26.02) as `CC`/`CXX`, cmake, ninja, rust,
   ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
 - DuckDB 1.5.4 with its tpch and tpcds extensions in `/opt/duckdb-ext`. The image sets
@@ -2021,37 +2032,29 @@ The binaries and data are mounted, never in the image:
 
 ## Containers
 
-An ensemble instance runs in the build image on a CPU VM, one container per chain. A developer
-readies a VM from their own machine, the laptop, with `scripts/env/provision-vm.sh`, and starts a
-chain from there with `scripts/env/up.sh`. On the VM the scripts are `bootstrap-vm.sh`, `up.sh`
-and `down.sh`. Each has `--help`.
+A developer works on a CPU VM: builds run in the build image there, and so do the DuckDB runs that
+want its 128 cores. The developer readies it from their own machine, the laptop, with
+`scripts/env/provision-vm.sh`, which runs `scripts/env/bootstrap-vm.sh` on the VM. Each has
+`--help`.
 
 ### Trust
 
-The VM is reachable from any instance as the developer's user. An instance writes the clone's
-`.git`, `CLAUDE_CONFIG_DIR` and `~/.config/gh`, and all three hold configuration that runs code:
-git hooks, Claude settings hooks, gh aliases. The developer's user is in the docker group, which is
-root. So the VM holds nothing beyond what every instance may use: the S3 read key, a fine-grained
-PAT scoped to the repository, and a key made for the GPU hosts. Never the S3 writer key, never
-another secret.
+The VM holds only what every run there may use: the S3 read key, a fine-grained PAT scoped to the
+repository, and the developer's key to the GPU hosts. Never the S3 writer key, never another
+secret. The developer's user is in the docker group, which is root.
 
-The PAT's Contents and Actions write let an instance push its branch and dispatch `pipeline.yml`
-on it. That code then runs in CI with CI's secrets: the nebius service-account key, the GPU hosts'
-ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the ensemble runs
-device steps without a person. So CI's S3 secret stays a read-only key too.
+The PAT's Contents and Actions write let work on the VM push its branch and dispatch
+`pipeline.yml` on it. That code then runs in CI with CI's secrets: the nebius service-account key,
+the GPU hosts' ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the
+ensemble runs device steps without a person. So CI's S3 secret stays a read-only key too.
 
 - **Developers on one VM** are separate Linux users. But every one of them is in the docker group,
   which is root, and has sudo. So each can read the others' PAT and keys. Share a VM only among
   people who trust each other.
 - **`peacock.env` holds only the storage keys** and may be passed between developers. The PAT and
   the GPU key are personal: never forward them. `provision-vm.sh` refuses a `peacock.env` with any
-  other key, naming the key and never its value.
-- `up.sh`, `down.sh`, `bootstrap-vm.sh` and `scripts/lib/machine.sh` run every git call on the
-  machine with `-c core.hooksPath=/dev/null -c core.fsmonitor=false`.
-- `up.sh` refuses to start while the clone has an active hook (a file in `.git/hooks` not ending
-  in `.sample`), or `core.hooksPath` or `core.fsmonitor` in its `.git/config`. It names each.
-- **Known limitation:** `up.sh` cannot tell a read key from a write key. An env file holding the
-  writer key gives every instance write access to the buckets.
+  other key, naming the key and never its value. Use the read key: nothing tells it from the
+  writer key.
 
 ### A fresh VM
 
@@ -2060,51 +2063,51 @@ Once per developer:
 1. Get `peacock.env` from whoever administers the storage: the four storage keys (below).
 2. Have someone create the VM, with a login user that has sudo and your ssh key.
 3. On the laptop, in a clone of the repository:
-   `scripts/env/provision-vm.sh <login>@<address> --env <the file you got>`. The laptop needs
-   bash 4.4 or later; on macOS, `brew install bash`.
+   `scripts/env/provision-vm.sh <login>@<address> --env <the file you got> --gpu-key <your key>`.
+   The laptop needs bash 4.4 or later; on macOS, `brew install bash`.
    It prints a GitHub token recipe: make the token on GitHub and paste it. It ends in Claude
    Code's login: open the URL it prints and finish there.
-
-Per chain, on the laptop: `scripts/env/up.sh A` for a new chain, `scripts/env/up.sh A --branch
-<its branch>` for one that ran before. `scripts/env/down.sh A` stops it.
 
 **What `provision-vm.sh` does.** Every argument is checked before anything is written. A rerun
 skips what is done.
 - On the laptop, in `~/.config/peacock/` (mode 700, each file 600): `peacock.env`, copied from
-  `--env`, which is needed only while it is missing, with every CR dropped and a final newline; `github-pat`, the token, asked for when
-  missing or with `--new-pat`; `gpu_ed25519` and `.pub`, made when missing. The `.pub` is printed:
-  put it on a GPU host when you create one. The token must be `github_pat_…` and able to read the
-  repository; gh checks it with the token in its environment, never its argv.
+  `--env`, which is needed only while it is missing, with every CR dropped and a final newline;
+  `github-pat`, the token, asked for when missing or with `--new-pat`. The token must be
+  `github_pat_…` and able to read the repository; gh checks it with the token in its environment,
+  never its argv.
+- The GPU key is taken, never made. `--gpu-key` names a private key the GPU hosts already accept,
+  with its `.pub` beside it; `~/.config/peacock/gpu_ed25519` by default. A missing key or `.pub`
+  is refused, naming `--gpu-key`. On dev the key is `~/.ssh/id_ed25519`.
 - As `<login>`, with sudo: groups `docker` and `peacock`; your Linux user (`--user`, your laptop
   user name by default) in both, with `<login>`'s `authorized_keys` and passwordless sudo.
-- As your user, over ssh: `bootstrap-vm.sh` (`--ref <branch>` passed on, master by default),
-  skipped once the machine marker is there; a `--ref` the VM's clone is not on is then refused.
-  Then the secrets, on ssh's stdin alone: `peacock.env`
-  and the GPU key pair into `~/.config/peacock/`, the VM's `peacock.env` gaining
-  `GPU_SSH_KEY_FILE`; the PAT into `gh auth login --with-token --insecure-storage`, then
-  `gh auth setup-git`. The PAT is never in the VM's `peacock.env`. Then git's identity, your
-  laptop's `user.name` and `user.email`.
+- As your user, over ssh, on every run: `bootstrap-vm.sh`, `--ref <branch>` passed on, master by
+  default. It skips what is done, and refuses a `--ref` the VM's clone is not on.
+  Then the secrets, on ssh's stdin alone: `peacock.env`, and the GPU key pair as
+  `~/.config/peacock/gpu_ed25519` and `.pub`, the VM's `peacock.env` gaining `GPU_SSH_KEY_FILE`;
+  the PAT into `gh auth login --with-token --insecure-storage`, then `gh auth setup-git`. The PAT
+  is never in the VM's `peacock.env`. Then git's identity, your laptop's `user.name` and
+  `user.email`.
 - The VM goes into the laptop's `~/.config/peacock/vm` as `<name> <user>@<address>`; `--name` is
-  the address by default. The last line is up.sh's default VM.
+  the address by default.
 - Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already.
 - `provision-vm.sh --new-pat` replaces the PAT on the laptop and on every VM in `vm` it reaches.
   It names each VM it cannot reach.
 
-**`bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`** prepares the machine, as a user with sudo.
-`provision-vm.sh` runs it; it is also one file you can fetch from the repository's raw view and
-run by hand. After one `apt-get update` it installs what is missing: git, curl and python3;
-Docker (`docker.io`); gh at `GH_VERSION` in `/usr/local/bin`, from the tarball the image takes;
-Claude Code at `CLAUDE_CODE_VERSION` with `superpowers@claude-plugins-official`. It makes the
-machine's data directory (below). It clones the repository into `~/peacockdb`, at `--ref` or
-master; a rerun with `--ref` passes when the clone is on that branch. It fetches the cuDF checkout
-the clone pins. In the build image it fills cargo's registry and generates sf1. Its last step
-writes the marker `~/.config/peacock/machine`: this machine runs instances. A step already done is
-skipped.
+**`bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`** prepares the machine, as a user with sudo,
+never root. `provision-vm.sh` runs it; it is also one file you can fetch from the repository's raw
+view and run by hand. After one `apt-get update` it installs what is missing: git, curl and
+python3; Docker (`docker.io`); gh at `GH_VERSION` in `/usr/local/bin`, from the tarball the image
+takes; Claude Code at `CLAUDE_CODE_VERSION` with `superpowers@claude-plugins-official`. It makes
+the machine's data directory (below). It clones the repository into `~/peacockdb`, at `--ref` or
+master; a `--ref` other than the branch an existing clone is on is refused, naming both. It
+fetches the cuDF checkout the clone pins. It pulls the build image of cuDF `--cudf`, 25.02 by
+default, and refuses one whose `peacockdb.inputs` label differs from the clone's inputs, naming
+each (`scripts/lib/image-inputs.sh`). In that image it fills cargo's registry and generates sf1.
+A step already done is skipped.
 - The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
   afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
   moves on, the check fails, and the two pins must be bumped.
-- `~/.bashrc` gets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CONFIG_DIR=$HOME/.claude`, so Claude Code
-  keeps its login, settings and plugins in one directory.
+- `~/.bashrc` gets `DISABLE_AUTOUPDATER=1`, so Claude Code stays at its pin.
 
 **By hand, without `provision-vm.sh`:** run `bootstrap-vm.sh`, log out and in again (for the
 docker group), then: `claude`, then `/login`; gh with a fine-grained PAT, below;
@@ -2117,8 +2120,7 @@ reaches every repository the user can. On GitHub: resource owner `asymptote-tech
 Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
 `gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read from
 stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
-`~/.config/gh/hosts.yml`, which the container mounts; without it gh puts the token in a desktop
-keyring where there is one, and `up.sh` refuses that. Then `gh auth setup-git`.
+`~/.config/gh/hosts.yml` rather than a desktop keyring. Then `gh auth setup-git`.
 
 ### The env file
 
@@ -2131,114 +2133,31 @@ The storage keys, in a docker env file, `NAME=value` a line:
 
 That is the whole of the laptop's `peacock.env`; blank and `#` lines are skipped, as docker
 skips them, and any other key is refused by name. On a VM, `~/.config/peacock/peacock.env` is the
-same with one more line, which `provision-vm.sh` writes, and may get a provider's:
+same with one more line, which `provision-vm.sh` writes:
 
     GPU_SSH_KEY_FILE=/home/<user>/.config/peacock/gpu_ed25519   # the key to GPU hosts
-    PROVIDER_CONFIG_DIR=/home/<user>/.<provider>                # optional: a provider CLI's config
 
-Every start needs the file: `up.sh` reads `~/.config/peacock/peacock.env`, or the file `--env`
-names. The four `AWS_*` lines are required; use the read key. `GH_TOKEN` and `GITHUB_TOKEN` are
-refused: gh's login is the machine's. The two paths must be absolute;
-each is mounted read-only at the same path. The file reaches a container only as `--env-file`.
+### What a VM holds
 
-### Instances
-
-    scripts/env/up.sh A                        # a new chain, on the laptop or on the VM
-    scripts/env/up.sh A --branch ENS-<b>       # a chain that ran before
-    docker exec -it peacock-<user>-A bash      # on the VM
-    scripts/env/down.sh A
-
-- **From the laptop.** On a machine without the marker, `up.sh` and `down.sh` run the VM's own
-  `~/peacockdb/scripts/env/up.sh` (or `down.sh`) with the same arguments, over ssh, as the user
-  `vm` records. The VM is the last line of `~/.config/peacock/vm`, or `--vm <name>`. A path given
-  to `--env` is the VM's. With no marker and no `vm` file they refuse and name `provision-vm.sh`.
-  `--vm` on the VM is refused. The remote command carries `PEACOCK_FORWARDED=1`, and a call that
-  carries it is never forwarded again. The three laptop scripts need bash 4.4 or later, and say
-  so before they source anything.
-- `up.sh <chain>` starts the container `peacock-<user>-<chain>`, labelled
-  `peacockdb.chain=<chain>` and `peacockdb.user=<user>`, as the user's uid:gid. It runs
-  `scripts/ensemble-watchdog.sh <chain>` in the chain's worktree of `~/peacockdb`,
-  `~/peacock-instances/<chain>`. The worktree and the clone's `.git` are mounted read-write at
-  their own paths, so a commit made inside lands in the clone. `down.sh <chain>` stops and removes
-  the caller's own container, found by both labels (with `-` in user and chain names, the name
-  alone can be two pairs), and keeps the worktree. `up.sh` reuses it as it is, its branch left
-  alone; a `--branch` naming another branch, or a `--board`, is refused then. Remove one with
-  `git worktree remove`.
-- **A chain runs once a machine.** The board is one per repository. `up.sh` refuses a chain while
-  any user's container carries its label, in any state, naming the user. A machine-wide lock in
-  the data directory holds from that check until the container is up.
-- **The chain's branch is never guessed.** The board names no branch, and branches are named
-  unlike their tasks (`ENS-optimizer` for `join-optimizer.md`). A new worktree is made from
-  origin, fetched first.
-  - `--branch <b>` resumes a chain that ran before: the worktree is on `<b>`, tracking
-    `origin/<b>`. A local `<b>` behind it is fast-forwarded; one diverged from it is refused,
-    naming both, and so is one another worktree has checked out. Refused: no `origin/<b>`, or no
-    section for the chain on its board.
-  - Without it, a new chain. Its section on the board at `--board <ref>`, `origin/master` by
-    default, gives its base, `(base: <b>)`, and its first task, the lowest-numbered `### <n>.`
-    heading's `<task>.md`. `up.sh` reads the board at the tip of every `origin/ENS*` branch first.
-    Where the chain's section holds that task at `building` or a later state (`blocked(…)` and
-    `rebase needed(…)` counting as the state they carry), it stops: "chain <c>
-    already ran on <branches>; resume with --branch <b>". It stops too when origin or the clone
-    has `ENS-<task>` already. Otherwise the worktree is on a new local `ENS-<task>` at
-    `origin/<base>`: the first branch checked out before the watchdog starts. Refused: no section
-    for the chain on that board, a section with no task or no base, a base origin lacks, and a
-    base whose own board lacks the chain, since the coordinator reads that board.
-  - A chain defined on a branch other than master, a scratch chain say: `--board origin/<branch>`,
-    with `(base: <branch>)` in its section, so its first branch carries that board.
-- `--cudf <v>` takes `peacockdb-build:cudf-<v>`, 25.02 by default. `--image cudf-<v>-<commit>`
-  keeps an instance on one image.
-- **Refused before anything starts**, exit 2, naming what is missing: root; Claude Code not
-  installed or not logged in; no `~/.config/gh/hosts.yml`; no `oauth_token` in it (a keyring
-  login); an `oauth_token` that is not a fine-grained PAT (`github_pat_…`); `gh auth status`
-  failing with `GH_TOKEN` and `GITHUB_TOKEN` unset; no git identity in `~/.gitconfig`; no
-  `/usr/local/bin/gh auth git-credential` helper for github.com there (`gh auth setup-git`); no env
-  file; a missing, empty or repeated key; a relative path; a data directory missing or not
-  writable; a hook in the clone; a container of the chain. A login the container cannot see does
-  not count: a token in the environment or a desktop keyring stays on the machine. Neither a
-  key's value nor a token is ever printed.
 - **The data directory** is the machine's, shared by its developers: `/var/lib/peacock`, or
   `$PEACOCK_DATA_DIR`. `bootstrap-vm.sh` makes it with sudo: group `peacock`, setgid, mode 2775,
-  owned by the user who ran it. `provision-vm.sh` puts every developer in `peacock`. What `up.sh`
-  and `bootstrap-vm.sh` write there is written under umask 002, the generator in the build image
+  owned by the user who ran it. `provision-vm.sh` puts every developer in `peacock`. What
+  `bootstrap-vm.sh` writes there is written under umask 002, the generator in the build image
   too. So one developer reuses another's sf1 and cuDF checkouts, takes their locks, and clears a
-  crashed `.partial` they left. cargo's registry and ccache stay per user.
+  crashed `.partial` they left. cargo's registry stays per user.
 - **third_party/cudf.** The FFI build's configure reads cuDF's cmake files. The machine keeps one
   checkout a commit, `<data dir>/cudf/<commit>/`, with the paths the build image's prefetch takes
-  (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`). `up.sh` mounts the one its worktree's gitlink
-  names read-only at the worktree's `third_party/cudf`, fetching it first, under a lock, when the
-  machine has none. So two instances on different commits each see their own, and none moves
-  under a running one. The clone's own `third_party/cudf` is never read. The checkout can be
-  another developer's, so the container's git trusts that path (`safe.directory`, passed as
-  `GIT_CONFIG_*`). An old checkout is removed by hand.
-- **Refused after the pull**: an image whose `peacockdb.inputs` label differs from the
-  worktree's inputs, naming each input. `image.sh` writes the label
-  (`scripts/lib/image-inputs.sh`): the sha256 of each `docker/` file the Dockerfile reads, the
-  25.02 build image taking nvcc from the 26.02 spec; one hash of the `pins.env` lines the
-  Dockerfile declares as `ARG`, less one declared only in another cuDF version's stage
-  (`GCC_26_02` under `AS cudf-26.02`), so a machine-only pin such as `CLAUDE_CODE_VERSION` stales
-  no image; and for the build image the `third_party/cudf` commit and the flatbuffers `GIT_TAG`.
-  The hash is the same in every locale. An image without the label is refused.
-- Each instance has its own home, `~/peacock-instances/.home/<chain>`, mounted at `$HOME`, and
-  builds into its worktree's `target/`. Its `/etc/passwd` and `/etc/group` are the image's with
-  the user added at its uid, gid and home, written to `~/peacock-instances/.etc/<chain>/` and
-  mounted read-only. So ssh and anything else that looks the uid up finds it.
-- From the machine, read-only: the Claude Code install (`~/.local/share/claude`,
-  `~/.local/bin/claude`), `~/.gitconfig`, `~/.config/peacock/hosts/`, the cuDF checkout,
-  cargo's registry at `/opt/rust/cargo/registry`, and sf1. Read-write and shared by the user's
-  instances: `CLAUDE_CONFIG_DIR`, `~/.config/gh` and ccache (`~/.cache/peacock/ccache`).
-- **The registry** is `~/.cache/peacock/cargo-registry`. Before an instance starts, `up.sh`
-  runs `cargo fetch --locked` for its worktree in the build image, under a lock. That is the one
-  step that writes the registry. A crate an agent adds mid-chain is not in it: the build fails
-  until `down.sh` and `up.sh` fetch it.
+  (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`). `bootstrap-vm.sh` fetches the one the clone's
+  gitlink names, under a lock, when the machine has none. The clone's own `third_party/cudf` is
+  never read. An old checkout is removed by hand.
+- **The registry** is `~/.cache/peacock/cargo-registry`. `bootstrap-vm.sh` runs
+  `cargo fetch --locked` for the clone in the build image, the clone mounted read-only, under a
+  lock, so two runs never write it at once.
 - **The data.** `<data dir>/<hash>/` holds `tpch.sf1` and `tpcds.sf1`. The hash is over the
-  worktree's `generate_testdata.sh`, the `DUCKDB_VERSION` pin and the generator's arguments
-  (`scripts/lib/data-inputs.sh`). A set is mounted read-only at the worktree's
-  `testdata/<dataset>`. With none for the hash, `up.sh` generates one in the build image, with
-  `--network none`, under a lock. Two starts at once generate it once. A set appears only
-  complete. An old set is removed by hand.
-- Docker would create a missing mount point as root on the machine, so `up.sh` creates each one
-  as the user first.
+  clone's `generate_testdata.sh`, the `DUCKDB_VERSION` pin and the generator's arguments
+  (`scripts/lib/data-inputs.sh`). With none for the hash, `bootstrap-vm.sh` generates one in the
+  build image, with `--network none`, under a lock. Two runs at once generate it once. A set
+  appears only complete. An old set is removed by hand.
 
 ## Benchmarks
 

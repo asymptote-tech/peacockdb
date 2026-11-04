@@ -59,10 +59,11 @@ place (26.02 at `~/miniforge3/envs/rapids-26.02`, 25.02 at `~/data/miniforge3/en
    pbench have no sf40 data, so the comparison is the tpch sf40 cases among the flipped cells
    (`join-rewrite-cell-estimate.md`'s comparison). Each run block names its cuDF (`cudf=`) with the
    rest of its provenance, and the results go under the device's tree,
-   `testdata/benchmark-results/<device>/` ([`containers.md`](containers.md)): one tree per card,
-   not per cuDF. The 25.02 run is committed first; the 26.02 run on the same card then rewrites
-   those files in the working tree, `git diff` against the commit is the comparison, and the
-   trailers' `cudf=` lines say which side each number is. Which run stays committed is #244's.
+   `testdata/benchmark-results/<device>/` ([containers' spec](../archive/archived-tasks.md)): one
+   tree per card, not per cuDF. The 25.02 run is committed first; the 26.02 run on the same card
+   then rewrites those files in the working tree, `git diff` against the commit is the comparison,
+   and the trailers' `cudf=` lines say which side each number is. Which run stays committed is
+   #244's.
 4b. The device's answers on 26.02: a corpus cycle with `PCK_WRITE_GPU_RESULT=26.02` writes
    `gpu-result-26.02.txt` (gitignored, never over the committed 25.02 file), compared with DuckDB
    by the same `duckdb_gpu_*` cases pointed at it; every divergence from DuckDB that 25.02 does

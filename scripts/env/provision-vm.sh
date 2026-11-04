@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Ready a VM for one developer, run on their own machine (llm-wiki/build-test.md, "A fresh VM").
 #
-#   provision-vm.sh <login>@<address> [--env <file>] [--user <name>] [--name <vm>] [--ref <branch>] [--new-pat]
+#   provision-vm.sh <login>@<address> [--env <file>] [--user <name>] [--name <vm>] [--ref <branch>]
+#                   [--gpu-key <file>] [--new-pat]
 #   provision-vm.sh --new-pat
 #
 # <login> has sudo on the VM. The developer's Linux user there is --user, this machine's by default,
-# and bootstrap-vm.sh runs as it at --ref. --env is needed until ~/.config/peacock holds the storage
-# keys. The PAT, asked for once, and the GPU key reach the VM on ssh's stdin alone. The VM becomes
-# up.sh's default as --name, its address by default. --new-pat replaces the PAT here and on every
-# recorded VM it reaches. A rerun skips what is done.
+# and bootstrap-vm.sh runs as it at --ref on every run. --env is needed until ~/.config/peacock holds
+# the storage keys. --gpu-key is a private key the GPU hosts already accept, beside its .pub,
+# ~/.config/peacock/gpu_ed25519 by default. The PAT, asked for once, and the GPU key reach the VM on
+# ssh's stdin alone. The VM is recorded as --name, its address by default. --new-pat replaces the
+# PAT here and on every recorded VM it reaches. A rerun skips what is done.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -19,14 +21,16 @@ shopt -s inherit_errexit
 
 die() { echo "provision-vm.sh: $*" >&2; exit 2; }
 
-target="" env_in="" user="" name="" ref="" new_pat=""
+target="" env_in="" user="" name="" ref="" gpu_key="" new_pat=""
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
-    --env|--user|--name|--ref)
+    --env|--user|--name|--ref|--gpu-key)
       [ -n "${2:-}" ] || die "$1 needs a value"
-      case "$1" in --env) var=env_in ;; --user) var=user ;; --name) var=name ;; --ref) var=ref ;; esac
+      case "$1" in
+        --env) var=env_in ;; --user) var=user ;; --name) var=name ;; --ref) var=ref ;; --gpu-key) var=gpu_key ;;
+      esac
       take "$var" "$1" "$2"
       shift 2 ;;
     --new-pat) take new_pat "$1" 1; shift ;;
@@ -36,7 +40,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$target" ]; then
   [ -n "$new_pat" ] || die "name the VM: provision-vm.sh <login>@<address>, see --help"
-  [ -z "$env_in$user$name$ref" ] || die "--env, --user, --name and --ref ready a VM: name it, <login>@<address>"
+  [ -z "$env_in$user$name$ref$gpu_key" ] || die "--env, --user, --name, --ref and --gpu-key ready a VM: name it, <login>@<address>"
 else
   [[ "$target" =~ ^([a-z_][a-z0-9_-]*)@([^@[:space:]]+)$ ]] || die "not <login>@<address>: $target"
   login=${BASH_REMATCH[1]} address=${BASH_REMATCH[2]}
@@ -63,7 +67,9 @@ if [ -n "$target" ]; then
   [ -f "$env_src" ] || die "no env file $env_src"
   peacock_env_is_storage_only "$env_src"
   peacock_env_has_storage "$env_src"
-  if [ ! -f "$PEACOCK_GPU_KEY" ]; then command -v ssh-keygen > /dev/null || die "no ssh-keygen to make the GPU key"; fi
+  gpu_key=${gpu_key:-$PEACOCK_GPU_KEY}
+  [ -f "$gpu_key" ] || die "no GPU key $gpu_key: --gpu-key names a private key the GPU hosts accept"
+  [ -f "$gpu_key.pub" ] || die "no $gpu_key.pub beside the GPU key: --gpu-key names a key with its .pub"
 fi
 
 # The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
@@ -110,12 +116,6 @@ remote_test() {
 
 if [ -n "$target" ]; then
   if [ -n "$env_in" ]; then peacock_env_normalised "$env_in" "$PEACOCK_ENV"; fi
-  if [ ! -f "$PEACOCK_GPU_KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -C "peacock-gpu $(id -un)" -f "$PEACOCK_GPU_KEY"
-  fi
-  chmod 600 "$PEACOCK_GPU_KEY" "$PEACOCK_GPU_KEY.pub"
-  echo "The key to GPU hosts, $PEACOCK_GPU_KEY.pub: put it on a GPU host when you create one."
-  cat "$PEACOCK_GPU_KEY.pub"
 
   # The developer's own Linux user, reached with <login>'s keys. Its sudo widens nothing: the docker
   # group is root already. Joining the groups before its first login makes them its session's.
@@ -138,27 +138,24 @@ if [ "$user" != "$login" ]; then
 fi
 ROOT
 
-  if remote_test 'test -e .config/peacock/machine'; then
-    if [ -n "$ref" ]; then
-      on_branch=$(on "$dev" 'git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C peacockdb branch --show-current' \
-                    < /dev/null) \
-        || die "cannot read the branch of ~/peacockdb on $dev"
-      [ "$on_branch" = "$ref" ] \
-        || die "~/peacockdb on $dev is on ${on_branch:-a detached HEAD}, not $ref: --ref names the branch it is on"
-    fi
-    echo "$dev is bootstrapped already"
-  else
-    run='f=$(mktemp) && cat > "$f" && bash "$f"'
-    if [ -n "$ref" ]; then run+=" --ref $(printf %q "$ref")"; fi
-    on "$dev" "$run"'; s=$?; rm -f "$f"; exit $s' < "$here/bootstrap-vm.sh"
-  fi
+  # Every run: bootstrap-vm.sh skips what is done, and refuses a --ref the clone is not on.
+  run='f=$(mktemp) && cat > "$f" && bash "$f"'
+  if [ -n "$ref" ]; then run+=" --ref $(printf %q "$ref")"; fi
+  on "$dev" "$run"'; s=$?; rm -f "$f"; exit $s' < "$here/bootstrap-vm.sh"
 
-  # Secrets on ssh's stdin only. The VM's peacock.env names its own copy of the GPU key, on a line
-  # of its own whether or not the file ended in a newline.
-  tar -C "$PEACOCK_CONFIG" -cf - peacock.env gpu_ed25519 gpu_ed25519.pub \
+  # Secrets on ssh's stdin only, from a copy named as the VM keeps them. The VM's peacock.env names
+  # its own copy of the GPU key, on a line of its own whether or not the file ended in a newline.
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  cp "$PEACOCK_ENV" "$stage/peacock.env"
+  cp "$gpu_key" "$stage/gpu_ed25519"
+  cp "$gpu_key.pub" "$stage/gpu_ed25519.pub"
+  chmod 600 "$stage"/*
+  tar -C "$stage" -cf - peacock.env gpu_ed25519 gpu_ed25519.pub \
     | on "$dev" 'umask 077 && mkdir -p .config/peacock && chmod 700 .config/peacock &&
                  tar -C .config/peacock -xf - && cd .config/peacock &&
                  { [ -z "$(tail -c 1 peacock.env)" ] || echo; echo "GPU_SSH_KEY_FILE=$HOME/.config/peacock/gpu_ed25519"; } >> peacock.env'
+  rm -rf "$stage"
   if [ -n "$new_pat" ] || ! remote_test 'env -u GH_TOKEN -u GITHUB_TOKEN gh auth status > /dev/null 2>&1'; then
     on "$dev" 'gh auth login --with-token --insecure-storage' < "$PEACOCK_PAT"
   fi
@@ -170,7 +167,6 @@ ROOT
   if [ -f "$PEACOCK_VMS" ]; then awk -v n="$name" '$1 != n' "$PEACOCK_VMS" > "$vms"; fi
   echo "$name $dev" >> "$vms"
   mv "$vms" "$PEACOCK_VMS"
-  echo "$name ($dev) is the default VM for up.sh and down.sh"
 fi
 
 # Every other recorded VM: one that is down keeps the old token and is named, and the rest go on.
@@ -189,10 +185,10 @@ if [ -n "$new_pat" ] && [ -s "$PEACOCK_VMS" ]; then
 fi
 
 if [ -n "$target" ]; then
-  if remote_test 'test -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"'; then
+  if remote_test 'test -s "$HOME/.claude/.credentials.json"'; then
     echo "Claude Code is logged in on $dev"
   else
-    ssh "${ssh_opts[@]}" -t -- "$dev" 'CLAUDE_CONFIG_DIR=$HOME/.claude DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'
+    ssh "${ssh_opts[@]}" -t -- "$dev" 'DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'
   fi
 fi
 [ -z "$failed" ] || exit 1

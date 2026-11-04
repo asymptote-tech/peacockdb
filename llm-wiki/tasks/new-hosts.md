@@ -51,7 +51,8 @@ them serve three. Below, every name is the new one.
    CPU VM also gets DuckDB 1.5.4 (`docker/pins.env`) and the native `.duckdb` databases that
    `benchmarks/duckdb_minimal.sh` builds.
 6. **The H100 runs the device tiers and the benchmark in containers' run image.** That means
-   containers' unfinished device runner (`containers-impl.md` task 7), as
+   containers' unfinished device runner (task 7 of
+   `origin/ENS-containers:llm-wiki/tasks/containers-impl.md`), as
    `scripts/env/run-gpu.sh prepare|ship|run|pull`, with `nebius-h100` as its first VM. By the
    human's decision there are no host adapters: no `scripts/env/host/`, no host files under
    `~/.config/peacock/hosts/`. `run-gpu.sh` takes `nebius.sh`'s `--instance-id` and `--profile`
