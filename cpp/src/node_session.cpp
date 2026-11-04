@@ -900,5 +900,21 @@ const TableResult& NodeSession::table_for(uint64_t handle) const {
 
 void NodeSession::release(uint64_t handle) { impl_->registry.erase(handle); }
 
+uint64_t NodeSession::duplicate_handle(uint64_t handle) {
+  auto it = impl_->registry.find(handle);
+  if (it == impl_->registry.end())
+    throw std::runtime_error("NodeSession::duplicate_handle: unknown handle " +
+                             std::to_string(handle));
+  // The producer is copied, not looked up through `producer_of`: a duplicate opens no
+  // region, so a handle that cannot be charged is refused at its export, as before.
+  RegionSink* sink = impl_->measuring();
+  TableResult copy = it->second;
+  uint64_t duplicate = impl_->register_handle(std::move(copy), nullptr, 0);
+  if (sink) {
+    if (auto producer = sink->produced_by.find(handle); producer != sink->produced_by.end())
+      sink->produced_by[duplicate] = producer->second;
+  }
+  return duplicate;
+}
 
 }  // namespace peacock

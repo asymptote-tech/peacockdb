@@ -705,7 +705,10 @@ read "the planner inserts `GpuMergePartitions` below it", not "this category is 
 reference its `Drop` needs, and the seq of the call that produced it — which is what a slice
 or an export of the handle is charged to when timing is on. Ownership is by move: every executor method takes its batch by
 value, so reuse after consumption is a compile error rather than a run-time throw, and neither
-batch type is `Clone` — a future dual consumer writes an explicit copy. A handle consumed by an
+batch type is `Clone`. A second consumer of one batch takes `Batch::share`, which copies no row:
+`CpuBatch` clones its `RecordBatch`, whose arrays are `Arc`s, and `GpuBatch` calls
+`peacock_handle_duplicate`, a second handle over the same columns with the same producer. Each
+batch is then consumed or dropped on its own. A handle consumed by an
 FFI call skips `Drop`, because C++ erased it.
 
 **Executors are fused call interfaces**: every state transition emits in the same call, so there
@@ -1025,7 +1028,7 @@ same expression and agree by construction rather than by two implementations hap
 match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
 stack two merges, per lane and then across lanes.
 
-Three additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields
+Four additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields
 are plan constants and these are decided per call:
 
 - `peacock_executor_execute_scan_rowgroups` — the scan arm otherwise emits every map entry in
@@ -1035,6 +1038,9 @@ are plan constants and these are decided per call:
 - `peacock_executor_slice_handle` — a mid-plan limit would otherwise hold every row ahead of the
   ones it wants, because frozen bounds are only correct against a table starting at row 0 of the
   stream. `OFFSET 1000000 LIMIT 10` would hold a million rows to return ten.
+- `peacock_handle_duplicate` — every call consumes its input handle, so a batch two consumers
+  read needs a second handle. The duplicate shares the original's columns and allocates nothing;
+  it does not consume the original, and its producer is the original's.
 
 The two limit symbols are not interchangeable: one produces a result, the other a handle.
 
@@ -1115,9 +1121,10 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is twenty-nine symbols in seven groups: lifecycle (`peacock_gpu_version`,
+The ABI is thirty symbols in seven groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
-node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
+node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `handle_duplicate`, a second
+handle over one table for a second consumer, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
 `handle_schema`, a handle's schema without its rows, read by the test harness alone); the join
 session (`peacock_join_build`, `_probe`, `_finish`, `_release`, below);

@@ -320,6 +320,19 @@ TEST(PeacockGpu, HandleFromArrowNeedsASession) {
   peacock_executor_destroy(ex);
 }
 
+// A duplicate is a second handle in the session's registry, so with no session there is
+// nothing to duplicate; the null arguments are refused before that.
+TEST(Lifecycle, DuplicateWithNoPlanIsRefused) {
+  peacock_executor_t* ex = nullptr;
+  ASSERT_EQ(peacock_executor_create(0, &ex), 0);
+  uint64_t out = 0;
+  EXPECT_NE(peacock_handle_duplicate(nullptr, 1, &out), 0);
+  EXPECT_NE(peacock_handle_duplicate(ex, 1, nullptr), 0);
+  EXPECT_EQ(peacock_handle_duplicate(ex, 1, &out), 1);
+  EXPECT_STREQ(peacock_last_error(ex), "no plan loaded (call peacock_executor_begin_plan first)");
+  peacock_executor_destroy(ex);
+}
+
 // The timing switch, on the tier that has no GPU because it needs none: it is a
 // process-global mode, and the whole safety argument for the benchmark work is that the
 // correctness suite never leaves it on. Stuck on, it would leak a CUDA event pair per

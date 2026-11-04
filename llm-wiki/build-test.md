@@ -400,11 +400,12 @@ name — a mark join's mark among them — a null decimal prints as `NULL`, a so
 mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec
 suffix
 
-| One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
+| One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 2 |
 |---|---|--:|
 
 one source step written once over `Backend` and driven against two backends with different
-batch types, so the trait's associated types are exercised the way both engines use them
+batch types, so the trait's associated types are exercised the way both engines use them; and
+a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by column
 
 *subcomponent*
 
@@ -1021,12 +1022,14 @@ seventh and has no caller; its arm reads the child's lane count. The contract ta
 half is the one case in `contract.rs`; and under `Events`, a slice and an export are charged to
 the node that produced the handle
 
-| Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 4 |
+| Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 5 |
 |---|---|--:|
 
 three of the four per-call symbols on a live GPU — a scan's row groups, an export range, a
 slice; `handle_schema` is `test_support`'s schema read — and
-the release skipped exactly where a call consumed the handle
+the release skipped exactly where a call consumed the handle; and a `GpuBatch`'s share, through
+`peacock_handle_duplicate`, reading the same rows under the same producer after the original
+is dropped
 
 *module unit*
 

@@ -244,6 +244,11 @@ class NodeSession {
   /// Release a resident handle (idempotent — already-consumed handles are no-ops).
   void release(uint64_t handle);
 
+  /// A new handle over the same owners as `handle`, which is NOT consumed: no device
+  /// allocation, and the columns live until the last handle viewing them goes. The new
+  /// handle's producer is the original's, so an export of either is the same node's.
+  uint64_t duplicate_handle(uint64_t handle);
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

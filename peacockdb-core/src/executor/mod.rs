@@ -52,15 +52,22 @@ use peacockdb_ffi::raw::PeacockExecutor;
 ///
 /// Ownership is by move — every executor method takes a batch by value, so reuse after
 /// consumption is a compile error rather than an unknown-handle throw from C++. Neither
-/// implementation is `Clone`: a `GpuBatch` cannot be, and the free `RecordBatch` clone
-/// is not worth the asymmetry (a future dual consumer writes an explicit copy, #140).
+/// implementation is `Clone`: a second consumer of one batch asks for it by name, through
+/// [`Batch::share`], so every second owner of a table is visible at its call site.
 pub trait Batch {
     fn num_rows(&self) -> usize;
     fn byte_size(&self) -> usize;
+    /// A second batch over the same rows, for a second consumer, copying no row: the CPU
+    /// clones the arrays' `Arc`s, the device duplicates the handle over the same columns.
+    /// Each is consumed or dropped on its own.
+    fn share(&self) -> Result<Self, BackendError>
+    where
+        Self: Sized;
 }
 
 /// The CPU backend's batch, and what leaves the device at the unload.
-/// Not `Clone`, deliberately — symmetry with `GpuBatch`, whose handle cannot be.
+/// Not `Clone`, deliberately — symmetry with `GpuBatch`, whose handle cannot be; a second
+/// consumer takes [`Batch::share`].
 #[derive(Debug)]
 pub struct CpuBatch {
     batch: RecordBatch,

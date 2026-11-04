@@ -51,6 +51,12 @@ impl Batch for MockBatch {
     fn byte_size(&self) -> usize {
         self.bytes
     }
+    fn share(&self) -> Result<Self, BackendError> {
+        Ok(Self {
+            rows: self.rows,
+            bytes: self.bytes,
+        })
+    }
 }
 
 /// What each category does. One rule per category for the whole plan: a test that needs
