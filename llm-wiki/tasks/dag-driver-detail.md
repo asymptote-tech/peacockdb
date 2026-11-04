@@ -89,3 +89,9 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
   validation half, since the driver had one root).
 - Task 6 must decide how a buffer's kept batches at a run's end are counted (`abandoned` vs the row
   conservation check); see Task 4 notes.
+
+## Rebase (2026-11-04)
+
+Control file said `rebase`; master holds #165 (ENS-optimizer) and the human's note in chain L's
+board preamble. dag-driver stopped at its Task 4 checkpoint (`10824c69`); resumes at Task 5 after
+sf40-baseline, once its own branch is rebased and re-proven.
