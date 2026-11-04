@@ -409,3 +409,13 @@ image's nvcc) and `nvidia-smi -q | grep -i 'Addressing Mode'`.
 | nebius-h100 | 2026-11-04 07:18:44 (RUNNING 07:19:49) | 2026-11-04 07:20:49 (`stop`: stopped) | 0.03 | Task 2 Step 3, `devprops`, addressing mode, `free -b`, kernel/driver/glibc; its own bracket, before the CPU-VM build |
 - L40S start for Task 2 Step 3's devprops: no capacity from 2026-11-04T06:57:37Z (developer; treated as 75). The coordinator retries every 15 min up to 10 h (until 16:57Z). Decision: the H100's devprops is read in its own short bracket before the CPU-VM build exists, so Tasks 3–5 (offline) can start once both cards are read; one extra H100 start of a few minutes, against the plan's order (Step 3 reads it after the build).
 - Order change (coordinator, 2026-11-04): Tasks 3, 4, 4b and 5 (offline, tested on no VM) run now, before Task 2's before profile, because the H100 path waits on new-hosts' block. The before profile and the before load times (Task 2 Steps 4–8) are then taken on an install staged from `ENS-new-hosts`'s tip (today's engine, no pinned-loads change), never from this branch. Task 6 waits on Task 2's Decision.
+
+## Blocked (2026-11-04)
+
+`blocked(building)`: the H100 path is not live. Task 2 Steps 3–9 (the before profile on an install
+staged from `ENS-new-hosts`'s tip), Task 6 (waits on Task 2's Decision), Task 7 (the H100 and L40S
+after-runs) and Task 8 need "The CPU-VM build", which waits on new-hosts' block (the human's
+GitHub PAT; `new-hosts-detail.md`, "Blocked"). The analyst spent on new-hosts' obstacle named this
+task's H100 work as hitting the same block. Done offline: Tasks 1, 2 Steps 1–2 (+ both cards'
+attribute), 3, 4, 4b, 5. Device-only gtests and `gpu_tests` cases are compiled, not run (Task 7).
+Once new-hosts' Task 10 has proven the H100 path, clear this block and resume at Task 2 Step 3.
