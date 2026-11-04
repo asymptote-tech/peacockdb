@@ -168,7 +168,7 @@ workspace alpha alongside chain L. It drives the H100 and the CPU VM through the
 directly (new-hosts has not landed), stops only VMs it started, and keeps to its VM-hour caps
 (CPU VM 6 h, H100 1 h, L40S 1 h). Every git write and the PR are the coordinator's.
 
-### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: approved to build
+### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: building
 
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
