@@ -2139,7 +2139,11 @@ skips what is done.
   `user.email`.
 - The VM goes into the laptop's `~/.config/peacock/vm` as `<name> <user>@<address>`; `--name` is
   the address by default.
-- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already.
+- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already. It needs a
+  person at a terminal. With stdin not a terminal (`</dev/null`, a script) the login is skipped and
+  the run still exits 0. It prints the command to run instead, on stderr:
+  `Claude Code is not logged in on <user>@<address>: run ssh -t <user>@<address> 'DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'`.
+  The path is spelled out because a plain `ssh <host> <command>` has no `~/.local/bin` on its PATH.
 - `provision-vm.sh --new-pat` replaces the PAT on the laptop and on every VM in `vm` it reaches.
   It names each VM it cannot reach.
 

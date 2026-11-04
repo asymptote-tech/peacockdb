@@ -6,6 +6,7 @@ user and group tools are fakes, and the VM is a directory, so nothing leaves the
 import getpass
 import json
 import pathlib
+import shlex
 import stat
 import subprocess
 import sys
@@ -40,16 +41,17 @@ def mode(path):
     return stat.S_IMODE(path.stat().st_mode)
 
 
-def readied(lap, *extra, stdin=PAT + "\n"):
+def readied(lap, *extra, stdin=PAT + "\n", tty=False):
     lap.add_vm("vm1.test")
-    return ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", "--name", "first", *extra, stdin=stdin))
+    return ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", "--name", "first", *extra, stdin=stdin,
+                            tty=tty))
 
 
 def test_provision_readies_a_vm():
     with Laptop() as lap:
         key = lap.home / ".ssh" / "id_ed25519"
         make_key(key, "Dev")
-        r = readied(lap, "--ref", "ENS-containers", "--gpu-key", key)
+        r = readied(lap, "--ref", "ENS-containers", "--gpu-key", key, tty=True)
         assert mode(lap.config) == 0o700, oct(mode(lap.config))
         for name in ("peacock.env", "github-pat", "vm"):
             assert mode(lap.config / name) == 0o600, (name, oct(mode(lap.config / name)))
@@ -163,7 +165,7 @@ def test_provision_refuses_a_token_it_cannot_use():
 def test_provision_rerun_skips_what_is_done():
     with Laptop() as lap:
         lap.add_vm("vm1.test")
-        ok(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n"))
+        ok(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n", tty=True))
         user = getpass.getuser()
         vm = lap.vms / "vm1.test"
         key = (lap.config / "gpu_ed25519").read_bytes()
@@ -178,6 +180,24 @@ def test_provision_rerun_skips_what_is_done():
         assert len(claude) == 1, claude
         assert sum("-t" in c["argv"] for c in lap.ssh_calls()) == 1, "Claude's login opened again"
         assert (lap.config / "vm").read_text() == f"vm1.test {user}@vm1.test\n"
+
+
+def test_provision_without_a_terminal_names_the_claude_login():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        (lap.config / "github-pat").write_text(PAT + "\n")
+        r = ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=None))
+        assert not any("-t" in c["argv"] for c in lap.ssh_calls()), [c["argv"] for c in lap.ssh_calls()]
+        credentials = lap.vm_home("vm1.test", "dev1") / ".claude" / ".credentials.json"
+        assert not credentials.exists()
+        [line] = [ln for ln in r.stderr.splitlines() if "claude auth login" in ln]
+        head = "Claude Code is not logged in on dev1@vm1.test: run "
+        assert line.startswith(head), r.stderr
+        # The command it names logs in when run as it says, from a terminal.
+        ssh_t = shlex.split(line[len(head):])
+        assert ssh_t[:3] == ["ssh", "-t", "dev1@vm1.test"], ssh_t
+        login = lap.run([str(lap.bin / "ssh"), *ssh_t[1:]], tty=True)
+        assert login.returncode == 0 and credentials.is_file(), (login.returncode, login.stderr)
 
 
 def test_provision_new_pat_replaces_it_everywhere():

@@ -184,11 +184,16 @@ if [ -n "$new_pat" ] && [ -s "$PEACOCK_VMS" ]; then
   done 3< "$PEACOCK_VMS"
 fi
 
+# Claude's login is finished by a person, so it needs this terminal; without one it is named instead.
+# The path is spelled out: ssh's PATH on the VM has no ~/.local/bin.
 if [ -n "$target" ]; then
+  login_cmd='DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'
   if remote_test 'test -s "$HOME/.claude/.credentials.json"'; then
     echo "Claude Code is logged in on $dev"
+  elif [ -t 0 ]; then
+    ssh "${ssh_opts[@]}" -t -- "$dev" "$login_cmd"
   else
-    ssh "${ssh_opts[@]}" -t -- "$dev" 'DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'
+    echo "Claude Code is not logged in on $dev: run ssh -t $dev '$login_cmd'" >&2
   fi
 fi
 [ -z "$failed" ] || exit 1
