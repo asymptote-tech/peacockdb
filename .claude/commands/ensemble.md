@@ -12,8 +12,10 @@ before you need it.
 
 Take the next task where progress is possible and dispatch it. Do not ask the human to
 confirm a task. When nothing can progress, write `stalled: <reason>` to
-`.claude/ensemble/$1.status` and exit. Before that exit, and every other, hard-stop the GPU
-host: `scripts/nebius.sh stop --force` (`llm-wiki/build-test.md`, "Nebius host").
+`.claude/ensemble/$1.status` and exit. Before that exit, and every other, hard-stop all three
+Nebius VMs (`llm-wiki/build-test.md`, "Nebius host"): `scripts/nebius.sh stop --force`,
+`scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu stop --force`
+and `scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 stop --force`.
 
 Never end your turn while a subagent you dispatched or resumed is still working, and never
 to send a progress report: under `claude -p` your last message ends the run and kills it.

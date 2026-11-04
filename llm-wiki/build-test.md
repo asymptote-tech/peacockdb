@@ -1660,6 +1660,17 @@ Rules that keep this healthy:
 
 ## Nebius host
 
+Three Nebius VMs, each with its own role. A chain needs no host override: these roles are the rule.
+
+| VM | card or cores | role |
+|---|---|---|
+| nebius-gpu | L40S, 46 GB | correctness: the L40S list below; no sf40, no benchmarks |
+| nebius-h100 | H100 80GB HBM3 | sf40, the benchmarks and Nsight, through `scripts/env/run-gpu.sh` |
+| nebius-cpu128 | 128 cores | DuckDB, and the H100's staged install ("The CPU-VM build") |
+
+A VM starts right before its first remote command and stops right after its last pull. It is
+never left up across a local build, CI, a review or the human.
+
 The device tier runs on **nebius-gpu** while shad-gpu is down. It is a paid VM. Every GPU step
 starts it and stops it after. Two guards stop it when nobody does.
 
@@ -1774,8 +1785,8 @@ If the VM is lost mid-step: `status`, `start` again, sync, rerun the step.
 A binary that runs 0 tests fails, and so does an empty glob or a segfault in any log. Every
 binary runs even after one fails.
 
-Out until further notice: the sf40 binaries, `--run-benchmarks`, Nsight captures and any H200
-timing. A task records each one it skips as deferred in its detail file.
+The sf40 binaries, `--run-benchmarks` and Nsight captures run on the H100 (nebius-h100) through
+`scripts/env/run-gpu.sh`, never on the L40S. H200 timing is out.
 
 ### The two idle guards
 
