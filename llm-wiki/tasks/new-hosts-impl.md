@@ -457,19 +457,20 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 
 **Files:** none in the tree; detail file only.
 
-- [ ] **Step 1: The key files, as the human named them (2026-11-03).** On dev: profile `eu-west1` →
+- [x] **Step 1: The key files, as the human named them (2026-11-03).** On dev: profile `eu-west1` →
   `~/.nebius/eu-west1-sa.pem`; profile `editor-eu` → `~/.nebius/sa-key.pem`. Check only that both
-  names exist (`ls -1 ~/.nebius/`, names only; open nothing). Each VM's `install-watch` passes its
-  profile's file as `--key-file`.
-- [ ] **Step 2: H100.** `H="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
-  `$H start && $H install-watch --key-file ~/.nebius/sa-key.pem` → last log line `install-watch: watcher installed, root's profile reaches the API`;
+  names exist (`ls -1 ~/.nebius/`, names only; open nothing). Only eu-west1 keeps its key in a file:
+  the CPU VM's `install-watch` passes it as `--key-file`. editor-eu embeds its key, and `sa-key.pem`
+  is not that key (live, 2026-11-04; detail file, Task 6), so the H100's takes none.
+- [x] **Step 2: H100.** `H="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
+  `$H start && $H install-watch` → last log line `install-watch: watcher installed, root's profile reaches the API`;
   `$H ssh 'sudo cat /etc/peacock-gpu-idle.json; sleep 70; tail -1 /var/log/peacock-gpu-idle.log'`
   → install file with the H100 id and `gpu`; the log line's `instance` is the H100 id, `kind` `gpu`.
   `$H stop`.
-- [ ] **Step 3: CPU VM.** The same with `--instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1`
+- [x] **Step 3: CPU VM.** The same with `--instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1`
   and `install-watch --key-file ~/.nebius/eu-west1-sa.pem` → `kind=cpu`; the log line's `card` is `[]`, `kind` `cpu`.
   `sudo ls /root/.nebius/` shows `config.yaml` alone, no `.pem` (names only). Stop it.
-- [ ] **Step 4: The CI key on both** (done before Steps 2–3, so each new VM is up once).
+- [x] **Step 4: The CI key on both** (done before Steps 2–3, so each new VM is up once).
   `scripts/nebius.sh start` (nebius-gpu); copy its `~/.ssh/authorized_keys` (public keys only)
   to a temp file on dev and `ssh-keygen -lf` it; stop nebius-gpu. Then, while Steps 2 and 3 have
   each VM up, every fingerprint nebius-gpu holds and that VM lacks is appended to the VM's
