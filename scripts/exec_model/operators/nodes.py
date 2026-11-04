@@ -227,18 +227,14 @@ def scan(
 
 
 @_records_its_recipe
-def parquet_scan(name, frame, row_counts, partition_groups, limit=None) -> PandasNode:
+def parquet_scan(name, frame, row_counts, partition_groups) -> PandasNode:
     """An engine scan: a parquet file's own row groups, read as the planner mapped them.
 
     `frame` is the file's projected columns, every row in file order; `row_counts` its row
     groups' sizes; `partition_groups` the engine's lanes → batches → row groups, verbatim.
-    `limit` is the one DataFusion pushed into the scan, which the planner gives one lane:
-    over N lanes each would honour it and N times the rows would come out.
     """
     if sum(row_counts) != len(frame):
         raise ValueError(f"{name}: row groups hold {sum(row_counts)} rows, the frame {len(frame)}")
-    if limit is not None and len(partition_groups) != 1:
-        raise ValueError(f"{name}: a scan limit over {len(partition_groups)} lanes")
     row_groups = source.row_group_ranges(row_counts)
     node = PandasNode(
         name,
@@ -246,7 +242,7 @@ def parquet_scan(name, frame, row_counts, partition_groups, limit=None) -> Panda
         _layout(len(partition_groups)),
         ExecutorCategory.SOURCE,
         factory=lambda lane: source.TableSource(
-            frame, row_groups, partition_groups[lane], name, lane, limit=limit
+            frame, row_groups, partition_groups[lane], name, lane
         ),
     )
     node.partition_groups = partition_groups

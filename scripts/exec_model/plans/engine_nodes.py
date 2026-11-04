@@ -70,15 +70,14 @@ class _Builder:
         frame = (self.tables.frame(table, columns) if columns
                  else pd.DataFrame({"marker": np.zeros(sum(counts), dtype="int8")}))
         frame.columns = engine_ir.frame_names([column for column, _ in node.schema])
-        limit = int(node.fields["limit"]) if "limit" in node.fields else None
         groups = json.loads(node.fields["partition_groups"])
-        return N.parquet_scan(name, frame, counts, groups, limit)
+        return N.parquet_scan(name, frame, counts, groups)
 
     def empty(self, node, name, children):
         """A relation the planner proved empty: one lane and one zero-row batch, typed by its
-        schema, where the engine's `GpuEmpty` emits no batch at all. Every node above sees the two
-        alike but a keyless aggregate on the device, which answers its identity row from an empty
-        batch and drops it given none (#199)."""
+        schema, where the engine's `GpuEmpty` emits no batch at all. A keyless aggregate above
+        answers its identity row either way: the engine's at done, when nothing went out; the
+        prototype's per-batch one from the zero-row batch, and nothing from a lane with none."""
         frame = pd.DataFrame({column: pd.Series([], dtype=dtype)
                               for column, dtype in engine_ir.dtypes(node.schema).items()})
         return N.memory_source(name, [frame])

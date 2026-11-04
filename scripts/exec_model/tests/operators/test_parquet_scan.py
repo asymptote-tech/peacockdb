@@ -34,9 +34,9 @@ def written(rows=10, row_group_size=3) -> pathlib.Path:
     return path
 
 
-def scan(path, partition_groups, columns=("id", "tag"), limit=None):
+def scan(path, partition_groups, columns=("id", "tag")):
     frame = pq.read_table(path, columns=list(columns)).to_pandas()
-    return N.parquet_scan("t", frame, row_group_rows(path), partition_groups, limit)
+    return N.parquet_scan("t", frame, row_group_rows(path), partition_groups)
 
 
 def lane_batches(node, lane) -> list[list]:
@@ -65,24 +65,19 @@ def test_a_plan_over_the_scan_reads_every_mapped_row_once():
     assert sorted(got["id"]) == list(range(10))
 
 
-def test_a_scan_limit_stops_the_lane_once_it_has_its_rows():
-    batches = lane_batches(scan(written(), [[[0, 1], [2, 3]]], limit=4), 0)
-    assert [list(b["id"]) for b in batches] == [[0, 1, 2, 3]]
-
-
 def test_a_scan_of_no_columns_still_counts_its_rows():
     batches = lane_batches(scan(written(), [[[0], [1, 2]]], columns=()), 0)
     assert [(len(b), len(b.columns)) for b in batches] == [(3, 0), (6, 0)]
 
 
 def test_a_batch_fetched_ahead_decodes_as_the_one_read_in_turn():
-    # Batches of two row groups and one, a limit that ends mid-batch, empty batches between.
+    # Batches of two row groups and one, and empty batches between.
     frame = pd.DataFrame({"k": range(10)})
     groups = source.row_group_ranges([2, 2, 3, 3])
     def lane(**kwargs):
         return source.TableSource(frame, groups, [[0, 1], [2], [3]], "t", 0, **kwargs)
 
-    for kwargs in ({}, {"limit": 6}, {"empty_probability": 0.5, "seed": 3}):
+    for kwargs in ({}, {"empty_probability": 0.5, "seed": 3}):
         plain, ahead = lane(**kwargs), lane(**kwargs)
         want, got = [], []
         while (batch := plain.next_batch()) is not None:
@@ -114,8 +109,6 @@ def test_a_mapping_the_file_cannot_hold_is_refused():
     frame = pq.read_table(path).to_pandas()
     with raises(ValueError, match=r"row groups hold 9 rows, the frame 10"):
         N.parquet_scan("t", frame, [3, 3, 3], [[[0]]])
-    with raises(ValueError, match=r"a scan limit over 2 lanes"):
-        N.parquet_scan("t", frame, row_group_rows(path), [[[0]], [[1]]], limit=5)
 
 
 if __name__ == "__main__":

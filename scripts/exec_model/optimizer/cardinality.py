@@ -180,8 +180,6 @@ class Estimator:
         table = node.fields["table"]
         groups = sorted({g for lane in json.loads(node.fields["partition_groups"]) for b in lane for g in b})
         rows = float(self.stats.rows(table, groups))
-        if "limit" in node.fields:
-            rows = min(rows, float(node.fields["limit"]))
         columns = []
         for ref in parse_columns(node.fields["projections"]):
             try:

@@ -129,9 +129,6 @@ class TableSource(SourceExecutor):
     the input every downstream operator is least likely to have been written for. The
     injections are bounded (one per real batch plus one tail) so the lane still terminates,
     and driven by a seeded generator so a failure reproduces.
-
-    `limit` is a scan's pushed-down row limit: the lane stops reading once it has emitted
-    that many rows, as cuDF's reader stops at its row count.
     """
 
     def __init__(
@@ -143,11 +140,8 @@ class TableSource(SourceExecutor):
         lane: int,
         empty_probability: float = 0.0,
         seed: int = 0,
-        limit: int | None = None,
     ):
         self.frame = frame
-        self.limit = limit
-        self.rows_out = 0
         self.row_groups = row_groups
         self.batches = list(batches)
         self.name = name
@@ -180,7 +174,6 @@ class TableSource(SourceExecutor):
             return None
         piece = self._fetched if self._fetched is not None else self._piece()
         self._fetched = None
-        self.rows_out += len(piece)
         tag = f"{self.name}.p{self.lane}.b{self.emitted}"
         self.emitted += 1
         return PandasBatch(piece, tag), no_scratch()   # the slice is the output
@@ -197,7 +190,7 @@ class TableSource(SourceExecutor):
         return int(self._fetched.memory_usage(index=False, deep=True).sum())
 
     def _remains(self) -> bool:
-        return self.emitted < len(self.batches) and self.rows_out != self.limit
+        return self.emitted < len(self.batches)
 
     def _piece(self) -> pd.DataFrame:
         self.reads += 1
@@ -206,8 +199,7 @@ class TableSource(SourceExecutor):
         # the same reason cuDF's reader takes a row-group list rather than row ranges.
         start = self.row_groups[groups[0]][0]
         stop = self.row_groups[groups[-1]][0] + self.row_groups[groups[-1]][1]
-        piece = self.frame.iloc[start:stop]
-        return piece if self.limit is None else piece.iloc[: self.limit - self.rows_out]
+        return self.frame.iloc[start:stop]
 
     def _inject_empty(self) -> bool:
         """Bounded, so the lane still terminates however the generator falls."""

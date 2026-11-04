@@ -311,10 +311,8 @@ committed `-mini.cost.txt` again from its `cpu.txt`. It is applied to two protot
 - **The final ratio is projected.** `cost_report.html` takes, per query, the min over modes of
   E × (O / P) / D: E the engine's `-mini.cost.txt` figure, O / P the prototype's optimized over
   planned at that mode, D DuckDB's `duckdb_cost=`. O / D would carry the prototype's byte scale
-  into the comparison, at its extreme in tpch `scan-limit` (#186): the prototype's scan stops at
-  the pushed-down limit, as `scan.cpp`'s `set_num_rows` intends (#186), while the engine's CPU
-  source reads the table,
-  so the planned cost is 3.4e-6 of the engine's. The prototype contributes only its own ratio.
+  into the comparison, pandas' rather than the engine's (#301), so the prototype contributes only
+  its own ratio.
   A query the planner refuses at every mode has no final ratio.
 - **The report reads its rules from the log it links to.** Rules fired counts the multi-joins a
   call reordered or flipped, the filters applied per pass and the replans, and links each to its
@@ -450,8 +448,8 @@ test still drive.
   over nulls is NULL. `PlanAggregateBatches` compacts on a doubling threshold and emits one typed
   batch even from no input.
 - **Real row groups.** `parquet_scan` reads a file's own row groups as the planner mapped lanes
-  to batches (`source.row_group_ranges`, `TableSource`, with fetch-ahead). A scan limit sits on
-  one lane. `MemorySource` is a materialized build, one batch per lane.
+  to batches (`source.row_group_ranges`, `TableSource`, with fetch-ahead). `MemorySource` is a
+  materialized build, one batch per lane.
 - **Expression and hash details.** Comparisons are three-valued, a Float32 column against its
   literal in float32; LIKE becomes a regex over its two metacharacters, a pattern per distinct
   value where the pattern is a column (which the device refuses, #246); literals broadcast;
