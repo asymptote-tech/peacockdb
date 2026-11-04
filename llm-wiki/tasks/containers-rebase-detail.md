@@ -334,3 +334,4 @@ labels carry `third_party/cudf=43505bb975f46ce4e140fdaf55192611d6e231ac` and
 should. With the run 26.02 label, a changed `pins.env` hash printed `docker/pins.env`. A label
 missing `docker/run-tests.sh` printed that input. Checking the label against the 25.02 tree
 printed both specs and `docker/pins.env`.
+- PR #193 opened against master (2026-11-04); board `reviewing`.
