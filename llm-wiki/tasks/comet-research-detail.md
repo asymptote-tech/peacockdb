@@ -418,3 +418,7 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   Spark's spill on the fastest disk it has.
 - 2026-11-04: Task 3 committed (5008e6a6). L40S used about 0.33 h by the log, 0.50 h with margin.
   Task 4 dispatched to a fresh developer.
+- 2026-11-04: Task 4 committed (cf35deed): all nine configurations ran, none skipped; cpu128
+  0.66 h, STOPPED. Task 5 dispatched to a fresh developer. Coordinator note for Task 5: the
+  "local" runs are RAM-resident (tmpfs), the strictest local baseline; the S3 runs read
+  in-region, so no in-region correction is modelled. Fix the `exotic.md` drift noted above.
