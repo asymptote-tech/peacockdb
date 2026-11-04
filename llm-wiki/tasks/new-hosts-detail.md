@@ -525,3 +525,46 @@ d34fe96e, ae7efe3e, 620184ae. Record-only commits that went empty (0f108108, 4ee
 add2a081) are restored by this file and the plan taken from the old tip (`L-pre-rebase-new-hosts`).
 `scripts/nebius*`, `.github/` and `scripts/env/` equal the old tip's but for master's own changes.
 The human lifted the block (PAT on dev); the task resumes at Task 7 Step 3 once re-proven.
+
+**build-test.md, merged by hand (developer, 2026-11-04).** The replay kept HEAD's page. It was
+rebuilt from `git merge-file --diff3` of HEAD, `687b61fe` and the old tip: 17 conflict hunks.
+- "Nebius host" is the old tip's Task 11 section, whole. Master's short "Other VMs" list was Task
+  12's stand-in for it; each of its facts is in the full section. Every value there was checked
+  against `nebius-watch.yml`, `watch.sh` and `idle_watch.py`.
+- Test categories: master's "Nebius scripts" row and its place, plus links to the three test
+  files the old tip named. The old tip's "Images" row, with fetch-sf40, install-duckdb, run-gpu,
+  stage-install and the Nsight `--ssh`.
+- Datasets: the two Nebius columns, and master's calibration-record row with both left blank.
+- Workflows: the old tip's `nebius-watch.yml` line (one leg per VM). CI structure: master's.
+- A clean-merge line HEAD had lost: the run image's `list` follows `nebius-test.sh`'s rules, not
+  `gpu-host-test.sh`'s.
+- Counts, by the page's rule (the header sums the N columns): Nebius 170 (13 files, run), Images
+  156 → 222 (19 files, run). Python 1401 → 1467, total 7593 → 7659. Rust 5959 and C++ 233 are
+  unchanged, and the cpu, ffi and gpu block headers equal their rows (3414, 7, 2409).
+
+**Re-proven on this base (developer, 2026-11-04). VM time: none.**
+- `scripts/nebius/tests/test_*.py`: 13 files, each rc 0, 170 passed, 0 failed.
+- shellcheck 0.11.0 (in `rhysd/actionlint:latest`) over CI's six Nebius scripts: exit 0.
+- actionlint: `nebius-watch.yml` no output, exit 0. `pipeline.yml` has only SC2001 (:52) and
+  SC2086 (:371). It is identical to master's, and master's copy gives the same two.
+- `cargo test -p cost-report --test test_source_formatting`: 32 passed, before and after the page.
+- `scripts/env/tests/test_*.py`: 17 of 19 files green, 219 passed. Among them are Task 7's
+  `test_provision` 20 (with `…without_a_terminal_names_the_claude_login`) and `test_bootstrap`
+  17, Task 8's `test_fetch_sf40` 23 and `test_install_duckdb` 8, and Task 9's `test_run_gpu` 29
+  (with `test_nsys_profile_uses_the_given_ssh`) and `test_stage_install` 5.
+  Three cases fail for want of inputs, as in containers-rebase's record. The cause is dev, not
+  code:
+  `test_image_any_user` 26.02 (no 26.02 build image; dev cannot hold it beside the run images,
+  39 GB free) and `test_run_image`'s two library checks (no `PEACOCK_STAGED_INSTALLS`). No image
+  input differs from the old tip: `git diff L-pre-rebase-new-hosts HEAD` over `docker/`,
+  `scripts/env/`, `scripts/lib/`, `third_party/` and `images.yml` is empty.
+- The images match the tree: `image_inputs_differ` prints nothing for build and run, 25.02 and
+  26.02. The missing build image's label was read remotely with `docker buildx imagetools inspect`.
+  A bogus label prints the inputs, so the check can go red.
+- `grep 'Out until further notice' build-test.md`: nothing. `stop --force` in `ensemble.md`: 3.
+  `git ls-files scripts/env/host scripts/env/gpu.sh`: nothing. `git status --short -- docker`:
+  nothing.
+- Task 11's `gpu-host` grep matches only the fixture hostname `host=gpu-host` (`-1`). It is in
+  peacockdb-core's record and trailer tests, `test_split.py` and the page's sample trailer. The
+  old tip has the same matches. It names a host in a sample record, not a script, so it stays.
+  `docker/run-tests.sh:7` is still the one recorded exception.
