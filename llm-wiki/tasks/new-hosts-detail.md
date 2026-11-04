@@ -17,8 +17,9 @@
 | nebius-h100 | 2026-11-04 05:04:14 | 05:07:13 | 0.05 | Task 6 Step 2 again: install-watch without `--key-file` |
 | nebius-cpu128 | 2026-11-04 18:58:00 | 19:10:11 | 0.20 | Task 7 Steps 4–6: provision, its checks, the rerun, the key checks |
 | nebius-h100 | 2026-11-04 19:07:41 | 19:09:38 | 0.03 | Task 7 Step 6: the CPU VM's ssh to it |
+| nebius-cpu128 | 2026-11-04 19:13:00 | 19:14:57 | 0.03 | Task 8 Step 5: the disk check (74 G free; stalled) |
 
-Hours so far: nebius-gpu 0.07, nebius-h100 0.13, nebius-cpu128 0.25. Dev's local time is UTC.
+Hours so far: nebius-gpu 0.07, nebius-h100 0.13, nebius-cpu128 0.28. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -449,6 +450,28 @@ the four storage keys are read from stdin; `GPU_SSH_KEY_FILE` and other lines ar
 - It needs python3. `vmtouch` is optional (it falls back to `/proc/meminfo`). `lsblk` is used for the
   device report only. Timed runs use all cores unless `--threads`; the verify pass uses one thread.
 - It builds the tpch db only. The tpcds db is sf40-baseline's extension (plan).
+
+Developer, 2026-11-04, Step 5 (live): **stalled at the disk gate.** No fetch ran. No file changed
+but this one.
+
+- Offline first: `test_fetch_sf40.py` 23 passed 0 failed, `test_install_duckdb.py` 8 passed 0 failed.
+- The CPU VM started at 66.201.6.39. `df -h / /var/lib/peacock`: both are `/dev/vda1`, 96 G, 22 G
+  used, **74 G free**. `lsblk`: one 100 G disk (`vda`), no data disk (`vdb` is 1 M). The plan's gate
+  is at least 110 GB free (parquet 56 GB + the tpch db ~38 GB + 10 %), so the plan says stall.
+- What uses the disk: the build image `peacockdb-build:cudf-25.02`, 15.4 GB; `/var/lib/peacock`,
+  775 M (sf1 and the cuDF source). Removing both still leaves about 90 G, short of 110. The image
+  is needed again for Task 10 Step 1, the CPU-VM build.
+- Fetching the parquet alone (56 of 74 G) was not done. It would leave about 18 G: too little for
+  DuckDB's database (its preflight wants the local parquet's ~40 G + 10 %), and too little for the
+  later CPU-VM build's `target-img-25.02/` and C++ build.
+- Also seen: no `aws` and no `duckdb` on the VM yet, as expected; `curl`, `python3`, `flock` present.
+  128 cores, 503 G RAM.
+- The VM was up 19:13:00–19:14:57 and stopped softly (exit 0, `STOPPED`).
+- **Unblocks it:** the human grows the CPU VM's disk. Step 5 alone needs 22 + 110 = 132 G in all.
+  The later CPU-VM build and sf40-baseline's tpcds database need more, so 200 G or more is safer.
+  Either grow the boot disk (and the root partition with it), or mount a data disk at
+  `/var/lib/peacock`, kept `dmitry:peacock` 2775 (bootstrap's mode). Then rerun Step 5 from the
+  `df` check.
 
 ## Task 9: `run-gpu.sh` and the staged install
 
