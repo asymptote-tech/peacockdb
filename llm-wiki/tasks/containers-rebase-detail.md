@@ -350,3 +350,28 @@ printed both specs and `docker/pins.env`.
 ## Review round 2 (2026-11-04)
 
 B1, I2, I3 resolved; no new findings. Board `completing`.
+
+## Completeness pass (2026-11-04)
+
+Reviewer (what is wrong): 0 blocking, 0 important.
+Analyst (what is missing): 0 blocking, 3 important; `architecture.md` has no false sentence;
+five `build-test.md` passages left false by the carried `f3db66b1` (its docs were in
+ENS-optimizer's `c5d12789`, not carried).
+- A1: no CI test reads the provenance on a device (`provenance::of_this_run`, Rust
+  `device_info()` reached only from the skipped `bench_` cases) → developer: a ninth harness test
+  in `peacock_gpu_benchmarks.rs`, run under `--skip bench_` by every gpu-tests job.
+- A2: open items from containers' record, owners named here:
+  - the CUDA mix in the 25.02 build image (compare with nebius-gpu's native build) → new-hosts,
+    which first runs the run image on a device;
+  - `nsys_hbm.py`'s device check on a real Nsight export → sf40-baseline (the H100's Nsight pass);
+  - the `tpcds-sf40` bucket's sha256s against shad-gpu's copy → sf40-baseline (it reads tpcds
+    sf40 from the bucket); shad-gpu is down, so it waits on shad-gpu;
+  - `scripts/build-test-shadgpu.sh:683`, `:702` "a failing case appends its rows before it
+    panics" → fixed here (developer).
+- A3: Done-when 2 on the tip → the developer re-runs the rust-only gates and
+  `scripts/env/tests` on the tip; the PR's CI run is recorded below.
+- build-test.md: :780 (one file per device, dataset and mode), :1232 (tpcds.sf40 too), :1251–1255
+  (`--metrics` per case, `hbm-parts`, `--parts`), :1257 and :2201–2204 (`plot.py` takes one
+  `--record` per dataset) → developer, from `git show c5d12789:llm-wiki/build-test.md`'s wording
+  where it fits the fork.
+- Round 1 fix: `test_bootstrap.py` ran 17 passed after `379a56d5` (developer's report).
