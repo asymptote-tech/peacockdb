@@ -30,6 +30,12 @@
 #   ./scripts/create_nsys_profile.sh --trace --host nebius-h100 \
 #       --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' \
 #       --remote-dir /home/dmitry/peacock/<dir> --remote-cudf-root /home/dmitry/peacock/cudf-25.02
+# --cases <csv> takes a device's cases.csv instead of the main list: its `ok` and `wrong` rows at
+# their modes, read through scripts/calibration/device_cases.py; the trace pass then runs exactly
+# those tests. --device <slug> reads the pinned records from calibration/<slug>/<dataset>.sf<sf>/,
+# where `fetch_record.sh <slug>/<dataset>.sf<sf>` puts a device's:
+#   ./scripts/create_nsys_profile.sh --cases <the H100's cases.csv, one dataset's rows> \
+#       --device h100-80gb-hbm3 <the H100 arguments above>
 # The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
 # PCK_BENCH_HBM_PEAK_BW (the H100 80GB HBM3: gh100 and 3.35e12), and nsys and python3 must be
 # on that host's PATH.
@@ -82,6 +88,8 @@ TRACE=0
 METRICS=0
 REMOTE_CUDF_ROOT=""
 HOST_OVERRIDDEN=0
+DEVICE_CASES=""
+DEVICE=""
 need_value() { [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -91,6 +99,8 @@ while [ $# -gt 0 ]; do
     --remote-dir)       need_value "$1" "${2:-}"; REMOTE_REPO="$2"; HOST_OVERRIDDEN=1; shift ;;
     --remote-cudf-root) need_value "$1" "${2:-}"; REMOTE_CUDF_ROOT="$2"; shift ;;
     --ssh)              need_value "$1" "${2:-}"; REMOTE_SSH="$2"; shift ;;
+    --cases)            need_value "$1" "${2:-}"; DEVICE_CASES="$2"; shift ;;
+    --device)           need_value "$1" "${2:-}"; DEVICE="$2"; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 1 ;;
   esac
@@ -121,6 +131,22 @@ filter_q=$(printf '%q' "$PCK_TEST_FILTER")
 
 # Before the first side effect: a missing input should say so in a second, not after a
 # capture and an export. The local checks first, then the one question for the host.
+[ -z "$DEVICE" ] || [[ "$DEVICE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+  || die "--device $DEVICE is not a device slug, e.g. h100-80gb-hbm3"
+if [ -n "$DEVICE_CASES" ]; then
+  [ -f "$DEVICE_CASES" ] || die "--cases $DEVICE_CASES: no such file"
+  BENCH_CASES=$DEVICE_CASES
+  # A device list's `ok` and `wrong` rows, a line per mode, as bench_cases prints the main list.
+  bench_cases() {
+    python3 scripts/calibration/device_cases.py "$DEVICE_CASES" \
+      | awk -F'\t' '{ n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }'
+  }
+  bench_datasets() {
+    local cases
+    cases=$(bench_cases) || return 1
+    awk '{ print $1 ".sf" $2 }' <<< "$cases" | LC_ALL=C sort -u
+  }
+fi
 datasets=$(bench_datasets) \
   || die "cannot read the datasets from $BENCH_CASES (the reason is above)"
 for name in $datasets; do
@@ -139,18 +165,24 @@ while read -r dataset sf query mode; do
   metric_cases+=("$dataset.sf$sf ${query//_/-} ${mode//_/-}")
 done <<< "$cases"
 all_cases=$(grep -c . <<< "$cases")
+# A device list's trace pass runs its cases by name: the main list's runs the filter over all.
+if [ -n "$DEVICE_CASES" ]; then
+  [ ${#metric_tests[@]} -gt 0 ] || die "PCK_TEST_FILTER=$PCK_TEST_FILTER selects none of $DEVICE_CASES's cases"
+  filter_q="$(printf '%q ' "${metric_tests[@]}")--exact"
+fi
 if [ "$METRICS" -eq 1 ] && [ ${#metric_tests[@]} -ne "$all_cases" ]; then
   die "--metrics with PCK_TEST_FILTER=$PCK_TEST_FILTER selects ${#metric_tests[@]} of the
      $all_cases cases, and the counters pass's merge is checked against every one of them.
      Narrow the trace pass only: --trace."
 fi
+[ -z "$DEVICE" ] || RECORDS_REL=$RECORDS_REL/$DEVICE
 record_args=()
 for name in $datasets; do
   record=testdata/$RECORDS_REL/$name/records.tsv
   record_args+=(--record "$record")
   [ "$METRICS" -eq 0 ] || [ -f "$record" ] \
     || die "$record is missing, and the counters pass has no times of its own to
-     join onto. Fetch it: scripts/calibration/fetch_record.sh $name"
+     join onto. Fetch it: scripts/calibration/fetch_record.sh ${DEVICE:+$DEVICE/}$name"
 done
 remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
   || die "$BENCH_TARGET is not on $REMOTE — build it and --push-binaries --patch first."

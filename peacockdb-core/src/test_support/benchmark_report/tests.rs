@@ -286,11 +286,90 @@ fn a_directory_without_benchmark_files_is_no_column() {
         "h200/tpch.sf40/tp1_single.benchmark.txt",
         &[("q1", UNBATCHED)],
     );
-    std::fs::create_dir_all(root.join("duckdb/tpch.sf40")).unwrap();
-    std::fs::write(root.join("duckdb/tpch.sf40/duckdb.tsv"), "q1\t1\n").unwrap();
+    std::fs::create_dir_all(root.join("notes/tpch.sf40")).unwrap();
+    std::fs::write(root.join("notes/tpch.sf40/notes.txt"), "q1\t1\n").unwrap();
     let html = page(root, &[("tpch", "q1")]);
-    assert!(!html.contains("duckdb"), "{html}");
+    assert!(!html.contains("notes"), "{html}");
     assert_eq!(row(&html, "q1", "tp1_single").len(), 6);
+}
+
+/// DuckDB's results in the format `duckdb_minimal.sh --results` writes: q3 timed, q6 failed.
+fn duckdb(root: &Path, tree: &str, dataset: &str, host: &str) {
+    let dir = root.join(tree).join(format!("{dataset}.sf40"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("duckdb.tsv"),
+        format!(
+            "# duckdb=1.5.4 threads=128 host={host} cpu=x cores=128 memory_gib=1007.7 db=/d \
+             resident_pct=100.0\n\
+             query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus\n\
+             q3\t412\t431,412\t100\t0\tyes\tok\n\
+             q6\t-\t-\t100\t-\t-\tfailed\n"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_duckdb_tree_is_a_column_of_its_own() {
+    let root = tree("duckdb-column");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED), ("q6", TIMED), ("q9", TIMED)],
+    );
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp4_sized.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3"), ("tpch", "q6"), ("tpch", "q9")]);
+    assert!(
+        !html.contains("<th colspan=\"4\">duckdb-cpu128</th>"),
+        "not a device: {html}"
+    );
+    let h100 = html.find(">h100-80gb-hbm3</th>").unwrap();
+    let duckdb = html
+        .find("<th rowspan=\"1\">duckdb-cpu128</th>")
+        .expect("a column");
+    assert!(h100 < duckdb, "after the devices: {html}");
+    assert!(html.contains("<th>warm (ms)</th>"), "{html}");
+    let timed = ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00", "412.0"];
+    assert_eq!(row(&html, "q3", "tp1_single"), timed);
+    // DuckDB has no mode: its time stands on each mode's row.
+    assert_eq!(row(&html, "q3", "tp4_sized")[6], "412.0");
+    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
+    assert_eq!(row(&html, "q9", "tp1_single")[6], "—");
+    assert!(html.contains("<td class=\"off\">failed</td>"), "{html}");
+    assert!(html.contains("<td class=\"na\">—</td>"), "{html}");
+    let href = section_href("benchmark-results/duckdb-cpu128/tpch.sf40/duckdb.tsv", 3);
+    assert!(
+        html.contains(&format!(
+            "<td class=\"n\"><a href=\"{href}\">412.0</a></td>"
+        )),
+        "{html}"
+    );
+}
+
+#[test]
+fn the_duckdb_column_names_its_provenance() {
+    let root = tree("duckdb-provenance");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3")]);
+    assert!(
+        html.contains("duckdb-cpu128, tpch sf40: DuckDB 1.5.4, 128 threads, host nebius-cpu128"),
+        "{html}"
+    );
+    assert!(
+        html.contains("query wall time over warm native storage"),
+        "{html}"
+    );
 }
 
 #[test]

@@ -170,6 +170,117 @@
     on dev and in the build image (`/opt/venv` has duckdb 1.5.4).
 - **Gates:** `testdata/test_duckdb_result.py` 27/27 on dev.
 
+## Task 6: `duckdb_minimal.sh` on the corpus; the H100 driver; records joined
+
+- **Red → green**, each `python3 <file>`: `test_join_records.py` `ModuleNotFoundError: join_records`,
+  then 8/8. `test_split.py` 11/12 (`cases.csv declares no corpus_query_benchmark! case`), then
+  12/12. `test_publish_record.py` 1/4 (no script), then 4/4. `test_run_gpu.py` 31/33 (`unknown
+  argument: --cases`), then 33/33. `test_bench_each.py` 0/11 (no script), then 11/11.
+  `benchmarks/tests/test_duckdb_minimal.py` 1/7 (`unknown argument '--cases'`, `'--dataset'`),
+  then 9/9 with the two below. Mutation: dropping `bench-each.sh`'s set-aside of a VM record fails
+  `test_bench_each_sets_aside_a_record_a_killed_run_left` (the fake run refuses, exit 2).
+- **A bug found offline, fixed test-first:** the DuckDB CLI parses a whole `-c` before running it,
+  and `integer_division` is a parser setting. `duckdb -c "SET integer_division=true; SELECT 7/2"`
+  answers `3.5`; with the SET in its own `-c`, `3`. So `--answers` and the corpus timed runs pass
+  the settings in a `-c` before the query's (`run_once` too: the minimal set's settings are
+  runtime ones, unchanged). `test_answers_take_the_oracle_s_integer_division` (tpcds q61's `/`
+  named `//`) failed before the fix.
+- **Offline check of Task 11's path at sf1.** Every candidate (`grep tp1_single` of the main list:
+  tpch 44, tpcds 82) as an `ok` row, `--runs 1 --cases --answers --results`: 44 and 82 answered and
+  timed `ok`. `answer_sections` over the two answers databases against the committed
+  `goldens/<ds>.sf1/duckdb-result.txt`: 126 of 126 sections byte-identical. Before the fix tpcds
+  q2 and q61 differed, in column names only.
+- **The default run** (no new flag) against HEAD's script, both at sf1 into fresh dirs, numbers
+  and paths normalised: identical but for the per-table size listing's order of `nation` and
+  `region`, a tie under the old `ORDER BY blocks DESC` (nondeterministic before this change).
+- **Departures from the plan's text:**
+  - **The record has no `# case` line.** A killed run's record is set aside under its last row's
+    (dataset, query, mode). A record with no row is removed on both sides. A local
+    `testdata/calibration/records.tsv` at start is set aside the same way.
+  - **`bench-each.sh` continues only on `run-gpu.sh` exit 0 or 1** (1 covers a failed, timed-out or
+    crashed case: the container's code is mapped to 1). Any other exit (2, 3, 4, 75, 69) stops it
+    with that code: 126 refusals in a row is not a run.
+  - **The slug** is not read from a section's `device=` (the H200 tree holds q1 too): it is the
+    device tree whose file for the case the first measured case's pull changed, kept in
+    `<records>/device`. Until known nothing is skipped; the harness's own resume keeps a section
+    the VM still holds.
+  - **`scripts/lib/bench-cases.sh`**: `bench_lines`, `bench_datasets`, `bench_cases` moved out of
+    `shadgpu-env.sh` unchanged (it sources the file), for `bench-each.sh`. `RUN_GPU_SH` and
+    `NEBIUS_SH` name the two scripts for the test's fakes.
+  - **`join_records.py`**: cases in the order the arguments first name them; two segments of one
+    attempt holding one case are refused; the span is `79.1GiB-79.3GiB` (one token when equal).
+  - **`test_publish_record.py`** (4) is beyond the plan, which names no test for the script.
+  - **`create_nsys_profile.sh --cases`**: the trace pass runs the list's test names `--exact`,
+    narrowed by `PCK_TEST_FILTER` when set; `test_cases_with_a_filter_narrow_the_trace_pass` beyond
+    the plan. Its existing `--ssh` test now builds its tree through a shared `nsys_tree`.
+  - **`duckdb_minimal.sh`**: `--answers` is refused without `--cases` and with `--skip-verify`
+    (the reading of "`--cases` with `--skip-verify` and `--answers` refused"). `--results` works
+    without `--cases`. `--dataset tpcds` needs `--cases` or `--build-only`. A row's `sf` is not
+    held to `--sf` (the tests read a list at sf1). The answers database is removed at the start of
+    the pass. TSV `status` is the timing's; a refused answer shows `ANSWER FAILED` in stdout and
+    has no table. The working set's SQL reaches python through argv, not a heredoc. Corpus SQL loses
+    its `--` comments and final `;` (`corpus_sql`). The preamble's values are one word each,
+    whitespace as `_` (the CPU's model name); `duckdb` is `SELECT version()` without the `v`.
+- **Gates (scripts):** `scripts/env/tests/test_*.py`: every file green but the two that need images
+  or staged installs (`test_image_any_user.py` 1/2: no 26.02 build image; `test_run_image.py` 7/9:
+  `PEACOCK_STAGED_INSTALLS` unset). `test_run_tests.py` failed once in the sweep while Docker
+  reported the run images absent (`test_run_image.py` said `no image …run:cudf-25.02` in the same
+  pass), then passed 8 of 8: the image state, not this change (`docker/run-tests.sh` untouched).
+  `scripts/calibration/tests/test_*.py` all green but `test_plot.py` (no matplotlib on dev).
+  `bash -n` on every changed script; no `shellcheck` on dev.
+
+## Task 7: DuckDB's results read once; the page's DuckDB column
+
+- **Red → green.** `cargo test -p peacockdb-core --features rust-only --lib -- duckdb_results
+  benchmark_report`: `a_duckdb_tree_is_a_column_of_its_own` (`a column`) and
+  `the_duckdb_column_names_its_provenance` failed, then 23/23 (12 + 2 page, 9 reader). The reader's
+  tests compiled only with the module; mutation: accepting a failed row with a time fails
+  `a_failed_row_with_a_time_is_refused`. `test_results_have_the_fixtures_shape` passed at once:
+  Task 6 wrote the TSV, and the fixture follows it. Swapping two columns of the script's header
+  fails it.
+- **Departures from the plan's text:**
+  - `workset_bytes` and `disk_read_bytes` are `Option<u64>`: a failed row has no disk read, and a
+    database whose storage info DuckDB withholds has no working set (`-`). `DuckdbResults`
+    derives `Debug, Clone, PartialEq` for the fixture test.
+  - Beyond the plan's two reader tests: a working set read as none, an unknown status, a failed row
+    with a time, an `ok` row without one, a missing preamble, the column line out of order, a query
+    listed twice.
+  - `a_directory_without_benchmark_files_is_no_column` wrote `duckdb/tpch.sf40/duckdb.tsv` as its
+    stray file, which is now a DuckDB column; it writes `notes/tpch.sf40/notes.txt` instead.
+  - A DuckDB cell links to its `duckdb.tsv` line, as a device's total links to its section.
+- **The page** is unchanged (no DuckDB tree is committed): `the_benchmark_report_matches_the_trees`
+  passes without `UPDATE_CANONICAL`, so nothing was regenerated.
+
+- **Gates (Tasks 6 and 7 together):** `--lib` 984 passed, 2 ignored (986; 975 before);
+  `test_corpus_goldens` 53; `test_golden_format` 41; `test_cpu_corpus` 2403; `cost-report --test
+  test_source_formatting` 32; no warning. `UPDATE_CANONICAL=1 … the_benchmark_report_matches_the_trees`
+  left `testdata/benchmark-report.html` byte-identical. No gpu-shape compile: nothing here is
+  behind a feature. `benchmarks/tests/test_duckdb_minimal.py` (9, ~2 min) and
+  `scripts/env/tests/test_bench_each.py` (11) run on dev only: no CI job runs `benchmarks/tests/`
+  or `scripts/env/tests/`. `test_join_records.py` and `test_publish_record.py` run in CI's
+  calibration step (stdlib, a fake aws).
+
+### For the live runs (Tasks 8–11)
+
+- **Task 8 Step 2**: `--dataset tpcds --build-only` prints `tables : 24 from the parquet: …`, then
+  `row counts verified against the parquet` and `built : …; --build-only`; no `=== page cache`.
+- **Task 9 Step 3**: before the first `bench-each.sh`, dev's `testdata/calibration/records.tsv`
+  must be absent or this run's: one there is set aside as a segment under its last row's case.
+  Give `--records` a scratch dir outside the tree. Each case prints `==> <ds> <q> <mode>: run-gpu.sh
+  exited <rc> after <s> s`: the per-query wall times. After the first measured case,
+  `<records>/device` must read `h100-80gb-hbm3`. Exit 1 means a case has no section: rerun the same
+  command. Exit 75 or 69 is the VM's: the coordinator's retry, then rerun. Each case pulls the whole
+  `benchmark-results/`, `calibration/` and the answers.
+- **Task 9 Step 6**: `join_records.py --record <scratch>/records/*.tsv` (the `device` file is not
+  `.tsv`). The joined heading's `allocator=` gives the free memory as `<min>-<max>`. `split_record.py
+  --cases <the H100 cases.csv>` (a device list is read as such by its header).
+- **Task 10**: `create_nsys_profile.sh --cases <scratch>/<ds>.csv --device h100-80gb-hbm3 …` runs
+  the trace pass as one `--exact` list of every row's test name.
+- **Task 11 Step 1**: `--answers` takes an absolute path without a quote; the database is replaced
+  each run. Every `ok`/`wrong` row's `testdata/<ds>-queries/<stem>.sql` is checked before any import.
+  `threads=` is DuckDB's own count. The corpus runs time the query under the oracle's two
+  settings, so DuckDB's time is the answered query's.
+
 ## VM time
 
 | VM | start (UTC) | stop (UTC) | hours | why |

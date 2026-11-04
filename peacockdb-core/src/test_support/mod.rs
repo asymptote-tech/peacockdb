@@ -34,6 +34,7 @@ mod device_answer;
 mod device_cases;
 mod device_schema;
 mod duckdb_oracle;
+mod duckdb_results;
 mod fingerprint;
 mod golden_text;
 #[cfg(not(feature = "rust-only"))]
@@ -1280,6 +1281,48 @@ pub fn device_lines(
     wrong: &BTreeMap<(String, String), String>,
 ) -> Result<Vec<DeviceCase>, String> {
     device_cases::lines(candidates, modes, files, wrong)
+}
+
+// --- DuckDB's results -------------------------------------------------------------
+
+/// What became of a query in DuckDB's timing pass, spelled `ok`, `failed` in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuckdbStatus {
+    Ok,
+    Failed,
+}
+
+/// One row of a `duckdb.tsv`: a query's timing on DuckDB's own storage.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckdbRow {
+    /// The main list's ident, `_` kept (`aggregate_groupby`).
+    pub query: String,
+    /// The second-smallest wall time; `None` when failed (`-`).
+    pub ms_2nd_min: Option<f64>,
+    /// Every timed run, in order; empty when failed.
+    pub runs_ms: Vec<f64>,
+    /// The on-disk size of the columns the query reads; `None` where DuckDB gave no sizes.
+    pub workset_bytes: Option<u64>,
+    /// Read from the block device during the reported run; `None` when failed.
+    pub disk_read_bytes: Option<u64>,
+    /// `yes`, `partial` or `NO`, as written; `-` when failed.
+    pub warm: String,
+    pub status: DuckdbStatus,
+}
+
+/// A `duckdb.tsv`: its `# ` line's `key=value` words in order (duckdb, threads, host, cpu,
+/// cores, memory_gib, db, resident_pct), then its rows in file order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckdbResults {
+    pub preamble: Vec<(String, String)>,
+    pub rows: Vec<DuckdbRow>,
+}
+
+/// `benchmarks/duckdb_minimal.sh --results`' file. Panics naming the line on a missing preamble
+/// or column line, a row short of seven fields, a value its column refuses, an unknown status,
+/// and a query listed twice.
+pub fn parse_duckdb_results(text: &str) -> DuckdbResults {
+    duckdb_results::parse(text)
 }
 
 // --- the benchmark report page ---------------------------------------------------

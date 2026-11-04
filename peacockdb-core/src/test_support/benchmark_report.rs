@@ -1,12 +1,13 @@
 //! The benchmark report page, `testdata/benchmark-report.html`: every device tree under
 //! `benchmark-results/` side by side, through the tree's one reader; build-test.md, **The page**.
 //!
-//! - A device is a directory directly under the root holding a `<ds>.sf<sf>/<mode>.benchmark.txt`
-//!   for one of `MODES`. One row per (dataset, sf, query, mode) some device has a section for.
-//! - A timed cell is load, execute, total and peak. A section without `load_us` has its load
-//!   derived and its peak `—`. Any other cell spans the four: the list's `skipped` note where it
-//!   has one, else the failure's or the marker's reason, else `—`.
-//! - No time, no host, no absolute path: the same trees give the same bytes.
+//! - A device is a directory holding a `<ds>.sf<sf>/<mode>.benchmark.txt` for one of `MODES`;
+//!   one row per (dataset, sf, query, mode) some device has a section for.
+//! - A timed cell is load, execute, total and peak; without `load_us`, the load is derived and the
+//!   peak `—`. Any other cell spans the four: the list's `skipped` note, the reason, or `—`.
+//! - A DuckDB tree holds `<ds>.sf<sf>/duckdb.tsv`: one column after the devices, its warm time on
+//!   every mode's row of a query its file holds.
+//! - No time, no absolute path, and no host but a DuckDB file's own: the same trees, same bytes.
 
 #[cfg(test)]
 mod tests;
@@ -16,8 +17,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::{
-    CaseStatus, DeviceCase, FAILED, MODES, REPORT_REPO, ReportCell, ReportTable, SKIPPED,
-    ordered_sections, parse_benchmark_section, parse_device_cases, testdata_root,
+    CaseStatus, DeviceCase, DuckdbResults, DuckdbStatus, FAILED, MODES, REPORT_REPO, ReportCell,
+    ReportTable, SKIPPED, duckdb_results, ordered_sections, parse_benchmark_section,
+    parse_device_cases, testdata_root,
 };
 
 /// What the peak column claims, and no more.
@@ -72,6 +74,12 @@ struct Device {
     cases: Vec<DeviceCase>,
 }
 
+/// One DuckDB column: its tree's name and its files by (dataset, sf).
+struct Duckdb {
+    name: String,
+    files: BTreeMap<(String, String), DuckdbResults>,
+}
+
 pub(crate) fn render(root: &Path, order: &[(String, String)], extra: &[ReportTable]) -> String {
     let devices = devices(root);
     let mut rows: BTreeMap<Place, BTreeMap<usize, Found>> = BTreeMap::new();
@@ -103,7 +111,43 @@ pub(crate) fn render(root: &Path, order: &[(String, String)], extra: &[ReportTab
             }
         }
     }
-    page(&devices, &rows, extra)
+    page(&devices, &duckdbs(root), &rows, extra)
+}
+
+/// Every directory directly under `root` holding a `<ds>.sf<sf>/duckdb.tsv`, by name.
+fn duckdbs(root: &Path) -> Vec<Duckdb> {
+    let mut found: BTreeMap<String, Duckdb> = BTreeMap::new();
+    for tree in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        let name = tree.file_name().to_string_lossy().into_owned();
+        for dir in std::fs::read_dir(tree.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let file = dir.path().join("duckdb.tsv");
+            let dirname = dir.file_name().to_string_lossy().into_owned();
+            let Some((dataset, sf)) = dirname.split_once(".sf") else {
+                continue;
+            };
+            if !file.is_file() {
+                continue;
+            }
+            let text = std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            found
+                .entry(name.clone())
+                .or_insert_with(|| Duckdb {
+                    name: name.clone(),
+                    files: BTreeMap::new(),
+                })
+                .files
+                .insert(
+                    (dataset.to_string(), sf.to_string()),
+                    duckdb_results::parse(&text),
+                );
+        }
+    }
+    found.into_values().collect()
 }
 
 /// Every directory directly under `root` that holds a mode's benchmark file, by name.
@@ -188,6 +232,7 @@ fn mode_rank(mode: &str) -> usize {
 
 fn page(
     devices: &[Device],
+    duckdbs: &[Duckdb],
     rows: &BTreeMap<Place, BTreeMap<usize, Found>>,
     extra: &[ReportTable],
 ) -> String {
@@ -205,8 +250,10 @@ fn page(
          test_corpus_goldens from testdata/benchmark-results/ · section links @ master</p>\n\
          <p><b>PeacockDB benchmark results</b> — every device tree side by side, one row per \
          query and mode. Times are device-side, in ms: the total is load plus execute. The peak \
-         is {PEAK_MEANS}, in GiB.</p>\n<ul>\n"
+         is {PEAK_MEANS}, in GiB.</p>\n"
     );
+    html.push_str(&duckdb_intro(duckdbs));
+    html.push_str("<ul>\n");
     for ((dataset, sf), places) in &groups {
         let id = format!("{}-sf{}", dataset.1, sf.1);
         let label = format!("{} sf{}", dataset.1, sf.1);
@@ -228,7 +275,9 @@ fn page(
     }
     html.push_str("</ul>\n");
     for ((dataset, sf), places) in &groups {
-        html.push_str(&dataset_table(&dataset.1, &sf.1, places, devices, rows));
+        html.push_str(&dataset_table(
+            &dataset.1, &sf.1, places, devices, duckdbs, rows,
+        ));
     }
     for table in extra {
         html.push_str(&extra_table(table));
@@ -237,11 +286,45 @@ fn page(
     html
 }
 
+/// What each DuckDB file was measured with, from its preamble; nothing without one.
+fn duckdb_intro(duckdbs: &[Duckdb]) -> String {
+    let named: Vec<String> = duckdbs
+        .iter()
+        .flat_map(|duckdb| {
+            duckdb.files.iter().map(move |((dataset, sf), results)| {
+                let of = |key: &str| {
+                    results
+                        .preamble
+                        .iter()
+                        .find(|(k, _)| k == key)
+                        .map_or("?", |(_, v)| v.as_str())
+                };
+                format!(
+                    "{}, {dataset} sf{sf}: DuckDB {}, {} threads, host {}",
+                    duckdb.name,
+                    of("duckdb"),
+                    of("threads"),
+                    of("host")
+                )
+            })
+        })
+        .collect();
+    if named.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<p>DuckDB's time is query wall time over warm native storage, the second-smallest of \
+         its runs, in ms: {}.</p>\n",
+        escape(&named.join("; "))
+    )
+}
+
 fn dataset_table(
     dataset: &str,
     sf: &str,
     places: &[&Place],
     devices: &[Device],
+    duckdbs: &[Duckdb],
     rows: &BTreeMap<Place, BTreeMap<usize, Found>>,
 ) -> String {
     let id = escape(&format!("{dataset}-sf{sf}"));
@@ -253,6 +336,9 @@ fn dataset_table(
     for device in devices {
         let _ = write!(html, "<th colspan=\"4\">{}</th>", escape(&device.name));
     }
+    for duckdb in duckdbs {
+        let _ = write!(html, "<th rowspan=\"1\">{}</th>", escape(&duckdb.name));
+    }
     html.push_str("</tr>\n<tr>");
     for _ in devices {
         let _ = write!(
@@ -261,6 +347,9 @@ fn dataset_table(
              ≥ (GiB)</th>",
             escape(PEAK_MEANS)
         );
+    }
+    for _ in duckdbs {
+        html.push_str("<th>warm (ms)</th>");
     }
     html.push_str("</tr>\n");
     for place in places {
@@ -273,6 +362,9 @@ fn dataset_table(
         );
         for (at, device) in devices.iter().enumerate() {
             html.push_str(&cells(place, &mode, device, rows[*place].get(&at)));
+        }
+        for duckdb in duckdbs {
+            html.push_str(&duckdb_cell(place, duckdb));
         }
         html.push_str("</tr>\n");
     }
@@ -339,6 +431,40 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
         None => escape(&text),
     };
     format!("<td colspan=\"4\" class=\"{class}\">{text}</td>")
+}
+
+/// A DuckDB tree's cell for a row: its time, linked to its line, or `failed`, or `—`.
+fn duckdb_cell(place: &Place, duckdb: &Duckdb) -> String {
+    let (dataset, sf) = (&place.dataset.1, &place.sf.1);
+    let found = duckdb
+        .files
+        .get(&(dataset.clone(), sf.clone()))
+        .and_then(|results| {
+            results
+                .rows
+                .iter()
+                .enumerate()
+                .find(|(_, row)| row.query.replace('_', "-") == place.query.1)
+        });
+    let Some((index, row)) = found else {
+        return "<td class=\"na\">—</td>".to_string();
+    };
+    match (row.status, row.ms_2nd_min) {
+        (DuckdbStatus::Ok, Some(ms)) => {
+            let rel = format!(
+                "benchmark-results/{}/{dataset}.sf{sf}/duckdb.tsv",
+                duckdb.name
+            );
+            // Rows start on the file's third line, after the preamble and the column line.
+            let href = section_href(&rel, index + 3);
+            format!(
+                "<td class=\"n\"><a href=\"{}\">{}</a></td>",
+                escape(&href),
+                escape(&format!("{ms:.1}"))
+            )
+        }
+        _ => "<td class=\"off\">failed</td>".to_string(),
+    }
 }
 
 fn extra_table(table: &ReportTable) -> String {

@@ -1418,6 +1418,11 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
   │                       └── fetch_record.sh <device>/<dataset>.sf<sf>
   │                             └──► calibration/<device>/<dataset>.sf<sf>/records.tsv   (gitignored)
   │
+  ├── bench-each.sh over run-gpu.sh (the H100), one process per query: the same files, and
+  │     each process's record set aside as a segment; join_records.py joins the segments,
+  │     split_record.py --cases <the device's cases.csv> cuts the result, and publish_record.sh
+  │     uploads and pins it from dev, as above
+  │
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
         │     └──► calibration/capture.sqlite          (not committed)
@@ -1442,8 +1447,9 @@ calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.t
 
 `<device>` is the card's slug, `h100-80gb-hbm3` for `NVIDIA H100 80GB HBM3`. The H200's two
 records predate it: they are keyed, pinned and fetched as `<dataset>.sf<sf>`, one level up.
-`create_nsys_profile.sh` reads the pinned records at that level only,
-`calibration/<dataset>.sf<sf>/records.tsv`, one per dataset the case list names.
+`create_nsys_profile.sh` reads the pinned records at that level,
+`calibration/<dataset>.sf<sf>/records.tsv`, one per dataset the case list names; `--device <slug>`
+reads them a level down, under the device's slug.
 
 What the arrows are there to make checkable:
 
@@ -1541,9 +1547,10 @@ What the arrows are there to make checkable:
   requires the host's record to be the one it pulled (no run started since) and the run to have
   exited 0, since a failed case is missing from it. A refused record leaves the
   pin as it was, and the pull exits 1 with the tree home. A record that names no device, or two,
-  is refused too: its rows are filed under the device that measured them. Only shad-gpu publishes,
-  through `build-test-shadgpu.sh`. `build-test.sh` keeps what it pulls, and nebius-gpu runs no
-  benchmark, so while shad-gpu is down no record is published.
+  is refused too: its rows are filed under the device that measured them. shad-gpu publishes
+  through `build-test-shadgpu.sh`. A run under `bench-each.sh` is published from dev, joined,
+  split and uploaded ("The H100's device run"). `build-test.sh` keeps what it pulls, and
+  nebius-gpu runs no benchmark.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 
@@ -1999,6 +2006,38 @@ $G run list         # or: PCK_TEST_FILTER=<f> $G run bench
 $G pull
 $N stop
 ```
+
+**The benchmark, one process per query.** `scripts/env/bench-each.sh [<vm options>] --cases <list>
+--mode <mode> [--within <cases.csv>] --timeout <s> --records <dir>` runs each case of the main
+list at `<mode>` as its own `run bench`, so no process nears the watcher's 4-hour cap and a crash
+leaves the next case a fresh CUDA context. `<vm options>` are `--instance-id`, `--profile` and
+`--dir`; `--dir` goes to `run-gpu.sh` alone. `--within` keeps the queries with an `ok` or `wrong`
+row in a device list. Per case:
+
+- a section already in the device tree on dev, timed or failed, is kept, so a rerun resumes and a
+  timed-out case is not run again;
+- else `run bench` with `PCK_TEST_FILTER` naming the case, `PEACOCK_BENCH_RESUME=1`,
+  `PEACOCK_BENCH_CASE_TIMEOUT_S=<s>` and `PCK_WRITE_GPU_RESULT=1`, then `pull`;
+- the pulled `calibration/records.tsv` moves to `<dir>/<ds>-<q>-<mode>.<attempt>.tsv`, one attempt
+  past the highest there, and is removed on the VM. A record a killed run left on the VM is pulled
+  and set aside the same way first, under its last row's case.
+
+The device tree is the one the first measured case's pull changed; its slug is kept in
+`<dir>/device` for a rerun. Exit 0 when every case has its section, 1 when one has none (rerun),
+2 on bad input, else the `run-gpu.sh` exit that stopped it. The segments then go home as one
+record:
+
+```
+python3 scripts/calibration/join_records.py --record <dir>/*.tsv --out <joined>
+python3 scripts/calibration/split_record.py --record <joined> --cases <the device's cases.csv> --out-dir <split>
+scripts/calibration/publish_record.sh --from <split> <device>/tpch.sf40 <device>/tpcds.sf40
+```
+
+`join_records.py` takes a case's rows from its highest attempt, a name without one counting as
+0, and refuses segments whose headings differ but for the pool's free memory, which it writes as
+`<min>-<max>`. `split_record.py --cases` reads a device list's `ok` and `wrong` rows as the cases.
+`publish_record.sh` uploads each file under its sha256, reads it back, rewrites its line in
+`records.sha256` and moves it to where `fetch_record.sh` puts it.
 
 Nsight runs on the VM itself, over the same door:
 `create_nsys_profile.sh --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i>
@@ -2577,7 +2616,8 @@ and `h200/` is held to it. It goes with `PREDATES_PROVENANCE` once the H200 is r
 Every per-device case list is `testdata/benchmark-results/<device>/cases.csv`. A device tree that
 holds one is held to it; a tree without is held to the whole main list. A list's `ok` and
 `wrong` rows are main-list cases, at modes the main list carries for them (`h200/` exempt).
-`duckdb-cpu128/` holds DuckDB's results, not a device's: the tree checks pass it by. A list's
+`duckdb-cpu128/` holds DuckDB's results, not a device's: the tree checks pass it by (DuckDB's
+side, below). A list's
 first line is `dataset,sf,query,modes,status,note`, and a row splits at its first five commas:
 - `dataset`, `sf`: as the main list writes them, `tpch` and `40`;
 - `query`: the main list's ident, `_` kept (`aggregate_groupby`);
@@ -2831,6 +2871,22 @@ minimum, which would be a tree belonging to no execution. Both counts are consta
 `src/test_support/` (`MEASURED_RUNS` in `mod.rs`, the warm-up in `corpus_benchmark.rs`), so every
 file in the tree was taken at the same counts. `--pull-benchmarks` is additive and no push
 `--delete`s the directory.
+
+**DuckDB's side.** `benchmarks/duckdb_minimal.sh` times DuckDB 1.5.4 over its own storage, the page
+cache warmed and its residency checked, all cores, the second-smallest of six. `--dataset tpch|tpcds`
+picks the dataset; `--cases <cases.csv>` runs the corpus text, `testdata/<ds>-queries/<q>.sql`, of
+the list's `ok` and `wrong` rows of that dataset, in file order, instead of the TPC-H minimal set,
+which alone is verified against goldens. A corpus query runs under the oracle's two settings,
+`default_null_order` and `integer_division`, each in a `-c` before the query's: the CLI parses a
+`-c` whole, so a parser setting in the query's own `-c` is read too late. `--answers <db>` stores
+each query's threads=1 answer as table `"<q>"` (`<q>` the file's stem), which `duckdb_result.py
+--sf 40 --answers <db>` renders. `--results <tsv>` writes `duckdb.tsv`: a `# ` line of one-word
+`key=value`s (`duckdb threads host cpu cores memory_gib db resident_pct`), the column line `query
+ms_2nd_min runs_ms workset_bytes disk_read_bytes warm status`, then a row per query, `runs_ms`
+comma-joined, a failed row `-` for its times, its disk read and its warm verdict. Its one reader is
+`parse_duckdb_results` in `test_support`, tested over `testdata/fixtures/duckdb-results.tsv`, which
+`benchmarks/tests/test_duckdb_minimal.py` holds the script's output to. The results live in
+`testdata/benchmark-results/duckdb-cpu128/<ds>.sf40/duckdb.tsv`.
 
 **The record**, `testdata/calibration/records.tsv` where a run's pull puts it, and
 `testdata/calibration/<device>/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the
