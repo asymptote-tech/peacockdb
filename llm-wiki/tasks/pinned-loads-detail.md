@@ -10,6 +10,10 @@
   the `build-test.md` edits. Notes below.
 - 2026-11-04: Task 2 Steps 1–2, and Step 3's L40S bracket only. The H100 is not live, so Step 3
   stops after the L40S: no CPU-VM build, no H100 start. Steps 3 (H100 part) to 9 wait for it.
+- 2026-11-04: Step 3's "Discrete cards", both cards: the L40S on the coordinator's retry, the
+  H100 in its own short bracket. Also the H100's `free -b` for "Host memory". Both report
+  `pageableMemoryAccess = 0`. The rest of Step 3 (CPU-VM build, `ship`, sf40 sizes, container
+  limit) still waits for the H100 path.
 
 ## Task 1: the load breakdown
 
@@ -156,13 +160,37 @@ one `cudaMemcpyAsync` per coalesced run, on the calling thread, with no host cop
 Read by `devprops` (`cudaGetDeviceProperties`; cudart 12.9 static, built with the 25.02 build
 image's nvcc) and `nvidia-smi -q | grep -i 'Addressing Mode'`.
 
-- **L40S (nebius-gpu): not read, no capacity.** On 2026-11-04 the API accepted `scripts/nebius.sh
-  start` at 06:57:37Z, and the VM stayed `STOPPED` for the whole 900 s `START_TIMEOUT`. In that
-  case `nebius.sh` exits 75 (`wait_for_state RUNNING … || exit 75`). The literal 75 was not seen:
-  the outer `timeout 900` was the same length and killed the script first (rc 124). The next try
-  should wrap `start` in at least `timeout 1000`. `status` at 07:12:52Z: `STOPPED`; `stop` at
-  07:13:08Z: "already STOPPED". Not retried; the coordinator owns the retry.
-- **H100**: waits for new-hosts.
+| card | VM | `pageableMemoryAccess` | `pageableMemoryAccessUsesHostPageTables` | `integrated` | Addressing Mode | discrete |
+|---|---|---|---|---|---|---|
+| `NVIDIA L40S` | nebius-gpu | 0 | 0 | 0 | None | yes |
+| `NVIDIA H100 80GB HBM3` | nebius-h100 | 0 | 0 | 0 | None | yes |
+
+- Both cards report `driver=13000 runtime=12090`. Neither card reports `pageableMemoryAccess = 1`,
+  so the plan's stop for the human does not apply.
+- Read 2026-11-04: the L40S at 07:17:58Z, the H100 at 07:20:10Z. The H100 was read in its own
+  short bracket, before the CPU-VM build (the coordinator's decision, under "VM time").
+- **The H100 is the kind of host the plan warns about, and still reports 0.** Its kernel is
+  `6.11.0-1016-nvidia`, and its driver is the open kernel module, 580.173.02. The plan says such a
+  host (open module, kernel ≥ 6.1) reports `pageableMemoryAccess = 1` through HMM. This one does
+  not. Why was not checked (nothing else was run on the VM). The attribute, not the
+  kernel/module pair, is what `is_discrete_for_pinning` reads, so the predicate is still right here.
+- **L40S, first try: no capacity.** On 2026-11-04 the API accepted `scripts/nebius.sh start` at
+  06:57:37Z, and the VM stayed `STOPPED` for the whole 900 s `START_TIMEOUT`. In that case
+  `nebius.sh` exits 75 (`wait_for_state RUNNING … || exit 75`). The literal 75 was not seen: the
+  outer `timeout 900` was the same length and killed the script first (rc 124). So wrap `start`
+  in at least `timeout 1000`. `status` at 07:12:52Z: `STOPPED`; `stop` at 07:13:08Z: "already
+  STOPPED". The coordinator's retry started it at 07:17:36Z.
+
+## Host memory
+
+- **nebius-h100, `free -b`:** total 211069927424 bytes (196.6 GiB), available 208810188800 at
+  07:20Z on a fresh boot. No swap.
+- **Not read yet:** the bytes of `tpch.sf40` and `tpcds.sf40` parquet (`du -cb`), the run
+  container's limit (`memory.max` inside `run-gpu.sh`'s `docker run`), the default cache and
+  whether each dataset fits. They wait for the H100 path: new-hosts' fetch and the CPU-VM build.
+- **Note, the H100's software:** kernel `6.11.0-1016-nvidia`; driver `NVIDIA UNIX Open Kernel
+  Module for x86_64 580.173.02` (built with gcc 13.3.0); glibc 2.39 (Ubuntu `2.39-0ubuntu8.9`).
+  `devprops` needs `GLIBC_2.34`, so it runs there.
 
 ## Task 2 notes
 
@@ -185,3 +213,7 @@ image's nvcc) and `nvidia-smi -q | grep -i 'Addressing Mode'`.
 | VM | start (UTC) | stop (UTC) | hours | why |
 |---|---|---|---|---|
 | nebius-gpu (L40S) | 2026-11-04 06:57:37 (requested; never RUNNING) | 2026-11-04 07:13:08 (`stop`: already STOPPED) | 0 | Task 2 Step 3, `devprops`; no capacity, see "Discrete cards" |
+| nebius-gpu (L40S) | 2026-11-04 07:17:36 (coordinator's retry; RUNNING) | 2026-11-04 07:18:37 (`stop`: stopped) | 0.02 | Task 2 Step 3, `devprops` and addressing mode |
+| nebius-h100 | 2026-11-04 07:18:44 (RUNNING 07:19:49) | 2026-11-04 07:20:49 (`stop`: stopped) | 0.03 | Task 2 Step 3, `devprops`, addressing mode, `free -b`, kernel/driver/glibc; its own bracket, before the CPU-VM build |
+- L40S start for Task 2 Step 3's devprops: no capacity from 2026-11-04T06:57:37Z (developer; treated as 75). The coordinator retries every 15 min up to 10 h (until 16:57Z). Decision: the H100's devprops is read in its own short bracket before the CPU-VM build exists, so Tasks 3–5 (offline) can start once both cards are read; one extra H100 start of a few minutes, against the plan's order (Step 3 reads it after the build).
+- Order change (coordinator, 2026-11-04): Tasks 3, 4, 4b and 5 (offline, tested on no VM) run now, before Task 2's before profile, because the H100 path waits on new-hosts' block. The before profile and the before load times (Task 2 Steps 4–8) are then taken on an install staged from `ENS-new-hosts`'s tip (today's engine, no pinned-loads change), never from this branch. Task 6 waits on Task 2's Decision.
