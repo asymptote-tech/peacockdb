@@ -144,7 +144,7 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
     means containers-rebase is mid-surgery: resume from `.claude/ensemble/L.surgery` (or the
     detail file's `## Surgery` once Step 5 has folded it in).
 
-### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: done — PR #193
+### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: rebase needed(done) — PR #193
 
 `ENS-containers-rebase`: containers' 16 commits replayed on master, plus the optimizer's benchmark
 commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list regenerated from
@@ -180,7 +180,7 @@ Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (devi
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.
 
-### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: approved to build
+### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: rebase needed(building)
 
 Production: the driver runs plans with shared sources and several roots, without deadlock, with
 per-consumer limits and an optional concurrency cap.
