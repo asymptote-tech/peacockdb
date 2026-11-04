@@ -19,6 +19,8 @@
 - 2026-11-04: Task 4 offline (the scan reads the cache; the option and the three symbols), no
   VM. Notes below.
 - 2026-11-04: Task 4b offline (the benchmark's prefill), no VM. Notes below.
+- 2026-11-04: Task 5 Steps 1–4 offline (the scan reads through a one-chunk chunked parquet
+  reader), no VM. Notes below.
 
 ## Task 1: the load breakdown
 
@@ -207,6 +209,43 @@
 - **Unrun (needs a device):** a benchmark run whose `[pinned-cache] prefill:` line shows
   `files > 0` and whose cases all pass `rounds_were_pinned`; the refusal and `[load-bytes]` lines
   on real data. Task 7 Step 3.
+
+## Task 5: the scan reads through a one-chunk chunked parquet reader
+
+- **Red → green.** The 26.02 build image (on dev at the start): `ninja peacock_cpu_tests
+  peacock_plan_tests -k 0` failed to compile both new files (`‘ScanReader’ has not been declared
+  in ‘peacock’`, `‘parse_scan_reader’ is not a member of ‘peacock’`, `‘read_scan_table’ is not a
+  member of ‘peacock’`). Then, in each image, a full `ninja` (exit 0, no warning in the log),
+  `ctest -L cpu` 1/1, `peacock_cpu_tests` 63/63, and `peacock_plan_tests --gtest_list_tests`
+  131 cases. 26.02 in `/tmp/pl-build26`; 25.02 in `/tmp/pl-build25`, after the 26.02 image was
+  removed and the 25.02 image pulled. Mutation: `scan_reader()` reading the variable on every
+  call fails `ScanReader.TheSwitchIsReadOnce` (26.02).
+- **Departures from the plan's text:**
+  - `read_scan_table` returns `ScanRead { table, chunks }`, as the plan's prose says. Its code
+    block still shows `table_with_metadata`; the prose and Step 3's `.table` win.
+  - The device cases are in a new file, `cpp/tests/gpu/test_scan_reader.cpp`, in
+    `peacock_plan_tests`, not in `test_plan_executor.cpp` (Task 4's reason: that file is 3046
+    lines). They call `read_scan_table` directly with reader options over `customer.parquet`,
+    not through a plan.
+  - `ScanReader.TheSwitchIsReadOnce` runs in `peacock_cpu_tests`
+    (`cpp/tests/cpu/test_scan_reader_switch.cpp`), so `ctest -L cpu` runs it. It reads the switch,
+    sets `PEACOCK_SCAN_READER=read_parquet`, and reads `Chunked` again. It skips if the variable is
+    set when it starts.
+  - Two CPU cases more than the plan, over a pure `parse_scan_reader(const char*)` (null = unset):
+    `ScanReader.TheSwitchNamesTwoReaders` and `ScanReader.AnyOtherValueIsRefusedByName` (`""`,
+    `Chunked`, `read-parquet`, `chunked `). The plan's "anything else throws naming it" cannot be
+    tested through `scan_reader()`, which reads once. An empty value is refused, not taken as unset.
+  - `operators.h` now includes `cudf/io/parquet.hpp` and `cudf/io/types.hpp`, for `ScanRead` and
+    the options type.
+- **What is subtle.** cuDF's `has_next()` is true once even for an empty read
+  (`is_first_output_chunk`, `reader_impl.cpp:818-827` at `v25.02.02`), so the `while (has_next())`
+  loop always returns at least one chunk. The lease is taken before `read_scan_table` and dropped
+  after it, so it covers the chunked reader's copies as it covered `read_parquet`'s.
+- **Unrun (needs a device):** `ScanReader.OneChunkEqualsReadParquet`,
+  `ScanReader.SeveralChunksConcatenateToReadParquet` (Review focus 5),
+  `ScanReader.RowGroupSelectionIsKept`. They compile in both images and are listed by
+  `--gtest_list_tests`. They run in Task 7 with the L40S list, cache on and off. The GPU tiers'
+  byte-identity under `PEACOCK_SCAN_READER=read_parquet` is Task 7's too.
 
 ## cuDF 25.02 default
 
