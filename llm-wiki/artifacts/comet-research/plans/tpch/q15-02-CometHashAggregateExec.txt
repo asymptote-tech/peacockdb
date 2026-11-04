@@ -1,0 +1,85 @@
+children {
+  children {
+    plan_id: 1
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 4
+          }
+        }
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=2.7 KiB, rowCount=25)"
+    }
+  }
+  plan_id: 20174
+  hash_agg {
+    agg_exprs {
+      max {
+        child {
+          unbound {
+            name: "total_revenue"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 38
+                  scale: 4
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 706
+            stop_index: 746
+            line: 21
+            start_position: 22
+          }
+          expr_id: 8408
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 38
+              scale: 4
+            }
+          }
+        }
+      }
+      query_context {
+        start_index: 714
+        stop_index: 731
+        line: 21
+        start_position: 30
+      }
+      expr_id: 8409
+    }
+    mode: Final
+  }
+}
+plan_id: 20174
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 4
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 714
+      stop_index: 731
+      line: 21
+      start_position: 30
+    }
+    expr_id: 8410
+  }
+}

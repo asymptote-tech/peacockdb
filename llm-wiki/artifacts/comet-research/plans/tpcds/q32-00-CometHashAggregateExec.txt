@@ -1,0 +1,105 @@
+children {
+  children {
+    plan_id: 6
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=104.0 B, rowCount=1)"
+    }
+  }
+  plan_id: 105940
+  hash_agg {
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "cs_ext_discount_amt"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 11
+                stop_index: 29
+                line: 1
+                start_position: 11
+              }
+              expr_id: 67255
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 7
+            stop_index: 30
+            line: 1
+            start_position: 7
+          }
+          expr_id: 67256
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 7
+        stop_index: 30
+        line: 1
+        start_position: 7
+      }
+      expr_id: 67257
+    }
+    mode: Final
+  }
+}
+plan_id: 105940
+projection {
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 30
+          line: 1
+          start_position: 7
+        }
+        expr_id: 67258
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 7
+      stop_index: 30
+      line: 1
+      start_position: 7
+    }
+    expr_id: 67259
+  }
+}

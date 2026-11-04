@@ -1,0 +1,112 @@
+children {
+  plan_id: 16097
+  native_scan {
+    common {
+      required_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_regionkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 205
+              stop_index: 213
+              line: 11
+              start_position: 6
+            }
+            expr_id: 6505
+          }
+        }
+        query_context {
+          stop_index: 497
+          line: 1
+        }
+        expr_id: 6506
+      }
+      projection_vector: 0
+      projection_vector: 1
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 144773979
+  }
+}
+plan_id: 16148
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 205
+          stop_index: 213
+          line: 11
+          start_position: 6
+        }
+        expr_id: 6507
+      }
+    }
+    query_context {
+      stop_index: 497
+      line: 1
+    }
+    expr_id: 6508
+  }
+}

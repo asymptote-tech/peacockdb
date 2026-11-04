@@ -1,0 +1,90 @@
+== Physical Plan ==
+AdaptiveSparkPlan (11)
++- == Final Plan ==
+   ResultQueryStage (9)
+   +- * CometColumnarToRow (8)
+      +- CometHashAggregate (7)
+         +- ShuffleQueryStage (6), Statistics(sizeInBytes=31.7 KiB, rowCount=128)
+            +- CometExchange (5)
+               +- CometHashAggregate (4)
+                  +- CometProject (3)
+                     +- CometFilter (2)
+                        +- CometNativeScan parquet  (1)
++- == Initial Plan ==
+   CometHashAggregate (10)
+   +- CometExchange (5)
+      +- CometHashAggregate (4)
+         +- CometProject (3)
+            +- CometFilter (2)
+               +- CometNativeScan parquet  (1)
+
+
+(1) CometNativeScan parquet 
+Output [4]: [l_quantity#12, l_extendedprice#13, l_discount#14, l_shipdate#18]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/lineitem.parquet]
+PushedFilters: [IsNotNull(l_shipdate), IsNotNull(l_discount), IsNotNull(l_quantity), GreaterThanOrEqual(l_shipdate,1994-01-01), LessThan(l_shipdate,1995-01-01), GreaterThanOrEqual(l_discount,0.05), LessThanOrEqual(l_discount,0.07), LessThan(l_quantity,24.00)]
+ReadSchema: struct<l_quantity:decimal(15,2),l_extendedprice:decimal(15,2),l_discount:decimal(15,2),l_shipdate:date>
+
+(2) CometFilter
+Input [4]: [l_quantity#12, l_extendedprice#13, l_discount#14, l_shipdate#18]
+Condition : (((((((isnotnull(l_shipdate#18) AND isnotnull(l_discount#14)) AND isnotnull(l_quantity#12)) AND (l_shipdate#18 >= 1994-01-01)) AND (l_shipdate#18 < 1995-01-01)) AND (l_discount#14 >= 0.05)) AND (l_discount#14 <= 0.07)) AND (l_quantity#12 < 24.00))
+
+(3) CometProject
+Input [4]: [l_quantity#12, l_extendedprice#13, l_discount#14, l_shipdate#18]
+Arguments: [l_extendedprice#13, l_discount#14], [l_extendedprice#13, l_discount#14]
+
+(4) CometHashAggregate
+Input [2]: [l_extendedprice#13, l_discount#14]
+Keys: []
+Functions [1]: [partial_sum((l_extendedprice#13 * l_discount#14))]
+
+(5) CometExchange
+Input [2]: [sum#167, isEmpty#168]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=7578]
+
+(6) ShuffleQueryStage
+Output [2]: [sum#167, isEmpty#168]
+Arguments: 0
+
+(7) CometHashAggregate
+Input [2]: [sum#167, isEmpty#168]
+Keys: []
+Functions [1]: [sum((l_extendedprice#13 * l_discount#14))]
+
+(8) CometColumnarToRow [codegen id : 1]
+Input [1]: [revenue#163]
+
+(9) ResultQueryStage
+Output [1]: [revenue#163]
+Arguments: 1
+
+(10) CometHashAggregate
+Input [2]: [sum#167, isEmpty#168]
+Keys: []
+Functions [1]: [sum((l_extendedprice#13 * l_discount#14))]
+
+(11) AdaptiveSparkPlan
+Output [1]: [revenue#163]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometHashAggregate
+   +- CometExchange
+      +- CometHashAggregate
+         +- CometProject
+            +- CometFilter
+               +- CometNativeScan parquet 
+
+Comet accelerated 6 out of 6 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 8 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometHashAggregate
+   +- CometExchange
+      +- CometHashAggregate
+         +- CometProject
+            +- CometFilter
+               +- CometNativeScan parquet 
+
+Comet accelerated 6 out of 6 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 8 native, 0 codegen dispatch.

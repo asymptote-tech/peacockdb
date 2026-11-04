@@ -1,0 +1,401 @@
+== Physical Plan ==
+AdaptiveSparkPlan (56)
++- == Final Plan ==
+   ResultQueryStage (41)
+   +- * CometColumnarToRow (40)
+      +- CometTakeOrderedAndProject (39)
+         +- CometHashAggregate (38)
+            +- AQEShuffleRead (37)
+               +- ShuffleQueryStage (36), Statistics(sizeInBytes=13.6 MiB, rowCount=1.02E+4)
+                  +- CometExchange (35)
+                     +- CometHashAggregate (34)
+                        +- CometProject (33)
+                           +- CometBroadcastHashJoin (32)
+                              :- CometProject (26)
+                              :  +- CometBroadcastHashJoin (25)
+                              :     :- CometProject (20)
+                              :     :  +- CometBroadcastHashJoin (19)
+                              :     :     :- CometProject (14)
+                              :     :     :  +- CometSortMergeJoin (13)
+                              :     :     :     :- CometSort (6)
+                              :     :     :     :  +- AQEShuffleRead (5)
+                              :     :     :     :     +- ShuffleQueryStage (4), Statistics(sizeInBytes=4.0 GiB, rowCount=1.06E+8)
+                              :     :     :     :        +- CometExchange (3)
+                              :     :     :     :           +- CometFilter (2)
+                              :     :     :     :              +- CometNativeScan parquet  (1)
+                              :     :     :     +- CometSort (12)
+                              :     :     :        +- AQEShuffleRead (11)
+                              :     :     :           +- ShuffleQueryStage (10), Statistics(sizeInBytes=333.1 MiB, rowCount=1.09E+7)
+                              :     :     :              +- CometExchange (9)
+                              :     :     :                 +- CometFilter (8)
+                              :     :     :                    +- CometNativeScan parquet  (7)
+                              :     :     +- BroadcastQueryStage (18), Statistics(sizeInBytes=7.2 KiB, rowCount=112)
+                              :     :        +- CometBroadcastExchange (17)
+                              :     :           +- CometFilter (16)
+                              :     :              +- CometNativeScan parquet  (15)
+                              :     +- BroadcastQueryStage (24), Statistics(sizeInBytes=286.2 KiB, rowCount=7.30E+4)
+                              :        +- CometBroadcastExchange (23)
+                              :           +- CometFilter (22)
+                              :              +- CometNativeScan parquet  (21)
+                              +- BroadcastQueryStage (31), Statistics(sizeInBytes=373.0 B, rowCount=31)
+                                 +- CometBroadcastExchange (30)
+                                    +- CometProject (29)
+                                       +- CometFilter (28)
+                                          +- CometNativeScan parquet  (27)
++- == Initial Plan ==
+   CometTakeOrderedAndProject (55)
+   +- CometHashAggregate (54)
+      +- CometExchange (53)
+         +- CometHashAggregate (52)
+            +- CometProject (51)
+               +- CometBroadcastHashJoin (50)
+                  :- CometProject (49)
+                  :  +- CometBroadcastHashJoin (48)
+                  :     :- CometProject (47)
+                  :     :  +- CometBroadcastHashJoin (46)
+                  :     :     :- CometProject (45)
+                  :     :     :  +- CometSortMergeJoin (44)
+                  :     :     :     :- CometSort (42)
+                  :     :     :     :  +- CometExchange (3)
+                  :     :     :     :     +- CometFilter (2)
+                  :     :     :     :        +- CometNativeScan parquet  (1)
+                  :     :     :     +- CometSort (43)
+                  :     :     :        +- CometExchange (9)
+                  :     :     :           +- CometFilter (8)
+                  :     :     :              +- CometNativeScan parquet  (7)
+                  :     :     +- CometBroadcastExchange (17)
+                  :     :        +- CometFilter (16)
+                  :     :           +- CometNativeScan parquet  (15)
+                  :     +- CometBroadcastExchange (23)
+                  :        +- CometFilter (22)
+                  :           +- CometNativeScan parquet  (21)
+                  +- CometBroadcastExchange (30)
+                     +- CometProject (29)
+                        +- CometFilter (28)
+                           +- CometNativeScan parquet  (27)
+
+
+(1) CometNativeScan parquet 
+Output [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_ticket_number), IsNotNull(ss_item_sk), IsNotNull(ss_customer_sk), IsNotNull(ss_store_sk), IsNotNull(ss_sold_date_sk)]
+ReadSchema: struct<ss_sold_date_sk:bigint,ss_item_sk:bigint,ss_customer_sk:bigint,ss_store_sk:bigint,ss_ticket_number:bigint>
+
+(2) CometFilter
+Input [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Condition : ((((isnotnull(ss_ticket_number#289L) AND isnotnull(ss_item_sk#282L)) AND isnotnull(ss_customer_sk#283L)) AND isnotnull(ss_store_sk#287L)) AND isnotnull(ss_sold_date_sk#280L))
+
+(3) CometExchange
+Input [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Arguments: hashpartitioning(ss_ticket_number#289L, ss_item_sk#282L, ss_customer_sk#283L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=125095]
+
+(4) ShuffleQueryStage
+Output [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Arguments: 0
+
+(5) AQEShuffleRead
+Input [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Arguments: coalesced
+
+(6) CometSort
+Input [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Arguments: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L], [ss_ticket_number#289L ASC NULLS FIRST, ss_item_sk#282L ASC NULLS FIRST, ss_customer_sk#283L ASC NULLS FIRST]
+
+(7) CometNativeScan parquet 
+Output [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_returns.parquet]
+PushedFilters: [IsNotNull(sr_ticket_number), IsNotNull(sr_item_sk), IsNotNull(sr_customer_sk), IsNotNull(sr_returned_date_sk)]
+ReadSchema: struct<sr_returned_date_sk:bigint,sr_item_sk:bigint,sr_customer_sk:bigint,sr_ticket_number:bigint>
+
+(8) CometFilter
+Input [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Condition : (((isnotnull(sr_ticket_number#269L) AND isnotnull(sr_item_sk#262L)) AND isnotnull(sr_customer_sk#263L)) AND isnotnull(sr_returned_date_sk#260L))
+
+(9) CometExchange
+Input [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: hashpartitioning(sr_ticket_number#269L, sr_item_sk#262L, sr_customer_sk#263L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=125099]
+
+(10) ShuffleQueryStage
+Output [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: 1
+
+(11) AQEShuffleRead
+Input [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: coalesced
+
+(12) CometSort
+Input [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L], [sr_ticket_number#269L ASC NULLS FIRST, sr_item_sk#262L ASC NULLS FIRST, sr_customer_sk#263L ASC NULLS FIRST]
+
+(13) CometSortMergeJoin
+Left output [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Right output [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [ss_ticket_number#289L, ss_item_sk#282L, ss_customer_sk#283L], [sr_ticket_number#269L, sr_item_sk#262L, sr_customer_sk#263L], Inner
+
+(14) CometProject
+Input [9]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L, sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L], [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L]
+
+(15) CometNativeScan parquet 
+Output [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string,s_company_id:bigint,s_street_number:string,s_street_name:string,s_street_type:string,s_suite_number:string,s_city:string,s_county:string,s_state:string,s_zip:string>
+
+(16) CometFilter
+Input [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Condition : isnotnull(s_store_sk#231L)
+
+(17) CometBroadcastExchange
+Input [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(18) BroadcastQueryStage
+Output [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: 2
+
+(19) CometBroadcastHashJoin
+Left output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L]
+Right output [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(20) CometProject
+Input [14]: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L, s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(21) CometNativeScan parquet 
+Output [1]: [d_date_sk#141L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_date_sk)]
+ReadSchema: struct<d_date_sk:bigint>
+
+(22) CometFilter
+Input [1]: [d_date_sk#141L]
+Condition : isnotnull(d_date_sk#141L)
+
+(23) CometBroadcastExchange
+Input [1]: [d_date_sk#141L]
+Arguments: [d_date_sk#141L]
+
+(24) BroadcastQueryStage
+Output [1]: [d_date_sk#141L]
+Arguments: 3
+
+(25) CometBroadcastHashJoin
+Left output [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Right output [1]: [d_date_sk#141L]
+Arguments: [ss_sold_date_sk#280L], [d_date_sk#141L], Inner, BuildRight
+
+(26) CometProject
+Input [13]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, d_date_sk#141L]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(27) CometNativeScan parquet 
+Output [3]: [d_date_sk#12601L, d_year#12607L, d_moy#12609L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_year), IsNotNull(d_moy), EqualTo(d_year,2001), EqualTo(d_moy,8), IsNotNull(d_date_sk)]
+ReadSchema: struct<d_date_sk:bigint,d_year:bigint,d_moy:bigint>
+
+(28) CometFilter
+Input [3]: [d_date_sk#12601L, d_year#12607L, d_moy#12609L]
+Condition : ((((isnotnull(d_year#12607L) AND isnotnull(d_moy#12609L)) AND (d_year#12607L = 2001)) AND (d_moy#12609L = 8)) AND isnotnull(d_date_sk#12601L))
+
+(29) CometProject
+Input [3]: [d_date_sk#12601L, d_year#12607L, d_moy#12609L]
+Arguments: [d_date_sk#12601L], [d_date_sk#12601L]
+
+(30) CometBroadcastExchange
+Input [1]: [d_date_sk#12601L]
+Arguments: [d_date_sk#12601L]
+
+(31) BroadcastQueryStage
+Output [1]: [d_date_sk#12601L]
+Arguments: 4
+
+(32) CometBroadcastHashJoin
+Left output [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Right output [1]: [d_date_sk#12601L]
+Arguments: [sr_returned_date_sk#260L], [d_date_sk#12601L], Inner, BuildRight
+
+(33) CometProject
+Input [13]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, d_date_sk#12601L]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(34) CometHashAggregate
+Input [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Keys [10]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Functions [5]: [partial_sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 30) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 30) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 60)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 60) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 90)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 90) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 120)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 120) THEN 1 ELSE 0 END)]
+
+(35) CometExchange
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Arguments: hashpartitioning(s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=125936]
+
+(36) ShuffleQueryStage
+Output [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Arguments: 5
+
+(37) AQEShuffleRead
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Arguments: coalesced
+
+(38) CometHashAggregate
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Keys [10]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Functions [5]: [sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 30) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 30) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 60)) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 60) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 90)) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 90) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 120)) THEN 1 ELSE 0 END), sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 120) THEN 1 ELSE 0 END)]
+
+(39) CometTakeOrderedAndProject
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[s_store_name#236 ASC NULLS FIRST,s_company_id#247L ASC NULLS FIRST,s_street_number#249 ASC NULLS FIRST,s_street_name#250 ASC NULLS FIRST,s_street_type#251 ASC NULLS FIRST,s_suite_number#252 ASC NULLS FIRST,s_city#253 ASC NULLS FIRST,s_county#254 ASC NULLS FIRST,s_state#255 ASC NULLS FIRST,s_zip#256 ASC NULLS FIRST], output=[s_store_name#236,s_company_id#247L,s_street_number#249,s_street_name#250,s_street_type#251,s_suite_number#252,s_city#253,s_county#254,s_state#255,s_zip#256,30 days#12596L,31-60 days#12597L,61-90 days#12598L,91-120 days#12599L,>120 days#12600L]), [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L], 100, 0, [s_store_name#236 ASC NULLS FIRST, s_company_id#247L ASC NULLS FIRST, s_street_number#249 ASC NULLS FIRST, s_street_name#250 ASC NULLS FIRST, s_street_type#251 ASC NULLS FIRST, s_suite_number#252 ASC NULLS FIRST, s_city#253 ASC NULLS FIRST, s_county#254 ASC NULLS FIRST, s_state#255 ASC NULLS FIRST, s_zip#256 ASC NULLS FIRST], [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+
+(40) CometColumnarToRow [codegen id : 1]
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+
+(41) ResultQueryStage
+Output [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+Arguments: 6
+
+(42) CometSort
+Input [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Arguments: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L], [ss_ticket_number#289L ASC NULLS FIRST, ss_item_sk#282L ASC NULLS FIRST, ss_customer_sk#283L ASC NULLS FIRST]
+
+(43) CometSort
+Input [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L], [sr_ticket_number#269L ASC NULLS FIRST, sr_item_sk#262L ASC NULLS FIRST, sr_customer_sk#263L ASC NULLS FIRST]
+
+(44) CometSortMergeJoin
+Left output [5]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L]
+Right output [4]: [sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [ss_ticket_number#289L, ss_item_sk#282L, ss_customer_sk#283L], [sr_ticket_number#269L, sr_item_sk#262L, sr_customer_sk#263L], Inner
+
+(45) CometProject
+Input [9]: [ss_sold_date_sk#280L, ss_item_sk#282L, ss_customer_sk#283L, ss_store_sk#287L, ss_ticket_number#289L, sr_returned_date_sk#260L, sr_item_sk#262L, sr_customer_sk#263L, sr_ticket_number#269L]
+Arguments: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L], [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L]
+
+(46) CometBroadcastHashJoin
+Left output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L]
+Right output [11]: [s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(47) CometProject
+Input [14]: [ss_sold_date_sk#280L, ss_store_sk#287L, sr_returned_date_sk#260L, s_store_sk#231L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(48) CometBroadcastHashJoin
+Left output [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Right output [1]: [d_date_sk#141L]
+Arguments: [ss_sold_date_sk#280L], [d_date_sk#141L], Inner, BuildRight
+
+(49) CometProject
+Input [13]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, d_date_sk#141L]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(50) CometBroadcastHashJoin
+Left output [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Right output [1]: [d_date_sk#12601L]
+Arguments: [sr_returned_date_sk#260L], [d_date_sk#12601L], Inner, BuildRight
+
+(51) CometProject
+Input [13]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, d_date_sk#12601L]
+Arguments: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256], [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+
+(52) CometHashAggregate
+Input [12]: [ss_sold_date_sk#280L, sr_returned_date_sk#260L, s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Keys [10]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Functions [5]: [partial_sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 30) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 30) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 60)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 60) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 90)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 90) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 120)) THEN 1 ELSE 0 END), partial_sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 120) THEN 1 ELSE 0 END)]
+
+(53) CometExchange
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Arguments: hashpartitioning(s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=125116]
+
+(54) CometHashAggregate
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, sum#12639L, sum#12640L, sum#12641L, sum#12642L, sum#12643L]
+Keys [10]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256]
+Functions [5]: [sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 30) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 30) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 60)) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 60) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 90)) THEN 1 ELSE 0 END), sum(CASE WHEN (((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 90) AND ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) <= 120)) THEN 1 ELSE 0 END), sum(CASE WHEN ((sr_returned_date_sk#260L - ss_sold_date_sk#280L) > 120) THEN 1 ELSE 0 END)]
+
+(55) CometTakeOrderedAndProject
+Input [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[s_store_name#236 ASC NULLS FIRST,s_company_id#247L ASC NULLS FIRST,s_street_number#249 ASC NULLS FIRST,s_street_name#250 ASC NULLS FIRST,s_street_type#251 ASC NULLS FIRST,s_suite_number#252 ASC NULLS FIRST,s_city#253 ASC NULLS FIRST,s_county#254 ASC NULLS FIRST,s_state#255 ASC NULLS FIRST,s_zip#256 ASC NULLS FIRST], output=[s_store_name#236,s_company_id#247L,s_street_number#249,s_street_name#250,s_street_type#251,s_suite_number#252,s_city#253,s_county#254,s_state#255,s_zip#256,30 days#12596L,31-60 days#12597L,61-90 days#12598L,91-120 days#12599L,>120 days#12600L]), [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L], 100, 0, [s_store_name#236 ASC NULLS FIRST, s_company_id#247L ASC NULLS FIRST, s_street_number#249 ASC NULLS FIRST, s_street_name#250 ASC NULLS FIRST, s_street_type#251 ASC NULLS FIRST, s_suite_number#252 ASC NULLS FIRST, s_city#253 ASC NULLS FIRST, s_county#254 ASC NULLS FIRST, s_state#255 ASC NULLS FIRST, s_zip#256 ASC NULLS FIRST], [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+
+(56) AdaptiveSparkPlan
+Output [15]: [s_store_name#236, s_company_id#247L, s_street_number#249, s_street_name#250, s_street_type#251, s_suite_number#252, s_city#253, s_county#254, s_state#255, s_zip#256, 30 days#12596L, 31-60 days#12597L, 61-90 days#12598L, 91-120 days#12599L, >120 days#12600L]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- AQEShuffleRead
+         +- CometExchange
+            +- CometHashAggregate
+               +- CometProject
+                  +- CometBroadcastHashJoin
+                     :- CometProject
+                     :  +- CometBroadcastHashJoin
+                     :     :- CometProject
+                     :     :  +- CometBroadcastHashJoin
+                     :     :     :- CometProject
+                     :     :     :  +- CometSortMergeJoin
+                     :     :     :     :- CometSort
+                     :     :     :     :  +- AQEShuffleRead
+                     :     :     :     :     +- CometExchange
+                     :     :     :     :        +- CometFilter
+                     :     :     :     :           +- CometNativeScan parquet 
+                     :     :     :     +- CometSort
+                     :     :     :        +- AQEShuffleRead
+                     :     :     :           +- CometExchange
+                     :     :     :              +- CometFilter
+                     :     :     :                 +- CometNativeScan parquet 
+                     :     :     +- CometBroadcastExchange
+                     :     :        +- CometFilter
+                     :     :           +- CometNativeScan parquet 
+                     :     +- CometBroadcastExchange
+                     :        +- CometFilter
+                     :           +- CometNativeScan parquet 
+                     +- CometBroadcastExchange
+                        +- CometProject
+                           +- CometFilter
+                              +- CometNativeScan parquet 
+
+Comet accelerated 30 out of 30 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 9 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- AQEShuffleRead
+         +- CometExchange
+            +- CometHashAggregate
+               +- CometProject
+                  +- CometBroadcastHashJoin
+                     :- CometProject
+                     :  +- CometBroadcastHashJoin
+                     :     :- CometProject
+                     :     :  +- CometBroadcastHashJoin
+                     :     :     :- CometProject
+                     :     :     :  +- CometSortMergeJoin
+                     :     :     :     :- CometSort
+                     :     :     :     :  +- AQEShuffleRead
+                     :     :     :     :     +- CometExchange
+                     :     :     :     :        +- CometFilter
+                     :     :     :     :           +- CometNativeScan parquet 
+                     :     :     :     +- CometSort
+                     :     :     :        +- AQEShuffleRead
+                     :     :     :           +- CometExchange
+                     :     :     :              +- CometFilter
+                     :     :     :                 +- CometNativeScan parquet 
+                     :     :     +- CometBroadcastExchange
+                     :     :        +- CometFilter
+                     :     :           +- CometNativeScan parquet 
+                     :     +- CometBroadcastExchange
+                     :        +- CometFilter
+                     :           +- CometNativeScan parquet 
+                     +- CometBroadcastExchange
+                        +- CometProject
+                           +- CometFilter
+                              +- CometNativeScan parquet 
+
+Comet accelerated 30 out of 30 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 9 native, 0 codegen dispatch.

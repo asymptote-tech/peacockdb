@@ -1,0 +1,173 @@
+children {
+  plan_id: 10009
+  native_scan {
+    common {
+      required_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "n_regionkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_regionkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 348
+              stop_index: 356
+              line: 10
+              start_position: 10
+            }
+            expr_id: 4139
+          }
+        }
+        query_context {
+          start_index: 117
+          stop_index: 744
+          line: 5
+          start_position: 4
+        }
+        expr_id: 4140
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 348
+              stop_index: 356
+              line: 10
+              start_position: 10
+            }
+            expr_id: 4141
+          }
+        }
+        query_context {
+          start_index: 117
+          stop_index: 744
+          line: 5
+          start_position: 4
+        }
+        expr_id: 4142
+      }
+      projection_vector: 0
+      projection_vector: 2
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: INT32
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1522235837
+  }
+}
+plan_id: 10098
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 348
+              stop_index: 356
+              line: 10
+              start_position: 10
+            }
+            expr_id: 4143
+          }
+        }
+        query_context {
+          start_index: 117
+          stop_index: 744
+          line: 5
+          start_position: 4
+        }
+        expr_id: 4144
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 348
+              stop_index: 356
+              line: 10
+              start_position: 10
+            }
+            expr_id: 4145
+          }
+        }
+        query_context {
+          start_index: 117
+          stop_index: 744
+          line: 5
+          start_position: 4
+        }
+        expr_id: 4146
+      }
+    }
+    expr_id: 4147
+  }
+}

@@ -1,0 +1,158 @@
+children {
+  children {
+    children {
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=10.8 MiB, rowCount=1.20E+6)"
+      }
+    }
+    plan_id: 4676
+    sort {
+      sort_orders {
+        sort_order {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 153
+              stop_index: 164
+              line: 7
+              start_position: 6
+            }
+            expr_id: 1944
+          }
+        }
+        expr_id: 1945
+      }
+    }
+  }
+  children {
+    children {
+      plan_id: 1
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DATE
+        }
+        fields {
+          type_id: INT32
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=667.3 MiB, rowCount=2.92E+7)"
+      }
+    }
+    plan_id: 4679
+    sort {
+      sort_orders {
+        sort_order {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 153
+              stop_index: 164
+              line: 7
+              start_position: 6
+            }
+            expr_id: 1946
+          }
+        }
+        expr_id: 1947
+      }
+    }
+  }
+  plan_id: 4681
+  sort_merge_join {
+    left_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 153
+        stop_index: 164
+        line: 7
+        start_position: 6
+      }
+      expr_id: 1948
+    }
+    right_join_keys {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 153
+        stop_index: 164
+        line: 7
+        start_position: 6
+      }
+      expr_id: 1949
+    }
+    sort_options {
+      sort_order {
+        child {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 153
+            stop_index: 164
+            line: 7
+            start_position: 6
+          }
+          expr_id: 1950
+        }
+      }
+      expr_id: 1951
+    }
+  }
+}
+plan_id: 4683
+projection {
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 1952
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: DATE
+      }
+    }
+    expr_id: 1953
+  }
+  project_list {
+    bound {
+      index: 4
+      datatype {
+        type_id: INT32
+      }
+    }
+    expr_id: 1954
+  }
+}

@@ -1,0 +1,63 @@
+children {
+  plan_id: 74
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=9.6 MiB, rowCount=3.11E+5)"
+  }
+}
+plan_id: 53568
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 71
+      stop_index: 685
+      line: 4
+      start_position: 6
+    }
+    expr_id: 38787
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 71
+      stop_index: 685
+      line: 4
+      start_position: 6
+    }
+    expr_id: 38788
+  }
+  grouping_exprs {
+    bound {
+      index: 2
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 71
+      stop_index: 685
+      line: 4
+      start_position: 6
+    }
+    expr_id: 38789
+  }
+  mode: Final
+}

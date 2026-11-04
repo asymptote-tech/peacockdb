@@ -1,0 +1,517 @@
+== Physical Plan ==
+AdaptiveSparkPlan (72)
++- == Final Plan ==
+   ResultQueryStage (52)
+   +- * CometColumnarToRow (51)
+      +- CometSort (50)
+         +- AQEShuffleRead (49)
+            +- ShuffleQueryStage (48), Statistics(sizeInBytes=24.3 KiB, rowCount=10)
+               +- CometExchange (47)
+                  +- CometHashAggregate (46)
+                     +- AQEShuffleRead (45)
+                        +- ShuffleQueryStage (44), Statistics(sizeInBytes=80.6 KiB, rowCount=17)
+                           +- CometExchange (43)
+                              +- CometHashAggregate (42)
+                                 +- CometProject (41)
+                                    +- CometBroadcastHashJoin (40)
+                                       :- CometProject (34)
+                                       :  +- CometBroadcastHashJoin (33)
+                                       :     :- CometProject (28)
+                                       :     :  +- CometBroadcastHashJoin (27)
+                                       :     :     :- CometProject (21)
+                                       :     :     :  +- CometBroadcastHashJoin (20)
+                                       :     :     :     :- CometProject (15)
+                                       :     :     :     :  +- CometBroadcastHashJoin (14)
+                                       :     :     :     :     :- CometProject (8)
+                                       :     :     :     :     :  +- CometBroadcastHashJoin (7)
+                                       :     :     :     :     :     :- BroadcastQueryStage (4), Statistics(sizeInBytes=699.0 B, rowCount=8)
+                                       :     :     :     :     :     :  +- CometBroadcastExchange (3)
+                                       :     :     :     :     :     :     +- CometFilter (2)
+                                       :     :     :     :     :     :        +- CometNativeScan parquet  (1)
+                                       :     :     :     :     :     +- CometFilter (6)
+                                       :     :     :     :     :        +- CometNativeScan parquet  (5)
+                                       :     :     :     :     +- BroadcastQueryStage (13), Statistics(sizeInBytes=370.0 B, rowCount=30)
+                                       :     :     :     :        +- CometBroadcastExchange (12)
+                                       :     :     :     :           +- CometProject (11)
+                                       :     :     :     :              +- CometFilter (10)
+                                       :     :     :     :                 +- CometNativeScan parquet  (9)
+                                       :     :     :     +- BroadcastQueryStage (19), Statistics(sizeInBytes=9.3 MiB, rowCount=5.69E+5)
+                                       :     :     :        +- CometBroadcastExchange (18)
+                                       :     :     :           +- CometFilter (17)
+                                       :     :     :              +- CometNativeScan parquet  (16)
+                                       :     :     +- BroadcastQueryStage (26), Statistics(sizeInBytes=129.2 KiB, rowCount=3.27E+4)
+                                       :     :        +- CometBroadcastExchange (25)
+                                       :     :           +- CometProject (24)
+                                       :     :              +- CometFilter (23)
+                                       :     :                 +- CometNativeScan parquet  (22)
+                                       :     +- BroadcastQueryStage (32), Statistics(sizeInBytes=1619.4 KiB, rowCount=1.10E+5)
+                                       :        +- CometBroadcastExchange (31)
+                                       :           +- CometFilter (30)
+                                       :              +- CometNativeScan parquet  (29)
+                                       +- BroadcastQueryStage (39), Statistics(sizeInBytes=5.1 KiB, rowCount=1.20E+3)
+                                          +- CometBroadcastExchange (38)
+                                             +- CometProject (37)
+                                                +- CometFilter (36)
+                                                   +- CometNativeScan parquet  (35)
++- == Initial Plan ==
+   CometSort (71)
+   +- CometExchange (70)
+      +- CometHashAggregate (69)
+         +- CometExchange (68)
+            +- CometHashAggregate (67)
+               +- CometProject (66)
+                  +- CometBroadcastHashJoin (65)
+                     :- CometProject (64)
+                     :  +- CometBroadcastHashJoin (63)
+                     :     :- CometProject (62)
+                     :     :  +- CometBroadcastHashJoin (61)
+                     :     :     :- CometProject (60)
+                     :     :     :  +- CometBroadcastHashJoin (59)
+                     :     :     :     :- CometProject (58)
+                     :     :     :     :  +- CometBroadcastHashJoin (57)
+                     :     :     :     :     :- CometProject (56)
+                     :     :     :     :     :  +- CometBroadcastHashJoin (55)
+                     :     :     :     :     :     :- CometBroadcastExchange (3)
+                     :     :     :     :     :     :  +- CometFilter (2)
+                     :     :     :     :     :     :     +- CometNativeScan parquet  (1)
+                     :     :     :     :     :     +- CometFilter (54)
+                     :     :     :     :     :        +- CometNativeScan parquet  (53)
+                     :     :     :     :     +- CometBroadcastExchange (12)
+                     :     :     :     :        +- CometProject (11)
+                     :     :     :     :           +- CometFilter (10)
+                     :     :     :     :              +- CometNativeScan parquet  (9)
+                     :     :     :     +- CometBroadcastExchange (18)
+                     :     :     :        +- CometFilter (17)
+                     :     :     :           +- CometNativeScan parquet  (16)
+                     :     :     +- CometBroadcastExchange (25)
+                     :     :        +- CometProject (24)
+                     :     :           +- CometFilter (23)
+                     :     :              +- CometNativeScan parquet  (22)
+                     :     +- CometBroadcastExchange (31)
+                     :        +- CometFilter (30)
+                     :           +- CometNativeScan parquet  (29)
+                     +- CometBroadcastExchange (38)
+                        +- CometProject (37)
+                           +- CometFilter (36)
+                              +- CometNativeScan parquet  (35)
+
+
+(1) CometNativeScan parquet 
+Output [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/call_center.parquet]
+PushedFilters: [IsNotNull(cc_call_center_sk)]
+ReadSchema: struct<cc_call_center_sk:bigint,cc_call_center_id:string,cc_name:string,cc_manager:string>
+
+(2) CometFilter
+Input [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Condition : isnotnull(cc_call_center_sk#0L)
+
+(3) CometBroadcastExchange
+Input [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Arguments: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+
+(4) BroadcastQueryStage
+Output [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Arguments: 0
+
+(5) CometNativeScan parquet 
+Output [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/catalog_returns.parquet]
+PushedFilters: [IsNotNull(cr_call_center_sk), IsNotNull(cr_returned_date_sk), IsNotNull(cr_returning_customer_sk)]
+ReadSchema: struct<cr_returned_date_sk:bigint,cr_returning_customer_sk:bigint,cr_call_center_sk:bigint,cr_net_loss:decimal(7,2)>
+
+(6) CometFilter
+Input [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Condition : ((isnotnull(cr_call_center_sk#51L) AND isnotnull(cr_returned_date_sk#40L)) AND isnotnull(cr_returning_customer_sk#47L))
+
+(7) CometBroadcastHashJoin
+Left output [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Right output [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Arguments: [cc_call_center_sk#0L], [cr_call_center_sk#51L], Inner, BuildLeft
+
+(8) CometProject
+Input [8]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66]
+
+(9) CometNativeScan parquet 
+Output [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_year), IsNotNull(d_moy), EqualTo(d_year,1998), EqualTo(d_moy,11), IsNotNull(d_date_sk)]
+ReadSchema: struct<d_date_sk:bigint,d_year:bigint,d_moy:bigint>
+
+(10) CometFilter
+Input [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Condition : ((((isnotnull(d_year#147L) AND isnotnull(d_moy#149L)) AND (d_year#147L = 1998)) AND (d_moy#149L = 11)) AND isnotnull(d_date_sk#141L))
+
+(11) CometProject
+Input [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [d_date_sk#141L], [d_date_sk#141L]
+
+(12) CometBroadcastExchange
+Input [1]: [d_date_sk#141L]
+Arguments: [d_date_sk#141L]
+
+(13) BroadcastQueryStage
+Output [1]: [d_date_sk#141L]
+Arguments: 1
+
+(14) CometBroadcastHashJoin
+Left output [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66]
+Right output [1]: [d_date_sk#141L]
+Arguments: [cr_returned_date_sk#40L], [d_date_sk#141L], Inner, BuildRight
+
+(15) CometProject
+Input [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66, d_date_sk#141L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66]
+
+(16) CometNativeScan parquet 
+Output [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/customer.parquet]
+PushedFilters: [IsNotNull(c_customer_sk), IsNotNull(c_current_addr_sk), IsNotNull(c_current_cdemo_sk), IsNotNull(c_current_hdemo_sk)]
+ReadSchema: struct<c_customer_sk:bigint,c_current_cdemo_sk:bigint,c_current_hdemo_sk:bigint,c_current_addr_sk:bigint>
+
+(17) CometFilter
+Input [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Condition : (((isnotnull(c_customer_sk#101L) AND isnotnull(c_current_addr_sk#105L)) AND isnotnull(c_current_cdemo_sk#103L)) AND isnotnull(c_current_hdemo_sk#104L))
+
+(18) CometBroadcastExchange
+Input [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+
+(19) BroadcastQueryStage
+Output [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: 2
+
+(20) CometBroadcastHashJoin
+Left output [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66]
+Right output [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: [cr_returning_customer_sk#47L], [c_customer_sk#101L], Inner, BuildRight
+
+(21) CometProject
+Input [9]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66, c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+
+(22) CometNativeScan parquet 
+Output [2]: [ca_address_sk#119L, ca_gmt_offset#130]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/customer_address.parquet]
+PushedFilters: [IsNotNull(ca_gmt_offset), EqualTo(ca_gmt_offset,-7.00), IsNotNull(ca_address_sk)]
+ReadSchema: struct<ca_address_sk:bigint,ca_gmt_offset:decimal(5,2)>
+
+(23) CometFilter
+Input [2]: [ca_address_sk#119L, ca_gmt_offset#130]
+Condition : ((isnotnull(ca_gmt_offset#130) AND (ca_gmt_offset#130 = -7.00)) AND isnotnull(ca_address_sk#119L))
+
+(24) CometProject
+Input [2]: [ca_address_sk#119L, ca_gmt_offset#130]
+Arguments: [ca_address_sk#119L], [ca_address_sk#119L]
+
+(25) CometBroadcastExchange
+Input [1]: [ca_address_sk#119L]
+Arguments: [ca_address_sk#119L]
+
+(26) BroadcastQueryStage
+Output [1]: [ca_address_sk#119L]
+Arguments: 3
+
+(27) CometBroadcastHashJoin
+Left output [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Right output [1]: [ca_address_sk#119L]
+Arguments: [c_current_addr_sk#105L], [ca_address_sk#119L], Inner, BuildRight
+
+(28) CometProject
+Input [8]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L, ca_address_sk#119L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L]
+
+(29) CometNativeScan parquet 
+Output [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/customer_demographics.parquet]
+PushedFilters: [Or(And(EqualTo(cd_marital_status,M),EqualTo(cd_education_status,Unknown)),And(EqualTo(cd_marital_status,W),EqualTo(cd_education_status,Advanced Degree))), IsNotNull(cd_demo_sk)]
+ReadSchema: struct<cd_demo_sk:bigint,cd_marital_status:string,cd_education_status:string>
+
+(30) CometFilter
+Input [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Condition : ((((cd_marital_status#134 = M) AND (cd_education_status#135 = Unknown)) OR ((cd_marital_status#134 = W) AND (cd_education_status#135 = Advanced Degree))) AND isnotnull(cd_demo_sk#132L))
+
+(31) CometBroadcastExchange
+Input [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+
+(32) BroadcastQueryStage
+Output [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: 4
+
+(33) CometBroadcastHashJoin
+Left output [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L]
+Right output [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: [c_current_cdemo_sk#103L], [cd_demo_sk#132L], Inner, BuildRight
+
+(34) CometProject
+Input [9]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135]
+
+(35) CometNativeScan parquet 
+Output [2]: [hd_demo_sk#169L, hd_buy_potential#171]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [IsNotNull(hd_buy_potential), StringStartsWith(hd_buy_potential,Unknown), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_buy_potential:string>
+
+(36) CometFilter
+Input [2]: [hd_demo_sk#169L, hd_buy_potential#171]
+Condition : ((isnotnull(hd_buy_potential#171) AND StartsWith(hd_buy_potential#171, Unknown)) AND isnotnull(hd_demo_sk#169L))
+
+(37) CometProject
+Input [2]: [hd_demo_sk#169L, hd_buy_potential#171]
+Arguments: [hd_demo_sk#169L], [hd_demo_sk#169L]
+
+(38) CometBroadcastExchange
+Input [1]: [hd_demo_sk#169L]
+Arguments: [hd_demo_sk#169L]
+
+(39) BroadcastQueryStage
+Output [1]: [hd_demo_sk#169L]
+Arguments: 5
+
+(40) CometBroadcastHashJoin
+Left output [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135]
+Right output [1]: [hd_demo_sk#169L]
+Arguments: [c_current_hdemo_sk#104L], [hd_demo_sk#169L], Inner, BuildRight
+
+(41) CometProject
+Input [8]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135, hd_demo_sk#169L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135]
+
+(42) CometHashAggregate
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135]
+Keys [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135]
+Functions [1]: [partial_sum(UnscaledValue(cr_net_loss#66))]
+
+(43) CometExchange
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Arguments: hashpartitioning(cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=226715]
+
+(44) ShuffleQueryStage
+Output [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Arguments: 6
+
+(45) AQEShuffleRead
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Arguments: coalesced
+
+(46) CometHashAggregate
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Keys [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135]
+Functions [1]: [sum(UnscaledValue(cr_net_loss#66))]
+
+(47) CometExchange
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: rangepartitioning(Returns_Loss#19945 DESC NULLS LAST, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=226803]
+
+(48) ShuffleQueryStage
+Output [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: 7
+
+(49) AQEShuffleRead
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: coalesced
+
+(50) CometSort
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945], [Returns_Loss#19945 DESC NULLS LAST]
+
+(51) CometColumnarToRow [codegen id : 1]
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+
+(52) ResultQueryStage
+Output [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: 8
+
+(53) CometNativeScan parquet 
+Output [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/catalog_returns.parquet]
+PushedFilters: [IsNotNull(cr_call_center_sk), IsNotNull(cr_returned_date_sk), IsNotNull(cr_returning_customer_sk)]
+ReadSchema: struct<cr_returned_date_sk:bigint,cr_returning_customer_sk:bigint,cr_call_center_sk:bigint,cr_net_loss:decimal(7,2)>
+
+(54) CometFilter
+Input [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Condition : ((isnotnull(cr_call_center_sk#51L) AND isnotnull(cr_returned_date_sk#40L)) AND isnotnull(cr_returning_customer_sk#47L))
+
+(55) CometBroadcastHashJoin
+Left output [4]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11]
+Right output [4]: [cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Arguments: [cc_call_center_sk#0L], [cr_call_center_sk#51L], Inner, BuildLeft
+
+(56) CometProject
+Input [8]: [cc_call_center_sk#0L, cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_call_center_sk#51L, cr_net_loss#66]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66]
+
+(57) CometBroadcastHashJoin
+Left output [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66]
+Right output [1]: [d_date_sk#141L]
+Arguments: [cr_returned_date_sk#40L], [d_date_sk#141L], Inner, BuildRight
+
+(58) CometProject
+Input [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returned_date_sk#40L, cr_returning_customer_sk#47L, cr_net_loss#66, d_date_sk#141L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66]
+
+(59) CometBroadcastHashJoin
+Left output [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66]
+Right output [4]: [c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: [cr_returning_customer_sk#47L], [c_customer_sk#101L], Inner, BuildRight
+
+(60) CometProject
+Input [9]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_returning_customer_sk#47L, cr_net_loss#66, c_customer_sk#101L, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+
+(61) CometBroadcastHashJoin
+Left output [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L]
+Right output [1]: [ca_address_sk#119L]
+Arguments: [c_current_addr_sk#105L], [ca_address_sk#119L], Inner, BuildRight
+
+(62) CometProject
+Input [8]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, c_current_addr_sk#105L, ca_address_sk#119L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L]
+
+(63) CometBroadcastHashJoin
+Left output [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L]
+Right output [3]: [cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: [c_current_cdemo_sk#103L], [cd_demo_sk#132L], Inner, BuildRight
+
+(64) CometProject
+Input [9]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_cdemo_sk#103L, c_current_hdemo_sk#104L, cd_demo_sk#132L, cd_marital_status#134, cd_education_status#135]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135]
+
+(65) CometBroadcastHashJoin
+Left output [7]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135]
+Right output [1]: [hd_demo_sk#169L]
+Arguments: [c_current_hdemo_sk#104L], [hd_demo_sk#169L], Inner, BuildRight
+
+(66) CometProject
+Input [8]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, c_current_hdemo_sk#104L, cd_marital_status#134, cd_education_status#135, hd_demo_sk#169L]
+Arguments: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135], [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135]
+
+(67) CometHashAggregate
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cr_net_loss#66, cd_marital_status#134, cd_education_status#135]
+Keys [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135]
+Functions [1]: [partial_sum(UnscaledValue(cr_net_loss#66))]
+
+(68) CometExchange
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Arguments: hashpartitioning(cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=225330]
+
+(69) CometHashAggregate
+Input [6]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135, sum#19949L]
+Keys [5]: [cc_call_center_id#1, cc_name#6, cc_manager#11, cd_marital_status#134, cd_education_status#135]
+Functions [1]: [sum(UnscaledValue(cr_net_loss#66))]
+
+(70) CometExchange
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: rangepartitioning(Returns_Loss#19945 DESC NULLS LAST, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=225332]
+
+(71) CometSort
+Input [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945], [Returns_Loss#19945 DESC NULLS LAST]
+
+(72) AdaptiveSparkPlan
+Output [4]: [Call_Center#19942, Call_Center_Name#19943, Manager#19944, Returns_Loss#19945]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometSort
+   +- AQEShuffleRead
+      +- CometExchange
+         +- CometHashAggregate
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometHashAggregate
+                     +- CometProject
+                        +- CometBroadcastHashJoin
+                           :- CometProject
+                           :  +- CometBroadcastHashJoin
+                           :     :- CometProject
+                           :     :  +- CometBroadcastHashJoin
+                           :     :     :- CometProject
+                           :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :- CometProject
+                           :     :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :     :- CometProject
+                           :     :     :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :     :     :- CometBroadcastExchange
+                           :     :     :     :     :     :  +- CometFilter
+                           :     :     :     :     :     :     +- CometNativeScan parquet 
+                           :     :     :     :     :     +- CometFilter
+                           :     :     :     :     :        +- CometNativeScan parquet 
+                           :     :     :     :     +- CometBroadcastExchange
+                           :     :     :     :        +- CometProject
+                           :     :     :     :           +- CometFilter
+                           :     :     :     :              +- CometNativeScan parquet 
+                           :     :     :     +- CometBroadcastExchange
+                           :     :     :        +- CometFilter
+                           :     :     :           +- CometNativeScan parquet 
+                           :     :     +- CometBroadcastExchange
+                           :     :        +- CometProject
+                           :     :           +- CometFilter
+                           :     :              +- CometNativeScan parquet 
+                           :     +- CometBroadcastExchange
+                           :        +- CometFilter
+                           :           +- CometNativeScan parquet 
+                           +- CometBroadcastExchange
+                              +- CometProject
+                                 +- CometFilter
+                                    +- CometNativeScan parquet 
+
+Comet accelerated 40 out of 40 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 9 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometSort
+   +- AQEShuffleRead
+      +- CometExchange
+         +- CometHashAggregate
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometHashAggregate
+                     +- CometProject
+                        +- CometBroadcastHashJoin
+                           :- CometProject
+                           :  +- CometBroadcastHashJoin
+                           :     :- CometProject
+                           :     :  +- CometBroadcastHashJoin
+                           :     :     :- CometProject
+                           :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :- CometProject
+                           :     :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :     :- CometProject
+                           :     :     :     :     :  +- CometBroadcastHashJoin
+                           :     :     :     :     :     :- CometBroadcastExchange
+                           :     :     :     :     :     :  +- CometFilter
+                           :     :     :     :     :     :     +- CometNativeScan parquet 
+                           :     :     :     :     :     +- CometFilter
+                           :     :     :     :     :        +- CometNativeScan parquet 
+                           :     :     :     :     +- CometBroadcastExchange
+                           :     :     :     :        +- CometProject
+                           :     :     :     :           +- CometFilter
+                           :     :     :     :              +- CometNativeScan parquet 
+                           :     :     :     +- CometBroadcastExchange
+                           :     :     :        +- CometFilter
+                           :     :     :           +- CometNativeScan parquet 
+                           :     :     +- CometBroadcastExchange
+                           :     :        +- CometProject
+                           :     :           +- CometFilter
+                           :     :              +- CometNativeScan parquet 
+                           :     +- CometBroadcastExchange
+                           :        +- CometFilter
+                           :           +- CometNativeScan parquet 
+                           +- CometBroadcastExchange
+                              +- CometProject
+                                 +- CometFilter
+                                    +- CometNativeScan parquet 
+
+Comet accelerated 40 out of 40 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 9 native, 0 codegen dispatch.

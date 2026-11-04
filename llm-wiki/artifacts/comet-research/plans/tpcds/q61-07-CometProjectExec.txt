@@ -1,0 +1,505 @@
+children {
+  children {
+    plan_id: 141376
+    native_scan {
+      common {
+        required_schema {
+          name: "s_store_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "s_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_store_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_store_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_rec_start_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_rec_end_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_closed_date_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_store_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_number_employees"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_floor_space"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_hours"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_manager"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_market_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_geography_class"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_market_desc"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_market_manager"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_division_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_division_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_company_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_company_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_street_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_street_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_street_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_suite_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_state"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_zip"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_country"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_tax_percentage"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87287
+            }
+          }
+          query_context {
+            start_index: 107
+            stop_index: 1231
+            line: 4
+          }
+          expr_id: 87288
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87289
+            }
+            right {
+              literal {
+                decimal_val: "\376\f"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 675
+                stop_index: 691
+                line: 24
+                start_position: 9
+              }
+              expr_id: 87290
+            }
+          }
+          query_context {
+            start_index: 675
+            stop_index: 691
+            line: 24
+            start_position: 9
+          }
+          expr_id: 87291
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87292
+            }
+          }
+          query_context {
+            start_index: 115
+            stop_index: 734
+            line: 5
+            start_position: 3
+          }
+          expr_id: 87293
+        }
+        projection_vector: 0
+        projection_vector: 27
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1225016831
+    }
+  }
+  plan_id: 141455
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87294
+            }
+          }
+          query_context {
+            start_index: 107
+            stop_index: 1231
+            line: 4
+          }
+          expr_id: 87295
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 5
+                          scale: 2
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    start_index: 296
+                    stop_index: 310
+                    line: 13
+                    start_position: 9
+                  }
+                  expr_id: 87296
+                }
+                right {
+                  literal {
+                    decimal_val: "\376\f"
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 5
+                          scale: 2
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    start_index: 675
+                    stop_index: 691
+                    line: 24
+                    start_position: 9
+                  }
+                  expr_id: 87297
+                }
+              }
+              query_context {
+                start_index: 675
+                stop_index: 691
+                line: 24
+                start_position: 9
+              }
+              expr_id: 87298
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 296
+                    stop_index: 310
+                    line: 13
+                    start_position: 9
+                  }
+                  expr_id: 87299
+                }
+              }
+              query_context {
+                start_index: 115
+                stop_index: 734
+                line: 5
+                start_position: 3
+              }
+              expr_id: 87300
+            }
+          }
+        }
+      }
+      expr_id: 87301
+    }
+  }
+}
+plan_id: 141457
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 87302
+  }
+}

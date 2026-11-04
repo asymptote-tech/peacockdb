@@ -1,0 +1,168 @@
+plan_id: 26793
+native_scan {
+  common {
+    required_schema {
+      name: "l_orderkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    required_schema {
+      name: "l_suppkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_orderkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_partkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_suppkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_linenumber"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_quantity"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_extendedprice"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_discount"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_tax"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_returnflag"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_linestatus"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_shipdate"
+      data_type {
+        type_id: DATE
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_commitdate"
+      data_type {
+        type_id: DATE
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_receiptdate"
+      data_type {
+        type_id: DATE
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_shipinstruct"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_shipmode"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "l_comment"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    projection_vector: 0
+    projection_vector: 2
+    session_timezone: "UTC"
+    source: "CometScan parquet  (unknown)"
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    allow_type_promotion: true
+    allow_timestamp_ltz_to_ntz: true
+  }
+  source_key_hash: -2109541980
+}

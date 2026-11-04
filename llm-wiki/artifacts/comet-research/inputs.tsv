@@ -1,0 +1,53 @@
+name	value	low	high	unit	tag	source
+price_h100_node	4.5	4.5	4.5	$/h	published	Nebius gpu-h100-sxm 1gpu-16vcpu-200gb $4.50/h https://nebius.com/prices (accessed 2026-11-04), via data-path.md section 2; every deployment costs the same at the human's parity (spec)
+rate_h100_s3	1.25	0.917	12.5	GB/s	modelled	assumption: Nebius states no NIC rate; data-path.md Rates for the cost model, 10-100 Gbit/s (value at the low end, 10 Gbit/s); low = the L40S's measured 0.917 GB/s S3 read (measurements/s3/summary.tsv), a lower bound per measurements/s3/notes.md
+rate_cpu128_s3	1.164	1.164	1.164	GB/s	measured	measurements/s3/summary.tsv: cpu128 in-region eu-west1, best of 1-64 threads (4 threads; 16 threads 1.163)
+rate_node16_s3	1.0	0.78	4.0	GB/s per node	modelled	assumption: data-path.md Rates, 16 vCPU 6.25-32 Gbit/s; value between the two measured Nebius VMs' S3 reads, 0.917 (8 vCPU) and 1.164 (128 vCPU), measurements/s3/summary.tsv
+rate_node8_s3	0.917	0.39	2.0	GB/s per node	modelled	assumption: data-path.md Rates, 8 vCPU 3.125-16 Gbit/s; value = the measured 8-vCPU L40S VM's S3 read, measurements/s3/summary.tsv
+bucket_cap	20	20	20	GB/s	published	Nebius Object Storage Standard class, 20 GBps per tenant per region https://docs.nebius.com/object-storage/storage-classes (accessed 2026-11-04), via data-path.md [S7]
+s3_efficiency	0.892	0.560	1.0	fraction	measured	measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: TPC-H S3 concurrent moved 48.30 GB in 46.49 s, 0.892 of the 1.164 GB/s microbenchmark; low = the sequential S3 run's 0.560 (74.06 s, its per-query sum: the batch row also timed --dump-plans, Task 6 audit finding 1); high = the microbenchmark
+s3_efficiency_sequential	0.560	0.431	0.892	fraction	measured	measurements/comet/summary.tsv and bytes.tsv, measurements/s3/summary.tsv: one query at a time, as a one-pass job reads; TPC-H sequential S3 48.30 GB in 74.06 s (per-query sum; the batch row also timed --dump-plans, Task 6 audit finding 1), 0.560 of 1.164 GB/s; low TPC-DS's 98.39 GB in 195.96 s, 0.431; high the concurrent run's 0.892
+decode_rate	4.1	2.34	18.8	GB/s compressed	modelled	derived from llm-wiki/reports/benchmark-minimal.md H200 sf40 load (read_parquet) over the queries' compressed column bytes (measurements/footers/sf40.tsv): q1 1.69 GB/505 ms 3.35, q6 1.54/398 3.87, q3 3.18/741 4.29, q8 5.62/680 8.3; value the median, an H200 figure applied to the H100; low = H200's lowest (3.35) x the H100/H200 HBM ratio 3.35/4.8 = 2.34, in case decode is memory-bound; high = GB10's chunked reader, q6 in 82 ms (18.8)
+gpu_speedup	10.1	3.4	28.3	x	modelled	llm-wiki/reports/benchmark-minimal.md: DuckDB warm (128-core VM) over H100 G=1 execute, q1 915/269.5 3.4, q6 137/21.8 6.3, q3 577/33.3 17.3, q8 1126/39.8 28.3; value the geometric mean; applied to Comet's time per the plan
+gpu_measured_scale	1.0	1.0	1.73	x	modelled	llm-wiki/reports/benchmark-minimal.md: value 1.0 keeps the H100 G=1 measured times (hand-written cuDF pipelines, data in VRAM); high is derived: H200 libcudf 25.02 execute x the HBM ratio 4.8/3.35 over the H100 figure, worst of the four (q3 57.5/33.3)
+gpu_h100_ms.tpch.q1	269.5	269.5	269.5	ms	published	llm-wiki/reports/benchmark-minimal.md, Multi-GPU scaling, 8x H100 table, G=1 (libcudf 26.02, 2nd-min of 5)
+gpu_h100_ms.tpch.q3	33.3	33.3	33.3	ms	published	llm-wiki/reports/benchmark-minimal.md, 8x H100 table, G=1
+gpu_h100_ms.tpch.q6	21.8	21.8	21.8	ms	published	llm-wiki/reports/benchmark-minimal.md, 8x H100 table, G=1
+gpu_h100_ms.tpch.q8	39.8	39.8	39.8	ms	published	llm-wiki/reports/benchmark-minimal.md, 8x H100 table, G=1
+shuffle_rate_gpu_node	4.0	2.0	20.0	GB/s	modelled	estimate: Comet's shuffle encode, lz4 and decode on the H100 node's 16 cores, of the order of 0.25-0.5 GB/s per core both ways; high = compression moved to the GPU (split.md)
+ineligible_weight	1.0	0.5	2.0	x	modelled	split.md: an operator's share of the count stands for its share of time; this weight spans that guess
+scheduler_share	0.25	0.0	1.0	fraction	modelled	measurements/comet/bytes.tsv scheduler_ms sums gaps over stages that run in parallel (TPC-H q8 7.1 s in a 2.9 s query), so only a share is wall time; capped per query at its own time
+overhead_overlap	0.5	0.2	1.0	fraction	modelled	estimate: share of a concurrent batch's per-query Spark overhead not hidden under other queries' device work
+cpu_run_spread	1.0	0.881	1.119	x	measured	measurements/comet/summary.tsv: TPC-H local sequential runs 59.57 and 46.89 s about their mean (concurrent 38.26 and 33.87, 0.939-1.061)
+cluster_overhead	1.1	1.0	1.3	x	modelled	estimate: k small nodes against one 128-core box for the same work (broadcast copies, stragglers, per-node JVMs)
+s3_penalty_bandwidth_share	0.5	0.0	1.0	exponent	modelled	estimate: how much of the 1x128 S3 penalty is bandwidth (shrinks with more nodes) rather than request latency; TPC-H concurrent looks bandwidth-bound, sequential latency-bound (measurements/comet/summary.tsv)
+size_exponent	0.7	0.5	1.0	exponent	modelled	data-path.md, Comet's published results past sf40: core time grows about as SF^0.5-0.9; the same exponent on both sides keeps the speedup
+spill_factor	1.3	1.0	2.0	x	modelled	estimate: work multiplier once one query's shuffle per node exceeds executor memory (CPU) or host RAM (GPU, where peacockdb has no spill)
+vram_gb	80	80	80	GB	published	H100 SXM 80 GB HBM3, Nebius gpu-h100-sxm https://docs.nebius.com/compute/virtual-machines/types (accessed 2026-11-04), via data-path.md
+host_ram_gb	200	200	200	GB	published	Nebius preset 1gpu-16vcpu-200gb, data-path.md section 2
+cores_gpu_node	16	16	16	vCPU	published	Nebius preset 1gpu-16vcpu-200gb, data-path.md section 2
+cores_cpu	128	128	128	vCPU	measured	measurements/comet/tpch-local-sequential-ball/conf.txt spark.executor.cores=128
+mem_cpu128_gb	320	320	320	GB	measured	measurements/comet/tpch-local-sequential-ball/conf.txt: off-heap 256g + heap 64g
+mem_node16_gb	40	40	40	GB	modelled	estimate: executor memory on a 64 GB node
+mem_node8_gb	20	20	20	GB	modelled	estimate: executor memory on a 32 GB node
+ram_cpu128_gb	512	512	512	GB	published	Nebius cpu-d3 128vcpu-512gb, data-path.md Rates
+ram_node16_gb	64	64	64	GB	published	Nebius cpu-d3 16vcpu-64gb, data-path.md Rates
+ram_node8_gb	32	32	32	GB	published	Nebius cpu-d3 8vcpu-32gb, data-path.md Rates
+cpu_ram_usable	0.5	0.5	0.5	fraction	modelled	estimate: share of RAM that can hold RAM-resident data next to Spark (Task 4's dedicated tmpfs was mounted at 320 GiB of 503, and held 58 GB of data plus shuffle; the first /dev/shm was 252 GiB)
+cpu128_s3_concurrent_all_s.tpcds	124.4	87.5	161.1	s	modelled	not run (spec's matrix): TPC-DS local concurrent 87.49 s + its sequential S3 penalty 73.64 s (195.96 per-query sum - 122.32) x 0.501, TPC-H's concurrent/sequential penalty ratio (10.43/20.83; the S3 sequential batches also timed --dump-plans, so both use per-query sums, Task 6 audit finding 1), measurements/comet/summary.tsv; low = penalty hidden; high = penalty as sequential; wire floor 98.4 GB / 1.164 GB/s = 84.5 s
+cpu_local_s.tpch	46.812	46.812	46.812	table	measured	measurements/comet/summary.tsv: per query, the faster of the local (RAM-resident, tmpfs) sequential runs, 1x128
+cpu_s3_s.tpch	74.058	74.058	74.058	table	measured	measurements/comet/summary.tsv: per query, the S3 (in-region eu-west1) sequential run, 1x128
+scan_bytes.tpch	4.82974e+10	4.82974e+10	4.82974e+10	table	measured	measurements/comet/bytes.tsv: per query, scan bytes of the local sequential run (the S3 runs read the same)
+shuffle_bytes.tpch	4.63731e+10	4.63731e+10	4.63731e+10	table	measured	measurements/comet/bytes.tsv: per query, shuffle bytes
+driver_s.tpch	2.092	2.092	2.092	table	measured	measurements/comet/bytes.tsv: per query, driver_ms, the lesser over the local sequential runs
+scheduler_s.tpch	22.907	22.907	22.907	table	measured	measurements/comet/bytes.tsv: per query, scheduler_ms, the lesser over the local sequential runs
+eligible_fraction.tpch	0.993136	0.993136	0.993136	table	modelled	plans/eligible.tsv (split.md's rule over the dumped plans); value is the mean over queries
+footer_bytes.tpch	42430863567	42430863567	42430863567	table	measured	measurements/footers/sf40.tsv: compressed bytes of every column, the size sf40 means; the batch union reads per-column rows of it
+cpu_local_s.tpcds	122.135	122.135	122.135	table	measured	measurements/comet/summary.tsv: per query, the faster of the local (RAM-resident, tmpfs) sequential runs, 1x128
+cpu_s3_s.tpcds	195.958	195.958	195.958	table	measured	measurements/comet/summary.tsv: per query, the S3 (in-region eu-west1) sequential run, 1x128
+scan_bytes.tpcds	9.83903e+10	9.83903e+10	9.83903e+10	table	measured	measurements/comet/bytes.tsv: per query, scan bytes of the local sequential run (the S3 runs read the same)
+shuffle_bytes.tpcds	5.65054e+10	5.65054e+10	5.65054e+10	table	measured	measurements/comet/bytes.tsv: per query, shuffle bytes
+driver_s.tpcds	13.325	13.325	13.325	table	measured	measurements/comet/bytes.tsv: per query, driver_ms, the lesser over the local sequential runs
+scheduler_s.tpcds	103.366	103.366	103.366	table	measured	measurements/comet/bytes.tsv: per query, scheduler_ms, the lesser over the local sequential runs
+eligible_fraction.tpcds	0.990012	0.990012	0.990012	table	modelled	plans/eligible.tsv (split.md's rule over the dumped plans); value is the mean over queries
+footer_bytes.tpcds	15261887937	15261887937	15261887937	table	measured	measurements/footers/sf40.tsv: compressed bytes of every column, the size sf40 means; the batch union reads per-column rows of it

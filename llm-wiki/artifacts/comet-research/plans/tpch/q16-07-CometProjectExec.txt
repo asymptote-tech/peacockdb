@@ -1,0 +1,251 @@
+children {
+  children {
+    plan_id: 20334
+    native_scan {
+      common {
+        required_schema {
+          name: "s_suppkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "s_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_suppkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_address"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_nationkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_phone"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_acctbal"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "s_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 351
+                stop_index: 359
+                line: 14
+                start_position: 14
+              }
+              expr_id: 8415
+            }
+          }
+          query_context {
+            start_index: 298
+            stop_index: 388
+            line: 12
+            start_position: 8
+          }
+          expr_id: 8416
+        }
+        data_filters {
+          like {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 351
+                stop_index: 359
+                line: 14
+                start_position: 14
+              }
+              expr_id: 8417
+            }
+            right {
+              literal {
+                string_val: "%Customer%Complaints%"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 366
+                stop_index: 388
+                line: 14
+                start_position: 29
+              }
+              expr_id: 8418
+            }
+          }
+          query_context {
+            start_index: 361
+            stop_index: 388
+            line: 14
+            start_position: 24
+          }
+          expr_id: 8419
+        }
+        projection_vector: 0
+        projection_vector: 6
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -264374751
+    }
+  }
+  plan_id: 20359
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 351
+                stop_index: 359
+                line: 14
+                start_position: 14
+              }
+              expr_id: 8420
+            }
+          }
+          query_context {
+            start_index: 298
+            stop_index: 388
+            line: 12
+            start_position: 8
+          }
+          expr_id: 8421
+        }
+        right {
+          like {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 351
+                stop_index: 359
+                line: 14
+                start_position: 14
+              }
+              expr_id: 8422
+            }
+            right {
+              literal {
+                string_val: "%Customer%Complaints%"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 366
+                stop_index: 388
+                line: 14
+                start_position: 29
+              }
+              expr_id: 8423
+            }
+          }
+          query_context {
+            start_index: 361
+            stop_index: 388
+            line: 14
+            start_position: 24
+          }
+          expr_id: 8424
+        }
+      }
+      expr_id: 8425
+    }
+  }
+}
+plan_id: 20361
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 305
+      stop_index: 313
+      line: 12
+      start_position: 15
+    }
+    expr_id: 8426
+  }
+}

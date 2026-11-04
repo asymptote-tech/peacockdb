@@ -1,0 +1,260 @@
+children {
+  children {
+    plan_id: 165859
+    native_scan {
+      common {
+        required_schema {
+          name: "sm_ship_mode_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "sm_carrier"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_ship_mode_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_ship_mode_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_code"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_carrier"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "sm_contract"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          in {
+            in_value {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 3997
+                stop_index: 4011
+                line: 111
+                start_position: 12
+              }
+              expr_id: 104289
+            }
+            lists {
+              literal {
+                string_val: "DHL"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 4241
+                stop_index: 4245
+                line: 117
+                start_position: 21
+              }
+              expr_id: 104290
+            }
+            lists {
+              literal {
+                string_val: "BARIAN"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 4247
+                stop_index: 4254
+                line: 117
+                start_position: 27
+              }
+              expr_id: 104291
+            }
+          }
+          query_context {
+            start_index: 4237
+            stop_index: 4255
+            line: 117
+            start_position: 17
+          }
+          expr_id: 104292
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 3997
+                stop_index: 4011
+                line: 111
+                start_position: 12
+              }
+              expr_id: 104293
+            }
+          }
+          query_context {
+            start_index: 1579
+            stop_index: 4376
+            line: 47
+            start_position: 5
+          }
+          expr_id: 104294
+        }
+        projection_vector: 0
+        projection_vector: 4
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1683788433
+    }
+  }
+  plan_id: 165938
+  filter {
+    predicate {
+      and {
+        left {
+          in {
+            in_value {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 3997
+                stop_index: 4011
+                line: 111
+                start_position: 12
+              }
+              expr_id: 104295
+            }
+            lists {
+              literal {
+                string_val: "DHL"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 4241
+                stop_index: 4245
+                line: 117
+                start_position: 21
+              }
+              expr_id: 104296
+            }
+            lists {
+              literal {
+                string_val: "BARIAN"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 4247
+                stop_index: 4254
+                line: 117
+                start_position: 27
+              }
+              expr_id: 104297
+            }
+          }
+          query_context {
+            start_index: 4237
+            stop_index: 4255
+            line: 117
+            start_position: 17
+          }
+          expr_id: 104298
+        }
+        right {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 3997
+                stop_index: 4011
+                line: 111
+                start_position: 12
+              }
+              expr_id: 104299
+            }
+          }
+          query_context {
+            start_index: 1579
+            stop_index: 4376
+            line: 47
+            start_position: 5
+          }
+          expr_id: 104300
+        }
+      }
+      expr_id: 104301
+    }
+  }
+}
+plan_id: 165940
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 104302
+  }
+}

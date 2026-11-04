@@ -1,0 +1,96 @@
+children {
+  children {
+    shuffle_scan {
+      fields {
+        type_id: BYTES
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1024.2 KiB, rowCount=1)"
+    }
+  }
+  plan_id: 361
+  hash_agg {
+    agg_exprs {
+      bloomFilterAgg {
+        child {
+          scalarFunc {
+            func: "xxhash64"
+            args {
+              unbound {
+                name: "r_regionkey"
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 167
+                stop_index: 175
+                line: 11
+                start_position: 6
+              }
+              expr_id: 199
+            }
+            args {
+              literal {
+                long_val: 42
+                datatype {
+                  type_id: INT64
+                }
+              }
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            stop_index: 670
+            line: 1
+          }
+          expr_id: 200
+        }
+        numItems {
+          literal {
+            long_val: 1000000
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 201
+        }
+        numBits {
+          literal {
+            long_val: 8388608
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 202
+        }
+        datatype {
+          type_id: BYTES
+        }
+        version: BLOOM_FILTER_VERSION_V2
+      }
+      query_context {
+        stop_index: 670
+        line: 1
+      }
+      expr_id: 203
+    }
+    mode: Final
+  }
+}
+plan_id: 361
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: BYTES
+      }
+    }
+    query_context {
+      stop_index: 670
+      line: 1
+    }
+    expr_id: 204
+  }
+}

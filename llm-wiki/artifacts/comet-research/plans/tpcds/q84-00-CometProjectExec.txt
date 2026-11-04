@@ -1,0 +1,241 @@
+children {
+  children {
+    plan_id: 6
+    scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=29.7 KiB, rowCount=957)"
+    }
+  }
+  children {
+    plan_id: 4
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=85.0 MiB, rowCount=1.11E+7)"
+    }
+  }
+  plan_id: 212311
+  hash_join {
+    left_join_keys {
+      bound {
+        index: 3
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 281
+        stop_index: 287
+        line: 9
+        start_position: 6
+      }
+      expr_id: 136479
+    }
+    right_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 281
+        stop_index: 287
+        line: 9
+        start_position: 6
+      }
+      expr_id: 136480
+    }
+  }
+}
+plan_id: 212313
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 7
+      stop_index: 19
+      line: 1
+      start_position: 7
+    }
+    expr_id: 136481
+  }
+  project_list {
+    scalarFunc {
+      func: "concat"
+      args {
+        caseWhen {
+          when {
+            is_not_null {
+              child {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 7
+                  stop_index: 19
+                  line: 1
+                  start_position: 7
+                }
+                expr_id: 136482
+              }
+            }
+            expr_id: 136483
+          }
+          then {
+            bound {
+              index: 2
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 7
+              stop_index: 19
+              line: 1
+              start_position: 7
+            }
+            expr_id: 136484
+          }
+          else_expr {
+            literal {
+              string_val: ""
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 81
+              stop_index: 82
+              line: 2
+              start_position: 43
+            }
+            expr_id: 136485
+          }
+        }
+        query_context {
+          start_index: 59
+          stop_index: 83
+          line: 2
+          start_position: 21
+        }
+        expr_id: 136486
+      }
+      args {
+        literal {
+          string_val: ", "
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 87
+          stop_index: 90
+          line: 2
+          start_position: 49
+        }
+        expr_id: 136487
+      }
+      args {
+        caseWhen {
+          when {
+            is_not_null {
+              child {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 7
+                  stop_index: 19
+                  line: 1
+                  start_position: 7
+                }
+                expr_id: 136488
+              }
+            }
+            expr_id: 136489
+          }
+          then {
+            bound {
+              index: 1
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 7
+              stop_index: 19
+              line: 1
+              start_position: 7
+            }
+            expr_id: 136490
+          }
+          else_expr {
+            literal {
+              string_val: ""
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 117
+              stop_index: 118
+              line: 2
+              start_position: 79
+            }
+            expr_id: 136491
+          }
+        }
+        query_context {
+          start_index: 94
+          stop_index: 119
+          line: 2
+          start_position: 56
+        }
+        expr_id: 136492
+      }
+    }
+    query_context {
+      start_index: 45
+      stop_index: 120
+      line: 2
+      start_position: 7
+    }
+    expr_id: 136493
+  }
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 570
+      stop_index: 582
+      line: 17
+      start_position: 9
+    }
+    expr_id: 136494
+  }
+}

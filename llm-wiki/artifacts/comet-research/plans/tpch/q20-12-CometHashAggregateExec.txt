@@ -1,0 +1,335 @@
+children {
+  children {
+    children {
+      plan_id: 24299
+      native_scan {
+        common {
+          required_schema {
+            name: "n_nationkey"
+            data_type {
+              type_id: INT32
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "n_name"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "n_nationkey"
+            data_type {
+              type_id: INT32
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "n_name"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "n_regionkey"
+            data_type {
+              type_id: INT32
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "n_comment"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_filters {
+            is_not_null {
+              child {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 61
+                  stop_index: 69
+                  line: 5
+                  start_position: 6
+                }
+                expr_id: 10321
+              }
+            }
+            query_context {
+              stop_index: 559
+              line: 1
+            }
+            expr_id: 10322
+          }
+          data_filters {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 61
+                  stop_index: 69
+                  line: 5
+                  start_position: 6
+                }
+                expr_id: 10323
+              }
+              right {
+                literal {
+                  string_val: "CANADA"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 552
+                  stop_index: 559
+                  line: 23
+                  start_position: 13
+                }
+                expr_id: 10324
+              }
+            }
+            query_context {
+              start_index: 543
+              stop_index: 559
+              line: 23
+              start_position: 4
+            }
+            expr_id: 10325
+          }
+          data_filters {
+            is_not_null {
+              child {
+                bound {
+                  datatype {
+                    type_id: INT32
+                  }
+                }
+                query_context {
+                  start_index: 61
+                  stop_index: 69
+                  line: 5
+                  start_position: 6
+                }
+                expr_id: 10326
+              }
+            }
+            query_context {
+              stop_index: 559
+              line: 1
+            }
+            expr_id: 10327
+          }
+          projection_vector: 0
+          projection_vector: 1
+          session_timezone: "UTC"
+          source: "CometScan parquet  (unknown)"
+          fields {
+            type_id: INT32
+          }
+          fields {
+            type_id: STRING
+          }
+          allow_type_promotion: true
+          allow_timestamp_ltz_to_ntz: true
+          has_data_filters: true
+        }
+        source_key_hash: 1067132969
+      }
+    }
+    plan_id: 24306
+    filter {
+      predicate {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 61
+                  stop_index: 69
+                  line: 5
+                  start_position: 6
+                }
+                expr_id: 10328
+              }
+            }
+            query_context {
+              stop_index: 559
+              line: 1
+            }
+            expr_id: 10329
+          }
+          right {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 61
+                      stop_index: 69
+                      line: 5
+                      start_position: 6
+                    }
+                    expr_id: 10330
+                  }
+                  right {
+                    literal {
+                      string_val: "CANADA"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 552
+                      stop_index: 559
+                      line: 23
+                      start_position: 13
+                    }
+                    expr_id: 10331
+                  }
+                }
+                query_context {
+                  start_index: 543
+                  stop_index: 559
+                  line: 23
+                  start_position: 4
+                }
+                expr_id: 10332
+              }
+              right {
+                is_not_null {
+                  child {
+                    bound {
+                      datatype {
+                        type_id: INT32
+                      }
+                    }
+                    query_context {
+                      start_index: 61
+                      stop_index: 69
+                      line: 5
+                      start_position: 6
+                    }
+                    expr_id: 10333
+                  }
+                }
+                query_context {
+                  stop_index: 559
+                  line: 1
+                }
+                expr_id: 10334
+              }
+            }
+          }
+        }
+        expr_id: 10335
+      }
+    }
+  }
+  plan_id: 24308
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: INT32
+        }
+      }
+      expr_id: 10336
+    }
+  }
+}
+plan_id: 24310
+hash_agg {
+  agg_exprs {
+    bloomFilterAgg {
+      child {
+        scalarFunc {
+          func: "xxhash64"
+          args {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 61
+              stop_index: 69
+              line: 5
+              start_position: 6
+            }
+            expr_id: 10337
+          }
+          args {
+            literal {
+              long_val: 42
+              datatype {
+                type_id: INT64
+              }
+            }
+          }
+          return_type {
+            type_id: INT64
+          }
+        }
+        query_context {
+          stop_index: 559
+          line: 1
+        }
+        expr_id: 10338
+      }
+      numItems {
+        literal {
+          long_val: 1000000
+          datatype {
+            type_id: INT64
+          }
+        }
+        expr_id: 10339
+      }
+      numBits {
+        literal {
+          long_val: 8388608
+          datatype {
+            type_id: INT64
+          }
+        }
+        expr_id: 10340
+      }
+      datatype {
+        type_id: BYTES
+      }
+      version: BLOOM_FILTER_VERSION_V2
+    }
+    query_context {
+      stop_index: 559
+      line: 1
+    }
+    expr_id: 10341
+  }
+}

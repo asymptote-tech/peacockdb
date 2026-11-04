@@ -1,0 +1,352 @@
+children {
+  children {
+    children {
+      plan_id: 90662
+      scan {
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 11
+              scale: 6
+            }
+          }
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 11
+              scale: 6
+            }
+          }
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 11
+              scale: 6
+            }
+          }
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "BroadcastExchange (unknown)"
+      }
+    }
+    children {
+      children {
+        children {
+          plan_id: 6
+          shuffle_scan {
+            fields {
+              type_id: DOUBLE
+            }
+            fields {
+              type_id: INT64
+            }
+            fields {
+              type_id: INT64
+            }
+            fields {
+              type_id: INT64
+            }
+            source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=8.9 KiB, rowCount=22)"
+          }
+        }
+        plan_id: 90213
+        hash_agg {
+          agg_exprs {
+            avg {
+              child {
+                scalarFunc {
+                  func: "unscaled_value"
+                  args {
+                    unbound {
+                      name: "ss_list_price"
+                      datatype {
+                        type_id: DECIMAL
+                        type_info {
+                          decimal {
+                            precision: 7
+                            scale: 2
+                          }
+                        }
+                      }
+                    }
+                    query_context {
+                      start_index: 1042
+                      stop_index: 1054
+                      line: 27
+                      start_position: 14
+                    }
+                    expr_id: 60862
+                  }
+                  return_type {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1038
+                  stop_index: 1055
+                  line: 27
+                  start_position: 10
+                }
+                expr_id: 60863
+              }
+              datatype {
+                type_id: DOUBLE
+              }
+              sum_datatype {
+                type_id: INT64
+              }
+              eval_mode: ANSI
+            }
+            query_context {
+              start_index: 1038
+              stop_index: 1055
+              line: 27
+              start_position: 10
+            }
+            expr_id: 60864
+          }
+          agg_exprs {
+            count {
+              children {
+                unbound {
+                  name: "ss_list_price"
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 7
+                        scale: 2
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  start_index: 1042
+                  stop_index: 1054
+                  line: 27
+                  start_position: 14
+                }
+                expr_id: 60865
+              }
+            }
+            query_context {
+              start_index: 1074
+              stop_index: 1093
+              line: 28
+              start_position: 10
+            }
+            expr_id: 60866
+          }
+          agg_exprs {
+            count {
+              children {
+                unbound {
+                  name: "ss_list_price"
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 7
+                        scale: 2
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  start_index: 1042
+                  stop_index: 1054
+                  line: 27
+                  start_position: 14
+                }
+                expr_id: 60867
+              }
+            }
+            query_context {
+              start_index: 1113
+              stop_index: 1141
+              line: 29
+              start_position: 10
+            }
+            expr_id: 60868
+          }
+          mode: Final
+        }
+      }
+      plan_id: 90213
+      projection {
+        project_list {
+          cast {
+            child {
+              divide {
+                left {
+                  bound {
+                    datatype {
+                      type_id: DOUBLE
+                    }
+                  }
+                  query_context {
+                    start_index: 1038
+                    stop_index: 1055
+                    line: 27
+                    start_position: 10
+                  }
+                  expr_id: 60869
+                }
+                right {
+                  literal {
+                    double_val: 100.0
+                    datatype {
+                      type_id: DOUBLE
+                    }
+                  }
+                  query_context {
+                    start_index: 1038
+                    stop_index: 1055
+                    line: 27
+                    start_position: 10
+                  }
+                  expr_id: 60870
+                }
+                return_type {
+                  type_id: DOUBLE
+                }
+                eval_mode: ANSI
+              }
+              query_context {
+                start_index: 1038
+                stop_index: 1055
+                line: 27
+                start_position: 10
+              }
+              expr_id: 60871
+            }
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 11
+                  scale: 6
+                }
+              }
+            }
+            timezone: "UTC"
+            eval_mode: ANSI
+            is_spark4_plus: true
+          }
+          query_context {
+            start_index: 1038
+            stop_index: 1055
+            line: 27
+            start_position: 10
+          }
+          expr_id: 60872
+        }
+        project_list {
+          bound {
+            index: 1
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1074
+            stop_index: 1093
+            line: 28
+            start_position: 10
+          }
+          expr_id: 60873
+        }
+        project_list {
+          bound {
+            index: 2
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1113
+            stop_index: 1141
+            line: 29
+            start_position: 10
+          }
+          expr_id: 60874
+        }
+      }
+    }
+    plan_id: 90671
+    broadcast_nested_loop_join {
+    }
+  }
+  children {
+    plan_id: 90678
+    scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 11
+            scale: 6
+          }
+        }
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "BroadcastExchange (unknown)"
+    }
+  }
+  plan_id: 90682
+  broadcast_nested_loop_join {
+    build_side: BuildRight
+  }
+}
+children {
+  plan_id: 90689
+  scan {
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 11
+          scale: 6
+        }
+      }
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    source: "BroadcastExchange (unknown)"
+  }
+}
+plan_id: 90693
+broadcast_nested_loop_join {
+  build_side: BuildRight
+}

@@ -1,0 +1,262 @@
+children {
+  children {
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      fields {
+        type_id: DOUBLE
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=43.3 MiB, rowCount=7.67E+5)"
+    }
+  }
+  plan_id: 90137
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+      }
+      query_context {
+        start_index: 28
+        stop_index: 40
+        line: 3
+        start_position: 14
+      }
+      expr_id: 60561
+    }
+    agg_exprs {
+      avg {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ss_list_price"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 28
+                stop_index: 40
+                line: 3
+                start_position: 14
+              }
+              expr_id: 60562
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 24
+            stop_index: 41
+            line: 3
+            start_position: 10
+          }
+          expr_id: 60563
+        }
+        datatype {
+          type_id: DOUBLE
+        }
+        sum_datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 24
+        stop_index: 41
+        line: 3
+        start_position: 10
+      }
+      expr_id: 60564
+    }
+    agg_exprs {
+      count {
+        children {
+          unbound {
+            name: "ss_list_price"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 7
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 28
+            stop_index: 40
+            line: 3
+            start_position: 14
+          }
+          expr_id: 60565
+        }
+      }
+      query_context {
+        start_index: 60
+        stop_index: 79
+        line: 4
+        start_position: 10
+      }
+      expr_id: 60566
+    }
+    mode: PartialMerge
+    expr_modes: PartialMerge
+    expr_modes: PartialMerge
+    initial_input_buffer_offset: 1
+  }
+}
+plan_id: 90139
+hash_agg {
+  agg_exprs {
+    avg {
+      child {
+        scalarFunc {
+          func: "unscaled_value"
+          args {
+            unbound {
+              name: "ss_list_price"
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 28
+              stop_index: 40
+              line: 3
+              start_position: 14
+            }
+            expr_id: 60567
+          }
+          return_type {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 24
+          stop_index: 41
+          line: 3
+          start_position: 10
+        }
+        expr_id: 60568
+      }
+      datatype {
+        type_id: DOUBLE
+      }
+      sum_datatype {
+        type_id: INT64
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 24
+      stop_index: 41
+      line: 3
+      start_position: 10
+    }
+    expr_id: 60569
+  }
+  agg_exprs {
+    count {
+      children {
+        unbound {
+          name: "ss_list_price"
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 28
+          stop_index: 40
+          line: 3
+          start_position: 14
+        }
+        expr_id: 60570
+      }
+    }
+    query_context {
+      start_index: 60
+      stop_index: 79
+      line: 4
+      start_position: 10
+    }
+    expr_id: 60571
+  }
+  agg_exprs {
+    count {
+      children {
+        bound {
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 28
+          stop_index: 40
+          line: 3
+          start_position: 14
+        }
+        expr_id: 60572
+      }
+    }
+    query_context {
+      start_index: 99
+      stop_index: 127
+      line: 5
+      start_position: 10
+    }
+    expr_id: 60573
+  }
+  expr_modes: PartialMerge
+  expr_modes: PartialMerge
+  expr_modes: Partial
+  initial_input_buffer_offset: 1
+}

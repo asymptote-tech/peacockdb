@@ -1,0 +1,45 @@
+children {
+  plan_id: 12
+  shuffle_scan {
+    fields {
+      type_id: INT32
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 38
+          scale: 6
+        }
+      }
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=576.0 B, rowCount=2)"
+  }
+}
+plan_id: 13180
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 772
+          stop_index: 777
+          line: 21
+          start_position: 9
+        }
+        expr_id: 5244
+      }
+    }
+    query_context {
+      start_index: 779
+      stop_index: 793
+      line: 22
+    }
+    expr_id: 5245
+  }
+}

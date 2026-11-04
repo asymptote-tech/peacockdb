@@ -1,0 +1,85 @@
+children {
+  children {
+    plan_id: 23
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 2
+          }
+        }
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=7.0 KiB, rowCount=64)"
+    }
+  }
+  plan_id: 78716
+  hash_agg {
+    agg_exprs {
+      max {
+        child {
+          unbound {
+            name: "csales"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 38
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 558
+            stop_index: 563
+            line: 22
+            start_position: 14
+          }
+          expr_id: 54918
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 38
+              scale: 2
+            }
+          }
+        }
+      }
+      query_context {
+        start_index: 554
+        stop_index: 564
+        line: 22
+        start_position: 10
+      }
+      expr_id: 54919
+    }
+    mode: Final
+  }
+}
+plan_id: 78716
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 554
+      stop_index: 564
+      line: 22
+      start_position: 10
+    }
+    expr_id: 54920
+  }
+}

@@ -1,0 +1,27 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: STRING
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=8.1 KiB, rowCount=14)"
+  }
+}
+plan_id: 20703
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 123
+      stop_index: 18931
+      line: 8
+      start_position: 6
+    }
+    expr_id: 12713
+  }
+  mode: Final
+}

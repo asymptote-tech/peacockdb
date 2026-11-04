@@ -1,0 +1,785 @@
+children {
+  children {
+    children {
+      children {
+        children {
+          children {
+            plan_id: 6
+            shuffle_scan {
+              fields {
+                type_id: INT64
+              }
+              fields {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: INT64
+              }
+              source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=69.7 MiB, rowCount=2.41E+4)"
+            }
+          }
+          plan_id: 84778
+          sort {
+            sort_orders {
+              sort_order {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 392
+                    stop_index: 407
+                    line: 19
+                    start_position: 9
+                  }
+                  expr_id: 57888
+                }
+              }
+              expr_id: 57889
+            }
+          }
+        }
+        children {
+          children {
+            plan_id: 4
+            shuffle_scan {
+              fields {
+                type_id: INT64
+              }
+              fields {
+                type_id: INT64
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              fields {
+                type_id: STRING
+              }
+              source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=27.0 MiB, rowCount=5.79E+5)"
+            }
+          }
+          plan_id: 84781
+          sort {
+            sort_orders {
+              sort_order {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 392
+                    stop_index: 407
+                    line: 19
+                    start_position: 9
+                  }
+                  expr_id: 57890
+                }
+              }
+              expr_id: 57891
+            }
+          }
+        }
+        plan_id: 84783
+        sort_merge_join {
+          left_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 392
+              stop_index: 407
+              line: 19
+              start_position: 9
+            }
+            expr_id: 57892
+          }
+          right_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 392
+              stop_index: 407
+              line: 19
+              start_position: 9
+            }
+            expr_id: 57893
+          }
+          sort_options {
+            sort_order {
+              child {
+                bound {
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 392
+                  stop_index: 407
+                  line: 19
+                  start_position: 9
+                }
+                expr_id: 57894
+              }
+            }
+            expr_id: 57895
+          }
+        }
+      }
+      plan_id: 84785
+      projection {
+        project_list {
+          bound {
+            index: 1
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 7
+                  scale: 2
+                }
+              }
+            }
+          }
+          expr_id: 57896
+        }
+        project_list {
+          bound {
+            index: 2
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57897
+        }
+        project_list {
+          bound {
+            index: 3
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57898
+        }
+        project_list {
+          bound {
+            index: 4
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57899
+        }
+        project_list {
+          bound {
+            index: 5
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 7
+                  scale: 2
+                }
+              }
+            }
+          }
+          expr_id: 57900
+        }
+        project_list {
+          bound {
+            index: 6
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57901
+        }
+        project_list {
+          bound {
+            index: 7
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57902
+        }
+        project_list {
+          bound {
+            index: 8
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57903
+        }
+        project_list {
+          bound {
+            index: 9
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 57904
+        }
+        project_list {
+          bound {
+            index: 11
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 57905
+        }
+        project_list {
+          bound {
+            index: 12
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57906
+        }
+        project_list {
+          bound {
+            index: 13
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57907
+        }
+        project_list {
+          bound {
+            index: 14
+            datatype {
+              type_id: STRING
+            }
+          }
+          expr_id: 57908
+        }
+      }
+    }
+    children {
+      plan_id: 5
+      scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: STRING
+        }
+        source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=5.8 MiB, rowCount=2.86E+5)"
+      }
+    }
+    plan_id: 84788
+    hash_join {
+      left_join_keys {
+        bound {
+          index: 9
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 392
+          stop_index: 407
+          line: 19
+          start_position: 9
+        }
+        expr_id: 57915
+      }
+      left_join_keys {
+        bound {
+          index: 3
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 392
+          stop_index: 407
+          line: 19
+          start_position: 9
+        }
+        expr_id: 57916
+      }
+      right_join_keys {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 392
+          stop_index: 407
+          line: 19
+          start_position: 9
+        }
+        expr_id: 57917
+      }
+      right_join_keys {
+        bound {
+          index: 2
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 392
+          stop_index: 407
+          line: 19
+          start_position: 9
+        }
+        expr_id: 57918
+      }
+      condition {
+        neq {
+          left {
+            bound {
+              index: 12
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 392
+              stop_index: 407
+              line: 19
+              start_position: 9
+            }
+            expr_id: 57909
+          }
+          right {
+            jvm_scalar_udf {
+              class_name: "org.apache.comet.udf.codegen.CometScalaUDFCodegen"
+              args {
+                literal {
+                  bytes_val: "_\303(\177r\n\314K\3354\251&?\234\320\0335Gvx\253P\343\000\245\'9\344\322\355\307\353"
+                  datatype {
+                    type_id: BYTES
+                  }
+                }
+                expr_id: 57910
+              }
+              args {
+                literal {
+                  bytes_val: "\254\355\000\005sr\000/org.apache.spark.sql.catalyst.expressions.Upper\t\247U-f6d\207\002\000\005B\000\bbitmap$0I\000\vcollationIdZ\000\006useICUL\000\005childt\0006Lorg/apache/spark/sql/catalyst/expressions/Expression;L\000\fnodePatternst\000 Lscala/collection/immutable/Seq;xp\000\000\000\000\000\000sr\0008org.apache.spark.sql.catalyst.expressions.BoundReference\232\207\262\336\360\230d\222\002\000\004Z\000\bnullableI\000\aordinalL\000\baccessort\000\021Lscala/Function2;L\000\bdataTypet\000%Lorg/apache/spark/sql/types/DataType;xp\001\000\000\000\000sr\000!java.lang.invoke.SerializedLambdaoa\320\224,)6\205\002\000\nI\000\016implMethodKind[\000\fcapturedArgst\000\023[Ljava/lang/Object;L\000\016capturingClasst\000\021Ljava/lang/Class;L\000\030functionalInterfaceClasst\000\022Ljava/lang/String;L\000\035functionalInterfaceMethodNameq\000~\000\vL\000\"functionalInterfaceMethodSignatureq\000~\000\vL\000\timplClassq\000~\000\vL\000\016implMethodNameq\000~\000\vL\000\023implMethodSignatureq\000~\000\vL\000\026instantiatedMethodTypeq\000~\000\vxp\000\000\000\006ur\000\023[Ljava.lang.Object;\220\316X\237\020s)l\002\000\000xp\000\000\000\001sq\000~\000\b\000\000\000\006uq\000~\000\r\000\000\000\000vr\000*org.apache.spark.sql.catalyst.InternalRow$\245\017\255\323\034\026\213\275\002\000\000xpt\000\017scala/Function2t\000\005applyt\0008(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;t\000*org/apache/spark/sql/catalyst/InternalRow$t\000\036$anonfun$getAccessor$8$adaptedt\000|(Lorg/apache/spark/sql/catalyst/expressions/SpecializedGetters;Ljava/lang/Object;)Lorg/apache/spark/unsafe/types/UTF8String;q\000~\000\030q\000~\000\022q\000~\000\023q\000~\000\024q\000~\000\025q\000~\000\026t\000\037$anonfun$getAccessor$16$adaptedt\000u(Lscala/Function2;Lorg/apache/spark/sql/catalyst/expressions/SpecializedGetters;Ljava/lang/Object;)Ljava/lang/Object;t\000d(Lorg/apache/spark/sql/catalyst/expressions/SpecializedGetters;Ljava/lang/Object;)Ljava/lang/Object;sr\000&scala.runtime.ModuleSerializationProxy\000\000\000\000\000\000\000\001\002\000\001L\000\vmoduleClassq\000~\000\nxpvr\000&org.apache.spark.sql.types.StringType$\240u\263\236h\307JI\002\000\000xr\000%org.apache.spark.sql.types.StringType\221\304\301\321\354\242)\361\002\000\002I\000\vcollationIdL\000\nconstraintt\000-Lorg/apache/spark/sql/types/StringConstraint;xpsr\0002scala.collection.generic.DefaultSerializationProxy\000\000\000\000\000\000\000\003\003\000\001L\000\afactoryt\000\032Lscala/collection/Factory;xpsr\000*scala.collection.IterableFactory$ToFactory\000\000\000\000\000\000\000\003\002\000\001L\000\afactoryt\000\"Lscala/collection/IterableFactory;xpsq\000~\000\034vr\000 scala.collection.immutable.List$\000\000\000\000\000\000\000\003\002\000\000xpw\004\377\377\377\377sr\000\025scala.Enumeration$Val\317ig\257\311\374\355O\002\000\002I\000\001iL\000\004nameq\000~\000\vxr\000\027scala.Enumeration$Valuebi|/\355!\035Q\002\000\002L\000\006$outert\000\023Lscala/Enumeration;L\000\034scala$Enumeration$$outerEnumq\000~\000-xpsq\000~\000\034vr\0000org.apache.spark.sql.catalyst.trees.TreePattern$\340{Rt\2378\226;\002\000\000xr\000\021scala.Enumerationu\240\315\335\230\016Y\216\002\000\bI\000\006nextIdI\000\033scala$Enumeration$$bottomIdI\000\030scala$Enumeration$$topIdL\000\024ValueOrdering$modulet\000\"Lscala/Enumeration$ValueOrdering$;L\000\017ValueSet$modulet\000\035Lscala/Enumeration$ValueSet$;L\000\bnextNamet\000\033Lscala/collection/Iterator;L\000\004nmapt\000\036Lscala/collection/mutable/Map;L\000\027scala$Enumeration$$vmapq\000~\0005xpq\000~\000/\000\000\000Lpsq\000~\000\034vr\000&scala.collection.generic.SerializeEnd$\000\000\000\000\000\000\000\003\002\000\000xpx"
+                  datatype {
+                    type_id: BYTES
+                  }
+                }
+                expr_id: 57911
+              }
+              args {
+                bound {
+                  index: 16
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 392
+                  stop_index: 407
+                  line: 19
+                  start_position: 9
+                }
+                expr_id: 57912
+              }
+              return_type {
+                type_id: STRING
+              }
+              return_nullable: true
+            }
+            query_context {
+              start_index: 638
+              stop_index: 654
+              line: 25
+              start_position: 28
+            }
+            expr_id: 57913
+          }
+        }
+        query_context {
+          start_index: 619
+          stop_index: 654
+          line: 25
+          start_position: 9
+        }
+        expr_id: 57914
+      }
+      build_side: BuildRight
+    }
+  }
+  plan_id: 84790
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 57919
+    }
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57920
+    }
+    project_list {
+      bound {
+        index: 2
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57921
+    }
+    project_list {
+      bound {
+        index: 4
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 57922
+    }
+    project_list {
+      bound {
+        index: 5
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57923
+    }
+    project_list {
+      bound {
+        index: 6
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57924
+    }
+    project_list {
+      bound {
+        index: 7
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57925
+    }
+    project_list {
+      bound {
+        index: 8
+        datatype {
+          type_id: INT64
+        }
+      }
+      expr_id: 57926
+    }
+    project_list {
+      bound {
+        index: 10
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57927
+    }
+    project_list {
+      bound {
+        index: 11
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57928
+    }
+    project_list {
+      bound {
+        index: 14
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 57929
+    }
+  }
+}
+plan_id: 84792
+hash_agg {
+  grouping_exprs {
+    bound {
+      index: 9
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57930
+  }
+  grouping_exprs {
+    bound {
+      index: 8
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57931
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57932
+  }
+  grouping_exprs {
+    bound {
+      index: 10
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57933
+  }
+  grouping_exprs {
+    bound {
+      index: 2
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57934
+  }
+  grouping_exprs {
+    bound {
+      index: 5
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57935
+  }
+  grouping_exprs {
+    bound {
+      index: 3
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57936
+  }
+  grouping_exprs {
+    bound {
+      index: 7
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57937
+  }
+  grouping_exprs {
+    bound {
+      index: 6
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57938
+  }
+  grouping_exprs {
+    bound {
+      index: 4
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 715
+      stop_index: 725
+      line: 28
+      start_position: 12
+    }
+    expr_id: 57939
+  }
+  agg_exprs {
+    sum {
+      child {
+        scalarFunc {
+          func: "unscaled_value"
+          args {
+            bound {
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 715
+              stop_index: 725
+              line: 28
+              start_position: 12
+            }
+            expr_id: 57940
+          }
+          return_type {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 242
+          stop_index: 257
+          line: 12
+          start_position: 10
+        }
+        expr_id: 57941
+      }
+      datatype {
+        type_id: INT64
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 242
+      stop_index: 257
+      line: 12
+      start_position: 10
+    }
+    expr_id: 57942
+  }
+}

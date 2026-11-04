@@ -1,0 +1,735 @@
+children {
+  plan_id: 30047
+  native_scan {
+    common {
+      required_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "cd_marital_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "cd_education_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_gender"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_marital_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_education_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_purchase_estimate"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_credit_rating"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_employed_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_college_count"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 276
+              stop_index: 285
+              line: 11
+              start_position: 6
+            }
+            expr_id: 17289
+          }
+        }
+        query_context {
+          stop_index: 2428
+          line: 1
+        }
+        expr_id: 17290
+      }
+      data_filters {
+        or {
+          left {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 276
+                      stop_index: 285
+                      line: 11
+                      start_position: 6
+                    }
+                    expr_id: 17291
+                  }
+                  right {
+                    literal {
+                      string_val: "M"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 486
+                      stop_index: 488
+                      line: 15
+                      start_position: 49
+                    }
+                    expr_id: 17292
+                  }
+                }
+                query_context {
+                  start_index: 466
+                  stop_index: 488
+                  line: 15
+                  start_position: 29
+                }
+                expr_id: 17293
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 276
+                      stop_index: 285
+                      line: 11
+                      start_position: 6
+                    }
+                    expr_id: 17294
+                  }
+                  right {
+                    literal {
+                      string_val: "Advanced Degree"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 541
+                      stop_index: 557
+                      line: 16
+                      start_position: 51
+                    }
+                    expr_id: 17295
+                  }
+                }
+                query_context {
+                  start_index: 519
+                  stop_index: 557
+                  line: 16
+                  start_position: 29
+                }
+                expr_id: 17296
+              }
+            }
+            query_context {
+              stop_index: 2428
+              line: 1
+            }
+            expr_id: 17297
+          }
+          right {
+            or {
+              left {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17298
+                      }
+                      right {
+                        literal {
+                          string_val: "S"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 836
+                          stop_index: 838
+                          line: 21
+                          start_position: 52
+                        }
+                        expr_id: 17299
+                      }
+                    }
+                    query_context {
+                      start_index: 816
+                      stop_index: 838
+                      line: 21
+                      start_position: 32
+                    }
+                    expr_id: 17300
+                  }
+                  right {
+                    eq {
+                      left {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17301
+                      }
+                      right {
+                        literal {
+                          string_val: "College"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 894
+                          stop_index: 902
+                          line: 22
+                          start_position: 54
+                        }
+                        expr_id: 17302
+                      }
+                    }
+                    query_context {
+                      start_index: 872
+                      stop_index: 902
+                      line: 22
+                      start_position: 32
+                    }
+                    expr_id: 17303
+                  }
+                }
+                query_context {
+                  stop_index: 2428
+                  line: 1
+                }
+                expr_id: 17304
+              }
+              right {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17305
+                      }
+                      right {
+                        literal {
+                          string_val: "W"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 1187
+                          stop_index: 1189
+                          line: 27
+                          start_position: 52
+                        }
+                        expr_id: 17306
+                      }
+                    }
+                    query_context {
+                      start_index: 1167
+                      stop_index: 1189
+                      line: 27
+                      start_position: 32
+                    }
+                    expr_id: 17307
+                  }
+                  right {
+                    eq {
+                      left {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17308
+                      }
+                      right {
+                        literal {
+                          string_val: "2 yr Degree"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 1245
+                          stop_index: 1257
+                          line: 28
+                          start_position: 54
+                        }
+                        expr_id: 17309
+                      }
+                    }
+                    query_context {
+                      start_index: 1223
+                      stop_index: 1257
+                      line: 28
+                      start_position: 32
+                    }
+                    expr_id: 17310
+                  }
+                }
+                query_context {
+                  stop_index: 2428
+                  line: 1
+                }
+                expr_id: 17311
+              }
+            }
+          }
+        }
+        query_context {
+          stop_index: 2428
+          line: 1
+        }
+        expr_id: 17312
+      }
+      projection_vector: 0
+      projection_vector: 2
+      projection_vector: 3
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 412070881
+  }
+}
+plan_id: 30101
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 276
+              stop_index: 285
+              line: 11
+              start_position: 6
+            }
+            expr_id: 17313
+          }
+        }
+        query_context {
+          stop_index: 2428
+          line: 1
+        }
+        expr_id: 17314
+      }
+      right {
+        or {
+          left {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 276
+                      stop_index: 285
+                      line: 11
+                      start_position: 6
+                    }
+                    expr_id: 17315
+                  }
+                  right {
+                    literal {
+                      string_val: "M"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 486
+                      stop_index: 488
+                      line: 15
+                      start_position: 49
+                    }
+                    expr_id: 17316
+                  }
+                }
+                query_context {
+                  start_index: 466
+                  stop_index: 488
+                  line: 15
+                  start_position: 29
+                }
+                expr_id: 17317
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 276
+                      stop_index: 285
+                      line: 11
+                      start_position: 6
+                    }
+                    expr_id: 17318
+                  }
+                  right {
+                    literal {
+                      string_val: "Advanced Degree"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 541
+                      stop_index: 557
+                      line: 16
+                      start_position: 51
+                    }
+                    expr_id: 17319
+                  }
+                }
+                query_context {
+                  start_index: 519
+                  stop_index: 557
+                  line: 16
+                  start_position: 29
+                }
+                expr_id: 17320
+              }
+            }
+            query_context {
+              stop_index: 2428
+              line: 1
+            }
+            expr_id: 17321
+          }
+          right {
+            or {
+              left {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17322
+                      }
+                      right {
+                        literal {
+                          string_val: "S"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 836
+                          stop_index: 838
+                          line: 21
+                          start_position: 52
+                        }
+                        expr_id: 17323
+                      }
+                    }
+                    query_context {
+                      start_index: 816
+                      stop_index: 838
+                      line: 21
+                      start_position: 32
+                    }
+                    expr_id: 17324
+                  }
+                  right {
+                    eq {
+                      left {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17325
+                      }
+                      right {
+                        literal {
+                          string_val: "College"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 894
+                          stop_index: 902
+                          line: 22
+                          start_position: 54
+                        }
+                        expr_id: 17326
+                      }
+                    }
+                    query_context {
+                      start_index: 872
+                      stop_index: 902
+                      line: 22
+                      start_position: 32
+                    }
+                    expr_id: 17327
+                  }
+                }
+                query_context {
+                  stop_index: 2428
+                  line: 1
+                }
+                expr_id: 17328
+              }
+              right {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17329
+                      }
+                      right {
+                        literal {
+                          string_val: "W"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 1187
+                          stop_index: 1189
+                          line: 27
+                          start_position: 52
+                        }
+                        expr_id: 17330
+                      }
+                    }
+                    query_context {
+                      start_index: 1167
+                      stop_index: 1189
+                      line: 27
+                      start_position: 32
+                    }
+                    expr_id: 17331
+                  }
+                  right {
+                    eq {
+                      left {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 276
+                          stop_index: 285
+                          line: 11
+                          start_position: 6
+                        }
+                        expr_id: 17332
+                      }
+                      right {
+                        literal {
+                          string_val: "2 yr Degree"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 1245
+                          stop_index: 1257
+                          line: 28
+                          start_position: 54
+                        }
+                        expr_id: 17333
+                      }
+                    }
+                    query_context {
+                      start_index: 1223
+                      stop_index: 1257
+                      line: 28
+                      start_position: 32
+                    }
+                    expr_id: 17334
+                  }
+                }
+                query_context {
+                  stop_index: 2428
+                  line: 1
+                }
+                expr_id: 17335
+              }
+            }
+          }
+        }
+        query_context {
+          stop_index: 2428
+          line: 1
+        }
+        expr_id: 17336
+      }
+    }
+    expr_id: 17337
+  }
+}

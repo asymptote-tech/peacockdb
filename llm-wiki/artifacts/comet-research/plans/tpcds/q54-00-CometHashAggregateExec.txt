@@ -1,0 +1,134 @@
+children {
+  children {
+    plan_id: 9
+    shuffle_scan {
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=11.2 KiB, rowCount=22)"
+    }
+  }
+  plan_id: 129651
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: INT32
+        }
+      }
+      query_context {
+        start_index: 1541
+        stop_index: 1548
+        line: 52
+        start_position: 5
+      }
+      expr_id: 81611
+    }
+    agg_exprs {
+      count {
+        children {
+          literal {
+            int_val: 1
+            datatype {
+              type_id: INT32
+            }
+          }
+          query_context {
+            start_index: 1475
+            stop_index: 1482
+            line: 50
+            start_position: 7
+          }
+          expr_id: 81612
+        }
+      }
+      query_context {
+        start_index: 1475
+        stop_index: 1482
+        line: 50
+        start_position: 7
+      }
+      expr_id: 81613
+    }
+    mode: Final
+  }
+}
+plan_id: 129651
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT32
+      }
+    }
+    query_context {
+      start_index: 1541
+      stop_index: 1548
+      line: 52
+      start_position: 5
+    }
+    expr_id: 81614
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1475
+      stop_index: 1482
+      line: 50
+      start_position: 7
+    }
+    expr_id: 81615
+  }
+  project_list {
+    multiply {
+      left {
+        bound {
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 1541
+          stop_index: 1548
+          line: 52
+          start_position: 5
+        }
+        expr_id: 81616
+      }
+      right {
+        literal {
+          int_val: 50
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 1517
+          stop_index: 1518
+          line: 51
+          start_position: 15
+        }
+        expr_id: 81617
+      }
+      return_type {
+        type_id: INT32
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 1509
+      stop_index: 1518
+      line: 51
+      start_position: 7
+    }
+    expr_id: 81618
+  }
+}

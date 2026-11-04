@@ -1,0 +1,123 @@
+children {
+  children {
+    children {
+      plan_id: 3
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=198.6 MiB, rowCount=1.15E+7)"
+      }
+    }
+    plan_id: 233870
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 462
+          stop_index: 480
+          line: 15
+          start_position: 12
+        }
+        expr_id: 145908
+      }
+      grouping_exprs {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 462
+          stop_index: 480
+          line: 15
+          start_position: 12
+        }
+        expr_id: 145909
+      }
+      mode: Final
+    }
+  }
+  plan_id: 233870
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 462
+        stop_index: 480
+        line: 15
+        start_position: 12
+      }
+      expr_id: 145910
+    }
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 462
+        stop_index: 480
+        line: 15
+        start_position: 12
+      }
+      expr_id: 145911
+    }
+  }
+}
+plan_id: 234155
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1048
+          stop_index: 1051
+          line: 32
+          start_position: 16
+        }
+        expr_id: 146062
+      }
+    }
+    expr_id: 146063
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1048
+          stop_index: 1051
+          line: 32
+          start_position: 16
+        }
+        expr_id: 146064
+      }
+    }
+    expr_id: 146065
+  }
+}

@@ -1,0 +1,257 @@
+children {
+  children {
+    plan_id: 5645
+    native_scan {
+      common {
+        required_schema {
+          name: "r_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "r_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 138
+                stop_index: 146
+                line: 5
+                start_position: 6
+              }
+              expr_id: 2379
+            }
+          }
+          query_context {
+            stop_index: 463
+            line: 1
+          }
+          expr_id: 2380
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 138
+                stop_index: 146
+                line: 5
+                start_position: 6
+              }
+              expr_id: 2381
+            }
+            right {
+              literal {
+                string_val: "ASIA"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 341
+                stop_index: 346
+                line: 11
+                start_position: 17
+              }
+              expr_id: 2382
+            }
+          }
+          query_context {
+            start_index: 332
+            stop_index: 346
+            line: 11
+            start_position: 8
+          }
+          expr_id: 2383
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 138
+                stop_index: 146
+                line: 5
+                start_position: 6
+              }
+              expr_id: 2384
+            }
+          }
+          query_context {
+            stop_index: 463
+            line: 1
+          }
+          expr_id: 2385
+        }
+        projection_vector: 0
+        projection_vector: 1
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT32
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -1428831196
+    }
+  }
+  plan_id: 5718
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 138
+                stop_index: 146
+                line: 5
+                start_position: 6
+              }
+              expr_id: 2386
+            }
+          }
+          query_context {
+            stop_index: 463
+            line: 1
+          }
+          expr_id: 2387
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 138
+                    stop_index: 146
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 2388
+                }
+                right {
+                  literal {
+                    string_val: "ASIA"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 341
+                    stop_index: 346
+                    line: 11
+                    start_position: 17
+                  }
+                  expr_id: 2389
+                }
+              }
+              query_context {
+                start_index: 332
+                stop_index: 346
+                line: 11
+                start_position: 8
+              }
+              expr_id: 2390
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT32
+                    }
+                  }
+                  query_context {
+                    start_index: 138
+                    stop_index: 146
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 2391
+                }
+              }
+              query_context {
+                stop_index: 463
+                line: 1
+              }
+              expr_id: 2392
+            }
+          }
+        }
+      }
+      expr_id: 2393
+    }
+  }
+}
+plan_id: 5720
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT32
+      }
+    }
+    expr_id: 2394
+  }
+}

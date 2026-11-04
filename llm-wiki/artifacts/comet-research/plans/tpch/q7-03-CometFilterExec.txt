@@ -1,0 +1,307 @@
+children {
+  plan_id: 7783
+  native_scan {
+    common {
+      required_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_regionkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3107
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3108
+      }
+      data_filters {
+        or {
+          left {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 346
+                  stop_index: 354
+                  line: 13
+                  start_position: 10
+                }
+                expr_id: 3109
+              }
+              right {
+                literal {
+                  string_val: "FRANCE"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 559
+                  stop_index: 566
+                  line: 19
+                  start_position: 25
+                }
+                expr_id: 3110
+              }
+            }
+            query_context {
+              start_index: 547
+              stop_index: 566
+              line: 19
+              start_position: 13
+            }
+            expr_id: 3111
+          }
+          right {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 346
+                  stop_index: 354
+                  line: 13
+                  start_position: 10
+                }
+                expr_id: 3112
+              }
+              right {
+                literal {
+                  string_val: "GERMANY"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 623
+                  stop_index: 631
+                  line: 20
+                  start_position: 28
+                }
+                expr_id: 3113
+              }
+            }
+            query_context {
+              start_index: 611
+              stop_index: 631
+              line: 20
+              start_position: 16
+            }
+            expr_id: 3114
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3115
+      }
+      projection_vector: 0
+      projection_vector: 1
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1448341054
+  }
+}
+plan_id: 7847
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3116
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3117
+      }
+      right {
+        or {
+          left {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 346
+                  stop_index: 354
+                  line: 13
+                  start_position: 10
+                }
+                expr_id: 3118
+              }
+              right {
+                literal {
+                  string_val: "FRANCE"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 559
+                  stop_index: 566
+                  line: 19
+                  start_position: 25
+                }
+                expr_id: 3119
+              }
+            }
+            query_context {
+              start_index: 547
+              stop_index: 566
+              line: 19
+              start_position: 13
+            }
+            expr_id: 3120
+          }
+          right {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 346
+                  stop_index: 354
+                  line: 13
+                  start_position: 10
+                }
+                expr_id: 3121
+              }
+              right {
+                literal {
+                  string_val: "GERMANY"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 623
+                  stop_index: 631
+                  line: 20
+                  start_position: 28
+                }
+                expr_id: 3122
+              }
+            }
+            query_context {
+              start_index: 611
+              stop_index: 631
+              line: 20
+              start_position: 16
+            }
+            expr_id: 3123
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3124
+      }
+    }
+    expr_id: 3125
+  }
+}

@@ -1,0 +1,741 @@
+== Physical Plan ==
+AdaptiveSparkPlan (107)
++- == Final Plan ==
+   ResultQueryStage (62)
+   +- * CometColumnarToRow (61)
+      +- CometTakeOrderedAndProject (60)
+         +- CometHashAggregate (59)
+            +- CometHashAggregate (58)
+               +- CometUnion (57)
+                  :- CometHashAggregate (33)
+                  :  +- AQEShuffleRead (32)
+                  :     +- ShuffleQueryStage (31), Statistics(sizeInBytes=1109.7 KiB, rowCount=156)
+                  :        +- CometExchange (30)
+                  :           +- CometHashAggregate (29)
+                  :              +- CometProject (28)
+                  :                 +- CometBroadcastHashJoin (27)
+                  :                    :- CometProject (21)
+                  :                    :  +- CometBroadcastHashJoin (20)
+                  :                    :     :- CometProject (14)
+                  :                    :     :  +- CometBroadcastHashJoin (13)
+                  :                    :     :     :- CometProject (8)
+                  :                    :     :     :  +- CometBroadcastHashJoin (7)
+                  :                    :     :     :     :- CometFilter (2)
+                  :                    :     :     :     :  +- CometNativeScan parquet  (1)
+                  :                    :     :     :     +- BroadcastQueryStage (6), Statistics(sizeInBytes=882.0 B, rowCount=6)
+                  :                    :     :     :        +- CometBroadcastExchange (5)
+                  :                    :     :     :           +- CometFilter (4)
+                  :                    :     :     :              +- CometNativeScan parquet  (3)
+                  :                    :     :     +- BroadcastQueryStage (12), Statistics(sizeInBytes=1944.0 B, rowCount=365)
+                  :                    :     :        +- CometBroadcastExchange (11)
+                  :                    :     :           +- CometFilter (10)
+                  :                    :     :              +- CometNativeScan parquet  (9)
+                  :                    :     +- BroadcastQueryStage (19), Statistics(sizeInBytes=113.0 KiB, rowCount=2.88E+4)
+                  :                    :        +- CometBroadcastExchange (18)
+                  :                    :           +- CometProject (17)
+                  :                    :              +- CometFilter (16)
+                  :                    :                 +- CometNativeScan parquet  (15)
+                  :                    +- BroadcastQueryStage (26), Statistics(sizeInBytes=239.0 B, rowCount=2)
+                  :                       +- CometBroadcastExchange (25)
+                  :                          +- CometProject (24)
+                  :                             +- CometFilter (23)
+                  :                                +- CometNativeScan parquet  (22)
+                  +- CometHashAggregate (56)
+                     +- AQEShuffleRead (55)
+                        +- ShuffleQueryStage (54), Statistics(sizeInBytes=1067.0 KiB, rowCount=150)
+                           +- CometExchange (53)
+                              +- CometHashAggregate (52)
+                                 +- CometProject (51)
+                                    +- CometBroadcastHashJoin (50)
+                                       :- CometProject (47)
+                                       :  +- CometBroadcastHashJoin (46)
+                                       :     :- CometProject (43)
+                                       :     :  +- CometBroadcastHashJoin (42)
+                                       :     :     :- CometProject (39)
+                                       :     :     :  +- CometBroadcastHashJoin (38)
+                                       :     :     :     :- CometFilter (35)
+                                       :     :     :     :  +- CometNativeScan parquet  (34)
+                                       :     :     :     +- BroadcastQueryStage (37), Statistics(sizeInBytes=882.0 B, rowCount=6)
+                                       :     :     :        +- ReusedExchange (36)
+                                       :     :     +- BroadcastQueryStage (41), Statistics(sizeInBytes=1944.0 B, rowCount=365)
+                                       :     :        +- ReusedExchange (40)
+                                       :     +- BroadcastQueryStage (45), Statistics(sizeInBytes=113.0 KiB, rowCount=2.88E+4)
+                                       :        +- ReusedExchange (44)
+                                       +- BroadcastQueryStage (49), Statistics(sizeInBytes=239.0 B, rowCount=2)
+                                          +- ReusedExchange (48)
++- == Initial Plan ==
+   CometTakeOrderedAndProject (106)
+   +- CometHashAggregate (105)
+      +- CometHashAggregate (104)
+         +- CometUnion (103)
+            :- CometHashAggregate (75)
+            :  +- CometExchange (74)
+            :     +- CometHashAggregate (73)
+            :        +- CometProject (72)
+            :           +- CometBroadcastHashJoin (71)
+            :              :- CometProject (70)
+            :              :  +- CometBroadcastHashJoin (69)
+            :              :     :- CometProject (68)
+            :              :     :  +- CometBroadcastHashJoin (67)
+            :              :     :     :- CometProject (66)
+            :              :     :     :  +- CometBroadcastHashJoin (65)
+            :              :     :     :     :- CometFilter (64)
+            :              :     :     :     :  +- CometNativeScan parquet  (63)
+            :              :     :     :     +- CometBroadcastExchange (5)
+            :              :     :     :        +- CometFilter (4)
+            :              :     :     :           +- CometNativeScan parquet  (3)
+            :              :     :     +- CometBroadcastExchange (11)
+            :              :     :        +- CometFilter (10)
+            :              :     :           +- CometNativeScan parquet  (9)
+            :              :     +- CometBroadcastExchange (18)
+            :              :        +- CometProject (17)
+            :              :           +- CometFilter (16)
+            :              :              +- CometNativeScan parquet  (15)
+            :              +- CometBroadcastExchange (25)
+            :                 +- CometProject (24)
+            :                    +- CometFilter (23)
+            :                       +- CometNativeScan parquet  (22)
+            +- CometHashAggregate (102)
+               +- CometExchange (101)
+                  +- CometHashAggregate (100)
+                     +- CometProject (99)
+                        +- CometBroadcastHashJoin (98)
+                           :- CometProject (93)
+                           :  +- CometBroadcastHashJoin (92)
+                           :     :- CometProject (87)
+                           :     :  +- CometBroadcastHashJoin (86)
+                           :     :     :- CometProject (82)
+                           :     :     :  +- CometBroadcastHashJoin (81)
+                           :     :     :     :- CometFilter (77)
+                           :     :     :     :  +- CometNativeScan parquet  (76)
+                           :     :     :     +- CometBroadcastExchange (80)
+                           :     :     :        +- CometFilter (79)
+                           :     :     :           +- CometNativeScan parquet  (78)
+                           :     :     +- CometBroadcastExchange (85)
+                           :     :        +- CometFilter (84)
+                           :     :           +- CometNativeScan parquet  (83)
+                           :     +- CometBroadcastExchange (91)
+                           :        +- CometProject (90)
+                           :           +- CometFilter (89)
+                           :              +- CometNativeScan parquet  (88)
+                           +- CometBroadcastExchange (97)
+                              +- CometProject (96)
+                                 +- CometFilter (95)
+                                    +- CometNativeScan parquet  (94)
+
+
+(1) CometNativeScan parquet 
+Output [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/web_sales.parquet]
+PushedFilters: [IsNotNull(ws_warehouse_sk), IsNotNull(ws_sold_date_sk), IsNotNull(ws_sold_time_sk), IsNotNull(ws_ship_mode_sk)]
+ReadSchema: struct<ws_sold_date_sk:bigint,ws_sold_time_sk:bigint,ws_ship_mode_sk:bigint,ws_warehouse_sk:bigint,ws_quantity:bigint,ws_ext_sales_price:decimal(7,2),ws_net_paid:decimal(7,2)>
+
+(2) CometFilter
+Input [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Condition : (((isnotnull(ws_warehouse_sk#380L) AND isnotnull(ws_sold_date_sk#365L)) AND isnotnull(ws_sold_time_sk#366L)) AND isnotnull(ws_ship_mode_sk#379L))
+
+(3) CometNativeScan parquet 
+Output [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/warehouse.parquet]
+PushedFilters: [IsNotNull(w_warehouse_sk)]
+ReadSchema: struct<w_warehouse_sk:bigint,w_warehouse_name:string,w_warehouse_sq_ft:bigint,w_city:string,w_county:string,w_state:string,w_country:string>
+
+(4) CometFilter
+Input [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Condition : isnotnull(w_warehouse_sk#313L)
+
+(5) CometBroadcastExchange
+Input [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+
+(6) BroadcastQueryStage
+Output [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: 0
+
+(7) CometBroadcastHashJoin
+Left output [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Right output [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: [ws_warehouse_sk#380L], [w_warehouse_sk#313L], Inner, BuildRight
+
+(8) CometProject
+Input [14]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325], [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+
+(9) CometNativeScan parquet 
+Output [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_year), EqualTo(d_year,2001), IsNotNull(d_date_sk)]
+ReadSchema: struct<d_date_sk:bigint,d_year:bigint,d_moy:bigint>
+
+(10) CometFilter
+Input [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Condition : ((isnotnull(d_year#147L) AND (d_year#147L = 2001)) AND isnotnull(d_date_sk#141L))
+
+(11) CometBroadcastExchange
+Input [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [d_date_sk#141L, d_year#147L, d_moy#149L]
+
+(12) BroadcastQueryStage
+Output [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: 1
+
+(13) CometBroadcastHashJoin
+Left output [12]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Right output [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [ws_sold_date_sk#365L], [d_date_sk#141L], Inner, BuildRight
+
+(14) CometProject
+Input [15]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(15) CometNativeScan parquet 
+Output [2]: [t_time_sk#303L, t_time#305L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_time), GreaterThanOrEqual(t_time,30838), LessThanOrEqual(t_time,59638), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_time:bigint>
+
+(16) CometFilter
+Input [2]: [t_time_sk#303L, t_time#305L]
+Condition : (((isnotnull(t_time#305L) AND (t_time#305L >= 30838)) AND (t_time#305L <= 59638)) AND isnotnull(t_time_sk#303L))
+
+(17) CometProject
+Input [2]: [t_time_sk#303L, t_time#305L]
+Arguments: [t_time_sk#303L], [t_time_sk#303L]
+
+(18) CometBroadcastExchange
+Input [1]: [t_time_sk#303L]
+Arguments: [t_time_sk#303L]
+
+(19) BroadcastQueryStage
+Output [1]: [t_time_sk#303L]
+Arguments: 2
+
+(20) CometBroadcastHashJoin
+Left output [13]: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Right output [1]: [t_time_sk#303L]
+Arguments: [ws_sold_time_sk#366L], [t_time_sk#303L], Inner, BuildRight
+
+(21) CometProject
+Input [14]: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L, t_time_sk#303L]
+Arguments: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(22) CometNativeScan parquet 
+Output [2]: [sm_ship_mode_sk#225L, sm_carrier#229]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/ship_mode.parquet]
+PushedFilters: [In(sm_carrier, [BARIAN,DHL]), IsNotNull(sm_ship_mode_sk)]
+ReadSchema: struct<sm_ship_mode_sk:bigint,sm_carrier:string>
+
+(23) CometFilter
+Input [2]: [sm_ship_mode_sk#225L, sm_carrier#229]
+Condition : (sm_carrier#229 IN (DHL,BARIAN) AND isnotnull(sm_ship_mode_sk#225L))
+
+(24) CometProject
+Input [2]: [sm_ship_mode_sk#225L, sm_carrier#229]
+Arguments: [sm_ship_mode_sk#225L], [sm_ship_mode_sk#225L]
+
+(25) CometBroadcastExchange
+Input [1]: [sm_ship_mode_sk#225L]
+Arguments: [sm_ship_mode_sk#225L]
+
+(26) BroadcastQueryStage
+Output [1]: [sm_ship_mode_sk#225L]
+Arguments: 3
+
+(27) CometBroadcastHashJoin
+Left output [12]: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Right output [1]: [sm_ship_mode_sk#225L]
+Arguments: [ws_ship_mode_sk#379L], [sm_ship_mode_sk#225L], Inner, BuildRight
+
+(28) CometProject
+Input [13]: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L, sm_ship_mode_sk#225L]
+Arguments: [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(29) CometHashAggregate
+Input [11]: [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Keys [7]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L]
+Functions [24]: [partial_sum(CASE WHEN (d_moy#149L = 1) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 2) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 3) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 4) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 5) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 6) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 7) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 8) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 9) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 10) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 11) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 12) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 1) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 2) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 3) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 4) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 5) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 6) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 7) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 8) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 9) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 10) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 11) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 12) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END)]
+
+(30) CometExchange
+Input [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Arguments: hashpartitioning(w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=166964]
+
+(31) ShuffleQueryStage
+Output [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Arguments: 8
+
+(32) AQEShuffleRead
+Input [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Arguments: coalesced
+
+(33) CometHashAggregate
+Input [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Keys [7]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L]
+Functions [24]: [sum(CASE WHEN (d_moy#149L = 1) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 2) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 3) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 4) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 5) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 6) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 7) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 8) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 9) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 10) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 11) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 12) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 1) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 2) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 3) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 4) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 5) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 6) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 7) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 8) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 9) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 10) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 11) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 12) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END)]
+
+(34) CometNativeScan parquet 
+Output [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/catalog_sales.parquet]
+PushedFilters: [IsNotNull(cs_warehouse_sk), IsNotNull(cs_sold_date_sk), IsNotNull(cs_sold_time_sk), IsNotNull(cs_ship_mode_sk)]
+ReadSchema: struct<cs_sold_date_sk:bigint,cs_sold_time_sk:bigint,cs_ship_mode_sk:bigint,cs_warehouse_sk:bigint,cs_quantity:bigint,cs_sales_price:decimal(7,2),cs_net_paid_inc_tax:decimal(7,2)>
+
+(35) CometFilter
+Input [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Condition : (((isnotnull(cs_warehouse_sk#81L) AND isnotnull(cs_sold_date_sk#67L)) AND isnotnull(cs_sold_time_sk#68L)) AND isnotnull(cs_ship_mode_sk#80L))
+
+(36) ReusedExchange [Reuses operator id: 5]
+Output [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+
+(37) BroadcastQueryStage
+Output [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: 4
+
+(38) CometBroadcastHashJoin
+Left output [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Right output [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: [cs_warehouse_sk#81L], [w_warehouse_sk#15546L], Inner, BuildRight
+
+(39) CometProject
+Input [14]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558], [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+
+(40) ReusedExchange [Reuses operator id: 11]
+Output [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+
+(41) BroadcastQueryStage
+Output [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: 5
+
+(42) CometBroadcastHashJoin
+Left output [12]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Right output [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: [cs_sold_date_sk#67L], [d_date_sk#15560L], Inner, BuildRight
+
+(43) CometProject
+Input [15]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(44) ReusedExchange [Reuses operator id: 18]
+Output [1]: [t_time_sk#15588L]
+
+(45) BroadcastQueryStage
+Output [1]: [t_time_sk#15588L]
+Arguments: 6
+
+(46) CometBroadcastHashJoin
+Left output [13]: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Right output [1]: [t_time_sk#15588L]
+Arguments: [cs_sold_time_sk#68L], [t_time_sk#15588L], Inner, BuildRight
+
+(47) CometProject
+Input [14]: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L, t_time_sk#15588L]
+Arguments: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(48) ReusedExchange [Reuses operator id: 25]
+Output [1]: [sm_ship_mode_sk#15598L]
+
+(49) BroadcastQueryStage
+Output [1]: [sm_ship_mode_sk#15598L]
+Arguments: 7
+
+(50) CometBroadcastHashJoin
+Left output [12]: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Right output [1]: [sm_ship_mode_sk#15598L]
+Arguments: [cs_ship_mode_sk#80L], [sm_ship_mode_sk#15598L], Inner, BuildRight
+
+(51) CometProject
+Input [13]: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L, sm_ship_mode_sk#15598L]
+Arguments: [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(52) CometHashAggregate
+Input [11]: [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Keys [7]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L]
+Functions [24]: [partial_sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END)]
+
+(53) CometExchange
+Input [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Arguments: hashpartitioning(w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=167059]
+
+(54) ShuffleQueryStage
+Output [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Arguments: 9
+
+(55) AQEShuffleRead
+Input [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Arguments: coalesced
+
+(56) CometHashAggregate
+Input [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Keys [7]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L]
+Functions [24]: [sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END)]
+
+(57) CometUnion
+Child 0 Input [32]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15460, feb_sales#15461, mar_sales#15462, apr_sales#15463, may_sales#15464, jun_sales#15465, jul_sales#15466, aug_sales#15467, sep_sales#15468, oct_sales#15469, nov_sales#15470, dec_sales#15471, jan_net#15472, feb_net#15473, mar_net#15474, apr_net#15475, may_net#15476, jun_net#15477, jul_net#15478, aug_net#15479, sep_net#15480, oct_net#15481, nov_net#15482, dec_net#15483]
+Child 1 Input [32]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, ship_carriers#15484, year_#15485L, jan_sales#15486, feb_sales#15487, mar_sales#15488, apr_sales#15489, may_sales#15490, jun_sales#15491, jul_sales#15492, aug_sales#15493, sep_sales#15494, oct_sales#15495, nov_sales#15496, dec_sales#15497, jan_net#15498, feb_net#15499, mar_net#15500, apr_net#15501, may_net#15502, jun_net#15503, jul_net#15504, aug_net#15505, sep_net#15506, oct_net#15507, nov_net#15508, dec_net#15509]
+
+(58) CometHashAggregate
+Input [32]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15460, feb_sales#15461, mar_sales#15462, apr_sales#15463, may_sales#15464, jun_sales#15465, jul_sales#15466, aug_sales#15467, sep_sales#15468, oct_sales#15469, nov_sales#15470, dec_sales#15471, jan_net#15472, feb_net#15473, mar_net#15474, apr_net#15475, may_net#15476, jun_net#15477, jul_net#15478, aug_net#15479, sep_net#15480, oct_net#15481, nov_net#15482, dec_net#15483]
+Keys [8]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L]
+Functions [36]: [partial_sum(jan_sales#15460), partial_sum(feb_sales#15461), partial_sum(mar_sales#15462), partial_sum(apr_sales#15463), partial_sum(may_sales#15464), partial_sum(jun_sales#15465), partial_sum(jul_sales#15466), partial_sum(aug_sales#15467), partial_sum(sep_sales#15468), partial_sum(oct_sales#15469), partial_sum(nov_sales#15470), partial_sum(dec_sales#15471), partial_sum((jan_sales#15460 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((feb_sales#15461 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((mar_sales#15462 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((apr_sales#15463 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((may_sales#15464 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((jun_sales#15465 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((jul_sales#15466 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((aug_sales#15467 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((sep_sales#15468 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((oct_sales#15469 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((nov_sales#15470 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((dec_sales#15471 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum(jan_net#15472), partial_sum(feb_net#15473), partial_sum(mar_net#15474), partial_sum(apr_net#15475), partial_sum(may_net#15476), partial_sum(jun_net#15477), partial_sum(jul_net#15478), partial_sum(aug_net#15479), partial_sum(sep_net#15480), partial_sum(oct_net#15481), partial_sum(nov_net#15482), partial_sum(dec_net#15483)]
+
+(59) CometHashAggregate
+Input [80]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, sum#15760, isEmpty#15761, sum#15762, isEmpty#15763, sum#15764, isEmpty#15765, sum#15766, isEmpty#15767, sum#15768, isEmpty#15769, sum#15770, isEmpty#15771, sum#15772, isEmpty#15773, sum#15774, isEmpty#15775, sum#15776, isEmpty#15777, sum#15778, isEmpty#15779, sum#15780, isEmpty#15781, sum#15782, isEmpty#15783, sum#15784, isEmpty#15785, sum#15786, isEmpty#15787, sum#15788, isEmpty#15789, sum#15790, isEmpty#15791, sum#15792, isEmpty#15793, sum#15794, isEmpty#15795, sum#15796, isEmpty#15797, sum#15798, isEmpty#15799, sum#15800, isEmpty#15801, sum#15802, isEmpty#15803, sum#15804, isEmpty#15805, sum#15806, isEmpty#15807, sum#15808, isEmpty#15809, sum#15810, isEmpty#15811, sum#15812, isEmpty#15813, sum#15814, isEmpty#15815, sum#15816, isEmpty#15817, sum#15818, isEmpty#15819, sum#15820, isEmpty#15821, sum#15822, isEmpty#15823, sum#15824, isEmpty#15825, sum#15826, isEmpty#15827, sum#15828, isEmpty#15829, sum#15830, isEmpty#15831]
+Keys [8]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L]
+Functions [36]: [sum(jan_sales#15460), sum(feb_sales#15461), sum(mar_sales#15462), sum(apr_sales#15463), sum(may_sales#15464), sum(jun_sales#15465), sum(jul_sales#15466), sum(aug_sales#15467), sum(sep_sales#15468), sum(oct_sales#15469), sum(nov_sales#15470), sum(dec_sales#15471), sum((jan_sales#15460 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((feb_sales#15461 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((mar_sales#15462 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((apr_sales#15463 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((may_sales#15464 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((jun_sales#15465 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((jul_sales#15466 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((aug_sales#15467 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((sep_sales#15468 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((oct_sales#15469 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((nov_sales#15470 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((dec_sales#15471 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum(jan_net#15472), sum(feb_net#15473), sum(mar_net#15474), sum(apr_net#15475), sum(may_net#15476), sum(jun_net#15477), sum(jul_net#15478), sum(aug_net#15479), sum(sep_net#15480), sum(oct_net#15481), sum(nov_net#15482), sum(dec_net#15483)]
+
+(60) CometTakeOrderedAndProject
+Input [44]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, jun_sales_per_sq_foot#15527, jul_sales_per_sq_foot#15528, aug_sales_per_sq_foot#15529, sep_sales_per_sq_foot#15530, oct_sales_per_sq_foot#15531, nov_sales_per_sq_foot#15532, dec_sales_per_sq_foot#15533, jan_net#15534, feb_net#15535, mar_net#15536, apr_net#15537, may_net#15538, jun_net#15539, jul_net#15540, aug_net#15541, sep_net#15542, oct_net#15543, nov_net#15544, dec_net#15545]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[w_warehouse_name#315 ASC NULLS FIRST], output=[w_warehouse_name#315,w_warehouse_sq_ft#316L,w_city#321,w_county#322,w_state#323,w_country#325,ship_carriers#15458,year_#15459L,jan_sales#15510,feb_sales#15511,mar_sales#15512,apr_sales#15513,may_sales#15514,jun_sales#15515,jul_sales#15516,aug_sales#15517,sep_sales#15518,oct_sales#15519,nov_sales#15520,dec_sales#15521,jan_sales_per_sq_foot#15522,feb_sales_per_sq_foot#15523,mar_sales_per_sq_foot#15524,apr_sales_per_sq_foot#15525,may_sales_per_sq_foot#15526,... 19 more fields]), [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, ... 19 more fields], 100, 0, [w_warehouse_name#315 ASC NULLS FIRST], [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, ... 19 more fields]
+
+(61) CometColumnarToRow [codegen id : 1]
+Input [44]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, jun_sales_per_sq_foot#15527, jul_sales_per_sq_foot#15528, aug_sales_per_sq_foot#15529, sep_sales_per_sq_foot#15530, oct_sales_per_sq_foot#15531, nov_sales_per_sq_foot#15532, dec_sales_per_sq_foot#15533, jan_net#15534, feb_net#15535, mar_net#15536, apr_net#15537, may_net#15538, jun_net#15539, jul_net#15540, aug_net#15541, sep_net#15542, oct_net#15543, nov_net#15544, dec_net#15545]
+
+(62) ResultQueryStage
+Output [44]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, jun_sales_per_sq_foot#15527, jul_sales_per_sq_foot#15528, aug_sales_per_sq_foot#15529, sep_sales_per_sq_foot#15530, oct_sales_per_sq_foot#15531, nov_sales_per_sq_foot#15532, dec_sales_per_sq_foot#15533, jan_net#15534, feb_net#15535, mar_net#15536, apr_net#15537, may_net#15538, jun_net#15539, jul_net#15540, aug_net#15541, sep_net#15542, oct_net#15543, nov_net#15544, dec_net#15545]
+Arguments: 10
+
+(63) CometNativeScan parquet 
+Output [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/web_sales.parquet]
+PushedFilters: [IsNotNull(ws_warehouse_sk), IsNotNull(ws_sold_date_sk), IsNotNull(ws_sold_time_sk), IsNotNull(ws_ship_mode_sk)]
+ReadSchema: struct<ws_sold_date_sk:bigint,ws_sold_time_sk:bigint,ws_ship_mode_sk:bigint,ws_warehouse_sk:bigint,ws_quantity:bigint,ws_ext_sales_price:decimal(7,2),ws_net_paid:decimal(7,2)>
+
+(64) CometFilter
+Input [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Condition : (((isnotnull(ws_warehouse_sk#380L) AND isnotnull(ws_sold_date_sk#365L)) AND isnotnull(ws_sold_time_sk#366L)) AND isnotnull(ws_ship_mode_sk#379L))
+
+(65) CometBroadcastHashJoin
+Left output [7]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394]
+Right output [7]: [w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: [ws_warehouse_sk#380L], [w_warehouse_sk#313L], Inner, BuildRight
+
+(66) CometProject
+Input [14]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_warehouse_sk#380L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_sk#313L, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Arguments: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325], [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+
+(67) CometBroadcastHashJoin
+Left output [12]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325]
+Right output [3]: [d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [ws_sold_date_sk#365L], [d_date_sk#141L], Inner, BuildRight
+
+(68) CometProject
+Input [15]: [ws_sold_date_sk#365L, ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_date_sk#141L, d_year#147L, d_moy#149L]
+Arguments: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(69) CometBroadcastHashJoin
+Left output [13]: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Right output [1]: [t_time_sk#303L]
+Arguments: [ws_sold_time_sk#366L], [t_time_sk#303L], Inner, BuildRight
+
+(70) CometProject
+Input [14]: [ws_sold_time_sk#366L, ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L, t_time_sk#303L]
+Arguments: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(71) CometBroadcastHashJoin
+Left output [12]: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Right output [1]: [sm_ship_mode_sk#225L]
+Arguments: [ws_ship_mode_sk#379L], [sm_ship_mode_sk#225L], Inner, BuildRight
+
+(72) CometProject
+Input [13]: [ws_ship_mode_sk#379L, ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L, sm_ship_mode_sk#225L]
+Arguments: [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L], [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+
+(73) CometHashAggregate
+Input [11]: [ws_quantity#383L, ws_ext_sales_price#388, ws_net_paid#394, w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, d_moy#149L]
+Keys [7]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L]
+Functions [24]: [partial_sum(CASE WHEN (d_moy#149L = 1) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 2) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 3) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 4) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 5) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 6) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 7) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 8) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 9) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 10) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 11) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 12) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 1) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 2) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 3) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 4) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 5) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 6) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 7) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 8) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 9) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 10) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 11) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#149L = 12) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END)]
+
+(74) CometExchange
+Input [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Arguments: hashpartitioning(w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=166075]
+
+(75) CometHashAggregate
+Input [55]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L, sum#15880, isEmpty#15881, sum#15882, isEmpty#15883, sum#15884, isEmpty#15885, sum#15886, isEmpty#15887, sum#15888, isEmpty#15889, sum#15890, isEmpty#15891, sum#15892, isEmpty#15893, sum#15894, isEmpty#15895, sum#15896, isEmpty#15897, sum#15898, isEmpty#15899, sum#15900, isEmpty#15901, sum#15902, isEmpty#15903, sum#15904, isEmpty#15905, sum#15906, isEmpty#15907, sum#15908, isEmpty#15909, sum#15910, isEmpty#15911, sum#15912, isEmpty#15913, sum#15914, isEmpty#15915, sum#15916, isEmpty#15917, sum#15918, isEmpty#15919, sum#15920, isEmpty#15921, sum#15922, isEmpty#15923, sum#15924, isEmpty#15925, sum#15926, isEmpty#15927]
+Keys [7]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, d_year#147L]
+Functions [24]: [sum(CASE WHEN (d_moy#149L = 1) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 2) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 3) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 4) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 5) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 6) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 7) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 8) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 9) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 10) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 11) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 12) THEN (ws_ext_sales_price#388 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 1) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 2) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 3) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 4) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 5) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 6) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 7) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 8) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 9) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 10) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 11) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#149L = 12) THEN (ws_net_paid#394 * cast(ws_quantity#383L as decimal(20,0))) ELSE 0.00 END)]
+
+(76) CometNativeScan parquet 
+Output [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/catalog_sales.parquet]
+PushedFilters: [IsNotNull(cs_warehouse_sk), IsNotNull(cs_sold_date_sk), IsNotNull(cs_sold_time_sk), IsNotNull(cs_ship_mode_sk)]
+ReadSchema: struct<cs_sold_date_sk:bigint,cs_sold_time_sk:bigint,cs_ship_mode_sk:bigint,cs_warehouse_sk:bigint,cs_quantity:bigint,cs_sales_price:decimal(7,2),cs_net_paid_inc_tax:decimal(7,2)>
+
+(77) CometFilter
+Input [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Condition : (((isnotnull(cs_warehouse_sk#81L) AND isnotnull(cs_sold_date_sk#67L)) AND isnotnull(cs_sold_time_sk#68L)) AND isnotnull(cs_ship_mode_sk#80L))
+
+(78) CometNativeScan parquet 
+Output [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/warehouse.parquet]
+PushedFilters: [IsNotNull(w_warehouse_sk)]
+ReadSchema: struct<w_warehouse_sk:bigint,w_warehouse_name:string,w_warehouse_sq_ft:bigint,w_city:string,w_county:string,w_state:string,w_country:string>
+
+(79) CometFilter
+Input [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Condition : isnotnull(w_warehouse_sk#15546L)
+
+(80) CometBroadcastExchange
+Input [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+
+(81) CometBroadcastHashJoin
+Left output [7]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97]
+Right output [7]: [w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: [cs_warehouse_sk#81L], [w_warehouse_sk#15546L], Inner, BuildRight
+
+(82) CometProject
+Input [14]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_warehouse_sk#81L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_sk#15546L, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Arguments: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558], [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+
+(83) CometNativeScan parquet 
+Output [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_year), EqualTo(d_year,2001), IsNotNull(d_date_sk)]
+ReadSchema: struct<d_date_sk:bigint,d_year:bigint,d_moy:bigint>
+
+(84) CometFilter
+Input [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Condition : ((isnotnull(d_year#15566L) AND (d_year#15566L = 2001)) AND isnotnull(d_date_sk#15560L))
+
+(85) CometBroadcastExchange
+Input [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+
+(86) CometBroadcastHashJoin
+Left output [12]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558]
+Right output [3]: [d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: [cs_sold_date_sk#67L], [d_date_sk#15560L], Inner, BuildRight
+
+(87) CometProject
+Input [15]: [cs_sold_date_sk#67L, cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_date_sk#15560L, d_year#15566L, d_moy#15568L]
+Arguments: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(88) CometNativeScan parquet 
+Output [2]: [t_time_sk#15588L, t_time#15590L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_time), GreaterThanOrEqual(t_time,30838), LessThanOrEqual(t_time,59638), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_time:bigint>
+
+(89) CometFilter
+Input [2]: [t_time_sk#15588L, t_time#15590L]
+Condition : (((isnotnull(t_time#15590L) AND (t_time#15590L >= 30838)) AND (t_time#15590L <= 59638)) AND isnotnull(t_time_sk#15588L))
+
+(90) CometProject
+Input [2]: [t_time_sk#15588L, t_time#15590L]
+Arguments: [t_time_sk#15588L], [t_time_sk#15588L]
+
+(91) CometBroadcastExchange
+Input [1]: [t_time_sk#15588L]
+Arguments: [t_time_sk#15588L]
+
+(92) CometBroadcastHashJoin
+Left output [13]: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Right output [1]: [t_time_sk#15588L]
+Arguments: [cs_sold_time_sk#68L], [t_time_sk#15588L], Inner, BuildRight
+
+(93) CometProject
+Input [14]: [cs_sold_time_sk#68L, cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L, t_time_sk#15588L]
+Arguments: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(94) CometNativeScan parquet 
+Output [2]: [sm_ship_mode_sk#15598L, sm_carrier#15602]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/ship_mode.parquet]
+PushedFilters: [In(sm_carrier, [BARIAN,DHL]), IsNotNull(sm_ship_mode_sk)]
+ReadSchema: struct<sm_ship_mode_sk:bigint,sm_carrier:string>
+
+(95) CometFilter
+Input [2]: [sm_ship_mode_sk#15598L, sm_carrier#15602]
+Condition : (sm_carrier#15602 IN (DHL,BARIAN) AND isnotnull(sm_ship_mode_sk#15598L))
+
+(96) CometProject
+Input [2]: [sm_ship_mode_sk#15598L, sm_carrier#15602]
+Arguments: [sm_ship_mode_sk#15598L], [sm_ship_mode_sk#15598L]
+
+(97) CometBroadcastExchange
+Input [1]: [sm_ship_mode_sk#15598L]
+Arguments: [sm_ship_mode_sk#15598L]
+
+(98) CometBroadcastHashJoin
+Left output [12]: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Right output [1]: [sm_ship_mode_sk#15598L]
+Arguments: [cs_ship_mode_sk#80L], [sm_ship_mode_sk#15598L], Inner, BuildRight
+
+(99) CometProject
+Input [13]: [cs_ship_mode_sk#80L, cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L, sm_ship_mode_sk#15598L]
+Arguments: [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L], [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+
+(100) CometHashAggregate
+Input [11]: [cs_quantity#85L, cs_sales_price#88, cs_net_paid_inc_tax#97, w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, d_moy#15568L]
+Keys [7]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L]
+Functions [24]: [partial_sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), partial_sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END)]
+
+(101) CometExchange
+Input [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Arguments: hashpartitioning(w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=166096]
+
+(102) CometHashAggregate
+Input [55]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L, sum#15976, isEmpty#15977, sum#15978, isEmpty#15979, sum#15980, isEmpty#15981, sum#15982, isEmpty#15983, sum#15984, isEmpty#15985, sum#15986, isEmpty#15987, sum#15988, isEmpty#15989, sum#15990, isEmpty#15991, sum#15992, isEmpty#15993, sum#15994, isEmpty#15995, sum#15996, isEmpty#15997, sum#15998, isEmpty#15999, sum#16000, isEmpty#16001, sum#16002, isEmpty#16003, sum#16004, isEmpty#16005, sum#16006, isEmpty#16007, sum#16008, isEmpty#16009, sum#16010, isEmpty#16011, sum#16012, isEmpty#16013, sum#16014, isEmpty#16015, sum#16016, isEmpty#16017, sum#16018, isEmpty#16019, sum#16020, isEmpty#16021, sum#16022, isEmpty#16023]
+Keys [7]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, d_year#15566L]
+Functions [24]: [sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_sales_price#88 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 1) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 2) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 3) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 4) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 5) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 6) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 7) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 8) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 9) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 10) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 11) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END), sum(CASE WHEN (d_moy#15568L = 12) THEN (cs_net_paid_inc_tax#97 * cast(cs_quantity#85L as decimal(20,0))) ELSE 0.00 END)]
+
+(103) CometUnion
+Child 0 Input [32]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15460, feb_sales#15461, mar_sales#15462, apr_sales#15463, may_sales#15464, jun_sales#15465, jul_sales#15466, aug_sales#15467, sep_sales#15468, oct_sales#15469, nov_sales#15470, dec_sales#15471, jan_net#15472, feb_net#15473, mar_net#15474, apr_net#15475, may_net#15476, jun_net#15477, jul_net#15478, aug_net#15479, sep_net#15480, oct_net#15481, nov_net#15482, dec_net#15483]
+Child 1 Input [32]: [w_warehouse_name#15548, w_warehouse_sq_ft#15549L, w_city#15554, w_county#15555, w_state#15556, w_country#15558, ship_carriers#15484, year_#15485L, jan_sales#15486, feb_sales#15487, mar_sales#15488, apr_sales#15489, may_sales#15490, jun_sales#15491, jul_sales#15492, aug_sales#15493, sep_sales#15494, oct_sales#15495, nov_sales#15496, dec_sales#15497, jan_net#15498, feb_net#15499, mar_net#15500, apr_net#15501, may_net#15502, jun_net#15503, jul_net#15504, aug_net#15505, sep_net#15506, oct_net#15507, nov_net#15508, dec_net#15509]
+
+(104) CometHashAggregate
+Input [32]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15460, feb_sales#15461, mar_sales#15462, apr_sales#15463, may_sales#15464, jun_sales#15465, jul_sales#15466, aug_sales#15467, sep_sales#15468, oct_sales#15469, nov_sales#15470, dec_sales#15471, jan_net#15472, feb_net#15473, mar_net#15474, apr_net#15475, may_net#15476, jun_net#15477, jul_net#15478, aug_net#15479, sep_net#15480, oct_net#15481, nov_net#15482, dec_net#15483]
+Keys [8]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L]
+Functions [36]: [partial_sum(jan_sales#15460), partial_sum(feb_sales#15461), partial_sum(mar_sales#15462), partial_sum(apr_sales#15463), partial_sum(may_sales#15464), partial_sum(jun_sales#15465), partial_sum(jul_sales#15466), partial_sum(aug_sales#15467), partial_sum(sep_sales#15468), partial_sum(oct_sales#15469), partial_sum(nov_sales#15470), partial_sum(dec_sales#15471), partial_sum((jan_sales#15460 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((feb_sales#15461 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((mar_sales#15462 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((apr_sales#15463 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((may_sales#15464 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((jun_sales#15465 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((jul_sales#15466 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((aug_sales#15467 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((sep_sales#15468 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((oct_sales#15469 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((nov_sales#15470 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum((dec_sales#15471 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), partial_sum(jan_net#15472), partial_sum(feb_net#15473), partial_sum(mar_net#15474), partial_sum(apr_net#15475), partial_sum(may_net#15476), partial_sum(jun_net#15477), partial_sum(jul_net#15478), partial_sum(aug_net#15479), partial_sum(sep_net#15480), partial_sum(oct_net#15481), partial_sum(nov_net#15482), partial_sum(dec_net#15483)]
+
+(105) CometHashAggregate
+Input [80]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, sum#15760, isEmpty#15761, sum#15762, isEmpty#15763, sum#15764, isEmpty#15765, sum#15766, isEmpty#15767, sum#15768, isEmpty#15769, sum#15770, isEmpty#15771, sum#15772, isEmpty#15773, sum#15774, isEmpty#15775, sum#15776, isEmpty#15777, sum#15778, isEmpty#15779, sum#15780, isEmpty#15781, sum#15782, isEmpty#15783, sum#15784, isEmpty#15785, sum#15786, isEmpty#15787, sum#15788, isEmpty#15789, sum#15790, isEmpty#15791, sum#15792, isEmpty#15793, sum#15794, isEmpty#15795, sum#15796, isEmpty#15797, sum#15798, isEmpty#15799, sum#15800, isEmpty#15801, sum#15802, isEmpty#15803, sum#15804, isEmpty#15805, sum#15806, isEmpty#15807, sum#15808, isEmpty#15809, sum#15810, isEmpty#15811, sum#15812, isEmpty#15813, sum#15814, isEmpty#15815, sum#15816, isEmpty#15817, sum#15818, isEmpty#15819, sum#15820, isEmpty#15821, sum#15822, isEmpty#15823, sum#15824, isEmpty#15825, sum#15826, isEmpty#15827, sum#15828, isEmpty#15829, sum#15830, isEmpty#15831]
+Keys [8]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L]
+Functions [36]: [sum(jan_sales#15460), sum(feb_sales#15461), sum(mar_sales#15462), sum(apr_sales#15463), sum(may_sales#15464), sum(jun_sales#15465), sum(jul_sales#15466), sum(aug_sales#15467), sum(sep_sales#15468), sum(oct_sales#15469), sum(nov_sales#15470), sum(dec_sales#15471), sum((jan_sales#15460 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((feb_sales#15461 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((mar_sales#15462 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((apr_sales#15463 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((may_sales#15464 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((jun_sales#15465 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((jul_sales#15466 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((aug_sales#15467 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((sep_sales#15468 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((oct_sales#15469 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((nov_sales#15470 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum((dec_sales#15471 / cast(w_warehouse_sq_ft#316L as decimal(20,0)))), sum(jan_net#15472), sum(feb_net#15473), sum(mar_net#15474), sum(apr_net#15475), sum(may_net#15476), sum(jun_net#15477), sum(jul_net#15478), sum(aug_net#15479), sum(sep_net#15480), sum(oct_net#15481), sum(nov_net#15482), sum(dec_net#15483)]
+
+(106) CometTakeOrderedAndProject
+Input [44]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, jun_sales_per_sq_foot#15527, jul_sales_per_sq_foot#15528, aug_sales_per_sq_foot#15529, sep_sales_per_sq_foot#15530, oct_sales_per_sq_foot#15531, nov_sales_per_sq_foot#15532, dec_sales_per_sq_foot#15533, jan_net#15534, feb_net#15535, mar_net#15536, apr_net#15537, may_net#15538, jun_net#15539, jul_net#15540, aug_net#15541, sep_net#15542, oct_net#15543, nov_net#15544, dec_net#15545]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[w_warehouse_name#315 ASC NULLS FIRST], output=[w_warehouse_name#315,w_warehouse_sq_ft#316L,w_city#321,w_county#322,w_state#323,w_country#325,ship_carriers#15458,year_#15459L,jan_sales#15510,feb_sales#15511,mar_sales#15512,apr_sales#15513,may_sales#15514,jun_sales#15515,jul_sales#15516,aug_sales#15517,sep_sales#15518,oct_sales#15519,nov_sales#15520,dec_sales#15521,jan_sales_per_sq_foot#15522,feb_sales_per_sq_foot#15523,mar_sales_per_sq_foot#15524,apr_sales_per_sq_foot#15525,may_sales_per_sq_foot#15526,... 19 more fields]), [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, ... 19 more fields], 100, 0, [w_warehouse_name#315 ASC NULLS FIRST], [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, ... 19 more fields]
+
+(107) AdaptiveSparkPlan
+Output [44]: [w_warehouse_name#315, w_warehouse_sq_ft#316L, w_city#321, w_county#322, w_state#323, w_country#325, ship_carriers#15458, year_#15459L, jan_sales#15510, feb_sales#15511, mar_sales#15512, apr_sales#15513, may_sales#15514, jun_sales#15515, jul_sales#15516, aug_sales#15517, sep_sales#15518, oct_sales#15519, nov_sales#15520, dec_sales#15521, jan_sales_per_sq_foot#15522, feb_sales_per_sq_foot#15523, mar_sales_per_sq_foot#15524, apr_sales_per_sq_foot#15525, may_sales_per_sq_foot#15526, jun_sales_per_sq_foot#15527, jul_sales_per_sq_foot#15528, aug_sales_per_sq_foot#15529, sep_sales_per_sq_foot#15530, oct_sales_per_sq_foot#15531, nov_sales_per_sq_foot#15532, dec_sales_per_sq_foot#15533, jan_net#15534, feb_net#15535, mar_net#15536, apr_net#15537, may_net#15538, jun_net#15539, jul_net#15540, aug_net#15541, sep_net#15542, oct_net#15543, nov_net#15544, dec_net#15545]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- CometHashAggregate
+         +- CometUnion
+            :- CometHashAggregate
+            :  +- AQEShuffleRead
+            :     +- CometExchange
+            :        +- CometHashAggregate
+            :           +- CometProject
+            :              +- CometBroadcastHashJoin
+            :                 :- CometProject
+            :                 :  +- CometBroadcastHashJoin
+            :                 :     :- CometProject
+            :                 :     :  +- CometBroadcastHashJoin
+            :                 :     :     :- CometProject
+            :                 :     :     :  +- CometBroadcastHashJoin
+            :                 :     :     :     :- CometFilter
+            :                 :     :     :     :  +- CometNativeScan parquet 
+            :                 :     :     :     +- CometBroadcastExchange
+            :                 :     :     :        +- CometFilter
+            :                 :     :     :           +- CometNativeScan parquet 
+            :                 :     :     +- CometBroadcastExchange
+            :                 :     :        +- CometFilter
+            :                 :     :           +- CometNativeScan parquet 
+            :                 :     +- CometBroadcastExchange
+            :                 :        +- CometProject
+            :                 :           +- CometFilter
+            :                 :              +- CometNativeScan parquet 
+            :                 +- CometBroadcastExchange
+            :                    +- CometProject
+            :                       +- CometFilter
+            :                          +- CometNativeScan parquet 
+            +- CometHashAggregate
+               +- AQEShuffleRead
+                  +- CometExchange
+                     +- CometHashAggregate
+                        +- CometProject
+                           +- CometBroadcastHashJoin
+                              :- CometProject
+                              :  +- CometBroadcastHashJoin
+                              :     :- CometProject
+                              :     :  +- CometBroadcastHashJoin
+                              :     :     :- CometProject
+                              :     :     :  +- CometBroadcastHashJoin
+                              :     :     :     :- CometFilter
+                              :     :     :     :  +- CometNativeScan parquet 
+                              :     :     :     +- CometBroadcastExchange
+                              :     :     :        +- CometFilter
+                              :     :     :           +- CometNativeScan parquet 
+                              :     :     +- CometBroadcastExchange
+                              :     :        +- CometFilter
+                              :     :           +- CometNativeScan parquet 
+                              :     +- CometBroadcastExchange
+                              :        +- CometProject
+                              :           +- CometFilter
+                              :              +- CometNativeScan parquet 
+                              +- CometBroadcastExchange
+                                 +- CometProject
+                                    +- CometFilter
+                                       +- CometNativeScan parquet 
+
+Comet accelerated 44 out of 44 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 13 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- CometHashAggregate
+         +- CometUnion
+            :- CometHashAggregate
+            :  +- AQEShuffleRead
+            :     +- CometExchange
+            :        +- CometHashAggregate
+            :           +- CometProject
+            :              +- CometBroadcastHashJoin
+            :                 :- CometProject
+            :                 :  +- CometBroadcastHashJoin
+            :                 :     :- CometProject
+            :                 :     :  +- CometBroadcastHashJoin
+            :                 :     :     :- CometProject
+            :                 :     :     :  +- CometBroadcastHashJoin
+            :                 :     :     :     :- CometFilter
+            :                 :     :     :     :  +- CometNativeScan parquet 
+            :                 :     :     :     +- CometBroadcastExchange
+            :                 :     :     :        +- CometFilter
+            :                 :     :     :           +- CometNativeScan parquet 
+            :                 :     :     +- CometBroadcastExchange
+            :                 :     :        +- CometFilter
+            :                 :     :           +- CometNativeScan parquet 
+            :                 :     +- CometBroadcastExchange
+            :                 :        +- CometProject
+            :                 :           +- CometFilter
+            :                 :              +- CometNativeScan parquet 
+            :                 +- CometBroadcastExchange
+            :                    +- CometProject
+            :                       +- CometFilter
+            :                          +- CometNativeScan parquet 
+            +- CometHashAggregate
+               +- AQEShuffleRead
+                  +- CometExchange
+                     +- CometHashAggregate
+                        +- CometProject
+                           +- CometBroadcastHashJoin
+                              :- CometProject
+                              :  +- CometBroadcastHashJoin
+                              :     :- CometProject
+                              :     :  +- CometBroadcastHashJoin
+                              :     :     :- CometProject
+                              :     :     :  +- CometBroadcastHashJoin
+                              :     :     :     :- CometFilter
+                              :     :     :     :  +- CometNativeScan parquet 
+                              :     :     :     +- CometBroadcastExchange
+                              :     :     :        +- CometFilter
+                              :     :     :           +- CometNativeScan parquet 
+                              :     :     +- CometBroadcastExchange
+                              :     :        +- CometFilter
+                              :     :           +- CometNativeScan parquet 
+                              :     +- CometBroadcastExchange
+                              :        +- CometProject
+                              :           +- CometFilter
+                              :              +- CometNativeScan parquet 
+                              +- CometBroadcastExchange
+                                 +- CometProject
+                                    +- CometFilter
+                                       +- CometNativeScan parquet 
+
+Comet accelerated 44 out of 44 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 13 native, 0 codegen dispatch.

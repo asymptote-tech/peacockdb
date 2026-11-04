@@ -1,0 +1,415 @@
+children {
+  children {
+    plan_id: 5
+    shuffle_scan {
+      fields {
+        type_id: DOUBLE
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DOUBLE
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DOUBLE
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=91.1 KiB, rowCount=128)"
+    }
+  }
+  plan_id: 30909
+  hash_agg {
+    agg_exprs {
+      avg {
+        child {
+          unbound {
+            name: "ss_quantity"
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 11
+            stop_index: 21
+            line: 1
+            start_position: 11
+          }
+          expr_id: 18707
+        }
+        datatype {
+          type_id: DOUBLE
+        }
+        sum_datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 7
+        stop_index: 22
+        line: 1
+        start_position: 7
+      }
+      expr_id: 18708
+    }
+    agg_exprs {
+      avg {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ss_ext_sales_price"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 11
+                stop_index: 21
+                line: 1
+                start_position: 11
+              }
+              expr_id: 18709
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 37
+            stop_index: 59
+            line: 2
+            start_position: 7
+          }
+          expr_id: 18710
+        }
+        datatype {
+          type_id: DOUBLE
+        }
+        sum_datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 37
+        stop_index: 59
+        line: 2
+        start_position: 7
+      }
+      expr_id: 18711
+    }
+    agg_exprs {
+      avg {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ss_ext_wholesale_cost"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 11
+                stop_index: 21
+                line: 1
+                start_position: 11
+              }
+              expr_id: 18712
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 74
+            stop_index: 99
+            line: 3
+            start_position: 7
+          }
+          expr_id: 18713
+        }
+        datatype {
+          type_id: DOUBLE
+        }
+        sum_datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 74
+        stop_index: 99
+        line: 3
+        start_position: 7
+      }
+      expr_id: 18714
+    }
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ss_ext_wholesale_cost"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 11
+                stop_index: 21
+                line: 1
+                start_position: 11
+              }
+              expr_id: 18715
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 114
+            stop_index: 139
+            line: 4
+            start_position: 7
+          }
+          expr_id: 18716
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 114
+        stop_index: 139
+        line: 4
+        start_position: 7
+      }
+      expr_id: 18717
+    }
+    mode: Final
+  }
+}
+plan_id: 30909
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: DOUBLE
+      }
+    }
+    query_context {
+      start_index: 7
+      stop_index: 22
+      line: 1
+      start_position: 7
+    }
+    expr_id: 18718
+  }
+  project_list {
+    cast {
+      child {
+        divide {
+          left {
+            bound {
+              index: 1
+              datatype {
+                type_id: DOUBLE
+              }
+            }
+            query_context {
+              start_index: 37
+              stop_index: 59
+              line: 2
+              start_position: 7
+            }
+            expr_id: 18719
+          }
+          right {
+            literal {
+              double_val: 100.0
+              datatype {
+                type_id: DOUBLE
+              }
+            }
+            query_context {
+              start_index: 37
+              stop_index: 59
+              line: 2
+              start_position: 7
+            }
+            expr_id: 18720
+          }
+          return_type {
+            type_id: DOUBLE
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 37
+          stop_index: 59
+          line: 2
+          start_position: 7
+        }
+        expr_id: 18721
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 11
+            scale: 6
+          }
+        }
+      }
+      timezone: "UTC"
+      eval_mode: ANSI
+      is_spark4_plus: true
+    }
+    query_context {
+      start_index: 37
+      stop_index: 59
+      line: 2
+      start_position: 7
+    }
+    expr_id: 18722
+  }
+  project_list {
+    cast {
+      child {
+        divide {
+          left {
+            bound {
+              index: 2
+              datatype {
+                type_id: DOUBLE
+              }
+            }
+            query_context {
+              start_index: 74
+              stop_index: 99
+              line: 3
+              start_position: 7
+            }
+            expr_id: 18723
+          }
+          right {
+            literal {
+              double_val: 100.0
+              datatype {
+                type_id: DOUBLE
+              }
+            }
+            query_context {
+              start_index: 74
+              stop_index: 99
+              line: 3
+              start_position: 7
+            }
+            expr_id: 18724
+          }
+          return_type {
+            type_id: DOUBLE
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 74
+          stop_index: 99
+          line: 3
+          start_position: 7
+        }
+        expr_id: 18725
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 11
+            scale: 6
+          }
+        }
+      }
+      timezone: "UTC"
+      eval_mode: ANSI
+      is_spark4_plus: true
+    }
+    query_context {
+      start_index: 74
+      stop_index: 99
+      line: 3
+      start_position: 7
+    }
+    expr_id: 18726
+  }
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          index: 3
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 114
+          stop_index: 139
+          line: 4
+          start_position: 7
+        }
+        expr_id: 18727
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 114
+      stop_index: 139
+      line: 4
+      start_position: 7
+    }
+    expr_id: 18728
+  }
+}

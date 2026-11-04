@@ -1,0 +1,2412 @@
+== Physical Plan ==
+AdaptiveSparkPlan (356)
++- == Final Plan ==
+   ResultQueryStage (197)
+   +- * CometColumnarToRow (196)
+      +- CometBroadcastNestedLoopJoin (195)
+         :- CometBroadcastNestedLoopJoin (171)
+         :  :- CometBroadcastNestedLoopJoin (147)
+         :  :  :- CometBroadcastNestedLoopJoin (123)
+         :  :  :  :- CometBroadcastNestedLoopJoin (99)
+         :  :  :  :  :- CometBroadcastNestedLoopJoin (75)
+         :  :  :  :  :  :- CometBroadcastNestedLoopJoin (51)
+         :  :  :  :  :  :  :- CometHashAggregate (27)
+         :  :  :  :  :  :  :  +- ShuffleQueryStage (26), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :  :  :  :  :  :     +- CometExchange (25)
+         :  :  :  :  :  :  :        +- CometHashAggregate (24)
+         :  :  :  :  :  :  :           +- CometProject (23)
+         :  :  :  :  :  :  :              +- CometBroadcastHashJoin (22)
+         :  :  :  :  :  :  :                 :- CometProject (16)
+         :  :  :  :  :  :  :                 :  +- CometBroadcastHashJoin (15)
+         :  :  :  :  :  :  :                 :     :- CometProject (9)
+         :  :  :  :  :  :  :                 :     :  +- CometBroadcastHashJoin (8)
+         :  :  :  :  :  :  :                 :     :     :- CometFilter (2)
+         :  :  :  :  :  :  :                 :     :     :  +- CometNativeScan parquet  (1)
+         :  :  :  :  :  :  :                 :     :     +- BroadcastQueryStage (7), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :  :  :  :  :  :                 :     :        +- CometBroadcastExchange (6)
+         :  :  :  :  :  :  :                 :     :           +- CometProject (5)
+         :  :  :  :  :  :  :                 :     :              +- CometFilter (4)
+         :  :  :  :  :  :  :                 :     :                 +- CometNativeScan parquet  (3)
+         :  :  :  :  :  :  :                 :     +- BroadcastQueryStage (14), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :  :  :  :  :  :                 :        +- CometBroadcastExchange (13)
+         :  :  :  :  :  :  :                 :           +- CometProject (12)
+         :  :  :  :  :  :  :                 :              +- CometFilter (11)
+         :  :  :  :  :  :  :                 :                 +- CometNativeScan parquet  (10)
+         :  :  :  :  :  :  :                 +- BroadcastQueryStage (21), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :  :  :  :  :  :                    +- CometBroadcastExchange (20)
+         :  :  :  :  :  :  :                       +- CometProject (19)
+         :  :  :  :  :  :  :                          +- CometFilter (18)
+         :  :  :  :  :  :  :                             +- CometNativeScan parquet  (17)
+         :  :  :  :  :  :  +- BroadcastQueryStage (50), Statistics(sizeInBytes=238.0 B, rowCount=1)
+         :  :  :  :  :  :     +- CometBroadcastExchange (49)
+         :  :  :  :  :  :        +- CometHashAggregate (48)
+         :  :  :  :  :  :           +- ShuffleQueryStage (47), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :  :  :  :  :              +- CometExchange (46)
+         :  :  :  :  :  :                 +- CometHashAggregate (45)
+         :  :  :  :  :  :                    +- CometProject (44)
+         :  :  :  :  :  :                       +- CometBroadcastHashJoin (43)
+         :  :  :  :  :  :                          :- CometProject (40)
+         :  :  :  :  :  :                          :  +- CometBroadcastHashJoin (39)
+         :  :  :  :  :  :                          :     :- CometProject (33)
+         :  :  :  :  :  :                          :     :  +- CometBroadcastHashJoin (32)
+         :  :  :  :  :  :                          :     :     :- CometFilter (29)
+         :  :  :  :  :  :                          :     :     :  +- CometNativeScan parquet  (28)
+         :  :  :  :  :  :                          :     :     +- BroadcastQueryStage (31), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :  :  :  :  :                          :     :        +- ReusedExchange (30)
+         :  :  :  :  :  :                          :     +- BroadcastQueryStage (38), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :  :  :  :  :                          :        +- CometBroadcastExchange (37)
+         :  :  :  :  :  :                          :           +- CometProject (36)
+         :  :  :  :  :  :                          :              +- CometFilter (35)
+         :  :  :  :  :  :                          :                 +- CometNativeScan parquet  (34)
+         :  :  :  :  :  :                          +- BroadcastQueryStage (42), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :  :  :  :  :                             +- ReusedExchange (41)
+         :  :  :  :  :  +- BroadcastQueryStage (74), Statistics(sizeInBytes=238.0 B, rowCount=1)
+         :  :  :  :  :     +- CometBroadcastExchange (73)
+         :  :  :  :  :        +- CometHashAggregate (72)
+         :  :  :  :  :           +- ShuffleQueryStage (71), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :  :  :  :              +- CometExchange (70)
+         :  :  :  :  :                 +- CometHashAggregate (69)
+         :  :  :  :  :                    +- CometProject (68)
+         :  :  :  :  :                       +- CometBroadcastHashJoin (67)
+         :  :  :  :  :                          :- CometProject (64)
+         :  :  :  :  :                          :  +- CometBroadcastHashJoin (63)
+         :  :  :  :  :                          :     :- CometProject (57)
+         :  :  :  :  :                          :     :  +- CometBroadcastHashJoin (56)
+         :  :  :  :  :                          :     :     :- CometFilter (53)
+         :  :  :  :  :                          :     :     :  +- CometNativeScan parquet  (52)
+         :  :  :  :  :                          :     :     +- BroadcastQueryStage (55), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :  :  :  :                          :     :        +- ReusedExchange (54)
+         :  :  :  :  :                          :     +- BroadcastQueryStage (62), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :  :  :  :                          :        +- CometBroadcastExchange (61)
+         :  :  :  :  :                          :           +- CometProject (60)
+         :  :  :  :  :                          :              +- CometFilter (59)
+         :  :  :  :  :                          :                 +- CometNativeScan parquet  (58)
+         :  :  :  :  :                          +- BroadcastQueryStage (66), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :  :  :  :                             +- ReusedExchange (65)
+         :  :  :  :  +- BroadcastQueryStage (98), Statistics(sizeInBytes=239.0 B, rowCount=1)
+         :  :  :  :     +- CometBroadcastExchange (97)
+         :  :  :  :        +- CometHashAggregate (96)
+         :  :  :  :           +- ShuffleQueryStage (95), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :  :  :              +- CometExchange (94)
+         :  :  :  :                 +- CometHashAggregate (93)
+         :  :  :  :                    +- CometProject (92)
+         :  :  :  :                       +- CometBroadcastHashJoin (91)
+         :  :  :  :                          :- CometProject (88)
+         :  :  :  :                          :  +- CometBroadcastHashJoin (87)
+         :  :  :  :                          :     :- CometProject (81)
+         :  :  :  :                          :     :  +- CometBroadcastHashJoin (80)
+         :  :  :  :                          :     :     :- CometFilter (77)
+         :  :  :  :                          :     :     :  +- CometNativeScan parquet  (76)
+         :  :  :  :                          :     :     +- BroadcastQueryStage (79), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :  :  :                          :     :        +- ReusedExchange (78)
+         :  :  :  :                          :     +- BroadcastQueryStage (86), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :  :  :                          :        +- CometBroadcastExchange (85)
+         :  :  :  :                          :           +- CometProject (84)
+         :  :  :  :                          :              +- CometFilter (83)
+         :  :  :  :                          :                 +- CometNativeScan parquet  (82)
+         :  :  :  :                          +- BroadcastQueryStage (90), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :  :  :                             +- ReusedExchange (89)
+         :  :  :  +- BroadcastQueryStage (122), Statistics(sizeInBytes=239.0 B, rowCount=1)
+         :  :  :     +- CometBroadcastExchange (121)
+         :  :  :        +- CometHashAggregate (120)
+         :  :  :           +- ShuffleQueryStage (119), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :  :              +- CometExchange (118)
+         :  :  :                 +- CometHashAggregate (117)
+         :  :  :                    +- CometProject (116)
+         :  :  :                       +- CometBroadcastHashJoin (115)
+         :  :  :                          :- CometProject (112)
+         :  :  :                          :  +- CometBroadcastHashJoin (111)
+         :  :  :                          :     :- CometProject (105)
+         :  :  :                          :     :  +- CometBroadcastHashJoin (104)
+         :  :  :                          :     :     :- CometFilter (101)
+         :  :  :                          :     :     :  +- CometNativeScan parquet  (100)
+         :  :  :                          :     :     +- BroadcastQueryStage (103), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :  :                          :     :        +- ReusedExchange (102)
+         :  :  :                          :     +- BroadcastQueryStage (110), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :  :                          :        +- CometBroadcastExchange (109)
+         :  :  :                          :           +- CometProject (108)
+         :  :  :                          :              +- CometFilter (107)
+         :  :  :                          :                 +- CometNativeScan parquet  (106)
+         :  :  :                          +- BroadcastQueryStage (114), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :  :                             +- ReusedExchange (113)
+         :  :  +- BroadcastQueryStage (146), Statistics(sizeInBytes=238.0 B, rowCount=1)
+         :  :     +- CometBroadcastExchange (145)
+         :  :        +- CometHashAggregate (144)
+         :  :           +- ShuffleQueryStage (143), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :  :              +- CometExchange (142)
+         :  :                 +- CometHashAggregate (141)
+         :  :                    +- CometProject (140)
+         :  :                       +- CometBroadcastHashJoin (139)
+         :  :                          :- CometProject (136)
+         :  :                          :  +- CometBroadcastHashJoin (135)
+         :  :                          :     :- CometProject (129)
+         :  :                          :     :  +- CometBroadcastHashJoin (128)
+         :  :                          :     :     :- CometFilter (125)
+         :  :                          :     :     :  +- CometNativeScan parquet  (124)
+         :  :                          :     :     +- BroadcastQueryStage (127), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :  :                          :     :        +- ReusedExchange (126)
+         :  :                          :     +- BroadcastQueryStage (134), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :  :                          :        +- CometBroadcastExchange (133)
+         :  :                          :           +- CometProject (132)
+         :  :                          :              +- CometFilter (131)
+         :  :                          :                 +- CometNativeScan parquet  (130)
+         :  :                          +- BroadcastQueryStage (138), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :  :                             +- ReusedExchange (137)
+         :  +- BroadcastQueryStage (170), Statistics(sizeInBytes=238.0 B, rowCount=1)
+         :     +- CometBroadcastExchange (169)
+         :        +- CometHashAggregate (168)
+         :           +- ShuffleQueryStage (167), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+         :              +- CometExchange (166)
+         :                 +- CometHashAggregate (165)
+         :                    +- CometProject (164)
+         :                       +- CometBroadcastHashJoin (163)
+         :                          :- CometProject (160)
+         :                          :  +- CometBroadcastHashJoin (159)
+         :                          :     :- CometProject (153)
+         :                          :     :  +- CometBroadcastHashJoin (152)
+         :                          :     :     :- CometFilter (149)
+         :                          :     :     :  +- CometNativeScan parquet  (148)
+         :                          :     :     +- BroadcastQueryStage (151), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+         :                          :     :        +- ReusedExchange (150)
+         :                          :     +- BroadcastQueryStage (158), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+         :                          :        +- CometBroadcastExchange (157)
+         :                          :           +- CometProject (156)
+         :                          :              +- CometFilter (155)
+         :                          :                 +- CometNativeScan parquet  (154)
+         :                          +- BroadcastQueryStage (162), Statistics(sizeInBytes=334.0 B, rowCount=15)
+         :                             +- ReusedExchange (161)
+         +- BroadcastQueryStage (194), Statistics(sizeInBytes=238.0 B, rowCount=1)
+            +- CometBroadcastExchange (193)
+               +- CometHashAggregate (192)
+                  +- ShuffleQueryStage (191), Statistics(sizeInBytes=13.0 KiB, rowCount=128)
+                     +- CometExchange (190)
+                        +- CometHashAggregate (189)
+                           +- CometProject (188)
+                              +- CometBroadcastHashJoin (187)
+                                 :- CometProject (184)
+                                 :  +- CometBroadcastHashJoin (183)
+                                 :     :- CometProject (177)
+                                 :     :  +- CometBroadcastHashJoin (176)
+                                 :     :     :- CometFilter (173)
+                                 :     :     :  +- CometNativeScan parquet  (172)
+                                 :     :     +- BroadcastQueryStage (175), Statistics(sizeInBytes=8.0 KiB, rowCount=1.92E+3)
+                                 :     :        +- ReusedExchange (174)
+                                 :     +- BroadcastQueryStage (182), Statistics(sizeInBytes=7.3 KiB, rowCount=1.80E+3)
+                                 :        +- CometBroadcastExchange (181)
+                                 :           +- CometProject (180)
+                                 :              +- CometFilter (179)
+                                 :                 +- CometNativeScan parquet  (178)
+                                 +- BroadcastQueryStage (186), Statistics(sizeInBytes=334.0 B, rowCount=15)
+                                    +- ReusedExchange (185)
++- == Initial Plan ==
+   CometBroadcastNestedLoopJoin (355)
+   :- CometBroadcastNestedLoopJoin (334)
+   :  :- CometBroadcastNestedLoopJoin (313)
+   :  :  :- CometBroadcastNestedLoopJoin (292)
+   :  :  :  :- CometBroadcastNestedLoopJoin (271)
+   :  :  :  :  :- CometBroadcastNestedLoopJoin (250)
+   :  :  :  :  :  :- CometBroadcastNestedLoopJoin (229)
+   :  :  :  :  :  :  :- CometHashAggregate (208)
+   :  :  :  :  :  :  :  +- CometExchange (207)
+   :  :  :  :  :  :  :     +- CometHashAggregate (206)
+   :  :  :  :  :  :  :        +- CometProject (205)
+   :  :  :  :  :  :  :           +- CometBroadcastHashJoin (204)
+   :  :  :  :  :  :  :              :- CometProject (203)
+   :  :  :  :  :  :  :              :  +- CometBroadcastHashJoin (202)
+   :  :  :  :  :  :  :              :     :- CometProject (201)
+   :  :  :  :  :  :  :              :     :  +- CometBroadcastHashJoin (200)
+   :  :  :  :  :  :  :              :     :     :- CometFilter (199)
+   :  :  :  :  :  :  :              :     :     :  +- CometNativeScan parquet  (198)
+   :  :  :  :  :  :  :              :     :     +- CometBroadcastExchange (6)
+   :  :  :  :  :  :  :              :     :        +- CometProject (5)
+   :  :  :  :  :  :  :              :     :           +- CometFilter (4)
+   :  :  :  :  :  :  :              :     :              +- CometNativeScan parquet  (3)
+   :  :  :  :  :  :  :              :     +- CometBroadcastExchange (13)
+   :  :  :  :  :  :  :              :        +- CometProject (12)
+   :  :  :  :  :  :  :              :           +- CometFilter (11)
+   :  :  :  :  :  :  :              :              +- CometNativeScan parquet  (10)
+   :  :  :  :  :  :  :              +- CometBroadcastExchange (20)
+   :  :  :  :  :  :  :                 +- CometProject (19)
+   :  :  :  :  :  :  :                    +- CometFilter (18)
+   :  :  :  :  :  :  :                       +- CometNativeScan parquet  (17)
+   :  :  :  :  :  :  +- CometBroadcastExchange (228)
+   :  :  :  :  :  :     +- CometHashAggregate (227)
+   :  :  :  :  :  :        +- CometExchange (226)
+   :  :  :  :  :  :           +- CometHashAggregate (225)
+   :  :  :  :  :  :              +- CometProject (224)
+   :  :  :  :  :  :                 +- CometBroadcastHashJoin (223)
+   :  :  :  :  :  :                    :- CometProject (218)
+   :  :  :  :  :  :                    :  +- CometBroadcastHashJoin (217)
+   :  :  :  :  :  :                    :     :- CometProject (216)
+   :  :  :  :  :  :                    :     :  +- CometBroadcastHashJoin (215)
+   :  :  :  :  :  :                    :     :     :- CometFilter (210)
+   :  :  :  :  :  :                    :     :     :  +- CometNativeScan parquet  (209)
+   :  :  :  :  :  :                    :     :     +- CometBroadcastExchange (214)
+   :  :  :  :  :  :                    :     :        +- CometProject (213)
+   :  :  :  :  :  :                    :     :           +- CometFilter (212)
+   :  :  :  :  :  :                    :     :              +- CometNativeScan parquet  (211)
+   :  :  :  :  :  :                    :     +- CometBroadcastExchange (37)
+   :  :  :  :  :  :                    :        +- CometProject (36)
+   :  :  :  :  :  :                    :           +- CometFilter (35)
+   :  :  :  :  :  :                    :              +- CometNativeScan parquet  (34)
+   :  :  :  :  :  :                    +- CometBroadcastExchange (222)
+   :  :  :  :  :  :                       +- CometProject (221)
+   :  :  :  :  :  :                          +- CometFilter (220)
+   :  :  :  :  :  :                             +- CometNativeScan parquet  (219)
+   :  :  :  :  :  +- CometBroadcastExchange (249)
+   :  :  :  :  :     +- CometHashAggregate (248)
+   :  :  :  :  :        +- CometExchange (247)
+   :  :  :  :  :           +- CometHashAggregate (246)
+   :  :  :  :  :              +- CometProject (245)
+   :  :  :  :  :                 +- CometBroadcastHashJoin (244)
+   :  :  :  :  :                    :- CometProject (239)
+   :  :  :  :  :                    :  +- CometBroadcastHashJoin (238)
+   :  :  :  :  :                    :     :- CometProject (237)
+   :  :  :  :  :                    :     :  +- CometBroadcastHashJoin (236)
+   :  :  :  :  :                    :     :     :- CometFilter (231)
+   :  :  :  :  :                    :     :     :  +- CometNativeScan parquet  (230)
+   :  :  :  :  :                    :     :     +- CometBroadcastExchange (235)
+   :  :  :  :  :                    :     :        +- CometProject (234)
+   :  :  :  :  :                    :     :           +- CometFilter (233)
+   :  :  :  :  :                    :     :              +- CometNativeScan parquet  (232)
+   :  :  :  :  :                    :     +- CometBroadcastExchange (61)
+   :  :  :  :  :                    :        +- CometProject (60)
+   :  :  :  :  :                    :           +- CometFilter (59)
+   :  :  :  :  :                    :              +- CometNativeScan parquet  (58)
+   :  :  :  :  :                    +- CometBroadcastExchange (243)
+   :  :  :  :  :                       +- CometProject (242)
+   :  :  :  :  :                          +- CometFilter (241)
+   :  :  :  :  :                             +- CometNativeScan parquet  (240)
+   :  :  :  :  +- CometBroadcastExchange (270)
+   :  :  :  :     +- CometHashAggregate (269)
+   :  :  :  :        +- CometExchange (268)
+   :  :  :  :           +- CometHashAggregate (267)
+   :  :  :  :              +- CometProject (266)
+   :  :  :  :                 +- CometBroadcastHashJoin (265)
+   :  :  :  :                    :- CometProject (260)
+   :  :  :  :                    :  +- CometBroadcastHashJoin (259)
+   :  :  :  :                    :     :- CometProject (258)
+   :  :  :  :                    :     :  +- CometBroadcastHashJoin (257)
+   :  :  :  :                    :     :     :- CometFilter (252)
+   :  :  :  :                    :     :     :  +- CometNativeScan parquet  (251)
+   :  :  :  :                    :     :     +- CometBroadcastExchange (256)
+   :  :  :  :                    :     :        +- CometProject (255)
+   :  :  :  :                    :     :           +- CometFilter (254)
+   :  :  :  :                    :     :              +- CometNativeScan parquet  (253)
+   :  :  :  :                    :     +- CometBroadcastExchange (85)
+   :  :  :  :                    :        +- CometProject (84)
+   :  :  :  :                    :           +- CometFilter (83)
+   :  :  :  :                    :              +- CometNativeScan parquet  (82)
+   :  :  :  :                    +- CometBroadcastExchange (264)
+   :  :  :  :                       +- CometProject (263)
+   :  :  :  :                          +- CometFilter (262)
+   :  :  :  :                             +- CometNativeScan parquet  (261)
+   :  :  :  +- CometBroadcastExchange (291)
+   :  :  :     +- CometHashAggregate (290)
+   :  :  :        +- CometExchange (289)
+   :  :  :           +- CometHashAggregate (288)
+   :  :  :              +- CometProject (287)
+   :  :  :                 +- CometBroadcastHashJoin (286)
+   :  :  :                    :- CometProject (281)
+   :  :  :                    :  +- CometBroadcastHashJoin (280)
+   :  :  :                    :     :- CometProject (279)
+   :  :  :                    :     :  +- CometBroadcastHashJoin (278)
+   :  :  :                    :     :     :- CometFilter (273)
+   :  :  :                    :     :     :  +- CometNativeScan parquet  (272)
+   :  :  :                    :     :     +- CometBroadcastExchange (277)
+   :  :  :                    :     :        +- CometProject (276)
+   :  :  :                    :     :           +- CometFilter (275)
+   :  :  :                    :     :              +- CometNativeScan parquet  (274)
+   :  :  :                    :     +- CometBroadcastExchange (109)
+   :  :  :                    :        +- CometProject (108)
+   :  :  :                    :           +- CometFilter (107)
+   :  :  :                    :              +- CometNativeScan parquet  (106)
+   :  :  :                    +- CometBroadcastExchange (285)
+   :  :  :                       +- CometProject (284)
+   :  :  :                          +- CometFilter (283)
+   :  :  :                             +- CometNativeScan parquet  (282)
+   :  :  +- CometBroadcastExchange (312)
+   :  :     +- CometHashAggregate (311)
+   :  :        +- CometExchange (310)
+   :  :           +- CometHashAggregate (309)
+   :  :              +- CometProject (308)
+   :  :                 +- CometBroadcastHashJoin (307)
+   :  :                    :- CometProject (302)
+   :  :                    :  +- CometBroadcastHashJoin (301)
+   :  :                    :     :- CometProject (300)
+   :  :                    :     :  +- CometBroadcastHashJoin (299)
+   :  :                    :     :     :- CometFilter (294)
+   :  :                    :     :     :  +- CometNativeScan parquet  (293)
+   :  :                    :     :     +- CometBroadcastExchange (298)
+   :  :                    :     :        +- CometProject (297)
+   :  :                    :     :           +- CometFilter (296)
+   :  :                    :     :              +- CometNativeScan parquet  (295)
+   :  :                    :     +- CometBroadcastExchange (133)
+   :  :                    :        +- CometProject (132)
+   :  :                    :           +- CometFilter (131)
+   :  :                    :              +- CometNativeScan parquet  (130)
+   :  :                    +- CometBroadcastExchange (306)
+   :  :                       +- CometProject (305)
+   :  :                          +- CometFilter (304)
+   :  :                             +- CometNativeScan parquet  (303)
+   :  +- CometBroadcastExchange (333)
+   :     +- CometHashAggregate (332)
+   :        +- CometExchange (331)
+   :           +- CometHashAggregate (330)
+   :              +- CometProject (329)
+   :                 +- CometBroadcastHashJoin (328)
+   :                    :- CometProject (323)
+   :                    :  +- CometBroadcastHashJoin (322)
+   :                    :     :- CometProject (321)
+   :                    :     :  +- CometBroadcastHashJoin (320)
+   :                    :     :     :- CometFilter (315)
+   :                    :     :     :  +- CometNativeScan parquet  (314)
+   :                    :     :     +- CometBroadcastExchange (319)
+   :                    :     :        +- CometProject (318)
+   :                    :     :           +- CometFilter (317)
+   :                    :     :              +- CometNativeScan parquet  (316)
+   :                    :     +- CometBroadcastExchange (157)
+   :                    :        +- CometProject (156)
+   :                    :           +- CometFilter (155)
+   :                    :              +- CometNativeScan parquet  (154)
+   :                    +- CometBroadcastExchange (327)
+   :                       +- CometProject (326)
+   :                          +- CometFilter (325)
+   :                             +- CometNativeScan parquet  (324)
+   +- CometBroadcastExchange (354)
+      +- CometHashAggregate (353)
+         +- CometExchange (352)
+            +- CometHashAggregate (351)
+               +- CometProject (350)
+                  +- CometBroadcastHashJoin (349)
+                     :- CometProject (344)
+                     :  +- CometBroadcastHashJoin (343)
+                     :     :- CometProject (342)
+                     :     :  +- CometBroadcastHashJoin (341)
+                     :     :     :- CometFilter (336)
+                     :     :     :  +- CometNativeScan parquet  (335)
+                     :     :     +- CometBroadcastExchange (340)
+                     :     :        +- CometProject (339)
+                     :     :           +- CometFilter (338)
+                     :     :              +- CometNativeScan parquet  (337)
+                     :     +- CometBroadcastExchange (181)
+                     :        +- CometProject (180)
+                     :           +- CometFilter (179)
+                     :              +- CometNativeScan parquet  (178)
+                     +- CometBroadcastExchange (348)
+                        +- CometProject (347)
+                           +- CometFilter (346)
+                              +- CometNativeScan parquet  (345)
+
+
+(1) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(2) CometFilter
+Input [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Condition : ((isnotnull(ss_hdemo_sk#285L) AND isnotnull(ss_sold_time_sk#281L)) AND isnotnull(ss_store_sk#287L))
+
+(3) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#169L, hd_dep_count#172L, hd_vehicle_count#173]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(4) CometFilter
+Input [3]: [hd_demo_sk#169L, hd_dep_count#172L, hd_vehicle_count#173]
+Condition : (((((hd_dep_count#172L = 4) AND (hd_vehicle_count#173 <= 6)) OR ((hd_dep_count#172L = 2) AND (hd_vehicle_count#173 <= 4))) OR ((hd_dep_count#172L = 0) AND (hd_vehicle_count#173 <= 2))) AND isnotnull(hd_demo_sk#169L))
+
+(5) CometProject
+Input [3]: [hd_demo_sk#169L, hd_dep_count#172L, hd_vehicle_count#173]
+Arguments: [hd_demo_sk#169L], [hd_demo_sk#169L]
+
+(6) CometBroadcastExchange
+Input [1]: [hd_demo_sk#169L]
+Arguments: [hd_demo_sk#169L]
+
+(7) BroadcastQueryStage
+Output [1]: [hd_demo_sk#169L]
+Arguments: 0
+
+(8) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Right output [1]: [hd_demo_sk#169L]
+Arguments: [ss_hdemo_sk#285L], [hd_demo_sk#169L], Inner, BuildRight
+
+(9) CometProject
+Input [4]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L, hd_demo_sk#169L]
+Arguments: [ss_sold_time_sk#281L, ss_store_sk#287L], [ss_sold_time_sk#281L, ss_store_sk#287L]
+
+(10) CometNativeScan parquet 
+Output [3]: [t_time_sk#303L, t_hour#306L, t_minute#307L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,8), GreaterThanOrEqual(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(11) CometFilter
+Input [3]: [t_time_sk#303L, t_hour#306L, t_minute#307L]
+Condition : ((((isnotnull(t_hour#306L) AND isnotnull(t_minute#307L)) AND (t_hour#306L = 8)) AND (t_minute#307L >= 30)) AND isnotnull(t_time_sk#303L))
+
+(12) CometProject
+Input [3]: [t_time_sk#303L, t_hour#306L, t_minute#307L]
+Arguments: [t_time_sk#303L], [t_time_sk#303L]
+
+(13) CometBroadcastExchange
+Input [1]: [t_time_sk#303L]
+Arguments: [t_time_sk#303L]
+
+(14) BroadcastQueryStage
+Output [1]: [t_time_sk#303L]
+Arguments: 1
+
+(15) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#281L, ss_store_sk#287L]
+Right output [1]: [t_time_sk#303L]
+Arguments: [ss_sold_time_sk#281L], [t_time_sk#303L], Inner, BuildRight
+
+(16) CometProject
+Input [3]: [ss_sold_time_sk#281L, ss_store_sk#287L, t_time_sk#303L]
+Arguments: [ss_store_sk#287L], [ss_store_sk#287L]
+
+(17) CometNativeScan parquet 
+Output [2]: [s_store_sk#231L, s_store_name#236]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(18) CometFilter
+Input [2]: [s_store_sk#231L, s_store_name#236]
+Condition : ((isnotnull(s_store_name#236) AND (s_store_name#236 = ese)) AND isnotnull(s_store_sk#231L))
+
+(19) CometProject
+Input [2]: [s_store_sk#231L, s_store_name#236]
+Arguments: [s_store_sk#231L], [s_store_sk#231L]
+
+(20) CometBroadcastExchange
+Input [1]: [s_store_sk#231L]
+Arguments: [s_store_sk#231L]
+
+(21) BroadcastQueryStage
+Output [1]: [s_store_sk#231L]
+Arguments: 2
+
+(22) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#287L]
+Right output [1]: [s_store_sk#231L]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(23) CometProject
+Input [2]: [ss_store_sk#287L, s_store_sk#231L]
+
+(24) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(25) CometExchange
+Input [1]: [count#19855L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=220375]
+
+(26) ShuffleQueryStage
+Output [1]: [count#19855L]
+Arguments: 24
+
+(27) CometHashAggregate
+Input [1]: [count#19855L]
+Keys: []
+Functions [1]: [count(1)]
+
+(28) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(29) CometFilter
+Input [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Condition : ((isnotnull(ss_hdemo_sk#19382L) AND isnotnull(ss_sold_time_sk#19378L)) AND isnotnull(ss_store_sk#19384L))
+
+(30) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19400L]
+
+(31) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19400L]
+Arguments: 3
+
+(32) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Right output [1]: [hd_demo_sk#19400L]
+Arguments: [ss_hdemo_sk#19382L], [hd_demo_sk#19400L], Inner, BuildRight
+
+(33) CometProject
+Input [4]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L, hd_demo_sk#19400L]
+Arguments: [ss_sold_time_sk#19378L, ss_store_sk#19384L], [ss_sold_time_sk#19378L, ss_store_sk#19384L]
+
+(34) CometNativeScan parquet 
+Output [3]: [t_time_sk#19405L, t_hour#19408L, t_minute#19409L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,9), LessThan(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(35) CometFilter
+Input [3]: [t_time_sk#19405L, t_hour#19408L, t_minute#19409L]
+Condition : ((((isnotnull(t_hour#19408L) AND isnotnull(t_minute#19409L)) AND (t_hour#19408L = 9)) AND (t_minute#19409L < 30)) AND isnotnull(t_time_sk#19405L))
+
+(36) CometProject
+Input [3]: [t_time_sk#19405L, t_hour#19408L, t_minute#19409L]
+Arguments: [t_time_sk#19405L], [t_time_sk#19405L]
+
+(37) CometBroadcastExchange
+Input [1]: [t_time_sk#19405L]
+Arguments: [t_time_sk#19405L]
+
+(38) BroadcastQueryStage
+Output [1]: [t_time_sk#19405L]
+Arguments: 4
+
+(39) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19378L, ss_store_sk#19384L]
+Right output [1]: [t_time_sk#19405L]
+Arguments: [ss_sold_time_sk#19378L], [t_time_sk#19405L], Inner, BuildRight
+
+(40) CometProject
+Input [3]: [ss_sold_time_sk#19378L, ss_store_sk#19384L, t_time_sk#19405L]
+Arguments: [ss_store_sk#19384L], [ss_store_sk#19384L]
+
+(41) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19415L]
+
+(42) BroadcastQueryStage
+Output [1]: [s_store_sk#19415L]
+Arguments: 5
+
+(43) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19384L]
+Right output [1]: [s_store_sk#19415L]
+Arguments: [ss_store_sk#19384L], [s_store_sk#19415L], Inner, BuildRight
+
+(44) CometProject
+Input [2]: [ss_store_sk#19384L, s_store_sk#19415L]
+
+(45) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(46) CometExchange
+Input [1]: [count#19857L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221502]
+
+(47) ShuffleQueryStage
+Output [1]: [count#19857L]
+Arguments: 25
+
+(48) CometHashAggregate
+Input [1]: [count#19857L]
+Keys: []
+Functions [1]: [count(1)]
+
+(49) CometBroadcastExchange
+Input [1]: [h9_to_9_30#19370L]
+Arguments: [h9_to_9_30#19370L]
+
+(50) BroadcastQueryStage
+Output [1]: [h9_to_9_30#19370L]
+Arguments: 36
+
+(51) CometBroadcastNestedLoopJoin
+Left output [1]: [h8_30_to_9#19369L]
+Right output [1]: [h9_to_9_30#19370L]
+Arguments: Inner, BuildRight
+
+(52) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(53) CometFilter
+Input [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Condition : ((isnotnull(ss_hdemo_sk#19449L) AND isnotnull(ss_sold_time_sk#19445L)) AND isnotnull(ss_store_sk#19451L))
+
+(54) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19467L]
+
+(55) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19467L]
+Arguments: 6
+
+(56) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Right output [1]: [hd_demo_sk#19467L]
+Arguments: [ss_hdemo_sk#19449L], [hd_demo_sk#19467L], Inner, BuildRight
+
+(57) CometProject
+Input [4]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L, hd_demo_sk#19467L]
+Arguments: [ss_sold_time_sk#19445L, ss_store_sk#19451L], [ss_sold_time_sk#19445L, ss_store_sk#19451L]
+
+(58) CometNativeScan parquet 
+Output [3]: [t_time_sk#19472L, t_hour#19475L, t_minute#19476L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,9), GreaterThanOrEqual(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(59) CometFilter
+Input [3]: [t_time_sk#19472L, t_hour#19475L, t_minute#19476L]
+Condition : ((((isnotnull(t_hour#19475L) AND isnotnull(t_minute#19476L)) AND (t_hour#19475L = 9)) AND (t_minute#19476L >= 30)) AND isnotnull(t_time_sk#19472L))
+
+(60) CometProject
+Input [3]: [t_time_sk#19472L, t_hour#19475L, t_minute#19476L]
+Arguments: [t_time_sk#19472L], [t_time_sk#19472L]
+
+(61) CometBroadcastExchange
+Input [1]: [t_time_sk#19472L]
+Arguments: [t_time_sk#19472L]
+
+(62) BroadcastQueryStage
+Output [1]: [t_time_sk#19472L]
+Arguments: 7
+
+(63) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19445L, ss_store_sk#19451L]
+Right output [1]: [t_time_sk#19472L]
+Arguments: [ss_sold_time_sk#19445L], [t_time_sk#19472L], Inner, BuildRight
+
+(64) CometProject
+Input [3]: [ss_sold_time_sk#19445L, ss_store_sk#19451L, t_time_sk#19472L]
+Arguments: [ss_store_sk#19451L], [ss_store_sk#19451L]
+
+(65) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19482L]
+
+(66) BroadcastQueryStage
+Output [1]: [s_store_sk#19482L]
+Arguments: 8
+
+(67) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19451L]
+Right output [1]: [s_store_sk#19482L]
+Arguments: [ss_store_sk#19451L], [s_store_sk#19482L], Inner, BuildRight
+
+(68) CometProject
+Input [2]: [ss_store_sk#19451L, s_store_sk#19482L]
+
+(69) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(70) CometExchange
+Input [1]: [count#19859L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221583]
+
+(71) ShuffleQueryStage
+Output [1]: [count#19859L]
+Arguments: 26
+
+(72) CometHashAggregate
+Input [1]: [count#19859L]
+Keys: []
+Functions [1]: [count(1)]
+
+(73) CometBroadcastExchange
+Input [1]: [h9_30_to_10#19371L]
+Arguments: [h9_30_to_10#19371L]
+
+(74) BroadcastQueryStage
+Output [1]: [h9_30_to_10#19371L]
+Arguments: 33
+
+(75) CometBroadcastNestedLoopJoin
+Left output [2]: [h8_30_to_9#19369L, h9_to_9_30#19370L]
+Right output [1]: [h9_30_to_10#19371L]
+Arguments: Inner, BuildRight
+
+(76) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(77) CometFilter
+Input [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Condition : ((isnotnull(ss_hdemo_sk#19516L) AND isnotnull(ss_sold_time_sk#19512L)) AND isnotnull(ss_store_sk#19518L))
+
+(78) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19534L]
+
+(79) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19534L]
+Arguments: 9
+
+(80) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Right output [1]: [hd_demo_sk#19534L]
+Arguments: [ss_hdemo_sk#19516L], [hd_demo_sk#19534L], Inner, BuildRight
+
+(81) CometProject
+Input [4]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L, hd_demo_sk#19534L]
+Arguments: [ss_sold_time_sk#19512L, ss_store_sk#19518L], [ss_sold_time_sk#19512L, ss_store_sk#19518L]
+
+(82) CometNativeScan parquet 
+Output [3]: [t_time_sk#19539L, t_hour#19542L, t_minute#19543L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,10), LessThan(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(83) CometFilter
+Input [3]: [t_time_sk#19539L, t_hour#19542L, t_minute#19543L]
+Condition : ((((isnotnull(t_hour#19542L) AND isnotnull(t_minute#19543L)) AND (t_hour#19542L = 10)) AND (t_minute#19543L < 30)) AND isnotnull(t_time_sk#19539L))
+
+(84) CometProject
+Input [3]: [t_time_sk#19539L, t_hour#19542L, t_minute#19543L]
+Arguments: [t_time_sk#19539L], [t_time_sk#19539L]
+
+(85) CometBroadcastExchange
+Input [1]: [t_time_sk#19539L]
+Arguments: [t_time_sk#19539L]
+
+(86) BroadcastQueryStage
+Output [1]: [t_time_sk#19539L]
+Arguments: 10
+
+(87) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19512L, ss_store_sk#19518L]
+Right output [1]: [t_time_sk#19539L]
+Arguments: [ss_sold_time_sk#19512L], [t_time_sk#19539L], Inner, BuildRight
+
+(88) CometProject
+Input [3]: [ss_sold_time_sk#19512L, ss_store_sk#19518L, t_time_sk#19539L]
+Arguments: [ss_store_sk#19518L], [ss_store_sk#19518L]
+
+(89) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19549L]
+
+(90) BroadcastQueryStage
+Output [1]: [s_store_sk#19549L]
+Arguments: 11
+
+(91) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19518L]
+Right output [1]: [s_store_sk#19549L]
+Arguments: [ss_store_sk#19518L], [s_store_sk#19549L], Inner, BuildRight
+
+(92) CometProject
+Input [2]: [ss_store_sk#19518L, s_store_sk#19549L]
+
+(93) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(94) CometExchange
+Input [1]: [count#19861L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221664]
+
+(95) ShuffleQueryStage
+Output [1]: [count#19861L]
+Arguments: 27
+
+(96) CometHashAggregate
+Input [1]: [count#19861L]
+Keys: []
+Functions [1]: [count(1)]
+
+(97) CometBroadcastExchange
+Input [1]: [h10_to_10_30#19372L]
+Arguments: [h10_to_10_30#19372L]
+
+(98) BroadcastQueryStage
+Output [1]: [h10_to_10_30#19372L]
+Arguments: 37
+
+(99) CometBroadcastNestedLoopJoin
+Left output [3]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L]
+Right output [1]: [h10_to_10_30#19372L]
+Arguments: Inner, BuildRight
+
+(100) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(101) CometFilter
+Input [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Condition : ((isnotnull(ss_hdemo_sk#19583L) AND isnotnull(ss_sold_time_sk#19579L)) AND isnotnull(ss_store_sk#19585L))
+
+(102) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19601L]
+
+(103) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19601L]
+Arguments: 12
+
+(104) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Right output [1]: [hd_demo_sk#19601L]
+Arguments: [ss_hdemo_sk#19583L], [hd_demo_sk#19601L], Inner, BuildRight
+
+(105) CometProject
+Input [4]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L, hd_demo_sk#19601L]
+Arguments: [ss_sold_time_sk#19579L, ss_store_sk#19585L], [ss_sold_time_sk#19579L, ss_store_sk#19585L]
+
+(106) CometNativeScan parquet 
+Output [3]: [t_time_sk#19606L, t_hour#19609L, t_minute#19610L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,10), GreaterThanOrEqual(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(107) CometFilter
+Input [3]: [t_time_sk#19606L, t_hour#19609L, t_minute#19610L]
+Condition : ((((isnotnull(t_hour#19609L) AND isnotnull(t_minute#19610L)) AND (t_hour#19609L = 10)) AND (t_minute#19610L >= 30)) AND isnotnull(t_time_sk#19606L))
+
+(108) CometProject
+Input [3]: [t_time_sk#19606L, t_hour#19609L, t_minute#19610L]
+Arguments: [t_time_sk#19606L], [t_time_sk#19606L]
+
+(109) CometBroadcastExchange
+Input [1]: [t_time_sk#19606L]
+Arguments: [t_time_sk#19606L]
+
+(110) BroadcastQueryStage
+Output [1]: [t_time_sk#19606L]
+Arguments: 13
+
+(111) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19579L, ss_store_sk#19585L]
+Right output [1]: [t_time_sk#19606L]
+Arguments: [ss_sold_time_sk#19579L], [t_time_sk#19606L], Inner, BuildRight
+
+(112) CometProject
+Input [3]: [ss_sold_time_sk#19579L, ss_store_sk#19585L, t_time_sk#19606L]
+Arguments: [ss_store_sk#19585L], [ss_store_sk#19585L]
+
+(113) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19616L]
+
+(114) BroadcastQueryStage
+Output [1]: [s_store_sk#19616L]
+Arguments: 14
+
+(115) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19585L]
+Right output [1]: [s_store_sk#19616L]
+Arguments: [ss_store_sk#19585L], [s_store_sk#19616L], Inner, BuildRight
+
+(116) CometProject
+Input [2]: [ss_store_sk#19585L, s_store_sk#19616L]
+
+(117) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(118) CometExchange
+Input [1]: [count#19863L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221745]
+
+(119) ShuffleQueryStage
+Output [1]: [count#19863L]
+Arguments: 28
+
+(120) CometHashAggregate
+Input [1]: [count#19863L]
+Keys: []
+Functions [1]: [count(1)]
+
+(121) CometBroadcastExchange
+Input [1]: [h10_30_to_11#19373L]
+Arguments: [h10_30_to_11#19373L]
+
+(122) BroadcastQueryStage
+Output [1]: [h10_30_to_11#19373L]
+Arguments: 35
+
+(123) CometBroadcastNestedLoopJoin
+Left output [4]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L]
+Right output [1]: [h10_30_to_11#19373L]
+Arguments: Inner, BuildRight
+
+(124) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(125) CometFilter
+Input [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Condition : ((isnotnull(ss_hdemo_sk#19650L) AND isnotnull(ss_sold_time_sk#19646L)) AND isnotnull(ss_store_sk#19652L))
+
+(126) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19668L]
+
+(127) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19668L]
+Arguments: 15
+
+(128) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Right output [1]: [hd_demo_sk#19668L]
+Arguments: [ss_hdemo_sk#19650L], [hd_demo_sk#19668L], Inner, BuildRight
+
+(129) CometProject
+Input [4]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L, hd_demo_sk#19668L]
+Arguments: [ss_sold_time_sk#19646L, ss_store_sk#19652L], [ss_sold_time_sk#19646L, ss_store_sk#19652L]
+
+(130) CometNativeScan parquet 
+Output [3]: [t_time_sk#19673L, t_hour#19676L, t_minute#19677L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,11), LessThan(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(131) CometFilter
+Input [3]: [t_time_sk#19673L, t_hour#19676L, t_minute#19677L]
+Condition : ((((isnotnull(t_hour#19676L) AND isnotnull(t_minute#19677L)) AND (t_hour#19676L = 11)) AND (t_minute#19677L < 30)) AND isnotnull(t_time_sk#19673L))
+
+(132) CometProject
+Input [3]: [t_time_sk#19673L, t_hour#19676L, t_minute#19677L]
+Arguments: [t_time_sk#19673L], [t_time_sk#19673L]
+
+(133) CometBroadcastExchange
+Input [1]: [t_time_sk#19673L]
+Arguments: [t_time_sk#19673L]
+
+(134) BroadcastQueryStage
+Output [1]: [t_time_sk#19673L]
+Arguments: 16
+
+(135) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19646L, ss_store_sk#19652L]
+Right output [1]: [t_time_sk#19673L]
+Arguments: [ss_sold_time_sk#19646L], [t_time_sk#19673L], Inner, BuildRight
+
+(136) CometProject
+Input [3]: [ss_sold_time_sk#19646L, ss_store_sk#19652L, t_time_sk#19673L]
+Arguments: [ss_store_sk#19652L], [ss_store_sk#19652L]
+
+(137) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19683L]
+
+(138) BroadcastQueryStage
+Output [1]: [s_store_sk#19683L]
+Arguments: 17
+
+(139) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19652L]
+Right output [1]: [s_store_sk#19683L]
+Arguments: [ss_store_sk#19652L], [s_store_sk#19683L], Inner, BuildRight
+
+(140) CometProject
+Input [2]: [ss_store_sk#19652L, s_store_sk#19683L]
+
+(141) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(142) CometExchange
+Input [1]: [count#19865L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221826]
+
+(143) ShuffleQueryStage
+Output [1]: [count#19865L]
+Arguments: 29
+
+(144) CometHashAggregate
+Input [1]: [count#19865L]
+Keys: []
+Functions [1]: [count(1)]
+
+(145) CometBroadcastExchange
+Input [1]: [h11_to_11_30#19374L]
+Arguments: [h11_to_11_30#19374L]
+
+(146) BroadcastQueryStage
+Output [1]: [h11_to_11_30#19374L]
+Arguments: 32
+
+(147) CometBroadcastNestedLoopJoin
+Left output [5]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L]
+Right output [1]: [h11_to_11_30#19374L]
+Arguments: Inner, BuildRight
+
+(148) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(149) CometFilter
+Input [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Condition : ((isnotnull(ss_hdemo_sk#19717L) AND isnotnull(ss_sold_time_sk#19713L)) AND isnotnull(ss_store_sk#19719L))
+
+(150) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19735L]
+
+(151) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19735L]
+Arguments: 18
+
+(152) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Right output [1]: [hd_demo_sk#19735L]
+Arguments: [ss_hdemo_sk#19717L], [hd_demo_sk#19735L], Inner, BuildRight
+
+(153) CometProject
+Input [4]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L, hd_demo_sk#19735L]
+Arguments: [ss_sold_time_sk#19713L, ss_store_sk#19719L], [ss_sold_time_sk#19713L, ss_store_sk#19719L]
+
+(154) CometNativeScan parquet 
+Output [3]: [t_time_sk#19740L, t_hour#19743L, t_minute#19744L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,11), GreaterThanOrEqual(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(155) CometFilter
+Input [3]: [t_time_sk#19740L, t_hour#19743L, t_minute#19744L]
+Condition : ((((isnotnull(t_hour#19743L) AND isnotnull(t_minute#19744L)) AND (t_hour#19743L = 11)) AND (t_minute#19744L >= 30)) AND isnotnull(t_time_sk#19740L))
+
+(156) CometProject
+Input [3]: [t_time_sk#19740L, t_hour#19743L, t_minute#19744L]
+Arguments: [t_time_sk#19740L], [t_time_sk#19740L]
+
+(157) CometBroadcastExchange
+Input [1]: [t_time_sk#19740L]
+Arguments: [t_time_sk#19740L]
+
+(158) BroadcastQueryStage
+Output [1]: [t_time_sk#19740L]
+Arguments: 19
+
+(159) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19713L, ss_store_sk#19719L]
+Right output [1]: [t_time_sk#19740L]
+Arguments: [ss_sold_time_sk#19713L], [t_time_sk#19740L], Inner, BuildRight
+
+(160) CometProject
+Input [3]: [ss_sold_time_sk#19713L, ss_store_sk#19719L, t_time_sk#19740L]
+Arguments: [ss_store_sk#19719L], [ss_store_sk#19719L]
+
+(161) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19750L]
+
+(162) BroadcastQueryStage
+Output [1]: [s_store_sk#19750L]
+Arguments: 20
+
+(163) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19719L]
+Right output [1]: [s_store_sk#19750L]
+Arguments: [ss_store_sk#19719L], [s_store_sk#19750L], Inner, BuildRight
+
+(164) CometProject
+Input [2]: [ss_store_sk#19719L, s_store_sk#19750L]
+
+(165) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(166) CometExchange
+Input [1]: [count#19867L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221907]
+
+(167) ShuffleQueryStage
+Output [1]: [count#19867L]
+Arguments: 30
+
+(168) CometHashAggregate
+Input [1]: [count#19867L]
+Keys: []
+Functions [1]: [count(1)]
+
+(169) CometBroadcastExchange
+Input [1]: [h11_30_to_12#19375L]
+Arguments: [h11_30_to_12#19375L]
+
+(170) BroadcastQueryStage
+Output [1]: [h11_30_to_12#19375L]
+Arguments: 38
+
+(171) CometBroadcastNestedLoopJoin
+Left output [6]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L]
+Right output [1]: [h11_30_to_12#19375L]
+Arguments: Inner, BuildRight
+
+(172) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(173) CometFilter
+Input [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Condition : ((isnotnull(ss_hdemo_sk#19784L) AND isnotnull(ss_sold_time_sk#19780L)) AND isnotnull(ss_store_sk#19786L))
+
+(174) ReusedExchange [Reuses operator id: 6]
+Output [1]: [hd_demo_sk#19802L]
+
+(175) BroadcastQueryStage
+Output [1]: [hd_demo_sk#19802L]
+Arguments: 21
+
+(176) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Right output [1]: [hd_demo_sk#19802L]
+Arguments: [ss_hdemo_sk#19784L], [hd_demo_sk#19802L], Inner, BuildRight
+
+(177) CometProject
+Input [4]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L, hd_demo_sk#19802L]
+Arguments: [ss_sold_time_sk#19780L, ss_store_sk#19786L], [ss_sold_time_sk#19780L, ss_store_sk#19786L]
+
+(178) CometNativeScan parquet 
+Output [3]: [t_time_sk#19807L, t_hour#19810L, t_minute#19811L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/time_dim.parquet]
+PushedFilters: [IsNotNull(t_hour), IsNotNull(t_minute), EqualTo(t_hour,12), LessThan(t_minute,30), IsNotNull(t_time_sk)]
+ReadSchema: struct<t_time_sk:bigint,t_hour:bigint,t_minute:bigint>
+
+(179) CometFilter
+Input [3]: [t_time_sk#19807L, t_hour#19810L, t_minute#19811L]
+Condition : ((((isnotnull(t_hour#19810L) AND isnotnull(t_minute#19811L)) AND (t_hour#19810L = 12)) AND (t_minute#19811L < 30)) AND isnotnull(t_time_sk#19807L))
+
+(180) CometProject
+Input [3]: [t_time_sk#19807L, t_hour#19810L, t_minute#19811L]
+Arguments: [t_time_sk#19807L], [t_time_sk#19807L]
+
+(181) CometBroadcastExchange
+Input [1]: [t_time_sk#19807L]
+Arguments: [t_time_sk#19807L]
+
+(182) BroadcastQueryStage
+Output [1]: [t_time_sk#19807L]
+Arguments: 22
+
+(183) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19780L, ss_store_sk#19786L]
+Right output [1]: [t_time_sk#19807L]
+Arguments: [ss_sold_time_sk#19780L], [t_time_sk#19807L], Inner, BuildRight
+
+(184) CometProject
+Input [3]: [ss_sold_time_sk#19780L, ss_store_sk#19786L, t_time_sk#19807L]
+Arguments: [ss_store_sk#19786L], [ss_store_sk#19786L]
+
+(185) ReusedExchange [Reuses operator id: 20]
+Output [1]: [s_store_sk#19817L]
+
+(186) BroadcastQueryStage
+Output [1]: [s_store_sk#19817L]
+Arguments: 23
+
+(187) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19786L]
+Right output [1]: [s_store_sk#19817L]
+Arguments: [ss_store_sk#19786L], [s_store_sk#19817L], Inner, BuildRight
+
+(188) CometProject
+Input [2]: [ss_store_sk#19786L, s_store_sk#19817L]
+
+(189) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(190) CometExchange
+Input [1]: [count#19869L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=221988]
+
+(191) ShuffleQueryStage
+Output [1]: [count#19869L]
+Arguments: 31
+
+(192) CometHashAggregate
+Input [1]: [count#19869L]
+Keys: []
+Functions [1]: [count(1)]
+
+(193) CometBroadcastExchange
+Input [1]: [h12_to_12_30#19376L]
+Arguments: [h12_to_12_30#19376L]
+
+(194) BroadcastQueryStage
+Output [1]: [h12_to_12_30#19376L]
+Arguments: 34
+
+(195) CometBroadcastNestedLoopJoin
+Left output [7]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L, h11_30_to_12#19375L]
+Right output [1]: [h12_to_12_30#19376L]
+Arguments: Inner, BuildRight
+
+(196) CometColumnarToRow [codegen id : 1]
+Input [8]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L, h11_30_to_12#19375L, h12_to_12_30#19376L]
+
+(197) ResultQueryStage
+Output [8]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L, h11_30_to_12#19375L, h12_to_12_30#19376L]
+Arguments: 39
+
+(198) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(199) CometFilter
+Input [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Condition : ((isnotnull(ss_hdemo_sk#285L) AND isnotnull(ss_sold_time_sk#281L)) AND isnotnull(ss_store_sk#287L))
+
+(200) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L]
+Right output [1]: [hd_demo_sk#169L]
+Arguments: [ss_hdemo_sk#285L], [hd_demo_sk#169L], Inner, BuildRight
+
+(201) CometProject
+Input [4]: [ss_sold_time_sk#281L, ss_hdemo_sk#285L, ss_store_sk#287L, hd_demo_sk#169L]
+Arguments: [ss_sold_time_sk#281L, ss_store_sk#287L], [ss_sold_time_sk#281L, ss_store_sk#287L]
+
+(202) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#281L, ss_store_sk#287L]
+Right output [1]: [t_time_sk#303L]
+Arguments: [ss_sold_time_sk#281L], [t_time_sk#303L], Inner, BuildRight
+
+(203) CometProject
+Input [3]: [ss_sold_time_sk#281L, ss_store_sk#287L, t_time_sk#303L]
+Arguments: [ss_store_sk#287L], [ss_store_sk#287L]
+
+(204) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#287L]
+Right output [1]: [s_store_sk#231L]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(205) CometProject
+Input [2]: [ss_store_sk#287L, s_store_sk#231L]
+
+(206) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(207) CometExchange
+Input [1]: [count#19855L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218637]
+
+(208) CometHashAggregate
+Input [1]: [count#19855L]
+Keys: []
+Functions [1]: [count(1)]
+
+(209) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(210) CometFilter
+Input [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Condition : ((isnotnull(ss_hdemo_sk#19382L) AND isnotnull(ss_sold_time_sk#19378L)) AND isnotnull(ss_store_sk#19384L))
+
+(211) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19400L, hd_dep_count#19403L, hd_vehicle_count#19404]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(212) CometFilter
+Input [3]: [hd_demo_sk#19400L, hd_dep_count#19403L, hd_vehicle_count#19404]
+Condition : (((((hd_dep_count#19403L = 4) AND (hd_vehicle_count#19404 <= 6)) OR ((hd_dep_count#19403L = 2) AND (hd_vehicle_count#19404 <= 4))) OR ((hd_dep_count#19403L = 0) AND (hd_vehicle_count#19404 <= 2))) AND isnotnull(hd_demo_sk#19400L))
+
+(213) CometProject
+Input [3]: [hd_demo_sk#19400L, hd_dep_count#19403L, hd_vehicle_count#19404]
+Arguments: [hd_demo_sk#19400L], [hd_demo_sk#19400L]
+
+(214) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19400L]
+Arguments: [hd_demo_sk#19400L]
+
+(215) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L]
+Right output [1]: [hd_demo_sk#19400L]
+Arguments: [ss_hdemo_sk#19382L], [hd_demo_sk#19400L], Inner, BuildRight
+
+(216) CometProject
+Input [4]: [ss_sold_time_sk#19378L, ss_hdemo_sk#19382L, ss_store_sk#19384L, hd_demo_sk#19400L]
+Arguments: [ss_sold_time_sk#19378L, ss_store_sk#19384L], [ss_sold_time_sk#19378L, ss_store_sk#19384L]
+
+(217) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19378L, ss_store_sk#19384L]
+Right output [1]: [t_time_sk#19405L]
+Arguments: [ss_sold_time_sk#19378L], [t_time_sk#19405L], Inner, BuildRight
+
+(218) CometProject
+Input [3]: [ss_sold_time_sk#19378L, ss_store_sk#19384L, t_time_sk#19405L]
+Arguments: [ss_store_sk#19384L], [ss_store_sk#19384L]
+
+(219) CometNativeScan parquet 
+Output [2]: [s_store_sk#19415L, s_store_name#19420]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(220) CometFilter
+Input [2]: [s_store_sk#19415L, s_store_name#19420]
+Condition : ((isnotnull(s_store_name#19420) AND (s_store_name#19420 = ese)) AND isnotnull(s_store_sk#19415L))
+
+(221) CometProject
+Input [2]: [s_store_sk#19415L, s_store_name#19420]
+Arguments: [s_store_sk#19415L], [s_store_sk#19415L]
+
+(222) CometBroadcastExchange
+Input [1]: [s_store_sk#19415L]
+Arguments: [s_store_sk#19415L]
+
+(223) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19384L]
+Right output [1]: [s_store_sk#19415L]
+Arguments: [ss_store_sk#19384L], [s_store_sk#19415L], Inner, BuildRight
+
+(224) CometProject
+Input [2]: [ss_store_sk#19384L, s_store_sk#19415L]
+
+(225) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(226) CometExchange
+Input [1]: [count#19857L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218654]
+
+(227) CometHashAggregate
+Input [1]: [count#19857L]
+Keys: []
+Functions [1]: [count(1)]
+
+(228) CometBroadcastExchange
+Input [1]: [h9_to_9_30#19370L]
+Arguments: [h9_to_9_30#19370L]
+
+(229) CometBroadcastNestedLoopJoin
+Left output [1]: [h8_30_to_9#19369L]
+Right output [1]: [h9_to_9_30#19370L]
+Arguments: Inner, BuildRight
+
+(230) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(231) CometFilter
+Input [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Condition : ((isnotnull(ss_hdemo_sk#19449L) AND isnotnull(ss_sold_time_sk#19445L)) AND isnotnull(ss_store_sk#19451L))
+
+(232) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19467L, hd_dep_count#19470L, hd_vehicle_count#19471]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(233) CometFilter
+Input [3]: [hd_demo_sk#19467L, hd_dep_count#19470L, hd_vehicle_count#19471]
+Condition : (((((hd_dep_count#19470L = 4) AND (hd_vehicle_count#19471 <= 6)) OR ((hd_dep_count#19470L = 2) AND (hd_vehicle_count#19471 <= 4))) OR ((hd_dep_count#19470L = 0) AND (hd_vehicle_count#19471 <= 2))) AND isnotnull(hd_demo_sk#19467L))
+
+(234) CometProject
+Input [3]: [hd_demo_sk#19467L, hd_dep_count#19470L, hd_vehicle_count#19471]
+Arguments: [hd_demo_sk#19467L], [hd_demo_sk#19467L]
+
+(235) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19467L]
+Arguments: [hd_demo_sk#19467L]
+
+(236) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L]
+Right output [1]: [hd_demo_sk#19467L]
+Arguments: [ss_hdemo_sk#19449L], [hd_demo_sk#19467L], Inner, BuildRight
+
+(237) CometProject
+Input [4]: [ss_sold_time_sk#19445L, ss_hdemo_sk#19449L, ss_store_sk#19451L, hd_demo_sk#19467L]
+Arguments: [ss_sold_time_sk#19445L, ss_store_sk#19451L], [ss_sold_time_sk#19445L, ss_store_sk#19451L]
+
+(238) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19445L, ss_store_sk#19451L]
+Right output [1]: [t_time_sk#19472L]
+Arguments: [ss_sold_time_sk#19445L], [t_time_sk#19472L], Inner, BuildRight
+
+(239) CometProject
+Input [3]: [ss_sold_time_sk#19445L, ss_store_sk#19451L, t_time_sk#19472L]
+Arguments: [ss_store_sk#19451L], [ss_store_sk#19451L]
+
+(240) CometNativeScan parquet 
+Output [2]: [s_store_sk#19482L, s_store_name#19487]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(241) CometFilter
+Input [2]: [s_store_sk#19482L, s_store_name#19487]
+Condition : ((isnotnull(s_store_name#19487) AND (s_store_name#19487 = ese)) AND isnotnull(s_store_sk#19482L))
+
+(242) CometProject
+Input [2]: [s_store_sk#19482L, s_store_name#19487]
+Arguments: [s_store_sk#19482L], [s_store_sk#19482L]
+
+(243) CometBroadcastExchange
+Input [1]: [s_store_sk#19482L]
+Arguments: [s_store_sk#19482L]
+
+(244) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19451L]
+Right output [1]: [s_store_sk#19482L]
+Arguments: [ss_store_sk#19451L], [s_store_sk#19482L], Inner, BuildRight
+
+(245) CometProject
+Input [2]: [ss_store_sk#19451L, s_store_sk#19482L]
+
+(246) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(247) CometExchange
+Input [1]: [count#19859L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218673]
+
+(248) CometHashAggregate
+Input [1]: [count#19859L]
+Keys: []
+Functions [1]: [count(1)]
+
+(249) CometBroadcastExchange
+Input [1]: [h9_30_to_10#19371L]
+Arguments: [h9_30_to_10#19371L]
+
+(250) CometBroadcastNestedLoopJoin
+Left output [2]: [h8_30_to_9#19369L, h9_to_9_30#19370L]
+Right output [1]: [h9_30_to_10#19371L]
+Arguments: Inner, BuildRight
+
+(251) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(252) CometFilter
+Input [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Condition : ((isnotnull(ss_hdemo_sk#19516L) AND isnotnull(ss_sold_time_sk#19512L)) AND isnotnull(ss_store_sk#19518L))
+
+(253) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19534L, hd_dep_count#19537L, hd_vehicle_count#19538]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(254) CometFilter
+Input [3]: [hd_demo_sk#19534L, hd_dep_count#19537L, hd_vehicle_count#19538]
+Condition : (((((hd_dep_count#19537L = 4) AND (hd_vehicle_count#19538 <= 6)) OR ((hd_dep_count#19537L = 2) AND (hd_vehicle_count#19538 <= 4))) OR ((hd_dep_count#19537L = 0) AND (hd_vehicle_count#19538 <= 2))) AND isnotnull(hd_demo_sk#19534L))
+
+(255) CometProject
+Input [3]: [hd_demo_sk#19534L, hd_dep_count#19537L, hd_vehicle_count#19538]
+Arguments: [hd_demo_sk#19534L], [hd_demo_sk#19534L]
+
+(256) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19534L]
+Arguments: [hd_demo_sk#19534L]
+
+(257) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L]
+Right output [1]: [hd_demo_sk#19534L]
+Arguments: [ss_hdemo_sk#19516L], [hd_demo_sk#19534L], Inner, BuildRight
+
+(258) CometProject
+Input [4]: [ss_sold_time_sk#19512L, ss_hdemo_sk#19516L, ss_store_sk#19518L, hd_demo_sk#19534L]
+Arguments: [ss_sold_time_sk#19512L, ss_store_sk#19518L], [ss_sold_time_sk#19512L, ss_store_sk#19518L]
+
+(259) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19512L, ss_store_sk#19518L]
+Right output [1]: [t_time_sk#19539L]
+Arguments: [ss_sold_time_sk#19512L], [t_time_sk#19539L], Inner, BuildRight
+
+(260) CometProject
+Input [3]: [ss_sold_time_sk#19512L, ss_store_sk#19518L, t_time_sk#19539L]
+Arguments: [ss_store_sk#19518L], [ss_store_sk#19518L]
+
+(261) CometNativeScan parquet 
+Output [2]: [s_store_sk#19549L, s_store_name#19554]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(262) CometFilter
+Input [2]: [s_store_sk#19549L, s_store_name#19554]
+Condition : ((isnotnull(s_store_name#19554) AND (s_store_name#19554 = ese)) AND isnotnull(s_store_sk#19549L))
+
+(263) CometProject
+Input [2]: [s_store_sk#19549L, s_store_name#19554]
+Arguments: [s_store_sk#19549L], [s_store_sk#19549L]
+
+(264) CometBroadcastExchange
+Input [1]: [s_store_sk#19549L]
+Arguments: [s_store_sk#19549L]
+
+(265) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19518L]
+Right output [1]: [s_store_sk#19549L]
+Arguments: [ss_store_sk#19518L], [s_store_sk#19549L], Inner, BuildRight
+
+(266) CometProject
+Input [2]: [ss_store_sk#19518L, s_store_sk#19549L]
+
+(267) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(268) CometExchange
+Input [1]: [count#19861L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218692]
+
+(269) CometHashAggregate
+Input [1]: [count#19861L]
+Keys: []
+Functions [1]: [count(1)]
+
+(270) CometBroadcastExchange
+Input [1]: [h10_to_10_30#19372L]
+Arguments: [h10_to_10_30#19372L]
+
+(271) CometBroadcastNestedLoopJoin
+Left output [3]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L]
+Right output [1]: [h10_to_10_30#19372L]
+Arguments: Inner, BuildRight
+
+(272) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(273) CometFilter
+Input [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Condition : ((isnotnull(ss_hdemo_sk#19583L) AND isnotnull(ss_sold_time_sk#19579L)) AND isnotnull(ss_store_sk#19585L))
+
+(274) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19601L, hd_dep_count#19604L, hd_vehicle_count#19605]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(275) CometFilter
+Input [3]: [hd_demo_sk#19601L, hd_dep_count#19604L, hd_vehicle_count#19605]
+Condition : (((((hd_dep_count#19604L = 4) AND (hd_vehicle_count#19605 <= 6)) OR ((hd_dep_count#19604L = 2) AND (hd_vehicle_count#19605 <= 4))) OR ((hd_dep_count#19604L = 0) AND (hd_vehicle_count#19605 <= 2))) AND isnotnull(hd_demo_sk#19601L))
+
+(276) CometProject
+Input [3]: [hd_demo_sk#19601L, hd_dep_count#19604L, hd_vehicle_count#19605]
+Arguments: [hd_demo_sk#19601L], [hd_demo_sk#19601L]
+
+(277) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19601L]
+Arguments: [hd_demo_sk#19601L]
+
+(278) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L]
+Right output [1]: [hd_demo_sk#19601L]
+Arguments: [ss_hdemo_sk#19583L], [hd_demo_sk#19601L], Inner, BuildRight
+
+(279) CometProject
+Input [4]: [ss_sold_time_sk#19579L, ss_hdemo_sk#19583L, ss_store_sk#19585L, hd_demo_sk#19601L]
+Arguments: [ss_sold_time_sk#19579L, ss_store_sk#19585L], [ss_sold_time_sk#19579L, ss_store_sk#19585L]
+
+(280) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19579L, ss_store_sk#19585L]
+Right output [1]: [t_time_sk#19606L]
+Arguments: [ss_sold_time_sk#19579L], [t_time_sk#19606L], Inner, BuildRight
+
+(281) CometProject
+Input [3]: [ss_sold_time_sk#19579L, ss_store_sk#19585L, t_time_sk#19606L]
+Arguments: [ss_store_sk#19585L], [ss_store_sk#19585L]
+
+(282) CometNativeScan parquet 
+Output [2]: [s_store_sk#19616L, s_store_name#19621]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(283) CometFilter
+Input [2]: [s_store_sk#19616L, s_store_name#19621]
+Condition : ((isnotnull(s_store_name#19621) AND (s_store_name#19621 = ese)) AND isnotnull(s_store_sk#19616L))
+
+(284) CometProject
+Input [2]: [s_store_sk#19616L, s_store_name#19621]
+Arguments: [s_store_sk#19616L], [s_store_sk#19616L]
+
+(285) CometBroadcastExchange
+Input [1]: [s_store_sk#19616L]
+Arguments: [s_store_sk#19616L]
+
+(286) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19585L]
+Right output [1]: [s_store_sk#19616L]
+Arguments: [ss_store_sk#19585L], [s_store_sk#19616L], Inner, BuildRight
+
+(287) CometProject
+Input [2]: [ss_store_sk#19585L, s_store_sk#19616L]
+
+(288) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(289) CometExchange
+Input [1]: [count#19863L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218711]
+
+(290) CometHashAggregate
+Input [1]: [count#19863L]
+Keys: []
+Functions [1]: [count(1)]
+
+(291) CometBroadcastExchange
+Input [1]: [h10_30_to_11#19373L]
+Arguments: [h10_30_to_11#19373L]
+
+(292) CometBroadcastNestedLoopJoin
+Left output [4]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L]
+Right output [1]: [h10_30_to_11#19373L]
+Arguments: Inner, BuildRight
+
+(293) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(294) CometFilter
+Input [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Condition : ((isnotnull(ss_hdemo_sk#19650L) AND isnotnull(ss_sold_time_sk#19646L)) AND isnotnull(ss_store_sk#19652L))
+
+(295) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19668L, hd_dep_count#19671L, hd_vehicle_count#19672]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(296) CometFilter
+Input [3]: [hd_demo_sk#19668L, hd_dep_count#19671L, hd_vehicle_count#19672]
+Condition : (((((hd_dep_count#19671L = 4) AND (hd_vehicle_count#19672 <= 6)) OR ((hd_dep_count#19671L = 2) AND (hd_vehicle_count#19672 <= 4))) OR ((hd_dep_count#19671L = 0) AND (hd_vehicle_count#19672 <= 2))) AND isnotnull(hd_demo_sk#19668L))
+
+(297) CometProject
+Input [3]: [hd_demo_sk#19668L, hd_dep_count#19671L, hd_vehicle_count#19672]
+Arguments: [hd_demo_sk#19668L], [hd_demo_sk#19668L]
+
+(298) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19668L]
+Arguments: [hd_demo_sk#19668L]
+
+(299) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L]
+Right output [1]: [hd_demo_sk#19668L]
+Arguments: [ss_hdemo_sk#19650L], [hd_demo_sk#19668L], Inner, BuildRight
+
+(300) CometProject
+Input [4]: [ss_sold_time_sk#19646L, ss_hdemo_sk#19650L, ss_store_sk#19652L, hd_demo_sk#19668L]
+Arguments: [ss_sold_time_sk#19646L, ss_store_sk#19652L], [ss_sold_time_sk#19646L, ss_store_sk#19652L]
+
+(301) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19646L, ss_store_sk#19652L]
+Right output [1]: [t_time_sk#19673L]
+Arguments: [ss_sold_time_sk#19646L], [t_time_sk#19673L], Inner, BuildRight
+
+(302) CometProject
+Input [3]: [ss_sold_time_sk#19646L, ss_store_sk#19652L, t_time_sk#19673L]
+Arguments: [ss_store_sk#19652L], [ss_store_sk#19652L]
+
+(303) CometNativeScan parquet 
+Output [2]: [s_store_sk#19683L, s_store_name#19688]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(304) CometFilter
+Input [2]: [s_store_sk#19683L, s_store_name#19688]
+Condition : ((isnotnull(s_store_name#19688) AND (s_store_name#19688 = ese)) AND isnotnull(s_store_sk#19683L))
+
+(305) CometProject
+Input [2]: [s_store_sk#19683L, s_store_name#19688]
+Arguments: [s_store_sk#19683L], [s_store_sk#19683L]
+
+(306) CometBroadcastExchange
+Input [1]: [s_store_sk#19683L]
+Arguments: [s_store_sk#19683L]
+
+(307) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19652L]
+Right output [1]: [s_store_sk#19683L]
+Arguments: [ss_store_sk#19652L], [s_store_sk#19683L], Inner, BuildRight
+
+(308) CometProject
+Input [2]: [ss_store_sk#19652L, s_store_sk#19683L]
+
+(309) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(310) CometExchange
+Input [1]: [count#19865L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218730]
+
+(311) CometHashAggregate
+Input [1]: [count#19865L]
+Keys: []
+Functions [1]: [count(1)]
+
+(312) CometBroadcastExchange
+Input [1]: [h11_to_11_30#19374L]
+Arguments: [h11_to_11_30#19374L]
+
+(313) CometBroadcastNestedLoopJoin
+Left output [5]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L]
+Right output [1]: [h11_to_11_30#19374L]
+Arguments: Inner, BuildRight
+
+(314) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(315) CometFilter
+Input [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Condition : ((isnotnull(ss_hdemo_sk#19717L) AND isnotnull(ss_sold_time_sk#19713L)) AND isnotnull(ss_store_sk#19719L))
+
+(316) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19735L, hd_dep_count#19738L, hd_vehicle_count#19739]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(317) CometFilter
+Input [3]: [hd_demo_sk#19735L, hd_dep_count#19738L, hd_vehicle_count#19739]
+Condition : (((((hd_dep_count#19738L = 4) AND (hd_vehicle_count#19739 <= 6)) OR ((hd_dep_count#19738L = 2) AND (hd_vehicle_count#19739 <= 4))) OR ((hd_dep_count#19738L = 0) AND (hd_vehicle_count#19739 <= 2))) AND isnotnull(hd_demo_sk#19735L))
+
+(318) CometProject
+Input [3]: [hd_demo_sk#19735L, hd_dep_count#19738L, hd_vehicle_count#19739]
+Arguments: [hd_demo_sk#19735L], [hd_demo_sk#19735L]
+
+(319) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19735L]
+Arguments: [hd_demo_sk#19735L]
+
+(320) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L]
+Right output [1]: [hd_demo_sk#19735L]
+Arguments: [ss_hdemo_sk#19717L], [hd_demo_sk#19735L], Inner, BuildRight
+
+(321) CometProject
+Input [4]: [ss_sold_time_sk#19713L, ss_hdemo_sk#19717L, ss_store_sk#19719L, hd_demo_sk#19735L]
+Arguments: [ss_sold_time_sk#19713L, ss_store_sk#19719L], [ss_sold_time_sk#19713L, ss_store_sk#19719L]
+
+(322) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19713L, ss_store_sk#19719L]
+Right output [1]: [t_time_sk#19740L]
+Arguments: [ss_sold_time_sk#19713L], [t_time_sk#19740L], Inner, BuildRight
+
+(323) CometProject
+Input [3]: [ss_sold_time_sk#19713L, ss_store_sk#19719L, t_time_sk#19740L]
+Arguments: [ss_store_sk#19719L], [ss_store_sk#19719L]
+
+(324) CometNativeScan parquet 
+Output [2]: [s_store_sk#19750L, s_store_name#19755]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(325) CometFilter
+Input [2]: [s_store_sk#19750L, s_store_name#19755]
+Condition : ((isnotnull(s_store_name#19755) AND (s_store_name#19755 = ese)) AND isnotnull(s_store_sk#19750L))
+
+(326) CometProject
+Input [2]: [s_store_sk#19750L, s_store_name#19755]
+Arguments: [s_store_sk#19750L], [s_store_sk#19750L]
+
+(327) CometBroadcastExchange
+Input [1]: [s_store_sk#19750L]
+Arguments: [s_store_sk#19750L]
+
+(328) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19719L]
+Right output [1]: [s_store_sk#19750L]
+Arguments: [ss_store_sk#19719L], [s_store_sk#19750L], Inner, BuildRight
+
+(329) CometProject
+Input [2]: [ss_store_sk#19719L, s_store_sk#19750L]
+
+(330) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(331) CometExchange
+Input [1]: [count#19867L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218749]
+
+(332) CometHashAggregate
+Input [1]: [count#19867L]
+Keys: []
+Functions [1]: [count(1)]
+
+(333) CometBroadcastExchange
+Input [1]: [h11_30_to_12#19375L]
+Arguments: [h11_30_to_12#19375L]
+
+(334) CometBroadcastNestedLoopJoin
+Left output [6]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L]
+Right output [1]: [h11_30_to_12#19375L]
+Arguments: Inner, BuildRight
+
+(335) CometNativeScan parquet 
+Output [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_hdemo_sk), IsNotNull(ss_sold_time_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_time_sk:bigint,ss_hdemo_sk:bigint,ss_store_sk:bigint>
+
+(336) CometFilter
+Input [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Condition : ((isnotnull(ss_hdemo_sk#19784L) AND isnotnull(ss_sold_time_sk#19780L)) AND isnotnull(ss_store_sk#19786L))
+
+(337) CometNativeScan parquet 
+Output [3]: [hd_demo_sk#19802L, hd_dep_count#19805L, hd_vehicle_count#19806]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/household_demographics.parquet]
+PushedFilters: [Or(Or(And(EqualTo(hd_dep_count,4),LessThanOrEqual(hd_vehicle_count,6)),And(EqualTo(hd_dep_count,2),LessThanOrEqual(hd_vehicle_count,4))),And(EqualTo(hd_dep_count,0),LessThanOrEqual(hd_vehicle_count,2))), IsNotNull(hd_demo_sk)]
+ReadSchema: struct<hd_demo_sk:bigint,hd_dep_count:bigint,hd_vehicle_count:int>
+
+(338) CometFilter
+Input [3]: [hd_demo_sk#19802L, hd_dep_count#19805L, hd_vehicle_count#19806]
+Condition : (((((hd_dep_count#19805L = 4) AND (hd_vehicle_count#19806 <= 6)) OR ((hd_dep_count#19805L = 2) AND (hd_vehicle_count#19806 <= 4))) OR ((hd_dep_count#19805L = 0) AND (hd_vehicle_count#19806 <= 2))) AND isnotnull(hd_demo_sk#19802L))
+
+(339) CometProject
+Input [3]: [hd_demo_sk#19802L, hd_dep_count#19805L, hd_vehicle_count#19806]
+Arguments: [hd_demo_sk#19802L], [hd_demo_sk#19802L]
+
+(340) CometBroadcastExchange
+Input [1]: [hd_demo_sk#19802L]
+Arguments: [hd_demo_sk#19802L]
+
+(341) CometBroadcastHashJoin
+Left output [3]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L]
+Right output [1]: [hd_demo_sk#19802L]
+Arguments: [ss_hdemo_sk#19784L], [hd_demo_sk#19802L], Inner, BuildRight
+
+(342) CometProject
+Input [4]: [ss_sold_time_sk#19780L, ss_hdemo_sk#19784L, ss_store_sk#19786L, hd_demo_sk#19802L]
+Arguments: [ss_sold_time_sk#19780L, ss_store_sk#19786L], [ss_sold_time_sk#19780L, ss_store_sk#19786L]
+
+(343) CometBroadcastHashJoin
+Left output [2]: [ss_sold_time_sk#19780L, ss_store_sk#19786L]
+Right output [1]: [t_time_sk#19807L]
+Arguments: [ss_sold_time_sk#19780L], [t_time_sk#19807L], Inner, BuildRight
+
+(344) CometProject
+Input [3]: [ss_sold_time_sk#19780L, ss_store_sk#19786L, t_time_sk#19807L]
+Arguments: [ss_store_sk#19786L], [ss_store_sk#19786L]
+
+(345) CometNativeScan parquet 
+Output [2]: [s_store_sk#19817L, s_store_name#19822]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_name), EqualTo(s_store_name,ese), IsNotNull(s_store_sk)]
+ReadSchema: struct<s_store_sk:bigint,s_store_name:string>
+
+(346) CometFilter
+Input [2]: [s_store_sk#19817L, s_store_name#19822]
+Condition : ((isnotnull(s_store_name#19822) AND (s_store_name#19822 = ese)) AND isnotnull(s_store_sk#19817L))
+
+(347) CometProject
+Input [2]: [s_store_sk#19817L, s_store_name#19822]
+Arguments: [s_store_sk#19817L], [s_store_sk#19817L]
+
+(348) CometBroadcastExchange
+Input [1]: [s_store_sk#19817L]
+Arguments: [s_store_sk#19817L]
+
+(349) CometBroadcastHashJoin
+Left output [1]: [ss_store_sk#19786L]
+Right output [1]: [s_store_sk#19817L]
+Arguments: [ss_store_sk#19786L], [s_store_sk#19817L], Inner, BuildRight
+
+(350) CometProject
+Input [2]: [ss_store_sk#19786L, s_store_sk#19817L]
+
+(351) CometHashAggregate
+Input: []
+Keys: []
+Functions [1]: [partial_count(1)]
+
+(352) CometExchange
+Input [1]: [count#19869L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=218768]
+
+(353) CometHashAggregate
+Input [1]: [count#19869L]
+Keys: []
+Functions [1]: [count(1)]
+
+(354) CometBroadcastExchange
+Input [1]: [h12_to_12_30#19376L]
+Arguments: [h12_to_12_30#19376L]
+
+(355) CometBroadcastNestedLoopJoin
+Left output [7]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L, h11_30_to_12#19375L]
+Right output [1]: [h12_to_12_30#19376L]
+Arguments: Inner, BuildRight
+
+(356) AdaptiveSparkPlan
+Output [8]: [h8_30_to_9#19369L, h9_to_9_30#19370L, h9_30_to_10#19371L, h10_to_10_30#19372L, h10_30_to_11#19373L, h11_to_11_30#19374L, h11_30_to_12#19375L, h12_to_12_30#19376L]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometBroadcastNestedLoopJoin
+   :- CometBroadcastNestedLoopJoin
+   :  :- CometBroadcastNestedLoopJoin
+   :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :  :  :- CometHashAggregate
+   :  :  :  :  :  :  :  +- CometExchange
+   :  :  :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :  :  :        +- CometProject
+   :  :  :  :  :  :  :           +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :- CometProject
+   :  :  :  :  :  :  :              :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :     :- CometProject
+   :  :  :  :  :  :  :              :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :     :     :- CometFilter
+   :  :  :  :  :  :  :              :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              :     :     +- CometBroadcastExchange
+   :  :  :  :  :  :  :              :     :        +- CometProject
+   :  :  :  :  :  :  :              :     :           +- CometFilter
+   :  :  :  :  :  :  :              :     :              +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              :     +- CometBroadcastExchange
+   :  :  :  :  :  :  :              :        +- CometProject
+   :  :  :  :  :  :  :              :           +- CometFilter
+   :  :  :  :  :  :  :              :              +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              +- CometBroadcastExchange
+   :  :  :  :  :  :  :                 +- CometProject
+   :  :  :  :  :  :  :                    +- CometFilter
+   :  :  :  :  :  :  :                       +- CometNativeScan parquet 
+   :  :  :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :  :        +- CometExchange
+   :  :  :  :  :  :           +- CometHashAggregate
+   :  :  :  :  :  :              +- CometProject
+   :  :  :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :- CometProject
+   :  :  :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :     :- CometProject
+   :  :  :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :  :  :                    :     :        +- CometProject
+   :  :  :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :  :  :                    :        +- CometProject
+   :  :  :  :  :  :                    :           +- CometFilter
+   :  :  :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :  :  :                       +- CometProject
+   :  :  :  :  :  :                          +- CometFilter
+   :  :  :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :        +- CometExchange
+   :  :  :  :  :           +- CometHashAggregate
+   :  :  :  :  :              +- CometProject
+   :  :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :  :                    :- CometProject
+   :  :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :  :                    :     :- CometProject
+   :  :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :  :                    :     :        +- CometProject
+   :  :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :  :                    :        +- CometProject
+   :  :  :  :  :                    :           +- CometFilter
+   :  :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :  :                       +- CometProject
+   :  :  :  :  :                          +- CometFilter
+   :  :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :     +- CometHashAggregate
+   :  :  :  :        +- CometExchange
+   :  :  :  :           +- CometHashAggregate
+   :  :  :  :              +- CometProject
+   :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :                    :- CometProject
+   :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :                    :     :- CometProject
+   :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :                    :     :        +- CometProject
+   :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :                    :        +- CometProject
+   :  :  :  :                    :           +- CometFilter
+   :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :                       +- CometProject
+   :  :  :  :                          +- CometFilter
+   :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  +- CometBroadcastExchange
+   :  :  :     +- CometHashAggregate
+   :  :  :        +- CometExchange
+   :  :  :           +- CometHashAggregate
+   :  :  :              +- CometProject
+   :  :  :                 +- CometBroadcastHashJoin
+   :  :  :                    :- CometProject
+   :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :                    :     :- CometProject
+   :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :                    :     :     :- CometFilter
+   :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :                    :     :        +- CometProject
+   :  :  :                    :     :           +- CometFilter
+   :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :                    :     +- CometBroadcastExchange
+   :  :  :                    :        +- CometProject
+   :  :  :                    :           +- CometFilter
+   :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :                    +- CometBroadcastExchange
+   :  :  :                       +- CometProject
+   :  :  :                          +- CometFilter
+   :  :  :                             +- CometNativeScan parquet 
+   :  :  +- CometBroadcastExchange
+   :  :     +- CometHashAggregate
+   :  :        +- CometExchange
+   :  :           +- CometHashAggregate
+   :  :              +- CometProject
+   :  :                 +- CometBroadcastHashJoin
+   :  :                    :- CometProject
+   :  :                    :  +- CometBroadcastHashJoin
+   :  :                    :     :- CometProject
+   :  :                    :     :  +- CometBroadcastHashJoin
+   :  :                    :     :     :- CometFilter
+   :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :                    :     :     +- CometBroadcastExchange
+   :  :                    :     :        +- CometProject
+   :  :                    :     :           +- CometFilter
+   :  :                    :     :              +- CometNativeScan parquet 
+   :  :                    :     +- CometBroadcastExchange
+   :  :                    :        +- CometProject
+   :  :                    :           +- CometFilter
+   :  :                    :              +- CometNativeScan parquet 
+   :  :                    +- CometBroadcastExchange
+   :  :                       +- CometProject
+   :  :                          +- CometFilter
+   :  :                             +- CometNativeScan parquet 
+   :  +- CometBroadcastExchange
+   :     +- CometHashAggregate
+   :        +- CometExchange
+   :           +- CometHashAggregate
+   :              +- CometProject
+   :                 +- CometBroadcastHashJoin
+   :                    :- CometProject
+   :                    :  +- CometBroadcastHashJoin
+   :                    :     :- CometProject
+   :                    :     :  +- CometBroadcastHashJoin
+   :                    :     :     :- CometFilter
+   :                    :     :     :  +- CometNativeScan parquet 
+   :                    :     :     +- CometBroadcastExchange
+   :                    :     :        +- CometProject
+   :                    :     :           +- CometFilter
+   :                    :     :              +- CometNativeScan parquet 
+   :                    :     +- CometBroadcastExchange
+   :                    :        +- CometProject
+   :                    :           +- CometFilter
+   :                    :              +- CometNativeScan parquet 
+   :                    +- CometBroadcastExchange
+   :                       +- CometProject
+   :                          +- CometFilter
+   :                             +- CometNativeScan parquet 
+   +- CometBroadcastExchange
+      +- CometHashAggregate
+         +- CometExchange
+            +- CometHashAggregate
+               +- CometProject
+                  +- CometBroadcastHashJoin
+                     :- CometProject
+                     :  +- CometBroadcastHashJoin
+                     :     :- CometProject
+                     :     :  +- CometBroadcastHashJoin
+                     :     :     :- CometFilter
+                     :     :     :  +- CometNativeScan parquet 
+                     :     :     +- CometBroadcastExchange
+                     :     :        +- CometProject
+                     :     :           +- CometFilter
+                     :     :              +- CometNativeScan parquet 
+                     :     +- CometBroadcastExchange
+                     :        +- CometProject
+                     :           +- CometFilter
+                     :              +- CometNativeScan parquet 
+                     +- CometBroadcastExchange
+                        +- CometProject
+                           +- CometFilter
+                              +- CometNativeScan parquet 
+
+Comet accelerated 142 out of 142 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 8 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometBroadcastNestedLoopJoin
+   :- CometBroadcastNestedLoopJoin
+   :  :- CometBroadcastNestedLoopJoin
+   :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :  :- CometBroadcastNestedLoopJoin
+   :  :  :  :  :  :  :- CometHashAggregate
+   :  :  :  :  :  :  :  +- CometExchange
+   :  :  :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :  :  :        +- CometProject
+   :  :  :  :  :  :  :           +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :- CometProject
+   :  :  :  :  :  :  :              :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :     :- CometProject
+   :  :  :  :  :  :  :              :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :  :              :     :     :- CometFilter
+   :  :  :  :  :  :  :              :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              :     :     +- CometBroadcastExchange
+   :  :  :  :  :  :  :              :     :        +- CometProject
+   :  :  :  :  :  :  :              :     :           +- CometFilter
+   :  :  :  :  :  :  :              :     :              +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              :     +- CometBroadcastExchange
+   :  :  :  :  :  :  :              :        +- CometProject
+   :  :  :  :  :  :  :              :           +- CometFilter
+   :  :  :  :  :  :  :              :              +- CometNativeScan parquet 
+   :  :  :  :  :  :  :              +- CometBroadcastExchange
+   :  :  :  :  :  :  :                 +- CometProject
+   :  :  :  :  :  :  :                    +- CometFilter
+   :  :  :  :  :  :  :                       +- CometNativeScan parquet 
+   :  :  :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :  :        +- CometExchange
+   :  :  :  :  :  :           +- CometHashAggregate
+   :  :  :  :  :  :              +- CometProject
+   :  :  :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :- CometProject
+   :  :  :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :     :- CometProject
+   :  :  :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :  :  :                    :     :        +- CometProject
+   :  :  :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :  :  :                    :        +- CometProject
+   :  :  :  :  :  :                    :           +- CometFilter
+   :  :  :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :  :  :                       +- CometProject
+   :  :  :  :  :  :                          +- CometFilter
+   :  :  :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :  :     +- CometHashAggregate
+   :  :  :  :  :        +- CometExchange
+   :  :  :  :  :           +- CometHashAggregate
+   :  :  :  :  :              +- CometProject
+   :  :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :  :                    :- CometProject
+   :  :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :  :                    :     :- CometProject
+   :  :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :  :                    :     :        +- CometProject
+   :  :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :  :                    :        +- CometProject
+   :  :  :  :  :                    :           +- CometFilter
+   :  :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :  :                       +- CometProject
+   :  :  :  :  :                          +- CometFilter
+   :  :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  :  +- CometBroadcastExchange
+   :  :  :  :     +- CometHashAggregate
+   :  :  :  :        +- CometExchange
+   :  :  :  :           +- CometHashAggregate
+   :  :  :  :              +- CometProject
+   :  :  :  :                 +- CometBroadcastHashJoin
+   :  :  :  :                    :- CometProject
+   :  :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :  :                    :     :- CometProject
+   :  :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :  :                    :     :     :- CometFilter
+   :  :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :  :                    :     :        +- CometProject
+   :  :  :  :                    :     :           +- CometFilter
+   :  :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :  :                    :     +- CometBroadcastExchange
+   :  :  :  :                    :        +- CometProject
+   :  :  :  :                    :           +- CometFilter
+   :  :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :  :                    +- CometBroadcastExchange
+   :  :  :  :                       +- CometProject
+   :  :  :  :                          +- CometFilter
+   :  :  :  :                             +- CometNativeScan parquet 
+   :  :  :  +- CometBroadcastExchange
+   :  :  :     +- CometHashAggregate
+   :  :  :        +- CometExchange
+   :  :  :           +- CometHashAggregate
+   :  :  :              +- CometProject
+   :  :  :                 +- CometBroadcastHashJoin
+   :  :  :                    :- CometProject
+   :  :  :                    :  +- CometBroadcastHashJoin
+   :  :  :                    :     :- CometProject
+   :  :  :                    :     :  +- CometBroadcastHashJoin
+   :  :  :                    :     :     :- CometFilter
+   :  :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :  :                    :     :     +- CometBroadcastExchange
+   :  :  :                    :     :        +- CometProject
+   :  :  :                    :     :           +- CometFilter
+   :  :  :                    :     :              +- CometNativeScan parquet 
+   :  :  :                    :     +- CometBroadcastExchange
+   :  :  :                    :        +- CometProject
+   :  :  :                    :           +- CometFilter
+   :  :  :                    :              +- CometNativeScan parquet 
+   :  :  :                    +- CometBroadcastExchange
+   :  :  :                       +- CometProject
+   :  :  :                          +- CometFilter
+   :  :  :                             +- CometNativeScan parquet 
+   :  :  +- CometBroadcastExchange
+   :  :     +- CometHashAggregate
+   :  :        +- CometExchange
+   :  :           +- CometHashAggregate
+   :  :              +- CometProject
+   :  :                 +- CometBroadcastHashJoin
+   :  :                    :- CometProject
+   :  :                    :  +- CometBroadcastHashJoin
+   :  :                    :     :- CometProject
+   :  :                    :     :  +- CometBroadcastHashJoin
+   :  :                    :     :     :- CometFilter
+   :  :                    :     :     :  +- CometNativeScan parquet 
+   :  :                    :     :     +- CometBroadcastExchange
+   :  :                    :     :        +- CometProject
+   :  :                    :     :           +- CometFilter
+   :  :                    :     :              +- CometNativeScan parquet 
+   :  :                    :     +- CometBroadcastExchange
+   :  :                    :        +- CometProject
+   :  :                    :           +- CometFilter
+   :  :                    :              +- CometNativeScan parquet 
+   :  :                    +- CometBroadcastExchange
+   :  :                       +- CometProject
+   :  :                          +- CometFilter
+   :  :                             +- CometNativeScan parquet 
+   :  +- CometBroadcastExchange
+   :     +- CometHashAggregate
+   :        +- CometExchange
+   :           +- CometHashAggregate
+   :              +- CometProject
+   :                 +- CometBroadcastHashJoin
+   :                    :- CometProject
+   :                    :  +- CometBroadcastHashJoin
+   :                    :     :- CometProject
+   :                    :     :  +- CometBroadcastHashJoin
+   :                    :     :     :- CometFilter
+   :                    :     :     :  +- CometNativeScan parquet 
+   :                    :     :     +- CometBroadcastExchange
+   :                    :     :        +- CometProject
+   :                    :     :           +- CometFilter
+   :                    :     :              +- CometNativeScan parquet 
+   :                    :     +- CometBroadcastExchange
+   :                    :        +- CometProject
+   :                    :           +- CometFilter
+   :                    :              +- CometNativeScan parquet 
+   :                    +- CometBroadcastExchange
+   :                       +- CometProject
+   :                          +- CometFilter
+   :                             +- CometNativeScan parquet 
+   +- CometBroadcastExchange
+      +- CometHashAggregate
+         +- CometExchange
+            +- CometHashAggregate
+               +- CometProject
+                  +- CometBroadcastHashJoin
+                     :- CometProject
+                     :  +- CometBroadcastHashJoin
+                     :     :- CometProject
+                     :     :  +- CometBroadcastHashJoin
+                     :     :     :- CometFilter
+                     :     :     :  +- CometNativeScan parquet 
+                     :     :     +- CometBroadcastExchange
+                     :     :        +- CometProject
+                     :     :           +- CometFilter
+                     :     :              +- CometNativeScan parquet 
+                     :     +- CometBroadcastExchange
+                     :        +- CometProject
+                     :           +- CometFilter
+                     :              +- CometNativeScan parquet 
+                     +- CometBroadcastExchange
+                        +- CometProject
+                           +- CometFilter
+                              +- CometNativeScan parquet 
+
+Comet accelerated 142 out of 142 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 8 native, 0 codegen dispatch.

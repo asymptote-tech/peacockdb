@@ -1,0 +1,80 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=2.1 MiB, rowCount=60)"
+  }
+}
+plan_id: 173340
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 5
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 114533
+      }
+      direction: Descending
+      null_ordering: NullsLast
+    }
+    query_context {
+      start_index: 1342
+      stop_index: 1349
+      line: 38
+      start_position: 9
+    }
+    expr_id: 114534
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 114535
+      }
+    }
+    query_context {
+      start_index: 1361
+      stop_index: 1375
+      line: 39
+      start_position: 9
+    }
+    expr_id: 114536
+  }
+}

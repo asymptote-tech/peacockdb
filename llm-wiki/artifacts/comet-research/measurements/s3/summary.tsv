@@ -1,0 +1,6 @@
+vm	source	best_GB_per_s	Gbit_per_s	threads	local_datetime	method	tag	note
+l40s	s3 eu-north1 (tpch-sf40/lineitem.parquet, 9,030,797,348 B)	0.917	7.33	16	2026-11-04 03:18:49 UTC	s3_throughput.py ranged GETs, 64 MiB parts	measured	64 threads 0.862; 1 thread 0.129; VM started for the run, idle otherwise
+l40s	local boot disk (NETWORK_SSD 100 GiB)	0.062	0.49	64	2026-11-04 03:29:05 UTC	s3_throughput.py --file, O_DIRECT, cache dropped	measured	0.061-0.062 at 1, 4, 16 and 64 threads: a per-disk limit, not the reader
+cpu128	s3 eu-west1 in-region (tpch-sf40/lineitem.parquet, 9,030,797,348 B)	1.164	9.31	4	2026-11-04 04:01:06 UTC	s3_throughput.py ranged GETs, 64 MiB parts	measured	16 threads 1.163; 64 threads 1.028; 1 thread 0.195; VM started for the session
+cpu128	s3 eu-north1 cross-region (same object)	0.902	7.22	16	2026-11-04 04:01:31 UTC	s3_throughput.py ranged GETs, 64 MiB parts	measured	reference row only; bulk fetch of the datasets ran at 0.449-0.572
+cpu128	local boot disk (NETWORK_SSD 100 GiB)	0.063	0.50	16	2026-11-04 04:06:05 UTC	s3_throughput.py --file, O_DIRECT, cache dropped	measured	1 thread 0.062; the VM's only disk, so data and spill were put on tmpfs

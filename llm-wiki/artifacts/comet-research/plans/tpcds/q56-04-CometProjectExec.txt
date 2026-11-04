@@ -1,0 +1,365 @@
+children {
+  children {
+    plan_id: 130693
+    native_scan {
+      common {
+        required_schema {
+          name: "i_item_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "i_color"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_rec_start_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_rec_end_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_desc"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_current_price"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_wholesale_cost"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_brand_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_brand"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_class_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_class"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_category_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_category"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manufact_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manufact"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_size"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_formulation"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_color"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_units"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_container"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manager_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_product_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          in {
+            in_value {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 235
+                stop_index: 241
+                line: 11
+                start_position: 14
+              }
+              expr_id: 81915
+            }
+            lists {
+              literal {
+                string_val: "slate"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 247
+                stop_index: 253
+                line: 11
+                start_position: 26
+              }
+              expr_id: 81916
+            }
+            lists {
+              literal {
+                string_val: "blanched"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 282
+                stop_index: 291
+                line: 12
+                start_position: 26
+              }
+              expr_id: 81917
+            }
+            lists {
+              literal {
+                string_val: "burnished"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 320
+                stop_index: 330
+                line: 13
+                start_position: 26
+              }
+              expr_id: 81918
+            }
+          }
+          query_context {
+            start_index: 243
+            stop_index: 331
+            line: 11
+            start_position: 22
+          }
+          expr_id: 81919
+        }
+        projection_vector: 1
+        projection_vector: 17
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -929637260
+    }
+  }
+  plan_id: 130795
+  filter {
+    predicate {
+      in {
+        in_value {
+          bound {
+            index: 1
+            datatype {
+              type_id: STRING
+            }
+          }
+          query_context {
+            start_index: 235
+            stop_index: 241
+            line: 11
+            start_position: 14
+          }
+          expr_id: 81920
+        }
+        lists {
+          literal {
+            string_val: "slate"
+            datatype {
+              type_id: STRING
+            }
+          }
+          query_context {
+            start_index: 247
+            stop_index: 253
+            line: 11
+            start_position: 26
+          }
+          expr_id: 81921
+        }
+        lists {
+          literal {
+            string_val: "blanched"
+            datatype {
+              type_id: STRING
+            }
+          }
+          query_context {
+            start_index: 282
+            stop_index: 291
+            line: 12
+            start_position: 26
+          }
+          expr_id: 81922
+        }
+        lists {
+          literal {
+            string_val: "burnished"
+            datatype {
+              type_id: STRING
+            }
+          }
+          query_context {
+            start_index: 320
+            stop_index: 330
+            line: 13
+            start_position: 26
+          }
+          expr_id: 81923
+        }
+      }
+      query_context {
+        start_index: 243
+        stop_index: 331
+        line: 11
+        start_position: 22
+      }
+      expr_id: 81924
+    }
+  }
+}
+plan_id: 130797
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 193
+      stop_index: 201
+      line: 9
+      start_position: 15
+    }
+    expr_id: 81925
+  }
+}

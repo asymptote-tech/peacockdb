@@ -1,0 +1,389 @@
+children {
+  children {
+    plan_id: 106376
+    native_scan {
+      common {
+        required_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "ca_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_suite_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_state"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_zip"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_country"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_location_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 171
+                stop_index: 183
+                line: 8
+                start_position: 9
+              }
+              expr_id: 67309
+            }
+          }
+          query_context {
+            start_index: 15
+            stop_index: 479
+            line: 2
+            start_position: 4
+          }
+          expr_id: 67310
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 171
+                stop_index: 183
+                line: 8
+                start_position: 9
+              }
+              expr_id: 67311
+            }
+            right {
+              literal {
+                decimal_val: "\376\f"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 436
+                stop_index: 453
+                line: 17
+                start_position: 9
+              }
+              expr_id: 67312
+            }
+          }
+          query_context {
+            start_index: 436
+            stop_index: 453
+            line: 17
+            start_position: 9
+          }
+          expr_id: 67313
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 171
+                stop_index: 183
+                line: 8
+                start_position: 9
+              }
+              expr_id: 67314
+            }
+          }
+          query_context {
+            start_index: 15
+            stop_index: 479
+            line: 2
+            start_position: 4
+          }
+          expr_id: 67315
+        }
+        projection_vector: 0
+        projection_vector: 11
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1788423938
+    }
+  }
+  plan_id: 106470
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 5
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 171
+                stop_index: 183
+                line: 8
+                start_position: 9
+              }
+              expr_id: 67316
+            }
+          }
+          query_context {
+            start_index: 15
+            stop_index: 479
+            line: 2
+            start_position: 4
+          }
+          expr_id: 67317
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 5
+                          scale: 2
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    start_index: 171
+                    stop_index: 183
+                    line: 8
+                    start_position: 9
+                  }
+                  expr_id: 67318
+                }
+                right {
+                  literal {
+                    decimal_val: "\376\f"
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 5
+                          scale: 2
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    start_index: 436
+                    stop_index: 453
+                    line: 17
+                    start_position: 9
+                  }
+                  expr_id: 67319
+                }
+              }
+              query_context {
+                start_index: 436
+                stop_index: 453
+                line: 17
+                start_position: 9
+              }
+              expr_id: 67320
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 171
+                    stop_index: 183
+                    line: 8
+                    start_position: 9
+                  }
+                  expr_id: 67321
+                }
+              }
+              query_context {
+                start_index: 15
+                stop_index: 479
+                line: 2
+                start_position: 4
+              }
+              expr_id: 67322
+            }
+          }
+        }
+      }
+      expr_id: 67323
+    }
+  }
+}
+plan_id: 106472
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 67324
+  }
+}

@@ -1,0 +1,110 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=2.5 MiB, rowCount=2.96E+4)"
+  }
+}
+plan_id: 172132
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 4
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 1279
+          stop_index: 1287
+          line: 44
+          start_position: 9
+        }
+        expr_id: 114083
+      }
+      direction: Descending
+    }
+    query_context {
+      start_index: 1270
+      stop_index: 1366
+      line: 44
+    }
+    expr_id: 114084
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1270
+          stop_index: 1366
+          line: 44
+        }
+        expr_id: 114085
+      }
+    }
+    query_context {
+      start_index: 1270
+      stop_index: 1366
+      line: 44
+    }
+    expr_id: 114086
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 2
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1205
+          stop_index: 1211
+          line: 40
+          start_position: 9
+        }
+        expr_id: 114087
+      }
+    }
+    query_context {
+      start_index: 1270
+      stop_index: 1366
+      line: 44
+    }
+    expr_id: 114088
+  }
+}

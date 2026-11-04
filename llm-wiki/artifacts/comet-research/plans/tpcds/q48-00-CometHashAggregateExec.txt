@@ -1,0 +1,62 @@
+children {
+  children {
+    plan_id: 4
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.1 KiB, rowCount=128)"
+    }
+  }
+  plan_id: 124737
+  hash_agg {
+    agg_exprs {
+      sum {
+        child {
+          unbound {
+            name: "ss_quantity"
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 12
+            stop_index: 22
+            line: 1
+            start_position: 12
+          }
+          expr_id: 78761
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 7
+        stop_index: 23
+        line: 1
+        start_position: 7
+      }
+      expr_id: 78762
+    }
+    mode: Final
+  }
+}
+plan_id: 124737
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 7
+      stop_index: 23
+      line: 1
+      start_position: 7
+    }
+    expr_id: 78763
+  }
+}

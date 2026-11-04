@@ -1,0 +1,116 @@
+children {
+  plan_id: 29
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 18
+          scale: 2
+        }
+      }
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=12.5 MiB, rowCount=2.55E+3)"
+  }
+}
+plan_id: 187163
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1993
+          stop_index: 1998
+          line: 49
+          start_position: 12
+        }
+        expr_id: 122162
+      }
+    }
+    expr_id: 122163
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 2
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1993
+          stop_index: 1998
+          line: 49
+          start_position: 12
+        }
+        expr_id: 122164
+      }
+    }
+    expr_id: 122165
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 3
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1993
+          stop_index: 1998
+          line: 49
+          start_position: 12
+        }
+        expr_id: 122166
+      }
+    }
+    expr_id: 122167
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 4
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1993
+          stop_index: 1998
+          line: 49
+          start_position: 12
+        }
+        expr_id: 122168
+      }
+    }
+    expr_id: 122169
+  }
+}

@@ -1,0 +1,333 @@
+children {
+  children {
+    plan_id: 211240
+    native_scan {
+      common {
+        required_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "ca_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_suite_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_state"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_zip"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_country"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_location_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 281
+                stop_index: 287
+                line: 9
+                start_position: 6
+              }
+              expr_id: 136071
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 136072
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 281
+                stop_index: 287
+                line: 9
+                start_position: 6
+              }
+              expr_id: 136073
+            }
+            right {
+              literal {
+                string_val: "Edgewood"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 291
+                stop_index: 300
+                line: 9
+                start_position: 16
+              }
+              expr_id: 136074
+            }
+          }
+          query_context {
+            start_index: 281
+            stop_index: 300
+            line: 9
+            start_position: 6
+          }
+          expr_id: 136075
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 281
+                stop_index: 287
+                line: 9
+                start_position: 6
+              }
+              expr_id: 136076
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 136077
+        }
+        projection_vector: 0
+        projection_vector: 6
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 249179779
+    }
+  }
+  plan_id: 211275
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 281
+                stop_index: 287
+                line: 9
+                start_position: 6
+              }
+              expr_id: 136078
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 136079
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 281
+                    stop_index: 287
+                    line: 9
+                    start_position: 6
+                  }
+                  expr_id: 136080
+                }
+                right {
+                  literal {
+                    string_val: "Edgewood"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 291
+                    stop_index: 300
+                    line: 9
+                    start_position: 16
+                  }
+                  expr_id: 136081
+                }
+              }
+              query_context {
+                start_index: 281
+                stop_index: 300
+                line: 9
+                start_position: 6
+              }
+              expr_id: 136082
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 281
+                    stop_index: 287
+                    line: 9
+                    start_position: 6
+                  }
+                  expr_id: 136083
+                }
+              }
+              query_context {
+                stop_index: 559
+                line: 1
+              }
+              expr_id: 136084
+            }
+          }
+        }
+      }
+      expr_id: 136085
+    }
+  }
+}
+plan_id: 211277
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 136086
+  }
+}

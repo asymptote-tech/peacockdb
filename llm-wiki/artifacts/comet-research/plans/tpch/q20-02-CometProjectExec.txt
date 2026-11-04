@@ -1,0 +1,264 @@
+children {
+  children {
+    plan_id: 24415
+    native_scan {
+      common {
+        required_schema {
+          name: "n_nationkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "n_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_nationkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 61
+                stop_index: 69
+                line: 5
+                start_position: 6
+              }
+              expr_id: 10516
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 10517
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 61
+                stop_index: 69
+                line: 5
+                start_position: 6
+              }
+              expr_id: 10518
+            }
+            right {
+              literal {
+                string_val: "CANADA"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 552
+                stop_index: 559
+                line: 23
+                start_position: 13
+              }
+              expr_id: 10519
+            }
+          }
+          query_context {
+            start_index: 543
+            stop_index: 559
+            line: 23
+            start_position: 4
+          }
+          expr_id: 10520
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 61
+                stop_index: 69
+                line: 5
+                start_position: 6
+              }
+              expr_id: 10521
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 10522
+        }
+        projection_vector: 0
+        projection_vector: 1
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT32
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1008369708
+    }
+  }
+  plan_id: 24503
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 61
+                stop_index: 69
+                line: 5
+                start_position: 6
+              }
+              expr_id: 10523
+            }
+          }
+          query_context {
+            stop_index: 559
+            line: 1
+          }
+          expr_id: 10524
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 61
+                    stop_index: 69
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 10525
+                }
+                right {
+                  literal {
+                    string_val: "CANADA"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 552
+                    stop_index: 559
+                    line: 23
+                    start_position: 13
+                  }
+                  expr_id: 10526
+                }
+              }
+              query_context {
+                start_index: 543
+                stop_index: 559
+                line: 23
+                start_position: 4
+              }
+              expr_id: 10527
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT32
+                    }
+                  }
+                  query_context {
+                    start_index: 61
+                    stop_index: 69
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 10528
+                }
+              }
+              query_context {
+                stop_index: 559
+                line: 1
+              }
+              expr_id: 10529
+            }
+          }
+        }
+      }
+      expr_id: 10530
+    }
+  }
+}
+plan_id: 24505
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT32
+      }
+    }
+    expr_id: 10531
+  }
+}

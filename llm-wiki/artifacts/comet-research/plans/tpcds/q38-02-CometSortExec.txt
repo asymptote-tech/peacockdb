@@ -1,0 +1,252 @@
+children {
+  plan_id: 9
+  shuffle_scan {
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: DATE
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=15.7 MiB, rowCount=4.71E+5)"
+  }
+}
+plan_id: 115895
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        caseWhen {
+          when {
+            is_not_null {
+              child {
+                bound {
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 710
+                  stop_index: 720
+                  line: 20
+                  start_position: 21
+                }
+                expr_id: 72295
+              }
+            }
+            expr_id: 72296
+          }
+          then {
+            bound {
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72297
+          }
+          else_expr {
+            literal {
+              string_val: ""
+              datatype {
+                type_id: STRING
+              }
+            }
+            expr_id: 72298
+          }
+        }
+        expr_id: 72299
+      }
+    }
+    expr_id: 72300
+  }
+  sort_orders {
+    sort_order {
+      child {
+        is_null {
+          child {
+            bound {
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72301
+          }
+        }
+        expr_id: 72302
+      }
+    }
+    expr_id: 72303
+  }
+  sort_orders {
+    sort_order {
+      child {
+        caseWhen {
+          when {
+            is_not_null {
+              child {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 710
+                  stop_index: 720
+                  line: 20
+                  start_position: 21
+                }
+                expr_id: 72304
+              }
+            }
+            expr_id: 72305
+          }
+          then {
+            bound {
+              index: 1
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72306
+          }
+          else_expr {
+            literal {
+              string_val: ""
+              datatype {
+                type_id: STRING
+              }
+            }
+            expr_id: 72307
+          }
+        }
+        expr_id: 72308
+      }
+    }
+    expr_id: 72309
+  }
+  sort_orders {
+    sort_order {
+      child {
+        is_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72310
+          }
+        }
+        expr_id: 72311
+      }
+    }
+    expr_id: 72312
+  }
+  sort_orders {
+    sort_order {
+      child {
+        caseWhen {
+          when {
+            is_not_null {
+              child {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 710
+                  stop_index: 720
+                  line: 20
+                  start_position: 21
+                }
+                expr_id: 72313
+              }
+            }
+            expr_id: 72314
+          }
+          then {
+            bound {
+              index: 2
+              datatype {
+                type_id: DATE
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72315
+          }
+          else_expr {
+            literal {
+              int_val: 0
+              datatype {
+                type_id: DATE
+              }
+            }
+            expr_id: 72316
+          }
+        }
+        expr_id: 72317
+      }
+    }
+    expr_id: 72318
+  }
+  sort_orders {
+    sort_order {
+      child {
+        is_null {
+          child {
+            bound {
+              index: 2
+              datatype {
+                type_id: DATE
+              }
+            }
+            query_context {
+              start_index: 710
+              stop_index: 720
+              line: 20
+              start_position: 21
+            }
+            expr_id: 72319
+          }
+        }
+        expr_id: 72320
+      }
+    }
+    expr_id: 72321
+  }
+}

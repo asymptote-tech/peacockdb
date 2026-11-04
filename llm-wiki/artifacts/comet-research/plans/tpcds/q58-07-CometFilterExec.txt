@@ -1,0 +1,173 @@
+children {
+  children {
+    children {
+      plan_id: 10
+      shuffle_scan {
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=843.1 KiB, rowCount=2.60E+4)"
+      }
+    }
+    plan_id: 135658
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 846
+          stop_index: 854
+          line: 32
+          start_position: 12
+        }
+        expr_id: 83705
+      }
+      agg_exprs {
+        sum {
+          child {
+            scalarFunc {
+              func: "unscaled_value"
+              args {
+                unbound {
+                  name: "cs_ext_sales_price"
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 7
+                        scale: 2
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  start_index: 846
+                  stop_index: 854
+                  line: 32
+                  start_position: 12
+                }
+                expr_id: 83706
+              }
+              return_type {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 484
+              stop_index: 506
+              line: 19
+              start_position: 10
+            }
+            expr_id: 83707
+          }
+          datatype {
+            type_id: INT64
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 484
+          stop_index: 506
+          line: 19
+          start_position: 10
+        }
+        expr_id: 83708
+      }
+      mode: Final
+    }
+  }
+  plan_id: 135658
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 846
+        stop_index: 854
+        line: 32
+        start_position: 12
+      }
+      expr_id: 83709
+    }
+    project_list {
+      scalarFunc {
+        func: "make_decimal"
+        args {
+          bound {
+            index: 1
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 484
+            stop_index: 506
+            line: 19
+            start_position: 10
+          }
+          expr_id: 83710
+        }
+        return_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 17
+              scale: 2
+            }
+          }
+        }
+        fail_on_error: true
+      }
+      query_context {
+        start_index: 484
+        stop_index: 506
+        line: 19
+        start_position: 10
+      }
+      expr_id: 83711
+    }
+  }
+}
+plan_id: 136356
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 1668
+          stop_index: 1675
+          line: 58
+          start_position: 5
+        }
+        expr_id: 84618
+      }
+    }
+    query_context {
+      start_index: 1283
+      stop_index: 2166
+      line: 49
+    }
+    expr_id: 84619
+  }
+}

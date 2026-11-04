@@ -1,0 +1,594 @@
+children {
+  children {
+    children {
+      plan_id: 126729
+      native_scan {
+        common {
+          required_schema {
+            name: "d_month_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "d_year"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "d_moy"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_date_sk"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_date_id"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_date"
+            data_type {
+              type_id: DATE
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_month_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_week_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_quarter_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_year"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_dow"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_moy"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_dom"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_qoy"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_fy_year"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_fy_quarter_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_fy_week_seq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_day_name"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_quarter_name"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_holiday"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_weekend"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_following_holiday"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_first_dom"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_last_dom"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_same_day_ly"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_same_day_lq"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_current_day"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_current_week"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_current_month"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_current_quarter"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "d_current_year"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_filters {
+            is_not_null {
+              child {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1300
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80615
+              }
+            }
+            query_context {
+              start_index: 1228
+              stop_index: 1333
+              line: 41
+              start_position: 7
+            }
+            expr_id: 80616
+          }
+          data_filters {
+            is_not_null {
+              child {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1300
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80617
+              }
+            }
+            query_context {
+              start_index: 1228
+              stop_index: 1333
+              line: 41
+              start_position: 7
+            }
+            expr_id: 80618
+          }
+          data_filters {
+            eq {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1300
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80619
+              }
+              right {
+                literal {
+                  long_val: 1998
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1332
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80620
+              }
+            }
+            query_context {
+              start_index: 1295
+              stop_index: 1307
+              line: 43
+              start_position: 14
+            }
+            expr_id: 80621
+          }
+          data_filters {
+            eq {
+              left {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1300
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80622
+              }
+              right {
+                literal {
+                  long_val: 12
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1332
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80623
+              }
+            }
+            query_context {
+              start_index: 1323
+              stop_index: 1332
+              line: 44
+              start_position: 14
+            }
+            expr_id: 80624
+          }
+          projection_vector: 3
+          projection_vector: 6
+          projection_vector: 8
+          session_timezone: "UTC"
+          source: "CometScan parquet  (unknown)"
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          allow_type_promotion: true
+          allow_timestamp_ltz_to_ntz: true
+          has_data_filters: true
+        }
+        source_key_hash: 1398853163
+      }
+    }
+    plan_id: 126736
+    filter {
+      predicate {
+        and {
+          left {
+            and {
+              left {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1300
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80625
+                  }
+                }
+                query_context {
+                  start_index: 1228
+                  stop_index: 1333
+                  line: 41
+                  start_position: 7
+                }
+                expr_id: 80626
+              }
+              right {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1300
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80627
+                  }
+                }
+                query_context {
+                  start_index: 1228
+                  stop_index: 1333
+                  line: 41
+                  start_position: 7
+                }
+                expr_id: 80628
+              }
+            }
+          }
+          right {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1300
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80629
+                  }
+                  right {
+                    literal {
+                      long_val: 1998
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1332
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80630
+                  }
+                }
+                query_context {
+                  start_index: 1295
+                  stop_index: 1307
+                  line: 43
+                  start_position: 14
+                }
+                expr_id: 80631
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1300
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80632
+                  }
+                  right {
+                    literal {
+                      long_val: 12
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 1295
+                      stop_index: 1332
+                      line: 43
+                      start_position: 14
+                    }
+                    expr_id: 80633
+                  }
+                }
+                query_context {
+                  start_index: 1323
+                  stop_index: 1332
+                  line: 44
+                  start_position: 14
+                }
+                expr_id: 80634
+              }
+            }
+          }
+        }
+        expr_id: 80635
+      }
+    }
+  }
+  plan_id: 126738
+  projection {
+    project_list {
+      add {
+        left {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1245
+            stop_index: 1255
+            line: 41
+            start_position: 24
+          }
+          expr_id: 80636
+        }
+        right {
+          literal {
+            long_val: 3
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1228
+            stop_index: 1333
+            line: 41
+            start_position: 7
+          }
+          expr_id: 80637
+        }
+        return_type {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 1245
+        stop_index: 1257
+        line: 41
+        start_position: 24
+      }
+      expr_id: 80638
+    }
+  }
+}
+plan_id: 126740
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1229
+      stop_index: 1332
+      line: 41
+      start_position: 8
+    }
+    expr_id: 80639
+  }
+}

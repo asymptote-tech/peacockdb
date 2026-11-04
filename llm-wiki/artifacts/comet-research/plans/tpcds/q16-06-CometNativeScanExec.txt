@@ -1,0 +1,264 @@
+plan_id: 63531
+native_scan {
+  common {
+    required_schema {
+      name: "cr_order_number"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returned_date_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returned_time_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_item_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_refunded_customer_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_refunded_cdemo_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_refunded_hdemo_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_refunded_addr_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returning_customer_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returning_cdemo_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returning_hdemo_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_returning_addr_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_call_center_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_catalog_page_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_ship_mode_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_warehouse_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_reason_sk"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_order_number"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_return_quantity"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_return_amount"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_return_tax"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_return_amt_inc_tax"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_fee"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_return_ship_cost"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_refunded_cash"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_reversed_charge"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_store_credit"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "cr_net_loss"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    projection_vector: 16
+    session_timezone: "UTC"
+    source: "CometScan parquet  (unknown)"
+    fields {
+      type_id: INT64
+    }
+    allow_type_promotion: true
+    allow_timestamp_ltz_to_ntz: true
+  }
+  source_key_hash: -998077456
+}

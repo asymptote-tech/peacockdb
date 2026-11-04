@@ -1,0 +1,151 @@
+children {
+  children {
+    plan_id: 4
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      fields {
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=35.3 KiB, rowCount=180)"
+    }
+  }
+  plan_id: 21986
+  hash_agg {
+    agg_exprs {
+      sum {
+        child {
+          unbound {
+            name: "l_extendedprice"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 15
+            stop_index: 29
+            line: 2
+            start_position: 8
+          }
+          expr_id: 9072
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 25
+              scale: 2
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 11
+        stop_index: 30
+        line: 2
+        start_position: 4
+      }
+      expr_id: 9073
+    }
+    mode: Final
+  }
+}
+plan_id: 21986
+projection {
+  project_list {
+    check_overflow {
+      child {
+        divide {
+          left {
+            bound {
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 25
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 11
+              stop_index: 30
+              line: 2
+              start_position: 4
+            }
+            expr_id: 9074
+          }
+          right {
+            literal {
+              decimal_val: "F"
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 2
+                    scale: 1
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 34
+              stop_index: 36
+              line: 2
+              start_position: 27
+            }
+            expr_id: 9075
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 30
+                scale: 6
+              }
+            }
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 11
+          stop_index: 36
+          line: 2
+          start_position: 4
+        }
+        expr_id: 9076
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 30
+            scale: 6
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 11
+      stop_index: 36
+      line: 2
+      start_position: 4
+    }
+    expr_id: 9077
+  }
+}

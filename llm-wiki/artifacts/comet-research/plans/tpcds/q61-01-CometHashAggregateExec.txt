@@ -1,0 +1,105 @@
+children {
+  children {
+    plan_id: 12
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.1 KiB, rowCount=128)"
+    }
+  }
+  plan_id: 143043
+  hash_agg {
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ss_ext_sales_price"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 770
+                stop_index: 787
+                line: 27
+                start_position: 14
+              }
+              expr_id: 87914
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 766
+            stop_index: 788
+            line: 27
+            start_position: 10
+          }
+          expr_id: 87915
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 766
+        stop_index: 788
+        line: 27
+        start_position: 10
+      }
+      expr_id: 87916
+    }
+    mode: Final
+  }
+}
+plan_id: 143043
+projection {
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 766
+          stop_index: 788
+          line: 27
+          start_position: 10
+        }
+        expr_id: 87917
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 766
+      stop_index: 788
+      line: 27
+      start_position: 10
+    }
+    expr_id: 87918
+  }
+}

@@ -1,0 +1,63 @@
+children {
+  plan_id: 1
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 7
+          scale: 2
+        }
+      }
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=176.7 MiB, rowCount=5.76E+6)"
+  }
+}
+plan_id: 119311
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 478
+          stop_index: 492
+          line: 12
+          start_position: 36
+        }
+        expr_id: 74834
+      }
+    }
+    expr_id: 74835
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 478
+          stop_index: 492
+          line: 12
+          start_position: 36
+        }
+        expr_id: 74836
+      }
+    }
+    expr_id: 74837
+  }
+}

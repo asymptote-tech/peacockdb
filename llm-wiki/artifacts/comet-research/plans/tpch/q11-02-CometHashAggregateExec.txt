@@ -1,0 +1,230 @@
+children {
+  children {
+    plan_id: 2
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 2
+          }
+        }
+      }
+      fields {
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=39.5 KiB, rowCount=201)"
+    }
+  }
+  plan_id: 17356
+  hash_agg {
+    agg_exprs {
+      sum {
+        child {
+          check_overflow {
+            child {
+              multiply {
+                left {
+                  unbound {
+                    name: "ps_supplycost"
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 15
+                          scale: 2
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    start_index: 270
+                    stop_index: 282
+                    line: 10
+                    start_position: 15
+                  }
+                  expr_id: 7277
+                }
+                right {
+                  cast {
+                    child {
+                      unbound {
+                        name: "ps_availqty"
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 270
+                        stop_index: 282
+                        line: 10
+                        start_position: 15
+                      }
+                      expr_id: 7278
+                    }
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 20
+                        }
+                      }
+                    }
+                    timezone: "UTC"
+                    eval_mode: ANSI
+                    is_spark4_plus: true
+                  }
+                  query_context {
+                    start_index: 270
+                    stop_index: 296
+                    line: 10
+                    start_position: 15
+                  }
+                  expr_id: 7279
+                }
+                return_type {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 36
+                      scale: 2
+                    }
+                  }
+                }
+                eval_mode: ANSI
+              }
+              query_context {
+                start_index: 270
+                stop_index: 296
+                line: 10
+                start_position: 15
+              }
+              expr_id: 7280
+            }
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 36
+                  scale: 2
+                }
+              }
+            }
+            fail_on_error: true
+          }
+          query_context {
+            start_index: 270
+            stop_index: 296
+            line: 10
+            start_position: 15
+          }
+          expr_id: 7281
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 38
+              scale: 2
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 266
+        stop_index: 297
+        line: 10
+        start_position: 11
+      }
+      expr_id: 7282
+    }
+    mode: Final
+  }
+}
+plan_id: 17356
+projection {
+  project_list {
+    check_overflow {
+      child {
+        multiply {
+          left {
+            bound {
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 38
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 266
+              stop_index: 297
+              line: 10
+              start_position: 11
+            }
+            expr_id: 7283
+          }
+          right {
+            literal {
+              decimal_val: "\002"
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 6
+                    scale: 6
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 301
+              stop_index: 308
+              line: 10
+              start_position: 46
+            }
+            expr_id: 7284
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 38
+                scale: 6
+              }
+            }
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 266
+          stop_index: 308
+          line: 10
+          start_position: 11
+        }
+        expr_id: 7285
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 6
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 266
+      stop_index: 308
+      line: 10
+      start_position: 11
+    }
+    expr_id: 7286
+  }
+}

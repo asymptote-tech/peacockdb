@@ -1,0 +1,446 @@
+children {
+  plan_id: 203990
+  native_scan {
+    common {
+      required_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_gmt_offset"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_location_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_gmt_offset"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_location_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 7
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 832
+              stop_index: 852
+              line: 32
+              start_position: 6
+            }
+            expr_id: 132936
+          }
+        }
+        query_context {
+          start_index: 417
+          stop_index: 1078
+          line: 13
+        }
+        expr_id: 132937
+      }
+      data_filters {
+        eq {
+          left {
+            bound {
+              index: 7
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 832
+              stop_index: 852
+              line: 32
+              start_position: 6
+            }
+            expr_id: 132938
+          }
+          right {
+            literal {
+              string_val: "GA"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1032
+              stop_index: 1035
+              line: 37
+              start_position: 17
+            }
+            expr_id: 132939
+          }
+        }
+        query_context {
+          start_index: 1021
+          stop_index: 1035
+          line: 37
+          start_position: 6
+        }
+        expr_id: 132940
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 832
+              stop_index: 852
+              line: 32
+              start_position: 6
+            }
+            expr_id: 132941
+          }
+        }
+        query_context {
+          start_index: 417
+          stop_index: 1078
+          line: 13
+        }
+        expr_id: 132942
+      }
+      projection_vector: 0
+      projection_vector: 2
+      projection_vector: 3
+      projection_vector: 4
+      projection_vector: 5
+      projection_vector: 6
+      projection_vector: 7
+      projection_vector: 8
+      projection_vector: 9
+      projection_vector: 10
+      projection_vector: 11
+      projection_vector: 12
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 5
+            scale: 2
+          }
+        }
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1216840818
+  }
+}
+plan_id: 204104
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              index: 7
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 832
+              stop_index: 852
+              line: 32
+              start_position: 6
+            }
+            expr_id: 132943
+          }
+        }
+        query_context {
+          start_index: 417
+          stop_index: 1078
+          line: 13
+        }
+        expr_id: 132944
+      }
+      right {
+        and {
+          left {
+            eq {
+              left {
+                bound {
+                  index: 7
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 832
+                  stop_index: 852
+                  line: 32
+                  start_position: 6
+                }
+                expr_id: 132945
+              }
+              right {
+                literal {
+                  string_val: "GA"
+                  datatype {
+                    type_id: STRING
+                  }
+                }
+                query_context {
+                  start_index: 1032
+                  stop_index: 1035
+                  line: 37
+                  start_position: 17
+                }
+                expr_id: 132946
+              }
+            }
+            query_context {
+              start_index: 1021
+              stop_index: 1035
+              line: 37
+              start_position: 6
+            }
+            expr_id: 132947
+          }
+          right {
+            is_not_null {
+              child {
+                bound {
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 832
+                  stop_index: 852
+                  line: 32
+                  start_position: 6
+                }
+                expr_id: 132948
+              }
+            }
+            query_context {
+              start_index: 417
+              stop_index: 1078
+              line: 13
+            }
+            expr_id: 132949
+          }
+        }
+      }
+    }
+    expr_id: 132950
+  }
+}

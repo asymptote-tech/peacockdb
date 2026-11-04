@@ -1,0 +1,398 @@
+children {
+  children {
+    plan_id: 171183
+    native_scan {
+      common {
+        required_schema {
+          name: "t_time_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "t_hour"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "t_minute"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "t_meal_time"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_time_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_time_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_time"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_hour"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_minute"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_second"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_am_pm"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_shift"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_sub_shift"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "t_meal_time"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          or {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 3
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1057
+                    stop_index: 1068
+                    line: 35
+                    start_position: 6
+                  }
+                  expr_id: 113764
+                }
+                right {
+                  literal {
+                    string_val: "breakfast"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1150
+                    stop_index: 1160
+                    line: 38
+                    start_position: 21
+                  }
+                  expr_id: 113765
+                }
+              }
+              query_context {
+                start_index: 1136
+                stop_index: 1160
+                line: 38
+                start_position: 7
+              }
+              expr_id: 113766
+            }
+            right {
+              eq {
+                left {
+                  bound {
+                    index: 3
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1057
+                    stop_index: 1068
+                    line: 35
+                    start_position: 6
+                  }
+                  expr_id: 113767
+                }
+                right {
+                  literal {
+                    string_val: "dinner"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1186
+                    stop_index: 1193
+                    line: 39
+                    start_position: 24
+                  }
+                  expr_id: 113768
+                }
+              }
+              query_context {
+                start_index: 1172
+                stop_index: 1193
+                line: 39
+                start_position: 10
+              }
+              expr_id: 113769
+            }
+          }
+          query_context {
+            start_index: 1136
+            stop_index: 1193
+            line: 38
+            start_position: 7
+          }
+          expr_id: 113770
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1057
+                stop_index: 1068
+                line: 35
+                start_position: 6
+              }
+              expr_id: 113771
+            }
+          }
+          query_context {
+            stop_index: 1268
+            line: 1
+          }
+          expr_id: 113772
+        }
+        projection_vector: 0
+        projection_vector: 3
+        projection_vector: 4
+        projection_vector: 9
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 2024012769
+    }
+  }
+  plan_id: 171259
+  filter {
+    predicate {
+      and {
+        left {
+          or {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 3
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1057
+                    stop_index: 1068
+                    line: 35
+                    start_position: 6
+                  }
+                  expr_id: 113773
+                }
+                right {
+                  literal {
+                    string_val: "breakfast"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1150
+                    stop_index: 1160
+                    line: 38
+                    start_position: 21
+                  }
+                  expr_id: 113774
+                }
+              }
+              query_context {
+                start_index: 1136
+                stop_index: 1160
+                line: 38
+                start_position: 7
+              }
+              expr_id: 113775
+            }
+            right {
+              eq {
+                left {
+                  bound {
+                    index: 3
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1057
+                    stop_index: 1068
+                    line: 35
+                    start_position: 6
+                  }
+                  expr_id: 113776
+                }
+                right {
+                  literal {
+                    string_val: "dinner"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 1186
+                    stop_index: 1193
+                    line: 39
+                    start_position: 24
+                  }
+                  expr_id: 113777
+                }
+              }
+              query_context {
+                start_index: 1172
+                stop_index: 1193
+                line: 39
+                start_position: 10
+              }
+              expr_id: 113778
+            }
+          }
+          query_context {
+            start_index: 1136
+            stop_index: 1193
+            line: 38
+            start_position: 7
+          }
+          expr_id: 113779
+        }
+        right {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1057
+                stop_index: 1068
+                line: 35
+                start_position: 6
+              }
+              expr_id: 113780
+            }
+          }
+          query_context {
+            stop_index: 1268
+            line: 1
+          }
+          expr_id: 113781
+        }
+      }
+      expr_id: 113782
+    }
+  }
+}
+plan_id: 171261
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 113783
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 113784
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 113785
+  }
+}

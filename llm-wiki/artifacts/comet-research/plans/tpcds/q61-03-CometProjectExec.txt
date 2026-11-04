@@ -1,0 +1,408 @@
+children {
+  children {
+    plan_id: 141405
+    native_scan {
+      common {
+        required_schema {
+          name: "i_item_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "i_category"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_rec_start_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_rec_end_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_item_desc"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_current_price"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_wholesale_cost"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_brand_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_brand"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_class_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_class"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_category_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_category"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manufact_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manufact"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_size"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_formulation"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_color"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_units"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_container"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_manager_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "i_product_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87407
+            }
+          }
+          query_context {
+            start_index: 107
+            stop_index: 1231
+            line: 4
+          }
+          expr_id: 87408
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87409
+            }
+            right {
+              literal {
+                string_val: "Jewelry"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 556
+                stop_index: 564
+                line: 20
+                start_position: 22
+              }
+              expr_id: 87410
+            }
+          }
+          query_context {
+            start_index: 543
+            stop_index: 564
+            line: 20
+            start_position: 9
+          }
+          expr_id: 87411
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87412
+            }
+          }
+          query_context {
+            start_index: 115
+            stop_index: 734
+            line: 5
+            start_position: 3
+          }
+          expr_id: 87413
+        }
+        projection_vector: 0
+        projection_vector: 12
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1913534832
+    }
+  }
+  plan_id: 141518
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 296
+                stop_index: 310
+                line: 13
+                start_position: 9
+              }
+              expr_id: 87414
+            }
+          }
+          query_context {
+            start_index: 107
+            stop_index: 1231
+            line: 4
+          }
+          expr_id: 87415
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 296
+                    stop_index: 310
+                    line: 13
+                    start_position: 9
+                  }
+                  expr_id: 87416
+                }
+                right {
+                  literal {
+                    string_val: "Jewelry"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 556
+                    stop_index: 564
+                    line: 20
+                    start_position: 22
+                  }
+                  expr_id: 87417
+                }
+              }
+              query_context {
+                start_index: 543
+                stop_index: 564
+                line: 20
+                start_position: 9
+              }
+              expr_id: 87418
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 296
+                    stop_index: 310
+                    line: 13
+                    start_position: 9
+                  }
+                  expr_id: 87419
+                }
+              }
+              query_context {
+                start_index: 115
+                stop_index: 734
+                line: 5
+                start_position: 3
+              }
+              expr_id: 87420
+            }
+          }
+        }
+      }
+      expr_id: 87421
+    }
+  }
+}
+plan_id: 141520
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 87422
+  }
+}

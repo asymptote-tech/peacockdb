@@ -1,0 +1,157 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=2.4 MiB, rowCount=6.36E+3)"
+  }
+}
+plan_id: 110111
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 68631
+      }
+    }
+    query_context {
+      start_index: 1267
+      stop_index: 1289
+      line: 36
+      start_position: 9
+    }
+    expr_id: 68632
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 68633
+      }
+    }
+    query_context {
+      start_index: 1301
+      stop_index: 1324
+      line: 37
+      start_position: 9
+    }
+    expr_id: 68634
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 2
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 68635
+      }
+    }
+    query_context {
+      start_index: 1336
+      stop_index: 1359
+      line: 38
+      start_position: 9
+    }
+    expr_id: 68636
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 3
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 68637
+      }
+      direction: Descending
+    }
+    query_context {
+      start_index: 1371
+      stop_index: 1408
+      line: 39
+      start_position: 9
+    }
+    expr_id: 68638
+  }
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          index: 4
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 7
+          stop_index: 17
+          line: 1
+          start_position: 7
+        }
+        expr_id: 68639
+      }
+    }
+    query_context {
+      start_index: 1420
+      stop_index: 1447
+      line: 40
+      start_position: 9
+    }
+    expr_id: 68640
+  }
+}

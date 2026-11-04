@@ -1,0 +1,1314 @@
+children {
+  children {
+    plan_id: 5
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.6 MiB, rowCount=1.02E+4)"
+    }
+  }
+  plan_id: 125794
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80150
+    }
+    grouping_exprs {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80151
+    }
+    grouping_exprs {
+      bound {
+        index: 2
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80152
+    }
+    grouping_exprs {
+      bound {
+        index: 3
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80153
+    }
+    grouping_exprs {
+      bound {
+        index: 4
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80154
+    }
+    grouping_exprs {
+      bound {
+        index: 5
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80155
+    }
+    grouping_exprs {
+      bound {
+        index: 6
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80156
+    }
+    grouping_exprs {
+      bound {
+        index: 7
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80157
+    }
+    grouping_exprs {
+      bound {
+        index: 8
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80158
+    }
+    grouping_exprs {
+      bound {
+        index: 9
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1474
+        stop_index: 1485
+        line: 47
+        start_position: 9
+      }
+      expr_id: 80159
+    }
+    agg_exprs {
+      sum {
+        child {
+          caseWhen {
+            when {
+              lt_eq {
+                left {
+                  subtract {
+                    left {
+                      unbound {
+                        name: "sr_returned_date_sk"
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 1474
+                        stop_index: 1485
+                        line: 47
+                        start_position: 9
+                      }
+                      expr_id: 80160
+                    }
+                    right {
+                      unbound {
+                        name: "ss_sold_date_sk"
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 1474
+                        stop_index: 1485
+                        line: 47
+                        start_position: 9
+                      }
+                      expr_id: 80161
+                    }
+                    return_type {
+                      type_id: INT64
+                    }
+                    eval_mode: ANSI
+                  }
+                  query_context {
+                    start_index: 232
+                    stop_index: 268
+                    line: 12
+                    start_position: 21
+                  }
+                  expr_id: 80162
+                }
+                right {
+                  literal {
+                    long_val: 30
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 202
+                    stop_index: 333
+                    line: 11
+                    start_position: 7
+                  }
+                  expr_id: 80163
+                }
+              }
+              query_context {
+                start_index: 232
+                stop_index: 274
+                line: 12
+                start_position: 21
+              }
+              expr_id: 80164
+            }
+            then {
+              literal {
+                int_val: 1
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 282
+                stop_index: 282
+                line: 12
+                start_position: 71
+              }
+              expr_id: 80165
+            }
+            else_expr {
+              literal {
+                int_val: 0
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 304
+                stop_index: 304
+                line: 13
+                start_position: 20
+              }
+              expr_id: 80166
+            }
+          }
+          query_context {
+            start_index: 206
+            stop_index: 319
+            line: 11
+            start_position: 11
+          }
+          expr_id: 80167
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 202
+        stop_index: 320
+        line: 11
+        start_position: 7
+      }
+      expr_id: 80168
+    }
+    agg_exprs {
+      sum {
+        child {
+          caseWhen {
+            when {
+              and {
+                left {
+                  gt {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80169
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80170
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 373
+                        stop_index: 409
+                        line: 16
+                        start_position: 21
+                      }
+                      expr_id: 80171
+                    }
+                    right {
+                      literal {
+                        long_val: 30
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 343
+                        stop_index: 546
+                        line: 15
+                        start_position: 7
+                      }
+                      expr_id: 80172
+                    }
+                  }
+                  query_context {
+                    start_index: 373
+                    stop_index: 414
+                    line: 16
+                    start_position: 21
+                  }
+                  expr_id: 80173
+                }
+                right {
+                  lt_eq {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80174
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80175
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 442
+                        stop_index: 478
+                        line: 17
+                        start_position: 25
+                      }
+                      expr_id: 80176
+                    }
+                    right {
+                      literal {
+                        long_val: 60
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 343
+                        stop_index: 546
+                        line: 15
+                        start_position: 7
+                      }
+                      expr_id: 80177
+                    }
+                  }
+                  query_context {
+                    start_index: 442
+                    stop_index: 484
+                    line: 17
+                    start_position: 25
+                  }
+                  expr_id: 80178
+                }
+              }
+              query_context {
+                start_index: 372
+                stop_index: 485
+                line: 16
+                start_position: 20
+              }
+              expr_id: 80179
+            }
+            then {
+              literal {
+                int_val: 1
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 492
+                stop_index: 492
+                line: 17
+                start_position: 75
+              }
+              expr_id: 80180
+            }
+            else_expr {
+              literal {
+                int_val: 0
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 514
+                stop_index: 514
+                line: 18
+                start_position: 20
+              }
+              expr_id: 80181
+            }
+          }
+          query_context {
+            start_index: 347
+            stop_index: 529
+            line: 15
+            start_position: 11
+          }
+          expr_id: 80182
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 343
+        stop_index: 530
+        line: 15
+        start_position: 7
+      }
+      expr_id: 80183
+    }
+    agg_exprs {
+      sum {
+        child {
+          caseWhen {
+            when {
+              and {
+                left {
+                  gt {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80184
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80185
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 586
+                        stop_index: 622
+                        line: 21
+                        start_position: 21
+                      }
+                      expr_id: 80186
+                    }
+                    right {
+                      literal {
+                        long_val: 60
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 556
+                        stop_index: 759
+                        line: 20
+                        start_position: 7
+                      }
+                      expr_id: 80187
+                    }
+                  }
+                  query_context {
+                    start_index: 586
+                    stop_index: 627
+                    line: 21
+                    start_position: 21
+                  }
+                  expr_id: 80188
+                }
+                right {
+                  lt_eq {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80189
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80190
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 655
+                        stop_index: 691
+                        line: 22
+                        start_position: 25
+                      }
+                      expr_id: 80191
+                    }
+                    right {
+                      literal {
+                        long_val: 90
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 556
+                        stop_index: 759
+                        line: 20
+                        start_position: 7
+                      }
+                      expr_id: 80192
+                    }
+                  }
+                  query_context {
+                    start_index: 655
+                    stop_index: 697
+                    line: 22
+                    start_position: 25
+                  }
+                  expr_id: 80193
+                }
+              }
+              query_context {
+                start_index: 585
+                stop_index: 698
+                line: 21
+                start_position: 20
+              }
+              expr_id: 80194
+            }
+            then {
+              literal {
+                int_val: 1
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 705
+                stop_index: 705
+                line: 22
+                start_position: 75
+              }
+              expr_id: 80195
+            }
+            else_expr {
+              literal {
+                int_val: 0
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 727
+                stop_index: 727
+                line: 23
+                start_position: 20
+              }
+              expr_id: 80196
+            }
+          }
+          query_context {
+            start_index: 560
+            stop_index: 742
+            line: 20
+            start_position: 11
+          }
+          expr_id: 80197
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 556
+        stop_index: 743
+        line: 20
+        start_position: 7
+      }
+      expr_id: 80198
+    }
+    agg_exprs {
+      sum {
+        child {
+          caseWhen {
+            when {
+              and {
+                left {
+                  gt {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80199
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80200
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 799
+                        stop_index: 835
+                        line: 26
+                        start_position: 21
+                      }
+                      expr_id: 80201
+                    }
+                    right {
+                      literal {
+                        long_val: 90
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 769
+                        stop_index: 974
+                        line: 25
+                        start_position: 7
+                      }
+                      expr_id: 80202
+                    }
+                  }
+                  query_context {
+                    start_index: 799
+                    stop_index: 840
+                    line: 26
+                    start_position: 21
+                  }
+                  expr_id: 80203
+                }
+                right {
+                  lt_eq {
+                    left {
+                      subtract {
+                        left {
+                          unbound {
+                            name: "sr_returned_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80204
+                        }
+                        right {
+                          unbound {
+                            name: "ss_sold_date_sk"
+                            datatype {
+                              type_id: INT64
+                            }
+                          }
+                          query_context {
+                            start_index: 1474
+                            stop_index: 1485
+                            line: 47
+                            start_position: 9
+                          }
+                          expr_id: 80205
+                        }
+                        return_type {
+                          type_id: INT64
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 868
+                        stop_index: 904
+                        line: 27
+                        start_position: 25
+                      }
+                      expr_id: 80206
+                    }
+                    right {
+                      literal {
+                        long_val: 120
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 769
+                        stop_index: 974
+                        line: 25
+                        start_position: 7
+                      }
+                      expr_id: 80207
+                    }
+                  }
+                  query_context {
+                    start_index: 868
+                    stop_index: 911
+                    line: 27
+                    start_position: 25
+                  }
+                  expr_id: 80208
+                }
+              }
+              query_context {
+                start_index: 798
+                stop_index: 912
+                line: 26
+                start_position: 20
+              }
+              expr_id: 80209
+            }
+            then {
+              literal {
+                int_val: 1
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 919
+                stop_index: 919
+                line: 27
+                start_position: 76
+              }
+              expr_id: 80210
+            }
+            else_expr {
+              literal {
+                int_val: 0
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 941
+                stop_index: 941
+                line: 28
+                start_position: 20
+              }
+              expr_id: 80211
+            }
+          }
+          query_context {
+            start_index: 773
+            stop_index: 956
+            line: 25
+            start_position: 11
+          }
+          expr_id: 80212
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 769
+        stop_index: 957
+        line: 25
+        start_position: 7
+      }
+      expr_id: 80213
+    }
+    agg_exprs {
+      sum {
+        child {
+          caseWhen {
+            when {
+              gt {
+                left {
+                  subtract {
+                    left {
+                      unbound {
+                        name: "sr_returned_date_sk"
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 1474
+                        stop_index: 1485
+                        line: 47
+                        start_position: 9
+                      }
+                      expr_id: 80214
+                    }
+                    right {
+                      unbound {
+                        name: "ss_sold_date_sk"
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 1474
+                        stop_index: 1485
+                        line: 47
+                        start_position: 9
+                      }
+                      expr_id: 80215
+                    }
+                    return_type {
+                      type_id: INT64
+                    }
+                    eval_mode: ANSI
+                  }
+                  query_context {
+                    start_index: 1014
+                    stop_index: 1050
+                    line: 31
+                    start_position: 21
+                  }
+                  expr_id: 80216
+                }
+                right {
+                  literal {
+                    long_val: 120
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 984
+                    stop_index: 1117
+                    line: 30
+                    start_position: 7
+                  }
+                  expr_id: 80217
+                }
+              }
+              query_context {
+                start_index: 1014
+                stop_index: 1056
+                line: 31
+                start_position: 21
+              }
+              expr_id: 80218
+            }
+            then {
+              literal {
+                int_val: 1
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 1064
+                stop_index: 1064
+                line: 31
+                start_position: 71
+              }
+              expr_id: 80219
+            }
+            else_expr {
+              literal {
+                int_val: 0
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 1086
+                stop_index: 1086
+                line: 32
+                start_position: 20
+              }
+              expr_id: 80220
+            }
+          }
+          query_context {
+            start_index: 988
+            stop_index: 1101
+            line: 30
+            start_position: 11
+          }
+          expr_id: 80221
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 984
+        stop_index: 1102
+        line: 30
+        start_position: 7
+      }
+      expr_id: 80222
+    }
+    mode: Final
+  }
+}
+plan_id: 125794
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80223
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80224
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80225
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80226
+  }
+  project_list {
+    bound {
+      index: 4
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80227
+  }
+  project_list {
+    bound {
+      index: 5
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80228
+  }
+  project_list {
+    bound {
+      index: 6
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80229
+  }
+  project_list {
+    bound {
+      index: 7
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80230
+  }
+  project_list {
+    bound {
+      index: 8
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80231
+  }
+  project_list {
+    bound {
+      index: 9
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1474
+      stop_index: 1485
+      line: 47
+      start_position: 9
+    }
+    expr_id: 80232
+  }
+  project_list {
+    bound {
+      index: 10
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 202
+      stop_index: 320
+      line: 11
+      start_position: 7
+    }
+    expr_id: 80233
+  }
+  project_list {
+    bound {
+      index: 11
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 343
+      stop_index: 530
+      line: 15
+      start_position: 7
+    }
+    expr_id: 80234
+  }
+  project_list {
+    bound {
+      index: 12
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 556
+      stop_index: 743
+      line: 20
+      start_position: 7
+    }
+    expr_id: 80235
+  }
+  project_list {
+    bound {
+      index: 13
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 769
+      stop_index: 957
+      line: 25
+      start_position: 7
+    }
+    expr_id: 80236
+  }
+  project_list {
+    bound {
+      index: 14
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 984
+      stop_index: 1102
+      line: 30
+      start_position: 7
+    }
+    expr_id: 80237
+  }
+}

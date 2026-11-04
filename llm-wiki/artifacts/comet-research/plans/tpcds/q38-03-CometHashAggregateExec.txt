@@ -1,0 +1,63 @@
+children {
+  plan_id: 8
+  shuffle_scan {
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: STRING
+    }
+    fields {
+      type_id: DATE
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=16.6 MiB, rowCount=5.06E+5)"
+  }
+}
+plan_id: 114818
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 710
+      stop_index: 720
+      line: 20
+      start_position: 21
+    }
+    expr_id: 70570
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 710
+      stop_index: 720
+      line: 20
+      start_position: 21
+    }
+    expr_id: 70571
+  }
+  grouping_exprs {
+    bound {
+      index: 2
+      datatype {
+        type_id: DATE
+      }
+    }
+    query_context {
+      start_index: 710
+      stop_index: 720
+      line: 20
+      start_position: 21
+    }
+    expr_id: 70572
+  }
+  mode: Final
+}

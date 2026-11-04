@@ -164,12 +164,25 @@ the wiki. shad-gpu stays as it is, since it has no Docker.
 ## Chain M (base: master)
 
 Should peacockdb become a GPU backend for Apache Comet, and how. One research task, run in
-workspace alpha alongside chain L. It drives the H100 and the CPU VM through the `nebius` CLI
-directly (new-hosts has not landed), stops only VMs it started, and keeps to its VM-hour caps
-(CPU VM 6 h, H100 1 h, L40S 1 h). Every git write and the PR are the coordinator's.
+workspace alpha on dev alongside chain L. It drives the CPU VM through the `nebius` CLI
+directly (new-hosts has not landed), never touches the H100, force-stops every VM it used, and
+keeps to its VM-hour caps (CPU VM 2 h, L40S 1 h). Every git write and the PR are the coordinator's.
 
-### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: approved to build
+- **Read the plan's Global Constraints first** (`comet-research-impl.md`). They override the
+  standing GPU-host rules for this chain.
+- **Checkpoints.** A developer report naming "report a checkpoint `<msg>`" is a checkpoint:
+  commit it with that message, push, and dispatch the developer at the next step. Only Task 6
+  Step 5 is green; then do Task 6 Step 6 (signoff, `done`, commit, push, PR against master). No
+  `reviewing`, no reviewer, no completeness pass, no CI wait.
+- **VMs.** Pre-start none. Once `llm-wiki/artifacts/comet-research/scripts/vm.sh` exists, run
+  `vm.sh stop-used` at startup when no dispatch is live, after any dispatch that ends without a
+  report, and before every exit. It replaces `gpu-host.sh stop --force` for this chain, and
+  covers the L40S. On exit 75, retry `vm.sh <vm> use` every 15 minutes for at most 2 hours, then
+  tell the developer the experiment is skipped. Never stall on it.
+- **Never exit voluntarily at a checkpoint**, only with no VM in use and when the window forces it.
+
+### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: done — PR #194
 
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
-three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, the alpha design.
+two VMs (L40S, CPU VM in-region), Comet on 1 × 128 cores and a cost model; on a go, the alpha design.

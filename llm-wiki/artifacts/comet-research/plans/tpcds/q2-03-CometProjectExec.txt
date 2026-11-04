@@ -1,0 +1,1214 @@
+children {
+  children {
+    children {
+      children {
+        plan_id: 5
+        shuffle_scan {
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          fields {
+            type_id: INT64
+          }
+          source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=377.5 KiB, rowCount=773)"
+        }
+      }
+      plan_id: 2880
+      hash_agg {
+        grouping_exprs {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1408
+            stop_index: 1417
+            line: 44
+            start_position: 12
+          }
+          expr_id: 1466
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1467
+                        }
+                        right {
+                          literal {
+                            string_val: "Sunday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 405
+                            stop_index: 412
+                            line: 14
+                            start_position: 35
+                          }
+                          expr_id: 1468
+                        }
+                      }
+                      query_context {
+                        start_index: 394
+                        stop_index: 412
+                        line: 14
+                        start_position: 24
+                      }
+                      expr_id: 1469
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1470
+                    }
+                  }
+                  query_context {
+                    start_index: 365
+                    stop_index: 476
+                    line: 13
+                    start_position: 14
+                  }
+                  expr_id: 1471
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 361
+                stop_index: 477
+                line: 13
+                start_position: 10
+              }
+              expr_id: 1472
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 361
+            stop_index: 477
+            line: 13
+            start_position: 10
+          }
+          expr_id: 1473
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1474
+                        }
+                        right {
+                          literal {
+                            string_val: "Monday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 544
+                            stop_index: 551
+                            line: 18
+                            start_position: 35
+                          }
+                          expr_id: 1475
+                        }
+                      }
+                      query_context {
+                        start_index: 533
+                        stop_index: 551
+                        line: 18
+                        start_position: 24
+                      }
+                      expr_id: 1476
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1477
+                    }
+                  }
+                  query_context {
+                    start_index: 504
+                    stop_index: 615
+                    line: 17
+                    start_position: 14
+                  }
+                  expr_id: 1478
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 500
+                stop_index: 616
+                line: 17
+                start_position: 10
+              }
+              expr_id: 1479
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 500
+            stop_index: 616
+            line: 17
+            start_position: 10
+          }
+          expr_id: 1480
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1481
+                        }
+                        right {
+                          literal {
+                            string_val: "Tuesday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 683
+                            stop_index: 691
+                            line: 22
+                            start_position: 35
+                          }
+                          expr_id: 1482
+                        }
+                      }
+                      query_context {
+                        start_index: 672
+                        stop_index: 691
+                        line: 22
+                        start_position: 24
+                      }
+                      expr_id: 1483
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1484
+                    }
+                  }
+                  query_context {
+                    start_index: 643
+                    stop_index: 755
+                    line: 21
+                    start_position: 14
+                  }
+                  expr_id: 1485
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 639
+                stop_index: 756
+                line: 21
+                start_position: 10
+              }
+              expr_id: 1486
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 639
+            stop_index: 756
+            line: 21
+            start_position: 10
+          }
+          expr_id: 1487
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1488
+                        }
+                        right {
+                          literal {
+                            string_val: "Wednesday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 823
+                            stop_index: 833
+                            line: 26
+                            start_position: 35
+                          }
+                          expr_id: 1489
+                        }
+                      }
+                      query_context {
+                        start_index: 812
+                        stop_index: 833
+                        line: 26
+                        start_position: 24
+                      }
+                      expr_id: 1490
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1491
+                    }
+                  }
+                  query_context {
+                    start_index: 783
+                    stop_index: 897
+                    line: 25
+                    start_position: 14
+                  }
+                  expr_id: 1492
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 779
+                stop_index: 898
+                line: 25
+                start_position: 10
+              }
+              expr_id: 1493
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 779
+            stop_index: 898
+            line: 25
+            start_position: 10
+          }
+          expr_id: 1494
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1495
+                        }
+                        right {
+                          literal {
+                            string_val: "Thursday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 965
+                            stop_index: 974
+                            line: 30
+                            start_position: 35
+                          }
+                          expr_id: 1496
+                        }
+                      }
+                      query_context {
+                        start_index: 954
+                        stop_index: 974
+                        line: 30
+                        start_position: 24
+                      }
+                      expr_id: 1497
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1498
+                    }
+                  }
+                  query_context {
+                    start_index: 925
+                    stop_index: 1038
+                    line: 29
+                    start_position: 14
+                  }
+                  expr_id: 1499
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 921
+                stop_index: 1039
+                line: 29
+                start_position: 10
+              }
+              expr_id: 1500
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 921
+            stop_index: 1039
+            line: 29
+            start_position: 10
+          }
+          expr_id: 1501
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1502
+                        }
+                        right {
+                          literal {
+                            string_val: "Friday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1106
+                            stop_index: 1113
+                            line: 34
+                            start_position: 35
+                          }
+                          expr_id: 1503
+                        }
+                      }
+                      query_context {
+                        start_index: 1095
+                        stop_index: 1113
+                        line: 34
+                        start_position: 24
+                      }
+                      expr_id: 1504
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1505
+                    }
+                  }
+                  query_context {
+                    start_index: 1066
+                    stop_index: 1177
+                    line: 33
+                    start_position: 14
+                  }
+                  expr_id: 1506
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1062
+                stop_index: 1178
+                line: 33
+                start_position: 10
+              }
+              expr_id: 1507
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 1062
+            stop_index: 1178
+            line: 33
+            start_position: 10
+          }
+          expr_id: 1508
+        }
+        agg_exprs {
+          sum {
+            child {
+              scalarFunc {
+                func: "unscaled_value"
+                args {
+                  caseWhen {
+                    when {
+                      eq {
+                        left {
+                          unbound {
+                            name: "d_day_name"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1408
+                            stop_index: 1417
+                            line: 44
+                            start_position: 12
+                          }
+                          expr_id: 1509
+                        }
+                        right {
+                          literal {
+                            string_val: "Saturday"
+                            datatype {
+                              type_id: STRING
+                            }
+                          }
+                          query_context {
+                            start_index: 1245
+                            stop_index: 1254
+                            line: 38
+                            start_position: 35
+                          }
+                          expr_id: 1510
+                        }
+                      }
+                      query_context {
+                        start_index: 1234
+                        stop_index: 1254
+                        line: 38
+                        start_position: 24
+                      }
+                      expr_id: 1511
+                    }
+                    then {
+                      unbound {
+                        name: "sales_price"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 7
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 1339
+                        stop_index: 1342
+                        line: 41
+                        start_position: 8
+                      }
+                      expr_id: 1512
+                    }
+                  }
+                  query_context {
+                    start_index: 1205
+                    stop_index: 1318
+                    line: 37
+                    start_position: 14
+                  }
+                  expr_id: 1513
+                }
+                return_type {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1201
+                stop_index: 1319
+                line: 37
+                start_position: 10
+              }
+              expr_id: 1514
+            }
+            datatype {
+              type_id: INT64
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 1201
+            stop_index: 1319
+            line: 37
+            start_position: 10
+          }
+          expr_id: 1515
+        }
+        mode: Final
+      }
+    }
+    plan_id: 2880
+    projection {
+      project_list {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1408
+          stop_index: 1417
+          line: 44
+          start_position: 12
+        }
+        expr_id: 1516
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 361
+              stop_index: 477
+              line: 13
+              start_position: 10
+            }
+            expr_id: 1517
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 361
+          stop_index: 477
+          line: 13
+          start_position: 10
+        }
+        expr_id: 1518
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 500
+              stop_index: 616
+              line: 17
+              start_position: 10
+            }
+            expr_id: 1519
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 500
+          stop_index: 616
+          line: 17
+          start_position: 10
+        }
+        expr_id: 1520
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 3
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 639
+              stop_index: 756
+              line: 21
+              start_position: 10
+            }
+            expr_id: 1521
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 639
+          stop_index: 756
+          line: 21
+          start_position: 10
+        }
+        expr_id: 1522
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 4
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 779
+              stop_index: 898
+              line: 25
+              start_position: 10
+            }
+            expr_id: 1523
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 779
+          stop_index: 898
+          line: 25
+          start_position: 10
+        }
+        expr_id: 1524
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 5
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 921
+              stop_index: 1039
+              line: 29
+              start_position: 10
+            }
+            expr_id: 1525
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 921
+          stop_index: 1039
+          line: 29
+          start_position: 10
+        }
+        expr_id: 1526
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 6
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 1062
+              stop_index: 1178
+              line: 33
+              start_position: 10
+            }
+            expr_id: 1527
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 1062
+          stop_index: 1178
+          line: 33
+          start_position: 10
+        }
+        expr_id: 1528
+      }
+      project_list {
+        scalarFunc {
+          func: "make_decimal"
+          args {
+            bound {
+              index: 7
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 1201
+              stop_index: 1319
+              line: 37
+              start_position: 10
+            }
+            expr_id: 1529
+          }
+          return_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 1201
+          stop_index: 1319
+          line: 37
+          start_position: 10
+        }
+        expr_id: 1530
+      }
+    }
+  }
+  children {
+    plan_id: 3
+    scan {
+      fields {
+        type_id: INT64
+      }
+      source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=675.0 B, rowCount=365)"
+    }
+  }
+  plan_id: 3159
+  hash_join {
+    left_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1408
+        stop_index: 1417
+        line: 44
+        start_position: 12
+      }
+      expr_id: 1618
+    }
+    right_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 2421
+        stop_index: 2439
+        line: 76
+        start_position: 9
+      }
+      expr_id: 1619
+    }
+    build_side: BuildRight
+  }
+}
+plan_id: 3161
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1408
+      stop_index: 1417
+      line: 44
+      start_position: 12
+    }
+    expr_id: 1620
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1621
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1622
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1623
+  }
+  project_list {
+    bound {
+      index: 4
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1624
+  }
+  project_list {
+    bound {
+      index: 5
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1625
+  }
+  project_list {
+    bound {
+      index: 6
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1626
+  }
+  project_list {
+    bound {
+      index: 7
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 1627
+  }
+}

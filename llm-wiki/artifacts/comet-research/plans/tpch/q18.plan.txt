@@ -1,0 +1,551 @@
+== Physical Plan ==
+AdaptiveSparkPlan (81)
++- == Final Plan ==
+   ResultQueryStage (53)
+   +- * CometColumnarToRow (52)
+      +- CometTakeOrderedAndProject (51)
+         +- CometHashAggregate (50)
+            +- CometHashAggregate (49)
+               +- CometProject (48)
+                  +- CometSortMergeJoin (47)
+                     :- CometSort (32)
+                     :  +- AQEShuffleRead (31)
+                     :     +- ShuffleQueryStage (30), Statistics(sizeInBytes=24.0 MiB, rowCount=2.58E+3)
+                     :        +- CometExchange (29)
+                     :           +- CometProject (28)
+                     :              +- CometSortMergeJoin (27)
+                     :                 :- CometSort (6)
+                     :                 :  +- AQEShuffleRead (5)
+                     :                 :     +- ShuffleQueryStage (4), Statistics(sizeInBytes=194.6 MiB, rowCount=6.00E+6)
+                     :                 :        +- CometExchange (3)
+                     :                 :           +- CometFilter (2)
+                     :                 :              +- CometNativeScan parquet  (1)
+                     :                 +- CometSort (26)
+                     :                    +- AQEShuffleRead (25)
+                     :                       +- ShuffleQueryStage (24), Statistics(sizeInBytes=50.3 MiB, rowCount=2.58E+3)
+                     :                          +- CometExchange (23)
+                     :                             +- CometSortMergeJoin (22)
+                     :                                :- CometSort (12)
+                     :                                :  +- AQEShuffleRead (11)
+                     :                                :     +- ShuffleQueryStage (10), Statistics(sizeInBytes=2.0 GiB, rowCount=6.00E+7)
+                     :                                :        +- CometExchange (9)
+                     :                                :           +- CometFilter (8)
+                     :                                :              +- CometNativeScan parquet  (7)
+                     :                                +- CometSort (21)
+                     :                                   +- CometProject (20)
+                     :                                      +- CometFilter (19)
+                     :                                         +- CometHashAggregate (18)
+                     :                                            +- AQEShuffleRead (17)
+                     :                                               +- ShuffleQueryStage (16), Statistics(sizeInBytes=4.7 GiB, rowCount=1.80E+8)
+                     :                                                  +- CometExchange (15)
+                     :                                                     +- CometHashAggregate (14)
+                     :                                                        +- CometNativeScan parquet  (13)
+                     +- CometSortMergeJoin (46)
+                        :- CometSort (38)
+                        :  +- AQEShuffleRead (37)
+                        :     +- ShuffleQueryStage (36), Statistics(sizeInBytes=5.4 GiB, rowCount=2.40E+8)
+                        :        +- CometExchange (35)
+                        :           +- CometFilter (34)
+                        :              +- CometNativeScan parquet  (33)
+                        +- CometSort (45)
+                           +- CometProject (44)
+                              +- CometFilter (43)
+                                 +- CometHashAggregate (42)
+                                    +- AQEShuffleRead (41)
+                                       +- ShuffleQueryStage (40), Statistics(sizeInBytes=4.7 GiB, rowCount=1.80E+8)
+                                          +- ReusedExchange (39)
++- == Initial Plan ==
+   CometTakeOrderedAndProject (80)
+   +- CometHashAggregate (79)
+      +- CometHashAggregate (78)
+         +- CometProject (77)
+            +- CometSortMergeJoin (76)
+               :- CometSort (66)
+               :  +- CometExchange (65)
+               :     +- CometProject (64)
+               :        +- CometSortMergeJoin (63)
+               :           :- CometSort (54)
+               :           :  +- CometExchange (3)
+               :           :     +- CometFilter (2)
+               :           :        +- CometNativeScan parquet  (1)
+               :           +- CometSort (62)
+               :              +- CometExchange (61)
+               :                 +- CometSortMergeJoin (60)
+               :                    :- CometSort (55)
+               :                    :  +- CometExchange (9)
+               :                    :     +- CometFilter (8)
+               :                    :        +- CometNativeScan parquet  (7)
+               :                    +- CometSort (59)
+               :                       +- CometProject (58)
+               :                          +- CometFilter (57)
+               :                             +- CometHashAggregate (56)
+               :                                +- CometExchange (15)
+               :                                   +- CometHashAggregate (14)
+               :                                      +- CometNativeScan parquet  (13)
+               +- CometSortMergeJoin (75)
+                  :- CometSort (67)
+                  :  +- CometExchange (35)
+                  :     +- CometFilter (34)
+                  :        +- CometNativeScan parquet  (33)
+                  +- CometSort (74)
+                     +- CometProject (73)
+                        +- CometFilter (72)
+                           +- CometHashAggregate (71)
+                              +- CometExchange (70)
+                                 +- CometHashAggregate (69)
+                                    +- CometNativeScan parquet  (68)
+
+
+(1) CometNativeScan parquet 
+Output [2]: [c_custkey#0L, c_name#1]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/customer.parquet]
+PushedFilters: [IsNotNull(c_custkey)]
+ReadSchema: struct<c_custkey:bigint,c_name:string>
+
+(2) CometFilter
+Input [2]: [c_custkey#0L, c_name#1]
+Condition : isnotnull(c_custkey#0L)
+
+(3) CometExchange
+Input [2]: [c_custkey#0L, c_name#1]
+Arguments: hashpartitioning(c_custkey#0L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22433]
+
+(4) ShuffleQueryStage
+Output [2]: [c_custkey#0L, c_name#1]
+Arguments: 0
+
+(5) AQEShuffleRead
+Input [2]: [c_custkey#0L, c_name#1]
+Arguments: coalesced
+
+(6) CometSort
+Input [2]: [c_custkey#0L, c_name#1]
+Arguments: [c_custkey#0L, c_name#1], [c_custkey#0L ASC NULLS FIRST]
+
+(7) CometNativeScan parquet 
+Output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/orders.parquet]
+PushedFilters: [IsNotNull(o_custkey), IsNotNull(o_orderkey)]
+ReadSchema: struct<o_orderkey:bigint,o_custkey:bigint,o_totalprice:decimal(15,2),o_orderdate:date>
+
+(8) CometFilter
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Condition : (isnotnull(o_custkey#29L) AND isnotnull(o_orderkey#28L))
+
+(9) CometExchange
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: hashpartitioning(o_orderkey#28L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22438]
+
+(10) ShuffleQueryStage
+Output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: 1
+
+(11) AQEShuffleRead
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: coalesced
+
+(12) CometSort
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32], [o_orderkey#28L ASC NULLS FIRST]
+
+(13) CometNativeScan parquet 
+Output [2]: [l_orderkey#390L, l_quantity#394]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/lineitem.parquet]
+ReadSchema: struct<l_orderkey:bigint,l_quantity:decimal(15,2)>
+
+(14) CometHashAggregate
+Input [2]: [l_orderkey#390L, l_quantity#394]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [partial_sum(l_quantity#394)]
+
+(15) CometExchange
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: hashpartitioning(l_orderkey#390L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22442]
+
+(16) ShuffleQueryStage
+Output [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: 2
+
+(17) AQEShuffleRead
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: coalesced
+
+(18) CometHashAggregate
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [sum(l_quantity#394)]
+
+(19) CometFilter
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Condition : (isnotnull(sum(l_quantity)#389) AND (sum(l_quantity)#389 > 300.00))
+
+(20) CometProject
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Arguments: [l_orderkey#390L], [l_orderkey#390L]
+
+(21) CometSort
+Input [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#390L], [l_orderkey#390L ASC NULLS FIRST]
+
+(22) CometSortMergeJoin
+Left output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Right output [1]: [l_orderkey#390L]
+Arguments: [o_orderkey#28L], [l_orderkey#390L], LeftSemi
+
+(23) CometExchange
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: hashpartitioning(o_custkey#29L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=23265]
+
+(24) ShuffleQueryStage
+Output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: 5
+
+(25) AQEShuffleRead
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: coalesced
+
+(26) CometSort
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32], [o_custkey#29L ASC NULLS FIRST]
+
+(27) CometSortMergeJoin
+Left output [2]: [c_custkey#0L, c_name#1]
+Right output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L], [o_custkey#29L], Inner
+
+(28) CometProject
+Input [6]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32], [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+
+(29) CometExchange
+Input [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: hashpartitioning(o_orderkey#28L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=23610]
+
+(30) ShuffleQueryStage
+Output [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: 6
+
+(31) AQEShuffleRead
+Input [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: coalesced
+
+(32) CometSort
+Input [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32], [o_orderkey#28L ASC NULLS FIRST]
+
+(33) CometNativeScan parquet 
+Output [2]: [l_orderkey#8L, l_quantity#12]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/lineitem.parquet]
+PushedFilters: [IsNotNull(l_orderkey)]
+ReadSchema: struct<l_orderkey:bigint,l_quantity:decimal(15,2)>
+
+(34) CometFilter
+Input [2]: [l_orderkey#8L, l_quantity#12]
+Condition : isnotnull(l_orderkey#8L)
+
+(35) CometExchange
+Input [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: hashpartitioning(l_orderkey#8L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22456]
+
+(36) ShuffleQueryStage
+Output [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: 3
+
+(37) AQEShuffleRead
+Input [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: coalesced
+
+(38) CometSort
+Input [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: [l_orderkey#8L, l_quantity#12], [l_orderkey#8L ASC NULLS FIRST]
+
+(39) ReusedExchange [Reuses operator id: 15]
+Output [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+
+(40) ShuffleQueryStage
+Output [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: 4
+
+(41) AQEShuffleRead
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: coalesced
+
+(42) CometHashAggregate
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [sum(l_quantity#394)]
+
+(43) CometFilter
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Condition : (isnotnull(sum(l_quantity)#389) AND (sum(l_quantity)#389 > 300.00))
+
+(44) CometProject
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Arguments: [l_orderkey#390L], [l_orderkey#390L]
+
+(45) CometSort
+Input [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#390L], [l_orderkey#390L ASC NULLS FIRST]
+
+(46) CometSortMergeJoin
+Left output [2]: [l_orderkey#8L, l_quantity#12]
+Right output [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#8L], [l_orderkey#390L], LeftSemi
+
+(47) CometSortMergeJoin
+Left output [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Right output [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: [o_orderkey#28L], [l_orderkey#8L], Inner
+
+(48) CometProject
+Input [7]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_orderkey#8L, l_quantity#12]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12], [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12]
+
+(49) CometHashAggregate
+Input [6]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12]
+Keys [5]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31]
+Functions [1]: [partial_sum(l_quantity#12)]
+
+(50) CometHashAggregate
+Input [7]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum#410, isEmpty#411]
+Keys [5]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31]
+Functions [1]: [sum(l_quantity#12)]
+
+(51) CometTakeOrderedAndProject
+Input [6]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[o_totalprice#31 DESC NULLS LAST,o_orderdate#32 ASC NULLS FIRST], output=[c_name#1,c_custkey#0L,o_orderkey#28L,o_orderdate#32,o_totalprice#31,sum(l_quantity)#407]), [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407], 100, 0, [o_totalprice#31 DESC NULLS LAST, o_orderdate#32 ASC NULLS FIRST], [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+
+(52) CometColumnarToRow [codegen id : 1]
+Input [6]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+
+(53) ResultQueryStage
+Output [6]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+Arguments: 7
+
+(54) CometSort
+Input [2]: [c_custkey#0L, c_name#1]
+Arguments: [c_custkey#0L, c_name#1], [c_custkey#0L ASC NULLS FIRST]
+
+(55) CometSort
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32], [o_orderkey#28L ASC NULLS FIRST]
+
+(56) CometHashAggregate
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [sum(l_quantity#394)]
+
+(57) CometFilter
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Condition : (isnotnull(sum(l_quantity)#389) AND (sum(l_quantity)#389 > 300.00))
+
+(58) CometProject
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Arguments: [l_orderkey#390L], [l_orderkey#390L]
+
+(59) CometSort
+Input [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#390L], [l_orderkey#390L ASC NULLS FIRST]
+
+(60) CometSortMergeJoin
+Left output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Right output [1]: [l_orderkey#390L]
+Arguments: [o_orderkey#28L], [l_orderkey#390L], LeftSemi
+
+(61) CometExchange
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: hashpartitioning(o_custkey#29L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22448]
+
+(62) CometSort
+Input [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32], [o_custkey#29L ASC NULLS FIRST]
+
+(63) CometSortMergeJoin
+Left output [2]: [c_custkey#0L, c_name#1]
+Right output [4]: [o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L], [o_custkey#29L], Inner
+
+(64) CometProject
+Input [6]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_custkey#29L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32], [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+
+(65) CometExchange
+Input [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: hashpartitioning(o_orderkey#28L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22452]
+
+(66) CometSort
+Input [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32], [o_orderkey#28L ASC NULLS FIRST]
+
+(67) CometSort
+Input [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: [l_orderkey#8L, l_quantity#12], [l_orderkey#8L ASC NULLS FIRST]
+
+(68) CometNativeScan parquet 
+Output [2]: [l_orderkey#390L, l_quantity#394]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/lineitem.parquet]
+ReadSchema: struct<l_orderkey:bigint,l_quantity:decimal(15,2)>
+
+(69) CometHashAggregate
+Input [2]: [l_orderkey#390L, l_quantity#394]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [partial_sum(l_quantity#394)]
+
+(70) CometExchange
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Arguments: hashpartitioning(l_orderkey#390L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=22460]
+
+(71) CometHashAggregate
+Input [3]: [l_orderkey#390L, sum#414, isEmpty#415]
+Keys [1]: [l_orderkey#390L]
+Functions [1]: [sum(l_quantity#394)]
+
+(72) CometFilter
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Condition : (isnotnull(sum(l_quantity)#389) AND (sum(l_quantity)#389 > 300.00))
+
+(73) CometProject
+Input [2]: [l_orderkey#390L, sum(l_quantity)#389]
+Arguments: [l_orderkey#390L], [l_orderkey#390L]
+
+(74) CometSort
+Input [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#390L], [l_orderkey#390L ASC NULLS FIRST]
+
+(75) CometSortMergeJoin
+Left output [2]: [l_orderkey#8L, l_quantity#12]
+Right output [1]: [l_orderkey#390L]
+Arguments: [l_orderkey#8L], [l_orderkey#390L], LeftSemi
+
+(76) CometSortMergeJoin
+Left output [5]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32]
+Right output [2]: [l_orderkey#8L, l_quantity#12]
+Arguments: [o_orderkey#28L], [l_orderkey#8L], Inner
+
+(77) CometProject
+Input [7]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_orderkey#8L, l_quantity#12]
+Arguments: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12], [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12]
+
+(78) CometHashAggregate
+Input [6]: [c_custkey#0L, c_name#1, o_orderkey#28L, o_totalprice#31, o_orderdate#32, l_quantity#12]
+Keys [5]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31]
+Functions [1]: [partial_sum(l_quantity#12)]
+
+(79) CometHashAggregate
+Input [7]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum#410, isEmpty#411]
+Keys [5]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31]
+Functions [1]: [sum(l_quantity#12)]
+
+(80) CometTakeOrderedAndProject
+Input [6]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[o_totalprice#31 DESC NULLS LAST,o_orderdate#32 ASC NULLS FIRST], output=[c_name#1,c_custkey#0L,o_orderkey#28L,o_orderdate#32,o_totalprice#31,sum(l_quantity)#407]), [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407], 100, 0, [o_totalprice#31 DESC NULLS LAST, o_orderdate#32 ASC NULLS FIRST], [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+
+(81) AdaptiveSparkPlan
+Output [6]: [c_name#1, c_custkey#0L, o_orderkey#28L, o_orderdate#32, o_totalprice#31, sum(l_quantity)#407]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- CometHashAggregate
+         +- CometProject
+            +- CometSortMergeJoin
+               :- CometSort
+               :  +- AQEShuffleRead
+               :     +- CometExchange
+               :        +- CometProject
+               :           +- CometSortMergeJoin
+               :              :- CometSort
+               :              :  +- AQEShuffleRead
+               :              :     +- CometExchange
+               :              :        +- CometFilter
+               :              :           +- CometNativeScan parquet 
+               :              +- CometSort
+               :                 +- AQEShuffleRead
+               :                    +- CometExchange
+               :                       +- CometSortMergeJoin
+               :                          :- CometSort
+               :                          :  +- AQEShuffleRead
+               :                          :     +- CometExchange
+               :                          :        +- CometFilter
+               :                          :           +- CometNativeScan parquet 
+               :                          +- CometSort
+               :                             +- CometProject
+               :                                +- CometFilter
+               :                                   +- CometHashAggregate
+               :                                      +- AQEShuffleRead
+               :                                         +- CometExchange
+               :                                            +- CometHashAggregate
+               :                                               +- CometNativeScan parquet 
+               +- CometSortMergeJoin
+                  :- CometSort
+                  :  +- AQEShuffleRead
+                  :     +- CometExchange
+                  :        +- CometFilter
+                  :           +- CometNativeScan parquet 
+                  +- CometSort
+                     +- CometProject
+                        +- CometFilter
+                           +- CometHashAggregate
+                              +- AQEShuffleRead
+                                 +- CometExchange
+                                    +- CometHashAggregate
+                                       +- CometNativeScan parquet 
+
+Comet accelerated 36 out of 36 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 5 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometHashAggregate
+      +- CometHashAggregate
+         +- CometProject
+            +- CometSortMergeJoin
+               :- CometSort
+               :  +- AQEShuffleRead
+               :     +- CometExchange
+               :        +- CometProject
+               :           +- CometSortMergeJoin
+               :              :- CometSort
+               :              :  +- AQEShuffleRead
+               :              :     +- CometExchange
+               :              :        +- CometFilter
+               :              :           +- CometNativeScan parquet 
+               :              +- CometSort
+               :                 +- AQEShuffleRead
+               :                    +- CometExchange
+               :                       +- CometSortMergeJoin
+               :                          :- CometSort
+               :                          :  +- AQEShuffleRead
+               :                          :     +- CometExchange
+               :                          :        +- CometFilter
+               :                          :           +- CometNativeScan parquet 
+               :                          +- CometSort
+               :                             +- CometProject
+               :                                +- CometFilter
+               :                                   +- CometHashAggregate
+               :                                      +- AQEShuffleRead
+               :                                         +- CometExchange
+               :                                            +- CometHashAggregate
+               :                                               +- CometNativeScan parquet 
+               +- CometSortMergeJoin
+                  :- CometSort
+                  :  +- AQEShuffleRead
+                  :     +- CometExchange
+                  :        +- CometFilter
+                  :           +- CometNativeScan parquet 
+                  +- CometSort
+                     +- CometProject
+                        +- CometFilter
+                           +- CometHashAggregate
+                              +- AQEShuffleRead
+                                 +- CometExchange
+                                    +- CometHashAggregate
+                                       +- CometNativeScan parquet 
+
+Comet accelerated 36 out of 36 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 5 native, 0 codegen dispatch.
