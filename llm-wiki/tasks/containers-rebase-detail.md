@@ -390,3 +390,4 @@ ENS-optimizer's `c5d12789`, not carried).
     which pulls it (25.02, 8.3 GB; 26.02 timed out at 120 s). Remove it afterwards.
 - Device CI: `pipeline.yml` dispatched 2026-11-04T01:51:56Z on `2b89446c`, run 41756935974. Waiting for `GPU Tests (nebius-gpu)`.
 - Run 41756935974 failed at "Start nebius-gpu": no capacity (exit 75) from 2026-11-04T02:17Z for 30 min. GPU capacity clock starts 2026-11-04T02:17Z (10 hours → 12:17Z). The coordinator retries `gpu-host.sh start` every 15 min and re-dispatches once the VM is up.
+- Re-dispatched 2026-11-04T02:52:57Z on `77ca5879` after `gpu-host.sh start` succeeded at 02:52Z: run 41763580580.
