@@ -768,6 +768,25 @@ pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, o
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
 }
 
+/// A recorded answer held to DuckDB's under its line's oracle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnswerVerdict {
+    /// The two agree, or the line says `duckdb_none` and a side does not answer.
+    Meets,
+    /// Both answer, and the oracle's comparison says how they differ.
+    Differs(String),
+    /// A side has no answer the line expects: no recorded section or file, a file another cuDF
+    /// recorded, or DuckDB's `failed:`. The text says how to record the missing one.
+    Unanswered(String),
+}
+
+/// The H100's sf40 answer to `query` (a case list's ident) at `tp1_single`, recorded in
+/// `goldens/<dataset>.sf40/gpu-result.txt`, against DuckDB's sf40 answer beside it, under the
+/// oracle of the sf1 registry row the benchmark's cell comes from.
+pub async fn sf40_answer_verdict(dataset: &str, query: &str) -> AnswerVerdict {
+    duckdb_oracle::sf40_verdict(dataset, query).await
+}
+
 /// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection —
 /// or why it has no plan. Such a line says `no_sort`.
 pub async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> Result<bool, String> {
@@ -1331,6 +1350,11 @@ pub const FAILED: &str = "status=failed reason=";
 /// cuDF and host measured. Unset or `0` measures every case, whatever its file holds.
 pub const RESUME_ENV: &str = "PEACOCK_BENCH_RESUME";
 
+/// Env var bounding one benchmark case, in whole seconds; unset means no bound. A case still
+/// running past it is recorded `status=failed reason=timeout: the case ran past <N> s` and the
+/// process exits 1, so a resumed rerun skips the case (one process per case: `bench-each.sh`).
+pub const CASE_TIMEOUT_ENV: &str = "PEACOCK_BENCH_CASE_TIMEOUT_S";
+
 /// Whether a benchmark run keeps the sections it already measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resume {
@@ -1498,6 +1522,7 @@ pub struct RunMeta<'a> {
 /// Strings as written: `device` is the runtime's name for the card, `driver` the kernel
 /// module's release (`580.95.05`), `cuda` the runtime's version (`12.9`), `cudf` the release
 /// built against (`25.02.02`).
+#[derive(Clone)]
 pub struct Provenance {
     pub device: String,
     pub driver: String,

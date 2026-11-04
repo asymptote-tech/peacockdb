@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use datafusion::arrow::array::RecordBatch;
 use futures::FutureExt;
 
 use crate::executor::{
@@ -26,17 +27,21 @@ use super::benchmark_prefill::{
     ProcessPrefill, case_query_file, prefill_reason, rounds_were_pinned, selected_benchmark_cases,
     unprefilled,
 };
-use super::benchmark_section::{assert_dataset_present, measure_into};
+use super::benchmark_section::{assert_dataset_present, case_timeout, measure_into, watch_case};
 use super::benchmark_trailer::{RunTotals, run_section};
-use super::corpus::plan_at;
+use super::corpus::{line_row_order, plan_at};
+use super::corpus_golden::declared_sf;
+use super::corpus_gpu::record_gpu_result;
+use super::device_answer::gpu_recording;
 use super::gpu_session::Session;
 use super::provenance::{device_slug, of_this_run};
 use super::record::{
     append_records, declared_steps, heading_mismatch, record_rows, rows_match_the_recipes,
 };
 use super::{
-    BUILD, BenchmarkCase, Capture, CaseOutcome, MEASURED_RUNS, Mode, NOT_TIMED, RECORD_PATH_ENV,
-    RESUME_ENV, Resume, RunMeta, SKIPPED, data_dir_for, mode_named, stem, testdata_root,
+    BUILD, BenchmarkCase, Capture, CaseOutcome, GpuRecording, MEASURED_RUNS, Mode, NOT_TIMED,
+    RECORD_PATH_ENV, RESUME_ENV, Resume, RowOrder, RunMeta, SKIPPED, data_dir_for, load_csv,
+    mode_named, stem, testdata_root,
 };
 
 /// The sections a `(dataset, sf, mode)` file is declared to hold: the queries timed at
@@ -118,6 +123,11 @@ struct Run {
 /// then fails, so the run goes on to the next, and under `PEACOCK_BENCH_RESUME=1` a section
 /// this run's device, driver, CUDA, cuDF and host measured is kept and its case not run. A
 /// captured run writes no section, so it measures every case and a panic is only a panic.
+///
+/// A plain run under `PEACOCK_BENCH_CASE_TIMEOUT_S` is watched: past it the case's section
+/// records the timeout and the process exits. Under `PCK_WRITE_GPU_RESULT` a measured case
+/// records the chosen run's answer in `gpu-result.txt` at its sf, which the sf40 answer check
+/// holds to DuckDB's.
 pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);
@@ -125,6 +135,7 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     // publish at the end of it.
     let capture = Capture::from_env();
     let resume = Resume::from_env();
+    let timeout = case_timeout();
     let provenance = of_this_run(&what);
 
     // Conditions of a benchmark run, not choices: rmm's default makes every cuDF
@@ -156,18 +167,43 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
 
     let case = measure(dataset, sf, query, mode, &meta, &what);
     if capture != Capture::None {
-        let (_, rows) = case.await;
+        let (_, (rows, _)) = case.await;
         append_records(&rows, &meta);
         return;
     }
     let ident = mode.ident();
     let file = results_file(&device_slug(&provenance.device), dataset, sf, &ident);
     let declared = declared_for(dataset, sf, &ident);
+    let watch = timeout.map(|seconds| {
+        let (path, query) = (file.clone(), query.to_string());
+        let exit = || std::process::exit(1);
+        watch_case(
+            seconds,
+            path,
+            declared.clone(),
+            query,
+            provenance.clone(),
+            exit,
+        )
+    });
     // The rows before the section: the section is what a resumed run keeps, so a crash between
     // the two leaves the case to be measured again rather than kept with no rows.
-    let append = |rows: Vec<String>| append_records(&rows, &meta);
-    match measure_into(&file, &declared, query, &provenance, resume, case, append).await {
-        CaseOutcome::Measured => {}
+    let mut answer = None;
+    let append = |(rows, batches): (Vec<String>, Vec<RecordBatch>)| {
+        append_records(&rows, &meta);
+        answer = Some(batches);
+    };
+    let outcome = measure_into(&file, &declared, query, &provenance, resume, case, append).await;
+    drop(watch);
+    match outcome {
+        CaseOutcome::Measured => {
+            if let Some(batches) = answer
+                && gpu_recording() != GpuRecording::No
+            {
+                let order = answer_order(dataset, sf, query);
+                record_gpu_result(dataset, sf, query, mode, order, &batches);
+            }
+        }
         CaseOutcome::Held => println!(
             "{what}: kept, {} holds its section from this device, driver, CUDA, cuDF and host \
              and {RESUME_ENV}=1",
@@ -179,8 +215,26 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     }
 }
 
-/// One case planned, warmed and run `MEASURED_RUNS` times: the section's body, and the
-/// record's rows for the caller to append before the section is written.
+/// The row order a benchmark case's answer is recorded in: its line's, from the registry row the
+/// benchmark's cell is declared at (sf1 for sf40, `declared_sf`).
+fn answer_order(dataset: &str, sf: &str, query: &str) -> RowOrder {
+    let row = load_csv()
+        .into_iter()
+        .find(|row| {
+            row.dataset == dataset && row.sf == declared_sf(sf) && stem(&row.query) == query
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{dataset}/{query}: no sf{} registry row to read its row order from",
+                declared_sf(sf)
+            )
+        });
+    line_row_order(&row.duckdb_oracle, &row.gpu_oracle)
+}
+
+/// One case planned, warmed and run `MEASURED_RUNS` times: the section's body, and beside it the
+/// record's rows for the caller to append before the section is written and the chosen run's
+/// answer.
 ///
 /// Planning happens once, outside the runs: `plan_at` reads every file's parquet
 /// metadata, and repeating that would time the catalog rather than the query. So
@@ -192,7 +246,7 @@ async fn measure(
     mode: &Mode,
     meta: &RunMeta<'_>,
     what: &str,
-) -> (String, Vec<String>) {
+) -> (String, (Vec<String>, Vec<RecordBatch>)) {
     const _: () = assert!(MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
 
     // First, and inside the failure record: no round may read a file from disk.
@@ -316,7 +370,13 @@ async fn measure(
         chosen.report.emitted.len(),
         chosen.regions.len()
     );
-    (body, rows)
+    let answer = chosen
+        .report
+        .batches
+        .iter()
+        .map(|batch| batch.record_batch().clone())
+        .collect();
+    (body, (rows, answer))
 }
 
 /// The process's one prefill: every case it will run planned (footers only, untimed), and the

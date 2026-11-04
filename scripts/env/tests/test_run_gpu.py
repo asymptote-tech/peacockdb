@@ -353,6 +353,20 @@ def test_run_passes_the_pinned_cache_and_scan_reader_switches():
         assert envs == ["PEACOCK_PINNED_HOST_CACHE_BYTES=0", "PEACOCK_SCAN_READER=read_parquet"], envs
 
 
+def test_run_passes_the_case_timeout_and_the_answer_switch():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        env = {"PEACOCK_BENCH_RESUME": "1", "PEACOCK_BENCH_CASE_TIMEOUT_S": "1800", "PCK_WRITE_GPU_RESULT": "1"}
+        ok(h.gpu("run", "bench", env=env))
+        a = h.docker_runs()[0]
+        envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
+        assert envs == ["PEACOCK_BENCH_RESUME=1", "PEACOCK_BENCH_CASE_TIMEOUT_S=1800", "PCK_WRITE_GPU_RESULT=1"], envs
+        ok(h.gpu("run", "bench", env={"PEACOCK_BENCH_CASE_TIMEOUT_S": "", "PCK_WRITE_GPU_RESULT": ""}))
+        a = h.docker_runs()[1]
+        assert "-e" not in a, a
+
+
 def test_run_refuses_a_run_in_progress():
     with Host() as h:
         prepared(h)
@@ -407,6 +421,23 @@ def test_pull_brings_the_results_the_record_and_the_log_home():
         assert str(logs) in r.stdout
 
 
+def test_pull_brings_the_gpu_answers():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        g = h.vm_dir() / "testdata/goldens"
+        (g / "tpch.sf40").mkdir(parents=True, exist_ok=True)
+        (g / "tpch.sf40/gpu-result.txt").write_text("cudf=25.02\n== q1 mode=tp1-single\nrow\n")
+        (g / "tpch.sf40/gpu-result-26.02.txt").write_text("cudf=26.02\n")
+        (g / "tpch.sf40/duckdb-result.txt").write_text("written on the VM\n")
+        r = ok(h.gpu("pull"))
+        home = h.tree / "testdata/goldens/tpch.sf40"
+        assert (home / "gpu-result.txt").read_text() == "cudf=25.02\n== q1 mode=tp1-single\nrow\n"
+        assert (home / "gpu-result-26.02.txt").is_file()
+        assert not (home / "duckdb-result.txt").exists(), "only the device's answers come home"
+        assert "gpu-result" in r.stdout
+
+
 def test_pull_before_ship_says_so():
     with Host() as h:
         refused(h.gpu("pull"), 2, "ship")
@@ -445,6 +476,7 @@ STUB_CALLS = r'''import sys
 a = sys.argv[1:]
 open(a[a.index("--out") + 1], "w").write("# calls\nrow\n")
 '''
+STUB_LOADS = STUB_CALLS.replace("# calls", "# loads")
 # As nsys_calls.py refuses a capture of a query with a join: a message and exit 1, nothing written.
 REFUSING_CALLS = 'import sys\nsys.exit("capture does not match q3\'s recipes")\n'
 
@@ -461,7 +493,7 @@ def nsys_profile(tmp, extra_env=None, calls=STUB_CALLS):
             shutil.copy2(REPO / rel, tree / rel)
     (tree / "scripts/calibration").mkdir()
     (tree / "scripts/calibration/nsys_calls.py").write_text(calls)
-    (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_CALLS)
+    (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_LOADS)
     cases = (tree / "peacockdb-core/tests/common/corpus_benchmark_cases.inc").read_text()
     for ds in set(re.findall(r"corpus_query_benchmark!\(\s*(\w+)\s*,", cases)):
         (tree / "testdata/goldens" / f"{ds}.sf1").mkdir(parents=True)
@@ -493,6 +525,7 @@ def test_nsys_profile_uses_the_given_ssh():
         ok(r)
         assert "the trace pass ran 1 tests" in r.stdout, r.stdout
         assert (tree / "testdata/calibration/calls.tsv").is_file()
+        assert (tree / "testdata/calibration/loads.tsv").is_file()
         assert (tree / "testdata/calibration/capture.sqlite").read_text() == "sqlite"
         assert not (tmp / "ssh.log").exists(), (tmp / "ssh.log").read_text()
         calls = log_lines(tmp / "rsh.log")

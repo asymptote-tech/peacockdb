@@ -7,8 +7,8 @@ mod tests;
 use std::collections::BTreeSet;
 
 use super::{
-    CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, corpus, corpus_golden,
-    fingerprint, result_text,
+    AnswerVerdict, CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, corpus,
+    corpus_golden, fingerprint, registry, result_text,
 };
 
 /// A spelling with its whitespace removed outside double quotes, so `stringify!`'s spacing
@@ -460,7 +460,8 @@ pub(crate) async fn duckdb_case(dataset: &str, sf: &str, query: &str, oracle: &s
             super::section_holds_rows(section) || fingerprint::is_fingerprint(section)
         })
         .map(|section| without_mode_line(&section));
-    judge(dataset, sf, query, oracle, ours, Side::Cpu).await
+    let verdict = verdict(dataset, sf, sf, query, oracle, ours, Side::Cpu).await;
+    held(dataset, query, Side::Cpu, verdict);
 }
 
 /// The DEVICE's recorded answer at one mode against DuckDB's. `gpu-result.txt` is keyed by
@@ -477,84 +478,141 @@ pub(crate) async fn duckdb_gpu_case(
     mode: &str,
     oracle: &str,
 ) {
+    let verdict = device_verdict(dataset, sf, sf, query, mode, oracle).await;
+    held(
+        dataset,
+        query,
+        Side::Device(super::mode_named(mode).name),
+        verdict,
+    );
+}
+
+/// The device's recorded answer at `mode` (its ident) against DuckDB's, both read at `sf`; the
+/// cells' kinds are planned at `kinds_sf`, since an output's schema does not move with the scale
+/// and CI holds no sf40 data. A missing file or section, or a file another cuDF recorded, is no
+/// answer, and the verdict names the variable that records one.
+pub(crate) async fn device_verdict(
+    dataset: &str,
+    sf: &str,
+    kinds_sf: &str,
+    query: &str,
+    mode: &str,
+    oracle: &str,
+) -> AnswerVerdict {
     let version = std::env::var("PCK_GPU_RESULT_VERSION").ok();
     let path = corpus_golden::gpu_result_golden(dataset, sf, version.as_deref());
     let mode = super::mode_named(mode).name;
     let knob = corpus_golden::recording_knob(version.as_deref());
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!(
-            "{dataset}/{query} at {mode}: {} does not exist, so no device answer is recorded \
-             for this cell. Run a cycle with {knob} and bring it home with --pull-results.",
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return AnswerVerdict::Unanswered(format!(
+            "{} does not exist, so no device answer is recorded for this cell. Run a cycle with \
+             {knob} and bring it home with --pull-results.",
             path.display()
-        )
-    });
-    corpus_golden::gpu_result_cudf_matches_path(&text, version.as_deref())
-        .unwrap_or_else(|said| panic!("{}: {said}", path.display()));
+        ));
+    };
+    if let Err(said) = corpus_golden::gpu_result_cudf_matches_path(&text, version.as_deref()) {
+        return AnswerVerdict::Unanswered(format!("{}: {said}", path.display()));
+    }
     let ours = gpu_result_sections(&text)
         .into_iter()
         .find(|section| section.query == query && section.mode == mode)
-        .map(|section| section.body)
-        .unwrap_or_else(|| {
-            panic!(
-                "{dataset}/{query} at {mode}: {} holds no section for this cell. Regenerate it \
-                 with {knob} and --pull-results.",
-                path.display()
-            )
-        });
-    judge(dataset, sf, query, oracle, Some(ours), Side::Device(mode)).await
+        .map(|section| section.body);
+    let Some(ours) = ours else {
+        return AnswerVerdict::Unanswered(format!(
+            "{} holds no section for this cell. Regenerate it with {knob} and --pull-results.",
+            path.display()
+        ));
+    };
+    let side = Side::Device(mode);
+    verdict(dataset, sf, kinds_sf, query, oracle, Some(ours), side).await
 }
 
-/// Whose answer [`judge`] holds to DuckDB's: the cpu's, which has no mode because the cpu
+/// The benchmark's sf40 answer at `tp1_single` against DuckDB's sf40 answer, under the oracle of
+/// the registry row the benchmark's cell is declared at. `query` as a case list names it.
+pub(crate) async fn sf40_verdict(dataset: &str, query: &str) -> AnswerVerdict {
+    const SF: &str = "40";
+    let declared = corpus_golden::declared_sf(SF);
+    let query = registry::stem(query);
+    let row = registry::load_csv()
+        .into_iter()
+        .find(|row| {
+            row.dataset == dataset && row.sf == declared && registry::stem(&row.query) == query
+        })
+        .unwrap_or_else(|| panic!("{dataset}/{query}: no sf{declared} registry row"));
+    device_verdict(
+        dataset,
+        SF,
+        declared,
+        &query,
+        "tp1_single",
+        &row.duckdb_oracle,
+    )
+    .await
+}
+
+/// Whose answer [`verdict`] holds to DuckDB's: the cpu's, which has no mode because the cpu
 /// authors the section, or the device's at one mode, which a `gpu:` part may compare apart.
 enum Side<'a> {
     Cpu,
     Device(&'a str),
 }
 
-/// The verdict both cases reach, with DuckDB's section read here so neither has to.
+/// The verdict every case reaches, with DuckDB's section read here so none has to. The cells'
+/// kinds are planned at `kinds_sf`.
 ///
 /// `ours` is `None` where our side does not answer at all — the section is absent, or a
 /// `skipped:` marker.
-async fn judge(
+async fn verdict(
     dataset: &str,
     sf: &str,
+    kinds_sf: &str,
     query: &str,
     oracle: &str,
     ours: Option<String>,
     side: Side<'_>,
-) {
+) -> AnswerVerdict {
     let spelled = oracle;
     let oracle = DuckdbOracle::parse(spelled);
     let duckdb = section(&corpus_golden::duckdb_golden(dataset, sf), query)
         .filter(|section| !section.starts_with("failed:") && !section.starts_with(super::SKIPPED));
-    let said = match (&ours, &duckdb) {
+    match (&ours, &duckdb) {
         (Some(ours), Some(duckdb)) => {
-            let kinds = corpus::output_kinds(dataset, sf, query).await;
-            match side {
+            let kinds = corpus::output_kinds(dataset, kinds_sf, query).await;
+            let compared = match side {
                 Side::Cpu => compare_sections(&oracle, ours, duckdb, &kinds),
                 Side::Device(_) => compare_device_section(&oracle, ours, duckdb, &kinds),
+            };
+            match compared {
+                Ok(()) => AnswerVerdict::Meets,
+                Err(said) => AnswerVerdict::Differs(said),
             }
         }
         // One side does not answer, which is what `duckdb_none` is for. Under any other
         // oracle it is the line that is wrong, and the line says which answer it expected.
-        _ if oracle == DuckdbOracle::None => Ok(()),
-        (None, _) => Err(format!(
+        _ if oracle == DuckdbOracle::None => AnswerVerdict::Meets,
+        (None, _) => AnswerVerdict::Unanswered(format!(
             "we do not answer this query and the line says {} — move it to duckdb_none, or \
              enable a mode",
             tight(spelled)
         )),
-        (_, None) => Err(format!(
+        (_, None) => AnswerVerdict::Unanswered(format!(
             "DuckDB does not answer this query and the line says {} — move it to duckdb_none",
             tight(spelled)
         )),
-    };
-    if let Err(said) = said {
-        let at = match side {
-            Side::Cpu => "the cpu".to_string(),
-            Side::Device(mode) => format!("the device at {mode}"),
-        };
-        panic!("{dataset}/{query} ({at}): {said}");
     }
+}
+
+/// A case's verdict held: anything but [`AnswerVerdict::Meets`] fails it, naming the side.
+fn held(dataset: &str, query: &str, side: Side<'_>, verdict: AnswerVerdict) {
+    let said = match verdict {
+        AnswerVerdict::Meets => return,
+        AnswerVerdict::Differs(said) | AnswerVerdict::Unanswered(said) => said,
+    };
+    let at = match side {
+        Side::Cpu => "the cpu".to_string(),
+        Side::Device(mode) => format!("the device at {mode}"),
+    };
+    panic!("{dataset}/{query} ({at}): {said}");
 }
 
 /// One section of a golden, or `None` where the file or the section is absent. Unlike
