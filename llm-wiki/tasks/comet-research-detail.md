@@ -264,3 +264,16 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   heartbeat, so it can undercount by up to one poll interval per use. For every cap check in
   Tasks 3 and 4, add 10 minutes per open or `lost` use to `vm.sh hours`. The report's VM hours
   give both figures: the log's sum and the request-to-STOPPED wall time.
+
+- 2026-11-04 (coordinator, before Task 4): the Spark side of `comet_run.py` and the `--dump-plans`
+  path have never run, and debugging them on the CPU VM spends its 2 h cap. So Task 4 opens with
+  a local shakedown on dev (8 cores, 31 GB, no VM time): Spark 4.1.3 and the Comet jar, TPC-H and
+  TPC-DS at sf1 from local Parquet, every query of both lists through `comet_run.py --source local
+  --mode sequential --runs 1 --warmup 0 --dump-plans`, plus one short concurrent batch and one
+  `comet_bytes.py` pass over its event log. Dialect fixes, ANSI failures and broken metric names
+  are fixed here. A query that cannot run under Spark is recorded and dropped from the list for
+  both datasets' runs, and the report names it. Its times are not measurements and are not
+  committed as such. Also on the CPU VM: read its disk type before setup, and keep data and
+  Spark's spill on the fastest disk it has.
+- 2026-11-04: Task 3 committed (5008e6a6). L40S used about 0.33 h by the log, 0.50 h with margin.
+  Task 4 dispatched to a fresh developer.
