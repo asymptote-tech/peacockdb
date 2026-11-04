@@ -1,5 +1,5 @@
 [Unit]
-Description=nebius-gpu idle watcher, one tick (scripts/gpu-host/idle_watch.py)
+Description=A Nebius VM's idle watcher, one tick (scripts/nebius/idle_watch.py)
 
 [Service]
 Type=oneshot

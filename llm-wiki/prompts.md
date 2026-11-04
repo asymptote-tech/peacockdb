@@ -61,7 +61,7 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
 - **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`
   and any `*.pem` under `~/.nebius/`, on any host, the VM's copy included: no `cat`, `grep`,
   `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into a
-  transcript on 2026-10-14. Reach the cloud through `scripts/gpu-host.sh`; learn the CLI from
+  transcript on 2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from
   `nebius … --help`.
 
 ## Board protocol
@@ -194,16 +194,16 @@ state, and a watchdog restarts you.
   name for the host and not an address of it: it is an ephemeral instance with a new IP per
   reprovision and no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or
   down. Ask the human for the address, or `scripts/list_verda_instances.sh` for it.
-- **The GPU host is nebius-gpu, started and stopped through `scripts/gpu-host.sh`**
-  (`build-test.md`, "GPU host"). Before dispatching a round with a GPU step, `gpu-host.sh start`.
+- **The GPU host is nebius-gpu, started and stopped through `scripts/nebius.sh`**
+  (`build-test.md`, "Nebius host"). Before dispatching a round with a GPU step, `nebius.sh start`.
   On exit 75 (no capacity), retry every 15 minutes for 10 hours. Record the first failure's time
   in `<task>-detail.md` so a restart keeps the clock, and wait in bounded waits of at most 10
   minutes. After 10 hours, write `stalled: gpu host unavailable` and exit. Exit 69 (the instance
   is gone) is a stall at once: rebuilding it is the human's. Exit 1 is a stall at once too, and
   is never retried. Most often the VM came up but ssh never answered; `start` has already
   stopped a VM it started. Write `stalled: gpu host up but unreachable`, or the reason in
-  `~/.config/peacock/gpu-host/gpu-host.log`, and exit.
-- **Hard stops are yours.** `gpu-host.sh stop --force` on entering `completeness approved`, on
+  `~/.config/peacock/nebius/nebius.log`, and exit.
+- **Hard stops are yours.** `nebius.sh stop --force` on entering `completeness approved`, on
   entering `done`, and before every exit: stalled, a tight window, or `stop`. Developers and CI
   stop softly.
 - **The final device run is CI's.** In `completeness approved`, after the hard stop, note the
@@ -373,14 +373,14 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   why the coordinator has no self-wake either.
 - After small fixes run only the affected subsets; kick heavy suites off in the background
   rather than blocking. Full-suite runs are for milestones and handoffs.
-- **A GPU step is bracketed.** `scripts/gpu-host.sh start` → `scripts/gpu-host-sync.sh` →
-  `scripts/gpu-host.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'`
-  → `scripts/gpu-host.sh ssh '~/<dest>/scripts/gpu-host-test.sh run ~/<dest>'`, polled with
-  `… status`, → `scripts/gpu-host.sh stop`. Only the L40S list runs: no sf40, no benchmarks.
+- **A GPU step is bracketed.** `scripts/nebius.sh start` → `scripts/nebius-sync.sh` →
+  `scripts/nebius.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'`
+  → `scripts/nebius.sh ssh '~/<dest>/scripts/nebius-test.sh run ~/<dest>'`, polled with
+  `… status`, → `scripts/nebius.sh stop`. Only the L40S list runs: no sf40, no benchmarks.
   If the host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
   the retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card:
   leave it. Never edit `~/.ssh/config` for the VM, and never accept a host key by hand:
-  `gpu-host.sh` resolves the IP and replaces a changed key itself.
+  `nebius.sh` resolves the IP and replaces a changed key itself.
 - **You never look at CI.** Not a run, not its logs, not its config. Work the tests
   directly, locally or on a remote host. A CI failure reaches you as a failing test the
   coordinator hands you, carrying its signature; that is the only form you ever see it in.

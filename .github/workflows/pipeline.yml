@@ -436,12 +436,12 @@ jobs:
           path: cpp-install.tar
           retention-days: 1
 
-  # nebius-gpu, an L40S VM this job starts and soft-stops (llm-wiki/build-test.md, "GPU host").
+  # nebius-gpu, an L40S VM this job starts and soft-stops (llm-wiki/build-test.md, "Nebius host").
   # It costs money while it runs, so the job runs on a push to master and on a dispatch, never
   # on a pull_request: a PR's branch gets it when someone with write access, listed in
   # GPU_ALLOWED_ACTORS, dispatches the pipeline on that branch. A fork PR gets no secrets and
   # no GPU job. The secrets live in the nebius-gpu Environment, which only this job and
-  # gpu-host-watch.yml reference.
+  # nebius-watch.yml reference.
   gpu-tests:
     name: GPU Tests (nebius-gpu)
     needs: cpp-build-2502
@@ -486,8 +486,8 @@ jobs:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           ALLOWED: ${{ vars.GPU_ALLOWED_ACTORS }}
         run: |
-          scripts/gpu-host/check-actor.sh "$ACTOR" "$ALLOWED"
-          scripts/gpu-host/check-actor.sh "$TRIGGERING_ACTOR" "$ALLOWED"
+          scripts/nebius/check-actor.sh "$ACTOR" "$ALLOWED"
+          scripts/nebius/check-actor.sh "$TRIGGERING_ACTOR" "$ALLOWED"
 
       - name: Download GPU test binaries
         uses: actions/download-artifact@v4
@@ -508,14 +508,14 @@ jobs:
 
       - name: Start nebius-gpu (up to 30 minutes for capacity)
         id: start
-        # One attempt can itself wait out STOPPING, RUNNING and ssh (gpu-host.sh's own bounds),
+        # One attempt can itself wait out STOPPING, RUNNING and ssh (nebius.sh's own bounds),
         # so the step's limit sits well past the 30-minute retry window.
         timeout-minutes: 75
         run: |
           # 75 is "no capacity or quota, retry later"; every other failure is final.
           deadline=$((SECONDS + 1800))
           while :; do
-            rc=0; scripts/gpu-host.sh start || rc=$?
+            rc=0; scripts/nebius.sh start || rc=$?
             [ "$rc" -eq 0 ] && exit 0
             [ "$rc" -eq 75 ] || exit "$rc"
             [ "$SECONDS" -lt "$deadline" ] || break
@@ -530,23 +530,23 @@ jobs:
         # and lossy (0.24 MB/s for one stream, 2026-10-15), so a first run, or one after the
         # cache is cleared, can take most of the limit; later runs send only what changed.
         timeout-minutes: 50
-        run: scripts/gpu-host/ci-ship.sh "$REMOTE_DIR"
+        run: scripts/nebius/ci-ship.sh "$REMOTE_DIR"
 
       - name: Generate SF-1 testdata
         run: |
           # Into this run's own directory, which the last step removes, so every run generates.
           # A non-interactive ssh does not source ~/peacock-env.sh, which is what puts duckdb on
-          # PATH, and generate_testdata.sh looks duckdb up first: source it, as gpu-host-sync.sh does.
+          # PATH, and generate_testdata.sh looks duckdb up first: source it, as nebius-sync.sh does.
           # PEACOCK_NO_FETCH=1 is set EXPLICITLY because ssh does not inherit the runner's
           # CI/GITHUB_ACTIONS vars — fetch_embeddings.sh's automation guard keys on the
           # environment, and over ssh that environment is the GPU host's, not the runner's.
           # Nothing here invokes fetch today; this keeps the guard honest if that changes.
-          scripts/gpu-host.sh ssh "[ -f ~/peacock-env.sh ] && . ~/peacock-env.sh; cd ~/$REMOTE_DIR \
+          scripts/nebius.sh ssh "[ -f ~/peacock-env.sh ] && . ~/peacock-env.sh; cd ~/$REMOTE_DIR \
             && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpch \
             && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpcds"
 
       - name: Run the L40S list
-        # scripts/gpu-host-test.sh is the one list, shared with the developer. What it keeps
+        # scripts/nebius-test.sh is the one list, shared with the developer. What it keeps
         # from this job's history:
         # - Every shipped peacock_*_tests binary, by glob rather than a hand-written list: a
         #   named list once let peacock_tpchv_tests be built, shipped and never run, green.
@@ -559,7 +559,7 @@ jobs:
         #   concurrent GPU tests OOM the device and poison the CUDA context for every later test.
         # - A segfault anywhere in the logs fails the run.
         # Out of it on an L40S: the sf40 pair and every bench_ case.
-        run: scripts/gpu-host.sh ssh "\$HOME/$REMOTE_DIR/scripts/gpu-host-test.sh run --foreground \$HOME/$REMOTE_DIR"
+        run: scripts/nebius.sh ssh "\$HOME/$REMOTE_DIR/scripts/nebius-test.sh run --foreground \$HOME/$REMOTE_DIR"
 
       - name: Clean up and soft-stop
         # Whenever the start step ran at all: a start that failed or was cancelled half way can
@@ -571,9 +571,9 @@ jobs:
           # idle watcher from stopping it. Kill this run's processes first. The pattern is
           # bracketed ([p]eacockdb-ci/...) so it does not match the remote shell running pkill.
           pattern="[${REMOTE_DIR:0:1}]${REMOTE_DIR:1}"
-          scripts/gpu-host.sh ssh "pkill -f '$pattern'" || true
-          scripts/gpu-host.sh ssh "rm -rf ~/${REMOTE_DIR:?}" || true
-          scripts/gpu-host.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
+          scripts/nebius.sh ssh "pkill -f '$pattern'" || true
+          scripts/nebius.sh ssh "rm -rf ~/${REMOTE_DIR:?}" || true
+          scripts/nebius.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
 
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
   # committed goldens (.cpu.txt = PeacockDB cost, .duckdb_cost.txt = DuckDB
@@ -715,18 +715,18 @@ jobs:
           done
           exit "$status"
 
-      # gpu-host's scripts, against fake nebius/ssh and synthetic clocks: no VM, no secret.
-      - name: GPU host script tests
+      # The Nebius VM scripts, against fake nebius/ssh and synthetic clocks: no VM, no secret.
+      - name: Nebius script tests
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(scripts/gpu-host/tests/test_*.py)
+          files=(scripts/nebius/tests/test_*.py)
           # A vanished glob makes the loop body disappear and the step pass green.
-          [ ${#files[@]} -gt 0 ] || { echo "no gpu-host test files matched"; exit 1; }
+          [ ${#files[@]} -gt 0 ] || { echo "no nebius test files matched"; exit 1; }
           status=0
           for f in "${files[@]}"; do echo "== $f"; python3 "$f" || status=1; done
-          shellcheck scripts/gpu-host.sh scripts/gpu-host-sync.sh scripts/gpu-host-test.sh \
-            scripts/gpu-host/check-actor.sh scripts/gpu-host/ci-ship.sh || status=1
+          shellcheck scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius-test.sh \
+            scripts/nebius/check-actor.sh scripts/nebius/ci-ship.sh scripts/nebius/watch.sh || status=1
           exit "$status"
 
       - name: cost-report unit tests (Rust)

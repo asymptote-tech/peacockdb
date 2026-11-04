@@ -1,0 +1,106 @@
+name: Nebius watch
+
+# The second of each Nebius VM's two idle guards (llm-wiki/build-test.md, "Nebius host"). The first
+# is the watcher on the VM; this one runs whether or not the VM, its watcher or its network is
+# alive. Hard stop: anything this finds is something no party is going to clean up.
+# It keeps no state. GitHub runs the schedule from master's copy of this file only.
+#
+# One matrix leg per VM, each on its own. A leg whose secrets are absent, whose profile cannot be
+# created, or whose VM is gone is skipped with a notice, never failed: the human may delete a VM.
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      clock_offset:
+        description: Seconds added to the checker's clock; for a test dispatch only
+        type: string
+        default: '0'
+
+concurrency:
+  group: nebius-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: watch (${{ matrix.vm }})
+    runs-on: ubuntu-latest
+    environment: nebius-gpu
+    # Setup, the 15-minute ssh window, and a hard stop that waits up to 10 minutes for STOPPED.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vm: nebius-gpu
+            instance: ""
+            profile: ci
+            prefix: NEBIUS
+          - vm: nebius-h100
+            instance: computeinstance-e00e6yena4nzjgaym0
+            profile: ci
+            prefix: NEBIUS
+          - vm: nebius-cpu128
+            instance: computeinstance-e01t2mm4265y8x88ey
+            profile: eu-west1
+            prefix: NEBIUS_EU_WEST1
+    steps:
+      - uses: actions/checkout@v4
+      # The leg's secrets, by its prefix: NEBIUS_* for eu-north1, NEBIUS_EU_WEST1_* for eu-west1.
+      - name: Secrets
+        id: secrets
+        shell: bash
+        env:
+          VM: ${{ matrix.vm }}
+          PREFIX: ${{ matrix.prefix }}
+          SA_ID: ${{ secrets[format('{0}_SA_ID', matrix.prefix)] }}
+          PUBLIC_KEY_ID: ${{ secrets[format('{0}_PUBLIC_KEY_ID', matrix.prefix)] }}
+          PROJECT_ID: ${{ secrets[format('{0}_PROJECT_ID', matrix.prefix)] }}
+          PRIVATE_KEY: ${{ secrets[format('{0}_PRIVATE_KEY', matrix.prefix)] }}
+          SSH_KEY: ${{ secrets.NEBIUS_GPU_SSH_KEY }}
+        run: |
+          missing=()
+          for n in SA_ID PUBLIC_KEY_ID PROJECT_ID PRIVATE_KEY; do
+            [ -n "${!n}" ] || missing+=("${PREFIX}_$n")
+          done
+          [ -n "$SSH_KEY" ] || missing+=(NEBIUS_GPU_SSH_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::notice::$VM: ${missing[*]} absent; skipped"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Setup
+        id: setup
+        if: steps.secrets.outputs.present == 'true'
+        continue-on-error: true
+        uses: ./.github/actions/nebius-setup
+        with:
+          sa-id: ${{ secrets[format('{0}_SA_ID', matrix.prefix)] }}
+          public-key-id: ${{ secrets[format('{0}_PUBLIC_KEY_ID', matrix.prefix)] }}
+          project-id: ${{ secrets[format('{0}_PROJECT_ID', matrix.prefix)] }}
+          private-key: ${{ secrets[format('{0}_PRIVATE_KEY', matrix.prefix)] }}
+          ssh-key: ${{ secrets.NEBIUS_GPU_SSH_KEY }}
+          profile: ${{ matrix.profile }}
+      - name: Profile not created
+        if: steps.setup.outcome == 'failure'
+        shell: bash
+        env:
+          VM: ${{ matrix.vm }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          echo "::notice::$VM: the $PROFILE profile could not be created; skipped"
+      - name: Check, and hard-stop if nobody is using it
+        id: check
+        if: steps.setup.outcome == 'success'
+        shell: bash
+        env:
+          VM: ${{ matrix.vm }}
+          INSTANCE: ${{ matrix.instance }}
+          PROFILE: ${{ matrix.profile }}
+          CLOCK_OFFSET: ${{ inputs.clock_offset || '0' }}
+        run: |
+          scripts/nebius/watch.sh "$VM" ${INSTANCE:+--instance-id "$INSTANCE"} --profile "$PROFILE"

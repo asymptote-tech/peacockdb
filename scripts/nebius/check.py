@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The hourly checker's verdict over the idle watcher's last log line (gpu-host-watch.yml).
+"""The hourly checker's verdict over the idle watcher's last log line (nebius-watch.yml).
 
 A reason to hard-stop, or None. It reuses idle_watch.decide, so the two guards apply one rule;
 on top of it, a watcher whose log is over an hour old is itself a reason. A line that parses
@@ -42,7 +42,10 @@ def _judge(l, now):
     procs = lambda key: [{"pid": p["pid"], "name": p["name"], "start": float(p["start"])} for p in l[key]]
     # test_procs carries the name-matched test processes, so the cap is recomputed on a hung
     # CPU-side test too. A line without it (a watcher older than this checker) is malformed.
-    _, decision, reason = idle_watch.decide(state, now, float(l["boot"]), procs("card"), procs("test_procs"), False)
+    # sessions, a CPU VM's terminal input, is newer: a line without it is judged without it.
+    sessions = [float(s) for s in l.get("sessions", [])]
+    _, decision, reason = idle_watch.decide(state, now, float(l["boot"]), procs("card"), procs("test_procs"), False,
+                                            sessions)
     return None if decision == "keep" else f"{decision}: {reason}"
 
 

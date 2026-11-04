@@ -1,10 +1,10 @@
-"""gpu-host.sh against fake nebius/ssh/ssh-keyscan: every exit code, and the host-key rule."""
+"""nebius.sh against fake nebius/ssh/ssh-keyscan: every exit code, and the host-key rule."""
 import pathlib, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
 from harness import main  # noqa: E402
 
-SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "gpu-host.sh")
+SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "nebius.sh")
 
 
 def run(world, *args, env=None, input=None):
@@ -107,7 +107,7 @@ def test_changed_key_replaced_and_logged():
     assert rc == 0, err
     kh = (w.dir / "state" / "known_hosts").read_text()
     assert "AAAAKEY2" in kh and "AAAAKEY1" not in kh
-    assert "host key replaced" in (w.dir / "state" / "gpu-host.log").read_text()
+    assert "host key replaced" in (w.dir / "state" / "nebius.log").read_text()
 
 
 def test_changed_key_refused_when_the_ip_moved_between_calls():
@@ -121,7 +121,7 @@ def test_changed_key_refused_when_the_ip_moved_between_calls():
     kh = (w.dir / "state" / "known_hosts").read_text()
     assert "AAAAKEY1" in kh and "AAAAKEY2" not in kh, kh
     assert not any(c[0] == "ssh-keyscan" for c in w.read()["calls"])
-    assert "host key replaced" not in (w.dir / "state" / "gpu-host.log").read_text()
+    assert "host key replaced" not in (w.dir / "state" / "nebius.log").read_text()
 
 
 def test_ssh_refused_when_api_does_not_vouch():
@@ -157,7 +157,7 @@ def test_failed_stop_is_logged_and_exits_without_polling():
     w = World(state="RUNNING", stop_error="Error: rpc error: code = PermissionDenied desc = nope")
     rc, _, _ = run(w, "stop", "--force")
     assert rc == 1
-    assert "PermissionDenied" in (w.dir / "state" / "gpu-host.log").read_text()
+    assert "PermissionDenied" in (w.dir / "state" / "nebius.log").read_text()
     gets_after = [c for c in w.read()["calls"] if c[:4] == ["nebius", "compute", "instance", "get"]]
     assert len(gets_after) <= 2, "polled a failed stop"
 
@@ -200,7 +200,7 @@ def test_start_up_but_no_ssh_is_1_and_stops_what_it_started():
     assert rc == 1, (rc, err)
     assert w.read()["state"] == "STOPPED"
     assert any(c[:4] == ["nebius", "compute", "instance", "stop"] for c in w.read()["calls"])
-    assert "no ssh" in (w.dir / "state" / "gpu-host.log").read_text()
+    assert "no ssh" in (w.dir / "state" / "nebius.log").read_text()
 
 
 def test_start_on_a_running_vm_without_ssh_is_1_and_leaves_it_running():
@@ -213,7 +213,7 @@ def test_start_on_a_running_vm_without_ssh_is_1_and_leaves_it_running():
 
 
 def test_stdin_reaches_the_remote_command_not_the_cli():
-    # `gpu-host.sh ssh … < patch` and rsync's -e transport feed the remote command on stdin.
+    # `nebius.sh ssh … < patch` and rsync's -e transport feed the remote command on stdin.
     # The nebius CLI and ssh-keyscan run first; they must not eat it.
     w = World(state="RUNNING")
     rc, out, err = run(w, "ssh", "cat", input="patch bytes\n")

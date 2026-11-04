@@ -1,5 +1,5 @@
 [Unit]
-Description=nebius-gpu idle watcher, every minute; survives reboots
+Description=A Nebius VM's idle watcher, every minute; survives reboots
 
 [Timer]
 OnBootSec=1min

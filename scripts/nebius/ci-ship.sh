@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI's transfer to nebius-gpu: pipeline.yml's gpu-tests ships the runner's cpp/install/, the L40S
-# list and the testdata subset with this (llm-wiki/build-test.md, "GPU host"). Run from anywhere
+# list and the testdata subset with this (llm-wiki/build-test.md, "Nebius host"). Run from anywhere
 # in the checkout, after cpp/install/ is unpacked.
 #
 #   ci-ship.sh <run dir, relative to the VM login's home>
@@ -23,8 +23,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=${GPU_SHIP_ROOT:-$(cd "$here/../.." && pwd)}
 run_dir=${1:?usage: ci-ship.sh <run dir under ~ on the VM>}
 RSYNC=${GPU_HOST_RSYNC:-rsync}
-RSH=${GPU_SHIP_RSH:-$here/../gpu-host.sh rsh}
-read -r -a vm_ssh <<< "${GPU_SHIP_SSH:-$here/../gpu-host.sh ssh}"
+RSH=${GPU_SHIP_RSH:-$here/../nebius.sh rsh}
+read -r -a vm_ssh <<< "${GPU_SHIP_SSH:-$here/../nebius.sh ssh}"
 ATTEMPTS=${GPU_SHIP_ATTEMPTS:-5}
 PAUSE=${GPU_SHIP_PAUSE:-15}
 CACHE=peacockdb-ci/cache
@@ -78,13 +78,13 @@ stream() {  # <label> <send calls, one string of rsync args each…>; one backgr
 
 "${vm_ssh[@]}" "mkdir -p ~/$CACHE/cpp/install/lib ~/$CACHE/cpp/install/rust-tests ~/$CACHE/testdata ~/$CACHE/scripts"
 
-dest=nebius-gpu:$CACHE  # the bare host is a placeholder; gpu-host.sh rsh resolves the IP
+dest=nebius-gpu:$CACHE  # the bare host is a placeholder; nebius.sh rsh resolves the IP
 pids=() labels=()
 stream lib "cpp/install/lib/ $dest/cpp/install/lib/" & pids+=($!); labels+=(lib)
 stream rust-tests "cpp/install/rust-tests/ $dest/cpp/install/rust-tests/" & pids+=($!); labels+=(rust-tests)
 # The rest of the install. Excluded, lib/ and rust-tests/ are also kept from --delete here.
 stream install "--exclude=/lib/ --exclude=/rust-tests/ cpp/install/ $dest/cpp/install/" & pids+=($!); labels+=(install)
-stream testdata "${TESTDATA[*]} $dest/testdata/" "scripts/gpu-host-test.sh $dest/scripts/" & pids+=($!); labels+=(testdata)
+stream testdata "${TESTDATA[*]} $dest/testdata/" "scripts/nebius-test.sh $dest/scripts/" & pids+=($!); labels+=(testdata)
 status=0
 for i in "${!pids[@]}"; do
   wait "${pids[$i]}" || { echo "::error::ci-ship: the ${labels[$i]} stream failed" >&2; status=1; }

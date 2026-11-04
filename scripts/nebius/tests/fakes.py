@@ -1,4 +1,4 @@
-"""Fake `nebius`, `ssh` and `ssh-keyscan` for gpu-host.sh's tests, driven by one JSON world.
+"""Fake `nebius`, `ssh` and `ssh-keyscan` for nebius.sh's tests, driven by one JSON world.
 
 world = {
   "exists": True, "state": "STOPPED", "ip": "203.0.113.7",
@@ -8,13 +8,26 @@ world = {
   "ssh": "ok",                # ok | down | changed
   "host_key": "ssh-ed25519 AAAAKEY1",
   "card": "",                 # what nvidia-smi --query-compute-apps prints
+  "no_gpu": False,            # a CPU VM: nvidia-smi is absent (exit 127); a probe that checks first prints cpu_busy
+  "cpu_busy": "",             # what the probe's `pgrep -a -x duckdb` prints on a CPU VM
   "stop_error": "",           # stderr text and rc 1 on `stop`
   "get_error": "",            # stderr text and rc 1 on `get`
   "hang": [],                 # verbs ("get", "start", "stop") that sleep 5 s before answering
   "ip_sequence": [],          # IPs `get` reports, one per call, before settling on the last
   "root_profile": "ok",       # ok | broken: the VM's root nebius profile, as install-watch checks it
+  "profiles": ["default"],    # the profiles in the config install-watch copies, and the active one
+  "active_profile": "default",
+  "profile_list": None,       # printed by `profile list` instead of the profiles, for an odd shape
+  "profile_config": {...},    # what `config get <key>` prints for any profile; `config unset` clears
+  "uptime": "99999",          # what `cut -d. -f1 /proc/uptime` prints on the VM
+  "watch_log": "",            # the watcher's last log line, what `tail -1 /var/log/peacock-gpu-idle.log` prints
   "calls": []                 # appended by every fake: argv lists
 }
+
+The fake profile commands answer as CLI 0.12.289 does (new-hosts-detail.md, Task 4): `profile
+list` prints names, the active one with " [default]"; deleting the active profile is refused;
+`profile update` with a key prompts, and so fails without a tty, unless it has the endpoint,
+service account and public key id. World.env() names an empty config for install-watch to copy.
 
 The fake nebius and ssh-keyscan read their stdin to the end, as a CLI that reads stdin would:
 a caller that does not give them /dev/null loses the bytes meant for the remote command. The
@@ -52,6 +65,38 @@ if a[:3] == ["compute", "instance", "stop"]:
     if w["stop_error"]:
         save(); print(w["stop_error"], file=sys.stderr); sys.exit(1)
     w["state"] = "STOPPED"; save(); sys.exit(0)
+cmd, i = [], 0
+while i < len(a):  # the command words, without the global flags install-watch adds
+    if a[i] in ("-c", "-p", "--profile"): i += 2; continue
+    if a[i] != "--no-check-update": cmd.append(a[i])
+    i += 1
+def fail(text, rc):
+    save(); print(text, file=sys.stderr); sys.exit(rc)
+if cmd[:2] == ["profile", "active"]:
+    save(); print(w["active_profile"]); sys.exit(0)
+if cmd[:2] == ["profile", "list"]:
+    out = w["profile_list"]
+    if out is None:
+        out = "\n".join(p + (" [default]" if p == w["active_profile"] else "") for p in w["profiles"])
+    save(); print(out); sys.exit(0)
+if cmd[:2] in (["profile", "activate"], ["profile", "delete"], ["profile", "update"]) and cmd[2:3]:
+    name = cmd[2]
+    if name not in w["profiles"]:
+        fail(f'Error: unknown profile "{name}"', 3)
+    if cmd[1] == "delete":
+        if name == w["active_profile"]:
+            fail(f'Error: cannot delete default profile "{name}"', 3)
+        w["profiles"].remove(name)
+    elif cmd[1] == "update" and "--private-key-file" in a and not all(
+            f in a for f in ("--endpoint", "--service-account-id", "--public-key-id")):
+        fail("Error: ^D", 2)
+    else:
+        w["active_profile"] = name
+    save(); sys.exit(0)
+if cmd[:2] == ["config", "get"] and cmd[2:3]:
+    save(); print(w["profile_config"].get(cmd[2], "")); sys.exit(0)
+if cmd[:2] == ["config", "unset"] and cmd[2:3]:
+    w["profile_config"][cmd[2]] = ""; save(); sys.exit(0)
 save(); print("fake nebius: unhandled " + " ".join(a), file=sys.stderr); sys.exit(3)
 '''
 
@@ -69,10 +114,19 @@ if w["host_key"] not in stored:
     sys.exit(255)
 at = next(i for i, a in enumerate(args) if "@" in a and not a.startswith("-"))
 cmd = " ".join(args[at + 1:])
-if "nvidia-smi" in cmd:
+if "nvidia-smi" in cmd and not w["no_gpu"]:
     print(w["card"], end="")
+elif "nvidia-smi" in cmd:
+    # A CPU VM: only a probe that looks for nvidia-smi first gets as far as its pgrep.
+    if "command -v nvidia-smi" not in cmd:
+        print("bash: line 1: nvidia-smi: command not found", file=sys.stderr); sys.exit(127)
+    print(w["cpu_busy"], end="")
 if cmd.strip() == "cat":
     sys.stdout.write(sys.stdin.read())
+if "/proc/uptime" in cmd:
+    print(w["uptime"])
+if "peacock-gpu-idle.log" in cmd and w["watch_log"]:
+    print(w["watch_log"])
 if "HOME=/root" in cmd and "compute instance get" in cmd and w["root_profile"] != "ok":
     print("Error: rpc error: code = Unauthenticated desc = bad credentials", file=sys.stderr); sys.exit(1)
 sys.exit(0)
@@ -94,8 +148,14 @@ json.dump(w, open(w_path, "w"))
 
 DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error": "",
            "start_to": "RUNNING", "states_after_start": [], "ssh": "ok",
-           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "stop_error": "", "get_error": "",
-           "hang": [], "ip_sequence": [], "root_profile": "ok", "calls": []}
+           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "no_gpu": False, "cpu_busy": "",
+           "stop_error": "", "get_error": "",
+           "hang": [], "ip_sequence": [], "root_profile": "ok",
+           "profiles": ["default"], "active_profile": "default", "profile_list": None,
+           "profile_config": {"endpoint": "api.nebius.cloud", "service-account-id": "serviceaccount-fake",
+                              "public-key-id": "publickey-fake", "private-key-file-path": ""},
+           "uptime": "99999", "watch_log": "",
+           "calls": []}
 
 
 class World:
@@ -103,6 +163,7 @@ class World:
         self.dir = pathlib.Path(tempfile.mkdtemp(prefix="gpuhost-"))
         self.path = self.dir / "world.json"
         self.write({**DEFAULT, **over, "calls": []})
+        (self.dir / "nebius-config.yaml").write_text("")
         for name, body in (("nebius", NEBIUS), ("ssh", SSH), ("ssh-keyscan", KEYSCAN), ("rsync", RSYNC)):
             f = self.dir / name
             f.write_text(body)
@@ -121,5 +182,6 @@ class World:
         return {**os.environ, "FAKE_WORLD": str(self.path), "NEBIUS": str(self.dir / "nebius"),
                 "GPU_HOST_SSH": str(self.dir / "ssh"), "GPU_HOST_KEYSCAN": str(self.dir / "ssh-keyscan"),
                 "GPU_HOST_RSYNC": str(self.dir / "rsync"),
+                "GPU_HOST_NEBIUS_CONFIG": str(self.dir / "nebius-config.yaml"),
                 "GPU_HOST_STATE_DIR": str(self.dir / "state"), "GPU_HOST_POLL": "0",
                 "GPU_HOST_START_TIMEOUT": "5", "GPU_HOST_STOP_TIMEOUT": "5"}

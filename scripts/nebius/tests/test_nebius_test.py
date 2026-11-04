@@ -1,9 +1,9 @@
-"""gpu-host-test.sh's list, over stub binaries: what runs, with what, and what is red."""
+"""nebius-test.sh's list, over stub binaries: what runs, with what, and what is red."""
 import os, pathlib, stat, subprocess, sys, tempfile, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from harness import main  # noqa: E402
 
-SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "gpu-host-test.sh")
+SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "nebius-test.sh")
 GTEST_OK = 'echo "$0 $*" >> "$TREE/argv"; echo "[  PASSED  ] 3 tests."'
 GTEST_ZERO = 'echo "$0 $*" >> "$TREE/argv"; echo "[  PASSED  ] 0 tests."'
 RUST_OK = 'echo "$0 $*" >> "$TREE/argv"; echo "running 2 tests"; echo "test result: ok. 2 passed; 0 failed"'

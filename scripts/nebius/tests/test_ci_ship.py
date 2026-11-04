@@ -34,7 +34,7 @@ def checkout():
         (r / "testdata" / d).mkdir(parents=True); (r / "testdata" / d / "a.txt").write_text(d)
     for f in TESTDATA_FILES:
         (r / "testdata" / f).write_text(f)
-    (r / "scripts").mkdir(); executable(r / "scripts/gpu-host-test.sh", "#!/bin/sh\n")
+    (r / "scripts").mkdir(); executable(r / "scripts/nebius-test.sh", "#!/bin/sh\n")
     return r
 
 
@@ -65,7 +65,7 @@ def test_run_dir_holds_the_tree_with_symlinks_and_exec_bits():
     assert (lib / "libx.so").is_symlink() and os.readlink(lib / "libx.so") == "libx.so.1", out
     assert (lib / "libx.so.1").is_symlink(), out
     for exe in ("cpp/install/bin/peacock_gpu_tests", "cpp/install/rust-tests/test_gpu_corpus",
-                "scripts/gpu-host-test.sh"):
+                "scripts/nebius-test.sh"):
         assert os.access(home / "peacockdb-ci/run-1-1" / exe, os.X_OK), exe
     for d in TESTDATA_DIRS:
         assert (home / "peacockdb-ci/run-1-1/testdata" / d / "a.txt").read_text() == d

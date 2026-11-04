@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use crate::repo_root;
 use crate::runners::{
-    GPU_HOST_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
+    NEBIUS_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
     gpu_job_staged_targets, is_rust_gpu_runner_invocation, lib_rung_of,
     rust_gpu_runner_invocations, staged_by_name_of,
 };
@@ -638,7 +638,7 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
     );
     let (keyed, rung) = gpu_job_lib_rung().unwrap_or_else(|| {
         panic!(
-            "{GPU_HOST_TEST}'s rust loop hands no file a rung: no `[ \"$name\" = <name> ] && \
+            "{NEBIUS_TEST}'s rust loop hands no file a rung: no `[ \"$name\" = <name> ] && \
              rung=<filter>` line. The staged lib `{staged}` holds every rung, so unfiltered \
              it runs the cpu cases on the device and filtered by nothing it runs the device \
              cases nowhere — the zero-test guard sees the second, not the first."
@@ -650,10 +650,10 @@ fn each_rung_has_its_ci_line_and_the_cli_is_built() {
         "the run loop keys the rung on a different file, or a different rung, from the lib \
          the staging step ships — `{staged}` is staged, `{keyed}` gets `{rung}`"
     );
-    for inv in rust_gpu_runner_invocations(GPU_HOST_TEST) {
+    for inv in rust_gpu_runner_invocations(NEBIUS_TEST) {
         assert!(
             inv.contains("$rung"),
-            "a rust invocation in {GPU_HOST_TEST}'s loop does not pass $rung, so the \
+            "a rust invocation in {NEBIUS_TEST}'s loop does not pass $rung, so the \
              assignment above it reaches nothing: {inv}"
         );
     }

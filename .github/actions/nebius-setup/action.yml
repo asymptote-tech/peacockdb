@@ -1,9 +1,9 @@
 name: nebius setup
 description: The nebius CLI with a service-account profile, and the VM's ssh key.
 
-# Shared by gpu-tests (pipeline.yml) and gpu-host-watch.yml, the only two jobs in the
-# nebius-gpu Environment. Every input is a secret, so each reaches the script through env,
-# never as a ${{ }} inside it.
+# Shared by gpu-tests (pipeline.yml) and nebius-watch.yml, the only two jobs in the
+# nebius-gpu Environment. Every input but `profile` is a secret. Each reaches the script
+# through env, never as a ${{ }} inside it.
 inputs:
   sa-id:
     description: NEBIUS_SA_ID, the service account
@@ -20,6 +20,10 @@ inputs:
   ssh-key:
     description: NEBIUS_GPU_SSH_KEY, the VM login
     required: true
+  profile:
+    description: The profile's name; one per region (ci for eu-north1, eu-west1)
+    required: false
+    default: ci
 runs:
   using: composite
   steps:
@@ -30,6 +34,7 @@ runs:
         PROJECT_ID: ${{ inputs.project-id }}
         PRIVATE_KEY: ${{ inputs.private-key }}
         SSH_KEY: ${{ inputs.ssh-key }}
+        PROFILE: ${{ inputs.profile }}
       run: |
         set -euo pipefail
         # Piped, the installer skips its interactive questions (it tests `-t 0`).
@@ -41,8 +46,8 @@ runs:
         # --private-key-file copies the key into the profile (--private-key-file-path would
         # keep a pointer to the file instead), so the PEM is removed right after. On a runner
         # with no config yet, the new profile is created and activated as the default, with no
-        # prompt: gpu-host.sh uses whatever profile is active.
-        "$HOME/.nebius/bin/nebius" profile create ci --no-check-update \
+        # prompt: nebius.sh uses whatever profile is active, or the one its --profile names.
+        "$HOME/.nebius/bin/nebius" profile create "$PROFILE" --no-check-update \
           --endpoint api.nebius.cloud \
           --service-account-id "$SA_ID" --public-key-id "$PK_ID" \
           --private-key-file "$RUNNER_TEMP/nebius/sa.pem" --parent-id "$PROJECT_ID" </dev/null

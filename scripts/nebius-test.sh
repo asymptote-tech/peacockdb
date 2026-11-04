@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The L40S test list, run on nebius-gpu against a tree holding cpp/install/ (llm-wiki/build-test.md,
-# "GPU host"). One list for the developer and for CI.
+# "Nebius host"). One list for the developer and for CI.
 #
-#   gpu-host-test.sh run [--foreground] <tree>   detached by default; logs and rc files in <tree>/.gpu-test/
-#   gpu-host-test.sh status <tree>               which binaries are done, running or failed
+#   nebius-test.sh run [--foreground] <tree>   detached by default; logs and rc files in <tree>/.gpu-test/
+#   nebius-test.sh status <tree>               which binaries are done, running or failed
 #
 # Out of the list: the sf40 pair (peacock_tpch_tests, peacock_tpchv_tests) and every bench_ case.
 set -uo pipefail

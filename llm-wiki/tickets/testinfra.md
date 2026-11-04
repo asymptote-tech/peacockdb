@@ -12,7 +12,7 @@ Tests, CI, hosts, testdata etc
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
 Each gtest main reserves a fixed byte budget (`kPoolBytes` beside its `main()`, listed in
-`build-test.md`). The GPU host is nebius-gpu now (`build-test.md`, "GPU host"). Our CI runs
+`build-test.md`). The GPU host is nebius-gpu now (`build-test.md`, "Nebius host"). Our CI runs
 queue on the `nebius-gpu` concurrency group. The other chains and the developers share the VM
 and do not queue, and neither does work outside this repo. So a neighbour holding part of the
 card still fails us. **Tentatively closed**: it cannot

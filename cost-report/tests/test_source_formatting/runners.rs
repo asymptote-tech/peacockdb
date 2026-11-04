@@ -1,6 +1,6 @@
 //! The three GPU runners — pipeline.yml's gpu job, `build-test-shadgpu.sh` and `build-test.sh`
 //! — read for the staged targets, the lib and its rung, and the single-tenant flag. The gpu
-//! job stages its binaries in pipeline.yml and runs them through `scripts/gpu-host-test.sh` on
+//! job stages its binaries in pipeline.yml and runs them through `scripts/nebius-test.sh` on
 //! the GPU host, so its run loop is read out of that script.
 
 use std::collections::BTreeSet;
@@ -14,7 +14,7 @@ use crate::repo_root;
 const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
 
 /// The L40S list pipeline.yml's gpu-tests job runs on the GPU host: its rust loop is the CI one.
-pub(crate) const GPU_HOST_TEST: &str = "scripts/gpu-host-test.sh";
+pub(crate) const NEBIUS_TEST: &str = "scripts/nebius-test.sh";
 
 const BUILD_TEST: &str = "scripts/build-test.sh";
 
@@ -91,11 +91,11 @@ pub(crate) fn gpu_job_staged_lib() -> Option<(String, String)> {
     })
 }
 
-/// The rung the gpu job's run loop (gpu-host-test.sh) hands one staged file, as
+/// The rung the gpu job's run loop (nebius-test.sh) hands one staged file, as
 /// `(staged name, filter)` — the `[ "$name" = <name> ] && rung=<filter>` line. The GPU host
 /// runs prebuilt binaries, never cargo, so the device rung is this line and not a command line.
 pub(crate) fn gpu_job_lib_rung() -> Option<(String, String)> {
-    rust_gpu_runner_loop(GPU_HOST_TEST)
+    rust_gpu_runner_loop(NEBIUS_TEST)
         .iter()
         .find_map(|l| lib_rung_of(l))
 }
@@ -313,13 +313,13 @@ fn the_three_gpu_target_lists_agree() {
     assert!(
         ci_lib.is_some() && dev_lib.is_some() && runtime_lib.is_some(),
         "a runner no longer names the lib binary and its rung — pipeline.yml + \
-         gpu-host-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
+         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
          {runtime_lib:?}"
     );
     assert!(
         ci_lib == dev_lib && dev_lib == runtime_lib,
         "the three runners disagree about the lib binary or its rung — pipeline.yml + \
-         gpu-host-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
+         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
          {runtime_lib:?}"
     );
     let runners = [
@@ -353,8 +353,8 @@ fn the_gpu_step_cannot_report_success_over_a_failure() {
         .collect();
     let step = step.join("\n");
     assert!(
-        step.contains("gpu-host-test.sh run --foreground"),
-        "the `{GPU_RUN_STEP}` step does not run {GPU_HOST_TEST} in the foreground. Detached, the \
+        step.contains("nebius-test.sh run --foreground"),
+        "the `{GPU_RUN_STEP}` step does not run {NEBIUS_TEST} in the foreground. Detached, the \
          script returns at once and the step is green before a single binary has run"
     );
     assert!(
@@ -362,14 +362,14 @@ fn the_gpu_step_cannot_report_success_over_a_failure() {
         "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
     );
 
-    let text = std::fs::read_to_string(repo_root().join(GPU_HOST_TEST))
-        .unwrap_or_else(|e| panic!("read {GPU_HOST_TEST}: {e}"));
+    let text = std::fs::read_to_string(repo_root().join(NEBIUS_TEST))
+        .unwrap_or_else(|e| panic!("read {NEBIUS_TEST}: {e}"));
     assert!(
         text.contains("return \"$rc\"") && text.contains("run_all \"$tree\"; exit $?"),
-        "{GPU_HOST_TEST} does not end by exiting the status it accumulated, so everything it \
+        "{NEBIUS_TEST} does not end by exiting the status it accumulated, so everything it \
          recorded in rc is discarded and the step is green whatever ran"
     );
-    for line in rust_gpu_runner_invocations(GPU_HOST_TEST) {
+    for line in rust_gpu_runner_invocations(NEBIUS_TEST) {
         assert!(
             line.ends_with("trc=$?"),
             "a staged rust GPU binary runs without its status captured, so it cannot fail \
@@ -377,7 +377,7 @@ fn the_gpu_step_cannot_report_success_over_a_failure() {
         );
     }
     assert!(
-        rust_gpu_runner_loop(GPU_HOST_TEST)
+        rust_gpu_runner_loop(NEBIUS_TEST)
             .iter()
             .any(|l| l.contains("[ \"$trc\" -eq 0 ] || rc=1")),
         "the rust loop no longer folds each binary's status into rc"
@@ -388,7 +388,7 @@ fn the_gpu_step_cannot_report_success_over_a_failure() {
     );
     assert!(
         text.contains("Segmentation fault") && text.contains("::error::"),
-        "nothing in {GPU_HOST_TEST} notices a command dying of a signal. Without 'set -e' such \
+        "nothing in {NEBIUS_TEST} notices a command dying of a signal. Without 'set -e' such \
          a death folds no status into rc, so the run is green having crashed — which is how \
          the rust loop printed nothing for five targets and said so nowhere"
     );
@@ -455,7 +455,7 @@ fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
 /// the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than
 /// exported, and a reader anchored at the start of the line stops seeing the invocation the
 /// moment anything precedes it — a guard silently reading nothing, not a red one.
-/// build-test-shadgpu.sh writes the loop inside an ssh heredoc (`"\$t"`), gpu-host-test.sh
+/// build-test-shadgpu.sh writes the loop inside an ssh heredoc (`"\$t"`), nebius-test.sh
 /// runs on the host itself (`"$t"`); both spellings are the same command.
 pub(crate) fn is_rust_gpu_runner_invocation(line: &str) -> bool {
     let line = line.trim_start().replace("\\$", "$");
@@ -469,7 +469,7 @@ pub(crate) fn is_rust_gpu_runner_invocation(line: &str) -> bool {
 /// makes that argument false, and until this test existed nothing said so.
 #[test]
 fn both_gpu_runners_pass_test_threads_one() {
-    for rel in [GPU_HOST_TEST, SHADGPU] {
+    for rel in [NEBIUS_TEST, SHADGPU] {
         for line in rust_gpu_runner_invocations(rel) {
             assert!(
                 line.contains("--test-threads=1"),
@@ -487,8 +487,8 @@ fn both_gpu_runners_pass_test_threads_one() {
 /// nothing else, so a runner that lost it turns the gate into a measurement in silence.
 #[test]
 fn the_benchmark_binary_runs_without_its_cases_on_ci() {
-    for rel in [GPU_HOST_TEST, SHADGPU] {
-        // build-test-shadgpu.sh names the target through `$BENCH_TARGET`, gpu-host-test.sh
+    for rel in [NEBIUS_TEST, SHADGPU] {
+        // build-test-shadgpu.sh names the target through `$BENCH_TARGET`, nebius-test.sh
         // spells it out.
         // Resolved rather than matched two ways, so one needle reads both files.
         let loop_body = rust_gpu_runner_loop(rel)
