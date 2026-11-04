@@ -18,6 +18,7 @@
   cases, 2 GPU cases. Notes below.
 - 2026-11-04: Task 4 offline (the scan reads the cache; the option and the three symbols), no
   VM. Notes below.
+- 2026-11-04: Task 4b offline (the benchmark's prefill), no VM. Notes below.
 
 ## Task 1: the load breakdown
 
@@ -164,6 +165,48 @@
   `--gtest_list_tests`), and `executor::pinned_cache::gpu_tests::{the_session_option_reaches_
   the_cache, prefill_reports_its_files_and_refuses_what_does_not_fit}` (compiled by
   `cargo test --no-run --features gpu`). They run in Task 7, cache on and off.
+
+## Task 4b: the benchmark prefills once per process
+
+- **Red → green.** `cargo test -p peacockdb-core --features rust-only --lib -- benchmark_prefill`
+  failed to compile (`E0432 unresolved imports super::ProcessPrefill, super::case_query_file, …`),
+  then 5/5. Mutations: reading `--test-threads`' value as a filter, and selecting `NOT_TIMED`
+  cases, each fail `selection_follows_libtest_filters`.
+- **Departures from the plan's text:**
+  - `a_case_outside_the_prefill_is_refused`: the plan expects `unprefilled(&{a, b}, &{a, c}) ==
+    Some(c)`. The missing case file is `b`, and the test says `Some(b)`.
+  - `selected_benchmark_cases` takes `impl IntoIterator<Item = &BenchmarkCase>`, not a slice:
+    `inventory::iter` gives no slice, and `BenchmarkCase` is not `Clone`.
+  - Under `--exact` a `--skip` is an equality too, as in libtest (the plan says "containing").
+    `--skip=<s>` is read, and `--shuffle-seed` takes a value; one more selection assertion pins
+    the `--exact` skip.
+  - `process_prefill` leaves out a case whose dataset directory is missing, or whose query panics
+    while planning (`catch_unwind`, a stderr line naming it). Without this, a missing tpcds sf40 or
+    one query that does not plan fails every case of the run, tpch included; with it, that case
+    fails on its own, as build-test.md already says a missing dataset does.
+  - The session option is applied after planning, from the first planned case's context; nothing
+    reads the cache before the prefill, so the order is the plan's in effect.
+  - With no case selected (a selection that misreads libtest), the prefill is `Ok` with no files,
+    so the running case fails `prefill: <path> was not prefilled`, also with the cache off.
+  - `Session::prefill_pinned_cache` is added here (Task 4 deferred it). The dead-code attributes
+    Task 4 left on the cache's Rust items are now `not(feature = "test-support")` on the three FFI
+    wrappers and `any(not(feature = "test-support"), feature = "rust-only")` on the types and
+    `plan_files`: a rust-only build compiles only `benchmark_prefill`, which leaves variants
+    unconstructed.
+  - `rounds_were_pinned` runs with the cache off too: an off cache counts no fallback
+    (`acquire` returns before counting at capacity 0), so it passes.
+  - The `[load-bytes]` sums walk the driver's `PlanIndex`, which is what `RunReport::emitted` is
+    indexed by.
+  - The gpu-shape compile ran in the 26.02 build image, not 25.02: dev holds one image, and this
+    task changes no C++ or ABI, so the cuDF version does not reach the Rust code.
+- **What is subtle.** A run under `PEACOCK_BENCH_RESUME=1` still plans and prefills the cases it
+  will keep, since they are selected; their bytes count against the limit. The prefill happens in
+  the first case's `measure`, before its warm-up, so no case's time includes it. `create_nsys_profile.sh`'s
+  metrics pass runs one case per process (`<name> --exact`), so each prefills that case's files
+  only; the selection reads `--exact` after the name as libtest does.
+- **Unrun (needs a device):** a benchmark run whose `[pinned-cache] prefill:` line shows
+  `files > 0` and whose cases all pass `rounds_were_pinned`; the refusal and `[load-bytes]` lines
+  on real data. Task 7 Step 3.
 
 ## cuDF 25.02 default
 

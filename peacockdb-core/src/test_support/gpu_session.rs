@@ -1,6 +1,10 @@
 //! A device session over one plan, shared by the tiers that open one.
 
-use crate::executor::{GpuContext, Region, collect_regions};
+use std::path::PathBuf;
+
+use crate::executor::{
+    GpuContext, PrefillError, PrefillStats, Region, collect_regions, prefill_on,
+};
 use crate::plan::GpuNode;
 use crate::wire::{RecipePlan, attach_recipes};
 use peacockdb_ffi::raw::{
@@ -46,6 +50,15 @@ impl Session {
     /// destroys the events, so a caller reading after the drop reads nothing.
     pub(crate) fn regions(&self, what: &str) -> Vec<Region> {
         collect_regions(self.executor).unwrap_or_else(|e| panic!("{what}: {e}"))
+    }
+
+    /// Make `files` resident in the process's pinned host cache. The cache is the process's,
+    /// not this session's; the executor only carries the C side's error text.
+    pub(crate) fn prefill_pinned_cache(
+        &self,
+        files: &[PathBuf],
+    ) -> Result<PrefillStats, PrefillError> {
+        prefill_on(self.executor, files)
     }
 
     pub(crate) fn context(&mut self) -> GpuContext {

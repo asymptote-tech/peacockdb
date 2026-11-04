@@ -917,13 +917,16 @@ pub(crate) struct PeacockOptions {
     pub(crate) pinned_host_cache_bytes: Option<u64>,
 }
 
-// The cache's Rust side is read by tests alone until the benchmark harness prefills through
-// it; each attribute below leaves with that caller. What only the FFI wrappers build is also
-// unbuilt in a rust-only test.
+// The cache's Rust side has one caller, the benchmark harness behind `test-support`, and a
+// rust-only build compiles only its pure half (`benchmark_prefill`), where the FFI wrappers
+// build nothing. Each attribute below leaves with a production caller.
 
 /// The process's pinned host file cache as the C++ side counts it. `Display` is one token
 /// run, the benchmark trailer's `pinned_cache=` value.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct PinnedCache {
     pub(crate) state: PinnedCacheState,
@@ -942,7 +945,10 @@ pub(crate) struct PinnedCache {
     pub(crate) reloads: u64,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum PinnedCacheState {
     On,
@@ -957,7 +963,10 @@ pub(crate) enum PinnedCacheState {
 
 /// Where the capacity came from. The environment's `PEACOCK_PINNED_HOST_CACHE_BYTES` wins
 /// over a session, and a session over the default.
-#[cfg_attr(any(not(test), feature = "rust-only"), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum PinnedCacheSource {
     #[default]
@@ -968,7 +977,10 @@ pub(crate) enum PinnedCacheSource {
 
 /// What one prefill read from disk (`files`, `bytes`, `us`; zero for a file already resident
 /// and unchanged), and the total it checked against the cache's limit.
-#[cfg_attr(any(not(test), feature = "rust-only"), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct PrefillStats {
     pub(crate) files: u64,
@@ -980,7 +992,10 @@ pub(crate) struct PrefillStats {
 
 /// Why a prefill did not make every file resident. `Display` is what the benchmark's refusal
 /// says after `prefill: `.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PrefillError {
     /// The files together exceed the limit; refused before anything was pinned.
@@ -994,14 +1009,17 @@ pub(crate) enum PrefillError {
 /// Every file the trees' loads read, once each: what a prefill makes resident so that the
 /// trees read pinned bytes only. A load of no column is skipped, since the device answers it
 /// from the footer before any read.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
 pub(crate) fn plan_files(roots: &[&dyn GpuNode]) -> BTreeSet<PathBuf> {
     pinned_cache::plan_files(roots)
 }
 
 /// Size the process's pinned host cache from this session's option, and report the cache.
 #[cfg(not(feature = "rust-only"))]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) fn apply_pinned_host_cache(
     config: &datafusion::execution::context::SessionConfig,
 ) -> PinnedCache {
@@ -1009,7 +1027,7 @@ pub(crate) fn apply_pinned_host_cache(
 }
 
 #[cfg(not(feature = "rust-only"))]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) fn pinned_host_cache() -> PinnedCache {
     instrument::pinned_host_cache()
 }
@@ -1017,7 +1035,7 @@ pub(crate) fn pinned_host_cache() -> PinnedCache {
 /// Make every file resident in the process's cache, whole, from disk. `executor` only carries
 /// the C side's error text; the cache is not the executor's.
 #[cfg(not(feature = "rust-only"))]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
 pub(crate) fn prefill_on(
     executor: *mut PeacockExecutor,
     files: &[PathBuf],

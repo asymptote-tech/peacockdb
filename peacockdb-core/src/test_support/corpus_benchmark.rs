@@ -4,18 +4,28 @@
 //! holds a device run to what the cpu wrote, and this one compares nothing at all. Sharing
 //! a module would put an assertion path and a measurement path behind one door.
 
+use std::collections::BTreeSet;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Instant;
 
+use futures::FutureExt;
+
 use crate::executor::{
-    GpuBackend, Measurements, NodeTiming, Region, RmmPool, RunReport, install_rmm_pool,
-    join_regions, node_measured, nodes_as_recorded, nvtx_range, run, set_node_timing,
+    GpuBackend, Measurements, NodeTiming, PlanIndex, PrefillError, PrefillStats, Region, RmmPool,
+    RunReport, apply_pinned_host_cache, install_rmm_pool, join_regions, node_measured,
+    nodes_as_recorded, nvtx_range, pinned_host_cache, plan_files, run, set_node_timing,
     set_nvtx_ranges,
 };
-use crate::plan::GpuNode;
+use crate::plan::{GpuLoadParquet, GpuNode};
 use crate::plan_text::{render_timings, timed_device_us};
 use crate::wire::{attach_recipes, join_scratch_bytes};
 
+use super::benchmark_prefill::{
+    ProcessPrefill, case_query_file, prefill_reason, rounds_were_pinned, selected_benchmark_cases,
+    unprefilled,
+};
 use super::benchmark_section::{assert_dataset_present, measure_into};
 use super::benchmark_trailer::run_section;
 use super::corpus::plan_at;
@@ -26,7 +36,7 @@ use super::record::{
 };
 use super::{
     BUILD, BenchmarkCase, Capture, CaseOutcome, MEASURED_RUNS, Mode, NOT_TIMED, RECORD_PATH_ENV,
-    RESUME_ENV, Resume, RunMeta, SKIPPED, mode_named, stem, testdata_root,
+    RESUME_ENV, Resume, RunMeta, SKIPPED, data_dir_for, mode_named, stem, testdata_root,
 };
 
 /// The sections a `(dataset, sf, mode)` file is declared to hold: the queries timed at
@@ -83,8 +93,9 @@ fn query_order(query: &str) -> (String, u32, String) {
 /// re-measures the tree is where this binary's own peak gets read.
 const BENCH_POOL_BYTES: u64 = 69 << 30;
 
-/// Discarded runs. The first execution pays for the page cache, CUDA module load and JIT,
-/// and allocator growth — the host's recent history rather than the plan. The pool removes
+/// Discarded runs. The first execution pays for CUDA module load and JIT, allocator growth
+/// and, with the pinned cache off, the page cache — the host's recent history rather than the
+/// plan. The pool removes
 /// most of the third before this runs, which is a reason to keep the warm-up: what is left
 /// is the part that varies.
 const BENCH_WARMUP_RUNS: usize = 1;
@@ -132,7 +143,9 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
         provenance: &provenance,
     };
     // Outside the failure record, each of them: a run-level fault fails every case alike, and
-    // recorded it would write one refusal into every section of the tree.
+    // recorded it would write one refusal into every section of the tree. The prefill's refusal
+    // is per process too, and is recorded on purpose (`measure`): a section without numbers
+    // says why, and sf40-baseline's skip table reads it.
     assert_fit_to_measure(&what);
     assert_dataset_present(dataset, sf, &what);
     if let Some(mismatch) =
@@ -182,7 +195,17 @@ async fn measure(
 ) -> (String, Vec<String>) {
     const _: () = assert!(MEASURED_RUNS >= 2, "a second minimum needs >= 2 runs");
 
+    // First, and inside the failure record: no round may read a file from disk.
+    let prefill = process_prefill().await;
+    if let Some(reason) = prefill_reason(prefill) {
+        panic!("{reason}");
+    }
     let (_ctx, tree) = plan_at(dataset, sf, query, mode).await;
+    if let Ok(prefill) = prefill
+        && let Some(path) = unprefilled(&plan_files(&[tree.as_ref()]), &prefill.files)
+    {
+        panic!("prefill: {} was not prefilled", path.display());
+    }
     let join_scratch = join_scratch_bytes(&mode.knobs_for(dataset));
 
     // Off across the warm-up, and set rather than assumed: the switch is process-global
@@ -190,6 +213,7 @@ async fn measure(
     // would leave later warm-ups ranging with no case range open — calls belonging to no
     // query. The capture's containment check catches exactly that, and did.
     set_nvtx_ranges(false);
+    let before = pinned_host_cache();
     for _ in 0..BENCH_WARMUP_RUNS {
         run_once(tree.as_ref(), join_scratch, what);
     }
@@ -217,6 +241,8 @@ async fn measure(
             regions,
         });
     }
+    let after = pinned_host_cache();
+    rounds_were_pinned(&before, &after).unwrap_or_else(|moved| panic!("{moved}"));
 
     let times: Vec<u64> = runs.iter().map(|run| run.total_us).collect();
     // Every run, not the chosen one: a spread of ten separates a call's cost from an
@@ -247,6 +273,9 @@ async fn measure(
 
     let chosen = second_smallest(runs);
     let costed = measured_of(&chosen, what);
+    let (compressed, decoded) = load_bytes(tree.as_ref(), &chosen.report, what);
+    eprintln!("[pinned-cache] {what}: {after}");
+    eprintln!("[load-bytes] {what}: compressed={compressed} decoded={decoded}");
     let body = format!(
         "{}{}",
         render_timings(tree.as_ref(), &costed),
@@ -277,6 +306,78 @@ async fn measure(
         chosen.regions.len()
     );
     (body, rows)
+}
+
+/// The process's one prefill: every case it will run planned (footers only, untimed), and the
+/// union of their files made resident under the first case's session option. Set after the
+/// planning `await`s; the binary runs `--test-threads=1`, so no case waits on another's.
+pub(crate) async fn process_prefill() -> &'static Result<ProcessPrefill, PrefillError> {
+    static PREFILL: OnceLock<Result<ProcessPrefill, PrefillError>> = OnceLock::new();
+    if let Some(prefill) = PREFILL.get() {
+        return prefill;
+    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut files = BTreeSet::new();
+    let mut planned = 0;
+    let mut first = None;
+    for case in selected_benchmark_cases(&args, inventory::iter::<BenchmarkCase>) {
+        let mode = mode_named(case.mode);
+        let what = format!("{}/{} at {}", case.dataset, case.query, mode.name);
+        // Left to its own case, which refuses a missing dataset and fails a query that does not
+        // plan naming itself, rather than every case of the run failing for it.
+        if !data_dir_for(case.dataset, case.sf).is_dir() {
+            continue;
+        }
+        let file = case_query_file(case);
+        let planning = plan_at(case.dataset, case.sf, &file, mode);
+        let Ok((ctx, tree)) = AssertUnwindSafe(planning).catch_unwind().await else {
+            eprintln!("[pinned-cache] prefill: {what} does not plan; its own case says why");
+            continue;
+        };
+        planned += 1;
+        files.extend(plan_files(&[tree.as_ref()]));
+        if first.is_none() {
+            first = Some((ctx, tree, join_scratch_bytes(&mode.knobs_for(case.dataset))));
+        }
+    }
+    let prefilled = match &first {
+        Some((ctx, tree, join_scratch)) => {
+            apply_pinned_host_cache(ctx.state().config());
+            let paths: Vec<PathBuf> = files.iter().cloned().collect();
+            Session::open(tree.as_ref(), *join_scratch, "the benchmark's prefill")
+                .prefill_pinned_cache(&paths)
+        }
+        None => Ok(PrefillStats::default()),
+    };
+    match &prefilled {
+        Ok(stats) => eprintln!(
+            "[pinned-cache] prefill: cases={planned} files={} bytes={} us={} needed={} limit={}",
+            stats.files, stats.bytes, stats.us, stats.needed, stats.limit
+        ),
+        Err(PrefillError::Off) => {
+            eprintln!("[pinned-cache] prefill skipped: {}", PrefillError::Off)
+        }
+        Err(error) => eprintln!("[pinned-cache] prefill refused: {error}"),
+    }
+    PREFILL.get_or_init(|| prefilled.map(|stats| ProcessPrefill { stats, files }))
+}
+
+/// What the tree's loads read and produced in one run: the parquet bytes of their row groups
+/// over the projected columns, and the bytes of the batches they emitted.
+fn load_bytes(tree: &dyn GpuNode, report: &RunReport, what: &str) -> (u64, u64) {
+    let index = PlanIndex::build(tree).unwrap_or_else(|e| panic!("{what}: {e}"));
+    let loads = index.nodes.iter().enumerate().filter_map(|(at, indexed)| {
+        let load = indexed.node.as_any().downcast_ref::<GpuLoadParquet>()?;
+        let emitted: usize = report.emitted[at]
+            .iter()
+            .flatten()
+            .map(|batch| batch.bytes)
+            .sum();
+        Some((load.bytes(), emitted as u64))
+    });
+    loads.fold((0, 0), |(compressed, decoded), (read, out)| {
+        (compressed + read, decoded + out)
+    })
 }
 
 /// One run's calls costed.

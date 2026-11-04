@@ -522,6 +522,17 @@ module line, two, or one naming no release or two, and an unreadable file refuse
 the `--- run ---` trailer a section ends with: its keys in order, the five provenance keys
 last, each with the run's own value
 
+| Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
+|---|---|--:|
+
+which cases one benchmark process runs, by libtest's rules over the macro's test names: a filter
+matches part of a name, `--exact` makes filters and skips whole names, `--skip` drops a match,
+`--test-threads 1` and `--test-threads=1` are no filter, and a case timed at no mode never
+runs; `aggregate_groupby` plans `aggregate-groupby.sql`. A case fails when the cache filled,
+fell back, reloaded or evicted during its rounds, naming each count; when the prefill did not
+fit or could not read a file, with its sizes (`prefill: needs 60 > limit 49`), but not when the
+cache is off; and when one of its files is outside the prefill, naming it
+
 | Device case lists | [test_support::device_cases::tests](../peacockdb-core/src/test_support/device_cases/tests.rs) | 11 |
 |---|---|--:|
 
@@ -2539,8 +2550,33 @@ The run's own refusals fail before anything is recorded: a capture or resume var
 setting, no device to name, no rmm pool, a debug build, a dataset that is not there, and a record
 at `PEACOCK_RECORD_PATH` that another run wrote.
 
+**The prefill.** No measured round reads a file from disk. Before its first case's warm-up, the
+process plans every case it will run (libtest's filters, `--exact` and `--skip`, read from its
+own arguments), collects the files their loads read, and prefills them into the pinned host
+cache once, under the first case's session option. Every warm-up and measured round of every case
+then reads those pinned buffers. A case whose dataset is missing, or whose query does not plan, is
+left out and fails on its own. The run prints one line on stderr:
+
+```
+[pinned-cache] prefill: cases=<k> files=<n> bytes=<n> us=<n> needed=<n> limit=<n>
+[pinned-cache] prefill refused: needs <needed> > limit <limit>
+[pinned-cache] prefill skipped: the pinned host cache is off
+```
+
+Unlike the refusals above, a refused prefill is recorded: every case's section is a failed one,
+`status=failed reason=prefill: needs <needed> > limit <limit>` (or `prefill: <path>: <error>`), so
+a section without numbers says why. With the cache off (`pinned_host_cache_bytes = 0`, or no
+discrete device) the cases measure from the path. A case also fails if one of its files is outside
+the prefill (`prefill: <path> was not prefilled`), or if the cache filled, fell back, reloaded or
+evicted during its rounds (`pinned cache: <f> fills, <b> fallbacks, <r> reloads, <e> evictions
+during the rounds`). After its runs a case prints two stderr lines: `[pinned-cache] <case>:` and
+the cache's counters, and `[load-bytes] <case>: compressed=<n> decoded=<n>`. `compressed` is the
+parquet bytes of its loads' row groups over the projected columns; `decoded` is the bytes of the
+batches its loads emitted in the reported run.
+
 It asserts nothing about an answer, so it can never gate a merge. Its nine harness assertions
-run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
+run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here. The prefill's
+case selection and refusals are tested in the cpu rung (`test_support::benchmark_prefill::tests`).
 
 The run is measured under event timing — a CUDA event pair around every call, no sync inside
 a region — and what that costs was measured once at sf40 by `test_node_timing`'s procedure
