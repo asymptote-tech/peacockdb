@@ -8,12 +8,17 @@
 - Tasks 0 and 1 committed (f4e2767d, 5330543d). Control file said `pause` after the desk wave;
   the plan was revised (2d4a7971, d0c2feba) and the pause cleared.
 - 2026-11-04: Task 2 (experiment scripts) dispatched to a fresh developer.
+- 2026-11-03 18:25 local (helper, the human's order): chain M hard-killed mid-Task-2. Task 2's
+  developer had written nothing and no VM was used. **Next dispatch: Task 1 Steps 4-5**
+  (the desk-wave amendments: `comet-internals.md` `## Recipes`, `data-path.md` `## Rates for
+  the cost model`), checkpoint `comet-research: desk wave amendments`. Then Task 2 from its
+  Step 1. Read the plan's Task 1 section before dispatching.
 
 ## Tasks
 
 - Task 0 (set up the run): done, committed.
-- Task 1 (desk wave): done, committed (5330543d).
-- Task 2 (experiment scripts): dispatched
+- Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): todo, next.
+- Task 2 (experiment scripts): todo (a dispatch was killed with no output)
 - Task 3 (experiment 1, VM-to-S3 throughput): todo
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
 - Task 5 (analysis and the cost model): todo
@@ -128,6 +133,9 @@ wording edits, no change of substance).
 ## VM hours
 
 ## Rulings
+
+- 2026-11-03 (helper, the human's decision): Task 1 Steps 4-5 run before Task 2. Task 2 consumes
+  `## Recipes`, and Tasks 3 and 5 consume `## Rates for the cost model`; neither section exists yet.
 
 - 2026-11-04 (coordinator): the desk wave proposed two additions. An iperf3 run between VMs is
   allowed in Task 3 if it fits the caps. A Comet run with
