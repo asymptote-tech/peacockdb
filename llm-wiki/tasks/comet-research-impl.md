@@ -259,7 +259,7 @@ needs.
   - `comet_bytes.py EVENTLOG_DIR > bytes.tsv`:
     `dataset	query	run	scan_bytes	shuffle_bytes	spill_bytes	s3_gets	driver_ms	scheduler_ms`.
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_vm_log.sh`, with `nebius` and `ssh` stubbed on `PATH` and `COMET_VM_LOG` a temp file:
     - `use` on a STOPPED VM logs `use-requested` then `use started`; `stop-used` stops it;
     - `use` on a RUNNING VM logs `use found`; `stop-used` force-stops it too;
@@ -282,9 +282,9 @@ needs.
     - `conf.txt` writing replaces a `fs.s3a.secret.key` value with `<redacted>`.
   - `test_comet_bytes.py`: on `fixtures/eventlog-small.json`, a hand-made two-stage event log,
     the sums equal the fixture's stage metrics.
-- [ ] **Step 2:** Run them. Expected: FAIL, the scripts do not exist.
-- [ ] **Step 3:** Write the scripts.
-- [ ] **Step 4:** Run the tests. Expected: PASS. Then, as the only VM time in this task: `vm.sh use
+- [x] **Step 2:** Run them. Expected: FAIL, the scripts do not exist.
+- [x] **Step 3:** Write the scripts.
+- [x] **Step 4:** Run the tests. Expected: PASS. Then, as the only VM time in this task: `vm.sh use
   l40s`, arm the dead-man stop at 3 minutes, and confirm `vm.sh status l40s` shows STOPPED within
   10 minutes. If not, switch to the local fallback, and repeat on the L40S. Record the result in
   `-detail.md`.

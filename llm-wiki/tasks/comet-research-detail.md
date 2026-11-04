@@ -21,7 +21,7 @@
 
 - Task 0 (set up the run): done, committed.
 - Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): done 2026-11-04, checkpoint `comet-research: desk wave amendments` reported, awaiting commit.
-- Task 2 (experiment scripts): todo (a dispatch was killed with no output)
+- Task 2 (experiment scripts): Steps 1-4 done 2026-11-04; checkpoint `comet-research: experiment scripts` reported, awaiting commit.
 - Task 3 (experiment 1, VM-to-S3 throughput): todo
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
 - Task 5 (analysis and the cost model): todo
@@ -148,6 +148,68 @@ Two foreground `Explore` subagents; the developer wrote their text in place and 
 
 ## VM hours
 
+Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude/ensemble/M.vm-log.tsv`.
+
+| VM | event | local time | note |
+|---|---|---|---|
+| l40s | use requested | 2026-11-04 03:07:47 | found RUNNING (up 15 min, idle: no card process, no test, no build; watcher "idle 908s") |
+| l40s | dead-man armed | 03:07:51 | guest, 3 min (Task 2 Step 4) |
+| l40s | guest poweroff | 03:10:51 | the timer fired; ssh stopped answering after 03:10:47 |
+| l40s | STOPPED | 03:13:39 | API state, polled with `vm.sh status l40s` (STOPPING from 03:12:05) |
+| l40s | stop-used | 03:13:46 | logged `lost found STOPPED`; no stop call needed |
+
+- After Task 2: l40s 0.05 h of the 1 h cap by the log; the wall time from request to STOPPED was
+  0.10 h. cpu128 0.00 h of 2 h.
+- The log undercounts a dead-man stop: `lost` closes a use at its last heartbeat (the plan's
+  rule), here 03:10:47, while the VM ran to 03:13:39. A long detached run polled every 9 min can
+  lose up to that much per use. Task 6 should report wall times beside the log's hours.
+
+## Task 2: experiment scripts (2026-11-04)
+
+- Tests: `bash llm-wiki/artifacts/comet-research/scripts/tests/test_vm_log.sh` (14 cases) and
+  `python3 -m pytest llm-wiki/artifacts/comet-research/scripts/tests` (17). Both passed; both
+  were watched failing first (scripts absent).
+- **Dead-man result (Step 4): the guest poweroff works.** `vm.sh use l40s --deadman-min 3` armed
+  `sudo systemd-run --unit=comet-deadman --on-active=3m systemctl poweroff`. The API showed
+  STOPPED 5 min 48 s after arming (2 min 48 s after the poweroff). The default stays
+  `COMET_DEADMAN=guest`; the local fallback (`COMET_DEADMAN=local`, a `systemd-run --user` timer
+  running `vm.sh stop <vm>`) is tested with stubs only. A dead-man stop lands about 3 min after
+  its timer, so a use can overrun the cap by that much. Not checked on cpu128 (not started in
+  this task); its first `use` arms the same guest timer.
+- Files beyond the plan's list: `comet_data.py` (reuse, fetch and upload decisions for
+  `comet_setup.sh`, tested in `test_comet_data.py`) and `test_s3_throughput.py`.
+- `vm.sh` details: a `started` use counts from its `use-requested` (billing starts at the start
+  call); a `found` use from the `use` row. `use` refuses (exit 1, nothing logged) when no minute
+  is left in the cap. A second `use` re-arms the dead-man at the minutes now left. `stop-used`
+  logs `lost` then still force-stops a RUNNING VM whose boot id changed (the human's ruling: every
+  VM used is force-stopped). `vm.sh stop <vm>` exists for the local dead-man. `push-aws` merges
+  the profile sections into the VM's `~/.aws` (dir 700, files 600) from JSON on ssh stdin.
+- `comet_run.py` details, for Task 4:
+  - Deploy: copy `scripts/` to the VM with `testdata/tpch-queries` and `testdata/tpcds-queries`
+    as `scripts/queries/tpch` and `scripts/queries/tpcds`. Run with
+    `SPARK_HOME=/opt/spark ~/comet/venv/bin/python comet_run.py …` after
+    `comet_setup.sh cluster`. Local data is `~/comet/data/<ds>-sf40/<table>.parquet`.
+  - The queries are peacockdb's DuckDB-dialect texts. Spark 4 reads `"x"` as a string, so
+    `statements()` turns double-quoted names into backticks (q16, q32, q50, q62, q90, q92, q94,
+    q95, q99 have them). Untested on Spark: other dialect gaps, and ANSI mode (on by default in
+    Spark 4, left at Comet's default) failing a query, show up first in Step 2's calibration.
+  - Every query runs under job group `<dataset>:<query>:<run>`; `comet_bytes.py` keys on it.
+    Plans are dumped for run `1` only, outside the timed span. `fallbacks.tsv` has one row per
+    fallback reason (`<Operator>: <reason>`), or one row with an empty reason; the operator
+    counts skip AQE, query-stage, reused, InputAdapter and WholeStageCodegen wrappers.
+  - `--matrix` estimates: concurrent costed as sequential (an upper bound), S3 as local × 2.0
+    until an S3 run calibrates it, `--cache` adds one pass, plus 1 min start-up per run.
+    `--warmup-query q1` is the TPC-H S3 warm-up.
+  - A SIGTERM (Task 4's `timeout`) writes `rc` 143 and status `cut by signal 15`.
+- `comet_bytes.py`: `driver_ms` is the SQL executions' wall time less the time a stage of the
+  query was open; `scheduler_ms` sums, per stage, its open time less its tasks' span. `s3_gets` is
+  Comet's `scan_io_http_observed_gets`; `scan_bytes` is `input.bytesRead`, which Comet feeds from
+  `bytes_scanned`. Not yet checked against a real 1.2.0 event log: that a stage's accumulables
+  carry the SQL metric under its display name.
+- Not run anywhere yet: `comet_setup.sh`, `comet_data.py`'s S3 paths, `s3_throughput.py` against S3,
+  and the Spark side of `comet_run.py`. `bash -n` passes on both shell scripts; shellcheck is not
+  installed here.
+
 ## Rulings
 
 - 2026-11-03 (helper, the human's decision): Task 1 Steps 4-5 run before Task 2. Task 2 consumes
@@ -166,3 +228,8 @@ Two foreground `Explore` subagents; the developer wrote their text in place and 
   model`, tagged as assumptions. Known drift left for Task 5: `exotic.md`'s p5.4xlarge NVMe 6 GB/s
   (likely ~3.9) and `local_nvme_x4_gds` 24.3 GiB/s (the L40S PCIe limit, not a drive's). The
   `nebius` CLI is at `~/.nebius/bin`, not on an agent shell's PATH.
+
+- 2026-11-04 (coordinator, after Task 2): `vm.sh hours` closes a `lost` use at its last
+  heartbeat, so it can undercount by up to one poll interval per use. For every cap check in
+  Tasks 3 and 4, add 10 minutes per open or `lost` use to `vm.sh hours`. The report's VM hours
+  give both figures: the log's sum and the request-to-STOPPED wall time.
