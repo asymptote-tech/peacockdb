@@ -202,7 +202,7 @@ add_test(NAME peacock_cpu_tests COMMAND peacock_cpu_tests)
 set_tests_properties(peacock_cpu_tests PROPERTIES LABELS "cpu")
 
 # GPU tests — requires a CUDA-capable device
-add_executable(peacock_gpu_tests tests/gpu/test_cudf.cpp)
+add_executable(peacock_gpu_tests tests/gpu/test_cudf.cpp tests/gpu/test_reader_probe.cpp)
 target_include_directories(peacock_gpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(peacock_gpu_tests PRIVATE peacock_gpu cudf::cudf GTest::gtest)
 set_target_properties(peacock_gpu_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
