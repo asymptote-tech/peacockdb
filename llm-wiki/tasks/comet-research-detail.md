@@ -6,13 +6,14 @@
   one plan task at a time (`comet-research-impl.md`); each checkpoint is committed by the
   coordinator with the plan's message.
 - Tasks 0 and 1 committed (f4e2767d, 5330543d). Control file said `pause` after the desk wave;
-  next dispatch is Task 2 once it clears.
+  the plan was revised (2d4a7971, d0c2feba) and the pause cleared.
+- 2026-11-04: Task 2 (experiment scripts) dispatched to a fresh developer.
 
 ## Tasks
 
 - Task 0 (set up the run): done, committed.
-- Task 1 (desk wave): done, checkpoint `comet-research: desk wave` pending.
-- Task 2 (experiment scripts): todo
+- Task 1 (desk wave): done, committed (5330543d).
+- Task 2 (experiment scripts): dispatched
 - Task 3 (experiment 1, VM-to-S3 throughput): todo
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
 - Task 5 (analysis and the cost model): todo
