@@ -9,11 +9,11 @@ branch, which is why two chains need no locking.
 > **Host override, from 2026-10-08 until the human lifts it.** It overrides the specs and
 > `build-test.md` wherever they disagree.
 >
-> **GPU host:** nebius-gpu through `scripts/gpu-host.sh`, `gpu-host-sync.sh` and `gpu-host-test.sh`
-> (`build-test.md`, "GPU host"). The L40S list only; sf40 and benchmarks are out and deferred.
+> **GPU host:** nebius-gpu through `scripts/nebius.sh`, `nebius-sync.sh` and `nebius-test.sh`
+> (`build-test.md`, "Nebius host"). The L40S list only; sf40 and benchmarks are out and deferred.
 > The final device run is the dispatched `GPU Tests (nebius-gpu)` CI job.
 >
-> - **This chain's tree on the VM is `~/peacockdb-J`**: sync with `gpu-host-sync.sh --dest
+> - **This chain's tree on the VM is `~/peacockdb-J`**: sync with `nebius-sync.sh --dest
 >   peacockdb-J`. Its sf1 data is already there.
 > - **Large tests and benchmark measurements are out of every task.** That means the sf40
 >   binaries (`peacock_tpch_tests`, `peacock_tpchv_tests`), `--run-benchmarks`, Nsight captures,
@@ -64,8 +64,8 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 
 > **Blocks lifted, 2026-11-04, by the human.** The GitHub PAT is on dev at
 > `~/.config/peacock/github-pat`, made as `new-hosts-detail.md` "Blocked" asks. Tested: Contents,
-> Pull requests and Actions write work; Workflows write is untested. `ENS-nebius-guard` is not on
-> master yet.
+> Pull requests and Actions write work; Workflows write is untested. `ENS-nebius-guard` is on
+> master too: cherry-picked by the human as `bf937124` and `e20db7e9`.
 >
 > - **Go back to the blocked tasks before anything else, in chain order: new-hosts, pinned-loads,
 >   bench-rows, sf40-baseline.** Master marks each `rebase needed(building)` against your
@@ -76,9 +76,8 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 >   (provision the CPU VM), then Task 8 live and Task 10; pinned-loads at Task 2 Step 3;
 >   bench-rows at Task 5; sf40-baseline at Task 8. Complete each to its plan's last step under the
 >   chain's rules.
-> - new-hosts' Task 6 Step 5 still waits on the human landing `ENS-nebius-guard`. When it is the
->   only step left, mark new-hosts `blocked(building)` naming that step alone and go on to
->   pinned-loads; the H100 work needs Task 10, not the guard.
+> - new-hosts' Task 6 Step 5 no longer waits: the guard's files are on master, so the step's
+>   landed-by-content check passes. Run it when the plan reaches it.
 > - **This rebase is larger than intended, and the human accepts it.** Master now holds the merge
 >   of #165 (`ENS-optimizer`, 17 commits, about 450 files), so the rebase this note arrives
 >   with carries the join optimizer into every chain L branch, from containers-rebase up,
