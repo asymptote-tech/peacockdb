@@ -1,0 +1,552 @@
+children {
+  children {
+    plan_id: 14131
+    native_scan {
+      common {
+        required_schema {
+          name: "cr_returned_date_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "cr_catalog_page_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "cr_return_amount"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "cr_net_loss"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returned_date_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returned_time_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_item_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_refunded_customer_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_refunded_cdemo_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_refunded_hdemo_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_refunded_addr_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returning_customer_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returning_cdemo_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returning_hdemo_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_returning_addr_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_call_center_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_catalog_page_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_ship_mode_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_warehouse_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_reason_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_order_number"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_return_quantity"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_return_amount"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_return_tax"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_return_amt_inc_tax"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_fee"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_return_ship_cost"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_refunded_cash"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_reversed_charge"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_store_credit"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "cr_net_loss"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 7
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1561
+                stop_index: 1578
+                line: 42
+                start_position: 23
+              }
+              expr_id: 9398
+            }
+          }
+          query_context {
+            start_index: 1058
+            stop_index: 2130
+            line: 29
+            start_position: 3
+          }
+          expr_id: 9399
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1561
+                stop_index: 1578
+                line: 42
+                start_position: 23
+              }
+              expr_id: 9400
+            }
+          }
+          query_context {
+            start_index: 1058
+            stop_index: 2130
+            line: 29
+            start_position: 3
+          }
+          expr_id: 9401
+        }
+        projection_vector: 0
+        projection_vector: 12
+        projection_vector: 18
+        projection_vector: 26
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -1893295872
+    }
+  }
+  plan_id: 14195
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1561
+                stop_index: 1578
+                line: 42
+                start_position: 23
+              }
+              expr_id: 9402
+            }
+          }
+          query_context {
+            start_index: 1058
+            stop_index: 2130
+            line: 29
+            start_position: 3
+          }
+          expr_id: 9403
+        }
+        right {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 1561
+                stop_index: 1578
+                line: 42
+                start_position: 23
+              }
+              expr_id: 9404
+            }
+          }
+          query_context {
+            start_index: 1058
+            stop_index: 2130
+            line: 29
+            start_position: 3
+          }
+          expr_id: 9405
+        }
+      }
+      expr_id: 9406
+    }
+  }
+}
+plan_id: 14197
+projection {
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1561
+      stop_index: 1578
+      line: 42
+      start_position: 23
+    }
+    expr_id: 9407
+  }
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1561
+      stop_index: 1578
+      line: 42
+      start_position: 23
+    }
+    expr_id: 9408
+  }
+  project_list {
+    literal {
+      decimal_val: "\000"
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 1670
+      stop_index: 1707
+      line: 44
+      start_position: 23
+    }
+    expr_id: 9409
+  }
+  project_list {
+    literal {
+      decimal_val: "\000"
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 1733
+      stop_index: 1765
+      line: 45
+      start_position: 23
+    }
+    expr_id: 9410
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 1561
+      stop_index: 1578
+      line: 42
+      start_position: 23
+    }
+    expr_id: 9411
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 1561
+      stop_index: 1578
+      line: 42
+      start_position: 23
+    }
+    expr_id: 9412
+  }
+}

@@ -1,0 +1,1333 @@
+children {
+  children {
+    plan_id: 23845
+    native_scan {
+      common {
+        required_schema {
+          name: "l_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "l_quantity"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "l_extendedprice"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "l_discount"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "l_shipinstruct"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "l_shipmode"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_orderkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_suppkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_linenumber"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_quantity"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_extendedprice"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_discount"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_tax"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_returnflag"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_linestatus"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_shipdate"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_commitdate"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_receiptdate"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_shipinstruct"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_shipmode"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "l_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 4
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 94
+                stop_index: 102
+                line: 5
+                start_position: 4
+              }
+              expr_id: 9802
+            }
+          }
+          query_context {
+            stop_index: 974
+            line: 1
+          }
+          expr_id: 9803
+        }
+        data_filters {
+          in {
+            in_value {
+              bound {
+                index: 5
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 94
+                stop_index: 102
+                line: 5
+                start_position: 4
+              }
+              expr_id: 9804
+            }
+            lists {
+              literal {
+                string_val: "AIR"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 314
+                stop_index: 318
+                line: 10
+                start_position: 23
+              }
+              expr_id: 9805
+            }
+            lists {
+              literal {
+                string_val: "AIR REG"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 321
+                stop_index: 329
+                line: 10
+                start_position: 30
+              }
+              expr_id: 9806
+            }
+          }
+          query_context {
+            start_index: 310
+            stop_index: 330
+            line: 10
+            start_position: 19
+          }
+          expr_id: 9807
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 4
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 94
+                stop_index: 102
+                line: 5
+                start_position: 4
+              }
+              expr_id: 9808
+            }
+            right {
+              literal {
+                string_val: "DELIVER IN PERSON"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 357
+                stop_index: 375
+                line: 11
+                start_position: 25
+              }
+              expr_id: 9809
+            }
+          }
+          query_context {
+            start_index: 340
+            stop_index: 375
+            line: 11
+            start_position: 8
+          }
+          expr_id: 9810
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 94
+                stop_index: 102
+                line: 5
+                start_position: 4
+              }
+              expr_id: 9811
+            }
+          }
+          query_context {
+            stop_index: 974
+            line: 1
+          }
+          expr_id: 9812
+        }
+        data_filters {
+          or {
+            left {
+              and {
+                left {
+                  gt_eq {
+                    left {
+                      bound {
+                        index: 1
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 15
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 94
+                        stop_index: 102
+                        line: 5
+                        start_position: 4
+                      }
+                      expr_id: 9813
+                    }
+                    right {
+                      literal {
+                        decimal_val: "d"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 15
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 88
+                        stop_index: 974
+                        line: 4
+                        start_position: 6
+                      }
+                      expr_id: 9814
+                    }
+                  }
+                  query_context {
+                    start_index: 219
+                    stop_index: 233
+                    line: 8
+                    start_position: 8
+                  }
+                  expr_id: 9815
+                }
+                right {
+                  lt_eq {
+                    left {
+                      bound {
+                        index: 1
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 15
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 94
+                        stop_index: 102
+                        line: 5
+                        start_position: 4
+                      }
+                      expr_id: 9816
+                    }
+                    right {
+                      literal {
+                        decimal_val: "\004L"
+                        datatype {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 15
+                              scale: 2
+                            }
+                          }
+                        }
+                      }
+                      query_context {
+                        start_index: 88
+                        stop_index: 974
+                        line: 4
+                        start_position: 6
+                      }
+                      expr_id: 9817
+                    }
+                  }
+                  query_context {
+                    start_index: 239
+                    stop_index: 258
+                    line: 8
+                    start_position: 28
+                  }
+                  expr_id: 9818
+                }
+              }
+              query_context {
+                stop_index: 974
+                line: 1
+              }
+              expr_id: 9819
+            }
+            right {
+              or {
+                left {
+                  and {
+                    left {
+                      gt_eq {
+                        left {
+                          bound {
+                            index: 1
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 94
+                            stop_index: 102
+                            line: 5
+                            start_position: 4
+                          }
+                          expr_id: 9820
+                        }
+                        right {
+                          literal {
+                            decimal_val: "\003\350"
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 88
+                            stop_index: 974
+                            line: 4
+                            start_position: 6
+                          }
+                          expr_id: 9821
+                        }
+                      }
+                      query_context {
+                        start_index: 516
+                        stop_index: 531
+                        line: 16
+                        start_position: 8
+                      }
+                      expr_id: 9822
+                    }
+                    right {
+                      lt_eq {
+                        left {
+                          bound {
+                            index: 1
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 94
+                            stop_index: 102
+                            line: 5
+                            start_position: 4
+                          }
+                          expr_id: 9823
+                        }
+                        right {
+                          literal {
+                            decimal_val: "\a\320"
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 88
+                            stop_index: 974
+                            line: 4
+                            start_position: 6
+                          }
+                          expr_id: 9824
+                        }
+                      }
+                      query_context {
+                        start_index: 537
+                        stop_index: 557
+                        line: 16
+                        start_position: 29
+                      }
+                      expr_id: 9825
+                    }
+                  }
+                  query_context {
+                    stop_index: 974
+                    line: 1
+                  }
+                  expr_id: 9826
+                }
+                right {
+                  and {
+                    left {
+                      gt_eq {
+                        left {
+                          bound {
+                            index: 1
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 94
+                            stop_index: 102
+                            line: 5
+                            start_position: 4
+                          }
+                          expr_id: 9827
+                        }
+                        right {
+                          literal {
+                            decimal_val: "\a\320"
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 88
+                            stop_index: 974
+                            line: 4
+                            start_position: 6
+                          }
+                          expr_id: 9828
+                        }
+                      }
+                      query_context {
+                        start_index: 813
+                        stop_index: 828
+                        line: 24
+                        start_position: 8
+                      }
+                      expr_id: 9829
+                    }
+                    right {
+                      lt_eq {
+                        left {
+                          bound {
+                            index: 1
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 94
+                            stop_index: 102
+                            line: 5
+                            start_position: 4
+                          }
+                          expr_id: 9830
+                        }
+                        right {
+                          literal {
+                            decimal_val: "\v\270"
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 15
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 88
+                            stop_index: 974
+                            line: 4
+                            start_position: 6
+                          }
+                          expr_id: 9831
+                        }
+                      }
+                      query_context {
+                        start_index: 834
+                        stop_index: 854
+                        line: 24
+                        start_position: 29
+                      }
+                      expr_id: 9832
+                    }
+                  }
+                  query_context {
+                    stop_index: 974
+                    line: 1
+                  }
+                  expr_id: 9833
+                }
+              }
+            }
+          }
+          query_context {
+            stop_index: 974
+            line: 1
+          }
+          expr_id: 9834
+        }
+        projection_vector: 1
+        projection_vector: 4
+        projection_vector: 5
+        projection_vector: 6
+        projection_vector: 13
+        projection_vector: 14
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 28866814
+    }
+  }
+  plan_id: 23860
+  filter {
+    predicate {
+      and {
+        left {
+          and {
+            left {
+              is_not_null {
+                child {
+                  bound {
+                    index: 4
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 94
+                    stop_index: 102
+                    line: 5
+                    start_position: 4
+                  }
+                  expr_id: 9835
+                }
+              }
+              query_context {
+                stop_index: 974
+                line: 1
+              }
+              expr_id: 9836
+            }
+            right {
+              in {
+                in_value {
+                  bound {
+                    index: 5
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 94
+                    stop_index: 102
+                    line: 5
+                    start_position: 4
+                  }
+                  expr_id: 9837
+                }
+                lists {
+                  literal {
+                    string_val: "AIR"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 314
+                    stop_index: 318
+                    line: 10
+                    start_position: 23
+                  }
+                  expr_id: 9838
+                }
+                lists {
+                  literal {
+                    string_val: "AIR REG"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 321
+                    stop_index: 329
+                    line: 10
+                    start_position: 30
+                  }
+                  expr_id: 9839
+                }
+              }
+              query_context {
+                start_index: 310
+                stop_index: 330
+                line: 10
+                start_position: 19
+              }
+              expr_id: 9840
+            }
+          }
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 4
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 94
+                    stop_index: 102
+                    line: 5
+                    start_position: 4
+                  }
+                  expr_id: 9841
+                }
+                right {
+                  literal {
+                    string_val: "DELIVER IN PERSON"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 357
+                    stop_index: 375
+                    line: 11
+                    start_position: 25
+                  }
+                  expr_id: 9842
+                }
+              }
+              query_context {
+                start_index: 340
+                stop_index: 375
+                line: 11
+                start_position: 8
+              }
+              expr_id: 9843
+            }
+            right {
+              and {
+                left {
+                  is_not_null {
+                    child {
+                      bound {
+                        datatype {
+                          type_id: INT64
+                        }
+                      }
+                      query_context {
+                        start_index: 94
+                        stop_index: 102
+                        line: 5
+                        start_position: 4
+                      }
+                      expr_id: 9844
+                    }
+                  }
+                  query_context {
+                    stop_index: 974
+                    line: 1
+                  }
+                  expr_id: 9845
+                }
+                right {
+                  or {
+                    left {
+                      and {
+                        left {
+                          gt_eq {
+                            left {
+                              bound {
+                                index: 1
+                                datatype {
+                                  type_id: DECIMAL
+                                  type_info {
+                                    decimal {
+                                      precision: 15
+                                      scale: 2
+                                    }
+                                  }
+                                }
+                              }
+                              query_context {
+                                start_index: 94
+                                stop_index: 102
+                                line: 5
+                                start_position: 4
+                              }
+                              expr_id: 9846
+                            }
+                            right {
+                              literal {
+                                decimal_val: "d"
+                                datatype {
+                                  type_id: DECIMAL
+                                  type_info {
+                                    decimal {
+                                      precision: 15
+                                      scale: 2
+                                    }
+                                  }
+                                }
+                              }
+                              query_context {
+                                start_index: 88
+                                stop_index: 974
+                                line: 4
+                                start_position: 6
+                              }
+                              expr_id: 9847
+                            }
+                          }
+                          query_context {
+                            start_index: 219
+                            stop_index: 233
+                            line: 8
+                            start_position: 8
+                          }
+                          expr_id: 9848
+                        }
+                        right {
+                          lt_eq {
+                            left {
+                              bound {
+                                index: 1
+                                datatype {
+                                  type_id: DECIMAL
+                                  type_info {
+                                    decimal {
+                                      precision: 15
+                                      scale: 2
+                                    }
+                                  }
+                                }
+                              }
+                              query_context {
+                                start_index: 94
+                                stop_index: 102
+                                line: 5
+                                start_position: 4
+                              }
+                              expr_id: 9849
+                            }
+                            right {
+                              literal {
+                                decimal_val: "\004L"
+                                datatype {
+                                  type_id: DECIMAL
+                                  type_info {
+                                    decimal {
+                                      precision: 15
+                                      scale: 2
+                                    }
+                                  }
+                                }
+                              }
+                              query_context {
+                                start_index: 88
+                                stop_index: 974
+                                line: 4
+                                start_position: 6
+                              }
+                              expr_id: 9850
+                            }
+                          }
+                          query_context {
+                            start_index: 239
+                            stop_index: 258
+                            line: 8
+                            start_position: 28
+                          }
+                          expr_id: 9851
+                        }
+                      }
+                      query_context {
+                        stop_index: 974
+                        line: 1
+                      }
+                      expr_id: 9852
+                    }
+                    right {
+                      or {
+                        left {
+                          and {
+                            left {
+                              gt_eq {
+                                left {
+                                  bound {
+                                    index: 1
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 94
+                                    stop_index: 102
+                                    line: 5
+                                    start_position: 4
+                                  }
+                                  expr_id: 9853
+                                }
+                                right {
+                                  literal {
+                                    decimal_val: "\003\350"
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 88
+                                    stop_index: 974
+                                    line: 4
+                                    start_position: 6
+                                  }
+                                  expr_id: 9854
+                                }
+                              }
+                              query_context {
+                                start_index: 516
+                                stop_index: 531
+                                line: 16
+                                start_position: 8
+                              }
+                              expr_id: 9855
+                            }
+                            right {
+                              lt_eq {
+                                left {
+                                  bound {
+                                    index: 1
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 94
+                                    stop_index: 102
+                                    line: 5
+                                    start_position: 4
+                                  }
+                                  expr_id: 9856
+                                }
+                                right {
+                                  literal {
+                                    decimal_val: "\a\320"
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 88
+                                    stop_index: 974
+                                    line: 4
+                                    start_position: 6
+                                  }
+                                  expr_id: 9857
+                                }
+                              }
+                              query_context {
+                                start_index: 537
+                                stop_index: 557
+                                line: 16
+                                start_position: 29
+                              }
+                              expr_id: 9858
+                            }
+                          }
+                          query_context {
+                            stop_index: 974
+                            line: 1
+                          }
+                          expr_id: 9859
+                        }
+                        right {
+                          and {
+                            left {
+                              gt_eq {
+                                left {
+                                  bound {
+                                    index: 1
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 94
+                                    stop_index: 102
+                                    line: 5
+                                    start_position: 4
+                                  }
+                                  expr_id: 9860
+                                }
+                                right {
+                                  literal {
+                                    decimal_val: "\a\320"
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 88
+                                    stop_index: 974
+                                    line: 4
+                                    start_position: 6
+                                  }
+                                  expr_id: 9861
+                                }
+                              }
+                              query_context {
+                                start_index: 813
+                                stop_index: 828
+                                line: 24
+                                start_position: 8
+                              }
+                              expr_id: 9862
+                            }
+                            right {
+                              lt_eq {
+                                left {
+                                  bound {
+                                    index: 1
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 94
+                                    stop_index: 102
+                                    line: 5
+                                    start_position: 4
+                                  }
+                                  expr_id: 9863
+                                }
+                                right {
+                                  literal {
+                                    decimal_val: "\v\270"
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 15
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 88
+                                    stop_index: 974
+                                    line: 4
+                                    start_position: 6
+                                  }
+                                  expr_id: 9864
+                                }
+                              }
+                              query_context {
+                                start_index: 834
+                                stop_index: 854
+                                line: 24
+                                start_position: 29
+                              }
+                              expr_id: 9865
+                            }
+                          }
+                          query_context {
+                            stop_index: 974
+                            line: 1
+                          }
+                          expr_id: 9866
+                        }
+                      }
+                    }
+                  }
+                  query_context {
+                    stop_index: 974
+                    line: 1
+                  }
+                  expr_id: 9867
+                }
+              }
+            }
+          }
+        }
+      }
+      expr_id: 9868
+    }
+  }
+}
+plan_id: 23862
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 9869
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 9870
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 9871
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+    }
+    expr_id: 9872
+  }
+}

@@ -1,0 +1,398 @@
+children {
+  plan_id: 124991
+  native_scan {
+    common {
+      required_schema {
+        name: "s_store_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_store_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_company_id"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_store_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_store_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_rec_start_date"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_rec_end_date"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_closed_date_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_store_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_number_employees"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_floor_space"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_hours"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_manager"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_market_id"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_geography_class"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_market_desc"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_market_manager"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_division_id"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_division_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_company_id"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_company_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_gmt_offset"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_tax_percentage"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 1210
+              stop_index: 1218
+              line: 39
+              start_position: 6
+            }
+            expr_id: 78841
+          }
+        }
+        query_context {
+          stop_index: 1677
+          line: 1
+        }
+        expr_id: 78842
+      }
+      projection_vector: 0
+      projection_vector: 5
+      projection_vector: 16
+      projection_vector: 18
+      projection_vector: 19
+      projection_vector: 20
+      projection_vector: 21
+      projection_vector: 22
+      projection_vector: 23
+      projection_vector: 24
+      projection_vector: 25
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1880144132
+  }
+}
+plan_id: 125032
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1210
+          stop_index: 1218
+          line: 39
+          start_position: 6
+        }
+        expr_id: 78843
+      }
+    }
+    query_context {
+      stop_index: 1677
+      line: 1
+    }
+    expr_id: 78844
+  }
+}

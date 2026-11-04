@@ -1,0 +1,199 @@
+children {
+  plan_id: 5616
+  native_scan {
+    common {
+      required_schema {
+        name: "c_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "c_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_address"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_phone"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_acctbal"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_mktsegment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 138
+              stop_index: 146
+              line: 5
+              start_position: 6
+            }
+            expr_id: 2273
+          }
+        }
+        query_context {
+          stop_index: 463
+          line: 1
+        }
+        expr_id: 2274
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 138
+              stop_index: 146
+              line: 5
+              start_position: 6
+            }
+            expr_id: 2275
+          }
+        }
+        query_context {
+          stop_index: 463
+          line: 1
+        }
+        expr_id: 2276
+      }
+      projection_vector: 0
+      projection_vector: 3
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT32
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 300572935
+  }
+}
+plan_id: 5657
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 138
+              stop_index: 146
+              line: 5
+              start_position: 6
+            }
+            expr_id: 2277
+          }
+        }
+        query_context {
+          stop_index: 463
+          line: 1
+        }
+        expr_id: 2278
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 138
+              stop_index: 146
+              line: 5
+              start_position: 6
+            }
+            expr_id: 2279
+          }
+        }
+        query_context {
+          stop_index: 463
+          line: 1
+        }
+        expr_id: 2280
+      }
+    }
+    expr_id: 2281
+  }
+}

@@ -123,3 +123,73 @@ def test_every_listed_query_gives_statements_with_no_double_quote_left():
         for q in comet_run.queries(ds, "all"):
             stmts = comet_run.statements((comet_run.default_queries_dir(ds) / f"{q}.sql").read_text())
             assert stmts and all('"' not in s for s in stmts), (ds, q)
+
+
+def test_conf_overrides_replace_the_defaults(tmp_path):
+    # The dev shakedown runs on 8 cores; the VM's 128-core sizes must be overridable.
+    args = comet_run.parse_args(["--dataset", "tpch", "--out", str(tmp_path),
+                                 "--conf", "spark.executor.cores=8",
+                                 "--conf", "spark.memory.offHeap.size=12g"])
+    conf = comet_run.spark_conf(args, tmp_path)
+    assert conf["spark.executor.cores"] == "8"
+    assert conf["spark.memory.offHeap.size"] == "12g"
+    assert conf["spark.plugins"] == "org.apache.spark.CometPlugin"
+
+
+class FakeSpark:
+    """Just enough of a SparkSession for Runner.query: each statement returns `rows[sql]` rows."""
+    def __init__(self, rows):
+        self.rows, self.sparkContext = rows, self
+
+    def setJobGroup(self, *_):
+        pass
+
+    def setLocalProperty(self, *_):
+        pass
+
+    def sql(self, s):
+        n = self.rows[s]
+        return type("DF", (), {"collect": lambda self: [None] * n})()
+
+
+def test_runs_tsv_records_result_rows_summed_over_statements(tmp_path):
+    qdir = tmp_path / "q"
+    qdir.mkdir()
+    (qdir / "q1.sql").write_text("SELECT a; SELECT b;")
+    args = comet_run.parse_args(["--dataset", "tpch", "--batch", "1", "--out", str(tmp_path),
+                                 "--queries-dir", str(qdir)])
+    r = comet_run.Runner(args, FakeSpark({"SELECT a": 3, "SELECT b": 4}), tmp_path)
+    r.sequential(["q1"], "1")
+    rows = [l.split("\t") for l in (tmp_path / "runs.tsv").read_text().splitlines()]
+    assert rows[0] == ["query", "run", "ms", "rows"]
+    assert rows[1][:2] == ["q1", "1"] and rows[1][3] == "7"
+    assert rows[2][:2] == ["batch", "1"]
+
+
+def test_op_kind_skips_wrappers_and_aqe_shuffle_reads():
+    # AQEShuffleRead over a Comet exchange is read by Comet; counting it made TPC-H q1 look 2/11
+    # Spark while Comet reports 8/8 operators accelerated.
+    for wrapper in ("AQEShuffleReadExec", "InputAdapter", "WholeStageCodegenExec",
+                    "ShuffleQueryStageExec", "BroadcastQueryStageExec", "ResultQueryStageExec",
+                    "AdaptiveSparkPlanExec", "ReusedExchangeExec",
+                    "SubqueryExec", "ColumnarToRowExec", "RowToColumnarExec",
+                    "InMemoryRelation", "TableCacheQueryStageExec"):
+        assert comet_run.op_kind(wrapper) is None, wrapper
+    assert comet_run.op_kind("CometHashAggregateExec") == "comet"
+    assert comet_run.op_kind("SortMergeJoinExec") == "spark"
+    assert comet_run.op_kind("BroadcastExchangeExec") == "spark"
+
+
+def test_native_plan_text_drops_the_repeated_sql_text():
+    # nativeOp repeats the query's text in every expression: 2.5 MB per block on TPC-DS q66.
+    text = ('hash_agg {\n  expr {\n    sql_text: "select \\"a\\"\\nfrom t"\n'
+            '    line: 3\n  }\n}\n')
+    assert comet_run.strip_sql_text(text) == 'hash_agg {\n  expr {\n    line: 3\n  }\n}\n'
+
+
+def test_the_walk_skips_the_replaced_scan_behind_a_comet_cache_scan():
+    # CometInMemoryTableScanExec lists Spark's replaced InMemoryTableScanExec as a subquery
+    # (CometInMemoryTableScanExec.scala:107 @ab46419f); it never runs.
+    assert not comet_run.follows_subqueries("CometInMemoryTableScanExec")
+    assert comet_run.follows_subqueries("CometFilterExec")
+    assert comet_run.follows_subqueries("FilterExec")

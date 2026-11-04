@@ -1,0 +1,1251 @@
+children {
+  children {
+    children {
+      plan_id: 48
+      native_scan {
+        common {
+          required_schema {
+            name: "l_quantity"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_extendedprice"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_discount"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_tax"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_returnflag"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_linestatus"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          required_schema {
+            name: "l_shipdate"
+            data_type {
+              type_id: DATE
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_orderkey"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_partkey"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_suppkey"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_linenumber"
+            data_type {
+              type_id: INT64
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_quantity"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_extendedprice"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_discount"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_tax"
+            data_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_returnflag"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_linestatus"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_shipdate"
+            data_type {
+              type_id: DATE
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_commitdate"
+            data_type {
+              type_id: DATE
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_receiptdate"
+            data_type {
+              type_id: DATE
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_shipinstruct"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_shipmode"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_schema {
+            name: "l_comment"
+            data_type {
+              type_id: STRING
+            }
+            nullable: true
+          }
+          data_filters {
+            is_not_null {
+              child {
+                bound {
+                  index: 6
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 416
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 47
+              }
+            }
+            query_context {
+              start_index: 459
+              stop_index: 493
+              line: 14
+            }
+            expr_id: 48
+          }
+          data_filters {
+            lt_eq {
+              left {
+                bound {
+                  index: 6
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 416
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 49
+              }
+              right {
+                literal {
+                  int_val: 10471
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 457
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 50
+              }
+            }
+            query_context {
+              start_index: 407
+              stop_index: 457
+              line: 13
+              start_position: 6
+            }
+            expr_id: 51
+          }
+          projection_vector: 4
+          projection_vector: 5
+          projection_vector: 6
+          projection_vector: 7
+          projection_vector: 8
+          projection_vector: 9
+          projection_vector: 10
+          session_timezone: "UTC"
+          source: "CometScan parquet  (unknown)"
+          fields {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          fields {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          fields {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          fields {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          fields {
+            type_id: STRING
+          }
+          fields {
+            type_id: STRING
+          }
+          fields {
+            type_id: DATE
+          }
+          allow_type_promotion: true
+          allow_timestamp_ltz_to_ntz: true
+          has_data_filters: true
+        }
+        source_key_hash: 308676480
+      }
+    }
+    plan_id: 57
+    filter {
+      predicate {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  index: 6
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 416
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 52
+              }
+            }
+            query_context {
+              start_index: 459
+              stop_index: 493
+              line: 14
+            }
+            expr_id: 53
+          }
+          right {
+            lt_eq {
+              left {
+                bound {
+                  index: 6
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 416
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 54
+              }
+              right {
+                literal {
+                  int_val: 10471
+                  datatype {
+                    type_id: DATE
+                  }
+                }
+                query_context {
+                  start_index: 407
+                  stop_index: 457
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 55
+              }
+            }
+            query_context {
+              start_index: 407
+              stop_index: 457
+              line: 13
+              start_position: 6
+            }
+            expr_id: 56
+          }
+        }
+        expr_id: 57
+      }
+    }
+  }
+  plan_id: 59
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 58
+    }
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 59
+    }
+    project_list {
+      bound {
+        index: 2
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 60
+    }
+    project_list {
+      bound {
+        index: 3
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 61
+    }
+    project_list {
+      bound {
+        index: 4
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 62
+    }
+    project_list {
+      bound {
+        index: 5
+        datatype {
+          type_id: STRING
+        }
+      }
+      expr_id: 63
+    }
+  }
+}
+plan_id: 61
+hash_agg {
+  grouping_exprs {
+    bound {
+      index: 4
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 468
+      stop_index: 479
+      line: 14
+      start_position: 9
+    }
+    expr_id: 64
+  }
+  grouping_exprs {
+    bound {
+      index: 5
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 468
+      stop_index: 479
+      line: 14
+      start_position: 9
+    }
+    expr_id: 65
+  }
+  agg_exprs {
+    sum {
+      child {
+        bound {
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 468
+          stop_index: 479
+          line: 14
+          start_position: 9
+        }
+        expr_id: 66
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 47
+      stop_index: 61
+      line: 4
+      start_position: 4
+    }
+    expr_id: 67
+  }
+  agg_exprs {
+    sum {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 468
+          stop_index: 479
+          line: 14
+          start_position: 9
+        }
+        expr_id: 68
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 79
+      stop_index: 98
+      line: 5
+      start_position: 4
+    }
+    expr_id: 69
+  }
+  agg_exprs {
+    sum {
+      child {
+        check_overflow {
+          child {
+            multiply {
+              left {
+                bound {
+                  index: 1
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 15
+                        scale: 2
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  start_index: 468
+                  stop_index: 479
+                  line: 14
+                  start_position: 9
+                }
+                expr_id: 70
+              }
+              right {
+                check_overflow {
+                  child {
+                    subtract {
+                      left {
+                        literal {
+                          decimal_val: "\001"
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 1
+                              }
+                            }
+                          }
+                        }
+                        query_context {
+                          start_index: 123
+                          stop_index: 179
+                          line: 6
+                          start_position: 4
+                        }
+                        expr_id: 71
+                      }
+                      right {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 15
+                                scale: 2
+                              }
+                            }
+                          }
+                        }
+                        query_context {
+                          start_index: 468
+                          stop_index: 479
+                          line: 14
+                          start_position: 9
+                        }
+                        expr_id: 72
+                      }
+                      return_type {
+                        type_id: DECIMAL
+                        type_info {
+                          decimal {
+                            precision: 16
+                            scale: 2
+                          }
+                        }
+                      }
+                      eval_mode: ANSI
+                    }
+                    query_context {
+                      start_index: 146
+                      stop_index: 159
+                      line: 6
+                      start_position: 27
+                    }
+                    expr_id: 73
+                  }
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 16
+                        scale: 2
+                      }
+                    }
+                  }
+                  fail_on_error: true
+                }
+                query_context {
+                  start_index: 146
+                  stop_index: 159
+                  line: 6
+                  start_position: 27
+                }
+                expr_id: 74
+              }
+              return_type {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 32
+                    scale: 4
+                  }
+                }
+              }
+              eval_mode: ANSI
+            }
+            query_context {
+              start_index: 127
+              stop_index: 160
+              line: 6
+              start_position: 8
+            }
+            expr_id: 75
+          }
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 32
+                scale: 4
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 127
+          stop_index: 160
+          line: 6
+          start_position: 8
+        }
+        expr_id: 76
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 4
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 123
+      stop_index: 161
+      line: 6
+      start_position: 4
+    }
+    expr_id: 77
+  }
+  agg_exprs {
+    sum {
+      child {
+        check_overflow {
+          child {
+            multiply {
+              left {
+                check_overflow {
+                  child {
+                    multiply {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 15
+                                scale: 2
+                              }
+                            }
+                          }
+                        }
+                        query_context {
+                          start_index: 468
+                          stop_index: 479
+                          line: 14
+                          start_position: 9
+                        }
+                        expr_id: 78
+                      }
+                      right {
+                        check_overflow {
+                          child {
+                            subtract {
+                              left {
+                                literal {
+                                  decimal_val: "\001"
+                                  datatype {
+                                    type_id: DECIMAL
+                                    type_info {
+                                      decimal {
+                                        precision: 1
+                                      }
+                                    }
+                                  }
+                                }
+                                query_context {
+                                  start_index: 186
+                                  stop_index: 252
+                                  line: 7
+                                  start_position: 4
+                                }
+                                expr_id: 79
+                              }
+                              right {
+                                bound {
+                                  index: 2
+                                  datatype {
+                                    type_id: DECIMAL
+                                    type_info {
+                                      decimal {
+                                        precision: 15
+                                        scale: 2
+                                      }
+                                    }
+                                  }
+                                }
+                                query_context {
+                                  start_index: 468
+                                  stop_index: 479
+                                  line: 14
+                                  start_position: 9
+                                }
+                                expr_id: 80
+                              }
+                              return_type {
+                                type_id: DECIMAL
+                                type_info {
+                                  decimal {
+                                    precision: 16
+                                    scale: 2
+                                  }
+                                }
+                              }
+                              eval_mode: ANSI
+                            }
+                            query_context {
+                              start_index: 209
+                              stop_index: 222
+                              line: 7
+                              start_position: 27
+                            }
+                            expr_id: 81
+                          }
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 16
+                                scale: 2
+                              }
+                            }
+                          }
+                          fail_on_error: true
+                        }
+                        query_context {
+                          start_index: 209
+                          stop_index: 222
+                          line: 7
+                          start_position: 27
+                        }
+                        expr_id: 82
+                      }
+                      return_type {
+                        type_id: DECIMAL
+                        type_info {
+                          decimal {
+                            precision: 32
+                            scale: 4
+                          }
+                        }
+                      }
+                      eval_mode: ANSI
+                    }
+                    query_context {
+                      start_index: 190
+                      stop_index: 223
+                      line: 7
+                      start_position: 8
+                    }
+                    expr_id: 83
+                  }
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 32
+                        scale: 4
+                      }
+                    }
+                  }
+                  fail_on_error: true
+                }
+                query_context {
+                  start_index: 190
+                  stop_index: 223
+                  line: 7
+                  start_position: 8
+                }
+                expr_id: 84
+              }
+              right {
+                check_overflow {
+                  child {
+                    add {
+                      left {
+                        literal {
+                          decimal_val: "\001"
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 1
+                              }
+                            }
+                          }
+                        }
+                        query_context {
+                          start_index: 186
+                          stop_index: 252
+                          line: 7
+                          start_position: 4
+                        }
+                        expr_id: 85
+                      }
+                      right {
+                        bound {
+                          index: 3
+                          datatype {
+                            type_id: DECIMAL
+                            type_info {
+                              decimal {
+                                precision: 15
+                                scale: 2
+                              }
+                            }
+                          }
+                        }
+                        query_context {
+                          start_index: 468
+                          stop_index: 479
+                          line: 14
+                          start_position: 9
+                        }
+                        expr_id: 86
+                      }
+                      return_type {
+                        type_id: DECIMAL
+                        type_info {
+                          decimal {
+                            precision: 16
+                            scale: 2
+                          }
+                        }
+                      }
+                      eval_mode: ANSI
+                    }
+                    query_context {
+                      start_index: 228
+                      stop_index: 236
+                      line: 7
+                      start_position: 46
+                    }
+                    expr_id: 87
+                  }
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 16
+                        scale: 2
+                      }
+                    }
+                  }
+                  fail_on_error: true
+                }
+                query_context {
+                  start_index: 228
+                  stop_index: 236
+                  line: 7
+                  start_position: 46
+                }
+                expr_id: 88
+              }
+              return_type {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 38
+                    scale: 6
+                  }
+                }
+              }
+              eval_mode: ANSI
+            }
+            query_context {
+              start_index: 190
+              stop_index: 237
+              line: 7
+              start_position: 8
+            }
+            expr_id: 89
+          }
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 38
+                scale: 6
+              }
+            }
+          }
+          fail_on_error: true
+        }
+        query_context {
+          start_index: 190
+          stop_index: 237
+          line: 7
+          start_position: 8
+        }
+        expr_id: 90
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 6
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 186
+      stop_index: 238
+      line: 7
+      start_position: 4
+    }
+    expr_id: 91
+  }
+  agg_exprs {
+    avg {
+      child {
+        bound {
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 468
+          stop_index: 479
+          line: 14
+          start_position: 9
+        }
+        expr_id: 92
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 19
+            scale: 6
+          }
+        }
+      }
+      sum_datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 259
+      stop_index: 273
+      line: 8
+      start_position: 4
+    }
+    expr_id: 93
+  }
+  agg_exprs {
+    avg {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 468
+          stop_index: 479
+          line: 14
+          start_position: 9
+        }
+        expr_id: 94
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 19
+            scale: 6
+          }
+        }
+      }
+      sum_datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 291
+      stop_index: 310
+      line: 9
+      start_position: 4
+    }
+    expr_id: 95
+  }
+  agg_exprs {
+    avg {
+      child {
+        bound {
+          index: 2
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 468
+          stop_index: 479
+          line: 14
+          start_position: 9
+        }
+        expr_id: 96
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 19
+            scale: 6
+          }
+        }
+      }
+      sum_datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 330
+      stop_index: 344
+      line: 10
+      start_position: 4
+    }
+    expr_id: 97
+  }
+  agg_exprs {
+    count {
+      children {
+        literal {
+          int_val: 1
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 363
+          stop_index: 370
+          line: 11
+          start_position: 4
+        }
+        expr_id: 98
+      }
+    }
+    query_context {
+      start_index: 363
+      stop_index: 370
+      line: 11
+      start_position: 4
+    }
+    expr_id: 99
+  }
+}

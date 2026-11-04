@@ -1,0 +1,440 @@
+children {
+  plan_id: 67740
+  native_scan {
+    common {
+      required_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_gmt_offset"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_location_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        in {
+          in_value {
+            bound {
+              index: 2
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 637
+              stop_index: 651
+              line: 19
+              start_position: 6
+            }
+            expr_id: 49207
+          }
+          lists {
+            literal {
+              string_val: "MS"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1128
+              stop_index: 1131
+              line: 34
+              start_position: 19
+            }
+            expr_id: 49208
+          }
+          lists {
+            literal {
+              string_val: "IN"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1153
+              stop_index: 1156
+              line: 35
+              start_position: 19
+            }
+            expr_id: 49209
+          }
+          lists {
+            literal {
+              string_val: "ND"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1178
+              stop_index: 1181
+              line: 36
+              start_position: 19
+            }
+            expr_id: 49210
+          }
+          lists {
+            literal {
+              string_val: "OK"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1203
+              stop_index: 1206
+              line: 37
+              start_position: 19
+            }
+            expr_id: 49211
+          }
+          lists {
+            literal {
+              string_val: "NM"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1228
+              stop_index: 1231
+              line: 38
+              start_position: 19
+            }
+            expr_id: 49212
+          }
+          lists {
+            literal {
+              string_val: "VA"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1253
+              stop_index: 1256
+              line: 39
+              start_position: 19
+            }
+            expr_id: 49213
+          }
+        }
+        query_context {
+          start_index: 1124
+          stop_index: 1282
+          line: 34
+          start_position: 15
+        }
+        expr_id: 49214
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 637
+              stop_index: 651
+              line: 19
+              start_position: 6
+            }
+            expr_id: 49215
+          }
+        }
+        query_context {
+          stop_index: 1355
+          line: 1
+        }
+        expr_id: 49216
+      }
+      projection_vector: 0
+      projection_vector: 7
+      projection_vector: 8
+      projection_vector: 10
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1972991299
+  }
+}
+plan_id: 67802
+filter {
+  predicate {
+    and {
+      left {
+        in {
+          in_value {
+            bound {
+              index: 2
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 637
+              stop_index: 651
+              line: 19
+              start_position: 6
+            }
+            expr_id: 49217
+          }
+          lists {
+            literal {
+              string_val: "MS"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1128
+              stop_index: 1131
+              line: 34
+              start_position: 19
+            }
+            expr_id: 49218
+          }
+          lists {
+            literal {
+              string_val: "IN"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1153
+              stop_index: 1156
+              line: 35
+              start_position: 19
+            }
+            expr_id: 49219
+          }
+          lists {
+            literal {
+              string_val: "ND"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1178
+              stop_index: 1181
+              line: 36
+              start_position: 19
+            }
+            expr_id: 49220
+          }
+          lists {
+            literal {
+              string_val: "OK"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1203
+              stop_index: 1206
+              line: 37
+              start_position: 19
+            }
+            expr_id: 49221
+          }
+          lists {
+            literal {
+              string_val: "NM"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1228
+              stop_index: 1231
+              line: 38
+              start_position: 19
+            }
+            expr_id: 49222
+          }
+          lists {
+            literal {
+              string_val: "VA"
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 1253
+              stop_index: 1256
+              line: 39
+              start_position: 19
+            }
+            expr_id: 49223
+          }
+        }
+        query_context {
+          start_index: 1124
+          stop_index: 1282
+          line: 34
+          start_position: 15
+        }
+        expr_id: 49224
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 637
+              stop_index: 651
+              line: 19
+              start_position: 6
+            }
+            expr_id: 49225
+          }
+        }
+        query_context {
+          stop_index: 1355
+          line: 1
+        }
+        expr_id: 49226
+      }
+    }
+    expr_id: 49227
+  }
+}

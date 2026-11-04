@@ -1,0 +1,269 @@
+children {
+  plan_id: 124996
+  native_scan {
+    common {
+      required_schema {
+        name: "d_date_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_date_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_date_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_date"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_month_seq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_week_seq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_quarter_seq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_year"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_dow"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_moy"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_dom"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_qoy"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_fy_year"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_fy_quarter_seq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_fy_week_seq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_day_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_quarter_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_holiday"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_weekend"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_following_holiday"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_first_dom"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_last_dom"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_same_day_ly"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_same_day_lq"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_current_day"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_current_week"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_current_month"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_current_quarter"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "d_current_year"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 1210
+              stop_index: 1218
+              line: 39
+              start_position: 6
+            }
+            expr_id: 78859
+          }
+        }
+        query_context {
+          stop_index: 1677
+          line: 1
+        }
+        expr_id: 78860
+      }
+      projection_vector: 0
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1937397118
+  }
+}
+plan_id: 125043
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1210
+          stop_index: 1218
+          line: 39
+          start_position: 6
+        }
+        expr_id: 78861
+      }
+    }
+    query_context {
+      stop_index: 1677
+      line: 1
+    }
+    expr_id: 78862
+  }
+}

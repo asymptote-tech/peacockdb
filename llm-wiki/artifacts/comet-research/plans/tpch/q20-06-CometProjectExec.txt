@@ -1,0 +1,282 @@
+children {
+  children {
+    plan_id: 24385
+    native_scan {
+      common {
+        required_schema {
+          name: "p_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "p_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_mfgr"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_brand"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_size"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_container"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_retailprice"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_text_embedding"
+          data_type {
+            type_id: LIST
+            type_info {
+              list {
+                element_type {
+                  type_id: FLOAT
+                }
+                contains_null: true
+              }
+            }
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 199
+                stop_index: 204
+                line: 11
+                start_position: 14
+              }
+              expr_id: 10388
+            }
+          }
+          query_context {
+            start_index: 150
+            stop_index: 219
+            line: 9
+            start_position: 8
+          }
+          expr_id: 10389
+        }
+        data_filters {
+          scalarFunc {
+            func: "starts_with"
+            args {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 199
+                stop_index: 204
+                line: 11
+                start_position: 14
+              }
+              expr_id: 10390
+            }
+            args {
+              literal {
+                string_val: "forest"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 206
+                stop_index: 219
+                line: 11
+                start_position: 21
+              }
+              expr_id: 10391
+            }
+          }
+          query_context {
+            start_index: 206
+            stop_index: 219
+            line: 11
+            start_position: 21
+          }
+          expr_id: 10392
+        }
+        projection_vector: 0
+        projection_vector: 1
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -1319193484
+    }
+  }
+  plan_id: 24440
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 199
+                stop_index: 204
+                line: 11
+                start_position: 14
+              }
+              expr_id: 10393
+            }
+          }
+          query_context {
+            start_index: 150
+            stop_index: 219
+            line: 9
+            start_position: 8
+          }
+          expr_id: 10394
+        }
+        right {
+          scalarFunc {
+            func: "starts_with"
+            args {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 199
+                stop_index: 204
+                line: 11
+                start_position: 14
+              }
+              expr_id: 10395
+            }
+            args {
+              literal {
+                string_val: "forest"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 206
+                stop_index: 219
+                line: 11
+                start_position: 21
+              }
+              expr_id: 10396
+            }
+          }
+          query_context {
+            start_index: 206
+            stop_index: 219
+            line: 11
+            start_position: 21
+          }
+          expr_id: 10397
+        }
+      }
+      expr_id: 10398
+    }
+  }
+}
+plan_id: 24442
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 157
+      stop_index: 165
+      line: 9
+      start_position: 15
+    }
+    expr_id: 10399
+  }
+}

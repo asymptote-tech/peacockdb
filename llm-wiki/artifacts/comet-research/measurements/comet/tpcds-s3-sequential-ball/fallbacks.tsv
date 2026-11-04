@@ -1,0 +1,89 @@
+query	comet_ops	spark_ops	reason
+q1	40	0	
+q2	36	0	
+q3	19	0	
+q4	98	0	
+q5	69	0	
+q6	47	0	
+q7	30	0	
+q8	43	0	
+q9	43	1	ProjectExec: Unsupported data type: StructType(StructField(count(1),LongType,false),StructField(avg(ss_ext_discount_amt),DecimalType(11,6),true),StructField(avg(ss_net_paid),DecimalType(11,6),true))
+q10	37	13	HashAggregateExec: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): count
+q10	37	13	ShuffleQueryStageExec: ShuffleQueryStage is not supported
+q10	37	13	SortMergeJoinExec: Unsupported join type ExistenceJoin(exists#4808)
+q11	68	0	
+q13	33	0	
+q14	117	3	HashAggregateExec: Ungrouped decimal AVG with a maximum-precision sum cannot match Spark's aggregation buffer
+q14	117	3	ShuffleQueryStageExec: ShuffleQueryStage is not supported
+q14	117	3	HashAggregateExec: Ungrouped decimal AVG with a maximum-precision sum cannot match Spark's aggregation buffer
+q15	23	0	
+q16	37	0	
+q17	47	0	
+q18	41	0	
+q19	34	0	
+q21	24	0	
+q22	19	0	
+q23	101	0	
+q24	69	0	
+q25	47	0	
+q26	30	0	
+q28	65	0	
+q29	51	0	
+q30	49	0	
+q31	84	0	
+q32	30	0	
+q33	54	0	
+q34	33	0	
+q35	36	14	HashAggregateExec: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): count
+q35	36	14	ShuffleQueryStageExec: ShuffleQueryStage is not supported
+q35	36	14	SortMergeJoinExec: Unsupported join type ExistenceJoin(exists#11829)
+q37	27	0	
+q38	47	0	
+q39	48	0	
+q40	31	0	
+q41	19	0	
+q42	19	0	
+q43	19	0	
+q45	35	0	
+q46	37	0	
+q48	28	0	
+q50	31	0	
+q52	19	0	
+q54	70	0	
+q55	19	0	
+q56	54	0	
+q58	54	0	
+q59	40	0	
+q60	54	0	
+q61	59	0	
+q62	29	0	
+q64	144	0	
+q65	39	0	
+q66	45	0	
+q68	37	0	
+q69	46	0	
+q71	35	0	
+q73	33	0	
+q74	68	0	
+q75	109	0	
+q76	33	0	
+q77	76	0	
+q78	61	0	
+q79	30	0	
+q80	91	0	
+q81	48	0	
+q82	28	0	
+q83	51	0	
+q84	33	0	
+q85	47	0	
+q87	47	0	
+q88	143	0	
+q90	42	0	
+q91	41	0	
+q92	30	0	
+q93	20	0	
+q94	37	0	
+q95	47	0	
+q96	24	0	
+q97	26	0	
+q99	29	0	

@@ -39,7 +39,7 @@ From `data-path.md` `## Rates for the cost model` @96b2657f. **Nebius states no 
 |---|--:|---|---|---|
 | gpu-h100-sxm 1gpu-16vcpu-200gb (the cost model's GPU node) | 16 | none; the platform lists a ConnectX-6 100 Gbps host adapter [S8] | 10-100 (1.25-12.5) [S8][S59] | not used (the human's decision) |
 | gpu-l40s-a 1gpu-8vcpu-32gb | 8 | none, no adapter listed [S8] | 5-20 (0.63-2.5), from AWS g6e.2xlarge [S14] | 7.33 Gbit/s S3 read, 16 threads |
-| cpu-d3 128vcpu-512gb | 128 | none [S8] | 32-100 (4-12.5) | Task 4 |
+| cpu-d3 128vcpu-512gb | 128 | none [S8] | 32-100 (4-12.5) | 9.31 Gbit/s S3 read in-region, 4 threads |
 | cpu-d3 or cpu-e2 16vcpu-64gb | 16 | none | 6.25-32 (0.78-4) | - |
 | cpu-d3 or cpu-e2 8vcpu-32gb | 8 | none | 3.125-16 (0.39-2) | - |
 
@@ -48,6 +48,12 @@ From `data-path.md` `## Rates for the cost model` @96b2657f. **Nebius states no 
 
 ## For Task 4
 - Check the CPU VM's boot disk type and size first. If its "local disk" is also a Nebius network disk, cold reads of sf40 from it may be far slower than S3 at this rate, and a "local" Comet run would be disk-bound unless the page cache (512 GB) holds the data. Say which in each local row.
+
+## cpu128 (Task 4, 2026-11-04)
+- Host `cpu128` (`computeinstance-e01t2mm4265y8x88ey`, `cpu-d3` `128vcpu-512gb`, eu-west1), started for the session. Same object, client and part size as the L40S, but boto3 1.43.123 from the VM's venv. Rows: [`cpu128.tsv`](cpu128.tsv).
+- In-region eu-west1: 0.195 / **1.164** / 1.163 / 1.028 GB/s at 1 / 4 / 16 / 64 threads. Client CPU was 173-296% at 4-16 threads (of 12,800%), so the flat top from 4 threads is not the client's CPU (estimate: a per-connection-set or per-VM network cap).
+- Cross-region eu-north1 at 16 threads: 0.902 GB/s. The bulk dataset fetch from eu-north1 ran at 0.45-0.57 GB/s; the upload to eu-west1 at 1.17-1.50 GB/s.
+- Boot disk (`NETWORK_SSD` 100 GiB, the VM's only disk): 0.062-0.063 GB/s read with O_DIRECT, 0.062 GB/s written, the L40S's rate again. So Task 4 kept the data and Spark's local dirs on a tmpfs, and its "local" rows are RAM-resident.
 
 ## Follow-up experiments
 - Run the 64-thread S3 read with several processes (or a native client), to tell a NIC cap from a Python/boto3 cap at about 0.9 GB/s.

@@ -1,0 +1,657 @@
+children {
+  plan_id: 212532
+  native_scan {
+    common {
+      required_schema {
+        name: "wr_item_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_refunded_cdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_refunded_addr_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_returning_cdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_reason_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_order_number"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_fee"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "wr_refunded_cash"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returned_date_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returned_time_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_item_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_refunded_customer_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_refunded_cdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_refunded_hdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_refunded_addr_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returning_customer_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returning_cdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returning_hdemo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_returning_addr_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_web_page_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_reason_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_order_number"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_return_quantity"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_return_amt"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_return_tax"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_return_amt_inc_tax"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_fee"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_return_ship_cost"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_refunded_cash"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_reversed_charge"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_account_credit"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "wr_net_loss"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136618
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136619
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 5
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136620
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136621
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136622
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136623
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 3
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136624
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136625
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136626
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136627
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 4
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136628
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136629
+      }
+      projection_vector: 2
+      projection_vector: 4
+      projection_vector: 6
+      projection_vector: 8
+      projection_vector: 12
+      projection_vector: 13
+      projection_vector: 18
+      projection_vector: 20
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 7
+            scale: 2
+          }
+        }
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1547499952
+  }
+}
+plan_id: 212583
+filter {
+  predicate {
+    and {
+      left {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 292
+                  stop_index: 305
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 136630
+              }
+            }
+            query_context {
+              stop_index: 2031
+              line: 1
+            }
+            expr_id: 136631
+          }
+          right {
+            and {
+              left {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 5
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 292
+                      stop_index: 305
+                      line: 13
+                      start_position: 6
+                    }
+                    expr_id: 136632
+                  }
+                }
+                query_context {
+                  stop_index: 2031
+                  line: 1
+                }
+                expr_id: 136633
+              }
+              right {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 292
+                      stop_index: 305
+                      line: 13
+                      start_position: 6
+                    }
+                    expr_id: 136634
+                  }
+                }
+                query_context {
+                  stop_index: 2031
+                  line: 1
+                }
+                expr_id: 136635
+              }
+            }
+          }
+        }
+      }
+      right {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  index: 3
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 292
+                  stop_index: 305
+                  line: 13
+                  start_position: 6
+                }
+                expr_id: 136636
+              }
+            }
+            query_context {
+              stop_index: 2031
+              line: 1
+            }
+            expr_id: 136637
+          }
+          right {
+            and {
+              left {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 292
+                      stop_index: 305
+                      line: 13
+                      start_position: 6
+                    }
+                    expr_id: 136638
+                  }
+                }
+                query_context {
+                  stop_index: 2031
+                  line: 1
+                }
+                expr_id: 136639
+              }
+              right {
+                is_not_null {
+                  child {
+                    bound {
+                      index: 4
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 292
+                      stop_index: 305
+                      line: 13
+                      start_position: 6
+                    }
+                    expr_id: 136640
+                  }
+                }
+                query_context {
+                  stop_index: 2031
+                  line: 1
+                }
+                expr_id: 136641
+              }
+            }
+          }
+        }
+      }
+    }
+    expr_id: 136642
+  }
+}

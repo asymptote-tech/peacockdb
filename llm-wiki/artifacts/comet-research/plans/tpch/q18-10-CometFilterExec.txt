@@ -1,0 +1,146 @@
+children {
+  plan_id: 22283
+  native_scan {
+    common {
+      required_schema {
+        name: "c_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "c_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_address"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_phone"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_acctbal"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_mktsegment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "c_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 143
+              stop_index: 152
+              line: 9
+              start_position: 6
+            }
+            expr_id: 9101
+          }
+        }
+        query_context {
+          stop_index: 376
+          line: 1
+        }
+        expr_id: 9102
+      }
+      projection_vector: 0
+      projection_vector: 1
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1647672524
+  }
+}
+plan_id: 22323
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 143
+          stop_index: 152
+          line: 9
+          start_position: 6
+        }
+        expr_id: 9103
+      }
+    }
+    query_context {
+      stop_index: 376
+      line: 1
+    }
+    expr_id: 9104
+  }
+}

@@ -12,6 +12,10 @@
 #   cluster  a standalone master and one worker with 128 cores, spill on ~/comet/spark-local.
 #   all      the three, in order (the default).
 #
+# cpu128's only disk is a 0.06 GB/s network disk, so Task 4 first mounted a tmpfs and linked
+# ~/comet/{data,spark-local} to it: sudo mount -t tmpfs -o size=320g,mode=1777 tmpfs /mnt/comet.
+# Not /dev/shm: logind's RemoveIPC empties a user's /dev/shm files when their last session ends.
+#
 # Then: SPARK_HOME=/opt/spark ~/comet/venv/bin/python comet_run.py …
 # URLs and versions: comet-internals.md `## Recipes` 4 and 5.
 set -euo pipefail
@@ -79,10 +83,18 @@ cmd_data() {
 cmd_cluster() {
   local host; host=$(hostname)
   mkdir -p "$LOCAL_DIRS"
-  export SPARK_LOCAL_DIRS=$LOCAL_DIRS SPARK_WORKER_DIR=$HOME/comet/spark-work SPARK_HOME=/opt/spark
+  # /opt/spark is root's, so logs and pids go under ~/comet; the start scripts exit 0 even when
+  # the daemon never started, so the check below is what says the cluster is up.
+  export SPARK_LOCAL_DIRS=$LOCAL_DIRS SPARK_WORKER_DIR=$HOME/comet/spark-work SPARK_HOME=/opt/spark \
+    SPARK_LOG_DIR=$HOME/comet/spark-logs SPARK_PID_DIR=$HOME/comet/spark-pids
   pgrep -f deploy.master.Master >/dev/null || /opt/spark/sbin/start-master.sh --host "$host"
   pgrep -f deploy.worker.Worker >/dev/null || \
     /opt/spark/sbin/start-worker.sh "spark://$host:7077" --cores 128 --memory 480g
+  local i; for i in $(seq 30); do
+    grep -qs "Successfully registered with master" "$SPARK_LOG_DIR"/*Worker*.out && break; sleep 2
+  done
+  pgrep -f deploy.worker.Worker >/dev/null && grep -qs "Successfully registered" "$SPARK_LOG_DIR"/*Worker*.out \
+    || { echo "cluster did not come up; see $SPARK_LOG_DIR" >&2; exit 1; }
   say "cluster up: spark://$host:7077"
 }
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Per-query bytes and overheads from Spark event logs: `comet_bytes.py EVENTLOG_DIR > bytes.tsv`.
 
-Columns: dataset query run scan_bytes shuffle_bytes spill_bytes s3_gets driver_ms scheduler_ms.
+Columns: config dataset query run scan_bytes shuffle_bytes spill_bytes s3_gets driver_ms scheduler_ms.
 
-A query is a job group `dataset:query:run`, which comet_run.py sets for each query. Its stages are
+`config` is the app name less its `comet-` prefix (comet_run names apps `comet-<out dir>`), so
+rows from several runs in one directory stay apart. A query is a job group `dataset:query:run`, which comet_run.py sets for each query. Its stages are
 its jobs' stages; its SQL executions are those its jobs name. Per query:
 - scan_bytes: internal.metrics.input.bytesRead. Comet adds its native scans' bytes_scanned there
   (CometMetricNode.reportScanInputMetrics @ab46419f).
@@ -15,13 +16,16 @@ its jobs' stages; its SQL executions are those its jobs name. Per query:
 - scheduler_ms: per stage, the time it was open less its tasks' span (first launch to last
   finish), summed: task scheduling and stage bookkeeping.
 Each stage counts once, by its last completed attempt. Logs may be plain or compressed
-(.zst/.zstd needs `zstandard`, .lz4 needs `lz4`).
+(.zst/.zstd needs `zstandard`, .lz4 needs `lz4`). Spark 4 rolls them by default: an app is a
+directory `eventlog_v2_<app>/` whose `events_<n>_<app>` parts are read as one stream, in n order;
+its `appstatus` files are not events.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
-COLUMNS = ["dataset", "query", "run", "scan_bytes", "shuffle_bytes", "spill_bytes", "s3_gets",
+COLUMNS = ["config", "dataset", "query", "run", "scan_bytes", "shuffle_bytes", "spill_bytes", "s3_gets",
            "driver_ms", "scheduler_ms"]
 ACCUMS = {
     "internal.metrics.input.bytesRead": "scan_bytes",
@@ -53,6 +57,20 @@ def events(path: Path):
                 yield json.loads(line)
 
 
+def log_streams(d: Path) -> list[list[Path]]:
+    """One list of files per application: a rolled log's parts in numeric order, or a v1 file."""
+    out = []
+    for p in sorted(Path(d).rglob("*")):
+        if p.is_dir() and p.name.startswith("eventlog_v2_"):
+            parts = [(int(m.group(1)), f) for f in p.iterdir()
+                     if (m := re.match(r"events_(\d+)_", f.name)) and f.is_file()]
+            out.append([f for _, f in sorted(parts)])
+        elif (p.is_file() and not p.parent.name.startswith("eventlog_v2_")
+              and not p.name.endswith((".inprogress", ".crc"))):
+            out.append([p])
+    return out
+
+
 def union_ms(intervals):
     total, end = 0, None
     for a, b in sorted(intervals):
@@ -65,15 +83,19 @@ def union_ms(intervals):
     return total
 
 
-def summarize(paths):
-    """One dict per (dataset, query, run), in the order the queries first appear."""
+def summarize(streams):
+    """One dict per (dataset, query, run), in the order the queries first appear. Each stream is
+    one application: a log file, or a list of a rolled log's parts."""
     out = []
-    for path in paths:
-        group_of_stage, groups, execs = {}, {}, {}
+    for stream in streams:
+        group_of_stage, groups, execs, app = {}, {}, {}, ""
         stages, task_span = {}, {}
-        for e in events(path):
+        files = stream if isinstance(stream, list) else [stream]
+        for e in (e for f in files for e in events(f)):
             kind = e.get("Event")
-            if kind == "SparkListenerJobStart":
+            if kind == "SparkListenerApplicationStart":
+                app = e.get("App Name", "").removeprefix("comet-")
+            elif kind == "SparkListenerJobStart":
                 props = e.get("Properties") or {}
                 g = props.get("spark.jobGroup.id", "")
                 if g.count(":") != 2:
@@ -99,8 +121,8 @@ def summarize(paths):
                 execs.setdefault(e["executionId"], [None, None])[1] = e["time"]
         for g in groups:
             dataset, query, run = g.split(":")
-            row = {"dataset": dataset, "query": query, "run": run}
-            row.update({c: 0 for c in COLUMNS[3:]})
+            row = {"config": app, "dataset": dataset, "query": query, "run": run}
+            row.update({c: 0 for c in COLUMNS[4:]})
             open_intervals = []
             for sid, si in stages.items():
                 if group_of_stage.get(sid) != g:
@@ -123,10 +145,8 @@ def summarize(paths):
 def main(argv):
     if len(argv) != 2:
         sys.exit("usage: comet_bytes.py EVENTLOG_DIR > bytes.tsv")
-    d = Path(argv[1])
-    paths = sorted(p for p in d.rglob("*") if p.is_file() and not p.name.endswith(".inprogress"))
     print("\t".join(COLUMNS))
-    for row in summarize(paths):
+    for row in summarize(log_streams(Path(argv[1]))):
         print("\t".join(str(row[c]) for c in COLUMNS))
 
 

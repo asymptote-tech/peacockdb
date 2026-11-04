@@ -1,0 +1,52 @@
+spark.app.id=app-20261104041810-0005
+spark.app.name=comet-tpcds-local-concurrent-ball
+spark.app.startTime=1793765889518
+spark.app.submitTime=1793765889411
+spark.cleaner.periodicGC.interval=5min
+spark.comet.explain.fallback.enabled=true
+spark.comet.expression.Cast.allowIncompatible=true
+spark.comet.version=1.2.0
+spark.cores.max=128
+spark.driver.extraClassPath=/opt/comet/comet-spark-spark4.1_2.13-1.2.0.jar
+spark.driver.extraJavaOptions=-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-modules=jdk.incubator.vector --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false -Dio.netty.tryReflectionSetAccessible=true -Dio.netty.allocator.type=pooled -Dio.netty.handler.ssl.defaultEndpointVerificationAlgorithm=NONE --enable-native-access=ALL-UNNAMED
+spark.driver.host=10.48.0.7
+spark.driver.memory=16g
+spark.driver.port=40521
+spark.eventLog.compress=true
+spark.eventLog.compression.codec=zstd
+spark.eventLog.dir=file:///home/dmitry/comet/eventlogs
+spark.eventLog.enabled=true
+spark.executor.cores=128
+spark.executor.extraClassPath=/opt/comet/comet-spark-spark4.1_2.13-1.2.0.jar
+spark.executor.extraJavaOptions=-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-modules=jdk.incubator.vector --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false -Dio.netty.tryReflectionSetAccessible=true -Dio.netty.allocator.type=pooled -Dio.netty.handler.ssl.defaultEndpointVerificationAlgorithm=NONE --enable-native-access=ALL-UNNAMED
+spark.executor.id=driver
+spark.executor.memory=64g
+spark.executor.memoryOverhead=48g
+spark.hadoop.fs.s3a.vectored.read.max.merged.size=2M
+spark.hadoop.fs.s3a.vectored.read.min.seek.size=128K
+spark.master=spark://computeinstance-e01t2mm4265y8x88ey:7077
+spark.memory.offHeap.enabled=true
+spark.memory.offHeap.size=256g
+spark.plugins=org.apache.spark.CometPlugin
+spark.rdd.compress=True
+spark.scheduler.allocation.file=/home/dmitry/comet/out/tpcds-local-concurrent-ball/fairscheduler.xml
+spark.scheduler.mode=FAIR
+spark.serializer.objectStreamReset=100
+spark.shuffle.manager=org.apache.spark.sql.comet.execution.shuffle.CometShuffleManager
+spark.sql.artifact.isolation.enabled=false
+spark.sql.extendedExplainProviders=org.apache.comet.ExtendedExplainInfo
+spark.sql.extensions=org.apache.comet.CometSparkSessionExtensions
+spark.sql.shuffle.partitions=256
+spark.submit.deployMode=client
+spark.submit.pyFiles=
+spark.ui.showConsoleProgress=true
+# run
+host=computeinstance-e01t2mm4265y8x88ey
+local_start=2026-11-04T04:18:07+00:00
+spark=4.1.3
+pyspark=4.1.3
+comet=1.2.0 (/opt/comet/comet-spark-spark4.1_2.13-1.2.0.jar)
+java=17.0.20.1
+python=3.12.3
+cpus=128
+argv=comet_run.py --out /home/dmitry/comet/out/tpcds-local-concurrent-ball --dataset tpcds --source local --mode concurrent --batch all --runs 1 --warmup 0 --conf spark.memory.offHeap.size=256g --conf spark.cleaner.periodicGC.interval=5min

@@ -1,0 +1,203 @@
+children {
+  plan_id: 26784
+  native_scan {
+    common {
+      required_schema {
+        name: "s_suppkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "s_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_suppkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_address"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_phone"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_acctbal"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "s_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 92
+              stop_index: 100
+              line: 5
+              start_position: 6
+            }
+            expr_id: 11072
+          }
+        }
+        query_context {
+          stop_index: 666
+          line: 1
+        }
+        expr_id: 11073
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 92
+              stop_index: 100
+              line: 5
+              start_position: 6
+            }
+            expr_id: 11074
+          }
+        }
+        query_context {
+          stop_index: 666
+          line: 1
+        }
+        expr_id: 11075
+      }
+      projection_vector: 0
+      projection_vector: 1
+      projection_vector: 3
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT32
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1143365158
+  }
+}
+plan_id: 26827
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 92
+              stop_index: 100
+              line: 5
+              start_position: 6
+            }
+            expr_id: 11076
+          }
+        }
+        query_context {
+          stop_index: 666
+          line: 1
+        }
+        expr_id: 11077
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 92
+              stop_index: 100
+              line: 5
+              start_position: 6
+            }
+            expr_id: 11078
+          }
+        }
+        query_context {
+          stop_index: 666
+          line: 1
+        }
+        expr_id: 11079
+      }
+    }
+    expr_id: 11080
+  }
+}

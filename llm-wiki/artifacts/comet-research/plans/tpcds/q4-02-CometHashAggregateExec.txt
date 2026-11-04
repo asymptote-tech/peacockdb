@@ -1,0 +1,491 @@
+children {
+  children {
+    plan_id: 23
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 24
+            scale: 6
+          }
+        }
+      }
+      fields {
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=58.2 MiB, rowCount=3.30E+5)"
+    }
+  }
+  plan_id: 9539
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7075
+    }
+    grouping_exprs {
+      bound {
+        index: 1
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7076
+    }
+    grouping_exprs {
+      bound {
+        index: 2
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7077
+    }
+    grouping_exprs {
+      bound {
+        index: 3
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7078
+    }
+    grouping_exprs {
+      bound {
+        index: 4
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7079
+    }
+    grouping_exprs {
+      bound {
+        index: 5
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7080
+    }
+    grouping_exprs {
+      bound {
+        index: 6
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7081
+    }
+    grouping_exprs {
+      bound {
+        index: 7
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 2503
+        stop_index: 2515
+        line: 63
+        start_position: 12
+      }
+      expr_id: 7082
+    }
+    agg_exprs {
+      sum {
+        child {
+          check_overflow {
+            child {
+              divide {
+                left {
+                  check_overflow {
+                    child {
+                      add {
+                        left {
+                          check_overflow {
+                            child {
+                              subtract {
+                                left {
+                                  check_overflow {
+                                    child {
+                                      subtract {
+                                        left {
+                                          unbound {
+                                            name: "ws_ext_list_price"
+                                            datatype {
+                                              type_id: DECIMAL
+                                              type_info {
+                                                decimal {
+                                                  precision: 7
+                                                  scale: 2
+                                                }
+                                              }
+                                            }
+                                          }
+                                          query_context {
+                                            start_index: 2503
+                                            stop_index: 2515
+                                            line: 63
+                                            start_position: 12
+                                          }
+                                          expr_id: 7083
+                                        }
+                                        right {
+                                          unbound {
+                                            name: "ws_ext_wholesale_cost"
+                                            datatype {
+                                              type_id: DECIMAL
+                                              type_info {
+                                                decimal {
+                                                  precision: 7
+                                                  scale: 2
+                                                }
+                                              }
+                                            }
+                                          }
+                                          query_context {
+                                            start_index: 2503
+                                            stop_index: 2515
+                                            line: 63
+                                            start_position: 12
+                                          }
+                                          expr_id: 7084
+                                        }
+                                        return_type {
+                                          type_id: DECIMAL
+                                          type_info {
+                                            decimal {
+                                              precision: 8
+                                              scale: 2
+                                            }
+                                          }
+                                        }
+                                        eval_mode: ANSI
+                                      }
+                                      query_context {
+                                        start_index: 2224
+                                        stop_index: 2262
+                                        line: 56
+                                        start_position: 27
+                                      }
+                                      expr_id: 7085
+                                    }
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 8
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                    fail_on_error: true
+                                  }
+                                  query_context {
+                                    start_index: 2224
+                                    stop_index: 2262
+                                    line: 56
+                                    start_position: 27
+                                  }
+                                  expr_id: 7086
+                                }
+                                right {
+                                  unbound {
+                                    name: "ws_ext_discount_amt"
+                                    datatype {
+                                      type_id: DECIMAL
+                                      type_info {
+                                        decimal {
+                                          precision: 7
+                                          scale: 2
+                                        }
+                                      }
+                                    }
+                                  }
+                                  query_context {
+                                    start_index: 2503
+                                    stop_index: 2515
+                                    line: 63
+                                    start_position: 12
+                                  }
+                                  expr_id: 7087
+                                }
+                                return_type {
+                                  type_id: DECIMAL
+                                  type_info {
+                                    decimal {
+                                      precision: 9
+                                      scale: 2
+                                    }
+                                  }
+                                }
+                                eval_mode: ANSI
+                              }
+                              query_context {
+                                start_index: 2224
+                                stop_index: 2282
+                                line: 56
+                                start_position: 27
+                              }
+                              expr_id: 7088
+                            }
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 9
+                                  scale: 2
+                                }
+                              }
+                            }
+                            fail_on_error: true
+                          }
+                          query_context {
+                            start_index: 2224
+                            stop_index: 2282
+                            line: 56
+                            start_position: 27
+                          }
+                          expr_id: 7089
+                        }
+                        right {
+                          unbound {
+                            name: "ws_ext_sales_price"
+                            datatype {
+                              type_id: DECIMAL
+                              type_info {
+                                decimal {
+                                  precision: 7
+                                  scale: 2
+                                }
+                              }
+                            }
+                          }
+                          query_context {
+                            start_index: 2503
+                            stop_index: 2515
+                            line: 63
+                            start_position: 12
+                          }
+                          expr_id: 7090
+                        }
+                        return_type {
+                          type_id: DECIMAL
+                          type_info {
+                            decimal {
+                              precision: 10
+                              scale: 2
+                            }
+                          }
+                        }
+                        eval_mode: ANSI
+                      }
+                      query_context {
+                        start_index: 2223
+                        stop_index: 2302
+                        line: 56
+                        start_position: 26
+                      }
+                      expr_id: 7091
+                    }
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 10
+                          scale: 2
+                        }
+                      }
+                    }
+                    fail_on_error: true
+                  }
+                  query_context {
+                    start_index: 2223
+                    stop_index: 2302
+                    line: 56
+                    start_position: 26
+                  }
+                  expr_id: 7092
+                }
+                right {
+                  literal {
+                    decimal_val: "\002"
+                    datatype {
+                      type_id: DECIMAL
+                      type_info {
+                        decimal {
+                          precision: 1
+                        }
+                      }
+                    }
+                  }
+                  expr_id: 7093
+                }
+                return_type {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 14
+                      scale: 6
+                    }
+                  }
+                }
+                eval_mode: ANSI
+              }
+              query_context {
+                start_index: 2222
+                stop_index: 2305
+                line: 56
+                start_position: 25
+              }
+              expr_id: 7094
+            }
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 14
+                  scale: 6
+                }
+              }
+            }
+            fail_on_error: true
+          }
+          query_context {
+            start_index: 2222
+            stop_index: 2305
+            line: 56
+            start_position: 25
+          }
+          expr_id: 7095
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 24
+              scale: 6
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 2217
+        stop_index: 2307
+        line: 56
+        start_position: 20
+      }
+      expr_id: 7096
+    }
+    mode: Final
+  }
+}
+plan_id: 9539
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 2503
+      stop_index: 2515
+      line: 63
+      start_position: 12
+    }
+    expr_id: 7097
+  }
+  project_list {
+    bound {
+      index: 8
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 24
+            scale: 6
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 2217
+      stop_index: 2307
+      line: 56
+      start_position: 20
+    }
+    expr_id: 7098
+  }
+}

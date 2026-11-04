@@ -24,7 +24,7 @@
 - Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): done 2026-11-04, checkpoint `comet-research: desk wave amendments` reported, awaiting commit.
 - Task 2 (experiment scripts): Steps 1-4 done 2026-11-04; checkpoint `comet-research: experiment scripts` reported, awaiting commit.
 - Task 3 (experiment 1, VM-to-S3 throughput): Steps 1-2 done 2026-11-04 on the L40S; checkpoint `comet-research: S3 throughput (L40S)` reported, awaiting commit.
-- Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
+- Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): Steps 0-5 done 2026-11-04; cpu128 STOPPED 04:33:49; checkpoint `comet-research: Comet runs and plan dumps` reported, awaiting commit.
 - Task 5 (analysis and the cost model): todo
 - Task 6 (the report and its audit): todo
 
@@ -164,12 +164,19 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
 | l40s | run | 03:17:22-03:31:32 | detached driver; ssh timed out about 03:24-03:28 (boot disk saturated), run unaffected |
 | l40s | stop-used | 03:31:49 | `gpu-host.sh stop --force` from 03:31:52 |
 | l40s | STOPPED | 03:32:23 | `vm.sh status l40s` reads STOPPED |
+| cpu128 | use requested | 03:54:22 | Task 4; found STOPPED, started |
+| cpu128 | RUNNING, ssh | 03:55:31 | `use started` logged; dead-man armed, guest, 118 min |
+| cpu128 | runs | 03:55:53-04:32:00 | setup, Experiment 1, calibration, the nine configurations, Step 4 |
+| cpu128 | stop-used | 04:32:57 | force stop |
+| cpu128 | STOPPED | 04:33:49 | `vm.sh status cpu128` reads STOPPED |
 
 - After Task 2: l40s 0.05 h of the 1 h cap by the log; the wall time from request to STOPPED was
   0.10 h. cpu128 0.00 h of 2 h.
 - After Task 3: l40s **0.33 h** by the log (Task 3's session 0.28 h, request 03:15:47 to stop
   03:32:23). Wall time, request to STOPPED: 0.28 h this session, 0.38 h over the task. For a cap
   check, add 10 min for the one `lost` use: 0.50 h of 1 h. cpu128 0.00 h of 2 h.
+- After Task 4: cpu128 **0.66 h** of 2 h by the log; wall time, request to STOPPED, 0.66 h
+  (03:54:22-04:33:49). No `lost` use, so no margin to add. l40s unchanged at 0.33 h by the log.
 - The log undercounts a dead-man stop: `lost` closes a use at its last heartbeat (the plan's
   rule), here 03:10:47, while the VM ran to 03:13:39. A long detached run polled every 9 min can
   lose up to that much per use. Task 6 should report wall times beside the log's hours.
@@ -240,6 +247,140 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   type first, and should not count on ssh while a run saturates the boot disk.
 - Not settled: whether ~0.9 GB/s is the NIC or the Python client (CPU 216-283% of 800%). Listed as
   a follow-up in `notes.md`.
+
+## Task 4: Comet on the CPU VM (2026-11-04)
+
+### Step 0: local shakedown on dev (03:35-03:52 UTC, no VM time)
+
+- Setup, all scratch under `~/comet-research/shakedown/` (outside the repo): Spark 4.1.3
+  tarball, Comet 1.2.0 jar, `hadoop-aws-3.4.2` and `bundle-2.29.52` in `$SPARK_HOME/jars` (sizes
+  match `## Recipes` 4-5), Java 21 (dev's; the VM gets 17), a standalone master and one 8-core
+  worker. Data: `testdata/{tpch,tpcds}.sf1` symlinked as `<ds>-sf40`. A wrapper passes dev sizes
+  through the new `--conf` (8 cores, executor 6g, off-heap 10g).
+- Ran: every query of both lists sequential with `--dump-plans` (TPC-H 22 in ~21 s, TPC-DS 82 in
+  ~82 s), concurrent TPC-H "all" and TPC-DS batch 20, `--cache --warmup-query q1` on TPC-H batch
+  3, and `comet_bytes.py` over the event logs (126 then 124 query rows, scan and shuffle bytes
+  non-zero on every row). An S3 smoke test from dev against eu-north1 (default profile, a
+  nation-region join through the same `spark_conf`): native scan, no fallback row, `s3_gets` 4,
+  no key in `conf.txt` or the plan files. So the profile provider, path-style and signing region
+  `eu-north1` work; eu-west1 is first tried on the VM.
+- **No query dropped.** No dialect gap beyond the double quotes Task 2 handled; no ANSI failure.
+  Result rows match DuckDB on sf1 for all 22 + 82 queries (a scratch check comparing the new
+  `rows` column with DuckDB 1.5.4 on the original texts).
+- Comet falls back on TPC-DS q9 (struct-typed project), q10 and q35 (count merge buffer), q14
+  (decimal AVG at max precision); every other query is Comet end to end.
+- Fixes, each with a test written and watched failing first (pytest 17 -> 24, `test_vm_log.sh`
+  14 unchanged, all pass):
+  - `comet_bytes.py` crashed on Spark 4's rolling event logs (`eventlog_v2_<app>/events_<n>_…`
+    plus a binary `.appstatus…crc`). It now reads each app's parts as one stream in numeric order
+    and skips status files (`log_streams`).
+  - `fallbacks.tsv` `spark_ops` counted wrappers (TPC-H q1 showed 2 Spark ops where Comet reports
+    8/8 accelerated): `AQEShuffleReadExec`, `SubqueryExec`, `ColumnarToRowExec`,
+    `RowToColumnarExec`, `InMemoryRelation` are skipped (`op_kind`), and the walk no longer follows
+    `CometInMemoryTableScanExec`'s subquery, the Spark scan it replaced (`follows_subqueries`).
+    After the fix every `spark_ops` > 0 has a reason row.
+  - Native plan `.txt` files carried the query text once per expression (2.5 MB a block on
+    TPC-DS q66; 66 MB of TPC-DS's 70 MB). `strip_sql_text` drops those lines; the `.pb` keeps
+    them. TPC-DS dumps are now ~22 MB on disk over ~1,700 files, none over 5 MB.
+  - New: `runs.tsv` has a `rows` column; `--conf KEY=VALUE` overrides a Spark setting.
+- Not checked locally: `s3_gets` on eu-west1, the `--matrix` estimates against real sf40 times.
+
+### The CPU VM's disks (read before setup, from `nebius compute instance get`)
+
+- One disk: the boot disk, `NETWORK_SSD`, 100 GiB, no secondary disk or filesystem. The L40S's
+  identical disk type read at 0.06 GB/s. sf40 Parquet is 58.2 GB (TPC-H 42.4, TPC-DS 15.8),
+  so data plus the 100 GB spill reserve cannot fit there.
+- Decision: data and Spark's local dirs (shuffle and spill) go on tmpfs, `/dev/shm/comet/`
+  (`~/comet/data` and `~/comet/spark-local` are symlinks to it); the RAM is the fastest disk the VM
+  has. Local runs are therefore "RAM-resident (tmpfs)", stricter than page-cache warm.
+- Deviations to fit RAM, passed with `--conf`: `spark.memory.offHeap.size=256g` (was 320g; 2 GB
+  per core, the ratio of Comet's own benchmark conf, 16g for 8 cores) and
+  `spark.cleaner.periodicGC.interval=5min` (so shuffle files on tmpfs are cleaned between queries).
+  Budget: 58 GB data + driver 16 + heap 64 + overhead 48 + off-heap 256 = 442 GB of 512.
+
+### Session (Steps 1-5), live log; times UTC (dev and VM clocks agree)
+
+- 03:54:22 `vm.sh use cpu128`: found STOPPED, started; RUNNING with ssh 03:55:32; boot id
+  `90ed1f00-…`; guest dead-man armed at 118 min (poweroff about 05:52). `push-aws`: default,
+  eu-west1. Scripts copied (sha256 of `comet_run.py` matched) with the queries, plus two scratch
+  helpers `runone.sh` (one configuration, detached under `timeout`, adds the two `--conf`
+  deviations) and `s3rows.sh` (Experiment 1).
+- VM as found: 128 vCPU AMD EPYC Genoa (AVX2), 503 GiB RAM, `/dev/shm` 252 GiB, boot disk `vda`
+  100 GiB (93 GiB free), Ubuntu 24.04.5, NIC eth0. No `/var/lib/peacock`, so no chain L copy.
+- `comet_setup.sh all` 03:55:53-03:59:55. Versions: OpenJDK 17.0.20.1, Spark 4.1.3, Comet 1.2.0
+  jar 98,985,596 B, hadoop-aws 3.4.2, AWS SDK bundle 2.29.52, Python 3.12.3, pyarrow 26.0.1,
+  boto3 1.43.123. Data copied (no reuse) from eu-north1 to tmpfs: TPC-H 42,442,683,465 B in 74.2 s
+  (0.572 GB/s), TPC-DS 15,787,929,533 B in 35.2 s (0.449 GB/s). Uploaded to the eu-west1 buckets:
+  TPC-H 28.3 s (1.502 GB/s), TPC-DS 13.5 s (1.173 GB/s); every size matches eu-north1. tmpfs free
+  after: 198 GiB of 252. Standalone cluster up (one worker, 128 cores, 480g).
+- A launch over ssh with a detached child hung the ssh until my 120 s timeout although the child
+  started; launches now run under a 30 s timeout.
+- 04:00:19 Experiment 1 launched (`s3rows.sh`): lineitem from eu-west1 at 1/4/16/64 threads, the
+  16-thread cross-region row against eu-north1, then orders.parquet copied to the boot disk and
+  read with O_DIRECT at 1 and 16 threads.
+- Experiment 1 S3 rows (lineitem, 9,030,797,348 B): eu-west1 in-region 0.195 / 1.164 / 1.163 /
+  1.028 GB/s at 1 / 4 / 16 / 64 threads (client CPU 17 / 173 / 296 / 1408 %); cross-region
+  eu-north1 at 16 threads 0.902 GB/s. eth0 took ~9.05 GB per row.
+- **The data vanished** after the 04:00:19 launch: `/dev/shm/comet` was gone. systemd-logind's
+  `RemoveIPC=yes` (Ubuntu default) deletes a user's files in `/dev/shm` when their last session
+  ends, and the 30 s launch ssh was the only session. Fix: a dedicated tmpfs,
+  `sudo mount -t tmpfs -o size=320g tmpfs /mnt/comet`, which RemoveIPC does not touch;
+  `~/comet/{data,spark-local}` now link there. Data re-fetched 04:02:26-04:04:15 (TPC-DS 0.482
+  GB/s; the eu-west1 upload was a no-op, sizes matched). A restarted run must redo the mount
+  and the fetch: a tmpfs does not survive a stop.
+- **Second bug, `comet_setup.sh cluster`**: `/opt/spark` is root's, so `start-master.sh` could not
+  write its log and no daemon started, yet the script printed "cluster up". Fixed in the repo
+  script: `SPARK_LOG_DIR`/`SPARK_PID_DIR` under `~/comet`, then a check that the worker
+  registered, else exit 1. Verified on the VM (worker registered 04:04:20, 128 cores, 480 GiB).
+  No automated test (shell, needs Spark); the VM run is the check.
+- Boot-disk rows (orders.parquet, 2,525,325,843 B; copy to disk 41.1 s, 0.062 GB/s): O_DIRECT
+  0.062 GB/s at 1 thread, 0.063 at 16. Same as the L40S's disk.
+- Step 2 calibration, local (tmpfs), sequential, 1 run, with `--dump-plans`: TPC-H 04:07:00-04:08:18,
+  batch 67.4 s, rc 0. Memory after: 60 GiB used, tmpfs 55 GiB. TPC-DS launched 04:08:30.
+- TPC-DS calibration 04:08:30-04:11:49, batch 190.7 s, rc 0. `measurements/comet/calibration.tsv`
+  written (104 rows). `--matrix` at 04:12: estimates 2.9, 2.9, 3.1, 3.1, 3.1, 2.9, 5.3, 2.9, 2.9
+  min, 29.1 cumulative. Used 0.30 h + 10 min margin: about 57 of 120 min. **No projected skips.**
+  Each configuration runs as `runone.sh <min(3 x est, minutes left)> ~/comet/out/<name> …`.
+- Matrix, outcomes (cap check before each; `vm.sh hours` shown):
+  - 1 `tpch-local-sequential-ball` (0.30 h) 04:12:15-04:14:08, rc 0: batch 59.6 s, 46.9 s.
+  - 1 `tpch-local-concurrent-ball` (0.33 h) 04:14:22-04:15:41, rc 0: batch 38.3 s, 33.9 s.
+  - 2 `tpcds-local-sequential-ball` (0.36 h) 04:15:49-04:18:00, rc 0: batch 122.3 s.
+  - 2 `tpcds-local-concurrent-ball` (0.40 h) 04:18:07-04:19:43, rc 0: batch 87.5 s, no OOM, so
+    no batch-20 fallback. Peak seen in polls: 167 GiB used, tmpfs 72 GiB.
+  - 3 `tpch-s3-sequential-ball` (0.43 h) 04:20:00-04:21:40, rc 0: q1 warm-up 5.9 s, batch 84.7 s.
+    Run with `--dump-plans ~/comet/plans-s3/tpch` (untimed) for the scan-parity check.
+  - 3 `tpch-s3-concurrent-ball` (0.46 h) 04:21:51-04:22:47, rc 0: batch 46.5 s. No dump (it would
+    fall inside the timed batch); same conf as the sequential S3 run.
+  - 4 `tpcds-s3-sequential-ball` (0.48 h) 04:22:59-04:27:35, rc 0: batch 265.6 s, with
+    `--dump-plans ~/comet/plans-s3/tpcds` (untimed).
+  - 5 `tpch-local-sequential-ball-cache` (0.56 h) 04:27:55-04:29:12, rc 0: batch 53.3 s.
+  - 5 `tpch-local-concurrent-ball-cache` (0.58 h) 04:29:26-04:30:26, rc 0: batch 36.1 s. Both
+    read the cache: 219 and 222 of their event logs' plans have `CometInMemoryTableScan`.
+  - Nothing skipped, cut, OOM or with a scan mismatch; `skipped.tsv` has its header only.
+- Scan parity: no scan row in any `fallbacks.tsv`, local or S3. TPC-H's local and S3 files are
+  identical; TPC-DS's differ only in AQE op counts (q31, q39) and an expression id (q35).
+- Step 4, 04:30-04:32: `comet_bytes.py` on the VM over the 11 apps' logs (230 MB, left on the VM's
+  boot disk) gave 527 rows. It needed a fix first: rows carried no configuration, so `tpch q1 run 1`
+  of six apps could not be told apart. A leading `config` column (the app name less `comet-`) was
+  added, test first (pytest 24 pass). Per pass: TPC-H scans 48.3 GB and shuffles 46.4 GB; TPC-DS
+  98.4 and 56.5 GB; no spill anywhere. `s3_gets`: 64,991 (TPC-H sequential with warm-up),
+  62,809 (TPC-H concurrent), 260,416 (TPC-DS). The cache runs report 456 GB scanned: the decoded
+  in-memory bytes, not Parquet.
+- Footer cross-check (`footer-check.tsv`; a scratch script summed the projected columns'
+  compressed chunk sizes over all row groups): TPC-H q1 0.986, TPC-DS q3 0.983, q42 0.983, q96
+  1.000. TPC-H q6 0.153 and q14 0.028 are below because their date filters prune row groups and
+  pages; footers are an upper bound.
+- 04:32:57 `vm.sh stop-used`; STOPPED 04:33:49 (`vm.sh status cpu128`). Wall time from request
+  to STOPPED: 39.5 min.
+- Calibration (first pass) is slower than the measured runs (TPC-H 67.4 s against 59.6 / 46.9;
+  TPC-DS 190.7 against 122.3): JIT and first-touch warm-up. Run 2 of TPC-H is 21% faster than
+  run 1, so single-run TPC-DS numbers carry some warm-up too.
+- Files written: `measurements/comet/<config>/{runs.tsv,conf.txt,status,rc,exit}` for the nine
+  configurations and `cal-tpch`, `cal-tpcds`; the two S3 sequential dirs also hold their
+  `fallbacks.tsv`. `measurements/comet/{summary,bytes,calibration,skipped,footer-check}.tsv`.
+  `plans/{tpch,tpcds}/` from the calibration runs (21.4 MB, 2,322 files, none over 5 MB).
+  `measurements/s3/cpu128.tsv`, cpu128 rows in `measurements/s3/summary.tsv`, a cpu128 section
+  in `measurements/s3/notes.md`. `measurements/vm-log.tsv` copied after the stop.
 
 ## Rulings
 

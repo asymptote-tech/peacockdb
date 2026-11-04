@@ -1,0 +1,642 @@
+children {
+  children {
+    children {
+      children {
+        children {
+          children {
+            children {
+              plan_id: 3
+              shuffle_scan {
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+                fields {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+                source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1981.5 MiB, rowCount=2.88E+7)"
+              }
+            }
+            plan_id: 195840
+            sort {
+              sort_orders {
+                sort_order {
+                  child {
+                    bound {
+                      index: 3
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 270
+                      stop_index: 284
+                      line: 9
+                      start_position: 28
+                    }
+                    expr_id: 126877
+                  }
+                }
+                expr_id: 126878
+              }
+              sort_orders {
+                sort_order {
+                  child {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 270
+                      stop_index: 284
+                      line: 9
+                      start_position: 28
+                    }
+                    expr_id: 126879
+                  }
+                }
+                expr_id: 126880
+              }
+            }
+          }
+          children {
+            children {
+              plan_id: 4
+              shuffle_scan {
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=44.0 MiB, rowCount=2.88E+6)"
+              }
+            }
+            plan_id: 195843
+            sort {
+              sort_orders {
+                sort_order {
+                  child {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 270
+                      stop_index: 284
+                      line: 9
+                      start_position: 28
+                    }
+                    expr_id: 126881
+                  }
+                }
+                expr_id: 126882
+              }
+              sort_orders {
+                sort_order {
+                  child {
+                    bound {
+                      datatype {
+                        type_id: INT64
+                      }
+                    }
+                    query_context {
+                      start_index: 270
+                      stop_index: 284
+                      line: 9
+                      start_position: 28
+                    }
+                    expr_id: 126883
+                  }
+                }
+                expr_id: 126884
+              }
+            }
+          }
+          plan_id: 195845
+          sort_merge_join {
+            left_join_keys {
+              bound {
+                index: 3
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 270
+                stop_index: 284
+                line: 9
+                start_position: 28
+              }
+              expr_id: 126885
+            }
+            left_join_keys {
+              bound {
+                index: 1
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 270
+                stop_index: 284
+                line: 9
+                start_position: 28
+              }
+              expr_id: 126886
+            }
+            right_join_keys {
+              bound {
+                index: 1
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 270
+                stop_index: 284
+                line: 9
+                start_position: 28
+              }
+              expr_id: 126887
+            }
+            right_join_keys {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 270
+                stop_index: 284
+                line: 9
+                start_position: 28
+              }
+              expr_id: 126888
+            }
+            join_type: LeftOuter
+            sort_options {
+              sort_order {
+                child {
+                  bound {
+                    index: 3
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 270
+                    stop_index: 284
+                    line: 9
+                    start_position: 28
+                  }
+                  expr_id: 126889
+                }
+              }
+              expr_id: 126890
+            }
+            sort_options {
+              sort_order {
+                child {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 270
+                    stop_index: 284
+                    line: 9
+                    start_position: 28
+                  }
+                  expr_id: 126891
+                }
+              }
+              expr_id: 126892
+            }
+          }
+        }
+        plan_id: 195847
+        filter {
+          predicate {
+            is_null {
+              child {
+                bound {
+                  index: 8
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 388
+                  stop_index: 402
+                  line: 12
+                  start_position: 9
+                }
+                expr_id: 126893
+              }
+            }
+            query_context {
+              start_index: 404
+              stop_index: 410
+              line: 12
+              start_position: 25
+            }
+            expr_id: 126894
+          }
+        }
+      }
+      plan_id: 195849
+      projection {
+        project_list {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 126895
+        }
+        project_list {
+          bound {
+            index: 1
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 126896
+        }
+        project_list {
+          bound {
+            index: 2
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 126897
+        }
+        project_list {
+          bound {
+            index: 4
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 126898
+        }
+        project_list {
+          bound {
+            index: 5
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 7
+                  scale: 2
+                }
+              }
+            }
+          }
+          expr_id: 126899
+        }
+        project_list {
+          bound {
+            index: 6
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 7
+                  scale: 2
+                }
+              }
+            }
+          }
+          expr_id: 126900
+        }
+      }
+    }
+    children {
+      plan_id: 5
+      scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=1782.0 B, rowCount=366)"
+      }
+    }
+    plan_id: 195852
+    hash_join {
+      left_join_keys {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 351
+          stop_index: 365
+          line: 11
+          start_position: 20
+        }
+        expr_id: 126901
+      }
+      right_join_keys {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 351
+          stop_index: 365
+          line: 11
+          start_position: 20
+        }
+        expr_id: 126902
+      }
+      build_side: BuildRight
+    }
+  }
+  plan_id: 195854
+  projection {
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      expr_id: 126903
+    }
+    project_list {
+      bound {
+        index: 2
+        datatype {
+          type_id: INT64
+        }
+      }
+      expr_id: 126904
+    }
+    project_list {
+      bound {
+        index: 3
+        datatype {
+          type_id: INT64
+        }
+      }
+      expr_id: 126905
+    }
+    project_list {
+      bound {
+        index: 4
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 126906
+    }
+    project_list {
+      bound {
+        index: 5
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 7
+              scale: 2
+            }
+          }
+        }
+      }
+      expr_id: 126907
+    }
+    project_list {
+      bound {
+        index: 7
+        datatype {
+          type_id: INT64
+        }
+      }
+      expr_id: 126908
+    }
+  }
+}
+plan_id: 195856
+hash_agg {
+  grouping_exprs {
+    bound {
+      index: 5
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 424
+      stop_index: 429
+      line: 13
+      start_position: 12
+    }
+    expr_id: 126909
+  }
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 424
+      stop_index: 429
+      line: 13
+      start_position: 12
+    }
+    expr_id: 126910
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 424
+      stop_index: 429
+      line: 13
+      start_position: 12
+    }
+    expr_id: 126911
+  }
+  agg_exprs {
+    sum {
+      child {
+        bound {
+          index: 2
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 424
+          stop_index: 429
+          line: 13
+          start_position: 12
+        }
+        expr_id: 126912
+      }
+      datatype {
+        type_id: INT64
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 123
+      stop_index: 138
+      line: 5
+      start_position: 10
+    }
+    expr_id: 126913
+  }
+  agg_exprs {
+    sum {
+      child {
+        scalarFunc {
+          func: "unscaled_value"
+          args {
+            bound {
+              index: 3
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 424
+              stop_index: 429
+              line: 13
+              start_position: 12
+            }
+            expr_id: 126914
+          }
+          return_type {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 158
+          stop_index: 179
+          line: 6
+          start_position: 10
+        }
+        expr_id: 126915
+      }
+      datatype {
+        type_id: INT64
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 158
+      stop_index: 179
+      line: 6
+      start_position: 10
+    }
+    expr_id: 126916
+  }
+  agg_exprs {
+    sum {
+      child {
+        scalarFunc {
+          func: "unscaled_value"
+          args {
+            bound {
+              index: 4
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 7
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 424
+              stop_index: 429
+              line: 13
+              start_position: 12
+            }
+            expr_id: 126917
+          }
+          return_type {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 198
+          stop_index: 216
+          line: 7
+          start_position: 10
+        }
+        expr_id: 126918
+      }
+      datatype {
+        type_id: INT64
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 198
+      stop_index: 216
+      line: 7
+      start_position: 10
+    }
+    expr_id: 126919
+  }
+}

@@ -1,0 +1,214 @@
+children {
+  plan_id: 7769
+  native_scan {
+    common {
+      required_schema {
+        name: "o_orderkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "o_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderstatus"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_totalprice"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderdate"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderpriority"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_clerk"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_shippriority"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3059
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3060
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3061
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3062
+      }
+      projection_vector: 0
+      projection_vector: 1
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1254311076
+  }
+}
+plan_id: 7818
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3063
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3064
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 346
+              stop_index: 354
+              line: 13
+              start_position: 10
+            }
+            expr_id: 3065
+          }
+        }
+        query_context {
+          start_index: 91
+          stop_index: 738
+          line: 7
+          start_position: 4
+        }
+        expr_id: 3066
+      }
+    }
+    expr_id: 3067
+  }
+}

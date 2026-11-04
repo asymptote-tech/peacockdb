@@ -1,0 +1,126 @@
+children {
+  plan_id: 143592
+  native_scan {
+    common {
+      required_schema {
+        name: "sm_ship_mode_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "sm_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_ship_mode_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_ship_mode_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_code"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_carrier"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "sm_contract"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 1098
+              stop_index: 1108
+              line: 34
+              start_position: 6
+            }
+            expr_id: 87996
+          }
+        }
+        query_context {
+          stop_index: 1338
+          line: 1
+        }
+        expr_id: 87997
+      }
+      projection_vector: 0
+      projection_vector: 2
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1656100763
+  }
+}
+plan_id: 143629
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 1098
+          stop_index: 1108
+          line: 34
+          start_position: 6
+        }
+        expr_id: 87998
+      }
+    }
+    query_context {
+      stop_index: 1338
+      line: 1
+    }
+    expr_id: 87999
+  }
+}

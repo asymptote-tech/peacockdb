@@ -1,0 +1,236 @@
+children {
+  children {
+    plan_id: 5
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=2.7 MiB, rowCount=4.20E+4)"
+    }
+  }
+  plan_id: 171887
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1205
+        stop_index: 1211
+        line: 40
+        start_position: 9
+      }
+      expr_id: 114034
+    }
+    grouping_exprs {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1205
+        stop_index: 1211
+        line: 40
+        start_position: 9
+      }
+      expr_id: 114035
+    }
+    grouping_exprs {
+      bound {
+        index: 2
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1205
+        stop_index: 1211
+        line: 40
+        start_position: 9
+      }
+      expr_id: 114036
+    }
+    grouping_exprs {
+      bound {
+        index: 3
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1205
+        stop_index: 1211
+        line: 40
+        start_position: 9
+      }
+      expr_id: 114037
+    }
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "ext_price"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 1205
+                stop_index: 1211
+                line: 40
+                start_position: 9
+              }
+              expr_id: 114038
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 89
+            stop_index: 102
+            line: 5
+            start_position: 7
+          }
+          expr_id: 114039
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 89
+        stop_index: 102
+        line: 5
+        start_position: 7
+      }
+      expr_id: 114040
+    }
+    mode: Final
+  }
+}
+plan_id: 171887
+projection {
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1205
+      stop_index: 1211
+      line: 40
+      start_position: 9
+    }
+    expr_id: 114041
+  }
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1205
+      stop_index: 1211
+      line: 40
+      start_position: 9
+    }
+    expr_id: 114042
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1205
+      stop_index: 1211
+      line: 40
+      start_position: 9
+    }
+    expr_id: 114043
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1205
+      stop_index: 1211
+      line: 40
+      start_position: 9
+    }
+    expr_id: 114044
+  }
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          index: 4
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 89
+          stop_index: 102
+          line: 5
+          start_position: 7
+        }
+        expr_id: 114045
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 89
+      stop_index: 102
+      line: 5
+      start_position: 7
+    }
+    expr_id: 114046
+  }
+}

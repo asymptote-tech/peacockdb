@@ -1,0 +1,120 @@
+children {
+  children {
+    plan_id: 3
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 2
+          }
+        }
+      }
+      fields {
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=8.3 MiB, rowCount=2.79E+5)"
+    }
+  }
+  plan_id: 228604
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 577
+        stop_index: 590
+        line: 16
+        start_position: 9
+      }
+      expr_id: 144263
+    }
+    agg_exprs {
+      sum {
+        child {
+          unbound {
+            name: "act_sales"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 28
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 577
+            stop_index: 590
+            line: 16
+            start_position: 9
+          }
+          expr_id: 144264
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 38
+              scale: 2
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 30
+        stop_index: 43
+        line: 2
+        start_position: 7
+      }
+      expr_id: 144265
+    }
+    mode: Final
+  }
+}
+plan_id: 228604
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 577
+      stop_index: 590
+      line: 16
+      start_position: 9
+    }
+    expr_id: 144266
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 38
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 30
+      stop_index: 43
+      line: 2
+      start_position: 7
+    }
+    expr_id: 144267
+  }
+}

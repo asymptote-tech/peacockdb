@@ -1,0 +1,146 @@
+children {
+  plan_id: 186116
+  scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 8
+          scale: 2
+        }
+      }
+    }
+    source: "Union (unknown)"
+  }
+}
+plan_id: 186119
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 241
+      stop_index: 246
+      line: 10
+      start_position: 13
+    }
+    expr_id: 121478
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 241
+      stop_index: 246
+      line: 10
+      start_position: 13
+    }
+    expr_id: 121479
+  }
+  grouping_exprs {
+    bound {
+      index: 2
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 241
+      stop_index: 246
+      line: 10
+      start_position: 13
+    }
+    expr_id: 121480
+  }
+  grouping_exprs {
+    bound {
+      index: 3
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 241
+      stop_index: 246
+      line: 10
+      start_position: 13
+    }
+    expr_id: 121481
+  }
+  grouping_exprs {
+    bound {
+      index: 4
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 241
+      stop_index: 246
+      line: 10
+      start_position: 13
+    }
+    expr_id: 121482
+  }
+  grouping_exprs {
+    bound {
+      index: 5
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 234
+      stop_index: 1965
+      line: 10
+      start_position: 6
+    }
+    expr_id: 121483
+  }
+  grouping_exprs {
+    bound {
+      index: 6
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 8
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 234
+      stop_index: 1965
+      line: 10
+      start_position: 6
+    }
+    expr_id: 121484
+  }
+}

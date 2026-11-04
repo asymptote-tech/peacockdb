@@ -10,7 +10,8 @@ One Spark application with one executor on all 128 cores (standalone master, sta
 `spark_conf` (comet-internals.md `## Recipes` 3 and 4). Concurrent mode runs one thread per query
 in one FAIR pool. Event logs go, zstd-compressed, to ~/comet/eventlogs on the VM.
 
-Writes into DIR: `runs.tsv` (query, run, ms; a `batch` row per run; warm-up runs are `w1`, …),
+Writes into DIR: `runs.tsv` (query, run, ms, result rows; a `batch` row per run; warm-up runs are
+`w1`, …),
 `conf.txt` (redacted settings, versions, host, local start time), `status`, `rc` (0, 1, or 143
 when cut by a signal) and `error.txt` on failure. `--dump-plans` writes per query its final plan
 text, its native plan blocks (`.pb`, `.txt`) and rows of `fallbacks.tsv`.
@@ -276,6 +277,9 @@ def spark_conf(args, out: Path) -> dict[str, str]:
         })
     if args.cache:
         conf["spark.comet.exec.inMemoryCache.enabled"] = "true"
+    for kv in args.conf:
+        k, _, v = kv.partition("=")
+        conf[k] = v
     return conf
 
 
@@ -301,8 +305,19 @@ P = "org.apache.spark.sql.execution."
 AQE, QS = P + "adaptive.AdaptiveSparkPlanExec", P + "adaptive.QueryStageExec"
 NATIVE = "org.apache.spark.sql.comet.CometNativeExec"
 REUSED = {P + "exchange.ReusedExchangeExec", P + "ReusedSubqueryExec"}
+# Not operators of either engine: wrappers, transitions, SubqueryExec, which only collects its
+# child, and InMemoryRelation, the cache a cached scan reads. AQEShuffleReadExec over a Comet exchange is read by Comet, which does not count it
+# as an eligible operator either.
 WRAPPERS = {"AdaptiveSparkPlanExec", "InputAdapter", "WholeStageCodegenExec",
-            "ReusedExchangeExec", "ReusedSubqueryExec"}
+            "ReusedExchangeExec", "ReusedSubqueryExec", "AQEShuffleReadExec", "SubqueryExec",
+            "ColumnarToRowExec", "RowToColumnarExec", "InMemoryRelation"}
+
+
+def op_kind(simple_name: str) -> str | None:
+    """'comet', 'spark', or None for a wrapper that the counts skip."""
+    if simple_name in WRAPPERS or simple_name.endswith("QueryStageExec"):
+        return None
+    return "comet" if simple_name.startswith("Comet") else "spark"
 
 
 def _isa(o, fqcn):
@@ -316,6 +331,20 @@ def _isa(o, fqcn):
 
 def _seq(s):
     return [s.apply(i) for i in range(s.size())]
+
+
+def follows_subqueries(simple_name: str) -> bool:
+    """CometInMemoryTableScanExec lists the Spark scan it replaced as a subquery
+    (CometInMemoryTableScanExec.scala:107 @ab46419f); that scan never runs."""
+    return simple_name != "CometInMemoryTableScanExec"
+
+
+SQL_TEXT = re.compile(r'^[ \t]*sql_text: ".*"\n', re.M)
+
+
+def strip_sql_text(text: str) -> str:
+    """Drop the `sql_text` lines nativeOp repeats in every expression; the .pb keeps them."""
+    return SQL_TEXT.sub("", text)
 
 
 def dump_plan(spark, name, df, outdir: Path):
@@ -339,7 +368,9 @@ def dump_plan(spark, name, df, outdir: Path):
             kids = [n.child()]
         else:
             kids = _seq(n.children())
-        stack += kids + _seq(n.subqueries())
+        if follows_subqueries(n.getClass().getSimpleName()):
+            kids += _seq(n.subqueries())
+        stack += kids
     expl = jvm.org.apache.spark.sql.api.python.PythonSQLUtils.explainString(qe, "formatted")
     cov = jvm.org.apache.comet.ExtendedExplainInfo().generateVerboseInfo(root)
     (outdir / f"{name}.plan.txt").write_text(expl + "\n" + cov)
@@ -347,11 +378,9 @@ def dump_plan(spark, name, df, outdir: Path):
     comet_ops = spark_ops = 0
     for n in nodes:
         op = n.getClass().getSimpleName()
-        if not (_isa(n, AQE) or _isa(n, QS) or op in WRAPPERS):
-            if op.startswith("Comet"):
-                comet_ops += 1
-            else:
-                spark_ops += 1
+        kind = None if _isa(n, AQE) or _isa(n, QS) else op_kind(op)
+        comet_ops += kind == "comet"
+        spark_ops += kind == "spark"
         if _isa(n, NATIVE) and n.serializedPlanOpt().isDefined():
             b = bytes(n.serializedPlanOpt().plan().get())
             h = hashlib.sha1(b).hexdigest()
@@ -359,7 +388,7 @@ def dump_plan(spark, name, df, outdir: Path):
                 base = outdir / f"{name}-{len(hashes):02d}-{op}"
                 hashes.add(h)
                 base.with_suffix(".pb").write_bytes(b)
-                base.with_suffix(".txt").write_text(n.nativeOp().toString())
+                base.with_suffix(".txt").write_text(strip_sql_text(n.nativeOp().toString()))
         v = n.getTagValue(tag)
         if v.isDefined():
             reasons += [f"{op}: {r}" for r in v.get().mkString("\n").split("\n") if r]
@@ -381,26 +410,26 @@ class Runner:
         for q in set(queries(args.dataset, args.batch)) | ({args.warmup_query} - {None}):
             self.sql[q] = statements((qdir / f"{q}.sql").read_text())
         self.tsv = open(out / "runs.tsv", "w")
-        self.tsv.write("query\trun\tms\n"); self.tsv.flush()
+        self.tsv.write("query\trun\tms\trows\n"); self.tsv.flush()
 
-    def record(self, q, run, ms):
+    def record(self, q, run, ms, rows=""):
         with self.lock:
-            self.tsv.write(f"{q}\t{run}\t{ms:.1f}\n"); self.tsv.flush()
+            self.tsv.write(f"{q}\t{run}\t{ms:.1f}\t{rows}\n"); self.tsv.flush()
 
     def query(self, q, run, pool=None) -> float:
         sc = self.spark.sparkContext
         if pool:
             sc.setLocalProperty("spark.scheduler.pool", pool)
         sc.setJobGroup(f"{self.args.dataset}:{q}:{run}", q)
-        stmts, ms = self.sql[q], 0.0
+        stmts, ms, nrows = self.sql[q], 0.0, 0
         for i, s in enumerate(stmts):
             t = time.perf_counter()
             df = self.spark.sql(s)
-            df.collect()
+            nrows += len(df.collect())
             ms += (time.perf_counter() - t) * 1000
             if self.args.dump_plans and run == "1":  # the dump is not timed
                 dump_plan(self.spark, q if len(stmts) == 1 else f"{q}-{i + 1}", df, Path(self.args.dump_plans))
-        self.record(q, run, ms)
+        self.record(q, run, ms, nrows)
         return ms
 
     def sequential(self, qs, run):
@@ -496,7 +525,7 @@ def run(args) -> int:
     return rc
 
 
-def main(argv=None) -> int:
+def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dataset", choices=["tpch", "tpcds"])
     ap.add_argument("--source", choices=["s3", "local"], default="local")
@@ -514,12 +543,19 @@ def main(argv=None) -> int:
     ap.add_argument("--data-dir", default="~/comet/data")
     ap.add_argument("--queries-dir")
     ap.add_argument("--master", default=os.environ.get("COMET_SPARK_MASTER", f"spark://{socket.gethostname()}:7077"))
+    ap.add_argument("--conf", action="append", default=[], metavar="KEY=VALUE",
+                    help="override a Spark setting (the dev shakedown's smaller sizes)")
     args = ap.parse_args(argv)
+    if not args.matrix and not (args.dataset and args.out):
+        ap.error("--dataset and --out are required unless --matrix")
+    return args
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
     if args.matrix:
         print_matrix(args.calibration)
         return 0
-    if not (args.dataset and args.out):
-        ap.error("--dataset and --out are required unless --matrix")
     queries(args.dataset, args.batch)  # validate before starting Spark
     return run(args)
 

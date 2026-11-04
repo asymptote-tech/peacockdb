@@ -1,0 +1,7 @@
+dataset	query	scan_bytes	footer_bytes	ratio	scans
+tpch	q1	1671707848	1694908480	0.986	lineitem:7
+tpch	q6	235429200	1543102324	0.153	lineitem:4
+tpch	q14	73365992	2636490334	0.028	lineitem:4 part:2
+tpcds	q3	659810214	671081513	0.983	date_dim:3 store_sales:3 item:4
+tpcds	q42	659698960	670971907	0.983	date_dim:3 store_sales:3 item:4
+tpcds	q96	558829679	558829538	1.000	store_sales:3 household_demographics:2 time_dim:3 store:2

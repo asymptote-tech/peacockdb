@@ -1,0 +1,124 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    fields {
+      type_id: DECIMAL
+      type_info {
+        decimal {
+          precision: 17
+          scale: 2
+        }
+      }
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=960.0 KiB, rowCount=365)"
+  }
+}
+plan_id: 3413
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        subtract {
+          left {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 2495
+              stop_index: 2505
+              line: 78
+              start_position: 6
+            }
+            expr_id: 1776
+          }
+          right {
+            literal {
+              long_val: 53
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 2495
+              stop_index: 2522
+              line: 78
+              start_position: 6
+            }
+            expr_id: 1777
+          }
+          return_type {
+            type_id: INT64
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 2509
+          stop_index: 2522
+          line: 78
+          start_position: 20
+        }
+        expr_id: 1778
+      }
+    }
+    expr_id: 1779
+  }
+}

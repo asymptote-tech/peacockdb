@@ -1,0 +1,163 @@
+children {
+  children {
+    children {
+      children {
+        children {
+          children {
+            children {
+              children {
+                children {
+                  plan_id: 24
+                  shuffle_scan {
+                    fields {
+                      type_id: INT64
+                    }
+                    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.0 KiB, rowCount=128)"
+                  }
+                }
+                plan_id: 219962
+                hash_agg {
+                  agg_exprs {
+                    count {
+                      children {
+                        literal {
+                          int_val: 1
+                          datatype {
+                            type_id: INT32
+                          }
+                        }
+                        query_context {
+                          start_index: 24
+                          stop_index: 31
+                          line: 3
+                          start_position: 10
+                        }
+                        expr_id: 142230
+                      }
+                    }
+                    query_context {
+                      start_index: 24
+                      stop_index: 31
+                      line: 3
+                      start_position: 10
+                    }
+                    expr_id: 142231
+                  }
+                  mode: Final
+                }
+              }
+              plan_id: 219962
+              projection {
+                project_list {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 24
+                    stop_index: 31
+                    line: 3
+                    start_position: 10
+                  }
+                  expr_id: 142232
+                }
+              }
+            }
+            children {
+              plan_id: 36
+              scan {
+                fields {
+                  type_id: INT64
+                }
+                source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=238.0 B, rowCount=1)"
+              }
+            }
+            plan_id: 223582
+            broadcast_nested_loop_join {
+              build_side: BuildRight
+            }
+          }
+          children {
+            plan_id: 33
+            scan {
+              fields {
+                type_id: INT64
+              }
+              source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=238.0 B, rowCount=1)"
+            }
+          }
+          plan_id: 223585
+          broadcast_nested_loop_join {
+            build_side: BuildRight
+          }
+        }
+        children {
+          plan_id: 37
+          scan {
+            fields {
+              type_id: INT64
+            }
+            source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=239.0 B, rowCount=1)"
+          }
+        }
+        plan_id: 223588
+        broadcast_nested_loop_join {
+          build_side: BuildRight
+        }
+      }
+      children {
+        plan_id: 35
+        scan {
+          fields {
+            type_id: INT64
+          }
+          source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=239.0 B, rowCount=1)"
+        }
+      }
+      plan_id: 223591
+      broadcast_nested_loop_join {
+        build_side: BuildRight
+      }
+    }
+    children {
+      plan_id: 32
+      scan {
+        fields {
+          type_id: INT64
+        }
+        source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=238.0 B, rowCount=1)"
+      }
+    }
+    plan_id: 223594
+    broadcast_nested_loop_join {
+      build_side: BuildRight
+    }
+  }
+  children {
+    plan_id: 38
+    scan {
+      fields {
+        type_id: INT64
+      }
+      source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=238.0 B, rowCount=1)"
+    }
+  }
+  plan_id: 223597
+  broadcast_nested_loop_join {
+    build_side: BuildRight
+  }
+}
+children {
+  plan_id: 34
+  scan {
+    fields {
+      type_id: INT64
+    }
+    source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=238.0 B, rowCount=1)"
+  }
+}
+plan_id: 223600
+broadcast_nested_loop_join {
+  build_side: BuildRight
+}

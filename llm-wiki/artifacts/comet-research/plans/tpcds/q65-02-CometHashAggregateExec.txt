@@ -1,0 +1,225 @@
+children {
+  children {
+    children {
+      plan_id: 5
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=499.4 MiB, rowCount=1.59E+7)"
+      }
+    }
+    plan_id: 164686
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 451
+          stop_index: 461
+          line: 19
+          start_position: 15
+        }
+        expr_id: 103084
+      }
+      grouping_exprs {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 451
+          stop_index: 461
+          line: 19
+          start_position: 15
+        }
+        expr_id: 103085
+      }
+      agg_exprs {
+        sum {
+          child {
+            scalarFunc {
+              func: "unscaled_value"
+              args {
+                unbound {
+                  name: "ss_sales_price"
+                  datatype {
+                    type_id: DECIMAL
+                    type_info {
+                      decimal {
+                        precision: 7
+                        scale: 2
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  start_index: 451
+                  stop_index: 461
+                  line: 19
+                  start_position: 15
+                }
+                expr_id: 103086
+              }
+              return_type {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 272
+              stop_index: 290
+              line: 14
+              start_position: 13
+            }
+            expr_id: 103087
+          }
+          datatype {
+            type_id: INT64
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 272
+          stop_index: 290
+          line: 14
+          start_position: 13
+        }
+        expr_id: 103088
+      }
+      mode: Final
+    }
+  }
+  plan_id: 164686
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 451
+        stop_index: 461
+        line: 19
+        start_position: 15
+      }
+      expr_id: 103089
+    }
+    project_list {
+      scalarFunc {
+        func: "make_decimal"
+        args {
+          bound {
+            index: 2
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 272
+            stop_index: 290
+            line: 14
+            start_position: 13
+          }
+          expr_id: 103090
+        }
+        return_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 17
+              scale: 2
+            }
+          }
+        }
+        fail_on_error: true
+      }
+      query_context {
+        start_index: 272
+        stop_index: 290
+        line: 14
+        start_position: 13
+      }
+      expr_id: 103091
+    }
+  }
+}
+plan_id: 165127
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 506
+      stop_index: 516
+      line: 21
+      start_position: 12
+    }
+    expr_id: 103226
+  }
+  agg_exprs {
+    avg {
+      child {
+        bound {
+          index: 1
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 17
+                scale: 2
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 506
+          stop_index: 516
+          line: 21
+          start_position: 12
+        }
+        expr_id: 103227
+      }
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 21
+            scale: 6
+          }
+        }
+      }
+      sum_datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 27
+            scale: 2
+          }
+        }
+      }
+      eval_mode: ANSI
+    }
+    query_context {
+      start_index: 180
+      stop_index: 191
+      line: 10
+      start_position: 10
+    }
+    expr_id: 103228
+  }
+}

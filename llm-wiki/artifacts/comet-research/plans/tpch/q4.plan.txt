@@ -1,0 +1,259 @@
+== Physical Plan ==
+AdaptiveSparkPlan (37)
++- == Final Plan ==
+   ResultQueryStage (27)
+   +- * CometColumnarToRow (26)
+      +- CometSort (25)
+         +- AQEShuffleRead (24)
+            +- ShuffleQueryStage (23), Statistics(sizeInBytes=8.1 KiB, rowCount=5)
+               +- CometExchange (22)
+                  +- CometHashAggregate (21)
+                     +- AQEShuffleRead (20)
+                        +- ShuffleQueryStage (19), Statistics(sizeInBytes=1460.7 KiB, rowCount=905)
+                           +- CometExchange (18)
+                              +- CometHashAggregate (17)
+                                 +- CometProject (16)
+                                    +- CometSortMergeJoin (15)
+                                       :- CometSort (7)
+                                       :  +- AQEShuffleRead (6)
+                                       :     +- ShuffleQueryStage (5), Statistics(sizeInBytes=59.2 MiB, rowCount=2.29E+6)
+                                       :        +- CometExchange (4)
+                                       :           +- CometProject (3)
+                                       :              +- CometFilter (2)
+                                       :                 +- CometNativeScan parquet  (1)
+                                       +- CometSort (14)
+                                          +- AQEShuffleRead (13)
+                                             +- ShuffleQueryStage (12), Statistics(sizeInBytes=1158.6 MiB, rowCount=1.52E+8)
+                                                +- CometExchange (11)
+                                                   +- CometProject (10)
+                                                      +- CometFilter (9)
+                                                         +- CometNativeScan parquet  (8)
++- == Initial Plan ==
+   CometSort (36)
+   +- CometExchange (35)
+      +- CometHashAggregate (34)
+         +- CometExchange (33)
+            +- CometHashAggregate (32)
+               +- CometProject (31)
+                  +- CometSortMergeJoin (30)
+                     :- CometSort (28)
+                     :  +- CometExchange (4)
+                     :     +- CometProject (3)
+                     :        +- CometFilter (2)
+                     :           +- CometNativeScan parquet  (1)
+                     +- CometSort (29)
+                        +- CometExchange (11)
+                           +- CometProject (10)
+                              +- CometFilter (9)
+                                 +- CometNativeScan parquet  (8)
+
+
+(1) CometNativeScan parquet 
+Output [3]: [o_orderkey#28L, o_orderdate#32, o_orderpriority#33]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/orders.parquet]
+PushedFilters: [IsNotNull(o_orderdate), GreaterThanOrEqual(o_orderdate,1993-07-01), LessThan(o_orderdate,1993-10-01)]
+ReadSchema: struct<o_orderkey:bigint,o_orderdate:date,o_orderpriority:string>
+
+(2) CometFilter
+Input [3]: [o_orderkey#28L, o_orderdate#32, o_orderpriority#33]
+Condition : ((isnotnull(o_orderdate#32) AND (o_orderdate#32 >= 1993-07-01)) AND (o_orderdate#32 < 1993-10-01))
+
+(3) CometProject
+Input [3]: [o_orderkey#28L, o_orderdate#32, o_orderpriority#33]
+Arguments: [o_orderkey#28L, o_orderpriority#33], [o_orderkey#28L, o_orderpriority#33]
+
+(4) CometExchange
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: hashpartitioning(o_orderkey#28L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5065]
+
+(5) ShuffleQueryStage
+Output [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: 0
+
+(6) AQEShuffleRead
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: coalesced
+
+(7) CometSort
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: [o_orderkey#28L, o_orderpriority#33], [o_orderkey#28L ASC NULLS FIRST]
+
+(8) CometNativeScan parquet 
+Output [3]: [l_orderkey#8L, l_commitdate#19, l_receiptdate#20]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpch-sf40/lineitem.parquet]
+PushedFilters: [IsNotNull(l_commitdate), IsNotNull(l_receiptdate)]
+ReadSchema: struct<l_orderkey:bigint,l_commitdate:date,l_receiptdate:date>
+
+(9) CometFilter
+Input [3]: [l_orderkey#8L, l_commitdate#19, l_receiptdate#20]
+Condition : ((isnotnull(l_commitdate#19) AND isnotnull(l_receiptdate#20)) AND (l_commitdate#19 < l_receiptdate#20))
+
+(10) CometProject
+Input [3]: [l_orderkey#8L, l_commitdate#19, l_receiptdate#20]
+Arguments: [l_orderkey#8L], [l_orderkey#8L]
+
+(11) CometExchange
+Input [1]: [l_orderkey#8L]
+Arguments: hashpartitioning(l_orderkey#8L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5069]
+
+(12) ShuffleQueryStage
+Output [1]: [l_orderkey#8L]
+Arguments: 1
+
+(13) AQEShuffleRead
+Input [1]: [l_orderkey#8L]
+Arguments: coalesced
+
+(14) CometSort
+Input [1]: [l_orderkey#8L]
+Arguments: [l_orderkey#8L], [l_orderkey#8L ASC NULLS FIRST]
+
+(15) CometSortMergeJoin
+Left output [2]: [o_orderkey#28L, o_orderpriority#33]
+Right output [1]: [l_orderkey#8L]
+Arguments: [o_orderkey#28L], [l_orderkey#8L], LeftSemi
+
+(16) CometProject
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: [o_orderpriority#33], [o_orderpriority#33]
+
+(17) CometHashAggregate
+Input [1]: [o_orderpriority#33]
+Keys [1]: [o_orderpriority#33]
+Functions [1]: [partial_count(1)]
+
+(18) CometExchange
+Input [2]: [o_orderpriority#33, count#156L]
+Arguments: hashpartitioning(o_orderpriority#33, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5369]
+
+(19) ShuffleQueryStage
+Output [2]: [o_orderpriority#33, count#156L]
+Arguments: 2
+
+(20) AQEShuffleRead
+Input [2]: [o_orderpriority#33, count#156L]
+Arguments: coalesced
+
+(21) CometHashAggregate
+Input [2]: [o_orderpriority#33, count#156L]
+Keys [1]: [o_orderpriority#33]
+Functions [1]: [count(1)]
+
+(22) CometExchange
+Input [2]: [o_orderpriority#33, order_count#152L]
+Arguments: rangepartitioning(o_orderpriority#33 ASC NULLS FIRST, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5436]
+
+(23) ShuffleQueryStage
+Output [2]: [o_orderpriority#33, order_count#152L]
+Arguments: 3
+
+(24) AQEShuffleRead
+Input [2]: [o_orderpriority#33, order_count#152L]
+Arguments: coalesced
+
+(25) CometSort
+Input [2]: [o_orderpriority#33, order_count#152L]
+Arguments: [o_orderpriority#33, order_count#152L], [o_orderpriority#33 ASC NULLS FIRST]
+
+(26) CometColumnarToRow [codegen id : 1]
+Input [2]: [o_orderpriority#33, order_count#152L]
+
+(27) ResultQueryStage
+Output [2]: [o_orderpriority#33, order_count#152L]
+Arguments: 4
+
+(28) CometSort
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: [o_orderkey#28L, o_orderpriority#33], [o_orderkey#28L ASC NULLS FIRST]
+
+(29) CometSort
+Input [1]: [l_orderkey#8L]
+Arguments: [l_orderkey#8L], [l_orderkey#8L ASC NULLS FIRST]
+
+(30) CometSortMergeJoin
+Left output [2]: [o_orderkey#28L, o_orderpriority#33]
+Right output [1]: [l_orderkey#8L]
+Arguments: [o_orderkey#28L], [l_orderkey#8L], LeftSemi
+
+(31) CometProject
+Input [2]: [o_orderkey#28L, o_orderpriority#33]
+Arguments: [o_orderpriority#33], [o_orderpriority#33]
+
+(32) CometHashAggregate
+Input [1]: [o_orderpriority#33]
+Keys [1]: [o_orderpriority#33]
+Functions [1]: [partial_count(1)]
+
+(33) CometExchange
+Input [2]: [o_orderpriority#33, count#156L]
+Arguments: hashpartitioning(o_orderpriority#33, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5074]
+
+(34) CometHashAggregate
+Input [2]: [o_orderpriority#33, count#156L]
+Keys [1]: [o_orderpriority#33]
+Functions [1]: [count(1)]
+
+(35) CometExchange
+Input [2]: [o_orderpriority#33, order_count#152L]
+Arguments: rangepartitioning(o_orderpriority#33 ASC NULLS FIRST, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=5076]
+
+(36) CometSort
+Input [2]: [o_orderpriority#33, order_count#152L]
+Arguments: [o_orderpriority#33, order_count#152L], [o_orderpriority#33 ASC NULLS FIRST]
+
+(37) AdaptiveSparkPlan
+Output [2]: [o_orderpriority#33, order_count#152L]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometSort
+   +- AQEShuffleRead
+      +- CometExchange
+         +- CometHashAggregate
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometHashAggregate
+                     +- CometProject
+                        +- CometSortMergeJoin
+                           :- CometSort
+                           :  +- AQEShuffleRead
+                           :     +- CometExchange
+                           :        +- CometProject
+                           :           +- CometFilter
+                           :              +- CometNativeScan parquet 
+                           +- CometSort
+                              +- AQEShuffleRead
+                                 +- CometExchange
+                                    +- CometProject
+                                       +- CometFilter
+                                          +- CometNativeScan parquet 
+
+Comet accelerated 17 out of 17 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 6 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometSort
+   +- AQEShuffleRead
+      +- CometExchange
+         +- CometHashAggregate
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometHashAggregate
+                     +- CometProject
+                        +- CometSortMergeJoin
+                           :- CometSort
+                           :  +- AQEShuffleRead
+                           :     +- CometExchange
+                           :        +- CometProject
+                           :           +- CometFilter
+                           :              +- CometNativeScan parquet 
+                           +- CometSort
+                              +- AQEShuffleRead
+                                 +- CometExchange
+                                    +- CometProject
+                                       +- CometFilter
+                                          +- CometNativeScan parquet 
+
+Comet accelerated 17 out of 17 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 6 native, 0 codegen dispatch.

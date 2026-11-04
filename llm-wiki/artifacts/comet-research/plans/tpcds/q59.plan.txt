@@ -1,0 +1,624 @@
+== Physical Plan ==
+AdaptiveSparkPlan (89)
++- == Final Plan ==
+   ResultQueryStage (56)
+   +- * CometColumnarToRow (55)
+      +- CometTakeOrderedAndProject (54)
+         +- CometProject (53)
+            +- CometBroadcastHashJoin (52)
+               :- AQEShuffleRead (29)
+               :  +- ShuffleQueryStage (28), Statistics(sizeInBytes=9.0 MiB, rowCount=2.08E+4)
+               :     +- CometExchange (27)
+               :        +- CometProject (26)
+               :           +- CometBroadcastHashJoin (25)
+               :              :- CometProject (19)
+               :              :  +- CometBroadcastHashJoin (18)
+               :              :     :- CometHashAggregate (13)
+               :              :     :  +- AQEShuffleRead (12)
+               :              :     :     +- ShuffleQueryStage (11), Statistics(sizeInBytes=1722.5 KiB, rowCount=2.17E+4)
+               :              :     :        +- CometExchange (10)
+               :              :     :           +- CometHashAggregate (9)
+               :              :     :              +- CometProject (8)
+               :              :     :                 +- CometBroadcastHashJoin (7)
+               :              :     :                    :- CometFilter (2)
+               :              :     :                    :  +- CometNativeScan parquet  (1)
+               :              :     :                    +- BroadcastQueryStage (6), Statistics(sizeInBytes=657.8 KiB, rowCount=7.30E+4)
+               :              :     :                       +- CometBroadcastExchange (5)
+               :              :     :                          +- CometFilter (4)
+               :              :     :                             +- CometNativeScan parquet  (3)
+               :              :     +- BroadcastQueryStage (17), Statistics(sizeInBytes=2.4 KiB, rowCount=112)
+               :              :        +- CometBroadcastExchange (16)
+               :              :           +- CometFilter (15)
+               :              :              +- CometNativeScan parquet  (14)
+               :              +- BroadcastQueryStage (24), Statistics(sizeInBytes=675.0 B, rowCount=365)
+               :                 +- CometBroadcastExchange (23)
+               :                    +- CometProject (22)
+               :                       +- CometFilter (21)
+               :                          +- CometNativeScan parquet  (20)
+               +- BroadcastQueryStage (51), Statistics(sizeInBytes=315.7 KiB, rowCount=2.08E+4)
+                  +- CometBroadcastExchange (50)
+                     +- AQEShuffleRead (49)
+                        +- ShuffleQueryStage (48), Statistics(sizeInBytes=8.9 MiB, rowCount=2.08E+4)
+                           +- CometExchange (47)
+                              +- CometProject (46)
+                                 +- CometBroadcastHashJoin (45)
+                                    :- CometProject (39)
+                                    :  +- CometBroadcastHashJoin (38)
+                                    :     :- CometHashAggregate (33)
+                                    :     :  +- AQEShuffleRead (32)
+                                    :     :     +- ShuffleQueryStage (31), Statistics(sizeInBytes=1722.5 KiB, rowCount=2.17E+4)
+                                    :     :        +- ReusedExchange (30)
+                                    :     +- BroadcastQueryStage (37), Statistics(sizeInBytes=1780.0 B, rowCount=112)
+                                    :        +- CometBroadcastExchange (36)
+                                    :           +- CometFilter (35)
+                                    :              +- CometNativeScan parquet  (34)
+                                    +- BroadcastQueryStage (44), Statistics(sizeInBytes=675.0 B, rowCount=365)
+                                       +- CometBroadcastExchange (43)
+                                          +- CometProject (42)
+                                             +- CometFilter (41)
+                                                +- CometNativeScan parquet  (40)
++- == Initial Plan ==
+   CometTakeOrderedAndProject (88)
+   +- CometProject (87)
+      +- CometSortMergeJoin (86)
+         :- CometSort (69)
+         :  +- CometExchange (68)
+         :     +- CometProject (67)
+         :        +- CometBroadcastHashJoin (66)
+         :           :- CometProject (65)
+         :           :  +- CometBroadcastHashJoin (64)
+         :           :     :- CometHashAggregate (63)
+         :           :     :  +- CometExchange (62)
+         :           :     :     +- CometHashAggregate (61)
+         :           :     :        +- CometProject (60)
+         :           :     :           +- CometBroadcastHashJoin (59)
+         :           :     :              :- CometFilter (58)
+         :           :     :              :  +- CometNativeScan parquet  (57)
+         :           :     :              +- CometBroadcastExchange (5)
+         :           :     :                 +- CometFilter (4)
+         :           :     :                    +- CometNativeScan parquet  (3)
+         :           :     +- CometBroadcastExchange (16)
+         :           :        +- CometFilter (15)
+         :           :           +- CometNativeScan parquet  (14)
+         :           +- CometBroadcastExchange (23)
+         :              +- CometProject (22)
+         :                 +- CometFilter (21)
+         :                    +- CometNativeScan parquet  (20)
+         +- CometSort (85)
+            +- CometExchange (84)
+               +- CometProject (83)
+                  +- CometBroadcastHashJoin (82)
+                     :- CometProject (81)
+                     :  +- CometBroadcastHashJoin (80)
+                     :     :- CometHashAggregate (79)
+                     :     :  +- CometExchange (78)
+                     :     :     +- CometHashAggregate (77)
+                     :     :        +- CometProject (76)
+                     :     :           +- CometBroadcastHashJoin (75)
+                     :     :              :- CometFilter (71)
+                     :     :              :  +- CometNativeScan parquet  (70)
+                     :     :              +- CometBroadcastExchange (74)
+                     :     :                 +- CometFilter (73)
+                     :     :                    +- CometNativeScan parquet  (72)
+                     :     +- CometBroadcastExchange (36)
+                     :        +- CometFilter (35)
+                     :           +- CometNativeScan parquet  (34)
+                     +- CometBroadcastExchange (43)
+                        +- CometProject (42)
+                           +- CometFilter (41)
+                              +- CometNativeScan parquet  (40)
+
+
+(1) CometNativeScan parquet 
+Output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_sold_date_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_date_sk:bigint,ss_store_sk:bigint,ss_sales_price:decimal(7,2)>
+
+(2) CometFilter
+Input [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Condition : (isnotnull(ss_sold_date_sk#280L) AND isnotnull(ss_store_sk#287L))
+
+(3) CometNativeScan parquet 
+Output [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_date_sk), IsNotNull(d_week_seq)]
+ReadSchema: struct<d_date_sk:bigint,d_week_seq:bigint,d_day_name:string>
+
+(4) CometFilter
+Input [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Condition : (isnotnull(d_date_sk#141L) AND isnotnull(d_week_seq#145L))
+
+(5) CometBroadcastExchange
+Input [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+
+(6) BroadcastQueryStage
+Output [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: 0
+
+(7) CometBroadcastHashJoin
+Left output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Right output [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: [ss_sold_date_sk#280L], [d_date_sk#141L], Inner, BuildRight
+
+(8) CometProject
+Input [6]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293, d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155], [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155]
+
+(9) CometHashAggregate
+Input [4]: [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155]
+Keys [2]: [d_week_seq#145L, ss_store_sk#287L]
+Functions [7]: [partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Sunday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Monday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Tuesday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Wednesday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Thursday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Friday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Saturday) THEN ss_sales_price#293 END))]
+
+(10) CometExchange
+Input [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Arguments: hashpartitioning(d_week_seq#145L, ss_store_sk#287L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=137676]
+
+(11) ShuffleQueryStage
+Output [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Arguments: 6
+
+(12) AQEShuffleRead
+Input [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Arguments: coalesced
+
+(13) CometHashAggregate
+Input [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Keys [2]: [d_week_seq#145L, ss_store_sk#287L]
+Functions [7]: [sum(UnscaledValue(CASE WHEN (d_day_name#155 = Sunday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Monday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Tuesday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Wednesday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Thursday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Friday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Saturday) THEN ss_sales_price#293 END))]
+
+(14) CometNativeScan parquet 
+Output [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_sk), IsNotNull(s_store_id)]
+ReadSchema: struct<s_store_sk:bigint,s_store_id:string,s_store_name:string>
+
+(15) CometFilter
+Input [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Condition : (isnotnull(s_store_sk#231L) AND isnotnull(s_store_id#232))
+
+(16) CometBroadcastExchange
+Input [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+
+(17) BroadcastQueryStage
+Output [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: 1
+
+(18) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#145L, ss_store_sk#287L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889]
+Right output [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(19) CometProject
+Input [12]: [d_week_seq#145L, ss_store_sk#287L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236], [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236]
+
+(20) CometNativeScan parquet 
+Output [2]: [d_month_seq#13893L, d_week_seq#13894L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_month_seq), GreaterThanOrEqual(d_month_seq,1212), LessThanOrEqual(d_month_seq,1223), IsNotNull(d_week_seq)]
+ReadSchema: struct<d_month_seq:bigint,d_week_seq:bigint>
+
+(21) CometFilter
+Input [2]: [d_month_seq#13893L, d_week_seq#13894L]
+Condition : (((isnotnull(d_month_seq#13893L) AND (d_month_seq#13893L >= 1212)) AND (d_month_seq#13893L <= 1223)) AND isnotnull(d_week_seq#13894L))
+
+(22) CometProject
+Input [2]: [d_month_seq#13893L, d_week_seq#13894L]
+Arguments: [d_week_seq#13894L], [d_week_seq#13894L]
+
+(23) CometBroadcastExchange
+Input [1]: [d_week_seq#13894L]
+Arguments: [d_week_seq#13894L]
+
+(24) BroadcastQueryStage
+Output [1]: [d_week_seq#13894L]
+Arguments: 2
+
+(25) CometBroadcastHashJoin
+Left output [10]: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236]
+Right output [1]: [d_week_seq#13894L]
+Arguments: [d_week_seq#145L], [d_week_seq#13894L], Inner, BuildRight
+
+(26) CometProject
+Input [11]: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236, d_week_seq#13894L]
+Arguments: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865], [s_store_name#236 AS s_store_name1#13856, d_week_seq#145L AS d_week_seq1#13857L, s_store_id#232 AS s_store_id1#13858, sun_sales#13883 AS sun_sales1#13859, mon_sales#13884 AS mon_sales1#13860, tue_sales#13885 AS tue_sales1#13861, wed_sales#13886 AS wed_sales1#13862, thu_sales#13887 AS thu_sales1#13863, fri_sales#13888 AS fri_sales1#13864, sat_sales#13889 AS sat_sales1#13865]
+
+(27) CometExchange
+Input [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Arguments: hashpartitioning(s_store_id1#13858, d_week_seq1#13857L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=137929]
+
+(28) ShuffleQueryStage
+Output [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Arguments: 8
+
+(29) AQEShuffleRead
+Input [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Arguments: coalesced
+
+(30) ReusedExchange [Reuses operator id: 10]
+Output [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+
+(31) ShuffleQueryStage
+Output [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+Arguments: 7
+
+(32) AQEShuffleRead
+Input [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+Arguments: coalesced
+
+(33) CometHashAggregate
+Input [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+Keys [2]: [d_week_seq#14076L, ss_store_sk#14056L]
+Functions [7]: [sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Sunday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Monday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Tuesday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Wednesday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Thursday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Friday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Saturday) THEN ss_sales_price#14062 END))]
+
+(34) CometNativeScan parquet 
+Output [2]: [s_store_sk#13918L, s_store_id#13919]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store.parquet]
+PushedFilters: [IsNotNull(s_store_sk), IsNotNull(s_store_id)]
+ReadSchema: struct<s_store_sk:bigint,s_store_id:string>
+
+(35) CometFilter
+Input [2]: [s_store_sk#13918L, s_store_id#13919]
+Condition : (isnotnull(s_store_sk#13918L) AND isnotnull(s_store_id#13919))
+
+(36) CometBroadcastExchange
+Input [2]: [s_store_sk#13918L, s_store_id#13919]
+Arguments: [s_store_sk#13918L, s_store_id#13919]
+
+(37) BroadcastQueryStage
+Output [2]: [s_store_sk#13918L, s_store_id#13919]
+Arguments: 4
+
+(38) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#14076L, ss_store_sk#14056L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990]
+Right output [2]: [s_store_sk#13918L, s_store_id#13919]
+Arguments: [ss_store_sk#14056L], [s_store_sk#13918L], Inner, BuildRight
+
+(39) CometProject
+Input [11]: [d_week_seq#14076L, ss_store_sk#14056L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_sk#13918L, s_store_id#13919]
+Arguments: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919], [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919]
+
+(40) CometNativeScan parquet 
+Output [2]: [d_month_seq#13950L, d_week_seq#13951L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_month_seq), GreaterThanOrEqual(d_month_seq,1224), LessThanOrEqual(d_month_seq,1235), IsNotNull(d_week_seq)]
+ReadSchema: struct<d_month_seq:bigint,d_week_seq:bigint>
+
+(41) CometFilter
+Input [2]: [d_month_seq#13950L, d_week_seq#13951L]
+Condition : (((isnotnull(d_month_seq#13950L) AND (d_month_seq#13950L >= 1224)) AND (d_month_seq#13950L <= 1235)) AND isnotnull(d_week_seq#13951L))
+
+(42) CometProject
+Input [2]: [d_month_seq#13950L, d_week_seq#13951L]
+Arguments: [d_week_seq#13951L], [d_week_seq#13951L]
+
+(43) CometBroadcastExchange
+Input [1]: [d_week_seq#13951L]
+Arguments: [d_week_seq#13951L]
+
+(44) BroadcastQueryStage
+Output [1]: [d_week_seq#13951L]
+Arguments: 5
+
+(45) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919]
+Right output [1]: [d_week_seq#13951L]
+Arguments: [d_week_seq#14076L], [d_week_seq#13951L], Inner, BuildRight
+
+(46) CometProject
+Input [10]: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919, d_week_seq#13951L]
+Arguments: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875], [d_week_seq#14076L AS d_week_seq2#13867L, s_store_id#13919 AS s_store_id2#13868, sun_sales#13984 AS sun_sales2#13869, mon_sales#13985 AS mon_sales2#13870, tue_sales#13986 AS tue_sales2#13871, wed_sales#13987 AS wed_sales2#13872, thu_sales#13988 AS thu_sales2#13873, fri_sales#13989 AS fri_sales2#13874, sat_sales#13990 AS sat_sales2#13875]
+
+(47) CometExchange
+Input [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: hashpartitioning(s_store_id2#13868, (d_week_seq2#13867L - 52), 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=138009]
+
+(48) ShuffleQueryStage
+Output [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: 9
+
+(49) AQEShuffleRead
+Input [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: local
+
+(50) CometBroadcastExchange
+Input [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+
+(51) BroadcastQueryStage
+Output [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: 10
+
+(52) CometBroadcastHashJoin
+Left output [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Right output [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [s_store_id1#13858, d_week_seq1#13857L], [s_store_id2#13868, (d_week_seq2#13867L - 52)], Inner, BuildRight
+
+(53) CometProject
+Input [19]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865, d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882], [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, (sun_sales1#13859 / sun_sales2#13869) AS sun_sales_ratio#13876, (mon_sales1#13860 / mon_sales2#13870) AS mon_sales_ratio#13877, (tue_sales1#13861 / tue_sales2#13871) AS tue_sales_ratio#13878, (wed_sales1#13862 / wed_sales2#13872) AS wed_sales_ratio#13879, (thu_sales1#13863 / thu_sales2#13873) AS thu_sales_ratio#13880, (fri_sales1#13864 / fri_sales2#13874) AS fri_sales_ratio#13881, (sat_sales1#13865 / sat_sales2#13875) AS sat_sales_ratio#13882]
+
+(54) CometTakeOrderedAndProject
+Input [10]: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[s_store_name1#13856 ASC NULLS FIRST,s_store_id1#13858 ASC NULLS FIRST,d_week_seq1#13857L ASC NULLS FIRST], output=[s_store_name1#13856,s_store_id1#13858,d_week_seq1#13857L,sun_sales_ratio#13876,mon_sales_ratio#13877,tue_sales_ratio#13878,wed_sales_ratio#13879,thu_sales_ratio#13880,fri_sales_ratio#13881,sat_sales_ratio#13882]), [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882], 100, 0, [s_store_name1#13856 ASC NULLS FIRST, s_store_id1#13858 ASC NULLS FIRST, d_week_seq1#13857L ASC NULLS FIRST], [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+
+(55) CometColumnarToRow [codegen id : 1]
+Input [10]: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+
+(56) ResultQueryStage
+Output [10]: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+Arguments: 11
+
+(57) CometNativeScan parquet 
+Output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_sold_date_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_date_sk:bigint,ss_store_sk:bigint,ss_sales_price:decimal(7,2)>
+
+(58) CometFilter
+Input [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Condition : (isnotnull(ss_sold_date_sk#280L) AND isnotnull(ss_store_sk#287L))
+
+(59) CometBroadcastHashJoin
+Left output [3]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293]
+Right output [3]: [d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: [ss_sold_date_sk#280L], [d_date_sk#141L], Inner, BuildRight
+
+(60) CometProject
+Input [6]: [ss_sold_date_sk#280L, ss_store_sk#287L, ss_sales_price#293, d_date_sk#141L, d_week_seq#145L, d_day_name#155]
+Arguments: [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155], [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155]
+
+(61) CometHashAggregate
+Input [4]: [ss_store_sk#287L, ss_sales_price#293, d_week_seq#145L, d_day_name#155]
+Keys [2]: [d_week_seq#145L, ss_store_sk#287L]
+Functions [7]: [partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Sunday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Monday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Tuesday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Wednesday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Thursday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Friday) THEN ss_sales_price#293 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#155 = Saturday) THEN ss_sales_price#293 END))]
+
+(62) CometExchange
+Input [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Arguments: hashpartitioning(d_week_seq#145L, ss_store_sk#287L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=136820]
+
+(63) CometHashAggregate
+Input [9]: [d_week_seq#145L, ss_store_sk#287L, sum#14114L, sum#14115L, sum#14116L, sum#14117L, sum#14118L, sum#14119L, sum#14120L]
+Keys [2]: [d_week_seq#145L, ss_store_sk#287L]
+Functions [7]: [sum(UnscaledValue(CASE WHEN (d_day_name#155 = Sunday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Monday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Tuesday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Wednesday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Thursday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Friday) THEN ss_sales_price#293 END)), sum(UnscaledValue(CASE WHEN (d_day_name#155 = Saturday) THEN ss_sales_price#293 END))]
+
+(64) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#145L, ss_store_sk#287L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889]
+Right output [3]: [s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: [ss_store_sk#287L], [s_store_sk#231L], Inner, BuildRight
+
+(65) CometProject
+Input [12]: [d_week_seq#145L, ss_store_sk#287L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_sk#231L, s_store_id#232, s_store_name#236]
+Arguments: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236], [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236]
+
+(66) CometBroadcastHashJoin
+Left output [10]: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236]
+Right output [1]: [d_week_seq#13894L]
+Arguments: [d_week_seq#145L], [d_week_seq#13894L], Inner, BuildRight
+
+(67) CometProject
+Input [11]: [d_week_seq#145L, sun_sales#13883, mon_sales#13884, tue_sales#13885, wed_sales#13886, thu_sales#13887, fri_sales#13888, sat_sales#13889, s_store_id#232, s_store_name#236, d_week_seq#13894L]
+Arguments: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865], [s_store_name#236 AS s_store_name1#13856, d_week_seq#145L AS d_week_seq1#13857L, s_store_id#232 AS s_store_id1#13858, sun_sales#13883 AS sun_sales1#13859, mon_sales#13884 AS mon_sales1#13860, tue_sales#13885 AS tue_sales1#13861, wed_sales#13886 AS wed_sales1#13862, thu_sales#13887 AS thu_sales1#13863, fri_sales#13888 AS fri_sales1#13864, sat_sales#13889 AS sat_sales1#13865]
+
+(68) CometExchange
+Input [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Arguments: hashpartitioning(s_store_id1#13858, d_week_seq1#13857L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=136830]
+
+(69) CometSort
+Input [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Arguments: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865], [s_store_id1#13858 ASC NULLS FIRST, d_week_seq1#13857L ASC NULLS FIRST]
+
+(70) CometNativeScan parquet 
+Output [3]: [ss_sold_date_sk#14049L, ss_store_sk#14056L, ss_sales_price#14062]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_sold_date_sk), IsNotNull(ss_store_sk)]
+ReadSchema: struct<ss_sold_date_sk:bigint,ss_store_sk:bigint,ss_sales_price:decimal(7,2)>
+
+(71) CometFilter
+Input [3]: [ss_sold_date_sk#14049L, ss_store_sk#14056L, ss_sales_price#14062]
+Condition : (isnotnull(ss_sold_date_sk#14049L) AND isnotnull(ss_store_sk#14056L))
+
+(72) CometNativeScan parquet 
+Output [3]: [d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/date_dim.parquet]
+PushedFilters: [IsNotNull(d_date_sk), IsNotNull(d_week_seq)]
+ReadSchema: struct<d_date_sk:bigint,d_week_seq:bigint,d_day_name:string>
+
+(73) CometFilter
+Input [3]: [d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+Condition : (isnotnull(d_date_sk#14072L) AND isnotnull(d_week_seq#14076L))
+
+(74) CometBroadcastExchange
+Input [3]: [d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+Arguments: [d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+
+(75) CometBroadcastHashJoin
+Left output [3]: [ss_sold_date_sk#14049L, ss_store_sk#14056L, ss_sales_price#14062]
+Right output [3]: [d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+Arguments: [ss_sold_date_sk#14049L], [d_date_sk#14072L], Inner, BuildRight
+
+(76) CometProject
+Input [6]: [ss_sold_date_sk#14049L, ss_store_sk#14056L, ss_sales_price#14062, d_date_sk#14072L, d_week_seq#14076L, d_day_name#14086]
+Arguments: [ss_store_sk#14056L, ss_sales_price#14062, d_week_seq#14076L, d_day_name#14086], [ss_store_sk#14056L, ss_sales_price#14062, d_week_seq#14076L, d_day_name#14086]
+
+(77) CometHashAggregate
+Input [4]: [ss_store_sk#14056L, ss_sales_price#14062, d_week_seq#14076L, d_day_name#14086]
+Keys [2]: [d_week_seq#14076L, ss_store_sk#14056L]
+Functions [7]: [partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Sunday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Monday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Tuesday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Wednesday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Thursday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Friday) THEN ss_sales_price#14062 END)), partial_sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Saturday) THEN ss_sales_price#14062 END))]
+
+(78) CometExchange
+Input [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+Arguments: hashpartitioning(d_week_seq#14076L, ss_store_sk#14056L, 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=136840]
+
+(79) CometHashAggregate
+Input [9]: [d_week_seq#14076L, ss_store_sk#14056L, sum#14128L, sum#14129L, sum#14130L, sum#14131L, sum#14132L, sum#14133L, sum#14134L]
+Keys [2]: [d_week_seq#14076L, ss_store_sk#14056L]
+Functions [7]: [sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Sunday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Monday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Tuesday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Wednesday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Thursday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Friday) THEN ss_sales_price#14062 END)), sum(UnscaledValue(CASE WHEN (d_day_name#14086 = Saturday) THEN ss_sales_price#14062 END))]
+
+(80) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#14076L, ss_store_sk#14056L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990]
+Right output [2]: [s_store_sk#13918L, s_store_id#13919]
+Arguments: [ss_store_sk#14056L], [s_store_sk#13918L], Inner, BuildRight
+
+(81) CometProject
+Input [11]: [d_week_seq#14076L, ss_store_sk#14056L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_sk#13918L, s_store_id#13919]
+Arguments: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919], [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919]
+
+(82) CometBroadcastHashJoin
+Left output [9]: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919]
+Right output [1]: [d_week_seq#13951L]
+Arguments: [d_week_seq#14076L], [d_week_seq#13951L], Inner, BuildRight
+
+(83) CometProject
+Input [10]: [d_week_seq#14076L, sun_sales#13984, mon_sales#13985, tue_sales#13986, wed_sales#13987, thu_sales#13988, fri_sales#13989, sat_sales#13990, s_store_id#13919, d_week_seq#13951L]
+Arguments: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875], [d_week_seq#14076L AS d_week_seq2#13867L, s_store_id#13919 AS s_store_id2#13868, sun_sales#13984 AS sun_sales2#13869, mon_sales#13985 AS mon_sales2#13870, tue_sales#13986 AS tue_sales2#13871, wed_sales#13987 AS wed_sales2#13872, thu_sales#13988 AS thu_sales2#13873, fri_sales#13989 AS fri_sales2#13874, sat_sales#13990 AS sat_sales2#13875]
+
+(84) CometExchange
+Input [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: hashpartitioning(s_store_id2#13868, (d_week_seq2#13867L - 52), 256), ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=136850]
+
+(85) CometSort
+Input [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875], [s_store_id2#13868 ASC NULLS FIRST, (d_week_seq2#13867L - 52) ASC NULLS FIRST]
+
+(86) CometSortMergeJoin
+Left output [10]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865]
+Right output [9]: [d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [s_store_id1#13858, d_week_seq1#13857L], [s_store_id2#13868, (d_week_seq2#13867L - 52)], Inner
+
+(87) CometProject
+Input [19]: [s_store_name1#13856, d_week_seq1#13857L, s_store_id1#13858, sun_sales1#13859, mon_sales1#13860, tue_sales1#13861, wed_sales1#13862, thu_sales1#13863, fri_sales1#13864, sat_sales1#13865, d_week_seq2#13867L, s_store_id2#13868, sun_sales2#13869, mon_sales2#13870, tue_sales2#13871, wed_sales2#13872, thu_sales2#13873, fri_sales2#13874, sat_sales2#13875]
+Arguments: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882], [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, (sun_sales1#13859 / sun_sales2#13869) AS sun_sales_ratio#13876, (mon_sales1#13860 / mon_sales2#13870) AS mon_sales_ratio#13877, (tue_sales1#13861 / tue_sales2#13871) AS tue_sales_ratio#13878, (wed_sales1#13862 / wed_sales2#13872) AS wed_sales_ratio#13879, (thu_sales1#13863 / thu_sales2#13873) AS thu_sales_ratio#13880, (fri_sales1#13864 / fri_sales2#13874) AS fri_sales_ratio#13881, (sat_sales1#13865 / sat_sales2#13875) AS sat_sales_ratio#13882]
+
+(88) CometTakeOrderedAndProject
+Input [10]: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+Arguments: TakeOrderedAndProject(limit=100, orderBy=[s_store_name1#13856 ASC NULLS FIRST,s_store_id1#13858 ASC NULLS FIRST,d_week_seq1#13857L ASC NULLS FIRST], output=[s_store_name1#13856,s_store_id1#13858,d_week_seq1#13857L,sun_sales_ratio#13876,mon_sales_ratio#13877,tue_sales_ratio#13878,wed_sales_ratio#13879,thu_sales_ratio#13880,fri_sales_ratio#13881,sat_sales_ratio#13882]), [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882], 100, 0, [s_store_name1#13856 ASC NULLS FIRST, s_store_id1#13858 ASC NULLS FIRST, d_week_seq1#13857L ASC NULLS FIRST], [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+
+(89) AdaptiveSparkPlan
+Output [10]: [s_store_name1#13856, s_store_id1#13858, d_week_seq1#13857L, sun_sales_ratio#13876, mon_sales_ratio#13877, tue_sales_ratio#13878, wed_sales_ratio#13879, thu_sales_ratio#13880, fri_sales_ratio#13881, sat_sales_ratio#13882]
+Arguments: isFinalPlan=true
+
+== Extended Information (Comet) ==
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometProject
+      +- CometBroadcastHashJoin
+         :- AQEShuffleRead
+         :  +- CometExchange
+         :     +- CometProject
+         :        +- CometBroadcastHashJoin
+         :           :- CometProject
+         :           :  +- CometBroadcastHashJoin
+         :           :     :- CometHashAggregate
+         :           :     :  +- AQEShuffleRead
+         :           :     :     +- CometExchange
+         :           :     :        +- CometHashAggregate
+         :           :     :           +- CometProject
+         :           :     :              +- CometBroadcastHashJoin
+         :           :     :                 :- CometFilter
+         :           :     :                 :  +- CometNativeScan parquet 
+         :           :     :                 +- CometBroadcastExchange
+         :           :     :                    +- CometFilter
+         :           :     :                       +- CometNativeScan parquet 
+         :           :     +- CometBroadcastExchange
+         :           :        +- CometFilter
+         :           :           +- CometNativeScan parquet 
+         :           +- CometBroadcastExchange
+         :              +- CometProject
+         :                 +- CometFilter
+         :                    +- CometNativeScan parquet 
+         +- CometBroadcastExchange
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometProject
+                     +- CometBroadcastHashJoin
+                        :- CometProject
+                        :  +- CometBroadcastHashJoin
+                        :     :- CometHashAggregate
+                        :     :  +- AQEShuffleRead
+                        :     :     +- CometExchange
+                        :     :        +- CometHashAggregate
+                        :     :           +- CometProject
+                        :     :              +- CometBroadcastHashJoin
+                        :     :                 :- CometFilter
+                        :     :                 :  +- CometNativeScan parquet 
+                        :     :                 +- CometBroadcastExchange
+                        :     :                    +- CometFilter
+                        :     :                       +- CometNativeScan parquet 
+                        :     +- CometBroadcastExchange
+                        :        +- CometFilter
+                        :           +- CometNativeScan parquet 
+                        +- CometBroadcastExchange
+                           +- CometProject
+                              +- CometFilter
+                                 +- CometNativeScan parquet 
+
+Comet accelerated 39 out of 39 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 13 native, 0 codegen dispatch.
+
+CometColumnarToRow
++- CometTakeOrderedAndProject
+   +- CometProject
+      +- CometBroadcastHashJoin
+         :- AQEShuffleRead
+         :  +- CometExchange
+         :     +- CometProject
+         :        +- CometBroadcastHashJoin
+         :           :- CometProject
+         :           :  +- CometBroadcastHashJoin
+         :           :     :- CometHashAggregate
+         :           :     :  +- AQEShuffleRead
+         :           :     :     +- CometExchange
+         :           :     :        +- CometHashAggregate
+         :           :     :           +- CometProject
+         :           :     :              +- CometBroadcastHashJoin
+         :           :     :                 :- CometFilter
+         :           :     :                 :  +- CometNativeScan parquet 
+         :           :     :                 +- CometBroadcastExchange
+         :           :     :                    +- CometFilter
+         :           :     :                       +- CometNativeScan parquet 
+         :           :     +- CometBroadcastExchange
+         :           :        +- CometFilter
+         :           :           +- CometNativeScan parquet 
+         :           +- CometBroadcastExchange
+         :              +- CometProject
+         :                 +- CometFilter
+         :                    +- CometNativeScan parquet 
+         +- CometBroadcastExchange
+            +- AQEShuffleRead
+               +- CometExchange
+                  +- CometProject
+                     +- CometBroadcastHashJoin
+                        :- CometProject
+                        :  +- CometBroadcastHashJoin
+                        :     :- CometHashAggregate
+                        :     :  +- AQEShuffleRead
+                        :     :     +- CometExchange
+                        :     :        +- CometHashAggregate
+                        :     :           +- CometProject
+                        :     :              +- CometBroadcastHashJoin
+                        :     :                 :- CometFilter
+                        :     :                 :  +- CometNativeScan parquet 
+                        :     :                 +- CometBroadcastExchange
+                        :     :                    +- CometFilter
+                        :     :                       +- CometNativeScan parquet 
+                        :     +- CometBroadcastExchange
+                        :        +- CometFilter
+                        :           +- CometNativeScan parquet 
+                        +- CometBroadcastExchange
+                           +- CometProject
+                              +- CometFilter
+                                 +- CometNativeScan parquet 
+
+Comet accelerated 39 out of 39 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 13 native, 0 codegen dispatch.

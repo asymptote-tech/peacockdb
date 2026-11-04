@@ -1,0 +1,250 @@
+children {
+  children {
+    children {
+      children {
+        children {
+          children {
+            children {
+              plan_id: 128684
+              scan {
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                fields {
+                  type_id: INT64
+                }
+                source: "Union (unknown)"
+              }
+            }
+            children {
+              scan {
+                fields {
+                  type_id: INT64
+                }
+                source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=5.4 KiB, rowCount=1.26E+3)"
+              }
+            }
+            plan_id: 128688
+            hash_join {
+              left_join_keys {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 493
+                  stop_index: 504
+                  line: 16
+                  start_position: 9
+                }
+                expr_id: 81275
+              }
+              right_join_keys {
+                bound {
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 493
+                  stop_index: 504
+                  line: 16
+                  start_position: 9
+                }
+                expr_id: 81276
+              }
+              build_side: BuildRight
+            }
+          }
+          plan_id: 128690
+          projection {
+            project_list {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              expr_id: 81277
+            }
+            project_list {
+              bound {
+                index: 1
+                datatype {
+                  type_id: INT64
+                }
+              }
+              expr_id: 81278
+            }
+          }
+        }
+        children {
+          plan_id: 1
+          scan {
+            fields {
+              type_id: INT64
+            }
+            source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=373.0 B, rowCount=31)"
+          }
+        }
+        plan_id: 128693
+        hash_join {
+          left_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 493
+              stop_index: 504
+              line: 16
+              start_position: 9
+            }
+            expr_id: 81279
+          }
+          right_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 493
+              stop_index: 504
+              line: 16
+              start_position: 9
+            }
+            expr_id: 81280
+          }
+          build_side: BuildRight
+        }
+      }
+      plan_id: 128695
+      projection {
+        project_list {
+          bound {
+            index: 1
+            datatype {
+              type_id: INT64
+            }
+          }
+          expr_id: 81281
+        }
+      }
+    }
+    children {
+      plan_id: 2
+      scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=4.8 MiB, rowCount=6.00E+5)"
+      }
+    }
+    plan_id: 128698
+    hash_join {
+      left_join_keys {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 493
+          stop_index: 504
+          line: 16
+          start_position: 9
+        }
+        expr_id: 81282
+      }
+      right_join_keys {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 493
+          stop_index: 504
+          line: 16
+          start_position: 9
+        }
+        expr_id: 81283
+      }
+      build_side: BuildRight
+    }
+  }
+  plan_id: 128700
+  projection {
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 40
+        stop_index: 52
+        line: 2
+        start_position: 19
+      }
+      expr_id: 81284
+    }
+    project_list {
+      bound {
+        index: 2
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 40
+        stop_index: 52
+        line: 2
+        start_position: 19
+      }
+      expr_id: 81285
+    }
+  }
+}
+plan_id: 128702
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 40
+      stop_index: 52
+      line: 2
+      start_position: 19
+    }
+    expr_id: 81286
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 40
+      stop_index: 52
+      line: 2
+      start_position: 19
+    }
+    expr_id: 81287
+  }
+}

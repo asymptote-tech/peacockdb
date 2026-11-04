@@ -1,0 +1,557 @@
+children {
+  plan_id: 225179
+  native_scan {
+    common {
+      required_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "cd_marital_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "cd_education_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_gender"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_marital_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_education_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_purchase_estimate"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_credit_rating"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_employed_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_college_count"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_filters {
+        or {
+          left {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143067
+                  }
+                  right {
+                    literal {
+                      string_val: "M"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 593
+                      stop_index: 595
+                      line: 20
+                      start_position: 28
+                    }
+                    expr_id: 143068
+                  }
+                }
+                query_context {
+                  start_index: 573
+                  stop_index: 595
+                  line: 20
+                  start_position: 8
+                }
+                expr_id: 143069
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143070
+                  }
+                  right {
+                    literal {
+                      string_val: "Unknown"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 631
+                      stop_index: 639
+                      line: 21
+                      start_position: 34
+                    }
+                    expr_id: 143071
+                  }
+                }
+                query_context {
+                  start_index: 609
+                  stop_index: 639
+                  line: 21
+                  start_position: 12
+                }
+                expr_id: 143072
+              }
+            }
+            query_context {
+              start_index: 573
+              stop_index: 639
+              line: 20
+              start_position: 8
+            }
+            expr_id: 143073
+          }
+          right {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143074
+                  }
+                  right {
+                    literal {
+                      string_val: "W"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 665
+                      stop_index: 667
+                      line: 21
+                      start_position: 68
+                    }
+                    expr_id: 143075
+                  }
+                }
+                query_context {
+                  start_index: 645
+                  stop_index: 667
+                  line: 21
+                  start_position: 48
+                }
+                expr_id: 143076
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143077
+                  }
+                  right {
+                    literal {
+                      string_val: "Advanced Degree"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 743
+                      stop_index: 759
+                      line: 22
+                      start_position: 74
+                    }
+                    expr_id: 143078
+                  }
+                }
+                query_context {
+                  start_index: 721
+                  stop_index: 759
+                  line: 22
+                  start_position: 52
+                }
+                expr_id: 143079
+              }
+            }
+            query_context {
+              start_index: 645
+              stop_index: 759
+              line: 21
+              start_position: 48
+            }
+            expr_id: 143080
+          }
+        }
+        query_context {
+          start_index: 572
+          stop_index: 760
+          line: 20
+          start_position: 7
+        }
+        expr_id: 143081
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 290
+              stop_index: 306
+              line: 12
+              start_position: 6
+            }
+            expr_id: 143082
+          }
+        }
+        query_context {
+          stop_index: 949
+          line: 1
+        }
+        expr_id: 143083
+      }
+      projection_vector: 0
+      projection_vector: 2
+      projection_vector: 3
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -885890319
+  }
+}
+plan_id: 225247
+filter {
+  predicate {
+    and {
+      left {
+        or {
+          left {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143084
+                  }
+                  right {
+                    literal {
+                      string_val: "M"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 593
+                      stop_index: 595
+                      line: 20
+                      start_position: 28
+                    }
+                    expr_id: 143085
+                  }
+                }
+                query_context {
+                  start_index: 573
+                  stop_index: 595
+                  line: 20
+                  start_position: 8
+                }
+                expr_id: 143086
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143087
+                  }
+                  right {
+                    literal {
+                      string_val: "Unknown"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 631
+                      stop_index: 639
+                      line: 21
+                      start_position: 34
+                    }
+                    expr_id: 143088
+                  }
+                }
+                query_context {
+                  start_index: 609
+                  stop_index: 639
+                  line: 21
+                  start_position: 12
+                }
+                expr_id: 143089
+              }
+            }
+            query_context {
+              start_index: 573
+              stop_index: 639
+              line: 20
+              start_position: 8
+            }
+            expr_id: 143090
+          }
+          right {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143091
+                  }
+                  right {
+                    literal {
+                      string_val: "W"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 665
+                      stop_index: 667
+                      line: 21
+                      start_position: 68
+                    }
+                    expr_id: 143092
+                  }
+                }
+                query_context {
+                  start_index: 645
+                  stop_index: 667
+                  line: 21
+                  start_position: 48
+                }
+                expr_id: 143093
+              }
+              right {
+                eq {
+                  left {
+                    bound {
+                      index: 2
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 290
+                      stop_index: 306
+                      line: 12
+                      start_position: 6
+                    }
+                    expr_id: 143094
+                  }
+                  right {
+                    literal {
+                      string_val: "Advanced Degree"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 743
+                      stop_index: 759
+                      line: 22
+                      start_position: 74
+                    }
+                    expr_id: 143095
+                  }
+                }
+                query_context {
+                  start_index: 721
+                  stop_index: 759
+                  line: 22
+                  start_position: 52
+                }
+                expr_id: 143096
+              }
+            }
+            query_context {
+              start_index: 645
+              stop_index: 759
+              line: 21
+              start_position: 48
+            }
+            expr_id: 143097
+          }
+        }
+        query_context {
+          start_index: 572
+          stop_index: 760
+          line: 20
+          start_position: 7
+        }
+        expr_id: 143098
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 290
+              stop_index: 306
+              line: 12
+              start_position: 6
+            }
+            expr_id: 143099
+          }
+        }
+        query_context {
+          stop_index: 949
+          line: 1
+        }
+        expr_id: 143100
+      }
+    }
+    expr_id: 143101
+  }
+}

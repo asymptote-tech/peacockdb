@@ -1,0 +1,45 @@
+children {
+  plan_id: 7
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1360.0 KiB, rowCount=6.02E+4)"
+  }
+}
+plan_id: 128707
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 40
+      stop_index: 52
+      line: 2
+      start_position: 19
+    }
+    expr_id: 81292
+  }
+  grouping_exprs {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 40
+      stop_index: 52
+      line: 2
+      start_position: 19
+    }
+    expr_id: 81293
+  }
+  mode: Final
+}

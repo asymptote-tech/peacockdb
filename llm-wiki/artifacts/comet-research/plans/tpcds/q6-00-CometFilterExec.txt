@@ -1,0 +1,134 @@
+children {
+  children {
+    children {
+      plan_id: 8
+      shuffle_scan {
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1579.0 KiB, rowCount=8.47E+3)"
+      }
+    }
+    plan_id: 17280
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 553
+          stop_index: 562
+          line: 21
+          start_position: 9
+        }
+        expr_id: 10524
+      }
+      agg_exprs {
+        count {
+          children {
+            literal {
+              int_val: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 32
+              stop_index: 39
+              line: 2
+              start_position: 7
+            }
+            expr_id: 10525
+          }
+        }
+        query_context {
+          start_index: 32
+          stop_index: 39
+          line: 2
+          start_position: 7
+        }
+        expr_id: 10526
+      }
+      mode: Final
+    }
+  }
+  plan_id: 17280
+  projection {
+    project_list {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 553
+        stop_index: 562
+        line: 21
+        start_position: 9
+      }
+      expr_id: 10527
+    }
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 32
+        stop_index: 39
+        line: 2
+        start_position: 7
+      }
+      expr_id: 10528
+    }
+  }
+}
+plan_id: 17415
+filter {
+  predicate {
+    gt_eq {
+      left {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          stop_index: 584
+          line: 1
+        }
+        expr_id: 10538
+      }
+      right {
+        literal {
+          long_val: 10
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 571
+          stop_index: 584
+          line: 22
+          start_position: 7
+        }
+        expr_id: 10539
+      }
+    }
+    query_context {
+      start_index: 571
+      stop_index: 584
+      line: 22
+      start_position: 7
+    }
+    expr_id: 10540
+  }
+}

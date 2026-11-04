@@ -1,0 +1,136 @@
+children {
+  plan_id: 211246
+  native_scan {
+    common {
+      required_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_demo_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_gender"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_marital_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_education_status"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_purchase_estimate"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_credit_rating"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_employed_count"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "cd_dep_college_count"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 281
+              stop_index: 287
+              line: 9
+              start_position: 6
+            }
+            expr_id: 136094
+          }
+        }
+        query_context {
+          stop_index: 559
+          line: 1
+        }
+        expr_id: 136095
+      }
+      projection_vector: 0
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 323335993
+  }
+}
+plan_id: 211288
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 281
+          stop_index: 287
+          line: 9
+          start_position: 6
+        }
+        expr_id: 136096
+      }
+    }
+    query_context {
+      stop_index: 559
+      line: 1
+    }
+    expr_id: 136097
+  }
+}

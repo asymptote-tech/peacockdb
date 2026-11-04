@@ -1,0 +1,90 @@
+plan_id: 29172
+native_scan {
+  common {
+    required_schema {
+      name: "o_custkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_orderkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_custkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_orderstatus"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_totalprice"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_orderdate"
+      data_type {
+        type_id: DATE
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_orderpriority"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_clerk"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_shippriority"
+      data_type {
+        type_id: INT32
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "o_comment"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    projection_vector: 1
+    session_timezone: "UTC"
+    source: "CometScan parquet  (unknown)"
+    fields {
+      type_id: INT64
+    }
+    allow_type_promotion: true
+    allow_timestamp_ltz_to_ntz: true
+  }
+  source_key_hash: -189273544
+}

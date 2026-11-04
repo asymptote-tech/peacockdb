@@ -1,0 +1,430 @@
+children {
+  children {
+    plan_id: 228928
+    native_scan {
+      common {
+        required_schema {
+          name: "web_site_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "web_company_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_site_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_site_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_rec_start_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_rec_end_date"
+          data_type {
+            type_id: DATE
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_open_date_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_close_date_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_class"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_manager"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_mkt_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_mkt_class"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_mkt_desc"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_market_manager"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_company_id"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_company_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_street_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_street_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_street_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_suite_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_state"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_zip"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_country"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "web_tax_percentage"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 243
+                stop_index: 248
+                line: 8
+                start_position: 6
+              }
+              expr_id: 144383
+            }
+          }
+          query_context {
+            stop_index: 742
+            line: 1
+          }
+          expr_id: 144384
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 243
+                stop_index: 248
+                line: 8
+                start_position: 6
+              }
+              expr_id: 144385
+            }
+            right {
+              literal {
+                string_val: "pri"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 468
+                stop_index: 472
+                line: 13
+                start_position: 25
+              }
+              expr_id: 144386
+            }
+          }
+          query_context {
+            start_index: 449
+            stop_index: 472
+            line: 13
+            start_position: 6
+          }
+          expr_id: 144387
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 243
+                stop_index: 248
+                line: 8
+                start_position: 6
+              }
+              expr_id: 144388
+            }
+          }
+          query_context {
+            stop_index: 742
+            line: 1
+          }
+          expr_id: 144389
+        }
+        projection_vector: 0
+        projection_vector: 14
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1402678559
+    }
+  }
+  plan_id: 228992
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 243
+                stop_index: 248
+                line: 8
+                start_position: 6
+              }
+              expr_id: 144390
+            }
+          }
+          query_context {
+            stop_index: 742
+            line: 1
+          }
+          expr_id: 144391
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 243
+                    stop_index: 248
+                    line: 8
+                    start_position: 6
+                  }
+                  expr_id: 144392
+                }
+                right {
+                  literal {
+                    string_val: "pri"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 468
+                    stop_index: 472
+                    line: 13
+                    start_position: 25
+                  }
+                  expr_id: 144393
+                }
+              }
+              query_context {
+                start_index: 449
+                stop_index: 472
+                line: 13
+                start_position: 6
+              }
+              expr_id: 144394
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 243
+                    stop_index: 248
+                    line: 8
+                    start_position: 6
+                  }
+                  expr_id: 144395
+                }
+              }
+              query_context {
+                stop_index: 742
+                line: 1
+              }
+              expr_id: 144396
+            }
+          }
+        }
+      }
+      expr_id: 144397
+    }
+  }
+}
+plan_id: 228994
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 144398
+  }
+}

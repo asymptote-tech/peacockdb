@@ -1,0 +1,370 @@
+children {
+  children {
+    children {
+      children {
+        children {
+          plan_id: 3
+          shuffle_scan {
+            fields {
+              type_id: INT64
+            }
+            fields {
+              type_id: INT64
+            }
+            fields {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+            source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1111.5 MiB, rowCount=3.64E+7)"
+          }
+        }
+        children {
+          plan_id: 8
+          scan {
+            fields {
+              type_id: INT64
+            }
+            source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=377.4 KiB, rowCount=8.72E+4)"
+          }
+        }
+        plan_id: 25856
+        hash_join {
+          left_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 324
+              stop_index: 332
+              line: 16
+              start_position: 14
+            }
+            expr_id: 10892
+          }
+          right_join_keys {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 157
+              stop_index: 165
+              line: 9
+              start_position: 15
+            }
+            expr_id: 10893
+          }
+          join_type: LeftSemi
+          build_side: BuildRight
+        }
+      }
+      plan_id: 25858
+      hash_agg {
+        grouping_exprs {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 324
+            stop_index: 332
+            line: 16
+            start_position: 14
+          }
+          expr_id: 10894
+        }
+        grouping_exprs {
+          bound {
+            index: 1
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 324
+            stop_index: 332
+            line: 16
+            start_position: 14
+          }
+          expr_id: 10895
+        }
+        agg_exprs {
+          sum {
+            child {
+              bound {
+                index: 2
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 15
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 276
+                stop_index: 285
+                line: 14
+                start_position: 25
+              }
+              expr_id: 10896
+            }
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 25
+                  scale: 2
+                }
+              }
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 272
+            stop_index: 286
+            line: 14
+            start_position: 21
+          }
+          expr_id: 10897
+        }
+      }
+    }
+    plan_id: 25860
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 324
+          stop_index: 332
+          line: 16
+          start_position: 14
+        }
+        expr_id: 10898
+      }
+      grouping_exprs {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 324
+          stop_index: 332
+          line: 16
+          start_position: 14
+        }
+        expr_id: 10899
+      }
+      agg_exprs {
+        sum {
+          child {
+            unbound {
+              name: "l_quantity"
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 15
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 276
+              stop_index: 285
+              line: 14
+              start_position: 25
+            }
+            expr_id: 10900
+          }
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 25
+                scale: 2
+              }
+            }
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 272
+          stop_index: 286
+          line: 14
+          start_position: 21
+        }
+        expr_id: 10901
+      }
+      mode: Final
+    }
+  }
+  plan_id: 25860
+  projection {
+    project_list {
+      check_overflow {
+        child {
+          multiply {
+            left {
+              literal {
+                decimal_val: "\005"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 1
+                      scale: 1
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 266
+                stop_index: 268
+                line: 14
+                start_position: 15
+              }
+              expr_id: 10902
+            }
+            right {
+              bound {
+                index: 2
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 25
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 272
+                stop_index: 286
+                line: 14
+                start_position: 21
+              }
+              expr_id: 10903
+            }
+            return_type {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 27
+                  scale: 3
+                }
+              }
+            }
+            eval_mode: ANSI
+          }
+          query_context {
+            start_index: 266
+            stop_index: 286
+            line: 14
+            start_position: 15
+          }
+          expr_id: 10904
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 27
+              scale: 3
+            }
+          }
+        }
+        fail_on_error: true
+      }
+      query_context {
+        start_index: 266
+        stop_index: 286
+        line: 14
+        start_position: 15
+      }
+      expr_id: 10905
+    }
+    project_list {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 324
+        stop_index: 332
+        line: 16
+        start_position: 14
+      }
+      expr_id: 10906
+    }
+    project_list {
+      bound {
+        index: 1
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 324
+        stop_index: 332
+        line: 16
+        start_position: 14
+      }
+      expr_id: 10907
+    }
+  }
+}
+plan_id: 25862
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 27
+                scale: 3
+              }
+            }
+          }
+        }
+        query_context {
+          start_index: 249
+          stop_index: 505
+          line: 13
+          start_position: 22
+        }
+        expr_id: 10908
+      }
+    }
+    query_context {
+      start_index: 80
+      stop_index: 505
+      line: 6
+      start_position: 4
+    }
+    expr_id: 10909
+  }
+}

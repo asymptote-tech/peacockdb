@@ -1,0 +1,83 @@
+plan_id: 18707
+native_scan {
+  common {
+    required_schema {
+      name: "c_custkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_custkey"
+      data_type {
+        type_id: INT64
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_name"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_address"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_nationkey"
+      data_type {
+        type_id: INT32
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_phone"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_acctbal"
+      data_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_mktsegment"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    data_schema {
+      name: "c_comment"
+      data_type {
+        type_id: STRING
+      }
+      nullable: true
+    }
+    projection_vector: 0
+    session_timezone: "UTC"
+    source: "CometScan parquet  (unknown)"
+    fields {
+      type_id: INT64
+    }
+    allow_type_promotion: true
+    allow_timestamp_ltz_to_ntz: true
+  }
+  source_key_hash: 860348109
+}

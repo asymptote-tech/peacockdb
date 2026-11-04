@@ -1,0 +1,265 @@
+children {
+  children {
+    plan_id: 10019
+    native_scan {
+      common {
+        required_schema {
+          name: "r_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "r_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "r_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4166
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4167
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4168
+            }
+            right {
+              literal {
+                string_val: "AMERICA"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 577
+                stop_index: 585
+                line: 16
+                start_position: 21
+              }
+              expr_id: 4169
+            }
+          }
+          query_context {
+            start_index: 568
+            stop_index: 585
+            line: 16
+            start_position: 12
+          }
+          expr_id: 4170
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4171
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4172
+        }
+        projection_vector: 0
+        projection_vector: 1
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT32
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 458572095
+    }
+  }
+  plan_id: 10120
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4173
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4174
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 348
+                    stop_index: 356
+                    line: 10
+                    start_position: 10
+                  }
+                  expr_id: 4175
+                }
+                right {
+                  literal {
+                    string_val: "AMERICA"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 577
+                    stop_index: 585
+                    line: 16
+                    start_position: 21
+                  }
+                  expr_id: 4176
+                }
+              }
+              query_context {
+                start_index: 568
+                stop_index: 585
+                line: 16
+                start_position: 12
+              }
+              expr_id: 4177
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT32
+                    }
+                  }
+                  query_context {
+                    start_index: 348
+                    stop_index: 356
+                    line: 10
+                    start_position: 10
+                  }
+                  expr_id: 4178
+                }
+              }
+              query_context {
+                start_index: 117
+                stop_index: 744
+                line: 5
+                start_position: 4
+              }
+              expr_id: 4179
+            }
+          }
+        }
+      }
+      expr_id: 4180
+    }
+  }
+}
+plan_id: 10122
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT32
+      }
+    }
+    expr_id: 4181
+  }
+}

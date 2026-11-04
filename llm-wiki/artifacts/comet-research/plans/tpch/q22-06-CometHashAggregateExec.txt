@@ -1,0 +1,97 @@
+children {
+  children {
+    shuffle_scan {
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 25
+            scale: 2
+          }
+        }
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=25.1 KiB, rowCount=119)"
+    }
+  }
+  plan_id: 29130
+  hash_agg {
+    agg_exprs {
+      avg {
+        child {
+          unbound {
+            name: "c_acctbal"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 15
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 311
+            stop_index: 319
+            line: 12
+            start_position: 23
+          }
+          expr_id: 11741
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 19
+              scale: 6
+            }
+          }
+        }
+        sum_datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 25
+              scale: 2
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 307
+        stop_index: 320
+        line: 12
+        start_position: 19
+      }
+      expr_id: 11742
+    }
+    mode: Final
+  }
+}
+plan_id: 29130
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 19
+            scale: 6
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 307
+      stop_index: 320
+      line: 12
+      start_position: 19
+    }
+    expr_id: 11743
+  }
+}

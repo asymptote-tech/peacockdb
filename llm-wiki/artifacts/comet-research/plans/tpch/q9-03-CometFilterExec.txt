@@ -1,0 +1,116 @@
+children {
+  plan_id: 13380
+  native_scan {
+    common {
+      required_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_nationkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_regionkey"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "n_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 307
+              stop_index: 315
+              line: 11
+              start_position: 10
+            }
+            expr_id: 5379
+          }
+        }
+        query_context {
+          start_index: 72
+          stop_index: 539
+          line: 6
+          start_position: 4
+        }
+        expr_id: 5380
+      }
+      projection_vector: 0
+      projection_vector: 1
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 1767968878
+  }
+}
+plan_id: 13458
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT32
+          }
+        }
+        query_context {
+          start_index: 307
+          stop_index: 315
+          line: 11
+          start_position: 10
+        }
+        expr_id: 5381
+      }
+    }
+    query_context {
+      start_index: 72
+      stop_index: 539
+      line: 6
+      start_position: 4
+    }
+    expr_id: 5382
+  }
+}

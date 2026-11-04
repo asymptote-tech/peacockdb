@@ -1,0 +1,591 @@
+== Physical Plan ==
+AdaptiveSparkPlan (7)
++- == Final Plan ==
+   ResultQueryStage (5)
+   +- * Project (4)
+      +- * CometColumnarToRow (3)
+         +- CometFilter (2)
+            +- CometNativeScan parquet  (1)
++- == Initial Plan ==
+   Project (6)
+   +- CometFilter (2)
+      +- CometNativeScan parquet  (1)
+
+
+(1) CometNativeScan parquet 
+Output [1]: [r_reason_sk#222L]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/reason.parquet]
+PushedFilters: [IsNotNull(r_reason_sk), EqualTo(r_reason_sk,1)]
+ReadSchema: struct<r_reason_sk:bigint>
+
+(2) CometFilter
+Input [1]: [r_reason_sk#222L]
+Condition : (isnotnull(r_reason_sk#222L) AND (r_reason_sk#222L = 1))
+
+(3) CometColumnarToRow [codegen id : 1]
+Input [1]: [r_reason_sk#222L]
+
+(4) Project [codegen id : 1]
+Output [5]: [CASE WHEN (Subquery subquery#4109, [id=#21904].count(1) > 74129) THEN ReusedSubquery Subquery subquery#4109, [id=#21904].avg(ss_ext_discount_amt) ELSE ReusedSubquery Subquery subquery#4109, [id=#21904].avg(ss_net_paid) END AS bucket1#4112, CASE WHEN (Subquery subquery#4113, [id=#21907].count(1) > 122840) THEN ReusedSubquery Subquery subquery#4113, [id=#21907].avg(ss_ext_discount_amt) ELSE ReusedSubquery Subquery subquery#4113, [id=#21907].avg(ss_net_paid) END AS bucket2#4116, CASE WHEN (Subquery subquery#4117, [id=#21910].count(1) > 56580) THEN ReusedSubquery Subquery subquery#4117, [id=#21910].avg(ss_ext_discount_amt) ELSE ReusedSubquery Subquery subquery#4117, [id=#21910].avg(ss_net_paid) END AS bucket3#4120, CASE WHEN (Subquery subquery#4121, [id=#21913].count(1) > 10097) THEN ReusedSubquery Subquery subquery#4121, [id=#21913].avg(ss_ext_discount_amt) ELSE ReusedSubquery Subquery subquery#4121, [id=#21913].avg(ss_net_paid) END AS bucket4#4124, CASE WHEN (Subquery subquery#4125, [id=#21916].count(1) > 165306) THEN ReusedSubquery Subquery subquery#4125, [id=#21916].avg(ss_ext_discount_amt) ELSE ReusedSubquery Subquery subquery#4125, [id=#21916].avg(ss_net_paid) END AS bucket5#4128]
+Input [1]: [r_reason_sk#222L]
+
+(5) ResultQueryStage
+Output [5]: [bucket1#4112, bucket2#4116, bucket3#4120, bucket4#4124, bucket5#4128]
+Arguments: 0
+
+(6) Project
+Output [5]: [CASE WHEN (Subquery subquery#4109, [id=#21904].count(1) > 74129) THEN Subquery subquery#4110, [id=#21905].avg(ss_ext_discount_amt) ELSE Subquery subquery#4111, [id=#21906].avg(ss_net_paid) END AS bucket1#4112, CASE WHEN (Subquery subquery#4113, [id=#21907].count(1) > 122840) THEN Subquery subquery#4114, [id=#21908].avg(ss_ext_discount_amt) ELSE Subquery subquery#4115, [id=#21909].avg(ss_net_paid) END AS bucket2#4116, CASE WHEN (Subquery subquery#4117, [id=#21910].count(1) > 56580) THEN Subquery subquery#4118, [id=#21911].avg(ss_ext_discount_amt) ELSE Subquery subquery#4119, [id=#21912].avg(ss_net_paid) END AS bucket3#4120, CASE WHEN (Subquery subquery#4121, [id=#21913].count(1) > 10097) THEN Subquery subquery#4122, [id=#21914].avg(ss_ext_discount_amt) ELSE Subquery subquery#4123, [id=#21915].avg(ss_net_paid) END AS bucket4#4124, CASE WHEN (Subquery subquery#4125, [id=#21916].count(1) > 165306) THEN Subquery subquery#4126, [id=#21917].avg(ss_ext_discount_amt) ELSE Subquery subquery#4127, [id=#21918].avg(ss_net_paid) END AS bucket5#4128]
+Input [1]: [r_reason_sk#222L]
+
+(7) AdaptiveSparkPlan
+Output [5]: [bucket1#4112, bucket2#4116, bucket3#4120, bucket4#4124, bucket5#4128]
+Arguments: isFinalPlan=true
+
+===== Subqueries =====
+
+Subquery:1 Hosting operator id = 4 Hosting Expression = Subquery subquery#4109, [id=#21904]
+AdaptiveSparkPlan (20)
++- == Final Plan ==
+   ResultQueryStage (17)
+   +- * CometColumnarToRow (16)
+      +- CometProject (15)
+         +- CometHashAggregate (14)
+            +- ShuffleQueryStage (13), Statistics(sizeInBytes=65.0 KiB, rowCount=128)
+               +- CometExchange (12)
+                  +- CometHashAggregate (11)
+                     +- CometProject (10)
+                        +- CometFilter (9)
+                           +- CometNativeScan parquet  (8)
++- == Initial Plan ==
+   CometProject (19)
+   +- CometHashAggregate (18)
+      +- CometExchange (12)
+         +- CometHashAggregate (11)
+            +- CometProject (10)
+               +- CometFilter (9)
+                  +- CometNativeScan parquet  (8)
+
+
+(8) CometNativeScan parquet 
+Output [3]: [ss_quantity#290L, ss_ext_discount_amt#294, ss_net_paid#300]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_quantity), GreaterThanOrEqual(ss_quantity,1), LessThanOrEqual(ss_quantity,20)]
+ReadSchema: struct<ss_quantity:bigint,ss_ext_discount_amt:decimal(7,2),ss_net_paid:decimal(7,2)>
+
+(9) CometFilter
+Input [3]: [ss_quantity#290L, ss_ext_discount_amt#294, ss_net_paid#300]
+Condition : ((isnotnull(ss_quantity#290L) AND (ss_quantity#290L >= 1)) AND (ss_quantity#290L <= 20))
+
+(10) CometProject
+Input [3]: [ss_quantity#290L, ss_ext_discount_amt#294, ss_net_paid#300]
+Arguments: [ss_ext_discount_amt#294, ss_net_paid#300], [ss_ext_discount_amt#294, ss_net_paid#300]
+
+(11) CometHashAggregate
+Input [2]: [ss_ext_discount_amt#294, ss_net_paid#300]
+Keys: []
+Functions [3]: [partial_count(1), partial_avg(UnscaledValue(ss_ext_discount_amt#294)), partial_avg(UnscaledValue(ss_net_paid#300))]
+
+(12) CometExchange
+Input [5]: [count#4529L, sum#4530, count#4531L, sum#4532, count#4533L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=21285]
+
+(13) ShuffleQueryStage
+Output [5]: [count#4529L, sum#4530, count#4531L, sum#4532, count#4533L]
+Arguments: 0
+
+(14) CometHashAggregate
+Input [5]: [count#4529L, sum#4530, count#4531L, sum#4532, count#4533L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#294)), avg(UnscaledValue(ss_net_paid#300))]
+
+(15) CometProject
+Input [3]: [count(1)#4130L, avg(ss_ext_discount_amt)#4132, avg(ss_net_paid)#4134]
+Arguments: [mergedValue#4524], [named_struct(count(1), count(1)#4130L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4132, avg(ss_net_paid), avg(ss_net_paid)#4134) AS mergedValue#4524]
+
+(16) CometColumnarToRow [codegen id : 1]
+Input [1]: [mergedValue#4524]
+
+(17) ResultQueryStage
+Output [1]: [mergedValue#4524]
+Arguments: 1
+
+(18) CometHashAggregate
+Input [5]: [count#4529L, sum#4530, count#4531L, sum#4532, count#4533L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#294)), avg(UnscaledValue(ss_net_paid#300))]
+
+(19) CometProject
+Input [3]: [count(1)#4130L, avg(ss_ext_discount_amt)#4132, avg(ss_net_paid)#4134]
+Arguments: [mergedValue#4524], [named_struct(count(1), count(1)#4130L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4132, avg(ss_net_paid), avg(ss_net_paid)#4134) AS mergedValue#4524]
+
+(20) AdaptiveSparkPlan
+Output [1]: [mergedValue#4524]
+Arguments: isFinalPlan=true
+
+Subquery:2 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4109, [id=#21904]
+
+Subquery:3 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4109, [id=#21904]
+
+Subquery:4 Hosting operator id = 4 Hosting Expression = Subquery subquery#4113, [id=#21907]
+AdaptiveSparkPlan (33)
++- == Final Plan ==
+   ResultQueryStage (30)
+   +- * CometColumnarToRow (29)
+      +- CometProject (28)
+         +- CometHashAggregate (27)
+            +- ShuffleQueryStage (26), Statistics(sizeInBytes=65.0 KiB, rowCount=128)
+               +- CometExchange (25)
+                  +- CometHashAggregate (24)
+                     +- CometProject (23)
+                        +- CometFilter (22)
+                           +- CometNativeScan parquet  (21)
++- == Initial Plan ==
+   CometProject (32)
+   +- CometHashAggregate (31)
+      +- CometExchange (25)
+         +- CometHashAggregate (24)
+            +- CometProject (23)
+               +- CometFilter (22)
+                  +- CometNativeScan parquet  (21)
+
+
+(21) CometNativeScan parquet 
+Output [3]: [ss_quantity#4215L, ss_ext_discount_amt#4219, ss_net_paid#4225]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_quantity), GreaterThanOrEqual(ss_quantity,21), LessThanOrEqual(ss_quantity,40)]
+ReadSchema: struct<ss_quantity:bigint,ss_ext_discount_amt:decimal(7,2),ss_net_paid:decimal(7,2)>
+
+(22) CometFilter
+Input [3]: [ss_quantity#4215L, ss_ext_discount_amt#4219, ss_net_paid#4225]
+Condition : ((isnotnull(ss_quantity#4215L) AND (ss_quantity#4215L >= 21)) AND (ss_quantity#4215L <= 40))
+
+(23) CometProject
+Input [3]: [ss_quantity#4215L, ss_ext_discount_amt#4219, ss_net_paid#4225]
+Arguments: [ss_ext_discount_amt#4219, ss_net_paid#4225], [ss_ext_discount_amt#4219, ss_net_paid#4225]
+
+(24) CometHashAggregate
+Input [2]: [ss_ext_discount_amt#4219, ss_net_paid#4225]
+Keys: []
+Functions [3]: [partial_count(1), partial_avg(UnscaledValue(ss_ext_discount_amt#4219)), partial_avg(UnscaledValue(ss_net_paid#4225))]
+
+(25) CometExchange
+Input [5]: [count#4534L, sum#4535, count#4536L, sum#4537, count#4538L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=21417]
+
+(26) ShuffleQueryStage
+Output [5]: [count#4534L, sum#4535, count#4536L, sum#4537, count#4538L]
+Arguments: 0
+
+(27) CometHashAggregate
+Input [5]: [count#4534L, sum#4535, count#4536L, sum#4537, count#4538L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4219)), avg(UnscaledValue(ss_net_paid#4225))]
+
+(28) CometProject
+Input [3]: [count(1)#4136L, avg(ss_ext_discount_amt)#4138, avg(ss_net_paid)#4140]
+Arguments: [mergedValue#4525], [named_struct(count(1), count(1)#4136L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4138, avg(ss_net_paid), avg(ss_net_paid)#4140) AS mergedValue#4525]
+
+(29) CometColumnarToRow [codegen id : 1]
+Input [1]: [mergedValue#4525]
+
+(30) ResultQueryStage
+Output [1]: [mergedValue#4525]
+Arguments: 1
+
+(31) CometHashAggregate
+Input [5]: [count#4534L, sum#4535, count#4536L, sum#4537, count#4538L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4219)), avg(UnscaledValue(ss_net_paid#4225))]
+
+(32) CometProject
+Input [3]: [count(1)#4136L, avg(ss_ext_discount_amt)#4138, avg(ss_net_paid)#4140]
+Arguments: [mergedValue#4525], [named_struct(count(1), count(1)#4136L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4138, avg(ss_net_paid), avg(ss_net_paid)#4140) AS mergedValue#4525]
+
+(33) AdaptiveSparkPlan
+Output [1]: [mergedValue#4525]
+Arguments: isFinalPlan=true
+
+Subquery:5 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4113, [id=#21907]
+
+Subquery:6 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4113, [id=#21907]
+
+Subquery:7 Hosting operator id = 4 Hosting Expression = Subquery subquery#4117, [id=#21910]
+AdaptiveSparkPlan (46)
++- == Final Plan ==
+   ResultQueryStage (43)
+   +- * CometColumnarToRow (42)
+      +- CometProject (41)
+         +- CometHashAggregate (40)
+            +- ShuffleQueryStage (39), Statistics(sizeInBytes=65.0 KiB, rowCount=128)
+               +- CometExchange (38)
+                  +- CometHashAggregate (37)
+                     +- CometProject (36)
+                        +- CometFilter (35)
+                           +- CometNativeScan parquet  (34)
++- == Initial Plan ==
+   CometProject (45)
+   +- CometHashAggregate (44)
+      +- CometExchange (38)
+         +- CometHashAggregate (37)
+            +- CometProject (36)
+               +- CometFilter (35)
+                  +- CometNativeScan parquet  (34)
+
+
+(34) CometNativeScan parquet 
+Output [3]: [ss_quantity#4284L, ss_ext_discount_amt#4288, ss_net_paid#4294]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_quantity), GreaterThanOrEqual(ss_quantity,41), LessThanOrEqual(ss_quantity,60)]
+ReadSchema: struct<ss_quantity:bigint,ss_ext_discount_amt:decimal(7,2),ss_net_paid:decimal(7,2)>
+
+(35) CometFilter
+Input [3]: [ss_quantity#4284L, ss_ext_discount_amt#4288, ss_net_paid#4294]
+Condition : ((isnotnull(ss_quantity#4284L) AND (ss_quantity#4284L >= 41)) AND (ss_quantity#4284L <= 60))
+
+(36) CometProject
+Input [3]: [ss_quantity#4284L, ss_ext_discount_amt#4288, ss_net_paid#4294]
+Arguments: [ss_ext_discount_amt#4288, ss_net_paid#4294], [ss_ext_discount_amt#4288, ss_net_paid#4294]
+
+(37) CometHashAggregate
+Input [2]: [ss_ext_discount_amt#4288, ss_net_paid#4294]
+Keys: []
+Functions [3]: [partial_count(1), partial_avg(UnscaledValue(ss_ext_discount_amt#4288)), partial_avg(UnscaledValue(ss_net_paid#4294))]
+
+(38) CometExchange
+Input [5]: [count#4539L, sum#4540, count#4541L, sum#4542, count#4543L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=21549]
+
+(39) ShuffleQueryStage
+Output [5]: [count#4539L, sum#4540, count#4541L, sum#4542, count#4543L]
+Arguments: 0
+
+(40) CometHashAggregate
+Input [5]: [count#4539L, sum#4540, count#4541L, sum#4542, count#4543L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4288)), avg(UnscaledValue(ss_net_paid#4294))]
+
+(41) CometProject
+Input [3]: [count(1)#4142L, avg(ss_ext_discount_amt)#4144, avg(ss_net_paid)#4146]
+Arguments: [mergedValue#4526], [named_struct(count(1), count(1)#4142L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4144, avg(ss_net_paid), avg(ss_net_paid)#4146) AS mergedValue#4526]
+
+(42) CometColumnarToRow [codegen id : 1]
+Input [1]: [mergedValue#4526]
+
+(43) ResultQueryStage
+Output [1]: [mergedValue#4526]
+Arguments: 1
+
+(44) CometHashAggregate
+Input [5]: [count#4539L, sum#4540, count#4541L, sum#4542, count#4543L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4288)), avg(UnscaledValue(ss_net_paid#4294))]
+
+(45) CometProject
+Input [3]: [count(1)#4142L, avg(ss_ext_discount_amt)#4144, avg(ss_net_paid)#4146]
+Arguments: [mergedValue#4526], [named_struct(count(1), count(1)#4142L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4144, avg(ss_net_paid), avg(ss_net_paid)#4146) AS mergedValue#4526]
+
+(46) AdaptiveSparkPlan
+Output [1]: [mergedValue#4526]
+Arguments: isFinalPlan=true
+
+Subquery:8 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4117, [id=#21910]
+
+Subquery:9 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4117, [id=#21910]
+
+Subquery:10 Hosting operator id = 4 Hosting Expression = Subquery subquery#4121, [id=#21913]
+AdaptiveSparkPlan (59)
++- == Final Plan ==
+   ResultQueryStage (56)
+   +- * CometColumnarToRow (55)
+      +- CometProject (54)
+         +- CometHashAggregate (53)
+            +- ShuffleQueryStage (52), Statistics(sizeInBytes=65.0 KiB, rowCount=128)
+               +- CometExchange (51)
+                  +- CometHashAggregate (50)
+                     +- CometProject (49)
+                        +- CometFilter (48)
+                           +- CometNativeScan parquet  (47)
++- == Initial Plan ==
+   CometProject (58)
+   +- CometHashAggregate (57)
+      +- CometExchange (51)
+         +- CometHashAggregate (50)
+            +- CometProject (49)
+               +- CometFilter (48)
+                  +- CometNativeScan parquet  (47)
+
+
+(47) CometNativeScan parquet 
+Output [3]: [ss_quantity#4353L, ss_ext_discount_amt#4357, ss_net_paid#4363]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_quantity), GreaterThanOrEqual(ss_quantity,61), LessThanOrEqual(ss_quantity,80)]
+ReadSchema: struct<ss_quantity:bigint,ss_ext_discount_amt:decimal(7,2),ss_net_paid:decimal(7,2)>
+
+(48) CometFilter
+Input [3]: [ss_quantity#4353L, ss_ext_discount_amt#4357, ss_net_paid#4363]
+Condition : ((isnotnull(ss_quantity#4353L) AND (ss_quantity#4353L >= 61)) AND (ss_quantity#4353L <= 80))
+
+(49) CometProject
+Input [3]: [ss_quantity#4353L, ss_ext_discount_amt#4357, ss_net_paid#4363]
+Arguments: [ss_ext_discount_amt#4357, ss_net_paid#4363], [ss_ext_discount_amt#4357, ss_net_paid#4363]
+
+(50) CometHashAggregate
+Input [2]: [ss_ext_discount_amt#4357, ss_net_paid#4363]
+Keys: []
+Functions [3]: [partial_count(1), partial_avg(UnscaledValue(ss_ext_discount_amt#4357)), partial_avg(UnscaledValue(ss_net_paid#4363))]
+
+(51) CometExchange
+Input [5]: [count#4544L, sum#4545, count#4546L, sum#4547, count#4548L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=21681]
+
+(52) ShuffleQueryStage
+Output [5]: [count#4544L, sum#4545, count#4546L, sum#4547, count#4548L]
+Arguments: 0
+
+(53) CometHashAggregate
+Input [5]: [count#4544L, sum#4545, count#4546L, sum#4547, count#4548L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4357)), avg(UnscaledValue(ss_net_paid#4363))]
+
+(54) CometProject
+Input [3]: [count(1)#4148L, avg(ss_ext_discount_amt)#4150, avg(ss_net_paid)#4152]
+Arguments: [mergedValue#4527], [named_struct(count(1), count(1)#4148L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4150, avg(ss_net_paid), avg(ss_net_paid)#4152) AS mergedValue#4527]
+
+(55) CometColumnarToRow [codegen id : 1]
+Input [1]: [mergedValue#4527]
+
+(56) ResultQueryStage
+Output [1]: [mergedValue#4527]
+Arguments: 1
+
+(57) CometHashAggregate
+Input [5]: [count#4544L, sum#4545, count#4546L, sum#4547, count#4548L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4357)), avg(UnscaledValue(ss_net_paid#4363))]
+
+(58) CometProject
+Input [3]: [count(1)#4148L, avg(ss_ext_discount_amt)#4150, avg(ss_net_paid)#4152]
+Arguments: [mergedValue#4527], [named_struct(count(1), count(1)#4148L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4150, avg(ss_net_paid), avg(ss_net_paid)#4152) AS mergedValue#4527]
+
+(59) AdaptiveSparkPlan
+Output [1]: [mergedValue#4527]
+Arguments: isFinalPlan=true
+
+Subquery:11 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4121, [id=#21913]
+
+Subquery:12 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4121, [id=#21913]
+
+Subquery:13 Hosting operator id = 4 Hosting Expression = Subquery subquery#4125, [id=#21916]
+AdaptiveSparkPlan (72)
++- == Final Plan ==
+   ResultQueryStage (69)
+   +- * CometColumnarToRow (68)
+      +- CometProject (67)
+         +- CometHashAggregate (66)
+            +- ShuffleQueryStage (65), Statistics(sizeInBytes=65.0 KiB, rowCount=128)
+               +- CometExchange (64)
+                  +- CometHashAggregate (63)
+                     +- CometProject (62)
+                        +- CometFilter (61)
+                           +- CometNativeScan parquet  (60)
++- == Initial Plan ==
+   CometProject (71)
+   +- CometHashAggregate (70)
+      +- CometExchange (64)
+         +- CometHashAggregate (63)
+            +- CometProject (62)
+               +- CometFilter (61)
+                  +- CometNativeScan parquet  (60)
+
+
+(60) CometNativeScan parquet 
+Output [3]: [ss_quantity#4422L, ss_ext_discount_amt#4426, ss_net_paid#4432]
+Batched: true
+Location: InMemoryFileIndex [file:/home/dmitry/comet/data/tpcds-sf40/store_sales.parquet]
+PushedFilters: [IsNotNull(ss_quantity), GreaterThanOrEqual(ss_quantity,81), LessThanOrEqual(ss_quantity,100)]
+ReadSchema: struct<ss_quantity:bigint,ss_ext_discount_amt:decimal(7,2),ss_net_paid:decimal(7,2)>
+
+(61) CometFilter
+Input [3]: [ss_quantity#4422L, ss_ext_discount_amt#4426, ss_net_paid#4432]
+Condition : ((isnotnull(ss_quantity#4422L) AND (ss_quantity#4422L >= 81)) AND (ss_quantity#4422L <= 100))
+
+(62) CometProject
+Input [3]: [ss_quantity#4422L, ss_ext_discount_amt#4426, ss_net_paid#4432]
+Arguments: [ss_ext_discount_amt#4426, ss_net_paid#4432], [ss_ext_discount_amt#4426, ss_net_paid#4432]
+
+(63) CometHashAggregate
+Input [2]: [ss_ext_discount_amt#4426, ss_net_paid#4432]
+Keys: []
+Functions [3]: [partial_count(1), partial_avg(UnscaledValue(ss_ext_discount_amt#4426)), partial_avg(UnscaledValue(ss_net_paid#4432))]
+
+(64) CometExchange
+Input [5]: [count#4551L, sum#4552, count#4553L, sum#4554, count#4555L]
+Arguments: SinglePartition, ENSURE_REQUIREMENTS, CometNativeShuffle, [plan_id=21813]
+
+(65) ShuffleQueryStage
+Output [5]: [count#4551L, sum#4552, count#4553L, sum#4554, count#4555L]
+Arguments: 0
+
+(66) CometHashAggregate
+Input [5]: [count#4551L, sum#4552, count#4553L, sum#4554, count#4555L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4426)), avg(UnscaledValue(ss_net_paid#4432))]
+
+(67) CometProject
+Input [3]: [count(1)#4154L, avg(ss_ext_discount_amt)#4156, avg(ss_net_paid)#4158]
+Arguments: [mergedValue#4528], [named_struct(count(1), count(1)#4154L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4156, avg(ss_net_paid), avg(ss_net_paid)#4158) AS mergedValue#4528]
+
+(68) CometColumnarToRow [codegen id : 1]
+Input [1]: [mergedValue#4528]
+
+(69) ResultQueryStage
+Output [1]: [mergedValue#4528]
+Arguments: 1
+
+(70) CometHashAggregate
+Input [5]: [count#4551L, sum#4552, count#4553L, sum#4554, count#4555L]
+Keys: []
+Functions [3]: [count(1), avg(UnscaledValue(ss_ext_discount_amt#4426)), avg(UnscaledValue(ss_net_paid#4432))]
+
+(71) CometProject
+Input [3]: [count(1)#4154L, avg(ss_ext_discount_amt)#4156, avg(ss_net_paid)#4158]
+Arguments: [mergedValue#4528], [named_struct(count(1), count(1)#4154L, avg(ss_ext_discount_amt), avg(ss_ext_discount_amt)#4156, avg(ss_net_paid), avg(ss_net_paid)#4158) AS mergedValue#4528]
+
+(72) AdaptiveSparkPlan
+Output [1]: [mergedValue#4528]
+Arguments: isFinalPlan=true
+
+Subquery:14 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4125, [id=#21916]
+
+Subquery:15 Hosting operator id = 4 Hosting Expression = ReusedSubquery Subquery subquery#4125, [id=#21916]
+
+
+== Extended Information (Comet) ==
+ Project [COMET: Unsupported data type: StructType(StructField(count(1),LongType,false),StructField(avg(ss_ext_discount_amt),DecimalType(11,6),true),StructField(avg(ss_net_paid),DecimalType(11,6),true))]
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  +- ReusedSubquery
++- CometColumnarToRow
+   +- CometFilter
+      +- CometNativeScan parquet 
+
+Comet accelerated 37 out of 43 eligible operators (86%). Final plan contains 6 transitions between Spark and Comet. Accelerated expressions: 11 native, 0 codegen dispatch.
+
+ Project [COMET: Unsupported data type: StructType(StructField(count(1),LongType,false),StructField(avg(ss_ext_discount_amt),DecimalType(11,6),true),StructField(avg(ss_net_paid),DecimalType(11,6),true))]
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  :- ReusedSubquery
+:  :- Subquery
+:  :  +- CometColumnarToRow
+:  :     +- CometProject
+:  :        +- CometHashAggregate
+:  :           +- CometExchange
+:  :              +- CometHashAggregate
+:  :                 +- CometProject
+:  :                    +- CometFilter
+:  :                       +- CometNativeScan parquet 
+:  :- ReusedSubquery
+:  +- ReusedSubquery
++- CometColumnarToRow
+   +- CometFilter
+      +- CometNativeScan parquet 
+
+Comet accelerated 37 out of 43 eligible operators (86%). Final plan contains 6 transitions between Spark and Comet. Accelerated expressions: 11 native, 0 codegen dispatch.

@@ -1,0 +1,240 @@
+children {
+  plan_id: 22287
+  native_scan {
+    common {
+      required_schema {
+        name: "o_orderkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "o_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "o_totalprice"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "o_orderdate"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_custkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderstatus"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_totalprice"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderdate"
+        data_type {
+          type_id: DATE
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_orderpriority"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_clerk"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_shippriority"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "o_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 143
+              stop_index: 152
+              line: 9
+              start_position: 6
+            }
+            expr_id: 9109
+          }
+        }
+        query_context {
+          stop_index: 376
+          line: 1
+        }
+        expr_id: 9110
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 143
+              stop_index: 152
+              line: 9
+              start_position: 6
+            }
+            expr_id: 9111
+          }
+        }
+        query_context {
+          stop_index: 376
+          line: 1
+        }
+        expr_id: 9112
+      }
+      projection_vector: 0
+      projection_vector: 1
+      projection_vector: 3
+      projection_vector: 4
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 15
+            scale: 2
+          }
+        }
+      }
+      fields {
+        type_id: DATE
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 2124916834
+  }
+}
+plan_id: 22331
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 143
+              stop_index: 152
+              line: 9
+              start_position: 6
+            }
+            expr_id: 9113
+          }
+        }
+        query_context {
+          stop_index: 376
+          line: 1
+        }
+        expr_id: 9114
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 143
+              stop_index: 152
+              line: 9
+              start_position: 6
+            }
+            expr_id: 9115
+          }
+        }
+        query_context {
+          stop_index: 376
+          line: 1
+        }
+        expr_id: 9116
+      }
+    }
+    expr_id: 9117
+  }
+}

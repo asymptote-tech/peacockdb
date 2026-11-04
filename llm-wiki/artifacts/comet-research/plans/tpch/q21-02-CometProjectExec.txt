@@ -1,0 +1,264 @@
+children {
+  children {
+    plan_id: 26816
+    native_scan {
+      common {
+        required_schema {
+          name: "n_nationkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "n_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_nationkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_regionkey"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "n_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 92
+                stop_index: 100
+                line: 5
+                start_position: 6
+              }
+              expr_id: 11194
+            }
+          }
+          query_context {
+            stop_index: 666
+            line: 1
+          }
+          expr_id: 11195
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 92
+                stop_index: 100
+                line: 5
+                start_position: 6
+              }
+              expr_id: 11196
+            }
+            right {
+              literal {
+                string_val: "SAUDI ARABIA"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 637
+                stop_index: 650
+                line: 23
+                start_position: 17
+              }
+              expr_id: 11197
+            }
+          }
+          query_context {
+            start_index: 628
+            stop_index: 650
+            line: 23
+            start_position: 8
+          }
+          expr_id: 11198
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT32
+                }
+              }
+              query_context {
+                start_index: 92
+                stop_index: 100
+                line: 5
+                start_position: 6
+              }
+              expr_id: 11199
+            }
+          }
+          query_context {
+            stop_index: 666
+            line: 1
+          }
+          expr_id: 11200
+        }
+        projection_vector: 0
+        projection_vector: 1
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT32
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -1185013152
+    }
+  }
+  plan_id: 26893
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 92
+                stop_index: 100
+                line: 5
+                start_position: 6
+              }
+              expr_id: 11201
+            }
+          }
+          query_context {
+            stop_index: 666
+            line: 1
+          }
+          expr_id: 11202
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 92
+                    stop_index: 100
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 11203
+                }
+                right {
+                  literal {
+                    string_val: "SAUDI ARABIA"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 637
+                    stop_index: 650
+                    line: 23
+                    start_position: 17
+                  }
+                  expr_id: 11204
+                }
+              }
+              query_context {
+                start_index: 628
+                stop_index: 650
+                line: 23
+                start_position: 8
+              }
+              expr_id: 11205
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT32
+                    }
+                  }
+                  query_context {
+                    start_index: 92
+                    stop_index: 100
+                    line: 5
+                    start_position: 6
+                  }
+                  expr_id: 11206
+                }
+              }
+              query_context {
+                stop_index: 666
+                line: 1
+              }
+              expr_id: 11207
+            }
+          }
+        }
+      }
+      expr_id: 11208
+    }
+  }
+}
+plan_id: 26895
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT32
+      }
+    }
+    expr_id: 11209
+  }
+}

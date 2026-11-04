@@ -1,0 +1,31 @@
+children {
+  plan_id: 6
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=33.8 MiB, rowCount=4.36E+6)"
+  }
+}
+plan_id: 24531
+sort {
+  sort_orders {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 761
+          stop_index: 775
+          line: 29
+          start_position: 11
+        }
+        expr_id: 14013
+      }
+    }
+    expr_id: 14014
+  }
+}

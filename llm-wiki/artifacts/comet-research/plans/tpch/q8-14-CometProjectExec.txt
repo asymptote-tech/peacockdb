@@ -1,0 +1,328 @@
+children {
+  children {
+    plan_id: 9977
+    native_scan {
+      common {
+        required_schema {
+          name: "p_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "p_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_partkey"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_mfgr"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_brand"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_size"
+          data_type {
+            type_id: INT32
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_container"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_retailprice"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 15
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_comment"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "p_text_embedding"
+          data_type {
+            type_id: LIST
+            type_info {
+              list {
+                element_type {
+                  type_id: FLOAT
+                }
+                contains_null: true
+              }
+            }
+          }
+          nullable: true
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4011
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4012
+        }
+        data_filters {
+          eq {
+            left {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4013
+            }
+            right {
+              literal {
+                string_val: "ECONOMY ANODIZED STEEL"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 721
+                stop_index: 744
+                line: 19
+                start_position: 21
+              }
+              expr_id: 4014
+            }
+          }
+          query_context {
+            start_index: 712
+            stop_index: 744
+            line: 19
+            start_position: 12
+          }
+          expr_id: 4015
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4016
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4017
+        }
+        projection_vector: 0
+        projection_vector: 4
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: -5460562
+    }
+  }
+  plan_id: 10031
+  filter {
+    predicate {
+      and {
+        left {
+          is_not_null {
+            child {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 348
+                stop_index: 356
+                line: 10
+                start_position: 10
+              }
+              expr_id: 4018
+            }
+          }
+          query_context {
+            start_index: 117
+            stop_index: 744
+            line: 5
+            start_position: 4
+          }
+          expr_id: 4019
+        }
+        right {
+          and {
+            left {
+              eq {
+                left {
+                  bound {
+                    index: 1
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 348
+                    stop_index: 356
+                    line: 10
+                    start_position: 10
+                  }
+                  expr_id: 4020
+                }
+                right {
+                  literal {
+                    string_val: "ECONOMY ANODIZED STEEL"
+                    datatype {
+                      type_id: STRING
+                    }
+                  }
+                  query_context {
+                    start_index: 721
+                    stop_index: 744
+                    line: 19
+                    start_position: 21
+                  }
+                  expr_id: 4021
+                }
+              }
+              query_context {
+                start_index: 712
+                stop_index: 744
+                line: 19
+                start_position: 12
+              }
+              expr_id: 4022
+            }
+            right {
+              is_not_null {
+                child {
+                  bound {
+                    datatype {
+                      type_id: INT64
+                    }
+                  }
+                  query_context {
+                    start_index: 348
+                    stop_index: 356
+                    line: 10
+                    start_position: 10
+                  }
+                  expr_id: 4023
+                }
+              }
+              query_context {
+                start_index: 117
+                stop_index: 744
+                line: 5
+                start_position: 4
+              }
+              expr_id: 4024
+            }
+          }
+        }
+      }
+      expr_id: 4025
+    }
+  }
+}
+plan_id: 10033
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 4026
+  }
+}

@@ -1,0 +1,26 @@
+children {
+  shuffle_scan {
+    fields {
+      type_id: INT64
+    }
+    source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1024.0 B, rowCount=1)"
+  }
+}
+plan_id: 126745
+hash_agg {
+  grouping_exprs {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1229
+      stop_index: 1332
+      line: 41
+      start_position: 8
+    }
+    expr_id: 80642
+  }
+  mode: Final
+}

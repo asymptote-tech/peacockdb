@@ -1,0 +1,137 @@
+children {
+  children {
+    plan_id: 13
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=101.2 KiB, rowCount=2.68E+3)"
+    }
+  }
+  plan_id: 132715
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1061
+        stop_index: 1069
+        line: 40
+        start_position: 12
+      }
+      expr_id: 82539
+    }
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "cs_ext_sales_price"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 1061
+                stop_index: 1069
+                line: 40
+                start_position: 12
+              }
+              expr_id: 82540
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 575
+            stop_index: 597
+            line: 23
+            start_position: 10
+          }
+          expr_id: 82541
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 575
+        stop_index: 597
+        line: 23
+        start_position: 10
+      }
+      expr_id: 82542
+    }
+    mode: Final
+  }
+}
+plan_id: 132715
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1061
+      stop_index: 1069
+      line: 40
+      start_position: 12
+    }
+    expr_id: 82543
+  }
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          index: 1
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 575
+          stop_index: 597
+          line: 23
+          start_position: 10
+        }
+        expr_id: 82544
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 575
+      stop_index: 597
+      line: 23
+      start_position: 10
+    }
+    expr_id: 82545
+  }
+}

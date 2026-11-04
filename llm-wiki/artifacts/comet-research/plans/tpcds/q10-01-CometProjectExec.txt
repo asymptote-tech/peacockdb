@@ -1,0 +1,401 @@
+children {
+  children {
+    plan_id: 22591
+    native_scan {
+      common {
+        required_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        required_schema {
+          name: "ca_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_sk"
+          data_type {
+            type_id: INT64
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_address_id"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_name"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_street_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_suite_number"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_city"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_county"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_state"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_zip"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_country"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_gmt_offset"
+          data_type {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 5
+                scale: 2
+              }
+            }
+          }
+          nullable: true
+        }
+        data_schema {
+          name: "ca_location_type"
+          data_type {
+            type_id: STRING
+          }
+          nullable: true
+        }
+        data_filters {
+          in {
+            in_value {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 413
+                stop_index: 431
+                line: 18
+                start_position: 6
+              }
+              expr_id: 13748
+            }
+            lists {
+              literal {
+                string_val: "Rush County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 472
+                stop_index: 484
+                line: 19
+                start_position: 20
+              }
+              expr_id: 13749
+            }
+            lists {
+              literal {
+                string_val: "Toole County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 507
+                stop_index: 520
+                line: 20
+                start_position: 20
+              }
+              expr_id: 13750
+            }
+            lists {
+              literal {
+                string_val: "Jefferson County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 543
+                stop_index: 560
+                line: 21
+                start_position: 20
+              }
+              expr_id: 13751
+            }
+            lists {
+              literal {
+                string_val: "Dona Ana County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 583
+                stop_index: 599
+                line: 22
+                start_position: 20
+              }
+              expr_id: 13752
+            }
+            lists {
+              literal {
+                string_val: "La Porte County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 622
+                stop_index: 638
+                line: 23
+                start_position: 20
+              }
+              expr_id: 13753
+            }
+          }
+          query_context {
+            start_index: 468
+            stop_index: 639
+            line: 19
+            start_position: 16
+          }
+          expr_id: 13754
+        }
+        data_filters {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 413
+                stop_index: 431
+                line: 18
+                start_position: 6
+              }
+              expr_id: 13755
+            }
+          }
+          query_context {
+            stop_index: 1625
+            line: 1
+          }
+          expr_id: 13756
+        }
+        projection_vector: 0
+        projection_vector: 7
+        session_timezone: "UTC"
+        source: "CometScan parquet  (unknown)"
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: STRING
+        }
+        allow_type_promotion: true
+        allow_timestamp_ltz_to_ntz: true
+        has_data_filters: true
+      }
+      source_key_hash: 1100759384
+    }
+  }
+  plan_id: 22684
+  filter {
+    predicate {
+      and {
+        left {
+          in {
+            in_value {
+              bound {
+                index: 1
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 413
+                stop_index: 431
+                line: 18
+                start_position: 6
+              }
+              expr_id: 13757
+            }
+            lists {
+              literal {
+                string_val: "Rush County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 472
+                stop_index: 484
+                line: 19
+                start_position: 20
+              }
+              expr_id: 13758
+            }
+            lists {
+              literal {
+                string_val: "Toole County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 507
+                stop_index: 520
+                line: 20
+                start_position: 20
+              }
+              expr_id: 13759
+            }
+            lists {
+              literal {
+                string_val: "Jefferson County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 543
+                stop_index: 560
+                line: 21
+                start_position: 20
+              }
+              expr_id: 13760
+            }
+            lists {
+              literal {
+                string_val: "Dona Ana County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 583
+                stop_index: 599
+                line: 22
+                start_position: 20
+              }
+              expr_id: 13761
+            }
+            lists {
+              literal {
+                string_val: "La Porte County"
+                datatype {
+                  type_id: STRING
+                }
+              }
+              query_context {
+                start_index: 622
+                stop_index: 638
+                line: 23
+                start_position: 20
+              }
+              expr_id: 13762
+            }
+          }
+          query_context {
+            start_index: 468
+            stop_index: 639
+            line: 19
+            start_position: 16
+          }
+          expr_id: 13763
+        }
+        right {
+          is_not_null {
+            child {
+              bound {
+                datatype {
+                  type_id: INT64
+                }
+              }
+              query_context {
+                start_index: 413
+                stop_index: 431
+                line: 18
+                start_position: 6
+              }
+              expr_id: 13764
+            }
+          }
+          query_context {
+            stop_index: 1625
+            line: 1
+          }
+          expr_id: 13765
+        }
+      }
+      expr_id: 13766
+    }
+  }
+}
+plan_id: 22686
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    expr_id: 13767
+  }
+}

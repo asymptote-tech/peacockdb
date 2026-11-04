@@ -1,0 +1,234 @@
+children {
+  plan_id: 69633
+  native_scan {
+    common {
+      required_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "ca_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_address_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_street_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_suite_number"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_city"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_county"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_state"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_zip"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_country"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_gmt_offset"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 5
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "ca_location_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 231
+              stop_index: 239
+              line: 12
+              start_position: 6
+            }
+            expr_id: 51274
+          }
+        }
+        query_context {
+          stop_index: 587
+          line: 1
+        }
+        expr_id: 51275
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 231
+              stop_index: 239
+              line: 12
+              start_position: 6
+            }
+            expr_id: 51276
+          }
+        }
+        query_context {
+          stop_index: 587
+          line: 1
+        }
+        expr_id: 51277
+      }
+      projection_vector: 0
+      projection_vector: 9
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 171526556
+  }
+}
+plan_id: 69688
+filter {
+  predicate {
+    and {
+      left {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 231
+              stop_index: 239
+              line: 12
+              start_position: 6
+            }
+            expr_id: 51278
+          }
+        }
+        query_context {
+          stop_index: 587
+          line: 1
+        }
+        expr_id: 51279
+      }
+      right {
+        is_not_null {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: STRING
+              }
+            }
+            query_context {
+              start_index: 231
+              stop_index: 239
+              line: 12
+              start_position: 6
+            }
+            expr_id: 51280
+          }
+        }
+        query_context {
+          stop_index: 587
+          line: 1
+        }
+        expr_id: 51281
+      }
+    }
+    expr_id: 51282
+  }
+}

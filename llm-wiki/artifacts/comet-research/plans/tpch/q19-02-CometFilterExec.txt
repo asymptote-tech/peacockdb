@@ -1,0 +1,1445 @@
+children {
+  plan_id: 23850
+  native_scan {
+    common {
+      required_schema {
+        name: "p_partkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "p_brand"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "p_size"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "p_container"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_partkey"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_name"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_mfgr"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_brand"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_type"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_size"
+        data_type {
+          type_id: INT32
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_container"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_retailprice"
+        data_type {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 15
+              scale: 2
+            }
+          }
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_comment"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "p_text_embedding"
+        data_type {
+          type_id: LIST
+          type_info {
+            list {
+              element_type {
+                type_id: FLOAT
+              }
+              contains_null: true
+            }
+          }
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 94
+              stop_index: 102
+              line: 5
+              start_position: 4
+            }
+            expr_id: 9877
+          }
+        }
+        query_context {
+          stop_index: 974
+          line: 1
+        }
+        expr_id: 9878
+      }
+      data_filters {
+        gt_eq {
+          left {
+            bound {
+              index: 2
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 94
+              stop_index: 102
+              line: 5
+              start_position: 4
+            }
+            expr_id: 9879
+          }
+          right {
+            literal {
+              int_val: 1
+              datatype {
+                type_id: INT32
+              }
+            }
+            query_context {
+              start_index: 283
+              stop_index: 283
+              line: 9
+              start_position: 23
+            }
+            expr_id: 9880
+          }
+        }
+        query_context {
+          start_index: 275
+          stop_index: 289
+          line: 9
+          start_position: 15
+        }
+        expr_id: 9881
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 94
+              stop_index: 102
+              line: 5
+              start_position: 4
+            }
+            expr_id: 9882
+          }
+        }
+        query_context {
+          stop_index: 974
+          line: 1
+        }
+        expr_id: 9883
+      }
+      data_filters {
+        or {
+          left {
+            and {
+              left {
+                eq {
+                  left {
+                    bound {
+                      index: 1
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 94
+                      stop_index: 102
+                      line: 5
+                      start_position: 4
+                    }
+                    expr_id: 9884
+                  }
+                  right {
+                    literal {
+                      string_val: "Brand#12"
+                      datatype {
+                        type_id: STRING
+                      }
+                    }
+                    query_context {
+                      start_index: 134
+                      stop_index: 143
+                      line: 6
+                      start_position: 18
+                    }
+                    expr_id: 9885
+                  }
+                }
+                query_context {
+                  start_index: 124
+                  stop_index: 143
+                  line: 6
+                  start_position: 8
+                }
+                expr_id: 9886
+              }
+              right {
+                and {
+                  left {
+                    in {
+                      in_value {
+                        bound {
+                          index: 3
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 94
+                          stop_index: 102
+                          line: 5
+                          start_position: 4
+                        }
+                        expr_id: 9887
+                      }
+                      lists {
+                        literal {
+                          string_val: "SM CASE"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 169
+                          stop_index: 177
+                          line: 7
+                          start_position: 24
+                        }
+                        expr_id: 9888
+                      }
+                      lists {
+                        literal {
+                          string_val: "SM BOX"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 180
+                          stop_index: 187
+                          line: 7
+                          start_position: 35
+                        }
+                        expr_id: 9889
+                      }
+                      lists {
+                        literal {
+                          string_val: "SM PACK"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 190
+                          stop_index: 198
+                          line: 7
+                          start_position: 45
+                        }
+                        expr_id: 9890
+                      }
+                      lists {
+                        literal {
+                          string_val: "SM PKG"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 201
+                          stop_index: 208
+                          line: 7
+                          start_position: 56
+                        }
+                        expr_id: 9891
+                      }
+                    }
+                    query_context {
+                      start_index: 165
+                      stop_index: 209
+                      line: 7
+                      start_position: 20
+                    }
+                    expr_id: 9892
+                  }
+                  right {
+                    lt_eq {
+                      left {
+                        bound {
+                          index: 2
+                          datatype {
+                            type_id: INT32
+                          }
+                        }
+                        query_context {
+                          start_index: 94
+                          stop_index: 102
+                          line: 5
+                          start_position: 4
+                        }
+                        expr_id: 9893
+                      }
+                      right {
+                        literal {
+                          int_val: 5
+                          datatype {
+                            type_id: INT32
+                          }
+                        }
+                        query_context {
+                          start_index: 289
+                          stop_index: 289
+                          line: 9
+                          start_position: 29
+                        }
+                        expr_id: 9894
+                      }
+                    }
+                    query_context {
+                      start_index: 275
+                      stop_index: 289
+                      line: 9
+                      start_position: 15
+                    }
+                    expr_id: 9895
+                  }
+                }
+              }
+            }
+            query_context {
+              stop_index: 974
+              line: 1
+            }
+            expr_id: 9896
+          }
+          right {
+            or {
+              left {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 94
+                          stop_index: 102
+                          line: 5
+                          start_position: 4
+                        }
+                        expr_id: 9897
+                      }
+                      right {
+                        literal {
+                          string_val: "Brand#23"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 428
+                          stop_index: 437
+                          line: 14
+                          start_position: 18
+                        }
+                        expr_id: 9898
+                      }
+                    }
+                    query_context {
+                      start_index: 418
+                      stop_index: 437
+                      line: 14
+                      start_position: 8
+                    }
+                    expr_id: 9899
+                  }
+                  right {
+                    and {
+                      left {
+                        in {
+                          in_value {
+                            bound {
+                              index: 3
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9900
+                          }
+                          lists {
+                            literal {
+                              string_val: "MED BAG"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 463
+                              stop_index: 471
+                              line: 15
+                              start_position: 24
+                            }
+                            expr_id: 9901
+                          }
+                          lists {
+                            literal {
+                              string_val: "MED BOX"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 474
+                              stop_index: 482
+                              line: 15
+                              start_position: 35
+                            }
+                            expr_id: 9902
+                          }
+                          lists {
+                            literal {
+                              string_val: "MED PKG"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 485
+                              stop_index: 493
+                              line: 15
+                              start_position: 46
+                            }
+                            expr_id: 9903
+                          }
+                          lists {
+                            literal {
+                              string_val: "MED PACK"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 496
+                              stop_index: 505
+                              line: 15
+                              start_position: 57
+                            }
+                            expr_id: 9904
+                          }
+                        }
+                        query_context {
+                          start_index: 459
+                          stop_index: 506
+                          line: 15
+                          start_position: 20
+                        }
+                        expr_id: 9905
+                      }
+                      right {
+                        lt_eq {
+                          left {
+                            bound {
+                              index: 2
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9906
+                          }
+                          right {
+                            literal {
+                              int_val: 10
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 588
+                              stop_index: 589
+                              line: 17
+                              start_position: 29
+                            }
+                            expr_id: 9907
+                          }
+                        }
+                        query_context {
+                          start_index: 574
+                          stop_index: 589
+                          line: 17
+                          start_position: 15
+                        }
+                        expr_id: 9908
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  stop_index: 974
+                  line: 1
+                }
+                expr_id: 9909
+              }
+              right {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 94
+                          stop_index: 102
+                          line: 5
+                          start_position: 4
+                        }
+                        expr_id: 9910
+                      }
+                      right {
+                        literal {
+                          string_val: "Brand#34"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 728
+                          stop_index: 737
+                          line: 22
+                          start_position: 18
+                        }
+                        expr_id: 9911
+                      }
+                    }
+                    query_context {
+                      start_index: 718
+                      stop_index: 737
+                      line: 22
+                      start_position: 8
+                    }
+                    expr_id: 9912
+                  }
+                  right {
+                    and {
+                      left {
+                        in {
+                          in_value {
+                            bound {
+                              index: 3
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9913
+                          }
+                          lists {
+                            literal {
+                              string_val: "LG CASE"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 763
+                              stop_index: 771
+                              line: 23
+                              start_position: 24
+                            }
+                            expr_id: 9914
+                          }
+                          lists {
+                            literal {
+                              string_val: "LG BOX"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 774
+                              stop_index: 781
+                              line: 23
+                              start_position: 35
+                            }
+                            expr_id: 9915
+                          }
+                          lists {
+                            literal {
+                              string_val: "LG PACK"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 784
+                              stop_index: 792
+                              line: 23
+                              start_position: 45
+                            }
+                            expr_id: 9916
+                          }
+                          lists {
+                            literal {
+                              string_val: "LG PKG"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 795
+                              stop_index: 802
+                              line: 23
+                              start_position: 56
+                            }
+                            expr_id: 9917
+                          }
+                        }
+                        query_context {
+                          start_index: 759
+                          stop_index: 803
+                          line: 23
+                          start_position: 20
+                        }
+                        expr_id: 9918
+                      }
+                      right {
+                        lt_eq {
+                          left {
+                            bound {
+                              index: 2
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9919
+                          }
+                          right {
+                            literal {
+                              int_val: 15
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 885
+                              stop_index: 886
+                              line: 25
+                              start_position: 29
+                            }
+                            expr_id: 9920
+                          }
+                        }
+                        query_context {
+                          start_index: 871
+                          stop_index: 886
+                          line: 25
+                          start_position: 15
+                        }
+                        expr_id: 9921
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  stop_index: 974
+                  line: 1
+                }
+                expr_id: 9922
+              }
+            }
+          }
+        }
+        query_context {
+          stop_index: 974
+          line: 1
+        }
+        expr_id: 9923
+      }
+      projection_vector: 0
+      projection_vector: 3
+      projection_vector: 5
+      projection_vector: 6
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT32
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: -1678954118
+  }
+}
+plan_id: 23870
+filter {
+  predicate {
+    and {
+      left {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: INT32
+                  }
+                }
+                query_context {
+                  start_index: 94
+                  stop_index: 102
+                  line: 5
+                  start_position: 4
+                }
+                expr_id: 9924
+              }
+            }
+            query_context {
+              stop_index: 974
+              line: 1
+            }
+            expr_id: 9925
+          }
+          right {
+            gt_eq {
+              left {
+                bound {
+                  index: 2
+                  datatype {
+                    type_id: INT32
+                  }
+                }
+                query_context {
+                  start_index: 94
+                  stop_index: 102
+                  line: 5
+                  start_position: 4
+                }
+                expr_id: 9926
+              }
+              right {
+                literal {
+                  int_val: 1
+                  datatype {
+                    type_id: INT32
+                  }
+                }
+                query_context {
+                  start_index: 283
+                  stop_index: 283
+                  line: 9
+                  start_position: 23
+                }
+                expr_id: 9927
+              }
+            }
+            query_context {
+              start_index: 275
+              stop_index: 289
+              line: 9
+              start_position: 15
+            }
+            expr_id: 9928
+          }
+        }
+      }
+      right {
+        and {
+          left {
+            is_not_null {
+              child {
+                bound {
+                  datatype {
+                    type_id: INT64
+                  }
+                }
+                query_context {
+                  start_index: 94
+                  stop_index: 102
+                  line: 5
+                  start_position: 4
+                }
+                expr_id: 9929
+              }
+            }
+            query_context {
+              stop_index: 974
+              line: 1
+            }
+            expr_id: 9930
+          }
+          right {
+            or {
+              left {
+                and {
+                  left {
+                    eq {
+                      left {
+                        bound {
+                          index: 1
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 94
+                          stop_index: 102
+                          line: 5
+                          start_position: 4
+                        }
+                        expr_id: 9931
+                      }
+                      right {
+                        literal {
+                          string_val: "Brand#12"
+                          datatype {
+                            type_id: STRING
+                          }
+                        }
+                        query_context {
+                          start_index: 134
+                          stop_index: 143
+                          line: 6
+                          start_position: 18
+                        }
+                        expr_id: 9932
+                      }
+                    }
+                    query_context {
+                      start_index: 124
+                      stop_index: 143
+                      line: 6
+                      start_position: 8
+                    }
+                    expr_id: 9933
+                  }
+                  right {
+                    and {
+                      left {
+                        in {
+                          in_value {
+                            bound {
+                              index: 3
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9934
+                          }
+                          lists {
+                            literal {
+                              string_val: "SM CASE"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 169
+                              stop_index: 177
+                              line: 7
+                              start_position: 24
+                            }
+                            expr_id: 9935
+                          }
+                          lists {
+                            literal {
+                              string_val: "SM BOX"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 180
+                              stop_index: 187
+                              line: 7
+                              start_position: 35
+                            }
+                            expr_id: 9936
+                          }
+                          lists {
+                            literal {
+                              string_val: "SM PACK"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 190
+                              stop_index: 198
+                              line: 7
+                              start_position: 45
+                            }
+                            expr_id: 9937
+                          }
+                          lists {
+                            literal {
+                              string_val: "SM PKG"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 201
+                              stop_index: 208
+                              line: 7
+                              start_position: 56
+                            }
+                            expr_id: 9938
+                          }
+                        }
+                        query_context {
+                          start_index: 165
+                          stop_index: 209
+                          line: 7
+                          start_position: 20
+                        }
+                        expr_id: 9939
+                      }
+                      right {
+                        lt_eq {
+                          left {
+                            bound {
+                              index: 2
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9940
+                          }
+                          right {
+                            literal {
+                              int_val: 5
+                              datatype {
+                                type_id: INT32
+                              }
+                            }
+                            query_context {
+                              start_index: 289
+                              stop_index: 289
+                              line: 9
+                              start_position: 29
+                            }
+                            expr_id: 9941
+                          }
+                        }
+                        query_context {
+                          start_index: 275
+                          stop_index: 289
+                          line: 9
+                          start_position: 15
+                        }
+                        expr_id: 9942
+                      }
+                    }
+                  }
+                }
+                query_context {
+                  stop_index: 974
+                  line: 1
+                }
+                expr_id: 9943
+              }
+              right {
+                or {
+                  left {
+                    and {
+                      left {
+                        eq {
+                          left {
+                            bound {
+                              index: 1
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9944
+                          }
+                          right {
+                            literal {
+                              string_val: "Brand#23"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 428
+                              stop_index: 437
+                              line: 14
+                              start_position: 18
+                            }
+                            expr_id: 9945
+                          }
+                        }
+                        query_context {
+                          start_index: 418
+                          stop_index: 437
+                          line: 14
+                          start_position: 8
+                        }
+                        expr_id: 9946
+                      }
+                      right {
+                        and {
+                          left {
+                            in {
+                              in_value {
+                                bound {
+                                  index: 3
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 94
+                                  stop_index: 102
+                                  line: 5
+                                  start_position: 4
+                                }
+                                expr_id: 9947
+                              }
+                              lists {
+                                literal {
+                                  string_val: "MED BAG"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 463
+                                  stop_index: 471
+                                  line: 15
+                                  start_position: 24
+                                }
+                                expr_id: 9948
+                              }
+                              lists {
+                                literal {
+                                  string_val: "MED BOX"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 474
+                                  stop_index: 482
+                                  line: 15
+                                  start_position: 35
+                                }
+                                expr_id: 9949
+                              }
+                              lists {
+                                literal {
+                                  string_val: "MED PKG"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 485
+                                  stop_index: 493
+                                  line: 15
+                                  start_position: 46
+                                }
+                                expr_id: 9950
+                              }
+                              lists {
+                                literal {
+                                  string_val: "MED PACK"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 496
+                                  stop_index: 505
+                                  line: 15
+                                  start_position: 57
+                                }
+                                expr_id: 9951
+                              }
+                            }
+                            query_context {
+                              start_index: 459
+                              stop_index: 506
+                              line: 15
+                              start_position: 20
+                            }
+                            expr_id: 9952
+                          }
+                          right {
+                            lt_eq {
+                              left {
+                                bound {
+                                  index: 2
+                                  datatype {
+                                    type_id: INT32
+                                  }
+                                }
+                                query_context {
+                                  start_index: 94
+                                  stop_index: 102
+                                  line: 5
+                                  start_position: 4
+                                }
+                                expr_id: 9953
+                              }
+                              right {
+                                literal {
+                                  int_val: 10
+                                  datatype {
+                                    type_id: INT32
+                                  }
+                                }
+                                query_context {
+                                  start_index: 588
+                                  stop_index: 589
+                                  line: 17
+                                  start_position: 29
+                                }
+                                expr_id: 9954
+                              }
+                            }
+                            query_context {
+                              start_index: 574
+                              stop_index: 589
+                              line: 17
+                              start_position: 15
+                            }
+                            expr_id: 9955
+                          }
+                        }
+                      }
+                    }
+                    query_context {
+                      stop_index: 974
+                      line: 1
+                    }
+                    expr_id: 9956
+                  }
+                  right {
+                    and {
+                      left {
+                        eq {
+                          left {
+                            bound {
+                              index: 1
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 94
+                              stop_index: 102
+                              line: 5
+                              start_position: 4
+                            }
+                            expr_id: 9957
+                          }
+                          right {
+                            literal {
+                              string_val: "Brand#34"
+                              datatype {
+                                type_id: STRING
+                              }
+                            }
+                            query_context {
+                              start_index: 728
+                              stop_index: 737
+                              line: 22
+                              start_position: 18
+                            }
+                            expr_id: 9958
+                          }
+                        }
+                        query_context {
+                          start_index: 718
+                          stop_index: 737
+                          line: 22
+                          start_position: 8
+                        }
+                        expr_id: 9959
+                      }
+                      right {
+                        and {
+                          left {
+                            in {
+                              in_value {
+                                bound {
+                                  index: 3
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 94
+                                  stop_index: 102
+                                  line: 5
+                                  start_position: 4
+                                }
+                                expr_id: 9960
+                              }
+                              lists {
+                                literal {
+                                  string_val: "LG CASE"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 763
+                                  stop_index: 771
+                                  line: 23
+                                  start_position: 24
+                                }
+                                expr_id: 9961
+                              }
+                              lists {
+                                literal {
+                                  string_val: "LG BOX"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 774
+                                  stop_index: 781
+                                  line: 23
+                                  start_position: 35
+                                }
+                                expr_id: 9962
+                              }
+                              lists {
+                                literal {
+                                  string_val: "LG PACK"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 784
+                                  stop_index: 792
+                                  line: 23
+                                  start_position: 45
+                                }
+                                expr_id: 9963
+                              }
+                              lists {
+                                literal {
+                                  string_val: "LG PKG"
+                                  datatype {
+                                    type_id: STRING
+                                  }
+                                }
+                                query_context {
+                                  start_index: 795
+                                  stop_index: 802
+                                  line: 23
+                                  start_position: 56
+                                }
+                                expr_id: 9964
+                              }
+                            }
+                            query_context {
+                              start_index: 759
+                              stop_index: 803
+                              line: 23
+                              start_position: 20
+                            }
+                            expr_id: 9965
+                          }
+                          right {
+                            lt_eq {
+                              left {
+                                bound {
+                                  index: 2
+                                  datatype {
+                                    type_id: INT32
+                                  }
+                                }
+                                query_context {
+                                  start_index: 94
+                                  stop_index: 102
+                                  line: 5
+                                  start_position: 4
+                                }
+                                expr_id: 9966
+                              }
+                              right {
+                                literal {
+                                  int_val: 15
+                                  datatype {
+                                    type_id: INT32
+                                  }
+                                }
+                                query_context {
+                                  start_index: 885
+                                  stop_index: 886
+                                  line: 25
+                                  start_position: 29
+                                }
+                                expr_id: 9967
+                              }
+                            }
+                            query_context {
+                              start_index: 871
+                              stop_index: 886
+                              line: 25
+                              start_position: 15
+                            }
+                            expr_id: 9968
+                          }
+                        }
+                      }
+                    }
+                    query_context {
+                      stop_index: 974
+                      line: 1
+                    }
+                    expr_id: 9969
+                  }
+                }
+              }
+            }
+            query_context {
+              stop_index: 974
+              line: 1
+            }
+            expr_id: 9970
+          }
+        }
+      }
+    }
+    expr_id: 9971
+  }
+}

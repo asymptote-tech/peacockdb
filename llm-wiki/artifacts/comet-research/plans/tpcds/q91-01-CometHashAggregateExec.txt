@@ -1,0 +1,239 @@
+children {
+  children {
+    plan_id: 6
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=80.6 KiB, rowCount=17)"
+    }
+  }
+  plan_id: 226578
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 836
+        stop_index: 852
+        line: 25
+        start_position: 9
+      }
+      expr_id: 143648
+    }
+    grouping_exprs {
+      bound {
+        index: 1
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 836
+        stop_index: 852
+        line: 25
+        start_position: 9
+      }
+      expr_id: 143649
+    }
+    grouping_exprs {
+      bound {
+        index: 2
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 836
+        stop_index: 852
+        line: 25
+        start_position: 9
+      }
+      expr_id: 143650
+    }
+    grouping_exprs {
+      bound {
+        index: 3
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 836
+        stop_index: 852
+        line: 25
+        start_position: 9
+      }
+      expr_id: 143651
+    }
+    grouping_exprs {
+      bound {
+        index: 4
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 836
+        stop_index: 852
+        line: 25
+        start_position: 9
+      }
+      expr_id: 143652
+    }
+    agg_exprs {
+      sum {
+        child {
+          scalarFunc {
+            func: "unscaled_value"
+            args {
+              unbound {
+                name: "cr_net_loss"
+                datatype {
+                  type_id: DECIMAL
+                  type_info {
+                    decimal {
+                      precision: 7
+                      scale: 2
+                    }
+                  }
+                }
+              }
+              query_context {
+                start_index: 836
+                stop_index: 852
+                line: 25
+                start_position: 9
+              }
+              expr_id: 143653
+            }
+            return_type {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 105
+            stop_index: 120
+            line: 4
+            start_position: 7
+          }
+          expr_id: 143654
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 105
+        stop_index: 120
+        line: 4
+        start_position: 7
+      }
+      expr_id: 143655
+    }
+    mode: Final
+  }
+}
+plan_id: 226578
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 836
+      stop_index: 852
+      line: 25
+      start_position: 9
+    }
+    expr_id: 143656
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 836
+      stop_index: 852
+      line: 25
+      start_position: 9
+    }
+    expr_id: 143657
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 836
+      stop_index: 852
+      line: 25
+      start_position: 9
+    }
+    expr_id: 143658
+  }
+  project_list {
+    scalarFunc {
+      func: "make_decimal"
+      args {
+        bound {
+          index: 5
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 105
+          stop_index: 120
+          line: 4
+          start_position: 7
+        }
+        expr_id: 143659
+      }
+      return_type {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 17
+            scale: 2
+          }
+        }
+      }
+      fail_on_error: true
+    }
+    query_context {
+      start_index: 105
+      stop_index: 120
+      line: 4
+      start_position: 7
+    }
+    expr_id: 143660
+  }
+}

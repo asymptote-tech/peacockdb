@@ -1,0 +1,179 @@
+children {
+  children {
+    children {
+      plan_id: 141002
+      scan {
+        fields {
+          type_id: STRING
+        }
+        fields {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 17
+              scale: 2
+            }
+          }
+        }
+        source: "Union (unknown)"
+      }
+    }
+    plan_id: 141005
+    hash_agg {
+      grouping_exprs {
+        bound {
+          datatype {
+            type_id: STRING
+          }
+        }
+        query_context {
+          start_index: 1538
+          stop_index: 1546
+          line: 64
+          start_position: 9
+        }
+        expr_id: 87246
+      }
+      agg_exprs {
+        sum {
+          child {
+            bound {
+              index: 1
+              datatype {
+                type_id: DECIMAL
+                type_info {
+                  decimal {
+                    precision: 17
+                    scale: 2
+                  }
+                }
+              }
+            }
+            query_context {
+              start_index: 1538
+              stop_index: 1546
+              line: 64
+              start_position: 9
+            }
+            expr_id: 87247
+          }
+          datatype {
+            type_id: DECIMAL
+            type_info {
+              decimal {
+                precision: 27
+                scale: 2
+              }
+            }
+          }
+          eval_mode: ANSI
+        }
+        query_context {
+          start_index: 1400
+          stop_index: 1415
+          line: 56
+          start_position: 7
+        }
+        expr_id: 87248
+      }
+    }
+  }
+  plan_id: 141007
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1538
+        stop_index: 1546
+        line: 64
+        start_position: 9
+      }
+      expr_id: 87249
+    }
+    agg_exprs {
+      sum {
+        child {
+          unbound {
+            name: "total_sales"
+            datatype {
+              type_id: DECIMAL
+              type_info {
+                decimal {
+                  precision: 17
+                  scale: 2
+                }
+              }
+            }
+          }
+          query_context {
+            start_index: 1538
+            stop_index: 1546
+            line: 64
+            start_position: 9
+          }
+          expr_id: 87250
+        }
+        datatype {
+          type_id: DECIMAL
+          type_info {
+            decimal {
+              precision: 27
+              scale: 2
+            }
+          }
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 1400
+        stop_index: 1415
+        line: 56
+        start_position: 7
+      }
+      expr_id: 87251
+    }
+    mode: Final
+  }
+}
+plan_id: 141007
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1538
+      stop_index: 1546
+      line: 64
+      start_position: 9
+    }
+    expr_id: 87252
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: DECIMAL
+        type_info {
+          decimal {
+            precision: 27
+            scale: 2
+          }
+        }
+      }
+    }
+    query_context {
+      start_index: 1400
+      stop_index: 1415
+      line: 56
+      start_position: 7
+    }
+    expr_id: 87253
+  }
+}

@@ -1,0 +1,252 @@
+children {
+  children {
+    plan_id: 10
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=1294.9 KiB, rowCount=1.27E+4)"
+    }
+  }
+  plan_id: 170757
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1164
+        stop_index: 1172
+        line: 41
+        start_position: 9
+      }
+      expr_id: 113529
+    }
+    grouping_exprs {
+      bound {
+        index: 1
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1164
+        stop_index: 1172
+        line: 41
+        start_position: 9
+      }
+      expr_id: 113530
+    }
+    grouping_exprs {
+      bound {
+        index: 2
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1164
+        stop_index: 1172
+        line: 41
+        start_position: 9
+      }
+      expr_id: 113531
+    }
+    grouping_exprs {
+      bound {
+        index: 3
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 1164
+        stop_index: 1172
+        line: 41
+        start_position: 9
+      }
+      expr_id: 113532
+    }
+    grouping_exprs {
+      bound {
+        index: 4
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1164
+        stop_index: 1172
+        line: 41
+        start_position: 9
+      }
+      expr_id: 113533
+    }
+    agg_exprs {
+      count {
+        children {
+          literal {
+            int_val: 1
+            datatype {
+              type_id: INT32
+            }
+          }
+          query_context {
+            start_index: 79
+            stop_index: 86
+            line: 4
+            start_position: 7
+          }
+          expr_id: 113534
+        }
+      }
+      query_context {
+        start_index: 79
+        stop_index: 86
+        line: 4
+        start_position: 7
+      }
+      expr_id: 113535
+    }
+    mode: Final
+  }
+}
+plan_id: 170757
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1164
+      stop_index: 1172
+      line: 41
+      start_position: 9
+    }
+    expr_id: 113536
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1164
+      stop_index: 1172
+      line: 41
+      start_position: 9
+    }
+    expr_id: 113537
+  }
+  project_list {
+    bound {
+      index: 2
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1164
+      stop_index: 1172
+      line: 41
+      start_position: 9
+    }
+    expr_id: 113538
+  }
+  project_list {
+    bound {
+      index: 5
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 79
+      stop_index: 86
+      line: 4
+      start_position: 7
+    }
+    expr_id: 113539
+  }
+  project_list {
+    bound {
+      index: 3
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1164
+      stop_index: 1172
+      line: 41
+      start_position: 9
+    }
+    expr_id: 113540
+  }
+  project_list {
+    bound {
+      index: 5
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 79
+      stop_index: 86
+      line: 4
+      start_position: 7
+    }
+    expr_id: 113541
+  }
+  project_list {
+    bound {
+      index: 4
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1164
+      stop_index: 1172
+      line: 41
+      start_position: 9
+    }
+    expr_id: 113542
+  }
+  project_list {
+    bound {
+      index: 5
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 79
+      stop_index: 86
+      line: 4
+      start_position: 7
+    }
+    expr_id: 113543
+  }
+}

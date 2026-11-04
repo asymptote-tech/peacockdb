@@ -1,0 +1,94 @@
+children {
+  children {
+    plan_id: 14
+    shuffle_scan {
+      fields {
+        type_id: STRING
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=857.3 KiB, rowCount=2.23E+4)"
+    }
+  }
+  plan_id: 210520
+  hash_agg {
+    grouping_exprs {
+      bound {
+        datatype {
+          type_id: STRING
+        }
+      }
+      query_context {
+        start_index: 1566
+        stop_index: 1574
+        line: 54
+        start_position: 12
+      }
+      expr_id: 135591
+    }
+    agg_exprs {
+      sum {
+        child {
+          unbound {
+            name: "wr_return_quantity"
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 1566
+            stop_index: 1574
+            line: 54
+            start_position: 12
+          }
+          expr_id: 135592
+        }
+        datatype {
+          type_id: INT64
+        }
+        eval_mode: ANSI
+      }
+      query_context {
+        start_index: 1110
+        stop_index: 1132
+        line: 39
+        start_position: 10
+      }
+      expr_id: 135593
+    }
+    mode: Final
+  }
+}
+plan_id: 210520
+projection {
+  project_list {
+    bound {
+      datatype {
+        type_id: STRING
+      }
+    }
+    query_context {
+      start_index: 1566
+      stop_index: 1574
+      line: 54
+      start_position: 12
+    }
+    expr_id: 135594
+  }
+  project_list {
+    bound {
+      index: 1
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 1110
+      stop_index: 1132
+      line: 39
+      start_position: 10
+    }
+    expr_id: 135595
+  }
+}

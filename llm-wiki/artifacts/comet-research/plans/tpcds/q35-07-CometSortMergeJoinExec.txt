@@ -1,0 +1,122 @@
+children {
+  children {
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.4 MiB, rowCount=5.79E+5)"
+    }
+  }
+  plan_id: 112134
+  sort {
+    sort_orders {
+      sort_order {
+        child {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 756
+            stop_index: 770
+            line: 28
+            start_position: 11
+          }
+          expr_id: 68960
+        }
+      }
+      expr_id: 68961
+    }
+  }
+}
+children {
+  children {
+    plan_id: 6
+    shuffle_scan {
+      fields {
+        type_id: INT64
+      }
+      source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=95.9 MiB, rowCount=1.24E+7)"
+    }
+  }
+  plan_id: 112137
+  sort {
+    sort_orders {
+      sort_order {
+        child {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 756
+            stop_index: 770
+            line: 28
+            start_position: 11
+          }
+          expr_id: 68962
+        }
+      }
+      expr_id: 68963
+    }
+  }
+}
+plan_id: 112139
+sort_merge_join {
+  left_join_keys {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 756
+      stop_index: 770
+      line: 28
+      start_position: 11
+    }
+    expr_id: 68964
+  }
+  right_join_keys {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 756
+      stop_index: 770
+      line: 28
+      start_position: 11
+    }
+    expr_id: 68965
+  }
+  join_type: LeftSemi
+  sort_options {
+    sort_order {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 756
+          stop_index: 770
+          line: 28
+          start_position: 11
+        }
+        expr_id: 68966
+      }
+    }
+    expr_id: 68967
+  }
+}

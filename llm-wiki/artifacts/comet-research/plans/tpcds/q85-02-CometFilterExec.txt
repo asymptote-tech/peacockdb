@@ -1,0 +1,105 @@
+children {
+  plan_id: 212565
+  native_scan {
+    common {
+      required_schema {
+        name: "r_reason_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      required_schema {
+        name: "r_reason_desc"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "r_reason_sk"
+        data_type {
+          type_id: INT64
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "r_reason_id"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_schema {
+        name: "r_reason_desc"
+        data_type {
+          type_id: STRING
+        }
+        nullable: true
+      }
+      data_filters {
+        is_not_null {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 292
+              stop_index: 305
+              line: 13
+              start_position: 6
+            }
+            expr_id: 136936
+          }
+        }
+        query_context {
+          stop_index: 2031
+          line: 1
+        }
+        expr_id: 136937
+      }
+      projection_vector: 0
+      projection_vector: 2
+      session_timezone: "UTC"
+      source: "CometScan parquet  (unknown)"
+      fields {
+        type_id: INT64
+      }
+      fields {
+        type_id: STRING
+      }
+      allow_type_promotion: true
+      allow_timestamp_ltz_to_ntz: true
+      has_data_filters: true
+    }
+    source_key_hash: 162766103
+  }
+}
+plan_id: 212654
+filter {
+  predicate {
+    is_not_null {
+      child {
+        bound {
+          datatype {
+            type_id: INT64
+          }
+        }
+        query_context {
+          start_index: 292
+          stop_index: 305
+          line: 13
+          start_position: 6
+        }
+        expr_id: 136938
+      }
+    }
+    query_context {
+      stop_index: 2031
+      line: 1
+    }
+    expr_id: 136939
+  }
+}

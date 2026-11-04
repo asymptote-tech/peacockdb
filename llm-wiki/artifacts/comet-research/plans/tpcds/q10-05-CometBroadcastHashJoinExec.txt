@@ -1,0 +1,166 @@
+children {
+  children {
+    children {
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=13.4 MiB, rowCount=5.79E+5)"
+      }
+    }
+    plan_id: 24528
+    sort {
+      sort_orders {
+        sort_order {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 761
+              stop_index: 775
+              line: 29
+              start_position: 11
+            }
+            expr_id: 14011
+          }
+        }
+        expr_id: 14012
+      }
+    }
+  }
+  children {
+    children {
+      plan_id: 6
+      shuffle_scan {
+        fields {
+          type_id: INT64
+        }
+        source: "ShuffleQueryStage (unknown), Statistics(sizeInBytes=33.8 MiB, rowCount=4.36E+6)"
+      }
+    }
+    plan_id: 24531
+    sort {
+      sort_orders {
+        sort_order {
+          child {
+            bound {
+              datatype {
+                type_id: INT64
+              }
+            }
+            query_context {
+              start_index: 761
+              stop_index: 775
+              line: 29
+              start_position: 11
+            }
+            expr_id: 14013
+          }
+        }
+        expr_id: 14014
+      }
+    }
+  }
+  plan_id: 24533
+  sort_merge_join {
+    left_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 761
+        stop_index: 775
+        line: 29
+        start_position: 11
+      }
+      expr_id: 14015
+    }
+    right_join_keys {
+      bound {
+        datatype {
+          type_id: INT64
+        }
+      }
+      query_context {
+        start_index: 761
+        stop_index: 775
+        line: 29
+        start_position: 11
+      }
+      expr_id: 14016
+    }
+    join_type: LeftSemi
+    sort_options {
+      sort_order {
+        child {
+          bound {
+            datatype {
+              type_id: INT64
+            }
+          }
+          query_context {
+            start_index: 761
+            stop_index: 775
+            line: 29
+            start_position: 11
+          }
+          expr_id: 14017
+        }
+      }
+      expr_id: 14018
+    }
+  }
+}
+children {
+  plan_id: 9
+  scan {
+    fields {
+      type_id: INT64
+    }
+    source: "BroadcastQueryStage (unknown), Statistics(sizeInBytes=2.6 MiB, rowCount=1.14E+6)"
+  }
+}
+plan_id: 24536
+hash_join {
+  left_join_keys {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 761
+      stop_index: 775
+      line: 29
+      start_position: 11
+    }
+    expr_id: 14019
+  }
+  right_join_keys {
+    bound {
+      datatype {
+        type_id: INT64
+      }
+    }
+    query_context {
+      start_index: 993
+      stop_index: 1007
+      line: 37
+      start_position: 16
+    }
+    expr_id: 14020
+  }
+  join_type: Existence
+  build_side: BuildRight
+}
