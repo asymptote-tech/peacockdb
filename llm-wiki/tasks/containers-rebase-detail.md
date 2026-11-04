@@ -457,3 +457,8 @@ replayed, plus the coordinator's board commit, HEAD `48f382e6` before the fixes 
     master's byte for byte, and the PR's cost-report job builds them on current stable.
   - Not run: the FFI tier and the gpu-shape compile in the build images, and any device run. CI
     runs them on the PR.
+
+CI after the rebase: PR #193 run 41875796464 (pull_request, 13a6271c); device run 41876054030
+(workflow_dispatch, dispatched 2026-11-04T17:16:57Z after the hard stop). `done` comes back when both are green.
+dispatch 41876054030 attempt 1: cudf 25.02 docker pull failed; GPU job's ci-ship hung after [lib] (50-min timeout). Rerun --failed at 2026-11-04T18:17:59Z.
+Rerun green: PR run 41875796464 and dispatch 41876054030 (GPU Tests (nebius-gpu) included), 2026-11-04T18:44:56Z. Back to done.
