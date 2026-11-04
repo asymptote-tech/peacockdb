@@ -55,17 +55,18 @@ machine_cudf_source() {
   umask "$mask"
 }
 
-# machine_image_checked <ref> <tree> <cudf> — pulls the build image <ref>; refuses it, naming each
-# input that differs, unless its peacockdb.inputs label is image_inputs over <tree>.
+# machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
+# default) or run; refuses it, naming each input that differs, unless its peacockdb.inputs label
+# is image_inputs over <tree>.
 machine_image_checked() {
-  local ref=$1 tree=$2 cudf=$3 label differ
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} label differ
   docker pull "$ref"
   label=$(docker image inspect --format '{{index .Config.Labels "peacockdb.inputs"}}' "$ref")
   if [ -z "$label" ] || [ "$label" = "<no value>" ]; then
     echo "${0##*/}: $ref has no peacockdb.inputs label: publish it again with scripts/env/image.sh" >&2
     return 2
   fi
-  differ=$(image_inputs_differ "$label" "$tree" build "$cudf")
+  differ=$(image_inputs_differ "$label" "$tree" "$kind" "$cudf")
   if [ -n "$differ" ]; then
     echo "${0##*/}: $ref was built from other inputs than $tree: $(paste -sd' ' <<< "$differ")" >&2
     return 2

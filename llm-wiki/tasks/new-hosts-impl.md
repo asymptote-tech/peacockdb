@@ -627,7 +627,7 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   every rsync's `-e` use it; `--ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh'`
   reaches the H100.
 
-- [ ] **Step 1: Failing tests**, a fake `NEBIUS_SH` recording its argv and fakes on PATH as
+- [x] **Step 1: Failing tests**, a fake `NEBIUS_SH` recording its argv and fakes on PATH as
   `scripts/env/tests/laptop.py` does: containers' — `test_run_refuses_old_driver` (exit 3 before
   any rsync, stderr holds both versions), `test_ship_dir_is_named_by_dir`,
   `test_ship_defaults_to_the_staged_install`, `test_run_passes_the_machines_hostname`,
@@ -642,7 +642,7 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   `test_run_mounts_the_data_dir_at_its_own_path`, `test_run_refuses_a_run_in_progress`,
   `test_stage_install_stages_four_tests_and_a_release_bench` (fake cargo/build.sh recording argv),
   `test_nsys_profile_uses_the_given_ssh` (fake ssh and rsync; every call through the `--ssh` command).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** every
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** every
   `scripts/env/tests/test_*.py` that needs no image → `0 failed`;
   `git ls-files scripts/env/host 'scripts/env/gpu.sh'` → nothing. **Step 5: Commit**
   `containers: run-gpu.sh, the device run over scripts/nebius.sh; the staged install; Nsight over any ssh`.

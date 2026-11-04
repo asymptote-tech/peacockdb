@@ -1788,6 +1788,27 @@ binary runs even after one fails.
 The sf40 binaries, `--run-benchmarks` and Nsight captures run on the H100 (nebius-h100) through
 `scripts/env/run-gpu.sh`, never on the L40S. H200 timing is out.
 
+**The device run on the H100.** `run-gpu.sh` takes `nebius.sh`'s `--instance-id` and `--profile`
+and reaches the VM only through `nebius.sh … ssh` and `rsh`. It never starts or stops the VM.
+The install is staged first, by `scripts/env/stage-install.sh` in the build image.
+
+```
+N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"
+G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"
+$N start
+$G prepare          # exit 4 the first time: $N stop --force; $N start; $G prepare again
+$G ship --install <the staged cpp/install>
+$G run list         # or: PCK_TEST_FILTER=<f> $G run bench
+$G pull
+$N stop
+```
+
+`--dir <i>` names the VM's directory, `~/peacock/<i>/`; the tree's directory name by default.
+Exit 3 is a driver older than the run image needs, and 2 a stale image, a run in progress, or a
+missing `prepare` or `ship`. Nsight runs on the VM itself, over the same door:
+`create_nsys_profile.sh --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i>
+--remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
+
 ### The two idle guards
 
 **The watcher** is `scripts/nebius/idle_watch.py`, run every minute on the VM by the
