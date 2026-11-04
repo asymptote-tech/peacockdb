@@ -33,8 +33,9 @@ this report relies on, at current versions.
 - **Realistic deployment.** The human expects real clusters to use small CPU nodes (8 or 16 cores),
   each with its own NIC, not one 128-core box. The cost model compares one H100 node against that
   many small nodes at the same price, with each side's total NIC bandwidth counted. It also
-  compares against the single 128-core box that is measured. Experiment 2 measures both a
-  1 × 128-core and an 8 × 16-core layout on that box.
+  compares against the single 128-core box that is measured. Experiment 2 measures only one
+  1 × 128-core layout; small-node clusters are modelled from it and per-node NIC rates (the
+  human's decision, 2026-11-03, after an analyst's reading).
 - **Small nodes are priced linearly by cores** (helper's call): the H100 node buys eight 16-core
   or sixteen 8-core nodes. Each small node gets the NIC rate the provider states for that size.
   The H100 node gets its own stated rate. Where a provider states none, the figure is an
@@ -48,6 +49,13 @@ this report relies on, at current versions.
   are a few TPC-H queries at sf40 on an H200, so most GPU-side times are modelled. Each input is
   marked measured, published or modelled, and the ratio carries an error band. A verdict whose
   band straddles 2× is a **conditional go** that names the measurement that would settle it.
+- **The verdict rule, fixed before any number exists** (the human's decision, 2026-11-03).
+  The headline cell is batch "all", against the faster of the two CPU baselines, at parity with
+  eight 16-core nodes. It is reported per dataset, at sf40 and at the first data size that no
+  longer fits in the H100 node's host RAM. It is a go only if the low end of the band is at
+  least 2× in that cell. The band is taken over the corners of the inputs' low/high ranges, and
+  a sensitivity table names the input that moves the ratio most: that is the settling
+  measurement of a conditional go.
 - **How realistic batching is.** Microsoft's work on overlap between production jobs (SCOPE:
   CloudViews, BigSubs, and their successors) is the guide. Use it to say how much real ETL
   pipelines share, and how well batches of TPC-H/TPC-DS queries stand in for them.
@@ -169,48 +177,64 @@ twice. That choice has a cost model.
 The task may run things. It does **not** run peacockdb's executor (the human's decision); GPU-side
 times come from existing measurements and models.
 
-**Hosts** (the human's list): the Nebius H100 and L40S VMs, and the 128-core CPU VM in eu-west1
-(`nebius-cpu128`; ids and profiles in [`new-hosts.md`](new-hosts.md)).
+**Hosts:** the Nebius L40S VM (eu-north1) and the 128-core CPU VM in eu-west1
+(`nebius-cpu128`; ids and profiles in [`new-hosts.md`](new-hosts.md)). The H100 VM is not
+used (the human's decision, 2026-11-03): the L40S takes its S3 measurement, and the cost model
+uses the H100 instance type's stated NIC rate.
 
 - **Access before new-hosts lands** (the human's decision). The L40S goes through
-  `scripts/gpu-host.sh`. The H100 and the CPU VM have no script, idle watcher or data on master
+  `scripts/gpu-host.sh`. The CPU VM has no script, idle watcher or data on master
   yet, so the chain drives the `nebius` CLI directly with the instance ids and profiles in
   `new-hosts.md`. Never open a Nebius credential file; learn the CLI from `nebius … --help`.
-- **The chain stops every VM it started**, at the end of each measurement session and before
-  it exits for any reason. **It never stops a VM it found running** (helper's call): that may be
-  chain L's run. With no idle watcher on the H100 and the CPU VM, nothing else stops them.
-- **Conflict with chain L is accepted** (the human's decision). If chain L is running, it may
-  stop a VM mid-measurement, and this chain's runs may disturb its H100 timings. A run cut
-  short is re-run and recorded in the detail file.
+- **The chain force-stops every VM it used**, at the end of each measurement session and
+  before it exits for any reason, whether it started the VM or found it running, and even if
+  chain L is using it (the human's decision, 2026-11-03). With no idle watcher on the CPU VM,
+  nothing else stops it.
+- **Conflict with chain L is accepted** (the human's decision). Chain L may stop a VM
+  mid-measurement, and this chain's runs and stops may disturb chain L's. A run cut short is
+  re-run once; cut again, it is recorded as cut and the run moves on. Cut time counts against
+  the cap.
 - **S3 read access** is the default AWS profile, on the VMs and locally (the human's decision),
   with the endpoint `https://storage.eu-north1.nebius.cloud:443`. No credential file is read
   and no key is printed into a transcript.
-- **VM-hour caps** (the human's decision): the CPU VM 6 h, the H100 1 h, the L40S 1 h, summed
+- **In-region buckets for the CPU VM** (the human's decision, 2026-11-03). The datasets live in
+  eu-north1 and the CPU VM is in eu-west1. The human made empty `tpch-sf40` and `tpcds-sf40`
+  buckets in the eu-west1 project, reached through the AWS profile `eu-west1` on dev
+  (endpoint `https://storage.eu-west1.nebius.cloud:443`; the default profile cannot write
+  there). The chain fills them from the CPU VM's local copy, and every S3 measurement on the
+  CPU VM reads them in-region. If that fails, the chain records the error and falls back to
+  cross-region reads with a modelled in-region correction. The buckets stay after the task;
+  emptying them is the human's call.
+- **VM-hour caps** (the human's decision): the CPU VM 2 h and the L40S 1 h, summed
   over the task. Experiments run in priority order. When a cap is reached, the remaining
   configurations are recorded as skipped, never left half-run. There is no mid-task
   checkpoint with the human; the caps take its place.
 
-1. **VM-to-S3 throughput** on each VM: single and parallel streams, against the dataset bucket
-   (eu-north1), and against the VM's local disk. Also the VM's NIC rate as the provider states
-   it. The CPU VM reads the bucket across regions. Its rate is reported as measured, and the
-   cost model uses an in-region rate taken from the provider's figures or the GPU VMs'
-   measurements, marked as an assumption (helper's call). No new bucket is created.
+1. **VM-to-S3 throughput** on each VM: single and parallel streams, against its own region's
+   bucket (the L40S: eu-north1; the CPU VM: the eu-west1 copy), and against the VM's local
+   disk. Also the VM's NIC rate as the provider states it. The CPU VM also gets one
+   cross-region row against eu-north1, for reference.
 2. **Comet on CPU, on the 128-core VM.** TPC-H sf40 (`tpch-sf40`) and TPC-DS sf40
    (`tpcds-sf40`), read from S3 and from local disk. That shows how far the NIC already limits a
-   CPU engine. The human expects it to. Every run uses all 128 cores (the human's decision), in
-   two layouts:
-   - **1 × 128:** one Spark executor with all the cores;
-   - **8 × 16:** eight executors of 16 cores each, each pinned to its own cores. It stands in
-     for a cluster of small nodes. Its shuffle goes over loopback and all eight share one NIC,
-     so the report says what it does not capture.
+   CPU engine. The human expects it to. Every run is one Spark application with one executor
+   on all 128 cores (the human's decisions). The query lists are TPC-H q1-q22, and the 82
+   TPC-DS queries carrying `tp1_single` in chain L's `peacockdb-core/tests/common/corpus_benchmark_cases.inc`
+   (`git show origin/ENS-containers-rebase:<path>`; not on master yet), in file order. That is
+   the list chain L's batches are drawn from.
 
-   For each batch (sizes 3, 10, 20 and all), run the queries **one after another, and
-   concurrently** (the human's decision). Spark's own exchange and subquery reuse stays at its
-   defaults. The report quotes the ratio against both. Priority order, for the cap:
-   1. TPC-H, both layouts, local disk;
-   2. TPC-H, both layouts, S3;
-   3. TPC-DS, 1 × 128, local disk and S3;
-   4. TPC-DS, 8 × 16, local disk and S3.
+   The queries run **one after another and concurrently** (the human's decision), with as few
+   batch configurations as possible (the human's decision, 2026-11-03):
+   - **sequential:** one run of the whole list. Batches 3, 10 and 20 are its prefix sums.
+   - **concurrent:** batch "all" only, the headline cell. If it runs out of memory, batch 20
+     runs concurrently instead, and the report says so.
+
+   Spark's own exchange and subquery reuse stays at its defaults. For batch "all" the report
+   quotes the ratio against both modes, and for 3, 10 and 20 against sequential only. The whole
+   experiment fits in the CPU VM's 2 h (the human's decision), in this priority order:
+   1. TPC-H, local disk: sequential and concurrent;
+   2. TPC-DS, local disk: sequential and concurrent;
+   3. TPC-H, S3: sequential and concurrent;
+   4. TPC-DS, S3: sequential.
 3. **Comet plan dumps** for the translatability count in group 3, on whichever host runs Comet.
 4. **GPU side, modelled, not run.** Use peacockdb's existing sf40 numbers
    ([`benchmark-minimal.md`](../reports/benchmark-minimal.md)), the measured PCIe and decode rates in
@@ -279,5 +303,5 @@ Every factual claim carries a source link and the date accessed. Measurements gi
 
 The report is on `ENS-comet-research`, answers question groups 1-6 to the bar above, with
 experiments 1-3 run, skipped under a cap, or their failure recorded. The audit's findings are
-fixed, every VM the chain started is stopped, and a PR against master is open. The human merges
+fixed, every VM the chain used is stopped, and a PR against master is open. The human merges
 it after reading the report.

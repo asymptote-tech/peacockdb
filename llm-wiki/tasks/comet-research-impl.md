@@ -6,98 +6,129 @@
 GPU backend for Apache Comet against the 2× cost-per-query bar. On a go, it gives the alpha design.
 
 **Architecture:** Chain M's only task, `Kind: prototype` with a PR and no reviewer, in workspace
-alpha on `ENS-comet-research`. The developer runs every step. It dispatches desk research and
-analysis to its own `general-purpose` subagents. Each subagent writes one artifact file under
-`llm-wiki/artifacts/comet-research/` and returns at most ten lines. The developer runs the
-experiments itself, in the foreground, through a small VM wrapper that logs every start and stop
-and enforces the VM-hour caps. A tested cost model turns measured, published and modelled inputs
-into the verdict. The coordinator owns every git write and the PR.
+alpha on dev, on `ENS-comet-research`. The developer runs every step. It has no web tools, so it
+dispatches desk research and analysis to its own `general-purpose` subagents. Each writes one
+artifact file under `llm-wiki/artifacts/comet-research/` and returns at most ten lines. The
+developer runs the experiments through a VM wrapper that logs every use, force-stops what was
+used, arms a dead-man stop on each VM, and counts hours against the caps. Long runs go detached
+on the VM and are polled. A tested cost model turns measured, published and modelled inputs into
+the verdict by a rule fixed in the spec. The coordinator owns every git write and the PR.
 
-**Tech Stack:** Agent tool (`general-purpose`), `anthropic-skills:deep-research`, WebSearch and
-WebFetch, `gh`, the `nebius` CLI, `scripts/gpu-host.sh` (L40S), the AWS CLI (default profile),
-Apache Spark standalone with Comet, Python 3 with pytest.
+**Tech Stack:** Agent tool (`general-purpose`), `anthropic-skills:deep-research`, `gh`, the
+`nebius` CLI, `scripts/gpu-host.sh` (L40S), Python 3 with boto3, pyarrow and pytest, Apache Spark
+standalone with the Comet release jar, `fio`.
 
 **Spec:** [`comet-research.md`](comet-research.md). Read it first. This plan argues from it.
 
+**Revision (2026-11-03, after an analyst's reading; the run paused after Task 1 to take it).**
+The human ruled: the verdict rule; 1 × 128 only; the CPU VM cap 2 h; force-stop every VM used;
+concurrent runs for batch "all" only; the H100 VM not used, its S3 measurement on the L40S;
+in-region eu-west1 buckets for the CPU VM.
+Everything else here is the helper's call. Of the coordinator's two rulings after the desk wave,
+the in-memory-cache run stays (Task 4, priority 5) and the iperf3 run between VMs is dropped: with
+the H100 out, the two VMs left are in different regions.
+
 ## Global Constraints
 
-- **Roles.** A step ending "report a checkpoint `<msg>`" is a checkpoint, not the task's green:
-  the developer stops and reports; the coordinator commits with that message, pushes, and
-  dispatches the developer at the next step. The developer never runs a git write. Only Task 6's
-  last step is green: the coordinator opens the PR against master and marks the task `done`. No
-  reviewer rounds, no completeness pass and no wait on CI (spec: prototype with a PR). The
-  coordinator writes the signoff from `audit.md`.
-- **No peacockdb executor runs.** GPU-side times come from existing measurements and models.
-  Nothing under `peacockdb-core/`, `peacockdb-ffi/`, `cpp/`, `flatbuffers/`, `docker/` or
-  `scripts/` changes. Experiment scripts live in `llm-wiki/artifacts/comet-research/scripts/`.
-- **Never open a Nebius credential file** (`~/.nebius/config.yaml`, `credentials.yaml`, any
-  `*.pem` under `~/.nebius/`, on any host): no `cat`, `grep`, `sed`, Read or redaction. Learn the
-  CLI from `nebius … --help`. S3 is the default AWS profile with `--endpoint-url
-  https://storage.eu-north1.nebius.cloud:443`. Never print `~/.aws/credentials` or a key.
-- **Hosts:** L40S through `scripts/gpu-host.sh`. H100 `computeinstance-e00e6yena4nzjgaym0`
-  (eu-north1, profile `editor-eu`) and CPU VM `computeinstance-e01t2mm4265y8x88ey` (eu-west1,
-  profile `eu-west1`) through the `nebius` CLI. Login `dmitry`, the default ssh key.
-- **Stop what you started, never what you found running.** `vm.sh` records each VM it starts.
-  `vm.sh stop-mine` stops exactly those. A VM already RUNNING when a session begins may be chain
-  L's: use it, never stop it. The developer runs `stop-mine` at the end of every measurement
-  session. The coordinator runs it before it exits for any reason, and after any developer
-  dispatch that ends without a report.
-- **VM-hour caps, summed over the task:** CPU VM 6 h, H100 1 h, L40S 1 h. `vm.sh hours <vm>`
-  is the count. Before each configuration, if hours used plus the configuration's estimate
-  exceed the cap, record it as skipped and go on.
-- **VM sessions run in the foreground**, never `run_in_background`. A backgrounded chain gets
-  killed mid-run with no error.
-- **Conflict with chain L is accepted.** A run cut short by a VM stopping under it is re-run once
-  and noted in `-detail.md`.
-- **Bar:** at least 2× lower cost per query than Comet on CPU. One H100 node (16 cores, 200 GB
-  RAM) costs the same as one 128-core, 512 GB node. Small CPU nodes are priced linearly by cores.
-  Cost per query is VM-hours at that parity. S3 charges and idle time are listed beside it.
-- **Workload:** batched ETL first (batch sizes 3, 10, 20, all), one-pass single job as the floor.
-  The CPU baseline runs each batch one after another and concurrently. Both ratios are quoted.
-- **A verdict whose error band straddles 2× is a conditional go**, naming the settling
-  measurement.
-- Every factual claim carries a link and `(accessed YYYY-MM-DD)`. A claim about code carries the
-  commit SHA it was read at. Every measurement gives host, local date and time, and method. Every
-  cost-model input is tagged `measured`, `published` or `modelled`. Guesses are marked
-  `(estimate)`.
-- External repos (Comet, spark-rapids, Gluten, Auron) are cloned under `~/comet-research/ext/` on
-  the local host, outside every worktree, never into the tree.
-- A subagent returns at most ten lines: its verdict and its file path. The writing is plain:
-  short sentences, ordinary words.
+- **Roles.** A step ending "report a checkpoint `<msg>`" is a checkpoint, not green: the
+  developer stops and reports; the coordinator commits with that message, pushes, and dispatches
+  the next step. The developer never runs a git write. Only Task 6 Step 5 is green. Then the
+  coordinator does Task 6 Step 6. No `reviewing` state, reviewer, completeness pass or CI wait.
+  The same duties are on the board's chain M section, which the coordinator reads at startup.
+- **The developer's done** is this plan's tests (Tasks 2 and 5) passing and the audit's findings
+  fixed. No engine test suite runs.
+- **No peacockdb executor runs.** Nothing under `peacockdb-core/`, `peacockdb-ffi/`, `cpp/`,
+  `flatbuffers/`, `docker/` or `scripts/` changes. Experiment scripts live in
+  `llm-wiki/artifacts/comet-research/scripts/`.
+- **Credentials.** Never open a Nebius credential file (`~/.nebius/config.yaml`,
+  `credentials.yaml`, any `*.pem` under `~/.nebius/`, on any host). Learn the CLI from `nebius …
+  --help`. S3 is the default AWS profile, endpoint `https://storage.eu-north1.nebius.cloud:443`,
+  read through the SDKs' profile providers. No key is ever put in Spark conf, a command line, or
+  a file, and `conf.txt` is redacted (Task 2).
+- **In-region buckets** (the human's decision): the CPU VM reads `tpch-sf40` and `tpcds-sf40`
+  in eu-west1, which exist empty and are filled in Task 4 Step 1. Every eu-west1 access uses
+  `--profile eu-west1` (its config carries the endpoint and region); eu-north1 uses the default
+  profile with `--endpoint-url https://storage.eu-north1.nebius.cloud:443`. The L40S reads
+  eu-north1. A cross-region read appears only as the labelled reference row.
+- **AWS profiles on a VM.** `vm.sh push-aws <vm>` writes dev's `default` and `eu-west1` profile
+  sections into the VM's `~/.aws/` (mode 600) through ssh stdin, never a command line, and
+  prints only the profile names. The L40S gets `default` only.
+- **Hosts:** L40S through `scripts/gpu-host.sh`; CPU VM `computeinstance-e01t2mm4265y8x88ey`
+  (eu-west1, profile `eu-west1`) through the `nebius` CLI. **The H100 VM is never used** (the
+  human's decision): `vm.sh` has no entry for it. Login `dmitry`, the default ssh key, known hosts
+  in `~/.ssh/known_hosts_comet` with `StrictHostKeyChecking=accept-new`, keyed by
+  `HostKeyAlias=comet-<vm>`.
+- **Every VM used is force-stopped** (the human's ruling): at the end of each measurement session
+  and before any exit, whether this chain started it or found it running, even under chain L.
+  `vm.sh stop-used` does it; for the L40S it is `gpu-host.sh stop --force`. The coordinator
+  pre-starts no VM. It runs `stop-used` (when `scripts/vm.sh` exists) at startup if no dispatch
+  is live, after any dispatch that ends without a report, and before every exit.
+- **Dead-man stop.** Each `vm.sh use` arms a stop that needs no live agent: on the VM, `sudo
+  systemd-run --on-active=<minutes left in the cap>m systemctl poweroff`. Task 2 verifies once
+  that a guest poweroff shows STOPPED in `nebius compute instance get`. If it does not, the
+  fallback is a local `systemd-run --user --on-active=… <abs path>/vm.sh stop <vm>` on dev.
+- **Caps, summed over the task:** CPU VM 2 h, L40S 1 h. `vm.sh hours <vm>` is the
+  count. Before each configuration, if hours used plus its calibrated estimate exceed the cap, it
+  is skipped (`skipped.tsv`). Each configuration also runs under `timeout` set to the lesser of
+  3 × its estimate and the minutes left; a timed-out one is `cut at cap`.
+- **Long runs are detached on the VM** (`setsid nohup … &`, writing a `status` file and an `rc`
+  file), and the developer polls with foreground `vm.sh <vm> ssh` calls of at most 9 minutes. No
+  Bash call runs longer than 10 minutes, and no local command uses `run_in_background`.
+- **Cuts.** A configuration cut by a VM stopping under it is re-run once. Cut again, it is `cut`
+  and the run moves on. Cut time counts against the cap.
+- **Exit 75 (no capacity)** from any VM: the developer records it and moves to the next VM or
+  configuration. The coordinator retries `vm.sh <vm> use` every 15 minutes for at most 2 hours,
+  then the experiment is recorded skipped, never stalled.
+- **The coordinator never exits voluntarily at a checkpoint**, only at a point with no VM in use
+  and only when its window forces it: three restarts with the board unchanged stall the chain.
+- **Bar, workload and verdict rule:** the spec's "The bar for go", verbatim. The headline cell
+  is batch "all", the faster CPU baseline, parity with eight 16-core nodes, per dataset, at sf40
+  and at the first size past host RAM; go only if the band's low end is ≥ 2×.
+- **Query lists:** TPC-H q1-q22 in numeric order. TPC-DS: the 82 lines carrying `tp1_single` in
+  `git show origin/ENS-containers-rebase:peacockdb-core/tests/common/corpus_benchmark_cases.inc`,
+  in file order, copied once into `scripts/tpcds-82.txt`. Batches are the first 3, 10, 20 and all.
+- Every factual claim carries a link and `(accessed YYYY-MM-DD)`, code a commit SHA. Every
+  measurement gives host, local date and time, and method. Every cost-model input is tagged
+  `measured`, `published` or `modelled`. Guesses are marked `(estimate)`.
+- External repos are cloned under `~/comet-research/ext/` on dev, outside every worktree. No
+  committed file under the artifact folder exceeds 5 MB; raw event logs stay on the VM, and only
+  their summaries are committed.
+- A subagent returns at most ten lines. The writing is plain: short sentences, ordinary words.
 
 ## Review Focus
 
-1. **A ratio manufactured by the baseline.** A weak CPU baseline (sequential only, S3 read
-   across regions, a mistuned Spark) makes 2× easy. Pinned in Task 4 (both modes, `conf.txt`
-   records the tuning), Task 5 (the cross-region correction is a separate, tagged input) and
-   Task 6's audit.
-2. **Modelled GPU numbers presented as measured.** Pinned by the input tags in Task 5, which a
-   test enforces, and the report's inputs table.
-3. **`spark-plugin.md` repeated rather than checked.** Every fact taken from it is re-verified at
-   the pinned Comet commit. Pinned in Task 1's prompt and Task 6's audit.
-4. **A VM left running, or chain L's VM stopped.** Pinned by `vm.sh`'s started-by-me log, tested
-   in Task 2, by `stop-mine` at the end of every experiment task, and by Task 6's final check.
-5. **The developer's window filling with bulk** (plan dumps, raw timings). Raw output goes to
-   files; the developer reads summaries. `-detail.md` is written after every task, so a
-   restarted coordinator resumes from it.
+1. **A VM left running after an agent dies.** Pinned by the dead-man stop (Task 2 Step 4 checks it
+   on a real VM), the coordinator's startup `stop-used`, and Task 6 Step 4.
+2. **A ratio manufactured by the baseline or by batching.** Pinned by both CPU modes, Comet's own
+   benchmark config with deviations listed (Task 4), the same scan implementation on both sources
+   (Task 4 Step 3), and `cost.md` splitting the ratio into its sharing and device factors (Task 5).
+3. **Modelled GPU numbers presented as measured.** Pinned by the input tags, which a test
+   enforces, and by the audit's check of every `measured` row against `measurements/`.
+4. **Missing bytes.** Every GPU-side and NIC term needs per-query bytes; Task 4 gathers them from
+   Spark event logs into `bytes.tsv`, cross-checked against Parquet footers.
+5. **An arithmetic slip in the model** (Gbit/s against GB/s, H200 against H100). Pinned by the
+   audit's hand recomputation of the headline cells (Task 6 Step 2).
 
 ---
 
 ## Artifact layout (the interface every task shares)
 
     llm-wiki/artifacts/comet-research/
-      comet-internals.md      Task 1: group 2, and group 3's seam
+      comet-internals.md      Task 1: group 2, group 3's seam, plan-dump and scan recipes
       prior-art.md            Task 1: group 1, and group 4's "how others handle it"
-      data-path.md            Task 1: group 4's survey: cloud instances, local SSD, wire savings
+      data-path.md            Task 1: group 4's survey: instances, NIC rates, local SSD, wire savings
       batching.md             Task 1: group 5's API options and prior art, SCOPE overlap numbers
       exotic.md               Task 1: group 4's exotic architectures, with the tier table
-      scripts/                Task 2: vm.sh, s3_throughput.sh, comet_setup.sh, comet_run.py, tests/
-      measurements/vm-log.tsv Task 2 on: every VM event, the source of the caps
-      measurements/<exp>/     Tasks 3-4: raw output, one dir per experiment, plus summary.tsv
-      plans/{tpch,tpcds}/     Task 4: Comet's serialized plans, one file per query
+      scripts/                Task 2: vm.sh, s3_throughput.py, comet_setup.sh, comet_run.py,
+                              comet_bytes.py, tpcds-82.txt, tests/
+      measurements/vm-log.tsv copied from .claude/ensemble/M.vm-log.tsv at each checkpoint
+      measurements/s3/        Task 3
+      measurements/comet/     Task 4: one dir per configuration, summary.tsv, bytes.tsv, skipped.tsv
+      plans/{tpch,tpcds}/     Task 4: final executed plans, fallbacks.tsv
+      split.md                Task 5: the per-operator CPU/GPU placement rule
       translatability.md      Task 5: the classification and counts
-      design.md               Task 5: split rule, seam, IR, data path, batching API, CBO
       cost_model.py, test_cost_model.py, inputs.tsv, cost.md   Task 5
+      design.md               Task 5: the alpha design, or the conditions for a go
       audit.md                Task 6
 
 Every findings file is at most 300 lines, opens with a five-line `## Summary`, and ends with
@@ -105,57 +136,59 @@ Every findings file is at most 300 lines, opens with a five-line `## Summary`, a
 
 ---
 
-### Task 0: Set up the run
+### Task 0: Set up the run (done before the revision)
 
-**Files:** `llm-wiki/artifacts/comet-research/` (with `scripts/`, `measurements/`, `plans/`);
-`llm-wiki/tasks/comet-research-detail.md`
-
-- [ ] **Step 1:** Create the folders. Write `-detail.md`: one line per task (`Task N: todo`), the
-  clone directory, and empty `## VM hours` and `## Rulings` headings.
-- [ ] **Step 2:** Clone into `~/comet-research/ext/`: `apache/datafusion-comet`,
-  `NVIDIA/cudf-spark`, `apache/gluten`, `apache/auron`. Pin Comet to its latest release tag.
-  Record each HEAD SHA, and Comet's tag with its Spark, DataFusion and Arrow versions (from
-  `pom.xml` and `native/Cargo.toml`), in `-detail.md`.
-- [ ] **Step 3:** Report a checkpoint `comet-research: start the run`.
+- [x] Folders, `-detail.md`, clones under `~/comet-research/ext/`, Comet pinned
+  (`comet-research: start the run`).
 
 ### Task 1: Desk wave (five parallel subagents)
 
 **Files:** `comet-internals.md`, `prior-art.md`, `data-path.md`, `batching.md`, `exotic.md`
 
-- [ ] **Step 1:** Dispatch all five at once, each with the prompt template below.
-  - **comet-internals:** spec group 2 in full, plus group 3's first and last bullets: the exact
-    seam where a GPU executor could take a plan fragment, what it receives and returns, and how
-    GPUs map onto executors and tasks. Read from the Comet clone at the pinned SHA, cited by
-    file and line. Include the protobuf schema's operator and expression lists, as a table
-    Task 5 can classify. Say how to make Comet write each query's serialized plan to a file,
-    for Task 4.
-  - **prior-art:** spec group 1, and group 4's "how others handle it": each accelerator's data
-    path (reader, shuffle, cache, NIC handling). Speedata, spark-rapids, Gluten and Velox-cuDF,
-    Auron and Photon at least. Any GPU or hardware effort on Comet itself, from issues, PRs, the
-    mailing list and talks.
+Steps 1-3 ran before the revision, with the jobs as written then. Step 4 adds what the revision
+needs.
+
+- [x] **Step 1:** Dispatch all five at once, each with the prompt template below.
+  - **comet-internals:** spec group 2 in full, plus group 3's first and last bullets. Read from
+    the Comet clone at the pinned SHA, cited by file and line. Include the protobuf schema's
+    operator and expression lists, as a table Task 5 can classify.
+  - **prior-art:** spec group 1, and group 4's "how others handle it". Speedata, spark-rapids,
+    Gluten and Velox-cuDF, Auron and Photon at least. Any GPU or hardware effort on Comet itself.
   - **data-path:** spec group 4's NIC, wire, RAM-cache and local-SSD bullets. A table of cloud
-    GPU and CPU instances (AWS, GCP, Azure, Nebius) with cores, RAM, NIC, local NVMe (count,
-    rated and published measured read rates), GDS support and on-demand price. The wire savings
-    (compression with GPU decompression, pruning, NVMe cache, shuffle volume), each with a
-    published number. The local-SSD product-option bullet in full, with its three layouts and
-    evidence for each. Whether a RAM cache is possible inside Comet and Spark (Comet's
-    experimental cache, Spark's cache manager and BlockManager, executor lifetime under dynamic
-    allocation).
+    GPU and CPU instances (AWS, GCP, Azure, Nebius) with cores, RAM, NIC, local NVMe, GDS support
+    and on-demand price. The wire savings, each with a published number. The local-SSD
+    product-option bullet with its three layouts. Whether a RAM cache is possible inside Comet
+    and Spark.
   - **batching:** spec group 5's API, CBO-placement and prior-art bullets. Microsoft's SCOPE
-    work (CloudViews, BigSubs and successors): the measured overlap between production jobs, as
-    numbers the cost model can use. What Spark already shares within and across queries.
-  - **exotic:** spec group 4's exotic-architectures bullet in full. Add CXL vendors (Samsung,
-    Astera Labs, Liqid, UnifabriX, Panmnesia), product-research's Grace option file
-    (`llm-wiki/artifacts/product-research/options/`), and Spark's fabric paths (spark-rapids' UCX
-    shuffle, SparkRDMA). End with the tier table the cost model reads:
+    overlap numbers. What Spark already shares within and across queries.
+  - **exotic:** spec group 4's exotic-architectures bullet, plus CXL vendors (Samsung, Astera
+    Labs, Liqid, UnifabriX, Panmnesia), product-research's Grace option file, and Spark's fabric
+    paths (spark-rapids' UCX shuffle, SparkRDMA). End with the tier table:
     `tier	GB_per_s_to_GPU	capacity_GB	price_per_hour	cloud|on-prem	source`.
-- [ ] **Step 2:** As each returns, append its ten lines to `-detail.md`.
-- [ ] **Step 3: Verify**, in the artifact folder:
-  `for f in comet-internals prior-art data-path batching exotic; do for h in Summary Sources
-  'Follow-up experiments'; do grep -qF "## $h" $f.md || echo "$f: $h"; done; grep -q 'accessed
-  20' $f.md || echo "$f: no dates"; done` prints nothing, and `exotic.md` has the tier table's
-  header row. Re-dispatch the owner for any gap.
-- [ ] **Step 4:** Report a checkpoint `comet-research: desk wave`.
+- [x] **Step 2:** As each returns, append its ten lines to `-detail.md`.
+- [x] **Step 3: Verify**, in the artifact folder: `for f in comet-internals prior-art data-path
+  batching exotic; do for h in Summary Sources 'Follow-up experiments'; do grep -qF "## $h"
+  $f.md || echo "$f: $h"; done; grep -q 'accessed 20' $f.md || echo "$f: no dates"; done` prints
+  nothing, and `exotic.md` has the tier table's header. Re-dispatch the owner for any gap.
+- [ ] **Step 4: Amendments** (revision). Dispatch two subagents with the same template, each
+  editing an existing file in place:
+  - **comet-internals**, a new `## Recipes` section, at the pinned tag:
+    - how to get each query's *final executed* plan after `collect()` under AQE
+      (`isFinalPlan=true`), and the serialized native plans of its `CometNativeExec` nodes,
+      through py4j;
+    - the fallback settings (`spark.comet.explainFallback.enabled`,
+      `spark.comet.explain.native.enabled`) and where their output goes;
+    - Comet's own benchmark configuration for TPC-H and TPC-DS at that tag, verbatim, with its
+      path;
+    - how the native scan reads S3 (the `spark.comet.scan.impl` values, the S3A-to-object_store
+      settings, the AWS profile provider), so S3 and local runs use the same scan;
+    - the release jar matching the pinned Spark version, and its URL.
+  - **data-path**, a new `## Rates for the cost model` section:
+    - the provider's stated NIC rate for the H100, L40S and 128-core VM instance types, and for
+      Nebius's 8- and 16-vCPU CPU sizes;
+    - the local NVMe tier as rows in the tier-table format above;
+    - Comet's published results at SF100 and SF1000, or the nearest, for CPU scaling past sf40.
+- [ ] **Step 5:** Re-run Step 3's check. Report a checkpoint `comet-research: desk wave amendments`.
 
 **The prompt template** (fill the brackets):
 
@@ -175,168 +208,252 @@ Every findings file is at most 300 lines, opens with a five-line `## Summary`, a
 
 ### Task 2: The experiment scripts
 
-**Files:** `scripts/vm.sh`, `scripts/s3_throughput.sh`, `scripts/comet_setup.sh`,
-`scripts/comet_run.py`, `scripts/tests/test_vm_log.sh`, `scripts/tests/test_comet_run.py`
+**Files:** `scripts/vm.sh`, `scripts/s3_throughput.py`, `scripts/comet_setup.sh`,
+`scripts/comet_run.py`, `scripts/comet_bytes.py`, `scripts/tpcds-82.txt`, `scripts/tests/`
+(`test_vm_log.sh`, `test_comet_run.py`, `test_comet_bytes.py`, `fixtures/`)
 
 **Interfaces:**
-- Consumes: `comet-internals.md`'s recipe for writing serialized plans to files.
+- Consumes: `comet-internals.md` `## Recipes`.
 - Produces:
-  - `vm.sh <h100|cpu128|l40s> <status|start|stop|ip|ssh <cmd…>>`, `vm.sh stop-mine`,
-    `vm.sh hours <vm>`. l40s delegates to `scripts/gpu-host.sh`. The other two call `nebius
-    --profile <p> compute instance {get,start,stop} --id <id>` and take the IP from
-    `network_interfaces[].public_ip_address`, as `gpu-host.sh` does. ssh uses a per-instance
-    `HostKeyAlias` (`comet-<vm>`). Exit codes as `gpu-host.sh`'s (0, 75, 69, 1).
-  - `measurements/vm-log.tsv`, appended by `vm.sh` only: `local_time	vm	event`, event one of
-    `start` (this chain started it), `found-running` (it was already up), `stop`. A VM is
-    "mine" when its last event is `start`. `stop-mine` stops each such VM and logs `stop`.
-    `hours <vm>` sums start-to-stop intervals, counting an open `start` up to now. The log path
-    is overridable by `COMET_VM_LOG`, for the test.
-  - `s3_throughput.sh <bucket> <prefix> <streams>`: run on a VM, prints one TSV row:
-    `vm	streams	bytes	seconds	GB_per_s	source(s3|local)`.
-  - `comet_setup.sh`: on the CPU VM, installs Java, the pinned Spark and Comet, and copies both
-    sf40 datasets to local disk. Idempotent.
-  - `comet_run.py --dataset tpch|tpcds --source s3|local --layout 1x128|8x16
-    --mode sequential|concurrent --batch K --runs R --out DIR`. It starts a Spark standalone
-    application with the layout's executors (8 × 16 pins each executor to its own 16 cores with
-    `taskset`). It writes `DIR/runs.tsv` (`query	run	ms`, plus one `batch` total row per run)
-    and `DIR/conf.txt` (every non-default Spark and Comet setting, versions, host, local start
-    time). `--dump-plans DIR` writes each query's serialized Comet plan and its Comet-annotated
-    explain text. `--matrix` prints the spec's configurations in priority order, one per line,
-    with its time estimate, and runs nothing.
+  - `vm.sh use <vm>`: logs `use-requested`, then reads the state. STOPPED: start it, wait for
+    RUNNING and ssh, log `use started`. RUNNING: log `use found`. STARTING or STOPPING: wait,
+    then re-read. Then record the VM's `/proc/sys/kernel/random/boot_id` and arm the dead-man
+    stop. `<vm>` is `cpu128` or `l40s` (l40s delegates to `gpu-host.sh`); any other name is exit 1.
+  - `vm.sh ssh <vm> <cmd…>`, `vm.sh status <vm>`, `vm.sh ip <vm>`. Each `ssh` refreshes the
+    heartbeat (time and boot id) in the log.
+  - `vm.sh stop-used`: force-stops every VM with an open use, and logs `stop`. A VM already
+    STOPPED, or with a different boot id, is logged `lost`, closed at its last heartbeat.
+  - `vm.sh hours <vm>`: sums use-to-stop intervals from the log, an open use up to now, a
+    `lost` one up to its last heartbeat. Prints hours with two decimals.
+  - The log: `local_time	vm	event	detail`, at `$(git rev-parse --show-toplevel)/.claude/ensemble/M.vm-log.tsv`
+    (git-ignored), overridable by `COMET_VM_LOG`. Exit codes as `gpu-host.sh`'s (0, 75, 69, 1).
+    On exit 1 from a call that started the VM, it stops it.
+  - `s3_throughput.py --bucket B --key K --threads N`: ranged GETs through boto3 into
+    `/dev/null`. `--file F` reads a local file with `O_DIRECT` after dropping the page cache.
+    Prints one TSV row: `vm	threads	bytes	seconds	GB_per_s	source	client_cpu_pct`.
+  - `comet_setup.sh`: on the CPU VM. Installs Java, the pinned Spark, the Comet release jar,
+    pyarrow and boto3. Data: it reuses an existing sf40 copy (chain L's default
+    `/var/lib/peacock/`) if every file's size matches the bucket listing. Otherwise it copies the
+    TPC-H tables and the TPC-DS tables, timing the copy. It checks `df` first and leaves 100 GB for
+    Spark's spill. Then it uploads the local copy to the eu-west1 buckets (`--profile
+    eu-west1`), and checks each object's size against eu-north1. Idempotent: an object already
+    present at the right size is not uploaded again. Spark's S3 reads use `AWS_PROFILE=eu-west1`
+    through the profile provider.
+  - `comet_run.py --dataset tpch|tpcds --source s3|local --mode sequential|concurrent --batch K
+    --runs R --warmup W --out DIR [--dump-plans DIR] [--matrix]`, run on the VM. One Spark
+    application, one executor on all 128 cores, Comet's benchmark config plus the listed
+    deviations. Concurrent means a FAIR scheduler, one pool and one thread per query. Event logs
+    are on, compressed, kept on the VM. It writes `DIR/runs.tsv` (`query	run	ms`, plus a
+    `batch` row per run), `DIR/conf.txt` (settings with keys matching
+    `(?i)secret|password|token|access[._]?key` redacted, versions, host, local start time),
+    `DIR/status` and `DIR/rc`. `--dump-plans` writes each query's final executed plan, its native
+    plans and `fallbacks.tsv` (`query	comet_ops	spark_ops	reason`). `--matrix` prints the
+    spec's configurations in priority order with their estimates, from `calibration.tsv` when it
+    exists, and runs nothing.
+    `prefix_sums(runs_tsv: Path, sizes: list[int]) -> dict[int, float]` gives sequential batch
+    times as the summed per-query times of the first K queries, by run.
+  - `comet_bytes.py EVENTLOG_DIR > bytes.tsv`:
+    `dataset	query	run	scan_bytes	shuffle_bytes	spill_bytes	s3_gets	driver_ms	scheduler_ms`.
 
 - [ ] **Step 1: Write the failing tests.**
-  - `test_vm_log.sh`, with `nebius` replaced by a stub on `PATH` and `COMET_VM_LOG` set to a temp
-    file:
-    - a VM the stub reports STOPPED, then `start`: the log's last line is `start`, and
-      `stop-mine` stops it;
-    - a VM the stub reports RUNNING, then `start`: the log says `found-running`, and `stop-mine`
-      calls no stop on it;
-    - `hours` over a log of two start/stop pairs of 30 min each prints `1.00`.
-  - `test_comet_run.py`: `--matrix` lists TPC-H local (both layouts) first and TPC-DS 8 × 16
-    last, in the spec's order; `sequential` with `--batch 3` takes q1-q3 of the list order.
-- [ ] **Step 2:** Run both. Expected: FAIL, the scripts do not exist.
-- [ ] **Step 3:** Write the four scripts.
-- [ ] **Step 4:** Run both tests. Expected: PASS. Then `vm.sh h100 status` and `vm.sh cpu128
-  status` each print a state and log nothing.
+  - `test_vm_log.sh`, with `nebius` and `ssh` stubbed on `PATH` and `COMET_VM_LOG` a temp file:
+    - `use` on a STOPPED VM logs `use-requested` then `use started`; `stop-used` stops it;
+    - `use` on a RUNNING VM logs `use found`; `stop-used` force-stops it too;
+    - `use` twice on the same VM, then `stop-used`: one stop;
+    - a stub that reports STOPPED at `stop-used` time: the log says `lost`, and no stop is called;
+    - `hours` over two 30-minute use/stop pairs prints `1.00`; over a `lost` use, it stops at the
+      last heartbeat;
+    - the dead-man command is issued with the minutes left in the cap.
+    - `vm.sh use h100` exits 1, calls no `nebius`, and logs nothing;
+    - `push-aws` with a stubbed `ssh` sends the profile sections on stdin, and neither key value
+      appears in the stub's argv or in `push-aws`'s output.
+  - `test_comet_run.py`:
+    - `--matrix` lists exactly nine runs: the seven of the spec, in order: TPC-H local sequential and concurrent
+      "all", TPC-DS local sequential and concurrent "all", TPC-H S3 sequential and concurrent
+      "all", TPC-DS S3 sequential; then the two in-memory-cache runs (Task 4, priority 5);
+    - `prefix_sums` of a sequential `runs.tsv` gives batches 3, 10 and 20 as the sums of the
+      first 3, 10 and 20 queries' times;
+    - TPC-H `--batch 3` takes q1, q2, q3; TPC-DS `--batch 3` takes the first three lines of
+      `tpcds-82.txt`, which has 82 lines;
+    - `conf.txt` writing replaces a `fs.s3a.secret.key` value with `<redacted>`.
+  - `test_comet_bytes.py`: on `fixtures/eventlog-small.json`, a hand-made two-stage event log,
+    the sums equal the fixture's stage metrics.
+- [ ] **Step 2:** Run them. Expected: FAIL, the scripts do not exist.
+- [ ] **Step 3:** Write the scripts.
+- [ ] **Step 4:** Run the tests. Expected: PASS. Then, as the only VM time in this task: `vm.sh use
+  l40s`, arm the dead-man stop at 3 minutes, and confirm `vm.sh status l40s` shows STOPPED within
+  10 minutes. If not, switch to the local fallback, and repeat on the L40S. Record the result in
+  `-detail.md`.
 - [ ] **Step 5:** Report a checkpoint `comet-research: experiment scripts`.
 
-### Task 3: Experiment 1, VM-to-S3 throughput
+### Task 3: Experiment 1, VM-to-S3 throughput, on the L40S
 
 **Files:** `measurements/s3/` (`<vm>.tsv`, `summary.tsv`, `notes.md`)
 
-- [ ] **Step 1:** For each VM in turn (`l40s`, `h100`, `cpu128`): `vm.sh <vm> start`, copy the
-  script over, run `s3_throughput.sh tpch-sf40 <lineitem's prefix> <n>` for n = 1, 4, 16, 64, and
-  once against local disk. Record the provider's stated NIC rate for the instance type in
-  `notes.md`. `vm.sh stop-mine` after each VM, except the CPU VM when Task 4 starts at once.
-- [ ] **Step 2:** Write `summary.tsv`: best rate per VM and source. Mark the CPU VM's S3 rate
-  `cross-region`. Copy each VM's hours so far into `-detail.md`'s `## VM hours`.
-- [ ] **Step 3:** Report a checkpoint `comet-research: S3 throughput`.
+The CPU VM's row is measured at the start of Task 4, in the same session.
 
-### Task 4: Experiments 2 and 3, Comet on the CPU VM, and plan dumps
+- [ ] **Step 1:** On `l40s` (the H100's measurement moved here, the human's decision): `vm.sh use`, `vm.sh push-aws l40s`, copy the script over, and run
+  `s3_throughput.py` against lineitem's largest object at 1, 4, 16 and 64 threads. Then copy that
+  object to local disk and read it with `--file`. When the VM was `found`, record its load next
+  to each row: load average, `nvidia-smi` utilisation, NIC counters. `vm.sh stop-used`.
+- [ ] **Step 2:** Write `summary.tsv` (best rate per VM and source) and `notes.md` (stated NIC
+  rates, from `data-path.md`, the H100's included: the cost model's GPU node is the H100).
+- [ ] **Step 3:** Report a checkpoint `comet-research: S3 throughput (L40S)`.
 
-**Files:** `measurements/comet/<dataset>-<source>-<layout>-<mode>-b<batch>/`,
-`measurements/comet/summary.tsv`, `measurements/comet/skipped.tsv`, `plans/{tpch,tpcds}/`
+### Task 4: Experiments 1-3 on the CPU VM: S3 throughput, Comet, plan dumps
 
-The matrix is the spec's, in its priority order (`comet_run.py --matrix`):
-- TPC-H q1-q22 on `tpch-sf40` (its TPC-H columns only); TPC-DS corpus queries on `tpcds-sf40`.
-  The TPC-DS list order is the corpus order in `testdata/` (the dataset's query files, sorted).
-- Per configuration: `sequential` once with all queries in list order (batch sizes 3/10/20 are
-  its prefix sums, plan's call), and `concurrent` per batch size 3/10/20/all.
-- One warm-up and two measured runs (agreed with the human); the faster measured run is reported.
-- A query Comet fails on or falls back to Spark for is recorded with the reason, not dropped.
+**Files:** `measurements/s3/cpu128.tsv`, `measurements/comet/<dataset>-<source>-<mode>-b<batch>/`,
+`measurements/comet/{summary,bytes,skipped,calibration}.tsv`, `plans/{tpch,tpcds}/`
 
-- [ ] **Step 1:** `vm.sh cpu128 start`. Run `comet_setup.sh`. Record versions and local-disk
-  free space in `-detail.md`.
-- [ ] **Step 2:** Plan dumps: `comet_run.py --layout 1x128 --source local --mode sequential
-  --runs 1 --dump-plans plans/<ds>` for both datasets. **Verify:** one plan file per query that
-  ran, and failures listed in `plans/<ds>/failed.txt`.
-- [ ] **Step 3:** Run the matrix in priority order, in the foreground, one configuration per
-  call. Before each, check the cap (Global Constraints) and write a skipped one to
-  `skipped.tsv`. After each, check `runs.tsv` has the expected rows, and append one line to
-  `-detail.md`.
-- [ ] **Step 4:** Write `summary.tsv`: one row per configuration, mode and batch size, with the
-  batch time, and per-query times from the sequential run. Note each fallback and its reason,
-  from Comet's explain output.
-- [ ] **Step 5:** `vm.sh stop-mine`. Copy the hours into `## VM hours`. Report a checkpoint
-  `comet-research: Comet runs and plan dumps`.
+All of it is one session, inside the CPU VM's 2 h. The target split is about 20 min for setup
+and Experiment 1, and about 100 min for the matrix.
+
+- [ ] **Step 1:** `vm.sh use cpu128`, then `vm.sh push-aws cpu128`. Run `comet_setup.sh`
+  detached and poll. Record in `-detail.md`: versions, the data's source (reused or copied, with
+  copy time and rate), the upload time and rate, and free disk. If bucket creation or upload
+  fails, record the error. The S3 runs then read eu-north1, every row is labelled
+  `cross-region`, and Task 5 adds the modelled in-region correction. Then run Task 3 Step 1's
+  measurements on the CPU VM against the eu-west1 copy, plus one 16-thread `cross-region` row
+  against eu-north1.
+- [ ] **Step 2: Calibration and plan dumps.** `comet_run.py --source local --mode sequential
+  --batch all --runs 1 --warmup 0 --dump-plans plans/<ds>` for TPC-H, then TPC-DS. This pass is
+  also each dataset's warm-up. Write `calibration.tsv` from its per-query times. Then print
+  `--matrix` and write its projected skips into `-detail.md` before going on.
+- [ ] **Step 3: The matrix**, in the spec's priority order, one configuration per detached run.
+  Before each, check the cap. Poll until `rc` exists.
+  1. TPC-H local: sequential, 2 measured runs; concurrent "all", 2 measured runs.
+  2. TPC-DS local: sequential, 1 measured run; concurrent "all", 1 run. If "all" runs out of
+     memory, that is recorded, and concurrent batch 20 runs instead.
+  3. TPC-H S3: one warm-up query (q1), then sequential, 1 run; concurrent "all", 1 run.
+  4. TPC-DS S3: sequential, 1 run.
+  5. The coordinator's ruling after the desk wave (in `-detail.md`): TPC-H local, sequential and
+     concurrent "all", 1 run each, with `spark.comet.exec.inMemoryCache.enabled=true` and the
+     tables cached first, as a fairer batching baseline. Lowest priority, skipped under the cap.
+
+  Sequential batches 3, 10 and 20 are prefix sums of the sequential run; nothing else runs for
+  them (the human's decision).
+
+  Run counts are the helper's call, to fit 2 h. The final plan of an S3 run must use the same
+  `spark.comet.scan.impl` and the same Comet scan node as the local run. If it does not, record
+  the configuration as `scan mismatch`, not as a NIC result. Local runs are labelled "page-cache
+  warm".
+- [ ] **Step 4:** Run `comet_bytes.py` on the VM over the event logs, and copy back `bytes.tsv`.
+  Cross-check three queries per dataset: scan bytes against the sum of their projected columns'
+  chunk sizes in the Parquet footers. Write `summary.tsv`: one row per configuration, mode and
+  batch size, with the batch time and per-query times.
+- [ ] **Step 5:** `vm.sh stop-used`. Copy the VM log into `measurements/`, and the hours into
+  `## VM hours`. Report a checkpoint `comet-research: Comet runs and plan dumps`.
 
 ### Task 5: Analysis and the cost model
 
-**Files:** `translatability.md`, `design.md`, `cost_model.py`, `test_cost_model.py`,
-`inputs.tsv`, `cost.md`
+**Files:** `split.md`, `translatability.md`, `cost_model.py`, `test_cost_model.py`, `inputs.tsv`,
+`cost.md`, `design.md`
 
 **Interfaces:**
-- Consumes: Task 1's five files, `measurements/*/summary.tsv`, `plans/`.
-- Produces: `inputs.tsv` with columns `name	value	low	high	unit	tag	source`. `tag` is one of
-  `measured`, `published`, `modelled`; `source` is a link, a file path, or the model's one-line
-  formula. `cost_model.py` exposes
-  `ratio(inputs: dict, workload: str, batch: int, baseline: str, data_bytes: float, tier: str = "nic") -> tuple[float, float, float]`
-  (low, mid, high), with `workload` in `{batched, one-pass}`, `baseline` in
-  `{sequential, concurrent}`, and `tier` either `nic` or a tier name from `exotic.md`.
+- Consumes: Task 1's five files, `measurements/` (`summary.tsv`, `bytes.tsv`, `s3/summary.tsv`),
+  `plans/`.
+- Produces: `inputs.tsv`: `name	value	low	high	unit	tag	source`. `cost_model.py` exposes
+  `ratio(inputs, dataset, workload, batch, baseline, deployment, data_bytes, tier="nic") -> Band`,
+  where `Band` has `low`, `mid`, `high`, `sharing_factor` and `device_factor`. The arguments take:
+  `dataset` `tpch` or `tpcds`; `workload` `batched` or `one-pass`; `baseline` `sequential` or
+  `concurrent`; `deployment` `1x128`, `8x16` or `16x8`; `tier` `nic`, `local-nvme`, or a tier
+  name from `exotic.md`. `sensitivity(...)` takes the same arguments and returns rows of
+  `(input, ratio_at_low, ratio_at_high)`, sorted by swing.
 
-- [ ] **Step 1 (subagent, translatability):** given `comet-internals.md`'s operator and
-  expression table, `plans/`, `peacockdb-core/src/plan/mod.rs` and `architecture.md`'s node set.
-  It classifies every operator and expression occurring in the dumps as supported, adaptable or
-  missing, with counts per query and overall, and says what the gap from DataFusion 45 to
-  Comet's version costs. Output `translatability.md`, ten-line reply.
+- [ ] **Step 1 (one subagent):** given `comet-internals.md`, `plans/` (with `fallbacks.tsv`),
+  `peacockdb-core/src/plan/mod.rs` and `architecture.md`'s node set, write two files:
+  - `translatability.md`: every operator and expression in the final plans, classed supported,
+    adaptable or missing, with counts per query and overall, and the cost of the gap from
+    DataFusion 45 to Comet's version;
+  - `split.md`: the per-operator placement rule (scan, decode, filter, project, join, aggregate,
+    shuffle write and read, Spark-exact expressions), fallback inside one stage, and each query's
+    GPU-eligible fraction of its operator time. The fractions are rows Task 5 Step 4 reads.
 - [ ] **Step 2: Write the failing tests** in `test_cost_model.py`:
-  - `test_nic_bound_scan`: 40 GB over 5 GB/s with GPU work at 1 s gives 8 s, the max of the
-    wire, PCIe and compute terms.
-  - `test_batching_divides_wire_bytes`: with full overlap, a batch of 10 moves the shared table's
-    bytes once, not ten times.
-  - `test_overlap_fraction_scales_sharing`: with overlap 0.5, half the scan bytes are shared.
-  - `test_parity_pricing`: one H100 node costs the same per hour as eight 16-core nodes, whose
-    total NIC is eight times one node's.
-  - `test_untagged_input_rejected`: an input whose tag is not one of the three raises
-    `ValueError`.
-  - `test_band_ordering`: `low <= mid <= high` for every workload, batch, baseline and tier.
-  - `test_fits_tier`: a data size maps to the tier it fits (VRAM 80 GB, host RAM 200 GB, local
-    disk, none) on the H100 node.
+  - `test_nic_bound_scan`: 40 GB over 5 GB/s, with GPU compute 1 s and no other term, is 8 s.
+  - `test_spark_overhead_floor`: a query with zero bytes and zero compute still costs its
+    `spark_overhead`.
+  - `test_sharing_uses_computed_overlap`: two queries reading 10 GB and 6 GB, with union 12 GB,
+    move 12 GB in a batch.
+  - `test_ratio_factors`: `sharing_factor × device_factor == mid`.
+  - `test_parity_pricing`: one H100 node costs the same per hour as eight 16-core nodes and as
+    sixteen 8-core nodes, whose total NIC is 8× and 16× the per-node rate.
+  - `test_untagged_input_rejected`: a tag outside the three raises `ValueError`.
+  - `test_band_from_corners`: with one input that raises GPU time and one that raises CPU time,
+    the band equals the min and max over the four corners, not "all low" and "all high".
+  - `test_sensitivity_order`: the input with the largest swing comes first.
+  - `test_fits_tier`: 60 GB fits VRAM, 150 GB host RAM, 1 TB local NVMe, 10 TB none, on the H100
+    node (80 GB VRAM, 200 GB RAM, the local NVMe tier's capacity).
+  - `test_one_pass`: `one-pass` is the median, and separately the worst, of the sequential
+    run's per-query ratios.
 - [ ] **Step 3:** Run `python3 -m pytest llm-wiki/artifacts/comet-research/test_cost_model.py`.
   Expected: FAIL, no `ratio`.
-- [ ] **Step 4:** Write `cost_model.py` and fill `inputs.tsv`. GPU per-query times come from
-  `benchmark-minimal.md` (H200 sf40, scaled to H100 by HBM and PCIe rates, tagged `modelled`) and
-  `inventory.md`'s PCIe and decode rates. The CPU VM's S3 rate gets an in-region correction as a
-  separate `modelled` input. Overlap comes from `batching.md`'s SCOPE numbers.
+- [ ] **Step 4:** Write `cost_model.py` and fill `inputs.tsv`. The model, per query q, stated in
+  `cost.md`'s header:
+  - GPU time:
+    `spark_overhead(q) + max(wire_bytes(q)/rate(tier), load_bytes(q)/decode_rate, compute(q)) + shuffle_bytes(q)/NIC + cpu_part(q)/(16-core rate)`.
+  - `spark_overhead` is `driver_ms` plus `scheduler_ms` from `bytes.tsv` (`measured`).
+  - `compute(q)` is the measured sf40 execute time where `benchmark-minimal.md` has one (H200,
+    scaled to H100 by the HBM rate). Elsewhere it is Comet's local time × the GPU-eligible
+    fraction ÷ a speedup band that spans the measured queries' DuckDB-to-GPU ratios (`modelled`).
+  - `cpu_part(q)` is the non-eligible fraction from `split.md`.
+  - `wire_bytes` comes from `bytes.tsv`. A batch moves the union of its queries' scan bytes;
+    overlap is computed from `bytes.tsv` and the plans' column sets. SCOPE's overlap from
+    `batching.md` appears only as a "realistic ETL" sensitivity row.
+  - The CPU side uses the measured times, in-region. Only if Task 4 fell back to cross-region
+    reads does the S3 rate get an in-region correction, a separate `modelled` input. CPU scaling past sf40 uses `data-path.md`'s published Comet results;
+    spill begins where data per node exceeds executor memory. `8x16` and `16x8` are modelled
+    from the 1 × 128 measurements and per-node NIC rates.
+  - S3 GET counts and egress bytes from `bytes.tsv` are listed beside each ratio, not folded in.
 - [ ] **Step 5:** Run the tests. Expected: PASS.
 - [ ] **Step 6:** Generate `cost.md` with `python3 cost_model.py > cost.md`, never by hand:
-  - ratio tables for batched (3, 10, 20, all) and one-pass, against both baselines, at parity
-    with one 128-core node and with eight 16-core nodes, by data size (sf40, sf200, 1 TB,
-    10 TB), each size's tier marked;
-  - the batched table again for each tier in `exotic.md`, at that tier's price;
-  - per TPC-H query, the NIC rate below which the GPU stalls: the rate at which that query's
-    bytes take as long to arrive as the GPU takes to process them.
-- [ ] **Step 7 (subagent, design):** given all artifacts so far, it writes `design.md`. On a go
-  or conditional go, the alpha design: seam, IR and translation, the CPU/GPU split rule, the data
-  path and cache (which local-SSD layout first, and whether an exotic tier changes it), the
-  batching API, and the whole-batch CBO for probe-side holds (buffer against re-read, after
-  query-fuser's item 1a) and where it sits relative to Catalyst, AQE and Comet. Sized by
-  component (reuse, adapt, new) against `inventory.md`'s yardstick, naming the hard part. On a
-  no-go, the conditions for a go. Ten-line reply.
+  - first, the headline cells by the spec's verdict rule, with bands and the verdict each implies;
+  - ratio tables for batched (3, 10, 20, all) and one-pass (median, worst), against both
+    baselines for "all" and the sequential baseline for 3, 10 and 20, for each deployment, by data size (sf40, sf200, 1 TB, 10 TB), each size's tier
+    marked, with the sharing and device factors;
+  - a row "CPU with shared scans" (modelled): the CPU baseline given the same sharing;
+  - the batched table again for the local NVMe tier and each `exotic.md` tier, at its price;
+  - per TPC-H query, the NIC rate below which the GPU stalls;
+  - the sensitivity table for each headline cell; its top row is the settling measurement.
+- [ ] **Step 7 (one subagent):** given all artifacts, write `design.md`. On a go or conditional
+  go: the alpha design (seam, IR and translation, `split.md`'s rule, the data path and cache,
+  which local-SSD layout first, whether an exotic tier changes it, the batching API, and the
+  whole-batch CBO for probe-side holds after query-fuser's item 1a, placed relative to Catalyst,
+  AQE and Comet), sized by component against `inventory.md`'s yardstick, naming the hard part.
+  On a no-go: the conditions for a go. Ten-line reply.
 - [ ] **Step 8:** Report a checkpoint `comet-research: analysis and cost model`.
 
 ### Task 6: The report and its audit
 
 **Files:** `llm-wiki/reports/comet-gpu.md`, `audit.md`
 
-- [ ] **Step 1:** Write the report in the spec's order: the verdict with both ratios (batched
-  ETL, one-pass) and their bands, the cost model and its inputs table (tags shown), groups 1-5
-  with the exotic architectures, the design or the conditions for a go, the VM hours used and any
-  configuration skipped under a cap, follow-up experiments collected from every artifact,
-  sources. Each section summarises and links its artifact. Every factual sentence keeps its
-  source and date.
-- [ ] **Step 2 (one fresh subagent, given the report and the artifact folder only):** open 15
-  cited sources at random and say whether each supports its sentence. Say whether the CPU
-  baseline was fair (tuning, both modes, both layouts, the cross-region correction), whether any
-  `modelled` input is presented as measured, whether a `spark-plugin.md` fact went unchecked,
-  and whether `cost.md` gives the stated verdict. Writes `audit.md`, ten-line reply.
+- [ ] **Step 1:** Write the report in the spec's order:
+  - the verdict, from `cost.md`'s headline cells, with bands;
+  - the cost model, its inputs table (tags shown), and its sharing and device factors;
+  - groups 1-5, with the exotic architectures;
+  - the design, or the conditions for a go;
+  - VM hours per VM, and every configuration skipped, cut or with a scan mismatch;
+  - follow-up experiments collected from every artifact;
+  - sources.
+
+  Each section summarises and links its artifact, and every factual sentence keeps its source
+  and date.
+- [ ] **Step 2 (one fresh subagent, given the report and the artifact folder only):** it writes
+  `audit.md` and replies in ten lines. Its checks:
+  - open 15 cited sources at random and say whether each supports its sentence;
+  - recompute both headline cells and one NIC-stall row by hand from `inputs.tsv`, and compare
+    them with `cost.md`;
+  - check every `measured` row in `inputs.tsv` against a file under `measurements/`;
+  - say whether the CPU baseline was fair: config, both modes, scan parity, and whether its S3
+    reads were in-region;
+  - say whether a `modelled` input is presented as measured, and whether a `spark-plugin.md`
+    fact went unchecked.
 - [ ] **Step 3:** Fix every finding. Re-generate `cost.md` if inputs changed, and re-run the
-  tests of Tasks 2 and 5: PASS.
-- [ ] **Step 4:** `vm.sh stop-mine`. Then `vm.sh <vm> status` for all three: every VM whose last
-  log event is `start` or `stop` by this chain shows stopped. Mark every task done in
-  `-detail.md`.
-- [ ] **Step 5:** Report green: the verdict, both ratios with bands, the design's headline or
-  the conditions for a go, VM hours per VM, and the report's path.
-- [ ] **Step 6 (coordinator):** Commit `comet-research: report`, push, open the PR against
-  master with the green report as its body, write the signoff from `audit.md` at the end of the
-  spec, and mark the task `done`.
+  Task 2 and Task 5 tests: PASS.
+- [ ] **Step 4:** `vm.sh stop-used`, then `vm.sh status` for all three VMs. Every VM the log shows
+  used is STOPPED, or used by someone else since our stop (its log shows our `stop`). Copy the
+  VM log into `measurements/`. Mark every task done in `-detail.md`.
+- [ ] **Step 5:** Report green: the verdict, the headline ratios with bands, the design's
+  headline or the conditions for a go, VM hours per VM, and the report's path.
+- [ ] **Step 6 (coordinator):** Write the signoff from `audit.md` at the end of the spec, and
+  mark the task `done` on the board. Commit `comet-research: report`, push, and open the PR against
+  master with the green report as its body and the PR attribution footer.
