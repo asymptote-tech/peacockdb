@@ -14,6 +14,8 @@
   H100 in its own short bracket. Also the H100's `free -b` for "Host memory". Both report
   `pageableMemoryAccess = 0`. The rest of Step 3 (CPU-VM build, `ship`, sf40 sizes, container
   limit) still waits for the H100 path.
+- 2026-11-04: Task 3 offline (the cache alone, no VM): `pinned_host_cache.h`/`.cpp`, 30 CPU
+  cases, 2 GPU cases. Notes below.
 
 ## Task 1: the load breakdown
 
@@ -54,6 +56,55 @@
   `create_nsys_profile.sh` and over the edited one gives the same findings: SC2034
   (`REMOTE_SSH` unused) and SC1091 (info), both there before. `bash -n` is clean. The image was
   removed after.
+
+## Task 3: the pinned host file cache
+
+- **Red → green, in the 25.02 build image** (build dir `/tmp/pl-build25` mounted over
+  `cpp/build`; dev's own `cpp/build` is a host build and was left alone). Red:
+  `test_pinned_host_cache.cpp:5:10: fatal error: peacock/pinned_host_cache.h: No such file or
+  directory`. Green: `ctest -L cpu` 1/1; `peacock_cpu_tests` 56/56 (26 before + 30
+  `PinnedHostCache.*`), three runs in a row. No warning from the new files.
+- **The GPU cases are compiled, not run:** `PinnedHostCache.CudaAllocatorPinsHostMemory` and
+  `PinnedHostCache.RefusedAllocationClearsTheCudaError` in `peacock_gpu_tests` (listed by
+  `--gtest_list_tests`). They run in Task 7. `peacock_gpu_tests` gained `PEACOCK_TESTDATA_DIR`
+  (env overrides) for the second one's `customer.parquet`.
+- **Not done: the 26.02 compile** the plan's Step 4 asks for. Dev holds one image at a time (the
+  dispatch's disk rule). The new code uses no API that differs between the two: CUDA runtime
+  (`cudaHostAlloc`, `cudaFreeHost`, `cudaGetLastError`), POSIX, and in the GPU test
+  `read_parquet`, which the reader probe already compiles against both. Task 4 or 5, which
+  build 26.02 anyway, cover it.
+- **First green run had 3 failures, all in the test's allocator.** `was_freed(p)` read false
+  after an eviction that was followed by a new 1 KiB allocation: glibc handed the freed block
+  straight back, and the allocator un-marked it. The allocator now poisons a freed block and
+  keeps it until the test ends, so an address is never reused within a test (this also makes a
+  read of a freed entry in `ConcurrentReadAndEviction` see `0xDD` for certain).
+- **Checked by mutation:** letting `make_room_locked` evict a leased entry fails
+  `LeasedEntryIsNeverEvicted`, `ConcurrentReadAndEviction`, `ReleaseEvictsWhileOverCapacity` and
+  `SetCapacityEvictsTheUnleased`. Dropping `acquire`'s wait for an in-flight fill fails
+  `SecondReaderWaitsForTheFill` and `AFailedFillWakesItsWaiters`.
+- **One rule for the fit, in acquire and prefill:** `limit = capacity − leased bytes that are
+  not the named files' current contents` (leased entries of other paths, a named path's leased
+  entry whose key moved, stale copies still leased: `stale_`). A request fits when the named
+  sizes' sum ≤ limit; only then are unleased entries evicted, so a scan that falls back evicts
+  nothing. In `acquire` the fallback line names the path at which the running sum passes the
+  limit.
+- **Small departures from the plan's text:**
+  - A path that cannot be `stat`ed, in `acquire`, is no fallback: not counted, not said. The
+    scan reads the path and cuDF names the error. (The plan says only "no throw".)
+  - A fill whose read fails says `not cached: read failed: <strerror>` (for example `Stale file
+    handle` for a short read at EOF). The plan names only the two reasons for a fit and a refused
+    allocation.
+  - `peacock_cpu_tests` did not need `src/` added to its include directories: `peacock_gpu`
+    exports it as a PUBLIC build interface already, and `test_executor.cpp` relies on it.
+  - `Lease` is move-only with no public default constructor; tests hold an optional one.
+  - The cache frees a buffer under its lock (`cudaFreeHost` included), so `resident_bytes` never
+    drops before the memory does. Eviction is rare in a run (prefill first), so the cost is
+    accepted.
+  - The fallback line is said once per path per cache instance; the process has one (Task 4's
+    singleton).
+- **For Task 4:** the singleton is still to write (`pinned_host_cache()`); nothing calls the
+  cache yet, and `scan.cpp` is untouched. `PrefillOutcome::failed_index` is an index into the
+  caller's `paths` (the first occurrence of a duplicate).
 
 ## cuDF 25.02 default
 

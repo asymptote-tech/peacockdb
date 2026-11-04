@@ -152,6 +152,7 @@ add_library(peacock_gpu SHARED
   src/column_refs.cpp
   src/node_session.cpp
   src/table_result.cpp
+  src/pinned_host_cache.cpp
   src/operators/dispatch.cpp
   src/operators/scan.cpp
   src/operators/filter.cpp
@@ -187,7 +188,7 @@ include("${CUDF_SOURCE_DIR}/cmake/thirdparty/get_gtest.cmake")
 enable_testing()
 
 # CPU tests — no GPU required at runtime, but needs libpeacock_gpu
-add_executable(peacock_cpu_tests tests/cpu/test_executor.cpp)
+add_executable(peacock_cpu_tests tests/cpu/test_executor.cpp tests/cpu/test_pinned_host_cache.cpp)
 target_include_directories(peacock_cpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # cudf::cudf + flatbuffers for the host-only unit tests of plan_executor_internal.h
 # (decimal-scale / AST-routing helpers); no GPU is touched at runtime.
@@ -205,6 +206,9 @@ set_tests_properties(peacock_cpu_tests PROPERTIES LABELS "cpu")
 add_executable(peacock_gpu_tests tests/gpu/test_cudf.cpp tests/gpu/test_reader_probe.cpp)
 target_include_directories(peacock_gpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(peacock_gpu_tests PRIVATE peacock_gpu cudf::cudf GTest::gtest)
+target_compile_definitions(peacock_gpu_tests PRIVATE
+  PEACOCK_TESTDATA_DIR="${PEACOCK_TESTDATA_DIR}"
+)
 set_target_properties(peacock_gpu_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 add_test(NAME peacock_gpu_tests COMMAND peacock_gpu_tests)
 set_tests_properties(peacock_gpu_tests PROPERTIES LABELS "gpu")
