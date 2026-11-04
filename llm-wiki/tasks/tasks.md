@@ -62,6 +62,23 @@ and tp4_sized only. new-hosts' rename of the `gpu-host` scripts to `nebius` and 
 to master in one small commit, `ENS-nebius-guard`, mid-task, once their offline tests pass; the
 human lands it, and new-hosts' live three-VM watch check is dispatched from master after that.
 
+> **Blocks lifted, 2026-11-04, by the human.** The GitHub PAT is on dev at
+> `~/.config/peacock/github-pat`, made as `new-hosts-detail.md` "Blocked" asks. Tested: Contents,
+> Pull requests and Actions write work; Workflows write is untested. `ENS-nebius-guard` is not on
+> master yet.
+>
+> - **Go back to the blocked tasks before anything else, in chain order: new-hosts, pinned-loads,
+>   bench-rows, sf40-baseline.** In one commit on your branch, reset each `blocked(building)` →
+>   `building`. dag-driver stays `building` at its last committed checkpoint and resumes after
+>   sf40-baseline.
+> - Each resumes where its detail file's "Blocked" section says: new-hosts at Task 7 Step 3
+>   (provision the CPU VM), then Task 8 live and Task 10; pinned-loads at Task 2 Step 3;
+>   bench-rows at Task 5; sf40-baseline at Task 8. Complete each to its plan's last step under the
+>   chain's rules.
+> - new-hosts' Task 6 Step 5 still waits on the human landing `ENS-nebius-guard`. When it is the
+>   only step left, mark new-hosts `blocked(building)` naming that step alone and go on to
+>   pinned-loads; the H100 work needs Task 10, not the guard.
+
 - **containers-rebase's history surgery stays in the roles.** The coordinator runs every git
   command (cherry-pick, rebase, each stop's `add` and `continue`, push); at each stop the
   developer resolves the files and compiles. The coordinator's `building` commit is kept: the
