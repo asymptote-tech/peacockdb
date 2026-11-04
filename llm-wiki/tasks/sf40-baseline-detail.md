@@ -286,3 +286,14 @@
 | VM | start (UTC) | stop (UTC) | hours | why |
 |---|---|---|---|---|
 - Known red on `ENS-pinned-loads` and `ENS-bench-rows`: `scripts/env/tests/test_run_gpu.py::test_nsys_profile_uses_the_given_ssh` — pinned-loads' `1c85b136` made `create_nsys_profile.sh` call `nsys_loads.py`, which that test's fake tree lacked. Fixed here (Task 3, a stub in the fake tree); pinned-loads must carry the same fix when it resumes (or get it by the rebase order).
+
+## Blocked (2026-11-04)
+
+`blocked(building)`: Tasks 8–12 need the VMs: Task 8 the CPU-VM build and DuckDB's tpcds database
+on nebius-cpu128, Tasks 9–10 the H100, Task 11 the 128-core DuckDB run. All wait on new-hosts'
+block (the human's GitHub PAT; `new-hosts-detail.md`, "Blocked"), the obstacle the analyst
+diagnosed there. Tasks 1–7 are committed (`2a6b0821`, `641a69af`, `a5458f7b`).
+- GitHub's SSH from dev was flaky on 2026-11-04 from about 10:40Z (`Permission denied
+  (publickey)` on most pushes and fetches, though `ssh -T git@github.com` authenticated). Pushes
+  went over HTTPS with gh's credentials, no config change:
+  `git -c credential.helper='!gh auth git-credential' push https://github.com/asymptote-tech/peacockdb.git <b>:<b>`.
