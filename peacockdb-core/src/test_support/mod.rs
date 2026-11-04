@@ -26,6 +26,7 @@ mod cost_model;
 // run a device can still show it failing.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 mod device_answer;
+mod device_cases;
 mod device_schema;
 mod duckdb_oracle;
 mod fingerprint;
@@ -1124,6 +1125,51 @@ pub fn declared_for(dataset: &str, sf: &str, mode: &str) -> Vec<(String, Option<
 #[cfg(not(feature = "rust-only"))]
 pub fn results_file(device: &str, dataset: &str, sf: &str, mode: &str) -> PathBuf {
     corpus_benchmark::results_file(device, dataset, sf, mode)
+}
+
+// --- the per-device case lists -------------------------------------------------
+
+/// The first line of every `<device>/cases.csv`. A row splits at its first five commas, and
+/// the note is the rest of the line, commas and all: no quoting, a reason is one line.
+pub const DEVICE_CASES_HEADER: &str = "dataset,sf,query,modes,status,note";
+
+/// What became of a case on its device, spelled `ok`, `skipped`, `wrong` in the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseStatus {
+    Ok,
+    Skipped,
+    Wrong,
+}
+
+/// One row of a device's case list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceCase {
+    pub dataset: String,
+    pub sf: String,
+    /// The main list's ident, `_` kept (`aggregate_groupby`).
+    pub query: String,
+    /// Mode idents in the file's order, `|`-joined there; empty iff `Skipped`.
+    pub modes: Vec<String>,
+    pub status: CaseStatus,
+    /// `Skipped`: the reason; `Wrong`: the ticket, `#NN`; `Ok`: empty.
+    pub note: String,
+}
+
+/// `testdata/benchmark-results/<device>/cases.csv`, the list `device`'s tree is held to.
+pub fn device_cases_path(device: &str) -> PathBuf {
+    device_cases::path(device)
+}
+
+/// The rows of a device case list. Panics naming the line number and its text on a list the
+/// format refuses.
+pub fn parse_device_cases(text: &str) -> Vec<DeviceCase> {
+    device_cases::parse(text)
+}
+
+/// The header and one row per case, each line ending in `\n`; `parse_device_cases` reads it
+/// back as `cases`.
+pub fn render_device_cases(cases: &[DeviceCase]) -> String {
+    device_cases::render(cases)
 }
 
 /// What became of one benchmark case in its mode's file.

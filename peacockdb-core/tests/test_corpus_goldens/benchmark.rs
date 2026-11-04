@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    BUILD, COLUMNS, Capture, FAILED, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV,
-    RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections, record_header,
-    rows_match_the_recipes, source_file, testdata_root,
+    BUILD, COLUMNS, Capture, DEVICE_CASES_HEADER, FAILED, MEASURED_RUNS, MODES, Mode, Provenance,
+    RECORD_PATH_ENV, RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections,
+    parse_device_cases, record_header, rows_match_the_recipes, source_file, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -497,24 +497,6 @@ fn listed_cases() -> Vec<Case> {
         .collect()
 }
 
-/// The `corpus_query_benchmark!(…);` lines of a list kept in testdata as text. Every other line
-/// is a `//` comment or blank; anything else is refused rather than skipped.
-fn text_cases(text: &str, path: &Path) -> Vec<Case> {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//"))
-        .map(|line| {
-            let args = line
-                .strip_prefix("corpus_query_benchmark!(")
-                .and_then(|rest| rest.strip_suffix(");"))
-                .unwrap_or_else(|| panic!("{}: {line:?} is not a case line", path.display()));
-            let args: Vec<String> = args.splitn(4, ',').map(|a| a.trim().to_string()).collect();
-            args.try_into()
-                .unwrap_or_else(|_| panic!("{}: {line:?} has not four arguments", path.display()))
-        })
-        .collect()
-}
-
 /// `(dataset, query, modes)` for every tpch and tpcds row with an enabled device cell, in the
 /// registry's row order, the modes in `MODES` order.
 fn registry_cases() -> Vec<(String, String, Vec<String>)> {
@@ -643,11 +625,28 @@ fn declared_files(cases: &[Case]) -> Files {
     files
 }
 
-/// What a tree in `PREDATES_PROVENANCE` was measured from, in that tree.
-const PREDATES_LIST: &str = "cases.inc";
+/// The list a device tree is held to when the tree holds one (`<device>/cases.csv`); a tree
+/// without is held to the whole main list.
+const DEVICE_LIST: &str = "cases.csv";
+
+/// `ok` and `wrong` rows, each mode → its `(dataset, sf, mode)` file → the query, `_` → `-`, as
+/// `declared_files` keys them. A `skipped` row declares no section: its modes are empty.
+fn device_list_files(path: &Path) -> Files {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut files = Files::new();
+    for case in parse_device_cases(&text) {
+        for mode in case.modes {
+            files
+                .entry((case.dataset.clone(), case.sf.clone(), mode))
+                .or_default()
+                .insert(case.query.replace('_', "-"));
+        }
+    }
+    files
+}
 
 /// Every case the list declares has its section in each device's committed tree. The exception is
-/// a tree in `PREDATES_PROVENANCE`, which is held to the list it was measured from instead.
+/// a tree that holds its own `DEVICE_LIST`, which is held to that list instead.
 ///
 /// The tree accumulates across runs and nothing else compares it with the list, so a case
 /// added and never measured would leave its file silently short.
@@ -671,6 +670,51 @@ fn a_new_device_tree_is_held_to_every_declared_case() {
     let _ = std::fs::remove_dir_all(&tree);
     let problem = problem.expect_err("a tree of one file passed against the whole list");
     assert!(problem.contains("h100-80gb-hbm3"), "{problem}");
+}
+
+/// A tree that holds a `DEVICE_LIST` answers to its rows and not to the main list: a case it
+/// lists `ok` and lacks a section for is refused by name, and the same case `skipped` is not.
+#[test]
+fn a_tree_with_its_own_list_is_held_to_it() {
+    let tree = synthesized_tree("own-list", "h100-80gb-hbm3", Some("NVIDIA H100 80GB HBM3"));
+    let main = declared_files(&listed_cases());
+    let held = |rows: &str| {
+        let list = tree.join("h100-80gb-hbm3").join(DEVICE_LIST);
+        std::fs::write(&list, format!("{DEVICE_CASES_HEADER}\n{rows}")).unwrap();
+        missing_case_problem(&tree, &main)
+    };
+    let one = held("tpch,40,q1,tp1_single,ok,\n");
+    let unmeasured = held("tpch,40,q1,tp1_single,ok,\ntpch,40,q2,tp1_single,ok,\n");
+    let skipped = held("tpch,40,q1,tp1_single,ok,\ntpch,40,q2,,skipped,not measured\n");
+    let _ = std::fs::remove_dir_all(&tree);
+    assert_eq!(one, Ok(()), "the tree's one file holds q1");
+    let problem = unmeasured.expect_err("q2 is listed ok and has no section");
+    assert!(problem.contains(r#"no section for ["q2"]"#), "{problem}");
+    assert_eq!(skipped, Ok(()), "a skipped case declares no section");
+}
+
+/// Every committed device list reads under the format's rules, and the H200's is committed.
+#[test]
+fn every_device_list_parses() {
+    let root = testdata_root().join("benchmark-results");
+    let lists: Vec<PathBuf> = device_directories(&root)
+        .into_iter()
+        .map(|device| device.join(DEVICE_LIST))
+        .filter(|list| list.is_file())
+        .collect();
+    assert!(
+        lists.contains(&root.join("h200").join(DEVICE_LIST)),
+        "{} holds no h200/{DEVICE_LIST}",
+        root.display()
+    );
+    for list in lists {
+        let text = std::fs::read_to_string(&list).unwrap();
+        assert!(
+            !parse_device_cases(&text).is_empty(),
+            "{} lists no case",
+            list.display()
+        );
+    }
 }
 
 /// A file that exists and lacks one declared section: named, rather than read as whole.
@@ -698,18 +742,15 @@ fn a_file_short_of_a_declared_section_is_refused() {
 /// The first declared case a device tree under `root` has no section for. A failed case's
 /// record is its section.
 ///
-/// A tree in `PREDATES_PROVENANCE` is held to the list it was measured from, its own
-/// `PREDATES_LIST`: its card is outside the run that would complete it to `files`.
+/// A tree that holds a `DEVICE_LIST` is held to it, and one without to `files`: the file's
+/// presence decides, not the device's name.
 fn missing_case_problem(root: &Path, files: &Files) -> Result<(), String> {
     for device in device_directories(root) {
-        let name = device.file_name().unwrap().to_str().unwrap();
+        let list = device.join(DEVICE_LIST);
         let own;
-        let held_to = match PREDATES_PROVENANCE.contains(&name) {
+        let held_to = match list.is_file() {
             true => {
-                let list = device.join(PREDATES_LIST);
-                let text = std::fs::read_to_string(&list)
-                    .map_err(|e| format!("{}: {e}", list.display()))?;
-                own = declared_files(&text_cases(&text, &list));
+                own = device_list_files(&list);
                 &own
             }
             false => files,
@@ -756,10 +797,8 @@ fn device_directories(root: &Path) -> Vec<PathBuf> {
 const PROVENANCE_KEYS: [&str; 5] = ["device", "driver", "cuda", "cudf", "host"];
 
 /// The device trees written before the harness wrote provenance, whose trailers may carry
-/// none of it, and before the case list followed the registry, so each is held to the list it
-/// was measured from, `PREDATES_LIST`. Only the H200's: both hosts that ran the benchmark
-/// before then, shad-gpu and verda-gpu, are H200s. A tree copied or written under any other
-/// name is held to the five and to the whole list.
+/// none of it. Only the H200's: both hosts that ran the benchmark before then, shad-gpu and
+/// verda-gpu, are H200s. A tree copied or written under any other name is held to the five.
 const PREDATES_PROVENANCE: &[&str] = &["h200"];
 
 /// Every file is `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, its device directory a

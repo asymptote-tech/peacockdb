@@ -182,3 +182,19 @@ Task 3 notes:
   removed. `.gitignore` gains `/target-img-*/` and `/.home-img/`; `git check-ignore` matches
   both, and `git status --short` showed only `.gitignore` while `target-img-26.02/` and
   `.home-img/` existed.
+
+Task 4 notes:
+- Step 2: both commands failed to compile on the missing items (`CaseStatus`, `DeviceCase`,
+  `DEVICE_CASES_HEADER`, `parse_device_cases`, `render_device_cases`, `DEVICE_LIST`).
+- After the implementation and before the conversion, `every_device_list_parses` and
+  `every_declared_case_has_a_section_in_the_tree` failed as expected: with no `h200/cases.csv`,
+  `h200/` fell to the main list and `tpcds.sf40/tp1_rowgroup` does not exist there.
+- Mutation check: with the rule forced to ignore the device list, `a_tree_with_its_own_list_is_held_to_it`
+  and the tree check both fail; restored byte for byte.
+- Beyond the plan's tests: `an_ok_or_wrong_row_names_its_modes`, `an_unknown_status_is_refused`,
+  `a_row_short_of_six_fields_is_refused`. Every refusal the Interfaces list has a test.
+- Step 4: the fork's `h200/cases.inc` equalled `origin/ENS-containers`' before the conversion.
+  `cases.csv` is 15 lines, 14 `,ok,`. Step 5's diff printed nothing; 14 invocations on each side.
+- `device_cases_path` has no caller yet (sf40-baseline's writer). `DEVICE_LIST` in benchmark.rs
+  spells `cases.csv` a second time, as the Interfaces fix it.
+- For Task 5's recount: `--lib` gains 11 (`device_cases::tests`), `test_corpus_goldens` gains 2.

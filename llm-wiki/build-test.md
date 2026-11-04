@@ -1330,7 +1330,7 @@ What the arrows are there to make checkable:
   record by call, not by execution, so its three cases are drawn beside them, and it is still
   a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
   over them, and that step runs from a checkout carrying the 26-case list: f3db66b1 (02f6a4d8 on
-  ENS-optimizer), whose case lines are `h200/cases.inc`'s. `create_nsys_profile.sh --metrics`
+  ENS-optimizer), whose case lines are `h200/cases.csv`'s rows. `create_nsys_profile.sh --metrics`
   takes every case of the list and checks its merge against the pinned records, which hold the
   twenty-six.
 - **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the

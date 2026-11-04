@@ -24,10 +24,10 @@ Moving the H200 record under `h200/` is one change:
 - `create_nsys_profile.sh` reads a record at `calibration/<device>/<dataset>.sf<sf>/`;
 - `build-test-shadgpu.sh`'s header documents the per-device tree, not the flat one;
 - the H200's Nsight pass runs from f3db66b1 (02f6a4d8 on ENS-optimizer), whose case lines are
-  `h200/cases.inc`'s:
+  `h200/cases.csv`'s rows:
   `create_nsys_profile.sh --metrics` takes every case of the checkout's list;
 - once the H200 is re-run with provenance, both `PREDATES_PROVENANCE` constants and
-  `h200/cases.inc` go: `nsys_hbm.py` takes a record naming no device as the H200's, and the
+  `h200/cases.csv` go: `nsys_hbm.py` takes a record naming no device as the H200's, and the
   golden lets `h200/` lack it.
 
 Two hazards until then:
