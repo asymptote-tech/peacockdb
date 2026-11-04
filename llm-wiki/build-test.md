@@ -376,7 +376,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one — plus `nested-limits`, for `CudfScan.rows_only` — so the membership grows when the mapping does; pbench's `empty-side-left-join` is the one whose `GpuEmpty` holds its slot with a stub scan — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 31 |
+| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 32 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, the joins first: the one `CudfJoin` each join
@@ -388,17 +388,18 @@ recipe with no plan, and an empty relation doing the same, so a plan of it alone
 unbudgeted mode writing that default, the enum and the field default agreeing, and the plan text
 printing only a value that is not the default; an interval literal printing as its three parts.
 Three plan pbench SQL to the writer: a date plus an interval literal crosses, and one inside a
-CASE operand or as `date_bin`'s argument is refused naming #249. The trivial kinds are not here — the plan goldens run them over every
+CASE operand or as `date_bin`'s argument is refused naming #249. A hold buffer crosses as
+nothing: the same bytes and wire nodes as without it, and no recipe of its own. The trivial kinds are not here — the plan goldens run them over every
 corpus query
 
-| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 15 |
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 16 |
 |---|---|--:|
 
 the renderer against what the planner emits from real SQL: every column reference prints name
 at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
 name — a mark join's mark among them — a null decimal prints as `NULL`, a source prints its
-mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec
-suffix
+mapping verbatim, a name that is not a token is backquoted, no node name carries an exec
+suffix, and a hold buffer prints a line of its own
 
 | One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 2 |
 |---|---|--:|
@@ -409,7 +410,7 @@ a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by colu
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 125 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 133 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -429,7 +430,13 @@ execution golden's node for node, and its load every loader's total rather than 
 a call without a region and
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order; and a sink that
-received nothing answering one zero-row batch under its input's columns, which no node emitted
+received nothing answering one zero-row batch under its input's columns, which no node emitted.
+Then the hold buffer under a join's hold: the subtree below it running during the build, held
+taking only what it is offered, emitting in arrival order once the hold lifts, one store per
+lane at 4 lanes, unheld forwarding as if it were not there, its batches held in the accountant,
+and a failed build with batches kept still reconciling; and `validate_dag` over 500 random DAGs
+— several roots, shared sources, joins, buffers on random edges — accepting every one once each
+unbuffered hold has its buffer
 
 | CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 92 |
 |---|---|--:|
@@ -479,13 +486,14 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 49 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 52 |
 |---|---|--:|
 
 the accountant's formula, cache and two checks on plain figures; the plan index's numbering,
 readers, regions and per-lane slots, on a tree as before and over shared sources; the
-scheduler's corners enumerated, holds over regions a second root reads into, and then a
-differential test against a naive rescan on randomized DAG shapes; the lane
+scheduler's corners enumerated, holds over regions a second root reads into, a held hold
+buffer still picked for intake and a limit still holding one, and then a
+differential test against a naive rescan on randomized DAG shapes with buffers among them; the lane
 state machine one call at a time with no tree around it
 
 | Rollup's shuffle keys, and DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 4 |
@@ -787,7 +795,7 @@ over every line of `testdata/fixtures/row-range-clamp.txt`, the case table C++'s
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 37 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 46 |
 |---|---|--:|
 
 validation's shape rules — a plan ends in a crossing, every root is a sink and nothing reads
@@ -795,19 +803,26 @@ one, under one root or several, a shared node is checked once, a limit has a
 real consumer, no node declares no column ([#63](archive/archived-tickets.md#t63)), no schema — an aggregate's intermediate included — literal, cast or function
 names a view type the device cannot hold; a pass-through
 node declares its input's column count and its fields;
-layout canonical forms and equality; whether a hash survives a regrouping
+layout canonical forms and equality; whether a hash survives a regrouping. Then holds over
+several roots: an unbuffered reader of a shared source inside a join's hold refused by name, a
+join reading one source on both sides refused at its probe edge, two roots whose builds wait on
+each other's probe refused, each passing with a buffer on the edge, no tree ever needing one;
+the wait-for graph's cycle finder and its message, a join waiting on the hold its build sits
+in, `validate_dag` refusing what its parts refuse, and the fixture that buffers every refused
+edge
 
-| Plan DAG walk | [plan::dag::tests](../peacockdb-core/src/plan/dag/tests.rs) | 8 |
+| Plan DAG walk | [plan::dag::tests](../peacockdb-core/src/plan/dag/tests.rs) | 10 |
 |---|---|--:|
 
 the walk over several roots: on every `every_kind()` fixture it numbers as the tree walk did,
 pre-order, post-order, depth as height, regions as contiguous subtrees; a shared source is one
 node with a reader per edge, the roots number in the order given, a shared node's height is
 below its deepest reader, a region skips a node read from outside it, a join reading one source
-on both sides holds nothing below its probe edge; only a `SharedSource` has a sharing key, and
+on both sides holds nothing below its probe edge; a hold stops at a `GpuHoldBuffer` and a node
+also read around the buffer is still held; only a `SharedSource` has a sharing key, and
 `share_sources` makes equal loads one node
 
-| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 14 |
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 15 |
 |---|---|--:|
 
 the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
@@ -815,7 +830,8 @@ holds comes off the budget first, a batch is charged once per lane in force, a l
 by the batches its mapping makes, amplification is the widest point on the path, a target lands
 on the coarse grid, constants that cannot be less and exceed the budget are a plan-time
 error, a join that answers at the finish — hash or nested loop — is charged its `matched` byte a
-build row, a RightSemi its distinct build keys, and an empty relation is no source the budget sizes
+build row, a RightSemi its distinct build keys, an empty relation is no source the budget sizes,
+and a hold buffer is charged everything its input emits while passing its batches on unchanged
 
 | Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 31 |
 |---|---|--:|

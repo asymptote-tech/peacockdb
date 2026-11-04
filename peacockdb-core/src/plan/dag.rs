@@ -4,10 +4,11 @@
 //! post-order, depth as height, a node's region its contiguous subtree — which is what keeps
 //! every golden unchanged. On a DAG a node's index and post-order come from its first visit,
 //! its height from its deepest reader, and a region skips whatever is also read from outside.
+//! A hold that lifts stops at a `GpuHoldBuffer`: its region decides nothing through one.
 
 use std::collections::HashMap;
 
-use super::{DagNode, GpuNode, PlanDag, Reader};
+use super::{DagNode, GpuNode, NodeRef, PlanDag, Reader, try_as_node_ref};
 
 pub(crate) fn of<'a>(roots: &[&'a dyn GpuNode]) -> PlanDag<'a> {
     let mut walk = Walk {
@@ -33,16 +34,43 @@ pub(crate) fn in_post_order(dag: &PlanDag<'_>) -> Vec<usize> {
 }
 
 pub(crate) fn region_of_node(dag: &PlanDag<'_>, node: usize) -> Vec<usize> {
-    let mut inside = vec![false; dag.nodes.len()];
-    inside[node] = true;
-    decide(dag, &dag.nodes[node].children, &mut inside, None);
-    members(&inside)
+    node_region(dag, node, Through::Buffers)
+}
+
+pub(crate) fn held_region_of_node(dag: &PlanDag<'_>, node: usize) -> Vec<usize> {
+    node_region(dag, node, Through::NoBuffer)
 }
 
 pub(crate) fn region_of_edge(dag: &PlanDag<'_>, parent: usize, slot: usize) -> Vec<usize> {
     let mut inside = vec![false; dag.nodes.len()];
     let child = dag.nodes[parent].children[slot];
-    decide(dag, &[child], &mut inside, Some(Reader { parent, slot }));
+    let edge = Some(Reader { parent, slot });
+    decide(dag, &[child], &mut inside, edge, Through::NoBuffer);
+    members(&inside)
+}
+
+pub(crate) fn is_buffer(dag: &PlanDag<'_>, node: usize) -> bool {
+    matches!(
+        try_as_node_ref(dag.nodes[node].node),
+        Some(NodeRef::HoldBuffer(_))
+    )
+}
+
+/// Whether a region is decided below a buffer. A limit's hold never lifts, so it covers what
+/// a buffer would keep; a hold that lifts stops there, since the buffer takes what it is
+/// offered and its subtree runs as if nothing were held.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Through {
+    Buffers,
+    NoBuffer,
+}
+
+fn node_region(dag: &PlanDag<'_>, node: usize, through: Through) -> Vec<usize> {
+    let mut inside = vec![false; dag.nodes.len()];
+    inside[node] = true;
+    if through == Through::Buffers || !is_buffer(dag, node) {
+        decide(dag, &dag.nodes[node].children, &mut inside, None, through);
+    }
     members(&inside)
 }
 
@@ -98,9 +126,16 @@ fn longest_paths(dag: &mut PlanDag<'_>) {
 
 /// Every node below `starts` joins the region once each of its readers is the `edge` or a
 /// member. A reader is strictly lower than what it reads, so deciding in ascending height
-/// decides every reader first.
-fn decide(dag: &PlanDag<'_>, starts: &[usize], inside: &mut [bool], edge: Option<Reader>) {
-    let mut below = descendants(dag, starts);
+/// decides every reader first. A node reached only through a buffer is not decided, so it
+/// stays out under `Through::NoBuffer`; one also reached around the buffer is decided.
+fn decide(
+    dag: &PlanDag<'_>,
+    starts: &[usize],
+    inside: &mut [bool],
+    edge: Option<Reader>,
+    through: Through,
+) {
+    let mut below = descendants(dag, starts, through);
     below.sort_by_key(|&at| (dag.nodes[at].height, at));
     for at in below {
         inside[at] = dag.nodes[at]
@@ -110,14 +145,16 @@ fn decide(dag: &PlanDag<'_>, starts: &[usize], inside: &mut [bool], edge: Option
     }
 }
 
-fn descendants(dag: &PlanDag<'_>, starts: &[usize]) -> Vec<usize> {
+fn descendants(dag: &PlanDag<'_>, starts: &[usize], through: Through) -> Vec<usize> {
     let mut seen = vec![false; dag.nodes.len()];
     let mut stack = starts.to_vec();
     let mut found = Vec::new();
     while let Some(at) = stack.pop() {
         if !std::mem::replace(&mut seen[at], true) {
             found.push(at);
-            stack.extend(&dag.nodes[at].children);
+            if through == Through::Buffers || !is_buffer(dag, at) {
+                stack.extend(&dag.nodes[at].children);
+            }
         }
     }
     found

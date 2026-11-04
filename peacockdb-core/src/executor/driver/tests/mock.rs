@@ -753,6 +753,7 @@ impl Backend for Mock {
             ExecutorCategory::Join => NodeExecutors::Join(MockJoin { script }),
             ExecutorCategory::Unload => NodeExecutors::Unload(MockUnload { script }),
             ExecutorCategory::BatchForwarder => NodeExecutors::BatchForwarder(forwarder_for(node)),
+            ExecutorCategory::HoldBuffer => NodeExecutors::HoldBuffer,
         })
     }
 }

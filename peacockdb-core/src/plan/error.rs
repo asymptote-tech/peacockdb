@@ -8,7 +8,9 @@ impl fmt::Display for PlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unsupported(what) => write!(f, "unsupported: {what}"),
-            Self::Invalid(what) => write!(f, "invalid plan: {what}"),
+            Self::Invalid(what)
+            | Self::UnbufferedHold { what, .. }
+            | Self::HoldCycle { what, .. } => write!(f, "invalid plan: {what}"),
         }
     }
 }

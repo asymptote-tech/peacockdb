@@ -47,12 +47,12 @@ fn a_node_rebuilt_over_its_own_children_is_the_node_it_was() {
             plan.name()
         );
     }
-    // The count is what makes a twentieth kind red here as well as a compile error in the
+    // The count is what makes a twenty-first kind red here as well as a compile error in the
     // match: an arm nothing builds is an arm nothing proves.
     assert_eq!(
         reached.len(),
-        19,
-        "the fixtures reach {} of the nineteen kinds: {reached:?}",
+        20,
+        "the fixtures reach {} of the twenty kinds: {reached:?}",
         reached.len()
     );
     // And the level below that: a field every fixture gives the same value is a field

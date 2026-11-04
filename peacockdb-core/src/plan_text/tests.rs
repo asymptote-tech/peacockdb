@@ -265,3 +265,29 @@ async fn a_join_filter_resolves_each_reference_onto_the_side_it_came_from() {
         "{text}"
     );
 }
+
+#[test]
+fn a_buffer_prints_its_own_line() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, source, unload};
+    let plan = unload(join(
+        coalesce_all(source("b", 1)),
+        Box::new(new_hold_buffer(filter(source("p", 1)))),
+    ));
+    let text = render_plan(plan.as_ref());
+    let at = |prefix: &str| {
+        text.lines()
+            .position(|line| line.trim_start().starts_with(prefix))
+            .unwrap_or_else(|| panic!("no line starts {prefix}:\n{text}"))
+    };
+    let (join_line, buffer_line, filter_line) = (
+        at("GpuHashJoin"),
+        at("GpuHoldBuffer: lanes=1"),
+        at("GpuFilter"),
+    );
+    assert_eq!(
+        (join_line + 3, buffer_line + 1),
+        (buffer_line, filter_line),
+        "{text}"
+    );
+}

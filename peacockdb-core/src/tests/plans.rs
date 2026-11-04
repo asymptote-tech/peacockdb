@@ -123,6 +123,23 @@ pub(crate) fn join_of(
     ))
 }
 
+/// `join` projected to the build side's column, so it emits the one column it declares: a
+/// join the whole of validation accepts, where `join` meets only the canonical form a driver
+/// checks. Its build side must still be one batch per lane.
+pub(crate) fn projected_join(build: Box<dyn GpuNode>, probe: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
+    Box::new(GpuHashJoin::new(
+        build,
+        probe,
+        JoinType::Inner,
+        vec![(0, 0)],
+        None,
+        Vec::new(),
+        false,
+        Some(vec![0]),
+        schema(),
+    ))
+}
+
 pub(crate) fn unload(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
     Box::new(GpuUnload::new(input, None))
 }

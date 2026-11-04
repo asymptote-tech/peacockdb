@@ -87,6 +87,7 @@ fn name_of(node: &dyn GpuNode) -> &'static str {
         NodeRef::MergeSortedPartitions(_) => "MergeSortedPartitions",
         NodeRef::Union(_) => "Union",
         NodeRef::Interleave(_) => "Interleave",
+        NodeRef::HoldBuffer(_) => "HoldBuffer",
         NodeRef::Unload(_) => "Unload",
     }
 }

@@ -253,8 +253,16 @@ impl<'a> Tree<'a> {
                 Some(self.bytes(build) + session_bytes(join.join_type, false, 0, self.rows(build)))
             }
             NodeRef::CrossJoin(_) => Some(self.bytes(self.children[seq][0])),
+            // Everything its input emits, which is what it keeps while a hold covers it.
+            NodeRef::HoldBuffer(_) => Some(self.bytes(self.children[seq][0])),
             _ => None,
         }
+    }
+
+    /// A hold buffer keeps what it is handed and emits the same batches, so it is where a
+    /// batch's bytes are held and not where the batch ends.
+    fn is_buffer(&self, seq: usize) -> bool {
+        matches!(as_node_ref(self.nodes[seq]), NodeRef::HoldBuffer(_))
     }
 
     /// What arrives at a node while it holds its state: a join's probe batch, per lane.
@@ -276,7 +284,7 @@ impl<'a> Tree<'a> {
         let mut node = source;
         let mut amplification = self.lanes(source) as f64;
         while let Some(parent) = self.parent[node] {
-            if self.held_by_accumulator(parent).is_some() {
+            if self.held_by_accumulator(parent).is_some() && !self.is_buffer(parent) {
                 break;
             }
             let factor = (self.rows(parent) as f64 / rows as f64)
@@ -298,7 +306,10 @@ impl<'a> Tree<'a> {
                 // What this mapping emits, which is the budget's target only where the
                 // budget is what cut the batches.
                 load.largest_batch_bytes()
-            } else if let Some(held) = self.held_by_accumulator(seq) {
+            } else if let Some(held) = self
+                .held_by_accumulator(seq)
+                .filter(|_| !self.is_buffer(seq))
+            {
                 held / self.lanes(seq).max(1)
             } else {
                 self.children[seq]

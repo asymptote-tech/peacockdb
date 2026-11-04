@@ -34,6 +34,9 @@ pub(crate) struct Scheduler {
     joins: Vec<JoinShape>,
     satisfied: Vec<bool>,
     regions: Vec<Vec<usize>>,
+    /// A hold buffer stays in the schedule under a join's hold, taking what it is offered;
+    /// only a limit's, which never lifts, takes it out.
+    buffers: Vec<bool>,
 }
 
 impl Scheduler {
@@ -67,6 +70,7 @@ impl Scheduler {
             joins: shape.joins.clone(),
             satisfied: vec![false; n],
             regions: shape.regions.clone(),
+            buffers: shape.buffers.clone(),
         };
         for join in &shape.joins {
             for node in &join.probe {
@@ -107,8 +111,9 @@ impl Scheduler {
     }
 
     /// One lane of a join has run `set_build`. The hold lifts when every lane has, since
-    /// a lane still building still cannot take a probe batch.
-    pub(crate) fn lane_left_build(&mut self, join_node: usize) {
+    /// a lane still building still cannot take a probe batch; `true` is that lift, after
+    /// which a hold buffer under it does something else with the same inputs.
+    pub(crate) fn lane_left_build(&mut self, join_node: usize) -> bool {
         let index = self
             .joins
             .iter()
@@ -120,13 +125,14 @@ impl Scheduler {
         );
         self.building[index] -= 1;
         if self.building[index] > 0 {
-            return;
+            return false;
         }
         for at in 0..self.joins[index].probe.len() {
             let node = self.joins[index].probe[at];
             self.build_holds[node] -= 1;
             self.refresh(node);
         }
+        true
     }
 
     /// Enough rows have passed this node that no later one can change its answer. It
@@ -161,7 +167,11 @@ impl Scheduler {
     }
 
     fn refresh(&mut self, node: usize) {
-        let runnable = self.ready_lanes[node] > 0 && !self.is_held(node);
+        let masked = match self.buffers[node] {
+            true => self.limit_holds[node] > 0,
+            false => self.is_held(node),
+        };
+        let runnable = self.ready_lanes[node] > 0 && !masked;
         let rank = self.rank_of_node[node];
         let (word, bit) = (rank / 64, 1u64 << (rank % 64));
         if runnable {

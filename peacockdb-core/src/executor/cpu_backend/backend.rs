@@ -123,6 +123,7 @@ impl Backend for CpuBackend {
             NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
                 NodeExecutors::BatchForwarder(forwarder_for(node))
             }
+            NodeRef::HoldBuffer(_) => NodeExecutors::HoldBuffer,
         })
     }
 }

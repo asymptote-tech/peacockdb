@@ -28,6 +28,15 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.states[node].out_queues[lane].len()
     }
 
+    pub(crate) fn in_flight(&self) -> usize {
+        self.acct.in_flight()
+    }
+
+    /// How many batches a hold buffer's lane keeps.
+    pub(crate) fn kept(&self, node: usize, lane: usize) -> usize {
+        self.states[node].kept[lane].len()
+    }
+
     pub(crate) fn last_call(&self) -> Option<CallKind> {
         self.trace.last().map(|event| event.call)
     }

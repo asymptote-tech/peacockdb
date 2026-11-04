@@ -355,3 +355,35 @@ async fn an_empty_relation_is_not_a_source_the_budget_sizes() {
     assert_eq!(model.sources.len(), 1, "{:?}", model.sources);
     assert_eq!(model.resident[0], 0, "the empty relation holds nothing");
 }
+
+#[test]
+fn a_buffer_is_charged_everything_its_child_emits() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, source, unload};
+    let plan = |buffered: bool| {
+        let probe = filter(source("p", 1));
+        let probe: Box<dyn GpuNode> = match buffered {
+            true => Box::new(new_hold_buffer(probe)),
+            false => probe,
+        };
+        unload(join(coalesce_all(source("b", 1)), probe))
+    };
+    let (with, without) = (plan(true), plan(false));
+    let model = estimate(with.as_ref(), BUDGET).expect("estimate the plan");
+    let bare = estimate(without.as_ref(), BUDGET).expect("estimate the plan");
+    // Post-order: 0 b, 1 coalesce, 2 p, 3 filter, 4 buffer, 5 join, 6 unload.
+    let tree = Tree::of(with.as_ref());
+    assert_eq!(tree.nodes[4].name(), "GpuHoldBuffer");
+    let filter_bytes = tree.bytes(3);
+    assert!(filter_bytes > 0);
+    assert_eq!(model.resident[4], filter_bytes);
+    assert_eq!(
+        model.accumulator_bytes,
+        bare.accumulator_bytes + filter_bytes
+    );
+    assert_eq!(
+        tree.batch_bytes()[4],
+        tree.batch_bytes()[3],
+        "it emits the batches it was handed"
+    );
+}

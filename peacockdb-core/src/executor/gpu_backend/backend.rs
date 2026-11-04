@@ -50,12 +50,14 @@ impl Backend for GpuBackend {
         post_order: usize,
         lane: usize,
     ) -> Result<NodeExecutors<Self>, PlanError> {
-        // Routing is the driver's, and an empty relation reads nothing, so neither has a
-        // recipe to look for: its absence is what they mean rather than a gap to report.
+        // Routing and a hold buffer's store are the driver's, and an empty relation reads
+        // nothing, so none has a recipe to look for: its absence is what they mean rather
+        // than a gap to report.
         match as_node_ref(node) {
             NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
                 return Ok(NodeExecutors::BatchForwarder(forwarder_for(node)));
             }
+            NodeRef::HoldBuffer(_) => return Ok(NodeExecutors::HoldBuffer),
             NodeRef::Empty(_) => return Ok(NodeExecutors::Source(GpuSource::empty())),
             _ => {}
         }
@@ -168,8 +170,9 @@ impl Backend for GpuBackend {
             NodeRef::MergePartitions(_)
             | NodeRef::Union(_)
             | NodeRef::Interleave(_)
+            | NodeRef::HoldBuffer(_)
             | NodeRef::Empty(_) => {
-                unreachable!("routing nodes and the empty relation are answered above")
+                unreachable!("driver-owned nodes and the empty relation are answered above")
             }
         })
     }

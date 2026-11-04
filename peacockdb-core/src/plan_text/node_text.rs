@@ -172,7 +172,8 @@ fn node_fields(node: &dyn GpuNode) -> Vec<String> {
         | NodeRef::CoalesceAllBatches(_)
         | NodeRef::MergePartitions(_)
         | NodeRef::Union(_)
-        | NodeRef::Interleave(_) => {}
+        | NodeRef::Interleave(_)
+        | NodeRef::HoldBuffer(_) => {}
     }
     fields
 }

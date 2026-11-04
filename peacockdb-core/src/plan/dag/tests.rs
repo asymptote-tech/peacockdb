@@ -1,4 +1,4 @@
-use crate::plan::{GpuLoadParquet, GpuNode, PlanDag, Reader, SharedSource};
+use crate::plan::{GpuLoadParquet, GpuNode, PlanDag, Reader, SharedSource, new_hold_buffer};
 use crate::tests::plans::{filter, join, project, source, unload};
 use crate::tests::rebuild::every_kind;
 use crate::tests::share::share_sources;
@@ -194,4 +194,34 @@ fn equal_loads_are_shared_and_others_are_not() {
     // s once, t at one lane, t at two lanes: the two t's differ in their mapping.
     assert_eq!(loads, 3);
     assert_eq!(dag.nodes[2].readers, vec![reader(1, 0), reader(4, 0)]);
+}
+
+#[test]
+fn a_hold_stops_at_a_buffer() {
+    let roots = vec![unload(join(
+        source("b", 1),
+        Box::new(new_hold_buffer(filter(source("p", 1)))),
+    ))];
+    let dag = PlanDag::of(&refs(&roots));
+    // 0 unload, 1 join, 2 b, 3 buffer, 4 filter, 5 p.
+    assert_eq!(dag.nodes[3].node.name(), "GpuHoldBuffer");
+    assert!(dag.is_buffer(3));
+    assert!(!dag.is_buffer(4));
+    assert_eq!(dag.region_of_edge(1, 1), vec![3]);
+    assert_eq!(dag.region_of_node(1), vec![1, 2, 3, 4, 5]);
+    assert_eq!(dag.held_region_of_node(0), vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn a_node_also_read_around_a_buffer_is_still_held() {
+    let s = shared("s");
+    let roots = vec![unload(join(
+        source("b", 1),
+        join(Box::new(new_hold_buffer(read(&s))), filter(read(&s))),
+    ))];
+    let dag = PlanDag::of(&refs(&roots));
+    // 0 unload, 1 join, 2 b, 3 inner join, 4 buffer, 5 S, 6 filter.
+    assert_eq!(dag.nodes[5].readers, vec![reader(4, 0), reader(6, 0)]);
+    assert_eq!(dag.region_of_edge(1, 1), vec![3, 4, 5, 6]);
+    assert_eq!(dag.region_of_edge(3, 0), vec![4]);
 }

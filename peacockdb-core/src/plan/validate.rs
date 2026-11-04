@@ -8,6 +8,8 @@
 //! its annotations — which no child can be blamed for and which no node-local check
 //! looks at.
 
+use std::num::NonZeroUsize;
+
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use super::GpuNode;
@@ -35,7 +37,178 @@ pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     }
     sinks_are_roots(&dag)?;
     limit_positions(&dag)?;
-    walk(&dag)
+    walk(&dag)?;
+    holds_are_buffered(&dag)
+}
+
+/// [`validate_roots`], then the wait-for graph between holds, which must have no cycle.
+/// Under the buffer rule none can form; the check is that argument made mechanical, and the
+/// first thing a later change to the rule breaks.
+pub(crate) fn validate_dag(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    if let Some(cap) = cap {
+        return Err(PlanError::Unsupported(format!(
+            "a cap of {cap} roots at once: no driver runs one"
+        )));
+    }
+    validate_roots(roots)?;
+    let dag = PlanDag::of(roots);
+    match first_cycle(&wait_for_edges(&dag)) {
+        Some(holds) => Err(hold_cycle(&dag, holds)),
+        None => Ok(()),
+    }
+}
+
+/// A join's probe is its second child, which is the side its hold covers.
+const PROBE_CHILD: usize = 1;
+
+fn joins<'d>(dag: &'d PlanDag<'_>) -> impl Iterator<Item = usize> + 'd {
+    (0..dag.nodes.len()).filter(|at| {
+        matches!(
+            try_as_node_ref(dag.nodes[*at].node),
+            Some(NodeRef::Join(_) | NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_))
+        )
+    })
+}
+
+/// No edge enters a join's held probe region from a producer outside it unless a
+/// `GpuHoldBuffer` reads that edge. A held buffer takes every batch it is offered, so it is
+/// the one reader whose producer never waits on the hold. On a tree nothing enters a region
+/// but through a buffer, so no single-query plan is refused here.
+fn holds_are_buffered(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for join in joins(dag) {
+        let region = dag.region_of_edge(join, PROBE_CHILD);
+        if let Some((reader, slot, producer)) =
+            unbuffered_entry(dag, &region, Some((join, PROBE_CHILD)))
+        {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UnbufferedHold {
+                hold: join,
+                reader,
+                slot,
+                producer,
+                what: format!(
+                    "{} (node {reader}) reads {} (node {producer}) from outside the hold of {} \
+                     (node {join}); a GpuHoldBuffer must sit on that edge",
+                    name(reader),
+                    name(producer),
+                    name(join)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The first edge, as `(reader, slot, producer)` in pre-order, that carries batches into
+/// `region` from outside it with no buffer reading it: an edge out of a member, or the
+/// `held_edge` itself, to a producer that is not a member.
+fn unbuffered_entry(
+    dag: &PlanDag<'_>,
+    region: &[usize],
+    held_edge: Option<(usize, usize)>,
+) -> Option<(usize, usize, usize)> {
+    let mut inside = vec![false; dag.nodes.len()];
+    for member in region {
+        inside[*member] = true;
+    }
+    for (reader, node) in dag.nodes.iter().enumerate() {
+        for (slot, &producer) in node.children.iter().enumerate() {
+            let enters = inside[reader] || Some((reader, slot)) == held_edge;
+            if enters && !inside[producer] && !dag.is_buffer(reader) {
+                return Some((reader, slot, producer));
+            }
+        }
+    }
+    None
+}
+
+/// `(waiting, held)`: a join in its build phase waits on every node its build side reads, and
+/// so on each hold whose region holds one of them. Holds stop at buffers, so a buffer below
+/// a build is what keeps that build from waiting.
+fn wait_for_edges(dag: &PlanDag<'_>) -> Vec<(usize, usize)> {
+    let held: Vec<(usize, Vec<usize>)> = joins(dag)
+        .map(|join| (join, dag.region_of_edge(join, PROBE_CHILD)))
+        .collect();
+    let mut edges = Vec::new();
+    for join in joins(dag) {
+        let build = dag.nodes[join].children[0];
+        let waits_on = reached_from(dag, build);
+        for (hold, region) in &held {
+            if region.iter().any(|member| waits_on[*member]) {
+                edges.push((join, *hold));
+            }
+        }
+    }
+    edges
+}
+
+/// `node` and everything it reads, through buffers too.
+fn reached_from(dag: &PlanDag<'_>, node: usize) -> Vec<bool> {
+    let mut seen = vec![false; dag.nodes.len()];
+    let mut stack = vec![node];
+    while let Some(at) = stack.pop() {
+        if !std::mem::replace(&mut seen[at], true) {
+            stack.extend(&dag.nodes[at].children);
+        }
+    }
+    seen
+}
+
+/// The first cycle a depth-first search finds, from the lowest vertex and along the lowest
+/// edge first, in the order its vertices are visited.
+fn first_cycle(edges: &[(usize, usize)]) -> Option<Vec<usize>> {
+    let mut vertices: Vec<usize> = edges.iter().flat_map(|(from, to)| [*from, *to]).collect();
+    vertices.sort_unstable();
+    vertices.dedup();
+    let mut sorted = edges.to_vec();
+    sorted.sort_unstable();
+    let mut done = Vec::new();
+    for start in &vertices {
+        if !done.contains(start) {
+            let mut path = Vec::new();
+            if let Some(cycle) = search(*start, &sorted, &mut path, &mut done) {
+                return Some(cycle);
+            }
+        }
+    }
+    None
+}
+
+fn search(
+    at: usize,
+    edges: &[(usize, usize)],
+    path: &mut Vec<usize>,
+    done: &mut Vec<usize>,
+) -> Option<Vec<usize>> {
+    if let Some(start) = path.iter().position(|on| *on == at) {
+        return Some(path[start..].to_vec());
+    }
+    if done.contains(&at) {
+        return None;
+    }
+    path.push(at);
+    for (_, next) in edges.iter().filter(|(from, _)| *from == at) {
+        if let Some(cycle) = search(*next, edges, path, done) {
+            return Some(cycle);
+        }
+    }
+    path.pop();
+    done.push(at);
+    None
+}
+
+fn hold_cycle(dag: &PlanDag<'_>, holds: Vec<usize>) -> PlanError {
+    let names: Vec<String> = holds
+        .iter()
+        .map(|at| format!("{} (node {at})", dag.nodes[*at].node.name()))
+        .collect();
+    PlanError::HoldCycle {
+        what: format!("holds wait on each other: {}", names.join(" → ")),
+        holds,
+    }
 }
 
 /// A sink's output has already crossed to the host, so nothing on the device can read it.
@@ -354,7 +527,8 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
             | NodeRef::Limit(_)
             | NodeRef::MergePartitions(_)
             | NodeRef::EmitPartitions(_)
-            | NodeRef::MergeSortedPartitions(_),
+            | NodeRef::MergeSortedPartitions(_)
+            | NodeRef::HoldBuffer(_),
         ) => node.children()[0],
         // A filter that projects re-selects columns rather than carrying them; its
         // projection is checked by width above and by ordinal at the node.

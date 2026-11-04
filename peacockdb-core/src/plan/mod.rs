@@ -1,4 +1,4 @@
-//! What a plan is: the nineteen nodes, the vocabulary they are written in, and the rules a
+//! What a plan is: the twenty nodes, the vocabulary they are written in, and the rules a
 //! tree has to satisfy.
 //!
 //! The IR is neither planner nor executor — it is what passes between them, and consumers
@@ -15,6 +15,7 @@ mod common;
 mod dag;
 mod error;
 mod exec_ops;
+mod hold_buffer;
 mod interval;
 mod join;
 mod layout;
@@ -29,6 +30,7 @@ mod validate;
 mod tests;
 
 use std::any::Any;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
@@ -58,6 +60,19 @@ pub enum PlanError {
     /// A plan that violates what a node requires of its children. Names the fix, since
     /// the node knows it: "the planner inserts `GpuMergePartitions` below it".
     Invalid(String),
+    /// An edge into a held region from a producer outside it, with no `GpuHoldBuffer` on it:
+    /// the producer's batches would pile into a queue while the hold stands. Indices are
+    /// `PlanDag::of(roots)`'s; the edge is `(reader, slot)`, reading `producer`, and `hold` is
+    /// the node whose hold it enters. `what` is the message, naming all four.
+    UnbufferedHold {
+        hold: usize,
+        reader: usize,
+        slot: usize,
+        producer: usize,
+        what: String,
+    },
+    /// Holds that wait on each other, in cycle order, as `PlanDag::of(roots)` indices.
+    HoldCycle { holds: Vec<usize>, what: String },
 }
 
 // The expression IR. Types and literals are DataFusion's own — the coercions and the
@@ -984,6 +999,23 @@ impl SharedSource {
     }
 }
 
+/// Keeps every batch its input emits while a hold covers it, and emits them in arrival order,
+/// one per lane per step, once the hold lifts: a hold stops here, so the subtree below runs
+/// during a join's build. The driver owns its per-lane store and it makes no device call. The
+/// rule that needs it is `llm-wiki/architecture.md`, "The scheduling rule".
+#[derive(Debug)]
+pub(crate) struct GpuHoldBuffer {
+    kind: NodeKind,
+    input: Box<dyn GpuNode>,
+}
+
+/// A buffer on the edge above `input`, carrying its layout and schema.
+// Fusing several queries' plans is what places one; the planner fuses nothing, so only tests do.
+#[allow(dead_code)]
+pub(crate) fn new_hold_buffer(input: Box<dyn GpuNode>) -> GpuHoldBuffer {
+    hold_buffer::over(input)
+}
+
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
@@ -1218,10 +1250,24 @@ impl<'a> PlanDag<'a> {
         dag::region_of_node(self, node)
     }
 
-    /// The nodes all of whose paths to a root pass through the edge `(parent, slot)`,
-    /// ascending; `parent` is not one. On a tree, the subtree below that edge.
+    /// What a hold on the edge `(parent, slot)` covers: the nodes all of whose paths to a root
+    /// pass through it, ascending, deciding nothing through a `GpuHoldBuffer` — the buffer
+    /// joins as any node does, and what lies only below it is not held. `parent` is not one.
+    /// On a tree with no buffer, the subtree below that edge.
     pub(crate) fn region_of_edge(&self, parent: usize, slot: usize) -> Vec<usize> {
         dag::region_of_edge(self, parent, slot)
+    }
+
+    /// [`Self::region_of_node`] stopping at buffers as [`Self::region_of_edge`] does: what a
+    /// hold on a whole root covers when the hold lifts.
+    // The concurrency cap's hold is its one reader, and no driver takes a cap yet.
+    #[allow(dead_code)]
+    pub(crate) fn held_region_of_node(&self, node: usize) -> Vec<usize> {
+        dag::held_region_of_node(self, node)
+    }
+
+    pub(crate) fn is_buffer(&self, node: usize) -> bool {
+        dag::is_buffer(self, node)
     }
 }
 
@@ -1254,6 +1300,9 @@ pub(crate) enum NodeRef<'a> {
     Union(&'a GpuUnion),
     #[allow(dead_code)]
     Interleave(&'a GpuInterleave),
+    // Nothing but its child, as the routing nodes are.
+    #[allow(dead_code)]
+    HoldBuffer(&'a GpuHoldBuffer),
     Unload(&'a GpuUnload),
 }
 
@@ -1311,6 +1360,8 @@ fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
         Some(NodeRef::Union(n))
     } else if let Some(n) = any.downcast_ref::<GpuInterleave>() {
         Some(NodeRef::Interleave(n))
+    } else if let Some(n) = any.downcast_ref::<GpuHoldBuffer>() {
+        Some(NodeRef::HoldBuffer(n))
     } else {
         any.downcast_ref::<GpuUnload>().map(NodeRef::Unload)
     }
@@ -1327,6 +1378,8 @@ pub(crate) enum ExecutorCategory {
     PartitionEmitter,
     Join,
     BatchForwarder,
+    /// A `GpuHoldBuffer`: a per-lane store the driver keeps, with no executor.
+    HoldBuffer,
     Unload,
 }
 
@@ -1360,6 +1413,7 @@ pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
         NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
             ExecutorCategory::BatchForwarder
         }
+        NodeRef::HoldBuffer(_) => ExecutorCategory::HoldBuffer,
         NodeRef::Unload(_) => ExecutorCategory::Unload,
     }
 }
@@ -1387,6 +1441,7 @@ pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
         NodeRef::MergeSortedPartitions(_) => "GpuMergeSortedPartitions",
         NodeRef::Union(_) => "GpuUnion",
         NodeRef::Interleave(_) => "GpuInterleave",
+        NodeRef::HoldBuffer(_) => "GpuHoldBuffer",
         NodeRef::Unload(_) => "GpuUnload",
     }
 }
@@ -1497,9 +1552,23 @@ pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
 }
 
 /// [`validate`] over a plan with several roots, each node checked once. Every root is a
-/// `GpuUnload`, and no `GpuUnload` is anything but a root.
+/// `GpuUnload`, and no `GpuUnload` is anything but a root. Every edge into a join's held probe
+/// region from a producer outside it ends at a `GpuHoldBuffer`, or the plan is refused as
+/// [`PlanError::UnbufferedHold`].
 pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     validate::validate_roots(roots)
+}
+
+/// The one check a plan with several roots passes before it runs: [`validate_roots`], then
+/// that no holds wait on each other ([`PlanError::HoldCycle`]). `cap` is how many roots may
+/// run at once; no driver takes one yet, so `Some` is refused as unsupported.
+// The entry point that runs several roots is its caller, and no driver runs several yet.
+#[allow(dead_code)]
+pub(crate) fn validate_dag(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    validate::validate_dag(roots, cap)
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock

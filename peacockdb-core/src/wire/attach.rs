@@ -108,8 +108,12 @@ fn emit(
             writer.leaf();
             Ok(None)
         }
-        // The three that route rather than compute: not one call between them.
-        NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => Ok(None),
+        // The three that route rather than compute, and the buffer whose store the driver
+        // keeps: not one call between them, so the child's offset passes up to the parent.
+        NodeRef::MergePartitions(_)
+        | NodeRef::Union(_)
+        | NodeRef::Interleave(_)
+        | NodeRef::HoldBuffer(_) => Ok(None),
     }
 }
 

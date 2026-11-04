@@ -186,6 +186,7 @@ pub(crate) fn can_be_null(node: &dyn GpuNode) -> Vec<bool> {
         | NodeRef::MergePartitions(_)
         | NodeRef::EmitPartitions(_)
         | NodeRef::Limit(_)
+        | NodeRef::HoldBuffer(_)
         | NodeRef::Unload(_) => child(0),
 
         // Branches disagree by column, so a column is nullable if it is in any branch.

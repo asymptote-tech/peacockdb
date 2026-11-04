@@ -207,6 +207,7 @@ Four limits on the number it produces.
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
 | `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing; satisfied once it has emitted `fetch` rows |
 | `GpuUnload` | Unload | `GpuBatch` in, `CpuBatch` out, over a row range the driver supplies; carries a root-adjacent limit's interval |
+| `GpuHoldBuffer` | HoldBuffer, no backend | one store per lane, kept by the driver: under a join's hold it takes every batch its input emits and emits nothing, and once the hold lifts it emits them in arrival order. A hold stops at it. The planner places none; a fused plan does ([The scheduling rule](#the-scheduling-rule)) |
 
 ### The sort decomposition
 
@@ -708,8 +709,9 @@ walk it is the load; `as_any` returns the load. A walk knows its clones are one 
 pre-order across the roots, in the order given, and counts post-order when a first visit ends.
 A node's height is its longest path to a root, so every reader is strictly lower than what it
 reads. It lists each node's readers, and its *regions*: the nodes all of whose paths to a root
-pass through a given node or edge. On a tree these are the recursive walk's numbers, and a
-region is a contiguous subtree. Validation runs over it: every root is a `GpuUnload`, nothing
+pass through a given node or edge. A region for a hold that lifts decides nothing through a
+`GpuHoldBuffer`, so what lies only below one is outside it. On a tree these are the recursive
+walk's numbers, and a region is a contiguous subtree. Validation runs over it: every root is a `GpuUnload`, nothing
 reads a `GpuUnload`, and each node is checked once, in post-order. The planner builds no DAG.
 
 **A batch is one table's worth of rows** — `num_rows()` and `byte_size()`, nothing else.
@@ -770,7 +772,8 @@ Lane-scoped categories get one instance per (node, lane); `PartitionAccumulator`
 `PartitionEmitter` get one per node, since they are the cross-lane points. A `BatchForwarder` is
 neither — it has no backend and no executor, so the driver owns its rotation directly, and one
 arm serves merge, union and interleave: a visit to output lane p cycles its source list in
-order, forwarding one batch per visit, skipping empty sources and retiring finished ones.
+order, forwarding one batch per visit, skipping empty sources and retiring finished ones. A
+`GpuHoldBuffer` has no backend and no executor either: the driver keeps its per-lane store.
 
 ### The scheduling rule
 
@@ -810,6 +813,30 @@ subtree and is never held by this rule, and completing the build is what lifts t
 Livelock has the same answer: the one thing that can block a batch is a join waiting on its
 other side, and orienting the tree so the build side is the left child removes the wait, because
 at equal heights the leftmost node wins and the build subtree drains first.
+
+**A hold that lifts stops at a `GpuHoldBuffer`.** The buffer is held and nothing below it is, so
+its subtree runs during the build, and what waits is the buffer's input, after the filters and
+projections below it. A held buffer stays in the schedule: it takes each batch it is offered
+into its lane's store and emits nothing, and a lane offered nothing is not ready. Unheld, it
+emits its store in arrival order, then forwards as batches arrive, one batch per lane per step,
+so the queue above it stays at one. A limit's hold never lifts, so it does not stop at a buffer
+and takes it out of the schedule. When a join's hold lifts, the driver re-checks each buffer it
+covered, since a buffer's readiness reads the hold.
+
+> **The only unbounded storage is a node you can see.** A queue between two ordinary nodes
+> stays self-bounding at one batch per lane, as "Queues need no cap" says. Validation
+> refuses any plan where an edge into a held region carries batches from a producer outside
+> it and nothing on that edge or below it, inside the region, is a hold buffer. That
+> includes a shared source read from inside a hold. Unbounded storage exists only in
+> accumulators and hold buffers, which the plan shows and the estimator charges.
+
+The check is `validate_roots`, per join: an edge out of a member of the probe region, or the
+probe edge itself, to a producer outside the region is refused as `PlanError::UnbufferedHold`
+unless a buffer reads it. On a tree nothing enters a region but through a buffer, so no
+single-query plan is refused. `validate_dag` adds the wait-for graph: a join in its build phase
+waits on each hold whose region holds a node its build side reads, and a cycle is refused as
+`PlanError::HoldCycle`. Under the rule above none forms; the graph is that argument made
+mechanical.
 
 Hash skew needs one decision and no mechanism. Empty scatter outputs are dropped at the
 emitter, so nothing empty traverses a chain, and a lane that receives nothing runs only to learn
@@ -871,10 +898,13 @@ Prevention at plan time, detection at run time.
 **Plan time** is the estimator above, rendered per node in each plan golden's `--- memory ---`
 section. Because `GpuMergePartitions` polls round-robin, all N lanes are live at once, so the
 estimator charges the full multi-lane section — N × (per-lane executor state + one in-flight
-batch) between the loader and the merge point.
+batch) between the loader and the merge point. A `GpuHoldBuffer` is charged everything its input
+emits, counted with the accumulators, and passes its input's batch size on unchanged.
 
 **Run time** the driver keeps a running total incrementally — `resident` is Σ `byte_size` over
-the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors.
+the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors. A batch a
+hold buffer keeps is still in flight: it moves into the store with its figure, and stays held
+until the buffer emits it or the run releases it.
 
 Per call: pre-check `resident + scratch_bytes(rows, bytes)` against the budget; execute; remove
 consumed inputs, add outputs at actual `byte_size()`, refresh that one executor's figure, and
@@ -1028,6 +1058,7 @@ The mapping from a plan node to the seqs it addresses, and to the calls a driver
 | `GpuHashJoin`, `GpuCrossJoin`, `GpuNestedLoopJoin` | `CudfJoin`, a leaf | `join_build(seq, build)` once per lane, `join_probe` per probe batch, and `join_finish` at done for the five finishing types |
 | `GpuLimit` | none | `slice_handle` on the two straddling batches, nothing on the rest — the bounds are runtime values |
 | `GpuMergePartitions`, `GpuUnion`, `GpuInterleave` | none, beyond the union's branch projects | routing in the driver, zero FFI calls |
+| `GpuHoldBuffer` | none; its recipe is `None` and its child's seq passes to its parent | a driver-owned per-lane store, zero FFI calls |
 | `GpuUnload` | none | `result_from_handle` per handle over the driver's row range; batches outside an interval are released without a call |
 
 Three facts about the C++ side are what make this drivable. `execute_node` is stateless per seq

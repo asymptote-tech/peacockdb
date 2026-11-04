@@ -460,6 +460,8 @@ pub enum NodeExecutors<B: Backend> {
     Unload(B::Unload),
     /// GpuMergePartitions, GpuUnion, GpuInterleave — routing only, no backend.
     BatchForwarder(Forwarder),
+    /// GpuHoldBuffer — a store the driver keeps per lane, no backend.
+    HoldBuffer,
 }
 
 impl<B: Backend> NodeExecutors<B> {
@@ -476,6 +478,7 @@ impl<B: Backend> NodeExecutors<B> {
             Self::Join(_) => ExecutorCategory::Join,
             Self::Unload(_) => ExecutorCategory::Unload,
             Self::BatchForwarder(_) => ExecutorCategory::BatchForwarder,
+            Self::HoldBuffer => ExecutorCategory::HoldBuffer,
         }
     }
 }
@@ -604,6 +607,9 @@ pub(crate) enum CallKind {
     LaneDone,
     Forward,
     ForwardDone,
+    /// A held buffer took a batch into its store and emitted nothing. What it emits once the
+    /// hold lifts is a `Forward`, and its end a `ForwardDone`.
+    Keep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1096,7 +1102,8 @@ pub(crate) struct JoinShape {
 /// The plan as plain numbers. Node indices are `PlanDag`'s first-visit pre-order, which is
 /// "order", the leftmost tie-break. A height is the longest path to a root, so every reader
 /// is strictly lower than what it reads. `regions[n]` is what a hold on `n` covers: on a
-/// tree, its subtree.
+/// tree, its subtree. `buffers[n]` marks a `GpuHoldBuffer`, which a join's hold never takes
+/// out of the schedule: held, it still takes what it is offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanShape {
     pub(crate) heights: Vec<u32>,
@@ -1105,6 +1112,7 @@ pub(crate) struct PlanShape {
     pub(crate) readers: Vec<Vec<Reader>>,
     pub(crate) joins: Vec<JoinShape>,
     pub(crate) roots: Vec<usize>,
+    pub(crate) buffers: Vec<bool>,
 }
 
 impl PlanShape {

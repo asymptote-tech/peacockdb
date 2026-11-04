@@ -169,6 +169,7 @@ fn serialize_join_schema<'a>(
             PlanError::Unsupported(format!("a join's {side} side: {what}"))
         }
         PlanError::Invalid(what) => PlanError::Invalid(format!("a join's {side} side: {what}")),
+        held @ (PlanError::UnbufferedHold { .. } | PlanError::HoldCycle { .. }) => held,
     })
 }
 

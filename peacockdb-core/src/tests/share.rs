@@ -1,9 +1,12 @@
 //! Turning several planned trees into one DAG by hand, the way a fuser would: every load that
-//! reads the same thing becomes one shared source. The planner builds no DAG, so tests do.
+//! reads the same thing becomes one shared source, and a hold buffer goes on every edge that
+//! needs one. The planner builds no DAG, so tests do.
 
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 use crate::plan::{GpuLoadParquet, GpuNode, NodeRef, Schema, SharedSource, as_node_ref};
+use crate::plan::{PlanDag, PlanError, new_hold_buffer, validate_dag};
 use crate::tests::rebuild::{rebuild, schema_of};
 
 /// What two loads must agree on to be read once: the table, the columns, the mapping and the
@@ -77,6 +80,71 @@ fn share(
             .into_any_box()
             .downcast::<GpuLoadParquet>()
             .expect("a load rebuilds as a load");
+        SharedSource::new(*load)
+    });
+    Box::new(source.clone())
+}
+
+/// `roots` with a `GpuHoldBuffer` on every edge `validate_dag` refuses as an unbuffered hold,
+/// one refusal at a time, and how many it inserted. Any other refusal is a panic naming it:
+/// the plan was wrong before any buffer could help.
+pub(crate) fn buffer_unbuffered_holds(
+    mut roots: Vec<Box<dyn GpuNode>>,
+    cap: Option<NonZeroUsize>,
+) -> (Vec<Box<dyn GpuNode>>, usize) {
+    let mut inserted = 0;
+    loop {
+        let refs: Vec<&dyn GpuNode> = roots.iter().map(|root| root.as_ref()).collect();
+        match validate_dag(&refs, cap) {
+            Ok(()) => return (roots, inserted),
+            Err(PlanError::UnbufferedHold { reader, slot, .. }) => {
+                roots = with_buffer_on(&refs, (reader, slot));
+                inserted += 1;
+            }
+            Err(other) => panic!("refused for a reason no buffer answers: {other}"),
+        }
+    }
+}
+
+/// The DAG rebuilt with a buffer on the edge `(reader, slot)`, indexed as `PlanDag::of(roots)`
+/// numbers it. Each shared source is rebuilt once and shared again by every reader.
+fn with_buffer_on(roots: &[&dyn GpuNode], edge: (usize, usize)) -> Vec<Box<dyn GpuNode>> {
+    let dag = PlanDag::of(roots);
+    let mut shared: HashMap<usize, SharedSource> = HashMap::new();
+    dag.roots
+        .iter()
+        .map(|root| rebuilt_at(&dag, *root, edge, &mut shared))
+        .collect()
+}
+
+fn rebuilt_at(
+    dag: &PlanDag<'_>,
+    at: usize,
+    edge: (usize, usize),
+    shared: &mut HashMap<usize, SharedSource>,
+) -> Box<dyn GpuNode> {
+    let node = dag.nodes[at].node;
+    let children = dag.nodes[at]
+        .children
+        .iter()
+        .enumerate()
+        .map(|(slot, child)| {
+            let child = rebuilt_at(dag, *child, edge, shared);
+            match (at, slot) == edge {
+                true => Box::new(new_hold_buffer(child)) as Box<dyn GpuNode>,
+                false => child,
+            }
+        })
+        .collect();
+    let rebuilt = rebuild(node, children);
+    let Some(key) = node.sharing_key() else {
+        return rebuilt;
+    };
+    let source = shared.entry(key).or_insert_with(|| {
+        let load = rebuilt
+            .into_any_box()
+            .downcast::<GpuLoadParquet>()
+            .expect("only a load is shared");
         SharedSource::new(*load)
     });
     Box::new(source.clone())

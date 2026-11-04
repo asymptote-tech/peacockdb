@@ -91,6 +91,7 @@ fn shape(readers: &[Vec<(usize, usize)>], lanes: &[usize], joins: &[usize]) -> P
             })
             .collect(),
         roots,
+        buffers: vec![false; n],
     }
 }
 
@@ -210,6 +211,54 @@ fn one_join(lanes: usize) -> PlanShape {
         &[lanes; 6],
         &[1],
     )
+}
+
+/// `one_join` with a hold buffer on the probe edge: 0 unload, 1 join, 2 coalesce, 3 build
+/// source, 4 buffer, 5 filter, 6 probe source. The probe region stops at the buffer.
+fn buffered_join() -> PlanShape {
+    let mut shape = tree(
+        &[None, Some(0), Some(1), Some(2), Some(1), Some(4), Some(5)],
+        &[1; 7],
+        &[1],
+    );
+    shape.joins[0].probe = vec![4];
+    shape.buffers[4] = true;
+    shape
+}
+
+#[test]
+fn a_held_buffer_stays_runnable_for_intake() {
+    let mut scheduler = Scheduler::new(&buffered_join());
+    scheduler.set_lane_ready(4, 0, true);
+    assert!(scheduler.is_held(4), "the join is building");
+    assert_eq!(
+        scheduler.next(),
+        Some(4),
+        "held, and still taking what it is offered"
+    );
+    scheduler.set_lane_ready(4, 0, false);
+    scheduler.set_lane_ready(6, 0, true);
+    assert!(!scheduler.is_held(6), "the hold stops at the buffer");
+    assert_eq!(scheduler.next(), Some(6));
+}
+
+#[test]
+fn a_limit_still_holds_a_buffer() {
+    let mut scheduler = Scheduler::new(&buffered_join());
+    scheduler.set_lane_ready(4, 0, true);
+    scheduler.satisfy(0);
+    assert_eq!(
+        scheduler.next(),
+        None,
+        "a limit's hold never lifts, so nothing waits for it"
+    );
+}
+
+#[test]
+fn a_lifted_hold_says_so_once() {
+    let mut scheduler = Scheduler::new(&one_join(2));
+    assert!(!scheduler.lane_left_build(1), "one lane is still building");
+    assert!(scheduler.lane_left_build(1), "the last lane lifts the hold");
 }
 
 #[test]
@@ -393,6 +442,7 @@ impl Naive {
         }
     }
 
+    /// A buffer is never masked by a build hold, which only changes what it does.
     fn held(&self, node: usize) -> bool {
         let building = self
             .shape
@@ -402,7 +452,7 @@ impl Naive {
             .any(|(join, left)| *left > 0 && join.probe.contains(&node));
         let satisfied = (0..self.shape.node_count())
             .any(|other| self.satisfied[other] && self.shape.regions[other].contains(&node));
-        building || satisfied
+        (building && !self.shape.buffers[node]) || satisfied
     }
 
     fn pick(&self) -> Option<usize> {
@@ -432,7 +482,8 @@ impl Rng {
 /// One or two trees grown by expansion, so each is numbered in pre-order as `PlanIndex`
 /// numbers it, then extra reader edges onto leaves from nodes that already have children: the
 /// shared reads a DAG adds, and never a cycle, since a leaf gains no child. Joins are drawn
-/// among the nodes left with two children; a node reading one leaf twice can be one.
+/// among the nodes left with two children; a node reading one leaf twice can be one. A node
+/// with one child is a buffer one time in four: the scheduler reads only the flag.
 fn random_shape(rng: &mut Rng, size: usize) -> PlanShape {
     fn grow(
         rng: &mut Rng,
@@ -480,7 +531,11 @@ fn random_shape(rng: &mut Rng, size: usize) -> PlanShape {
     let joins: Vec<usize> = (0..n)
         .filter(|node| children[*node] == 2 && rng.below(2) == 0)
         .collect();
-    shape(&readers, &lanes, &joins)
+    let mut shape = shape(&readers, &lanes, &joins);
+    for node in 0..n {
+        shape.buffers[node] = children[node] == 1 && rng.below(4) == 0;
+    }
+    shape
 }
 
 /// Every region a shape declares is dominated: a member other than its node is read only from

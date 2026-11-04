@@ -442,7 +442,8 @@ impl<B: Backend> LaneDriver<B> {
             // lane-scoped node; a backend that returns one is caught there.
             NodeExecutors::PartitionAccumulator(_)
             | NodeExecutors::PartitionEmitter(_)
-            | NodeExecutors::BatchForwarder(_) => {
+            | NodeExecutors::BatchForwarder(_)
+            | NodeExecutors::HoldBuffer => {
                 return Err(RunError::Backend(PlanError::Invalid(format!(
                     "{}: a cross-lane executor for a lane-scoped node",
                     site.node.name()

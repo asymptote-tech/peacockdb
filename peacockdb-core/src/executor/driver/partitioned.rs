@@ -11,8 +11,6 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use datafusion::arrow::array::RecordBatch;
-
 use super::StepError;
 use super::accounting::{Held, ResidentAccountant, Slot, Trip};
 use super::index::PROBE_CHILD;
@@ -29,6 +27,8 @@ use crate::plan::PlanError;
 use crate::plan::check_canonical_form;
 use crate::wire::Seq;
 
+mod answers;
+mod hold_buffer;
 #[cfg(test)]
 mod tests;
 
@@ -104,6 +104,8 @@ struct NodeState<B: Backend> {
     retired: Vec<Vec<bool>>,
     lane_done_sent: Vec<bool>,
     emitter_finished: bool,
+    /// A hold buffer's store, per lane: what it took while held and has not yet emitted.
+    kept: Vec<VecDeque<Held<B::Batch>>>,
 }
 
 enum CrossExecutor<B: Backend> {
@@ -137,6 +139,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                 retired: Vec::new(),
                 lane_done_sent: vec![false; node.input_lanes],
                 emitter_finished: false,
+                kept: (0..node.lanes).map(|_| VecDeque::new()).collect(),
             })
             .collect();
         let nodes = index.len();
@@ -261,6 +264,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             ExecutorCategory::PartitionEmitter => self.run_emitter(node)?,
             ExecutorCategory::PartitionAccumulator => self.run_partition_accumulator(node)?,
             ExecutorCategory::BatchForwarder => self.run_forwarder(node),
+            ExecutorCategory::HoldBuffer => self.run_hold_buffer(node),
             other => {
                 return Err(RunError::Protocol(format!("{other:?} has no driver arm")).into());
             }
@@ -390,8 +394,8 @@ impl<'a, B: Backend> Driver<'a, B> {
             // The call ends a lane's build phase whether a batch arrived or not, and the
             // hold lifts when every lane has: a lane that owed nothing still has to say
             // so, or the probe region is held by a lane that will never build.
-            if call == LaneCall::SetBuild {
-                self.scheduler.lane_left_build(node);
+            if call == LaneCall::SetBuild && self.scheduler.lane_left_build(node) {
+                self.hold_lifted(node);
             }
             if outcome.finished {
                 self.states[node].out_done[lane] = true;
@@ -599,6 +603,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                         && !self.states[node].lane_done_sent[lane])
             }
             ExecutorCategory::BatchForwarder => self.forwarder_lane_ready(node, lane),
+            ExecutorCategory::HoldBuffer => self.hold_buffer_lane_ready(node, lane),
             _ => false,
         }
     }
@@ -714,7 +719,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                 }
             }
         }
-        Ok(())
+        self.release_kept()
     }
 
     fn assert_drained(&self) -> Result<(), StepError> {
@@ -727,7 +732,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             ))
             .into());
         }
-        let stranded: Vec<String> = (0..self.index.len())
+        let mut stranded: Vec<String> = (0..self.index.len())
             .flat_map(|node| {
                 self.states[node]
                     .out_queues
@@ -743,6 +748,7 @@ impl<'a, B: Backend> Driver<'a, B> {
                     })
             })
             .collect();
+        stranded.extend(self.kept_stranded());
         if stranded.is_empty() {
             return Ok(());
         }
@@ -944,45 +950,6 @@ impl<'a, B: Backend> Driver<'a, B> {
                 trip.bytes,
                 trip.budget
             ),
-        }
-    }
-
-    /// The sink's batches, or one of zero rows under its input's columns where none reached it.
-    fn answer(&mut self) -> Vec<CpuBatch> {
-        if !self.results.is_empty() {
-            return std::mem::take(&mut self.results);
-        }
-        let declared = self.index.nodes[ROOT].node.children()[0]
-            .kind()
-            .schema()
-            .expect("a sink's input declares its columns")
-            .fields
-            .clone();
-        vec![CpuBatch::new(RecordBatch::new_empty(declared))]
-    }
-
-    fn report(mut self) -> RunReport {
-        let batches = self.answer();
-        RunReport {
-            batches,
-            peak_bytes: self.acct.peak(),
-            in_flight_bytes: self.acct.in_flight(),
-            steps: self.steps,
-            holds: self.acct.hops().0,
-            releases: self.acct.hops().1,
-            underestimates: self.acct.underestimates().to_vec(),
-            measured_calls: self.acct.measured_calls(),
-            trace: self.trace,
-            rows_skipped: self.rows_skipped,
-            lanes_of: self.index.nodes.iter().map(|node| node.lanes).collect(),
-            peak_queued: self.peak_queued,
-            emitted: self.emitted,
-            abi_calls: self.abi_calls,
-            abandoned: self.abandoned,
-            consumed: self.consumed,
-            satisfied: (0..self.index.len())
-                .filter(|node| self.scheduler.is_satisfied(*node))
-                .collect(),
         }
     }
 }

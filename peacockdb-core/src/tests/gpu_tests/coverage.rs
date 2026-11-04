@@ -2,7 +2,7 @@
 //! source text, which is the reader-that-stops-at-the-first-match class — and checked
 //! against the node registry in both directions. The oracle for "every kind" is
 //! `every_kind`, which `a_node_rebuilt_over_its_own_children_is_the_node_it_was` holds to
-//! all nineteen. `inventory` collects per binary, and the cases are gpu-rung, so the guard
+//! all twenty. `inventory` collects per binary, and the cases are gpu-rung, so the guard
 //! sits here and runs where they link.
 
 use std::collections::BTreeSet;
@@ -32,9 +32,14 @@ macro_rules! operator_case {
     };
 }
 
-/// The three forwarders have no executor and belong to the driver, which is tested
-/// elsewhere. Permanent.
-const EXCLUDED: &[&str] = &["GpuMergePartitions", "GpuUnion", "GpuInterleave"];
+/// The three forwarders and the hold buffer have no executor and belong to the driver, which
+/// is tested elsewhere. Permanent.
+const EXCLUDED: &[&str] = &[
+    "GpuMergePartitions",
+    "GpuUnion",
+    "GpuInterleave",
+    "GpuHoldBuffer",
+];
 
 /// Every kind but a forwarder has a case, every case names a kind, and the exclusions are
 /// kinds with no case — so a new node kind, a misspelt one, or a forwarder that gains an
