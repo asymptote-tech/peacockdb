@@ -1,4 +1,5 @@
-//! Validation of a whole tree: each node against its children, then against itself.
+//! Validation of a whole plan: each node against its children, then against itself, once
+//! however many parents read it.
 //!
 //! The two halves answer different questions. A node's own
 //! [`validate_schemas_and_partitions`](GpuNode::validate_schemas_and_partitions) judges
@@ -10,6 +11,7 @@
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use super::GpuNode;
+use super::PlanDag;
 use super::PlanError;
 use super::Schema;
 use super::emitted_columns;
@@ -17,52 +19,83 @@ use super::unholdable;
 use super::{AggregateBody, GpuCrossJoin, GpuNestedLoopJoin, NodeRef, try_as_node_ref};
 use super::{KeyDistribution, NodeKind, SortOrder};
 
-/// Post-order, so a child's complaint comes before its parent's.
-///
-/// Public because the planner is not the only thing that builds a tree: a test that
-/// rewrites a planned one into a shape no planner emits needs the same check the planner
-/// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
-pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
-    if !matches!(root.kind(), NodeKind::Sink) {
-        return Err(PlanError::Invalid(format!(
-            "{}: a plan ends at the crossing back to the host — the planner roots it in \
-             GpuUnload",
-            root.name()
-        )));
+/// The structure first, then the canonical form, then every node in post-order, so a
+/// child's complaint comes before its parent's.
+pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    let dag = PlanDag::of(roots);
+    for &root in &dag.roots {
+        let root = dag.nodes[root].node;
+        if !is_sink(root) {
+            return Err(PlanError::Invalid(format!(
+                "{}: a plan ends at the crossing back to the host — the planner roots it in \
+                 GpuUnload",
+                root.name()
+            )));
+        }
     }
-    check_canonical_form(root)?;
-    walk(root)
+    sinks_are_roots(&dag)?;
+    limit_positions(&dag)?;
+    walk(&dag)
+}
+
+/// A sink's output has already crossed to the host, so nothing on the device can read it.
+fn sinks_are_roots(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    match dag
+        .nodes
+        .iter()
+        .find(|node| !node.readers.is_empty() && is_sink(node.node))
+    {
+        Some(sink) => Err(PlanError::Invalid(format!(
+            "{}: a sink feeds another node — every GpuUnload is a root",
+            sink.node.name()
+        ))),
+        None => Ok(()),
+    }
+}
+
+fn is_sink(node: &dyn GpuNode) -> bool {
+    matches!(node.kind(), NodeKind::Sink)
 }
 
 /// Which lowering a limit got is a question about position, and a node cannot see what is
 /// above it: root-adjacent means the interval belongs to `GpuUnload`, so a limit node whose
-/// only consumer is the sink is a tree the planner does not emit.
-fn limit_positions(node: &dyn GpuNode, parent_is_sink: bool) -> Result<(), PlanError> {
-    if node.row_interval().is_some() && parent_is_sink {
-        return Err(PlanError::Invalid(format!(
-            "{}: a limit feeding only the sink is not a node — the planner puts its \
-             skip/fetch on GpuUnload, so the driver can release the batches it does not want \
-             instead of unloading them and throwing the rows away",
-            node.name()
-        )));
-    }
-    let is_sink = matches!(node.kind(), NodeKind::Sink);
-    for child in node.children() {
-        limit_positions(child, is_sink)?;
+/// only consumer is the sink is a plan the planner does not emit. Pre-order, as the tree
+/// walk was, so the highest such limit is the one named.
+fn limit_positions(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for node in &dag.nodes {
+        let only_a_sink_reads_it = !node.readers.is_empty()
+            && node
+                .readers
+                .iter()
+                .all(|reader| is_sink(dag.nodes[reader.parent].node));
+        if node.node.row_interval().is_some() && only_a_sink_reads_it {
+            return Err(PlanError::Invalid(format!(
+                "{}: a limit feeding only the sink is not a node — the planner puts its \
+                 skip/fetch on GpuUnload, so the driver can release the batches it does not \
+                 want instead of unloading them and throwing the rows away",
+                node.node.name()
+            )));
+        }
     }
     Ok(())
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
 /// plan meets the same refusal a planned one would.
-pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
-    limit_positions(root, false)
+pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    limit_positions(&PlanDag::of(roots))
 }
 
-fn walk(node: &dyn GpuNode) -> Result<(), PlanError> {
-    for child in node.children() {
-        walk(child)?;
-    }
+/// The order `walk` checks nodes in: post-order, a shared node once.
+fn walk_order<'a, 'd>(dag: &'d PlanDag<'a>) -> impl Iterator<Item = &'a dyn GpuNode> + 'd {
+    dag.in_post_order().into_iter().map(|at| dag.nodes[at].node)
+}
+
+fn walk(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    walk_order(dag).try_for_each(check_node)
+}
+
+fn check_node(node: &dyn GpuNode) -> Result<(), PlanError> {
     node.validate_schemas_and_partitions()?;
     declares_a_column(node)?;
     structural(node)?;
@@ -363,17 +396,10 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
     Ok(())
 }
 
+/// A sink below a root is refused before the walk, by `sinks_are_roots`.
 fn structural(node: &dyn GpuNode) -> Result<(), PlanError> {
     let name = node.name();
     let children = node.children();
-    for child in &children {
-        if matches!(child.kind(), NodeKind::Sink) {
-            return Err(PlanError::Invalid(format!(
-                "{name}: its input is a {}, whose output has already crossed to the host",
-                child.name()
-            )));
-        }
-    }
     match (node.kind(), children.is_empty()) {
         (NodeKind::Source { .. }, false) => {
             return Err(PlanError::Invalid(format!(

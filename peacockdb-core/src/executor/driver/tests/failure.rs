@@ -3,8 +3,8 @@
 //! accounting still reconciles on the way out.
 
 use super::mock::{FailAt, JoinRule, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 fn source_batches(lanes: usize) -> Script {
     Script::default().source("part", vec![vec![spec(10, 80); 3]; lanes])

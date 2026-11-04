@@ -700,6 +700,18 @@ annotations a consumer can check: sort column, group key, aggregator, two-phase 
 a node knows what it needs of its children and can name the fix: a limit over four lanes should
 read "the planner inserts `GpuMergePartitions` below it", not "this category is 1:1 per lane".
 
+**Only a source is shared.** A plan with several roots, one per fused query, is a DAG. The one
+node two parents may hold is a `SharedSource`: an `Arc<GpuLoadParquet>`, one clone per parent.
+Sharing is that type, so nothing checks at run time what was shared. To every consumer but a
+walk it is the load; `as_any` returns the load. A walk knows its clones are one node by
+`GpuNode::sharing_key`, and goes through `PlanDag`. It numbers the nodes in first-visit
+pre-order across the roots, in the order given, and counts post-order when a first visit ends.
+A node's height is its longest path to a root, so every reader is strictly lower than what it
+reads. It lists each node's readers, and its *regions*: the nodes all of whose paths to a root
+pass through a given node or edge. On a tree these are the recursive walk's numbers, and a
+region is a contiguous subtree. Validation runs over it: every root is a `GpuUnload`, nothing
+reads a `GpuUnload`, and each node is checked once, in post-order. The planner builds no DAG.
+
 **A batch is one table's worth of rows** — `num_rows()` and `byte_size()`, nothing else.
 `CpuBatch` wraps an Arrow `RecordBatch`; `GpuBatch` wraps a `u64` handle, the session
 reference its `Drop` needs, and the seq of the call that produced it — which is what a slice

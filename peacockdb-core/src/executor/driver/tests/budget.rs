@@ -5,9 +5,9 @@
 //! mock's sizes move, and it can make a test pass for a reason nobody meant.
 
 use super::mock::{Script, spec};
-use super::plans::*;
 use super::*;
 use crate::executor::When;
+use crate::tests::plans::*;
 
 /// The test's own input, so the sizes below are data rather than expectations.
 const BATCH_ROWS: usize = 10;

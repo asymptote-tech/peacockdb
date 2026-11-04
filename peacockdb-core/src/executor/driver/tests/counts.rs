@@ -6,8 +6,8 @@
 //! looked like exceptions were measured and are not, and each is pinned below.
 
 use super::mock::{AccRule, EmitRule, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 /// Node numbering is pre-order, so the root is 0 and a chain descends from it.
 const UNLOAD: usize = 0;
@@ -258,7 +258,11 @@ fn the_call_record_is_indexed_by_the_lanes_a_node_is_driven_on() {
     let differ: Vec<usize> = (0..report.abi_calls.len())
         .filter(|node| index.nodes[*node].ready_lanes != report.lanes_of[*node])
         .collect();
-    assert_eq!(differ.len(), 2, "the scatter and the merge, and nothing else");
+    assert_eq!(
+        differ.len(),
+        2,
+        "the scatter and the merge, and nothing else"
+    );
     for node in 0..report.abi_calls.len() {
         assert_eq!(
             report.abi_calls[node].len(),

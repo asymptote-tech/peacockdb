@@ -6,9 +6,9 @@ use std::sync::atomic::Ordering;
 
 use super::super::accounting::ResidentAccountant;
 use super::super::tests::mock::{JoinRule, Mock, Script, spec};
-use super::super::tests::plans;
 use super::*;
 use crate::executor::Batch;
+use crate::tests::plans;
 
 fn accountant() -> ResidentAccountant {
     ResidentAccountant::new(1, None)

@@ -3,8 +3,8 @@
 //! which is the thing this lowering exists to avoid.
 
 use super::mock::{AccRule, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 /// Six batches of ten rows on one lane, over a chain the interval sits on top of.
 fn chain(skip: u64, fetch: Option<u64>) -> Box<dyn GpuNode> {

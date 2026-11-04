@@ -130,11 +130,54 @@ fn a_plan_that_does_not_end_in_a_crossing_is_refused() {
 }
 
 #[test]
-fn a_sink_below_the_root_is_refused() {
-    // Two unloads: the inner one already moved its rows to the host, so the outer
-    // one is reading something that is no longer on the device.
+fn a_sink_below_a_root_is_refused() {
+    // The inner unload already moved its rows to the host, so whatever reads it is reading
+    // something no longer on the device — under one root, or under the second of two.
+    let message = "GpuUnload: a sink feeds another node — every GpuUnload is a root";
     let tree = rooted(rooted(plain_source()));
-    invalid(validate(tree.as_ref()), "already crossed to the host");
+    invalid(validate(tree.as_ref()), message);
+    let roots = [rooted(plain_source()), rooted(rooted(plain_source()))];
+    invalid(
+        validate_roots(&[roots[0].as_ref(), roots[1].as_ref()]),
+        message,
+    );
+}
+
+#[test]
+fn every_root_is_a_sink() {
+    let roots = [rooted(plain_source()), plain_source()];
+    invalid(
+        validate_roots(&[roots[0].as_ref(), roots[1].as_ref()]),
+        "the planner roots it in GpuUnload",
+    );
+}
+
+#[test]
+fn the_validation_walk_visits_a_shared_node_once() {
+    let load = crate::tests::plans::source("s", 1)
+        .into_any_box()
+        .downcast::<GpuLoadParquet>()
+        .expect("plans::source builds a loader");
+    let shared = SharedSource::new(*load);
+    let roots = [
+        rooted(crate::tests::plans::filter(Box::new(shared.clone()))),
+        rooted(crate::tests::plans::project(Box::new(shared))),
+    ];
+    let roots = [roots[0].as_ref(), roots[1].as_ref()];
+    let dag = PlanDag::of(&roots);
+    let names: Vec<&str> = super::walk_order(&dag).map(|node| node.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "GpuLoadParquet",
+            "GpuFilter",
+            "GpuUnload",
+            "GpuProject",
+            "GpuUnload"
+        ]
+    );
+    assert_eq!(validate_roots(&roots), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&roots), Ok(()));
 }
 
 #[test]

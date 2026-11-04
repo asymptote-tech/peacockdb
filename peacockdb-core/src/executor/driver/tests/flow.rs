@@ -3,8 +3,8 @@
 use datafusion::common::JoinType;
 
 use super::mock::{AccRule, EmitRule, ExecRule, JoinRule, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 fn one_lane_chain() -> Box<dyn GpuNode> {
     unload(filter(source("part", 1)))

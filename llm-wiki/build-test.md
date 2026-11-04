@@ -786,14 +786,25 @@ over every line of `testdata/fixtures/row-range-clamp.txt`, the case table C++'s
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 43 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 37 |
 |---|---|--:|
 
-validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
+validation's shape rules — a plan ends in a crossing, every root is a sink and nothing reads
+one, under one root or several, a shared node is checked once, a limit has a
 real consumer, no node declares no column ([#63](archive/archived-tickets.md#t63)), no schema — an aggregate's intermediate included — literal, cast or function
 names a view type the device cannot hold; a pass-through
 node declares its input's column count and its fields;
 layout canonical forms and equality; whether a hash survives a regrouping
+
+| Plan DAG walk | [plan::dag::tests](../peacockdb-core/src/plan/dag/tests.rs) | 8 |
+|---|---|--:|
+
+the walk over several roots: on every `every_kind()` fixture it numbers as the tree walk did,
+pre-order, post-order, depth as height, regions as contiguous subtrees; a shared source is one
+node with a reader per edge, the roots number in the order given, a shared node's height is
+below its deepest reader, a region skips a node read from outside it, a join reading one source
+on both sides holds nothing below its probe edge; only a `SharedSource` has a sharing key, and
+`share_sources` makes equal loads one node
 
 | Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 14 |
 |---|---|--:|

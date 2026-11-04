@@ -17,5 +17,7 @@ pub(crate) mod given;
 mod gpu_tests;
 pub(crate) mod injection;
 pub(crate) mod join_fixture;
+pub(crate) mod plans;
 pub(crate) mod rebuild;
+pub(crate) mod share;
 pub(crate) mod synthetic;

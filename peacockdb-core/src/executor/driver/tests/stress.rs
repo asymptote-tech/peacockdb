@@ -6,8 +6,8 @@
 //! comparison the injector exists for needs real operators and belongs to T14.
 
 use super::mock::{EmitRule, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 /// One shape of the same query: how many lanes the scan has, how many batches each holds,
 /// and where the scatter puts the rows.

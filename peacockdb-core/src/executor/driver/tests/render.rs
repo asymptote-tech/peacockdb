@@ -8,11 +8,11 @@
 //! that nothing else is.
 
 use super::mock::{EmitRule, Script, spec};
-use super::plans::*;
 use super::*;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget};
 use crate::executor::{Region, join_regions, nodes_as_recorded};
 use crate::plan_text::{render_plan, render_run, render_timings, timed_device_us, timed_load_us};
+use crate::tests::plans::*;
 use crate::wire::FbKind;
 
 #[test]

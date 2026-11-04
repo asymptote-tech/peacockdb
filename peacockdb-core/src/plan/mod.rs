@@ -12,12 +12,14 @@ mod accumulators;
 mod aggregate;
 mod aggregates;
 mod common;
+mod dag;
 mod error;
 mod exec_ops;
 mod interval;
 mod join;
 mod layout;
 mod partition_ops;
+mod shared;
 mod source;
 mod union;
 mod unload;
@@ -963,6 +965,25 @@ impl GpuEmpty {
     }
 }
 
+/// A `GpuLoadParquet` that several parents read, each through its own clone. The only node a
+/// plan may share, so "only a source is shared" is this type rather than a check. The clones
+/// are one node to every walk, by [`GpuNode::sharing_key`]; to everything else they are the
+/// load, `as_any` included.
+#[derive(Debug, Clone)]
+pub(crate) struct SharedSource {
+    load: Arc<GpuLoadParquet>,
+}
+
+impl SharedSource {
+    // Fusing several queries' plans builds one; the planner fuses nothing, so only tests do.
+    #[allow(dead_code)]
+    pub(crate) fn new(load: GpuLoadParquet) -> Self {
+        Self {
+            load: Arc::new(load),
+        }
+    }
+}
+
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
@@ -1138,10 +1159,73 @@ pub trait GpuNode: std::fmt::Debug + IntoAnyBox {
         None
     }
 
+    /// What makes two nodes one to a walk over several roots: `Some` only for a
+    /// [`SharedSource`], whose clones all carry the same key. Every other node is itself, by
+    /// address.
+    fn sharing_key(&self) -> Option<usize> {
+        None
+    }
+
     /// The one downcast point. Consumers that need a node's own parameters — the
     /// renderer, a backend's executor match, the serializer — go through
     /// [`as_node_ref`] rather than downcasting here.
     fn as_any(&self) -> &dyn Any;
+}
+
+/// One edge into a node: the parent reading it, and which of the parent's children it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Reader {
+    pub(crate) parent: usize,
+    pub(crate) slot: usize,
+}
+
+/// A node as [`PlanDag`] numbers it. `children` are indices, in the node's own order, and may
+/// repeat one — a join reading one source on both sides; `readers` are in first-seen order,
+/// one per edge, and empty only at a root.
+#[derive(Debug)]
+pub(crate) struct DagNode<'a> {
+    pub(crate) node: &'a dyn GpuNode,
+    pub(crate) children: Vec<usize>,
+    pub(crate) readers: Vec<Reader>,
+    /// Counted when the first visit ends, so every reader's is above it.
+    pub(crate) post_order: usize,
+    /// The longest path to a root, so every reader is strictly lower than what it reads.
+    pub(crate) height: u32,
+}
+
+/// The plan as every walk over several roots sees it: indexed in first-visit pre-order, the
+/// roots walked in the order given, each node once however many parents read it. On a tree
+/// the numbers are the recursive walk's. The rules are `llm-wiki/architecture.md`, "Traits".
+#[derive(Debug)]
+pub(crate) struct PlanDag<'a> {
+    pub(crate) nodes: Vec<DagNode<'a>>,
+    pub(crate) roots: Vec<usize>,
+}
+
+impl<'a> PlanDag<'a> {
+    pub(crate) fn of(roots: &[&'a dyn GpuNode]) -> PlanDag<'a> {
+        dag::of(roots)
+    }
+
+    /// Indices in post-order: every child before any node that reads it.
+    pub(crate) fn in_post_order(&self) -> Vec<usize> {
+        dag::in_post_order(self)
+    }
+
+    /// `node` and the nodes all of whose paths to a root pass through it, ascending. On a
+    /// tree, its subtree; on a DAG, not contiguous — a node also read from outside is not in.
+    // The driver indexes trees, and nothing else asks for a region yet.
+    #[allow(dead_code)]
+    pub(crate) fn region_of_node(&self, node: usize) -> Vec<usize> {
+        dag::region_of_node(self, node)
+    }
+
+    /// The nodes all of whose paths to a root pass through the edge `(parent, slot)`,
+    /// ascending; `parent` is not one. On a tree, the subtree below that edge.
+    #[allow(dead_code)]
+    pub(crate) fn region_of_edge(&self, parent: usize, slot: usize) -> Vec<usize> {
+        dag::region_of_edge(self, parent, slot)
+    }
 }
 
 /// Every node kind, as a borrow of the concrete node. Adding a node is one line here and
@@ -1412,13 +1496,24 @@ pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: 
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
 /// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
 pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
-    validate::validate(root)
+    validate_roots(&[root])
+}
+
+/// [`validate`] over a plan with several roots, each node checked once. Every root is a
+/// `GpuUnload`, and no `GpuUnload` is anything but a root.
+pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    validate::validate_roots(roots)
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
 /// plan meets the same refusal a planned one would.
 pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
-    validate::check_canonical_form(root)
+    check_canonical_form_of_roots(&[root])
+}
+
+/// [`check_canonical_form`] over a plan with several roots.
+pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    validate::check_canonical_form_of_roots(roots)
 }
 
 /// What the plan promised its caller. The layer's contract is that the rows it hands back

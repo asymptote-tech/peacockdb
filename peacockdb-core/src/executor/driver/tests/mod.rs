@@ -4,11 +4,10 @@
 //! rather than on the rows that came back: a limit test that checks the rows passes just
 //! as well when the whole input was read and thrown away.
 
-/// The mock backend and the plans built on it, `pub(crate)` because the test modules of
-/// `driver`'s subcomponents drive the same backend and cannot see a private sibling.
+/// The mock backend, `pub(crate)` because the test modules of `driver`'s subcomponents
+/// drive the same backend and cannot see a private sibling. The plans it runs are
+/// `crate::tests::plans`, which `plan`'s tests build DAGs from too.
 pub(crate) mod mock;
-/// See [`mock`].
-pub(crate) mod plans;
 
 mod budget;
 mod counts;
