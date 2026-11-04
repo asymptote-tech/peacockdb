@@ -652,29 +652,29 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 
 **Files:** none expected; fixes get a failing test first. Detail file: counts, wall times, ids.
 
-- [ ] **Step 1: The staged install, built first** (the CPU-VM build of Global Constraints;
+- [x] **Step 1: The staged install, built first** (the CPU-VM build of Global Constraints;
   the H100 stays stopped meanwhile), into `/build/peacock/new-hosts/install` → exit 0, the CPU VM
   stopped again.
-- [ ] **Step 2: Prepare.** `N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
+- [x] **Step 2: Prepare.** `N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
   `G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`; `$N start`;
   `$G prepare` → exit 4 the first time; `$N stop --force && $N start`;
   `$G prepare` → exit 0, `fetched` lines for both sf40 sets. Check: `$N ssh 'grep RmProfilingAdminOnly /proc/driver/nvidia/params; nsys --version; ldd --version | head -1'`
   → `RmProfilingAdminOnly: 0`, an nsys version, glibc ≥ 2.39 (else stop the H100 and stall: the
   exported prefix needs the image's glibc). tpch.sf40's aggregate sha256 equals Task 8's pin.
   Second `$G prepare` → `fetched 0` twice, no pull of a new image, exit 0.
-- [ ] **Step 3: The sf1 corpus.** `$G ship --install /build/peacock/new-hosts/install && $G run list`
+- [x] **Step 3: The sf1 corpus.** `$G ship --install /build/peacock/new-hosts/install && $G run list`
   → exit 0; record per-binary counts beside the latest `GPU Tests (nebius-gpu)` run's.
-- [ ] **Step 4: One benchmark case.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single $G run bench && $G pull`
+- [x] **Step 4: One benchmark case.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single $G run bench && $G pull`
   → exit 0, a `testdata/benchmark-results/<h100 slug>/tpch.sf40/tp1_single.benchmark.txt` with
   `host=` the VM's hostname. Then remove the host record (C6), so pinned-loads' first `run
   bench` is not refused: `$N ssh 'rm -f ~/peacock/<i>/testdata/calibration/records.tsv'`. Not
   committed (sf40-baseline owns results): the local copies are restored or removed (the
   coordinator runs any `git restore`).
-- [ ] **Step 5: Nsight.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single scripts/create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`
+- [x] **Step 5: Nsight.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single scripts/create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`
   → `the trace pass ran 1 tests`, `calls.tsv` written. Counters: on the H100 as dmitry,
   `nsys profile --gpu-metrics-devices=all -o /tmp/m --force-overwrite=true env LD_LIBRARY_PATH=… <bench binary> --exact bench_tpch_sf40_q6_tp1_single --test-threads=1`
   → exit 0, no `ERR_NVGPUCTRPERM` in its output. Remove the local derived files (not committed).
-- [ ] **Step 6:** `$N stop` → `STOPPED`. Only then any fix: a failing test first, locally,
+- [x] **Step 6:** `$N stop` → `STOPPED`. Only then any fix: a failing test first, locally,
   with the H100 stopped; a rerun repeats Steps 1–5 from the build. Commit any fixes.
 
 ### Task 11: `build-test.md`
@@ -693,7 +693,7 @@ key pair uploaded in the web console,
 `nebius profile create eu-west1 --endpoint api.nebius.cloud --service-account-id <sa> --public-key-id <key> --private-key-file-path <pem> --parent-id <project>`,
 and `gh secret set NEBIUS_EU_WEST1_SA_ID --env nebius-gpu` (and the other three, values on stdin).
 
-- [ ] **Step 1:** write it, short sentences, every value from the code (`grep` each flag and path
+- [x] **Step 1:** write it, short sentences, every value from the code (`grep` each flag and path
   named against the scripts). **Step 2:** every test file under `scripts/nebius/tests/` and
   `scripts/env/tests/` (no image needed) → `0 failed`; `cargo test -p cost-report --test
   test_source_formatting` → PASS. `git grep -n -E 'gpu-host|scripts/env/gpu\.sh|host/nebius|host/ssh|config/peacock/hosts' -- . ':!llm-wiki/archive' ':!llm-wiki/reports' ':!llm-wiki/tasks' ':!docker'`

@@ -23,8 +23,9 @@
 | nebius-cpu128 | 2026-11-04 19:45:38 | 19:47:58 | 0.04 | Task 6 Step 5: the running leg of nebius-watch.yml (coordinator) |
 | nebius-cpu128 | 2026-11-04 22:01:07 | 22:23:17 | 0.37 | Task 8 Steps 5–6: the disk check, both fetches, DuckDB and its database |
 | nebius-h100 | 2026-11-04 22:23:24 | 22:24:59 | 0.03 | the grown disk's `df -h /` (174 G, grown at boot) |
+| nebius-h100 | 2026-11-04 22:28:42 | 23:11:47 | 0.72 | Task 10 Steps 2–6: both prepares, the sf1 list, one benchmark case, Nsight |
 
-Hours so far: nebius-gpu 0.07, nebius-h100 0.19, nebius-cpu128 0.86. Dev's local time is UTC.
+Hours so far: nebius-gpu 0.07, nebius-h100 0.91, nebius-cpu128 0.86. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -486,6 +487,45 @@ but this one.
   `/var/lib/peacock`, kept `dmitry:peacock` 2775 (bootstrap's mode). Then rerun Step 5 from the
   `df` check.
 
+Developer, 2026-11-04, Steps 5–6 (live), after the human grew the disks. Changed:
+`scripts/env/sf40.sha256` (the tpch line) and this file.
+
+- **The disks.** Both roots had already grown at boot, so no `growpart` or `resize2fs` ran.
+  - nebius-cpu128: `vda` 220 G, `/dev/vda1` 213 G, 37 G used, **177 G free**. `/var/lib/peacock`
+    is on `/` and is `dmitry:peacock` 2775. The gate is 110 G, so it passes.
+  - nebius-h100: `vda` 180 G, `/dev/vda1` 174 G, 18 G used, **156 G free**. It has no
+    `/var/lib/peacock` yet; `prepare` makes it. Nothing was written there.
+- **Step 5.** Offline first: 23 passed and 8 passed. The tree went over by `nebius-sync.sh --no-data`.
+  - First fetch: rc 0, 6 min 41 s. It printed `tpch.sf40: fetched 8, kept 0` and
+    `tpcds.sf40: fetched 24, kept 0`. tpcds matched its pin live. aws CLI v2 was installed
+    into `~/.local/aws-cli`. On disk: tpch.sf40 40 G, tpcds.sf40 15 G.
+  - tpch.sf40's aggregate is
+    `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It is now pinned in
+    `scripts/env/sf40.sha256`. Task 10 Step 2 checks the H100's fetch against it.
+    After the pin, both test files still pass (23 and 8).
+  - Second run, re-synced with the pin: rc 0, 28 s. It printed `fetched 0, kept 8` and
+    `fetched 0, kept 24`, and checked both pins. The parquet was in the page cache, so this
+    was not a cold read.
+- **Step 6.** `install-duckdb.sh` installed `/usr/local/bin/duckdb` v1.5.4 (08e34c447b). A
+  rerun printed `is v1.5.4 already`, rc 0.
+  - `duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb`
+    finished rc 0. Wall time **9 min 16 s**, of which the import took 392 s (partsupp 240 s,
+    lineitem 88 s).
+  - Row counts were verified against the parquet. `/var/lib/peacock/tpch.sf40.duckdb` is 32.73 GiB
+    (partsupp 21.74, lineitem 6.07). It was 100 % resident.
+  - All 10 queries matched `testdata/goldens/tpch.sf40/`: q6 q1 q3 q8, q11v img_000/017/034,
+    q12v/txt_000, q10v/txt_017, q9v/txt_034. Every timed run read 0.00 G from disk.
+    Second-smallest times: q6 121 ms, q1 738, q3 513, q8 934, q11v 1317/1340/1400,
+    q12v 506, q10v 819, q9v 1459 ms.
+  - 9 min is under 4 h, so `CAP` for `cpu` stays at 14400 in `idle_watch.py`.
+  - Afterwards the root had 124 G used and 89 G free. No `duckdb_tmp` was left behind.
+- **A launch detail.** In `cd … && nohup … & echo`, the `&` backgrounds the whole `&&` chain.
+  The forked shell then holds ssh's stdout until the job ends, so the launching ssh timed out
+  (rc 124) while the fetch kept running. Wrap the job instead:
+  `cd … && { nohup … </dev/null >/dev/null 2>&1 & }`. After that, the launches returned at once.
+- Both VMs stopped softly (rc 0, `STOPPED`). The CPU VM's scratch log dir was removed.
+- The disk part of "Blocked (2026-11-04, second)" is resolved. Next is Task 10 Step 2 on the H100.
+
 ## Task 9: `run-gpu.sh` and the staged install
 
 Developer, 2026-11-04, Steps 1–4 (offline: fakes only, no VM, no image pulled or built). VM time: none.
@@ -607,6 +647,73 @@ Developer, 2026-11-04. Step 1 done; Step 2 **stalled at the H100's disk**, befor
   check; Step 1's install at the path above is still good unless the tree changes.
 - tpch.sf40's pin from the H100's fetch (the analyst's departure) is not done: no fetch ran.
 
+Developer, 2026-11-04, Steps 2–6 (live), after the disks grew. No file changed but this one and
+the plan's ticks. No fix was needed.
+
+- **Step 1 still holds.** Outside `llm-wiki/`, the tree differs from the one the install was built
+  from (`4c2fa26f`) only in `scripts/env/sf40.sha256`. That file is in `prepare`'s kit, not in the
+  install. So the install at `/home/dmitry/build/peacock/new-hosts/install` (649 M) was shipped as it is.
+  Offline first: `test_run_gpu.py` 29 passed, `test_stage_install.py` 5 passed.
+- **Step 2, prepare.** The disk before: 174 G, 156 G free.
+  - **The first `prepare` exited 0, not 4.** The Nebius H100 image already holds Docker 29.9.2,
+    the NVIDIA Container Toolkit 1.20.1 and Nsight Systems 2025.3.2
+    (`/opt/nvidia/nsight-systems/2025.3.2/`). The dpkg logs show no install of any of them.
+    `RmProfilingAdminOnly` already read 0. So nothing was installed, and no restart was needed.
+    `prepare` only linked nsys to `/usr/local/bin/nsys` and added dmitry to `docker`.
+    It still wrote `/etc/modprobe.d/peacock-profiling.conf`.
+  - The first `prepare` took 22:29:46–22:50:56, about 21 min. The two image pulls took about 8 min:
+    build 10 GB and run 5.09 GB on disk. sf1 was generated into `/var/lib/peacock/d608b4d0ede659a7`
+    (774 M).
+  - The sf40 fetch printed `fetched 8, kept 0` and `fetched 24, kept 0`, about 12 min.
+    **tpch.sf40's aggregate matched Task 8's pin**, the CPU VM's `d9e4a8fe…8713`, and tpcds
+    matched its pin. So two independent fetches agree.
+  - The cuDF copy is at `~/peacock/cudf-25.02` (4.7 G).
+  - Checks: `RmProfilingAdminOnly: 0`, nsys 2025.3.2.474, glibc 2.39 (Ubuntu 2.39-0ubuntu8.9),
+    driver 580.173.02, `H100 80GB HBM3` with 81559 MiB.
+  - Second `prepare`: rc 0 in about 1 min. Both images were `up to date`, so nothing new was
+    pulled. It printed `fetched 0, kept 8` and `fetched 0, kept 24`, and the cuDF copy `already`.
+  - After prepare: 93 G used, 82 G free.
+- **Step 3, the sf1 list.** `ship --install …` took 1 min 39 s, rc 0. `run list` took 14 min
+  (22:54–23:08), rc 0, ending `run-tests.sh list: green`.
+  - Per binary: `peacock_cpu_tests` 26, `peacock_gpu_tests` 3, `peacock_join_session_tests` 56,
+    `peacock_plan_tests` 126. `peacock_gpu_benchmarks --skip bench_` passed 9 with 650 filtered,
+    659 in all. `peacockdb_core_gpu_lib gpu_tests::` 740, `test_gpu_corpus` 1009 (821 s),
+    `test_node_timing` 1.
+  - The sf40 pair was skipped, as the list says.
+  - These equal `build-test.md`'s counts (gpu: 740, 1009, 659, 1; the C++ rows 26, 126, 56).
+    The developer does not read CI, so the coordinator can compare them with the latest
+    `GPU Tests (nebius-gpu)` run.
+  - The panics in the log come from tests that expect a panic. Each of their binaries reports
+    0 failed.
+- **Step 4, one benchmark case.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single run bench`:
+  rc 0, 8 s. The rmm pool was 69.0 GiB of 78.7 GiB free. q6 ran in 96 684 us (second-smallest of 10).
+  - It reported 1 benchmark file and 81 calibration rows. `records.tsv` had 139 lines: 81 rows and
+    58 `#` lines.
+  - `pull`: rc 0. It wrote `testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt`
+    with `host=computeinstance-e00e6yena4nzjgaym0` (the VM's hostname), `device=NVIDIA H100 80GB
+    HBM3`, `driver=580.173.02`, `cuda=12.2`, `cudf=25.02.02` and `build=release`. The slug is
+    `h100-80gb-hbm3`.
+  - The host's `records.tsv` was removed. The local result (untracked) and the pulled
+    `testdata/calibration/records.tsv` (ignored) are out of the tree, kept in `/tmp/nh-h100-q6.*`.
+- **Step 5, Nsight.** `create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 …`: rc 0,
+  `the trace pass ran 1 tests`, `wrote testdata/calibration/calls.tsv`, 57 rows.
+  - The tracked `calls.tsv` was put back from a copy taken before the run, so `git status` is clean.
+    `capture.sqlite` (ignored) was moved out. The H100's versions are in `/tmp/nh-calls.tsv.h100` and
+    `/tmp/nh-capture.sqlite`.
+  - The counters run: `nsys profile --gpu-metrics-devices=all …`, run as dmitry: nsys rc 0,
+    `1 passed`, `General Metrics for NVIDIA GH100`, and no `ERR_NVGPUCTRPERM`.
+    q6 took 105 242 us under the counters, about 9 % over the clean run.
+    `/tmp/m.nsys-rep` was removed.
+  - **A departure:** the plan's literal command sets no environment. I added `PEACOCK_TESTDATA_DIR`
+    (the harness finds the datasets through it, as the trace pass sets it), and
+    `PEACOCK_BENCHMARK_CAPTURE=metrics`. With that, a profiled run publishes no `.benchmark.txt`
+    over the host's tree.
+- **`PCK_BENCH_HBM_PEAK_BW` for the H100 is `3.35e12`.** nvidia-smi gives a 2619 MHz maximum memory
+  clock. HBM3's bus is 5120 bits, double data rate: 2619e6 × 2 × 640 B = 3.352e12 B/s. That is
+  NVIDIA's published 3.35 TB/s for this card.
+- **Step 6.** The H100 stopped softly at 23:11:47, rc 0, `STOPPED`. No container was left.
+  The disk was 93 G used and 81 G free. The VM has 16 vCPUs and 196 G RAM.
+
 ## Task 11: `build-test.md`
 
 Developer, 2026-11-04, Steps 1–2 (offline). VM time: none.
@@ -630,6 +737,30 @@ Developer, 2026-11-04, Steps 1–2 (offline). VM time: none.
   record is published while shad-gpu is down. `run-gpu.sh pull` brings a record home but does not
   publish it, so that holds; Task 10 may want a line. The Datasets bullet keeps "sf40 on shad-gpu is
   a hard precondition of the GPU job", though `gpu-tests` now runs on nebius-gpu without sf40.
+
+Developer, 2026-11-04, the live values (after Tasks 8 and 10). Only `build-test.md` changed.
+VM time: none of its own.
+
+- **Added:** the sf40 ✓ for both Nebius columns, and the sentence under the table that says what a
+  ✓ there means. tpch.sf40's pin, under "sf40 lives on shad-gpu".
+  - nebius-h100: glibc, driver, and what its image already holds (so there is no exit 4).
+  - The CPU VM's clean provision.
+  - Both roots' sizes and their free space after the work, under "Disk", with the growpart line.
+  - `PCK_BENCH_HBM_PEAK_BW=3.35e12` and why. `gh100` stays: the H100 and the H200 are both GH100.
+  - The first and second `prepare`'s times, the sf1 list's 14 min, and the q6 case's 97 ms.
+  - The database's size, the import and run times, and the fetch times, under "What a VM holds".
+- **Step 2.** All 13 `scripts/nebius/tests/` files: 0 failed. The `scripts/env/tests/` files:
+  0 failed, except two that need what dev does not have.
+  - `test_image_any_user.py`: 1 failed. There is no `peacockdb-build:cudf-26.02` image on dev.
+  - `test_run_image.py`: 2 failed. `PEACOCK_STAGED_INSTALLS` is not set; it needs staged installs
+    per cuDF version.
+  - Both are image tests ("With the images built" in the Images row), outside the step's
+    "no image needed".
+  - `cargo test -p cost-report --test test_source_formatting`: 32 passed.
+- **The grep** finds only the fixture hostname `gpu-host`, which the rebase record accepts, and
+  `docker/run-tests.sh:7` is excluded by the path filter.
+- **Drift, still not changed:** the "TPC-H sf40 bare-cuDF" row keeps "shad-gpu (sf40 is a hard
+  precondition)". The H100 now holds sf40, but the plan never ran that pair there.
 
 ## Blocked (2026-11-04)
 
@@ -701,45 +832,6 @@ rebuilt from `git merge-file --diff3` of HEAD, `687b61fe` and the old tip: 17 co
   peacockdb-core's record and trailer tests, `test_split.py` and the page's sample trailer. The
   old tip has the same matches. It names a host in a sample record, not a script, so it stays.
   `docker/run-tests.sh:7` is still the one recorded exception.
-
-Developer, 2026-11-04, Steps 5–6 (live), after the human grew the disks. Changed:
-`scripts/env/sf40.sha256` (the tpch line) and this file.
-
-- **The disks.** Both roots had already grown at boot, so no `growpart` or `resize2fs` ran.
-  - nebius-cpu128: `vda` 220 G, `/dev/vda1` 213 G, 37 G used, **177 G free**. `/var/lib/peacock`
-    is on `/` and is `dmitry:peacock` 2775. The gate is 110 G, so it passes.
-  - nebius-h100: `vda` 180 G, `/dev/vda1` 174 G, 18 G used, **156 G free**. It has no
-    `/var/lib/peacock` yet; `prepare` makes it. Nothing was written there.
-- **Step 5.** Offline first: 23 passed and 8 passed. The tree went over by `nebius-sync.sh --no-data`.
-  - First fetch: rc 0, 6 min 41 s. It printed `tpch.sf40: fetched 8, kept 0` and
-    `tpcds.sf40: fetched 24, kept 0`. tpcds matched its pin live. aws CLI v2 was installed
-    into `~/.local/aws-cli`. On disk: tpch.sf40 40 G, tpcds.sf40 15 G.
-  - tpch.sf40's aggregate is
-    `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It is now pinned in
-    `scripts/env/sf40.sha256`. Task 10 Step 2 checks the H100's fetch against it.
-    After the pin, both test files still pass (23 and 8).
-  - Second run, re-synced with the pin: rc 0, 28 s. It printed `fetched 0, kept 8` and
-    `fetched 0, kept 24`, and checked both pins. The parquet was in the page cache, so this
-    was not a cold read.
-- **Step 6.** `install-duckdb.sh` installed `/usr/local/bin/duckdb` v1.5.4 (08e34c447b). A
-  rerun printed `is v1.5.4 already`, rc 0.
-  - `duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb`
-    finished rc 0. Wall time **9 min 16 s**, of which the import took 392 s (partsupp 240 s,
-    lineitem 88 s).
-  - Row counts were verified against the parquet. `/var/lib/peacock/tpch.sf40.duckdb` is 32.73 GiB
-    (partsupp 21.74, lineitem 6.07). It was 100 % resident.
-  - All 10 queries matched `testdata/goldens/tpch.sf40/`: q6 q1 q3 q8, q11v img_000/017/034,
-    q12v/txt_000, q10v/txt_017, q9v/txt_034. Every timed run read 0.00 G from disk.
-    Second-smallest times: q6 121 ms, q1 738, q3 513, q8 934, q11v 1317/1340/1400,
-    q12v 506, q10v 819, q9v 1459 ms.
-  - 9 min is under 4 h, so `CAP` for `cpu` stays at 14400 in `idle_watch.py`.
-  - Afterwards the root had 124 G used and 89 G free. No `duckdb_tmp` was left behind.
-- **A launch detail.** In `cd … && nohup … & echo`, the `&` backgrounds the whole `&&` chain.
-  The forked shell then holds ssh's stdout until the job ends, so the launching ssh timed out
-  (rc 124) while the fetch kept running. Wrap the job instead:
-  `cd … && { nohup … </dev/null >/dev/null 2>&1 & }`. After that, the launches returned at once.
-- Both VMs stopped softly (rc 0, `STOPPED`). The CPU VM's scratch log dir was removed.
-- The disk part of "Blocked (2026-11-04, second)" is resolved. Next is Task 10 Step 2 on the H100.
 
 ## Analyst: disk (2026-11-04)
 

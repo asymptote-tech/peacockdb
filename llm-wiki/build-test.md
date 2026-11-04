@@ -1012,8 +1012,8 @@ region above, for `build-test-shadgpu.sh`.
 | TPC-H+V sf1, external vectors | 8 tables, 987 MB; GloVe 100-d + DEEP1B 96-d | ✓ | ✓ | ✓ |  |  | — | most CPU/GPU rust tests |
 | TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — |  |  | — | CI only — regenerated every run |
 | TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ |  |  | — | plan + CPU + GPU subsets |
-| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | — | — | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
-| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | — | — | `tpcds-sf40` | `peacock_gpu_benchmarks` |
+| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | ✓ | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
+| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | ✓ | ✓ | `tpcds-sf40` | `peacock_gpu_benchmarks` |
 | TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ |  |  | `tpcds-sf200` | no tests — S3 check, validate-large |
 | TPC-H sf200 | not generated yet | — | — | — |  |  | `tpch-sf200` | nothing yet |
 | embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ |  |  | — | generator input, not a test input |
@@ -1022,7 +1022,7 @@ region above, for `build-test-shadgpu.sh`.
 Paths: `testdata/{tpch.minimal,pbench.sf1,tpch.sf1,tpcds.sf1,embeddings-cache}`; sf40 and sf200 live
 outside the repo on shad-gpu, under `/home/info/peacock-datasets/testdata/`. The two Nebius
 columns track sf40 alone. `fetch-sf40.sh` puts both sets in `/var/lib/peacock/<dataset>/` there
-("Containers"); a ✓ waits for an audited fetch. **+V** means
+("Containers"). Each ✓ there is a fetch checked against both pins, on 2026-11-04. **+V** means
 the TPC-H tables carry vector columns — `part.p_text_embedding` and
 `partsupp.ps_image_embedding` + `ps_text_embedding`; TPC-DS does not have embeddings.
 
@@ -1059,6 +1059,9 @@ sha256 matches local). Notes on the rows above:
   shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
   Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
 - **sf40 lives on shad-gpu**, and `fetch-sf40.sh` fetches it to nebius-h100 and nebius-cpu128.
+  tpch.sf40's aggregate is
+  `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It was pinned from the CPU
+  VM's fetch, and the H100's own fetch matched it.
   CI's `gpu-tests` runs on the L40S and reads no sf40; the sf40 goldens are committed (see
   below), so a comparison never touches 40 GB.
 - **tpcds sf40 is the benchmark's alone**: no test tier reads it, only the s3-datasets check
@@ -1696,7 +1699,10 @@ the device runs. Every CPU build and run stays local, or on verda.
   asks the API for it on every call.
 
 **nebius-h100** holds no tree. `run-gpu.sh` ships each run's install and testdata to it.
-**nebius-cpu128** is a containers VM: `provision-vm.sh` readies it ("Containers").
+Ubuntu's glibc 2.39, driver 580.173.02. Its image already has Docker, the NVIDIA Container Toolkit
+and nsys, and its counters are open to non-root, so its first `prepare` needed no restart.
+**nebius-cpu128** is a containers VM: `provision-vm.sh` readies it ("Containers"). It ran clean
+there on 2026-11-04, with no fix.
 
 ### The scripts
 
@@ -1854,8 +1860,13 @@ $N stop
 
 Nsight runs on the VM itself, over the same door:
 `create_nsys_profile.sh --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i>
---remote-cudf-root /home/dmitry/peacock/cudf-25.02`. Its HBM defaults are an H200's: set
-`PCK_BENCH_HBM_PEAK_BW` for the H100.
+--remote-cudf-root /home/dmitry/peacock/cudf-25.02`. Its HBM defaults are an H200's. The
+metric set `gh100` fits the H100 too, but the peak does not: set `PCK_BENCH_HBM_PEAK_BW=3.35e12`.
+That is the H100's 2619 MHz memory clock × 2 × 5120 bits, NVIDIA's 3.35 TB/s.
+
+On 2026-11-04 the first `prepare` took about 21 min: 8 for the two images, 12 for sf40. A second
+took about 1 min. The sf1 list ran green in 14 min, each binary at the count this page gives. One
+benchmark case, `bench_tpch_sf40_q6_tp1_single`, took 97 ms a run.
 
 ### The CPU-VM build
 
@@ -1984,6 +1995,11 @@ nebius-gpu's boot disk is 96 GB in all, and two chains and CI share it.
 
 On nebius-h100 and nebius-cpu128, run `df -h / /var/lib/peacock` before `prepare` or a fetch. sf40
 is about 56 GB, and the two images about 15 GB.
+
+- nebius-h100's root is 174 GB. After `prepare` 81 GB is free.
+- nebius-cpu128's root is 213 GB. After sf40, the tpch database and the build image 89 GB is free.
+- A grown disk's root grew at the next boot on both. If `df -h /` still shows the old size, run
+  `sudo growpart /dev/vda 1 && sudo resize2fs /dev/vda1`.
 
 ### Who stops it
 
@@ -2373,7 +2389,10 @@ same with one more line, which `provision-vm.sh` writes:
   `benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download` imports the
   fetched `tpch.sf40` parquet into `/var/lib/peacock/tpch.sf40.duckdb`. `--skip-download` is
   needed: without it the script lists the bucket with a bare `aws` and aws's own credentials, and
-  the VM keeps its keys in `peacock.env` alone.
+  the VM keeps its keys in `peacock.env` alone. On 2026-11-04 the database was 32.7 GiB. The
+  import took 392 s, and the whole run, with its golden checks and timings, 9 min 16 s.
+- **Fetch times**, on 2026-11-04: on the CPU VM 6 min 41 s, on the H100 about 12 min. A second
+  run fetches nothing: 28 s on the CPU VM, with the parquet in the page cache.
 
 ## Benchmarks
 
