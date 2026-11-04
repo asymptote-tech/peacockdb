@@ -513,26 +513,26 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Produces: `provision-vm.sh` with stdin not a terminal skips the Claude login and prints
   `Claude Code is not logged in on <dev>: run ssh -t <dev> 'claude auth login'`, exit 0.
 
-- [ ] **Step 1: Failing test** `test_provision_without_a_terminal_names_the_claude_login` (stdin
+- [x] **Step 1: Failing test** `test_provision_without_a_terminal_names_the_claude_login` (stdin
   `/dev/null`, no credentials on the fake VM → rc 0, no `-t` ssh, stderr names `claude auth login`).
   Run `python3 scripts/env/tests/test_provision.py` → FAIL. Implement (`[ -t 0 ]` guard). Run → pass.
-- [ ] **Step 2: 6a's fake-ssh tests.** `for f in scripts/env/tests/test_{provision,bootstrap}.py; do python3 "$f"; done`
+- [x] **Step 2: 6a's fake-ssh tests.** `for f in scripts/env/tests/test_{provision,bootstrap}.py; do python3 "$f"; done`
   → each `0 failed`.
-- [ ] **Step 3: Preconditions on dev.** `test -s ~/.config/peacock/github-pat && echo yes` (never
+- [x] **Step 3: Preconditions on dev.** `test -s ~/.config/peacock/github-pat && echo yes` (never
   print it). Missing → stall for the human: `provision-vm.sh` reads the PAT from a terminal.
   *(coordinator)* commit the work so far and push `ENS-new-hosts` (a mid-task push, so the VM's
   clone can check the branch out). The VM's clone is bootstrap's only; builds there come from
   the CPU-VM build, never from it.
-- [ ] **Step 4: Run it.** `C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"`;
+- [x] **Step 4: Run it.** `C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"`;
   `$C start`; `time scripts/env/provision-vm.sh dmitry@$($C ip) --name nebius-cpu128 --ref ENS-new-hosts </dev/null` (the GPU key is the default `~/.config/peacock/gpu_ed25519`, a copy of dev's `~/.ssh/id_ed25519`, put there 2026-11-03)
   → exit 0. Check over `$C ssh`: `docker --version`, `gh --version` = `GH_VERSION`,
   `~/.local/bin/claude --version` = `CLAUDE_CODE_VERSION`, `git -C ~/peacockdb branch --show-current`
   = `ENS-new-hosts`, an sf1 set under `/var/lib/peacock/<hash>/{tpch.sf1,tpcds.sf1}`,
   and no `~/.config/peacock/machine` (`test ! -e`). Bootstrap's work counts under the 2-hour build rule; if a
   run outlasts it, record it and rerun (the rerun resumes).
-- [ ] **Step 5: Rerun** the same command → bootstrap runs again and reports every step skipped,
+- [x] **Step 5: Rerun** the same command → bootstrap runs again and reports every step skipped,
   wall time recorded, exit 0.
-- [ ] **Step 6: The GPU-host key reaches the H100.** `$C ssh 'grep -c "^GPU_SSH_KEY_FILE=" ~/.config/peacock/peacock.env; stat -c %a ~/.config/peacock/gpu_ed25519'`
+- [x] **Step 6: The GPU-host key reaches the H100.** `$C ssh 'grep -c "^GPU_SSH_KEY_FILE=" ~/.config/peacock/peacock.env; stat -c %a ~/.config/peacock/gpu_ed25519'`
   → `1` and `600`; its fingerprint equals dev's `ssh-keygen -lf ~/.ssh/id_ed25519.pub` (public
   halves only). Nothing is authorized anew: the H100 already accepts it. No host key is
   accepted blind (`prompts.md`): with the H100 started

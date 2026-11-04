@@ -15,6 +15,10 @@
 | nebius-h100 | 2026-11-04 04:55:52 | 04:58:53 | 0.05 | Task 6 Step 2: install-watch (failed: wrong `--key-file`), checks, keys |
 | nebius-cpu128 | 2026-11-04 05:00:07 | 05:03:02 | 0.05 | Task 6 Step 3: install-watch, checks, keys |
 | nebius-h100 | 2026-11-04 05:04:14 | 05:07:13 | 0.05 | Task 6 Step 2 again: install-watch without `--key-file` |
+| nebius-cpu128 | 2026-11-04 18:58:00 | 19:10:11 | 0.20 | Task 7 Steps 4–6: provision, its checks, the rerun, the key checks |
+| nebius-h100 | 2026-11-04 19:07:41 | 19:09:38 | 0.03 | Task 7 Step 6: the CPU VM's ssh to it |
+
+Hours so far: nebius-gpu 0.07, nebius-h100 0.13, nebius-cpu128 0.25. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -324,6 +328,56 @@ Developer, 2026-11-04, Steps 1–3 (offline). VM time: none.
     is silent but for docker pull and cargo fetch, which run every time, and the closing text.
     Judge the skip by the absence of apt/curl/sudo work and by wall time.
   - With `</dev/null` Claude Code ends installed, not logged in: the human runs the printed command.
+
+Developer, 2026-11-04, Steps 4–6 (live). Branch pushed at `01041c1f`; `~/.config/peacock/github-pat`
+present (`test -s`, not printed). No code changed: the run showed nothing broken.
+
+- **Host key, before provision.** The CPU VM came up at 66.201.6.39. Dev's `~/.ssh/known_hosts` had
+  no entry for it. `ssh-keyscan -t ed25519` gave the same key `nebius.sh` recorded at Task 6
+  (`…UKe8XLxeiLw+4VOM`, alias `nebius-computeinstance-e01t2mm4265y8x88ey`). So provision's
+  `accept-new` took a key already checked. After the run, `~/.ssh/known_hosts` holds that key.
+- **Step 4.** `scripts/env/provision-vm.sh dmitry@66.201.6.39 --name nebius-cpu128 --ref ENS-new-hosts </dev/null`:
+  exit 0, wall 453 s (7.6 min), well inside the 2-hour rule. Log: `/tmp/t7/run1.log` (578 lines,
+  dev only). None of the live-run risks above came true: apt installed `docker.io` with no prompt,
+  the Claude installer and `plugin marketplace add`/`plugin install` worked from ssh's EOF stdin,
+  and the long ssh did not drop. Last line on stderr:
+  `Claude Code is not logged in on dmitry@66.201.6.39: run ssh -t dmitry@66.201.6.39 'DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'`.
+  Checks over `$C ssh`, all as the plan wants:
+  - `docker --version`: 29.1.3 (Ubuntu's `docker.io`).
+  - `gh --version`: 2.102.1 = `GH_VERSION`, at `/usr/local/bin/gh`.
+  - `~/.local/bin/claude --version`: 2.1.304 = `CLAUDE_CODE_VERSION`.
+  - `git -C ~/peacockdb branch --show-current`: `ENS-new-hosts`, HEAD `01041c1f`.
+  - sf1: `/var/lib/peacock/d608b4d0ede659a7/{tpch.sf1,tpcds.sf1}`, 8 and 24 files. Also
+    `/var/lib/peacock/cudf/43505bb9…`, the cuDF source bootstrap fetches.
+  - `test ! -e ~/.config/peacock/machine`: true.
+  - Also: groups `dmitry docker peacock`; `gh auth status` logged in (account alephonea); git
+    `user.name` set.
+  - Disk after provision: `/dev/vda1` 96 G, 22 G used, 74 G free. **For Task 8:** sf40 (about 56 G)
+    leaves about 18 G for DuckDB's native sf40 database. Run `df -h / /var/lib/peacock` first, as
+    build-test.md says; I did not check whether `/var/lib/peacock` is on `/`.
+- **Step 5, the rerun.** The same command: exit 0, wall 6 s. Its whole output is the build image's
+  `docker pull` ("Image is up to date"), bootstrap's closing text and the Claude line. No apt, curl,
+  clone, plugin or sf1 work; cargo's fetch printed nothing. Log: `/tmp/t7/run2.log`.
+- **Step 6, the GPU key.** On the CPU VM: `grep -c '^GPU_SSH_KEY_FILE='` in `peacock.env` is `1`
+  after both runs (provision rewrites the file, then appends the line). `gpu_ed25519` is mode 600.
+  Its fingerprint, from the `.pub` and derived from the private key with `ssh-keygen -yf`, is
+  `SHA256:2aXlKfnh+7h7M2NXk/UrO+NTIUNAd8D+cZk3mOJUBnw`, equal to dev's `~/.ssh/id_ed25519.pub`.
+  The H100 started at 89.169.123.170. Its one line under alias `nebius-computeinstance-e00e6yena4nzjgaym0`
+  in dev's `~/.config/peacock/nebius/known_hosts` went to the CPU VM's
+  `~/.config/peacock/h100_known_hosts` (1 line, mode 600). Then, on the CPU VM,
+  `ssh -i ~/.config/peacock/gpu_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.config/peacock/h100_known_hosts -o HostKeyAlias=nebius-computeinstance-e00e6yena4nzjgaym0 dmitry@89.169.123.170 true`:
+  exit 0. Nothing was authorized anew. The H100 then the CPU VM stopped softly, each exit 0, and
+  `status` shows both `STOPPED`.
+- **Drift, not fixed (no wrong behaviour today).** `provision-vm.sh` records the VM as
+  `nebius-cpu128 dmitry@66.201.6.39` in `~/.config/peacock/vm`. build-test.md ("Nebius host") says an
+  IP can change on every start and is never written down. So a later `provision-vm.sh --new-pat`
+  goes to that IP. If the IP has moved, ssh fails (no answer, or a host-key mismatch) and the script
+  names the VM as unreachable, as designed. It does not reach the moved VM. A Nebius VM
+  needs `provision-vm.sh dmitry@$($C ip) --name nebius-cpu128 …` again, or a by-hand `gh auth login`,
+  after a PAT change. The same goes for the entry dev's `~/.ssh/known_hosts` now holds for
+  66.201.6.39.
+- Claude Code on nebius-cpu128 is installed, not logged in. That is the human's optional step 4
+  in "Blocked" above.
 
 ## Task 8: sf40 and DuckDB on the VMs
 
