@@ -357,3 +357,53 @@ fn a_capture_variable_naming_no_pass_is_refused() {
     let _loan = EnvLoan::set(CAPTURE_ENV, "sideways");
     let _ = Capture::from_env();
 }
+
+/// What a measuring run stamps on every trailer and record heading, read the way a `bench_`
+/// case reads it. CI skips those cases, so without this no gate reads the five on a device,
+/// and a wrong one would first show in a published file.
+#[test]
+fn this_runs_provenance_names_its_device_driver_cuda_cudf_and_host() {
+    use peacockdb_core::test_support::{cudf_release, device_slug, provenance_of_this_run};
+
+    let provenance = provenance_of_this_run("the provenance check");
+
+    let slug = device_slug(&provenance.device);
+    assert!(
+        !provenance.device.trim().is_empty() && !slug.is_empty(),
+        "the device {:?} names no directory under benchmark-results/",
+        provenance.device
+    );
+    assert!(
+        slug.split('-').all(|word| !word.is_empty()
+            && word
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())),
+        "{:?} slugs to {slug:?}, which fetch_record.sh refuses as a device",
+        provenance.device
+    );
+
+    let driver = &provenance.driver;
+    assert!(
+        driver.contains('.')
+            && driver
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+        "the driver {driver:?} is not a release, digits and dots"
+    );
+
+    let cuda = &provenance.cuda;
+    let version = cuda
+        .split_once('.')
+        .and_then(|(major, minor)| Some((major.parse::<u32>().ok()?, minor.parse::<u32>().ok()?)));
+    assert!(
+        version.is_some_and(|version| version >= (11, 0)),
+        "the CUDA runtime {cuda:?} is not a major.minor of 11.0 or later"
+    );
+
+    assert_eq!(
+        provenance.cudf,
+        cudf_release(),
+        "the cuDF named is not the one this binary was built against"
+    );
+    assert!(!provenance.host.trim().is_empty(), "the host name is empty");
+}

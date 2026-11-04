@@ -334,3 +334,131 @@ labels carry `third_party/cudf=43505bb975f46ce4e140fdaf55192611d6e231ac` and
 should. With the run 26.02 label, a changed `pins.env` hash printed `docker/pins.env`. A label
 missing `docker/run-tests.sh` printed that input. Checking the label against the 25.02 tree
 printed both specs and `docker/pins.env`.
+- PR #193 opened against master (2026-11-04); board `reviewing`.
+
+## Review round 1 (2026-11-04)
+
+1 blocking, 2 important, 7 nits (nits not taken).
+- B1: `test_the_data_directory_is_machine_wide_by_default` (old `test_up.py:538`) went with
+  `test_up.py`; `machine.sh:15`'s default is untested → developer, port into `test_bootstrap.py`.
+- I2: `source_file` is a public path into the checkout the `no_core_test_reads_the_checkout`
+  guard cannot see → developer: make it write-only (`rewrite_source_file(rel, text)`).
+- I3: #226 names `scripts/exec_model/optimizer/call_cost.py` and `exec-model-corpus.yml`'s record
+  fetch, which exist only on `ENS-optimizer` → coordinator edits the ticket.
+- Round 1 fixed: B1, I2 (developer, 379a56d5); I3 (coordinator, #226 loses the optimizer-only call_cost.py and exec-model-corpus.yml references).
+
+## Review round 2 (2026-11-04)
+
+B1, I2, I3 resolved; no new findings. Board `completing`.
+
+## Completeness pass (2026-11-04)
+
+Reviewer (what is wrong): 0 blocking, 0 important.
+Analyst (what is missing): 0 blocking, 3 important; `architecture.md` has no false sentence;
+five `build-test.md` passages left false by the carried `f3db66b1` (its docs were in
+ENS-optimizer's `c5d12789`, not carried).
+- A1: no CI test reads the provenance on a device (`provenance::of_this_run`, Rust
+  `device_info()` reached only from the skipped `bench_` cases) → developer: a ninth harness test
+  in `peacock_gpu_benchmarks.rs`, run under `--skip bench_` by every gpu-tests job.
+- A2: open items from containers' record, owners named here:
+  - the CUDA mix in the 25.02 build image (compare with nebius-gpu's native build) → new-hosts,
+    which first runs the run image on a device;
+  - `nsys_hbm.py`'s device check on a real Nsight export → sf40-baseline (the H100's Nsight pass);
+  - the `tpcds-sf40` bucket's sha256s against shad-gpu's copy → sf40-baseline (it reads tpcds
+    sf40 from the bucket); shad-gpu is down, so it waits on shad-gpu;
+  - `scripts/build-test-shadgpu.sh:683`, `:702` "a failing case appends its rows before it
+    panics" → fixed here (developer).
+- A3: Done-when 2 on the tip → the developer re-runs the rust-only gates and
+  `scripts/env/tests` on the tip; the PR's CI run is recorded below.
+- build-test.md: :780 (one file per device, dataset and mode), :1232 (tpcds.sf40 too), :1251–1255
+  (`--metrics` per case, `hbm-parts`, `--parts`), :1257 and :2201–2204 (`plot.py` takes one
+  `--record` per dataset) → developer, from `git show c5d12789:llm-wiki/build-test.md`'s wording
+  where it fits the fork.
+- Round 1 fix: `test_bootstrap.py` ran 17 passed after `379a56d5` (developer's report).
+- Completeness fixes (developer, 2026-11-04):
+  - A1: `this_runs_provenance_names_its_device_driver_cuda_cudf_and_host` in
+    `peacock_gpu_benchmarks.rs`, through two delegates in `test_support/mod.rs`
+    (`provenance_of_this_run`, `cudf_release`). Red then green as a compile in the 25.02 build
+    image (`cargo test --no-run -p peacockdb-core --features gpu --tests`): E0432 before the
+    delegates, clean after. 639 tests, 9 under `--skip bench_`. Never run on a device; with none
+    it stops at `of_this_run`'s "the CUDA runtime describes no device".
+  - A2: `build-test-shadgpu.sh:683`, `:702` now say a failed case appends none of its rows.
+  - build-test.md: the five passages, from c5d12789's wording. `create_nsys_profile.sh` reads
+    pinned records only at `calibration/<dataset>.sf<sf>/`, the H200's level; a new device's
+    fetched records sit under `<device>/`, so step 5 does not find them there yet.
+  - `scripts/env/tests/test_run_tests.py` runs `docker run` on a run image that is not there,
+    which pulls it (25.02, 8.3 GB; 26.02 timed out at 120 s). Remove it afterwards.
+- Device CI: `pipeline.yml` dispatched 2026-11-04T01:51:56Z on `2b89446c`, run 41756935974. Waiting for `GPU Tests (nebius-gpu)`.
+- Run 41756935974 failed at "Start nebius-gpu": no capacity (exit 75) from 2026-11-04T02:17Z for 30 min. GPU capacity clock starts 2026-11-04T02:17Z (10 hours → 12:17Z). The coordinator retries `gpu-host.sh start` every 15 min and re-dispatches once the VM is up.
+- Re-dispatched 2026-11-04T02:52:57Z on `77ca5879` after `gpu-host.sh start` succeeded at 02:52Z: run 41763580580.
+- Run 41763580580: `build 25.02 for GPU` failed in "Initialize containers": the runner had no space left pulling the image (infra). Re-run of failed jobs.
+- Dispatched again 2026-11-04T03:28:09Z on `ceaa2615`: run 41767310779 (41763580580 left to finish its CPU legs; its GPU job never ran).
+- Run 41767310779 green, `GPU Tests (nebius-gpu)` included (the new provenance test passed on the L40S; 9 harness tests, 740 gpu_tests, 989 corpus cells). GPU host hard-stopped. Board `done` (2026-11-04).
+
+## Rebase onto master (2026-11-04)
+
+Master now holds the ENS-optimizer merge (#165). The branch was rebased onto it: 42 commits
+replayed, plus the coordinator's board commit, HEAD `48f382e6` before the fixes below.
+- **`f3db66b1` is gone.** Master's `a5c852e4` is the same commit as master took it: rk00's, same
+  date and subject. Master's version wins. It reads both case lists through the `inventory`
+  declarations, and master has no `macro_invocations_in` (`272819bd` removed it). The fork's two
+  unit tests for that reader left with it, so `corpus::tests` is 10 again.
+- **Code conflicts**, all in `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`:
+  - `602ff9f4`: master's inventory reading kept. The commit's per-device loop went into master's
+    `every_declared_case_has_a_section_in_the_tree`. `CASE_LIST` and `macro_invocations_in` dropped.
+  - `61ecd637`: this commit never compiled on the fork. It calls a `macro_invocations(path, …)`
+    nothing defines, and reads the list from the checkout. The main list now comes from
+    `listed_cases()`, over the inventory. The registry test compares the compiled-in `CASE_LIST`.
+    `h200/cases.inc` was read at run time by a strict local reader, `text_cases`, until `c0339f81`.
+  - `16e0aad5`: `source_file` for the `UPDATE_CANONICAL` write, so no core test names
+    `CARGO_MANIFEST_DIR`. A missing H200 list is an `Err`, not a panic.
+  - `c0339f81`: the commit's `device_list_files`. `text_cases` and `PREDATES_LIST` deleted.
+    `a_tree_with_its_own_list_is_held_to_it` reads `listed_cases()`.
+  - `379a56d5`: the import list only; `rewrite_source_file` replaces `source_file`.
+- **The case list, regenerated** from master's registry with `UPDATE_CANONICAL=1`. It gains 4
+  queries at all five modes, 20 cells: tpch `anti_join_reorder`, `left_join_fixed`,
+  `left_join_reorder` and `semi_join_reorder` (master's `2264ef29` turned them on). 650 cells over
+  130 queries. The registry did not change, so `testdata/report.html` did not either.
+- **`build-test.md`**: the replay's wiki conflicts had taken master's side. The page is now the
+  three-way merge of master, `dc90b51c` and the old tip `L-pre-rebase-containers`, its 21 hunks
+  resolved by meaning. Master's names win: nebius, `nebius-watch.yml`, the exec-model rows.
+  Containers' material stays: device trees, provenance, the failed-case record and resume, the
+  images, `tpcds-sf40`'s bucket, the registry-made list. `f3db66b1` became `a5c852e4` there and
+  in `tickets/benchmarks.md`. Recounted from `--list`: 7593 cases, Rust 5959, C++ 233, Python
+  1401; cpu 3414 (`--lib` 917, `test_corpus_goldens` 47); gpu 2409 (`peacock_gpu_benchmarks` 659).
+- **Gate fix**: `scripts/env/tests/test_run_tests.py` read `scripts/gpu-host-test.sh`, which
+  master's `bf937124` renamed `scripts/nebius-test.sh`. Red (FileNotFoundError), then 24/24.
+  `docker/run-tests.sh:7` still names `gpu-host-test.sh` in a comment. It is left: a `docker/`
+  edit changes the images' `peacockdb.inputs` label and asks for a rebuild.
+- **Done when, on this base.** Item 1: the 42 replayed commits keep author and date, matched by
+  subject; 16 are rk00's, and `f3db66b1`'s place is master's `a5c852e4`. Item 2: the gates below
+  pass; the H200 tree check passes, `h200/` held to its `cases.csv`. Item 2a: `h200/cases.inc` is
+  gone, `cases.csv` holds 14 `ok` rows, and no page outside the tasks names `h200/cases.inc`.
+  Item 3 is waived: master carries the optimizer. Item 6: the seven deleted files are absent, and
+  the grep finds none of its terms outside `llm-wiki/tasks` and `llm-wiki/archive`.
+- **Gates** (dev, local; verda unreachable; no device run):
+  - `cargo test --features rust-only -p peacockdb-core`: `--lib` 915 + 2 ignored,
+    `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3, `test_crate_privacy`
+    1, `test_golden_format` 41. `cargo build --features rust-only -p peacockdb` builds.
+  - `cmake --build cpp/build` and `ctest --test-dir cpp/build -L cpu`: 1/1.
+  - `cargo test -p cost-report`: bin 49, `test_source_formatting` 32.
+  - `scripts/env/tests`: all pass but two, for want of inputs on dev. `test_image_any_user` passes
+    25.02 and has no 26.02 build image. `test_run_image` passes 7 of 9 and has no
+    `PEACOCK_STAGED_INSTALLS`. No image input changed since the old tip (`git diff` over
+    `docker/`, `scripts/env/` but its tests, `scripts/lib/`, `third_party/` and `images.yml` is
+    empty), so Task 3 Step 8's image-backed runs still stand.
+  - `scripts/calibration/tests`: all pass; `test_plot.py` 7/7 in the 25.02 build image (dev has no
+    matplotlib). `testdata/test_*.py`, `scripts/test_ticket_widget.py`, `scripts/nebius/tests`:
+    all pass.
+  - The exec-model step of CI's cost-report job: 42 of its 48 files pass. The other six
+    (`test_dphyp`, `test_filter_passes`, `test_optimize`, `test_reorder_non_inner`, `test_replan`,
+    `test_report`) need `libpeacockdb_dphyp.so`. Dev's rustc 1.94 cannot build it: `enumerate.rs:89`
+    calls `isolate_lowest_one`, unstable there. `peacockdb-dphyp/` and `scripts/exec_model/` are
+    master's byte for byte, and the PR's cost-report job builds them on current stable.
+  - Not run: the FFI tier and the gpu-shape compile in the build images, and any device run. CI
+    runs them on the PR.
+
+CI after the rebase: PR #193 run 41875796464 (pull_request, 13a6271c); device run 41876054030
+(workflow_dispatch, dispatched 2026-11-04T17:16:57Z after the hard stop). `done` comes back when both are green.
+dispatch 41876054030 attempt 1: cudf 25.02 docker pull failed; GPU job's ci-ship hung after [lib] (50-min timeout). Rerun --failed at 2026-11-04T18:17:59Z.
+Rerun green: PR run 41875796464 and dispatch 41876054030 (GPU Tests (nebius-gpu) included), 2026-11-04T18:44:56Z. Back to done.

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use peacockdb_core::test_support::{
     BUILD, COLUMNS, Capture, DEVICE_CASES_HEADER, FAILED, MEASURED_RUNS, MODES, Mode, Provenance,
     RECORD_PATH_ENV, RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections,
-    parse_device_cases, record_header, rows_match_the_recipes, source_file, testdata_root,
+    parse_device_cases, record_header, rewrite_source_file, rows_match_the_recipes, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -557,10 +557,7 @@ fn the_benchmark_cases_follow_the_registry() {
     );
     let want = case_list_text(&cases);
     if std::env::var("UPDATE_CANONICAL").is_ok() {
-        let path = source_file("tests/common/corpus_benchmark_cases.inc");
-        let staged = path.with_extension("inc.new");
-        std::fs::write(&staged, &want).expect("the staged case list");
-        std::fs::rename(&staged, &path).expect("the case list");
+        rewrite_source_file("tests/common/corpus_benchmark_cases.inc", &want);
         return;
     }
     if CASE_LIST == want {

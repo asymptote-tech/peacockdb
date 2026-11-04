@@ -186,3 +186,14 @@ five files, `upload-embeddings.sh`, `embeddings-bucket.sh`; trims `provision-vm.
 `scripts/env/tests/`, and `build-test.md`.
 
 Component-level API: none beyond what containers already adds.
+
+## Completeness signoff (2026-11-04)
+
+Solved under its constraints: master + `02f6a4d8` (as `f3db66b1`) + containers' 16 commits, all 17
+rk00's with their dates; no optimizer file; the case list from master's registry (630 cells); the
+H200 list as `cases.csv`; launcher and embeddings' S3 path removed; rust-only, FFI (image),
+gpu-shape compile, cost-report and script gates green; the four images serve the fork unrebuilt.
+Shortcuts: #226 left open, against the spec's "closes", because it still lists open work; two new
+unit tests sit inside the carried `f3db66b1`; the FFI tiers in the build image need
+`LD_LIBRARY_PATH=/opt/cudf/lib` (as on containers' tip, now documented); `docker/run-tests.sh` and
+`scripts/env/image.sh` still cite the archived containers spec; one new SC2034. Otherwise none.

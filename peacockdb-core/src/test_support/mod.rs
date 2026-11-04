@@ -74,10 +74,10 @@ pub fn testdata_root() -> PathBuf {
     testdata::root()
 }
 
-/// A source file under `peacockdb-core/`, for an `UPDATE_CANONICAL` rewrite of a compiled-in
-/// list.
-pub fn source_file(rel: &str) -> PathBuf {
-    testdata::source_file(rel)
+/// Replaces a source file under `peacockdb-core/` with `text`, for an `UPDATE_CANONICAL`
+/// rewrite of a compiled-in list. Write-only: no path into the checkout is handed out.
+pub fn rewrite_source_file(rel: &str, text: &str) {
+    testdata::rewrite_source_file(rel, text)
 }
 
 pub fn data_dir_for(dataset: &str, sf: &str) -> PathBuf {
@@ -1372,6 +1372,19 @@ pub struct Provenance {
 /// path segment, `NVIDIA H100 80GB HBM3` as `h100-80gb-hbm3`. The full name is in each file.
 pub fn device_slug(name: &str) -> String {
     provenance::device_slug(name)
+}
+
+/// This process's five, read as a benchmark case reads them; panics naming `what` when one
+/// cannot be read.
+#[cfg(not(feature = "rust-only"))]
+pub fn provenance_of_this_run(what: &str) -> Provenance {
+    provenance::of_this_run(what)
+}
+
+/// The cuDF release this binary was built against, `25.02.02`, as a benchmark's `cudf=` says it.
+#[cfg(not(feature = "rust-only"))]
+pub fn cudf_release() -> String {
+    device_answer::cudf_release()
 }
 
 /// The only timing mode a record is written under: the harness sets `NodeTiming::Events`
