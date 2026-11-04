@@ -1,9 +1,10 @@
 """A synthetic Nsight export, for the calibration readers' tests.
 
-`nsys_calls.py` and `nsys_hbm.py` read one capture for two different numbers, out of the
-same tables: the NVTX ranges our domain and libcudf push, CUPTI's device rows, and — for
-the counters pass — the GPU metric samples. Building those here is what lets both readers
-be tested without a device, an nsys and half an hour.
+`nsys_calls.py`, `nsys_loads.py` and `nsys_hbm.py` read one capture for different numbers,
+out of the same tables: the NVTX ranges our domain, libcudf and kvikio push, CUPTI's device
+and API rows, the OS runtime calls, and — for the counters pass — the GPU metric samples.
+Building those here is what lets the readers be tested without a device, an nsys and half an
+hour.
 
 Only the columns the readers select exist; a real export has hundreds more. Times are
 nanoseconds on one arbitrary clock, which is what an export carries.
@@ -18,11 +19,13 @@ SCHEMA = """
 create table StringIds (id integer, value text);
 create table NVTX_EVENTS (start integer, end integer, text text, textId integer,
                           eventType integer, domainId integer, globalTid integer);
-create table CUPTI_ACTIVITY_KIND_KERNEL (start integer, end integer, correlationId integer);
-create table CUPTI_ACTIVITY_KIND_MEMCPY (start integer, end integer, correlationId integer);
+create table CUPTI_ACTIVITY_KIND_KERNEL (start integer, end integer, correlationId integer,
+                                         demangledName integer);
+create table CUPTI_ACTIVITY_KIND_MEMCPY (start integer, end integer, correlationId integer,
+                                         bytes integer, copyKind integer, srcKind integer);
 create table CUPTI_ACTIVITY_KIND_MEMSET (start integer, end integer, correlationId integer);
-create table CUPTI_ACTIVITY_KIND_RUNTIME (start integer, globalTid integer,
-                                          correlationId integer);
+create table CUPTI_ACTIVITY_KIND_RUNTIME (start integer, end integer, globalTid integer,
+                                          correlationId integer, nameId integer);
 create table TARGET_INFO_GPU (id integer, name text);
 create table TARGET_INFO_GPU_METRICS (metricId integer, metricName text);
 create table GPU_METRICS (timestamp integer, value real, metricId integer);
@@ -74,6 +77,66 @@ class Capture:
             "values (?, ?, ?)",
             (launched_at, launched_at + duration, self.correlation),
         )
+
+    def string(self, value):
+        """`value`'s id in StringIds, added on first use, as an export interns names."""
+        row = self.conn.execute("select id from StringIds where value = ?", (value,)).fetchone()
+        if row:
+            return row[0]
+        string_id = self.conn.execute("select count(*) from StringIds").fetchone()[0] + 1
+        self.conn.execute("insert into StringIds (id, value) values (?, ?)", (string_id, value))
+        return string_id
+
+    def runtime_call(self, name, start, end, tid=1):
+        """One CUDA runtime call, its own correlation id; returns that id."""
+        self.correlation += 1
+        self.conn.execute(
+            "insert into CUPTI_ACTIVITY_KIND_RUNTIME "
+            "(start, end, globalTid, correlationId, nameId) values (?, ?, ?, ?, ?)",
+            (start, end, tid, self.correlation, self.string(name)),
+        )
+        return self.correlation
+
+    def kernel(self, launched_at, duration, name, tid=1):
+        """A named kernel, starting on the device the moment its launch does."""
+        corr = self.runtime_call("cudaLaunchKernel_v7000", launched_at, launched_at + 5, tid)
+        self.conn.execute(
+            "insert into CUPTI_ACTIVITY_KIND_KERNEL (start, end, correlationId, demangledName) "
+            "values (?, ?, ?, ?)",
+            (launched_at, launched_at + duration, corr, self.string(name)),
+        )
+
+    def memcpy(self, launched_at, duration, nbytes, src_kind, tid=1, copy_kind=1):
+        """A copy of `nbytes`; `copy_kind` and `src_kind` are CUPTI's enums (1 = HtoD)."""
+        corr = self.runtime_call("cudaMemcpyAsync_v3020", launched_at, launched_at + 5, tid)
+        self.conn.execute(
+            "insert into CUPTI_ACTIVITY_KIND_MEMCPY "
+            "(start, end, correlationId, bytes, copyKind, srcKind) values (?, ?, ?, ?, ?, ?)",
+            (launched_at, launched_at + duration, corr, nbytes, copy_kind, src_kind),
+        )
+
+    def osrt(self, name, start, end, tid=1):
+        """One OS runtime call. The table exists only once one is added, as in an export
+        taken without `--trace=osrt`."""
+        self.conn.execute(
+            "create table if not exists OSRT_API "
+            "(start integer, end integer, nameId integer, globalTid integer)"
+        )
+        self.conn.execute(
+            "insert into OSRT_API (start, end, nameId, globalTid) values (?, ?, ?, ?)",
+            (start, end, self.string(name), tid),
+        )
+
+    def load(self, text, seq, call_index, start, end, tid=1):
+        """One case range around one `CudfScan` call and its `p0` range, all `[start, end)`.
+
+        For tests that place device work by absolute time, where `case` lays calls out by
+        its own clock. The clock moves past `end`, so a later `case` does not overlap it.
+        """
+        self.push("peacockdb", text, start, end, tid)
+        self.push("peacockdb", f"{seq}.{call_index} CudfScan", start, end, tid)
+        self.push("peacockdb", "p0", start, end, tid)
+        self.clock = max(self.clock, end + 1000)
 
     def metric(self, name, samples):
         """One GPU metric's samples, as `(timestamp, percent of peak)`."""

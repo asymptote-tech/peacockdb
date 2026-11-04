@@ -1316,8 +1316,10 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
         │     └──► calibration/capture.sqlite          (not committed)
-        │           └── nsys_calls.py × goldens/<dataset>.sf1
-        │                 └──► calibration/calls.tsv   what one ABI call splits into, per case
+        │           ├── nsys_calls.py × goldens/<dataset>.sf1
+        │           │     └──► calibration/calls.tsv   what one ABI call splits into, per case
+        │           └── nsys_loads.py
+        │                 └──► calibration/loads.tsv   where each parquet load's time goes (not committed)
         │
         └── --metrics   the same cases under the memory counters, one capture per case;
               │         PEACOCK_BENCHMARK_CAPTURE=metrics
@@ -1363,22 +1365,51 @@ What the arrows are there to make checkable:
 - **`calls.tsv` is keyed by case.** The harness names each `(dataset, sf, query, mode)` in an
   NVTX range around the run, and `nsys_calls.py` reads the case off that range; keyed on the
   node alone, three cases fold into one row set.
+- **`loads.tsv` splits each parquet load.** `calls.tsv` gives a cuDF call one `device_us`, so a
+  load's copy cannot be told from its decode there. `nsys_loads.py` writes one row per load node
+  per case: every partition region of a `CudfScan` call. Each number is computed per execution,
+  then the median over executions is taken, column by column. A device operation is the load's
+  when its launching API call starts inside one of the load's windows, on any thread. The
+  parquet reader launches from threads of its own, which `calls.tsv` leaves as `(off-thread)`.
+  A launch where two loads are open is credited to neither; the run prints that total as
+  `ambiguous`. A capture without kernel names (`demangledName`) or without a `CudfScan` region is
+  refused, and nothing is written.
+
+  | column | meaning |
+  |---|---|
+  | `dataset sf query mode` | the case, as in `calls.tsv` |
+  | `recipe_seq` | the load's fb seq: the `GpuLoadParquet` node's `CudfScan` recipe |
+  | `executions` | executions in the capture |
+  | `calls` | call indices per execution: the batches the load was driven for |
+  | `load_us` | the sum of the load's partition region spans in one execution. The same quantity as the tree's `GpuLoadParquet` `time_us` |
+  | `host_read_source` | `osrt` if the capture has `OSRT_API` rows; else `kvikio` if it has a `libkvikio` domain; else `none` |
+  | `host_read_us` | wall time inside the windows, a union over threads, in `pread*` and `read` OS calls, or else in `libkvikio` ranges. kvikio's ranges contain its bounce copies, which the `h2d_*` columns also count |
+  | `h2d_count h2d_bytes h2d_us` | the HtoD copies launched in the windows, from any thread. `h2d_us` sums their durations |
+  | `h2d_gbps` | `h2d_bytes / (h2d_us·1000)`: the per-copy rate, comparable with a probe's pinned and pageable rates. `0` with no copies |
+  | `h2d_pinned_bytes h2d_pinned_gbps h2d_pageable_bytes h2d_pageable_gbps` | the same, split by CUPTI's `srcKind`. A copy of another kind counts in the totals only |
+  | `h2d_max_bytes` | the largest single copy. It says whether a copy was too small to reach the link rate |
+  | `decompress_us decode_us other_device_us` | kernel durations matching `DECOMPRESS_RE`, then `DECODE_RE`; then everything else: other kernels, memsets, copies that are not HtoD |
+  | `off_thread_device_us` | the part of the device time above launched from a thread other than the load's own. It is included in the columns above |
+  | `pinned_alloc_count pinned_alloc_us` | the `cudaHostAlloc`-family calls (`PINNED_ALLOC_RE`) that start in the windows, from any thread, and their summed host span |
+  | `unattributed_us` | `load_us` less the union of host reads, device operations and pinned allocations, each clipped to the windows |
 - **Every derived file has exactly one producer, and the scripts above run it.** A file that
   only a human regenerates goes stale in silence: nothing checks it against the capture it
   claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
   `plot.py` is the only thing that draws, for the same reason.
 - **The derived text is committed; the record and the captures are not.** The
   `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
-  by each collection, so `git diff` shows how the numbers moved. The record is 26 MB at sf40
-  and grows with every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks`
-  writes both, and the commit that moves the tree moves the pin. The two `.sqlite` exports are
+  by each collection, so `git diff` shows how the numbers moved. `loads.tsv` is not: it is one
+  host's profile, read into a task's detail file. The record is 26 MB at sf40 and grows with
+  every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks` writes both, and
+  the commit that moves the tree moves the pin. The two `.sqlite` exports are
   undiffable binary that only the scripts above read. The counters one grows ~27 MB a second
   of run with the whole gh100 set at 20 kHz, ~100 GB over the corpus, so it is taken a case at a
   time and never leaves the host: each case is joined there and deleted before the next, and
   only `hbm.tsv` comes home.
   `testdata/.gitignore` is deny-by-default over `calibration/`, re-including the pin and the
-  derived files only. `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run —
-  q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
+  committed derived files only, so `loads.tsv` stays out without a line of its own.
+  `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run — q6 at `tp1-single` and
+  `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
   record by call, not by execution, so its three cases are drawn beside them, and it is still
   a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
@@ -2510,8 +2541,8 @@ Six steps, three scripts:
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
 ./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
 ./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
-# 5. the derived records: both Nsight passes, calls.tsv and hbm.tsv, the counters a case at a
-#    time and joined onto the pinned records (fetch_record.sh <dataset>.sf<sf> for each
+# 5. the derived records: both Nsight passes, calls.tsv, loads.tsv and hbm.tsv, the counters a
+#    case at a time and joined onto the pinned records (fetch_record.sh <dataset>.sf<sf> for each
 #    first). No flag runs both passes; --trace or --metrics picks one. Over the H200's
 #    records, from a5c852e4 on master, whose case lines are
 #    h200/cases.csv's rows.

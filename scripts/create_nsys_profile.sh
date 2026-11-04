@@ -31,11 +31,13 @@
 #       --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' \
 #       --remote-dir /home/dmitry/peacock/<dir> --remote-cudf-root /home/dmitry/peacock/cudf-25.02
 # The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
-# PCK_BENCH_HBM_PEAK_BW, and nsys and python3 must be on that host's PATH.
+# PCK_BENCH_HBM_PEAK_BW (the H100 80GB HBM3: gh100 and 3.35e12), and nsys and python3 must be
+# on that host's PATH.
 #
 # WRITES (under testdata/calibration/)
 #   capture.sqlite           the trace capture's export
 #   calls.tsv                what one ABI call splits into, derived from it
+#   loads.tsv                where each parquet load's time goes, derived from it (not committed)
 #   hbm.tsv                  the counters pass's traffic, a row per call of the pinned records
 # The counters pass is one capture per case, each joined on the host and deleted before the
 # next: sampling the whole set at the default frequency writes ~27 MB of export a second of
@@ -51,6 +53,7 @@ BENCH_STAGING=cpp/install/rust-benchmarks
 # Relative to testdata/ on both sides, so one name drives the remote write and the pull.
 CAPTURE_REL=calibration/capture
 CALLS_REL=calibration/calls.tsv
+LOADS_REL=calibration/loads.tsv
 METRICS_CAPTURE_REL=calibration/capture-metrics
 # That pass's own record, written on the host and left there: see the header.
 METRICS_RECORD_REL=calibration/records-metrics.tsv
@@ -222,6 +225,9 @@ if [ "$TRACE" -eq 1 ]; then
     --capture "testdata/$CAPTURE_REL.sqlite" --plans-dir "$PLANS_DIR" \
     --out "testdata/$CALLS_REL"
   echo "==> the call breakdown: $(grep -vc '^#' "testdata/$CALLS_REL") rows"
+  python3 scripts/calibration/nsys_loads.py \
+    --capture "testdata/$CAPTURE_REL.sqlite" --out "testdata/$LOADS_REL"
+  echo "==> the load breakdown: $(grep -vc '^#' "testdata/$LOADS_REL") rows"
 fi
 
 if [ "$METRICS" -eq 1 ]; then
