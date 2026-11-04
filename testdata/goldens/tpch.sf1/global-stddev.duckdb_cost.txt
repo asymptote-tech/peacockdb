@@ -1,0 +1,16 @@
+UNGROUPED_AGGREGATE: aggregates=[stddev_samp(#0), var_samp(#1)], output_bytes=16, output_rows=1, materialized=96019440
+  PROJECTION: projections=[#0, #0], output_bytes=96019440, output_rows=6001215, materialized=0
+    PROJECTION: projections=[CAST(l_quantity AS DOUBLE)], output_bytes=48009720, output_rows=6001215, materialized=0
+      TABLE_SCAN: table=lineitem, projections=[l_quantity], output_bytes=48009720, output_rows=6001215, materialized=48009720, bytes_read=96019440, rows_read=6001215
+duckdb_cost=240048600
+materialization_total=144029160
+storage_read_total=96019440
+
+--- row-group pruning (storage reduction) ---
+lineitem  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=4538843/4538843 (100.0%)
+pruning_bytes_fetched=4538843/4538843 (100.0%)
+
+--- cost breakdown ---
+UNGROUPED_AGGREGATE                    96019440  66.7%
+TABLE_SCAN(lineitem)                   48009720  33.3%
+total=144029160

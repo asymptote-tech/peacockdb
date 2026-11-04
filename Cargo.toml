@@ -4,6 +4,7 @@ members = [
   "peacockdb-core",
   "peacockdb-ffi",
   "cost-report",
+  "peacockdb-dphyp",
 ]
 resolver = "2"
 

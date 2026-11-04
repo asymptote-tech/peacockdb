@@ -1,0 +1,20 @@
+HASH_GROUP_BY: groups=[#0, #1], aggregates=[count_star()], output_bytes=4228, output_rows=151, materialized=3000000
+  PROJECTION: projections=[c_nationkey, c_mktsegment], output_bytes=3000000, output_rows=150000, materialized=0
+    HASH_JOIN: join_type=INNER, conditions=[c_nationkey = n_nationkey], output_bytes=3600000, output_rows=150000, materialized=3600000
+      TABLE_SCAN: table=customer, projections=[c_nationkey, c_mktsegment], output_bytes=3000000, output_rows=150000, materialized=3000000, bytes_read=2568360, rows_read=150000
+      TABLE_SCAN: table=nation, projections=[n_nationkey], output_bytes=100, output_rows=25, materialized=100, bytes_read=104, rows_read=25
+duckdb_cost=12168564
+materialization_total=9600100
+storage_read_total=2568464
+
+--- row-group pruning (storage reduction) ---
+customer  dyn_filter=[c_nationkey>=0 AND c_nationkey<=24]  row_groups=2/2  rows=150000/150000 (100.0%)  bytes_fetched=151757/151757 (100.0%)
+nation  row_groups=1/1  rows=25/25 (100.0%)  bytes_fetched=125/125 (100.0%)
+pruning_bytes_fetched=151882/151882 (100.0%)
+
+--- cost breakdown ---
+HASH_JOIN                               3600000  37.5%
+HASH_GROUP_BY                           3000000  31.2%
+TABLE_SCAN(customer)                    3000000  31.2%
+TABLE_SCAN(nation)                          100   0.0%
+total=9600100

@@ -18,6 +18,8 @@ Tickets related to scalars and functions. These tickets are tied to a milestone 
 - [#230 (GROUPING() key subset) GROUPING() over a subset or reordering of the rollup keys is refused on the device](#t230)
 - [#288 (decimal division digits) a decimal division keeps four more digits and truncates, so later arithmetic prints wrong digits](#t288)
 - [#255 (nested column panic) the planner panics on a Struct or Interval column instead of refusing it](#t255)
+- [#292 (pre-1970 timestamp cast) a pre-1970 timestamp cast to a coarser unit answers differently on the cpu and the device](#t292)
+- [#293 (LIKE backslash escape) a backslash in a LIKE pattern escapes on the cpu and is literal on the device](#t293)
 
 <a id="t224"></a>
 ### #224 (int to date cast) the device cannot cast an integer to a date
@@ -252,3 +254,23 @@ file there is read by every plan-golden renderer, so one of these in the directo
 of pbench's plan goldens and the dataset cannot land at all. They arrive with the fix. pbench's
 own task (`pbench.md`) could not land them — its Restriction forbids fixing what a query
 shows — and recorded the hold in `pbench-detail.md`.
+
+<a id="t292"></a>
+### #292 (pre-1970 timestamp cast) a pre-1970 timestamp cast to a coarser unit answers differently on the cpu and the device
+The cpu truncates toward zero, as arrow's cast divides the integer; the device floors, as cuDF's
+cast does (`chrono::floor` in `cast_ops.cu`), and so does DuckDB. Only a time before 1970 with a
+remainder in the coarser unit differs: `arrow_cast(ts, 'Timestamp(Second, None)')` over a stored
+1969-12-31 23:59:59.5 is 1970-01-01 00:00:00 on the cpu and 1969-12-31 23:59:59 on the device and
+in DuckDB.
+
+**Corpus queries:** none differ; pbench's `timestamp-s-key-group` casts microseconds to seconds over
+times after 1970. The prototype floors (`expressions.TimestampCast`).
+
+<a id="t293"></a>
+### #293 (LIKE backslash escape) a backslash in a LIKE pattern escapes on the cpu and is literal on the device
+DataFusion's LIKE reads `\` as its default escape; `cudf::strings::like` is called with no escape
+character (`expr.cpp`), so the device matches a backslash as itself, as DuckDB does. `s LIKE 'a\%'`
+matches only `a%` on the cpu, and every value starting `a\` on the device.
+
+**Corpus queries:** none; no corpus pattern holds a backslash. The prototype matches it literally
+(`expressions.Like`).

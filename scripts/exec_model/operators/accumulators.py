@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..batch import CallStats
-from ..executors import BatchAccumulatorExecutor, LaneEvent, PartitionAccumulatorExecutor
-from ..limit import RowInterval, RowRange
+from ..engine.batch import CallStats
+from ..engine.executors import BatchAccumulatorExecutor, LaneEvent, PartitionAccumulatorExecutor
+from ..engine.limit import RowInterval, RowRange
 from . import aggregates
-from .frame import PandasBatch, concatenate, empty_frame, no_scratch, scratch_of
+from .frame import PandasBatch, concatenate, empty_frame, no_scratch, scratch_of, sort_frame
 
 # The contract every SingleBatch accumulator here honours: exactly one batch at done, even
 # when nothing was accumulated (F7 — a join's build lane cannot tell an empty build side
@@ -209,11 +209,9 @@ class ReBatchToTarget(BatchAccumulatorExecutor):
 DEFAULT_COMPACT_BYTES = 1 << 20
 
 
-class AggregateBatches(BatchAccumulatorExecutor):
-    """`GpuAggregateBatches` — merges pre-aggregated batches, emits at done.
-
-    `final=False` re-partials (compacting a partition's batches without finishing them);
-    `final=True` produces the declared outputs.
+class PlanAggregateBatches(BatchAccumulatorExecutor):
+    """An engine `GpuAggregateBatches` — merges pre-aggregated batches with the plan's own
+    calls, emits at done: the state, or with a `final` list the declared outputs.
 
     **Compaction runs on a byte threshold that doubles when it fails to pay.** The two
     obvious policies are each wrong in one regime. Compacting on every arrival keeps the
@@ -233,16 +231,11 @@ class AggregateBatches(BatchAccumulatorExecutor):
     backstop (#142).
     """
 
-    def __init__(self, keys, aggs, final_exprs=None, name: str = "agg_batches",
-                 schema: dict | None = None, compact_bytes: int = DEFAULT_COMPACT_BYTES):
-        self.keys = keys
-        self.aggs = aggs
-        #: the node's `final` list, or None to emit state. Its presence is the only thing
-        #: distinguishing a merging node from a finalizing one — there is no phase flag.
-        self.final_exprs = final_exprs
+    def __init__(self, body: aggregates.PlanAggregate, name: str, schema: dict | None = None,
+                 compact_bytes: int = DEFAULT_COMPACT_BYTES):
+        self.body = body
         self.name = name
-        #: `{column: dtype}` of THIS phase's output (state columns for final=False, keys +
-        #: declared outputs for final=True); consulted only for the zero-input empty case
+        #: `{column: dtype}` of the output, consulted only for the zero-input empty case
         self.schema = schema
         self.threshold = compact_bytes
         self._state: pd.DataFrame | None = None
@@ -275,7 +268,7 @@ class AggregateBatches(BatchAccumulatorExecutor):
         """Fold every pending arrival into the state. Returns the transient's size."""
         frames = ([] if self._state is None else [self._state]) + self._pending
         merged = frames[0] if len(frames) == 1 else concatenate(frames)
-        self._state = aggregates.merge(merged, self.keys, self.aggs)
+        self._state = self.body.aggregate(merged)
         self._pending, self._pending_bytes = [], 0
         self.compactions += 1
         # A compaction that did not shrink will not shrink next time either — the keys are
@@ -291,10 +284,8 @@ class AggregateBatches(BatchAccumulatorExecutor):
         if state is None:
             # Zero-input lane: the schema IS the output — no phase left to run over it.
             out = _empty_single_batch(self.name, self.schema)
-        elif self.final_exprs is not None:
-            out = aggregates.finalize(state, self.keys, self.aggs)
         else:
-            out = state
+            out = self.body.emit(state)
         return [PandasBatch(out, f"[{'+'.join(tags)}]>{self.name}")], no_scratch()
 
 
@@ -331,12 +322,7 @@ class AccumulateBatchesAndSort(BatchAccumulatorExecutor):
         if not frames:
             out = _empty_single_batch(self.name, self.schema)
             return [PandasBatch(out, f"[]>{self.name}")], no_scratch()
-        out = concatenate(frames).sort_values(
-            by=self.by,
-            ascending=self.ascending,
-            na_position="first" if self.nulls_first else "last",
-            kind="stable",
-        )
+        out = sort_frame(concatenate(frames), self.by, self.ascending, self.nulls_first)
         merged = out
         if self.fetch is not None:
             out = out.iloc[: self.fetch]
@@ -388,12 +374,7 @@ class MergeSortedPartitions(PartitionAccumulatorExecutor):
         if not frames:
             out = _empty_single_batch(self.name, self.schema)
             return [PandasBatch(out, f"[]>{self.name}")], no_scratch()
-        out = concatenate(frames).sort_values(
-            by=self.by,
-            ascending=self.ascending,
-            na_position="first" if self.nulls_first else "last",
-            kind="stable",
-        )
+        out = sort_frame(concatenate(frames), self.by, self.ascending, self.nulls_first)
         merged = out
         if self.fetch is not None:
             out = out.iloc[: self.fetch]

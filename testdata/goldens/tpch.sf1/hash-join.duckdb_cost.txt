@@ -1,0 +1,22 @@
+UNGROUPED_AGGREGATE: aggregates=[count_star(), sum(#0), sum(#1)], output_bytes=40, output_rows=1, materialized=96019440
+  PROJECTION: projections=[l_quantity, o_totalprice], output_bytes=96019440, output_rows=6001215, materialized=0
+    HASH_JOIN: join_type=INNER, conditions=[l_orderkey = o_orderkey], output_bytes=96019440, output_rows=6001215, materialized=186034020
+      PROJECTION: projections=[__internal_compress_integral_uinteger(#0, 1), #1], output_bytes=72014580, output_rows=6001215, materialized=0
+        TABLE_SCAN: table=lineitem, projections=[l_orderkey, l_quantity], output_bytes=96019440, output_rows=6001215, materialized=96019440, bytes_read=144779312, rows_read=6001215
+      PROJECTION: projections=[__internal_compress_integral_uinteger(#0, 1), #1], output_bytes=18000000, output_rows=1500000, materialized=0
+        TABLE_SCAN: table=orders, projections=[o_orderkey, o_totalprice], output_bytes=24000000, output_rows=1500000, materialized=24000000, bytes_read=36187500, rows_read=1500000
+duckdb_cost=583039712
+materialization_total=402072900
+storage_read_total=180966812
+
+--- row-group pruning (storage reduction) ---
+lineitem  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=33772577/33772577 (100.0%)
+orders  row_groups=13/13  rows=1500000/1500000 (100.0%)  bytes_fetched=16080669/16080669 (100.0%)
+pruning_bytes_fetched=49853246/49853246 (100.0%)
+
+--- cost breakdown ---
+HASH_JOIN                             186034020  46.3%
+UNGROUPED_AGGREGATE                    96019440  23.9%
+TABLE_SCAN(lineitem)                   96019440  23.9%
+TABLE_SCAN(orders)                     24000000   6.0%
+total=402072900

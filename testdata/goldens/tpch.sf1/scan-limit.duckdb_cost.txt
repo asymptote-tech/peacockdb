@@ -1,0 +1,13 @@
+STREAMING_LIMIT: output_bytes=1560, output_rows=10, materialized=0
+  TABLE_SCAN: table=lineitem, projections=[l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment], output_bytes=319488, output_rows=2048, materialized=319488, bytes_read=1039879210, rows_read=6001215
+duckdb_cost=1040198698
+materialization_total=319488
+storage_read_total=1039879210
+
+--- row-group pruning (storage reduction) ---
+lineitem  row_groups=49/49  rows=6001215/6001215 (100.0%)  bytes_fetched=207589990/207589990 (100.0%)
+pruning_bytes_fetched=207589990/207589990 (100.0%)
+
+--- cost breakdown ---
+TABLE_SCAN(lineitem)                     319488 100.0%
+total=319488

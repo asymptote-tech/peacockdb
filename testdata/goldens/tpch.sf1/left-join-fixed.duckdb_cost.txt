@@ -1,0 +1,23 @@
+PROJECTION: projections=[c_name, o_orderkey, l_linenumber], output_bytes=80896, output_rows=2528, materialized=0
+  HASH_JOIN: join_type=INNER, conditions=[o_orderkey = l_orderkey], output_bytes=80896, output_rows=2528, materialized=80896
+    HASH_JOIN: join_type=RIGHT, conditions=[o_custkey = c_custkey], output_bytes=37200096, output_rows=1550004, materialized=37200096
+      TABLE_SCAN: table=orders, projections=[o_custkey, o_orderkey], output_bytes=24000000, output_rows=1500000, materialized=24000000, bytes_read=24375000, rows_read=1500000
+      TABLE_SCAN: table=customer, projections=[c_custkey, c_name], output_bytes=3600000, output_rows=150000, materialized=3600000, bytes_read=4518750, rows_read=150000
+    TABLE_SCAN: table=lineitem, projections=[l_orderkey, l_linenumber], filters="l_shipdate='1995-03-15'::DATE", output_bytes=40448, output_rows=2528, materialized=40448, bytes_read=2488320, rows_read=122880
+duckdb_cost=96303510
+materialization_total=64921440
+storage_read_total=31382070
+
+--- row-group pruning (storage reduction) ---
+orders  dyn_filter=[o_custkey>=1 AND o_custkey<=150000 AND o_orderkey>=1281 AND o_orderkey<=5994624]  row_groups=13/13  rows=1500000/1500000 (100.0%)  bytes_fetched=14583325/14583325 (100.0%)
+customer  row_groups=2/2  rows=150000/150000 (100.0%)  bytes_fetched=1346848/1346848 (100.0%)
+lineitem  filter=[l_shipdate='1995-03-15'::DATE]  row_groups=1/49  rows=122880/6001215 (2.0%)  bytes_fetched=645944/31533109 (2.0%)
+pruning_bytes_fetched=16576117/47463282 (34.9%)
+
+--- cost breakdown ---
+HASH_JOIN                              37200096  57.3%
+TABLE_SCAN(orders)                     24000000  37.0%
+TABLE_SCAN(customer)                    3600000   5.5%
+HASH_JOIN                                 80896   0.1%
+TABLE_SCAN(lineitem)                      40448   0.1%
+total=64921440
