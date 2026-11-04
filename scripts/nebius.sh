@@ -18,7 +18,8 @@
 #   nebius.sh rsh <host> <cmd…> the same, for rsync -e (rsync's host argument is dropped)
 #   nebius.sh install-watch [--key-file <pem>]
 #                               install the idle watcher, root's one profile and the install file;
-#                                 --key-file embeds the PEM of a profile that keeps its key in one
+#                                 --key-file embeds the PEM of a profile that keeps its key in one;
+#                                 a profile that embeds its key already refuses it
 #
 # Exit codes: 0 done; 2 busy, soft stop refused; 75 no capacity, retry later; 69 instance gone;
 # 1 other; 64 usage.
@@ -279,6 +280,8 @@ cmd_install_watch() {
   p=$PROFILE
   [ -n "$p" ] || p=$(tcli profile active 2>/dev/null) || install_fail "no active profile in $NEBIUS_CONFIG"
   path=$(tcli -p "$p" config get private-key-file-path 2>/dev/null) || install_fail "no profile $p in $NEBIUS_CONFIG"
+  # A profile with no key path embeds its key already; another --key-file would replace a working key.
+  [ -z "$key" ] || [ -n "$path" ] || install_fail "profile $p embeds its key; run install-watch without --key-file"
   if [ -n "$key" ]; then
     # update prompts for these three unless given them, and keeps the path beside the embedded key.
     endpoint=$(tcli -p "$p" config get endpoint 2>/dev/null) || install_fail "cannot read profile $p's endpoint"

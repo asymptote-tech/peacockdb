@@ -96,8 +96,12 @@ def test_install_watch_removes_its_temp_dir_on_failure():
     assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 
+KEY_PATH_PROFILE = {"endpoint": "api.nebius.cloud", "service-account-id": "serviceaccount-w1",
+                    "public-key-id": "publickey-w1", "private-key-file-path": "/home/u/.nebius/eu-west1-sa.pem"}
+
+
 def test_install_watch_never_reads_the_key_file():
-    w, home = setup(profiles=["default", "eu-west1"])
+    w, home = setup(profiles=["default", "eu-west1"], profile_config=dict(KEY_PATH_PROFILE))
     pem = str(home / "k.pem")
     rc, out, err = install(w, home, "--instance-id", CPU, "--profile", "eu-west1", "install-watch", "--key-file", pem)
     assert rc == 0, (rc, err)
@@ -148,6 +152,19 @@ def test_install_watch_refuses_a_key_path_profile_without_a_key_file():
     assert rc == 1, (rc, err)
     assert "--key-file" in err and "eu-west1" in err, err
     assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
+
+
+def test_install_watch_refuses_a_key_file_for_a_profile_that_embeds_its_key():
+    # editor-eu embeds its key. A --key-file would replace a working key with another one; live on
+    # the H100 (2026-11-04) that left root's profile failing with "Signed JWT rejected".
+    w, home = setup(profiles=["default", "editor-eu"])
+    rc, out, err = install(w, home, "--instance-id", H100, "--profile", "editor-eu", "install-watch",
+                           "--key-file", str(home / "k.pem"))
+    assert rc == 1, (rc, err)
+    assert "--key-file" in err and "editor-eu" in err, err
+    assert not [c for c in profile_calls(w) if "update" in c], profile_calls(w)
+    assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
+    assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 
 def test_install_watch_refuses_an_unexpected_profile_list_without_echoing_it():
