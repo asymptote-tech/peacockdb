@@ -543,4 +543,4 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
 - 2026-11-04: Task 5 committed: every headline cell a conditional go, bands straddle 2×. Task 6
   dispatched to a fresh developer.
 - 2026-11-04: Task 6 green. Signoff written, board `done`, `comet-research: report` committed;
-  PR against master opened by the coordinator.
+  PR #194 against master opened by the coordinator.
