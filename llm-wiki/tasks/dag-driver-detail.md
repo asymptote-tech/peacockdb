@@ -95,3 +95,16 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 Control file said `rebase`; master holds #165 (ENS-optimizer) and the human's note in chain L's
 board preamble. dag-driver stopped at its Task 4 checkpoint (`10824c69`); resumes at Task 5 after
 sf40-baseline, once its own branch is rebased and re-proven.
+
+Re-proof on the rebased branch (`3394b553`, parent `0aa67e93`), local, CPU and compile only:
+
+- Master's merge reaches four files under `peacockdb-core/src` (`cpu_backend/backend.rs`, `test_support/corpus*`, `test_support/mod.rs`) and adds no node kind and no walk over kinds, so Tasks 1–4 needed no new arm.
+- **New baseline, parent `0aa67e93`:** `test_corpus_goldens` 53; `--lib` 1001 cases (master dropped two `test_support::corpus` tests, so dag-driver's 25 sit on top: 1026 = 1024 passed + 2 ignored); `test_cpu_corpus` 2451; `plan_goldens` 25.
+- **One failure, mine from Task 4:** `test_cost_model::every_node_kind_is_in_exactly_one_cost_category` refused `GpuHoldBuffer`. The test predates the rebase: it was red at the Task 4 checkpoint, which ran `--lib`, the goldens and the CPU corpus but not `test_cost_model`. The fix bins `GpuHoldBuffer` into `cuda_forward_bytes` (multiplier 0.0) in `testdata/cost_model.conf`: a buffer hands whole batches on without a copy, as a forwarder does. **Every `.cost.txt` prints each category's node list**, so the 15 cost goldens change on 1017 lines. The change is that comment and nothing else: with comments stripped, every file is byte-identical to before. This is a deviation from the Global Constraint "every golden byte-identical", in comment text only; there is no category a node kind can join without it. `scripts/ticket_widget.py` leaves `testdata/report.html` unchanged.
+- **Green after the fix:** `cargo test --features rust-only -p peacockdb-core`, every target: `--lib` 1024 + 2 ignored, `test_corpus_goldens` 53, `test_cost_model` 3, `test_cpu_corpus` 2451, `test_crate_privacy` 1, `test_golden_format` 41. `plan_goldens` 25. By name: `executor::driver::` + `plan::` 328, `hold_buffer` 7, `random_dags` 1, `plan::dag::tests` 10. `cost-report --test test_source_formatting` 32. `ctest -L cpu` 1/1, which is `peacock_cpu_tests` with 64 cases, `Lifecycle.DuplicateWithNoPlanIsRefused` among them. The `--features gpu --no-run` build against rapids-cuda-12.2 compiles with no warning; its `--list` has 743 `gpu_tests::` cases.
+- **build-test.md:** HEAD's page plus the three hunks the replay lost. The C++ CPU/FFI row is dag-driver's (64, the duplicate refusal named) in HEAD's row order. The cpu header is 3533 (`--lib` 1026 + `test_cpu_corpus` 2451 + `test_corpus_goldens` 53 + `test_cost_model` 3). The gpu header is 2412 (`gpu_tests::` 743 + HEAD's 1009, 659 and 1). Every dag-driver row outside the hunks had merged and matches `--list` (driver tests 133, Driver internals 52, validate 46, dag 10, estimation 15, wire 32, plan text 16).
+
+Coordinator decision (2026-11-04): `GpuHoldBuffer` joins `cuda_forward_bytes` in `cost_model.conf`, so
+15 `-mini.cost.txt` goldens change in their category comment line only (numbers identical). This
+departs from the spec's "every existing golden byte-identical"; the alternative, exempting the buffer
+from the taxonomy test, would hide a node kind from the cost model. Name it in the signoff.

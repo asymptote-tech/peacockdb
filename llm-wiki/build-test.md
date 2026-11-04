@@ -884,7 +884,7 @@ release is null-guarded on the executor
 the Rust side of the same no-device answer: `NoDevice`, `off no-device`, a session's option
 reaching the C side as `Session` and pinning nothing, a prefill `Err(Off)`
 
-#### gpu — `--features gpu`: shad-gpu only. 2411 cases: `--lib -- gpu_tests::` 742, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 2412 cases: `--lib -- gpu_tests::` 743, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
 
 *crate integration, external*
 
