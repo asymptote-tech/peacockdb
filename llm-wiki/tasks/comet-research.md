@@ -1,8 +1,9 @@
 # Should peacockdb become a GPU backend for Apache Comet, and how
 
-Kind: research. It runs in a helper session on master, with subagents, and is not a chain task.
-There is no branch, no PR and no reviewer. The output is one report, plus the measurements and
-plan dumps it rests on.
+Kind: prototype. Chain M's only task, run by the ensemble in workspace alpha on branch
+`ENS-comet-research`, off master, alongside chain L (the human's decision, 2026-11-03). Unlike
+other prototypes, it opens a PR against master when done, so the report can be merged. It gets
+no reviewer rounds. The output is one report, plus the measurements and plan dumps it rests on.
 
 ## Why
 
@@ -32,7 +33,8 @@ this report relies on, at current versions.
 - **Realistic deployment.** The human expects real clusters to use small CPU nodes (8 or 16 cores),
   each with its own NIC, not one 128-core box. The cost model compares one H100 node against that
   many small nodes at the same price, with each side's total NIC bandwidth counted. It also
-  compares against the single 128-core box that is measured.
+  compares against the single 128-core box that is measured. Experiment 2 measures both a
+  1 × 128-core and an 8 × 16-core layout on that box.
 - **Small nodes are priced linearly by cores** (helper's call): the H100 node buys eight 16-core
   or sixteen 8-core nodes. Each small node gets the NIC rate the provider states for that size.
   The H100 node gets its own stated rate. Where a provider states none, the figure is an
@@ -118,6 +120,20 @@ Each group is answered in the report, with sources.
   Say which layout a GPU backend should target first, and who runs it today.
 - **How others handle it:** spark-rapids (shuffle over UCX, the reader, file cache), Speedata,
   Gluten-cuDF, and any other accelerator that publishes its data path.
+- **Exotic architectures** (the human's request; desk only). What feeds the GPU faster than a
+  40 Gbit/s NIC? For each: how it works, bandwidth and latency to the GPU, capacity, who sells
+  or rents it and at what price, whether Spark or Comet runs on it today, and what the plugin
+  would need to use it. Cover at least:
+  - InfiniBand or RoCE RDMA to a memory server (Kove:SDM, GPUDirect RDMA from remote RAM, the
+    research far-memory systems);
+  - CXL memory pools and switches;
+  - Grace superchips: GH200's NVLink-C2C to LPDDR, GB200 NVL72's rack-wide memory (GB10
+    measurements in [`dgx-spark.md`](../reports/dgx-spark.md));
+  - RDMA storage feeding GPUs through GPUDirect Storage (VAST, WEKA, DDN);
+  - cloud GPU nodes with InfiniBand (Nebius, AWS EFA, Azure ND, CoreWeave), and whether Spark's
+    shuffle and scans can use the fabric.
+
+  The cost model treats each as a tier the data could arrive over instead of the NIC.
 
 ### 5. Batched query execution on Comet
 
@@ -158,27 +174,43 @@ times come from existing measurements and models.
 
 - **Access before new-hosts lands** (the human's decision). The L40S goes through
   `scripts/gpu-host.sh`. The H100 and the CPU VM have no script, idle watcher or data on master
-  yet, so the session drives the `nebius` CLI directly with the instance ids and profiles in
+  yet, so the chain drives the `nebius` CLI directly with the instance ids and profiles in
   `new-hosts.md`. Never open a Nebius credential file; learn the CLI from `nebius … --help`.
-- **The session stops every VM it started**, at the end of each measurement session and
-  before it ends for any reason. With no idle watcher on those two, nothing else will.
+- **The chain stops every VM it started**, at the end of each measurement session and before
+  it exits for any reason. **It never stops a VM it found running** (helper's call): that may be
+  chain L's run. With no idle watcher on the H100 and the CPU VM, nothing else stops them.
 - **Conflict with chain L is accepted** (the human's decision). If chain L is running, it may
-  stop a VM mid-measurement, and the session's runs may disturb its H100 timings. A run cut
+  stop a VM mid-measurement, and this chain's runs may disturb its H100 timings. A run cut
   short is re-run and recorded in the detail file.
-- **S3 read access on the VMs** is set up with the human at the checkpoint. No key is read
-  from a credential file or printed into a transcript.
+- **S3 read access** is the default AWS profile, on the VMs and locally (the human's decision),
+  with the endpoint `https://storage.eu-north1.nebius.cloud:443`. No credential file is read
+  and no key is printed into a transcript.
+- **VM-hour caps** (the human's decision): the CPU VM 6 h, the H100 1 h, the L40S 1 h, summed
+  over the task. Experiments run in priority order. When a cap is reached, the remaining
+  configurations are recorded as skipped, never left half-run. There is no mid-task
+  checkpoint with the human; the caps take its place.
 
 1. **VM-to-S3 throughput** on each VM: single and parallel streams, against the dataset bucket
    (eu-north1), and against the VM's local disk. Also the VM's NIC rate as the provider states
    it. The CPU VM reads the bucket across regions. Its rate is reported as measured, and the
    cost model uses an in-region rate taken from the provider's figures or the GPU VMs'
    measurements, marked as an assumption (helper's call). No new bucket is created.
-2. **Comet on CPU, on the 128-core VM.** TPC-H, and TPC-DS if it runs, read from S3 and from local
-   disk. That shows how far the NIC already limits a CPU engine. The human expects it to. Repeat
-   at 8 and 16 cores to stand in for the small nodes of a real deployment. For each batch
-   (sizes 3, 10, 20 and all), run the queries **one after another, and concurrently** on the
-   same Spark session (the human's decision). Spark's own exchange and subquery reuse stays at
-   its defaults. The report quotes the ratio against both.
+2. **Comet on CPU, on the 128-core VM.** TPC-H sf40 (`tpch-sf40`) and TPC-DS sf40
+   (`tpcds-sf40`), read from S3 and from local disk. That shows how far the NIC already limits a
+   CPU engine. The human expects it to. Every run uses all 128 cores (the human's decision), in
+   two layouts:
+   - **1 × 128:** one Spark executor with all the cores;
+   - **8 × 16:** eight executors of 16 cores each, each pinned to its own cores. It stands in
+     for a cluster of small nodes. Its shuffle goes over loopback and all eight share one NIC,
+     so the report says what it does not capture.
+
+   For each batch (sizes 3, 10, 20 and all), run the queries **one after another, and
+   concurrently** (the human's decision). Spark's own exchange and subquery reuse stays at its
+   defaults. The report quotes the ratio against both. Priority order, for the cap:
+   1. TPC-H, both layouts, local disk;
+   2. TPC-H, both layouts, S3;
+   3. TPC-DS, 1 × 128, local disk and S3;
+   4. TPC-DS, 8 × 16, local disk and S3.
 3. **Comet plan dumps** for the translatability count in group 3, on whichever host runs Comet.
 4. **GPU side, modelled, not run.** Use peacockdb's existing sf40 numbers
    ([`benchmark-minimal.md`](../reports/benchmark-minimal.md)), the measured PCIe and decode rates in
@@ -191,21 +223,23 @@ follow-up experiment.
 
 ## Method
 
-The plan sets the phases, in this order of dependence:
+The plan sets the phases, in this order of dependence. The developer runs them and may
+dispatch its own subagents; the coordinator owns every git write.
 
-1. Desk research on groups 1, 2, 4 (the survey parts) and 5 (prior art), as parallel subagents.
-   Use `anthropic-skills:deep-research` where the question is open-ended.
-2. **Checkpoint** before any VM time (helper's call). The human sees Comet's infrastructure,
-   the prior art, and the experiment list with its expected VM hours, and amends them.
-3. Experiments 1-3.
-4. Analysis: plan translatability, the split rule, the data-path model, the batching API and CBO.
-5. Synthesis into the report.
+1. Desk research on groups 1, 2, 4 (the survey parts, the exotic architectures included) and 5
+   (prior art), as parallel subagents. Use `anthropic-skills:deep-research` where the question
+   is open-ended.
+2. Experiments 1-3, in the foreground, under the caps.
+3. Analysis: plan translatability, the split rule, the data-path model, the batching API and CBO.
+4. Synthesis into the report, and an audit of it by a fresh subagent. The audit
+   is the task's independent check, in place of reviewer rounds (helper's call).
 
 **Intermediate artifacts go in `llm-wiki/artifacts/comet-research/`.** That covers one findings
 file per subagent, the plan dumps, raw measurements and the scripts that produced them, and the
 cost model's inputs. Subagents write their findings there and return a short summary and the
-path. `comet-research-detail.md` holds only run state: which phases are done, the checkpoint
-decision, which VMs are up, and what a restarted session needs to resume.
+path. `comet-research-detail.md` holds only run state: which phases are done, VM starts and
+stops with local times, VM hours used against each cap, and what a restarted coordinator needs
+to resume.
 
 ## The report
 
@@ -213,7 +247,7 @@ One file: `llm-wiki/reports/comet-gpu.md`. It opens with the verdict, go or no-g
 lines, with the cost-per-query ratio for batched ETL and for the one-pass floor. Then:
 
 - the cost model and its inputs;
-- a section per question group, 1-5;
+- a section per question group, 1-5, the exotic architectures included;
 - the design (on a go) or the conditions for a go (on a no-go);
 - follow-up experiments;
 - sources.
@@ -228,17 +262,22 @@ Every factual claim carries a source link and the date accessed. Measurements gi
   folder, not under `scripts/`.
 - **Component-level API:** none.
 - **Files written:** `llm-wiki/reports/comet-gpu.md`; `llm-wiki/artifacts/comet-research/`, a new
-  folder; and this task's `-impl.md` and `-detail.md` while it runs. The artifacts stay after the
-  task is archived, because the report links to them.
+  folder; this task's `-impl.md` and `-detail.md` while it runs; and chain M's section of
+  `llm-wiki/tasks/tasks.md`. The artifacts stay after the task is archived, because the report
+  links to them.
 
 ## Constraints
 
 - **Paid VMs.** Start a VM only for a measurement session and stop it when the session ends. Each
   start and stop goes in the detail file with local times.
+- **VM sessions run in the foreground.** A backgrounded build-and-run chain gets killed mid-run
+  with no error.
 - Comet, Spark and DataFusion versions are pinned in the report. Comet is built or fetched on the
   VMs, never vendored into the repo.
 
 ## Done when
 
-The report exists on master and answers question groups 1-6 to the bar above, with experiments 1-3
-run or their failure recorded, and the human has read it.
+The report is on `ENS-comet-research`, answers question groups 1-6 to the bar above, with
+experiments 1-3 run, skipped under a cap, or their failure recorded. The audit's findings are
+fixed, every VM the chain started is stopped, and a PR against master is open. The human merges
+it after reading the report.

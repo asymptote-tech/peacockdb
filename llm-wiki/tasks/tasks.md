@@ -160,3 +160,16 @@ The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to
 Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.10), the L40S's `gpu-tests` through `run-gpu.sh`,
 local and verda builds through the image, the conda install and init scripts deleted, one path in
 the wiki. shad-gpu stays as it is, since it has no Docker.
+
+## Chain M (base: master)
+
+Should peacockdb become a GPU backend for Apache Comet, and how. One research task, run in
+workspace alpha alongside chain L. It drives the H100 and the CPU VM through the `nebius` CLI
+directly (new-hosts has not landed), stops only VMs it started, and keeps to its VM-hour caps
+(CPU VM 6 h, H100 1 h, L40S 1 h). Every git write and the PR are the coordinator's.
+
+### 1. [`comet-research.md`](comet-research.md) — closes no ticket — state: approved to build
+
+Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
+go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
+three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, the alpha design.
