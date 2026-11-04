@@ -394,3 +394,66 @@ ENS-optimizer's `c5d12789`, not carried).
 - Run 41763580580: `build 25.02 for GPU` failed in "Initialize containers": the runner had no space left pulling the image (infra). Re-run of failed jobs.
 - Dispatched again 2026-11-04T03:28:09Z on `ceaa2615`: run 41767310779 (41763580580 left to finish its CPU legs; its GPU job never ran).
 - Run 41767310779 green, `GPU Tests (nebius-gpu)` included (the new provenance test passed on the L40S; 9 harness tests, 740 gpu_tests, 989 corpus cells). GPU host hard-stopped. Board `done` (2026-11-04).
+
+## Rebase onto master (2026-11-04)
+
+Master now holds the ENS-optimizer merge (#165). The branch was rebased onto it: 42 commits
+replayed, plus the coordinator's board commit, HEAD `48f382e6` before the fixes below.
+- **`f3db66b1` is gone.** Master's `a5c852e4` is the same commit as master took it: rk00's, same
+  date and subject. Master's version wins. It reads both case lists through the `inventory`
+  declarations, and master has no `macro_invocations_in` (`272819bd` removed it). The fork's two
+  unit tests for that reader left with it, so `corpus::tests` is 10 again.
+- **Code conflicts**, all in `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`:
+  - `602ff9f4`: master's inventory reading kept. The commit's per-device loop went into master's
+    `every_declared_case_has_a_section_in_the_tree`. `CASE_LIST` and `macro_invocations_in` dropped.
+  - `61ecd637`: this commit never compiled on the fork. It calls a `macro_invocations(path, …)`
+    nothing defines, and reads the list from the checkout. The main list now comes from
+    `listed_cases()`, over the inventory. The registry test compares the compiled-in `CASE_LIST`.
+    `h200/cases.inc` was read at run time by a strict local reader, `text_cases`, until `c0339f81`.
+  - `16e0aad5`: `source_file` for the `UPDATE_CANONICAL` write, so no core test names
+    `CARGO_MANIFEST_DIR`. A missing H200 list is an `Err`, not a panic.
+  - `c0339f81`: the commit's `device_list_files`. `text_cases` and `PREDATES_LIST` deleted.
+    `a_tree_with_its_own_list_is_held_to_it` reads `listed_cases()`.
+  - `379a56d5`: the import list only; `rewrite_source_file` replaces `source_file`.
+- **The case list, regenerated** from master's registry with `UPDATE_CANONICAL=1`. It gains 4
+  queries at all five modes, 20 cells: tpch `anti_join_reorder`, `left_join_fixed`,
+  `left_join_reorder` and `semi_join_reorder` (master's `2264ef29` turned them on). 650 cells over
+  130 queries. The registry did not change, so `testdata/report.html` did not either.
+- **`build-test.md`**: the replay's wiki conflicts had taken master's side. The page is now the
+  three-way merge of master, `dc90b51c` and the old tip `L-pre-rebase-containers`, its 21 hunks
+  resolved by meaning. Master's names win: nebius, `nebius-watch.yml`, the exec-model rows.
+  Containers' material stays: device trees, provenance, the failed-case record and resume, the
+  images, `tpcds-sf40`'s bucket, the registry-made list. `f3db66b1` became `a5c852e4` there and
+  in `tickets/benchmarks.md`. Recounted from `--list`: 7593 cases, Rust 5959, C++ 233, Python
+  1401; cpu 3414 (`--lib` 917, `test_corpus_goldens` 47); gpu 2409 (`peacock_gpu_benchmarks` 659).
+- **Gate fix**: `scripts/env/tests/test_run_tests.py` read `scripts/gpu-host-test.sh`, which
+  master's `bf937124` renamed `scripts/nebius-test.sh`. Red (FileNotFoundError), then 24/24.
+  `docker/run-tests.sh:7` still names `gpu-host-test.sh` in a comment. It is left: a `docker/`
+  edit changes the images' `peacockdb.inputs` label and asks for a rebuild.
+- **Done when, on this base.** Item 1: the 42 replayed commits keep author and date, matched by
+  subject; 16 are rk00's, and `f3db66b1`'s place is master's `a5c852e4`. Item 2: the gates below
+  pass; the H200 tree check passes, `h200/` held to its `cases.csv`. Item 2a: `h200/cases.inc` is
+  gone, `cases.csv` holds 14 `ok` rows, and no page outside the tasks names `h200/cases.inc`.
+  Item 3 is waived: master carries the optimizer. Item 6: the seven deleted files are absent, and
+  the grep finds none of its terms outside `llm-wiki/tasks` and `llm-wiki/archive`.
+- **Gates** (dev, local; verda unreachable; no device run):
+  - `cargo test --features rust-only -p peacockdb-core`: `--lib` 915 + 2 ignored,
+    `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3, `test_crate_privacy`
+    1, `test_golden_format` 41. `cargo build --features rust-only -p peacockdb` builds.
+  - `cmake --build cpp/build` and `ctest --test-dir cpp/build -L cpu`: 1/1.
+  - `cargo test -p cost-report`: bin 49, `test_source_formatting` 32.
+  - `scripts/env/tests`: all pass but two, for want of inputs on dev. `test_image_any_user` passes
+    25.02 and has no 26.02 build image. `test_run_image` passes 7 of 9 and has no
+    `PEACOCK_STAGED_INSTALLS`. No image input changed since the old tip (`git diff` over
+    `docker/`, `scripts/env/` but its tests, `scripts/lib/`, `third_party/` and `images.yml` is
+    empty), so Task 3 Step 8's image-backed runs still stand.
+  - `scripts/calibration/tests`: all pass; `test_plot.py` 7/7 in the 25.02 build image (dev has no
+    matplotlib). `testdata/test_*.py`, `scripts/test_ticket_widget.py`, `scripts/nebius/tests`:
+    all pass.
+  - The exec-model step of CI's cost-report job: 42 of its 48 files pass. The other six
+    (`test_dphyp`, `test_filter_passes`, `test_optimize`, `test_reorder_non_inner`, `test_replan`,
+    `test_report`) need `libpeacockdb_dphyp.so`. Dev's rustc 1.94 cannot build it: `enumerate.rs:89`
+    calls `isolate_lowest_one`, unstable there. `peacockdb-dphyp/` and `scripts/exec_model/` are
+    master's byte for byte, and the PR's cost-report job builds them on current stable.
+  - Not run: the FFI tier and the gpu-shape compile in the build images, and any device run. CI
+    runs them on the PR.

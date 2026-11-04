@@ -21,7 +21,7 @@ Moving the H200 record under `h200/` is one change:
 - rename the two lines of `testdata/calibration/records.sha256` to `h200/<dataset>.sf40/records.tsv`;
 - `create_nsys_profile.sh` reads a record at `calibration/<device>/<dataset>.sf<sf>/`;
 - `build-test-shadgpu.sh`'s header documents the per-device tree, not the flat one;
-- the H200's Nsight pass runs from f3db66b1 (02f6a4d8 on ENS-optimizer), whose case lines are
+- the H200's Nsight pass runs from a5c852e4 on master, whose case lines are
   `h200/cases.csv`'s rows:
   `create_nsys_profile.sh --metrics` takes every case of the checkout's list;
 - once the H200 is re-run with provenance, both `PREDATES_PROVENANCE` constants and
