@@ -93,7 +93,11 @@ the H100 out, the two VMs left are in different regions.
 - External repos are cloned under `~/comet-research/ext/` on dev, outside every worktree. No
   committed file under the artifact folder exceeds 5 MB; raw event logs stay on the VM, and only
   their summaries are committed.
-- A subagent returns at most ten lines. The writing is plain: short sentences, ordinary words.
+- **Subagents cannot write files** (found in Task 1: the developer's subagents are read-only). A
+  research or analysis subagent returns its findings file's full text in its reply, and the
+  developer writes it to the named path unchanged, then keeps only the first ten lines in view.
+  Wherever this plan says a subagent "writes" a file, read it that way.
+- The writing is plain: short sentences, ordinary words.
 
 ## Review Focus
 
