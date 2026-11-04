@@ -479,12 +479,13 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 49 |
 |---|---|--:|
 
-the accountant's formula, cache and two checks on plain figures; the plan index's numbering
-and per-lane slots; the scheduler's corners
-enumerated and then a differential test against a naive rescan on randomized shapes; the lane
+the accountant's formula, cache and two checks on plain figures; the plan index's numbering,
+readers, regions and per-lane slots, on a tree as before and over shared sources; the
+scheduler's corners enumerated, holds over regions a second root reads into, and then a
+differential test against a naive rescan on randomized DAG shapes; the lane
 state machine one call at a time with no tree around it
 
 | Rollup's shuffle keys, and DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 4 |

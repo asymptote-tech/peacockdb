@@ -25,7 +25,7 @@ pub(crate) struct Scheduler {
     /// index where a readiness index belongs is caught here in debug builds; a release
     /// build writes into the next node's flags.
     lane_count: Vec<usize>,
-    /// Counters, not flags: one node can sit in two joins' probe subtrees, and a lift of
+    /// Counters, not flags: one node can sit in two joins' probe regions, and a lift of
     /// one of them must not free it from the other.
     build_holds: Vec<u32>,
     limit_holds: Vec<u32>,
@@ -33,11 +33,11 @@ pub(crate) struct Scheduler {
     building: Vec<usize>,
     joins: Vec<JoinShape>,
     satisfied: Vec<bool>,
-    subtree: Vec<(usize, usize)>,
+    regions: Vec<Vec<usize>>,
 }
 
 impl Scheduler {
-    /// A join holds its probe subtree from time zero: no lane has left build yet, and a
+    /// A join holds its probe region from time zero: no lane has left build yet, and a
     /// probe batch produced before `set_build` has nowhere to go.
     pub(crate) fn new(shape: &PlanShape) -> Self {
         let n = shape.node_count();
@@ -66,11 +66,11 @@ impl Scheduler {
             building: shape.joins.iter().map(|join| join.lanes).collect(),
             joins: shape.joins.clone(),
             satisfied: vec![false; n],
-            subtree: shape.subtree.clone(),
+            regions: shape.regions.clone(),
         };
         for join in &shape.joins {
-            for node in join.probe.0..join.probe.1 {
-                scheduler.build_holds[node] += 1;
+            for node in &join.probe {
+                scheduler.build_holds[*node] += 1;
             }
         }
         scheduler
@@ -122,23 +122,23 @@ impl Scheduler {
         if self.building[index] > 0 {
             return;
         }
-        let probe = self.joins[index].probe;
-        for node in probe.0..probe.1 {
+        for at in 0..self.joins[index].probe.len() {
+            let node = self.joins[index].probe[at];
             self.build_holds[node] -= 1;
             self.refresh(node);
         }
     }
 
     /// Enough rows have passed this node that no later one can change its answer. It
-    /// holds its whole subtree, itself included, and the hold never lifts — so this is
+    /// holds its whole region, itself included, and the hold never lifts — so this is
     /// where a run ends with lanes not done and queues non-empty.
     pub(crate) fn satisfy(&mut self, node: usize) {
         if self.satisfied[node] {
             return;
         }
         self.satisfied[node] = true;
-        let (start, end) = self.subtree[node];
-        for held in start..end {
+        for at in 0..self.regions[node].len() {
+            let held = self.regions[node][at];
             self.limit_holds[held] += 1;
             self.refresh(held);
         }

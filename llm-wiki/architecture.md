@@ -785,23 +785,27 @@ the query as a failed call does, the refused batch released where it was refused
 passes `None`; the device corpus installs
 `test_support`'s schema validator through it.
 
-Every node carries a **height** (distance to the root) and an **order** (pre-order index). A
-node is **runnable** when any of its lanes can make progress: a source always can, another node
-once that lane's inputs hold a batch or are known finished. Among runnable nodes the driver
+Every node carries a **height**, its longest path to a root, and an **order**, its index in the
+plan's pre-order: `PlanDag`'s first visit, the roots walked in order, so a node several parents
+read is numbered once. A node is **runnable** when any of its lanes can make progress: a source
+always can, another node once that lane's inputs hold a batch or are known finished. Among runnable nodes the driver
 takes the smallest height, breaks ties leftmost, and runs **every lane** of that node.
 
 The push behaviour falls out rather than being programmed. The moment a node produces a batch
-its parent is runnable at a strictly lower height, so the batch is carried up before anything
-below produces again; it stops only at an accumulator or the sink. With N lanes the unit that
+its parent is runnable at a strictly lower height (every reader of a node is lower than it,
+since a height is the longest path), so the batch is carried up before anything below produces
+again; it stops only at an accumulator or the sink. With N lanes the unit that
 moves is one batch per lane — running every lane of the chosen node is what keeps lanes
 progressing together.
 
 **Queues need no cap.** A producer's out-queue is drained by its parent before the producer runs
 again, so queues are self-bounding at one batch per lane. One shape breaks that on its own:
-**a join in its build phase holds back its whole probe subtree**, transitively, since without
-the hold the probe side piles into a queue nothing will drain. It cannot deadlock — plans are
-trees, so a join's build subtree is disjoint from its probe subtree and is never held by this
-rule, and completing the build is what lifts the hold. Nested joins resolve outermost-first.
+**a join in its build phase holds back its probe region**, since without the hold the probe
+side piles into a queue nothing will drain. A **region** is the set of nodes all of whose paths
+to a root pass through a node or an edge; the probe region is the probe edge's, and on a tree it
+is the whole probe subtree. A node also read from outside the region is not in it. The driver
+runs one tree, and there it cannot deadlock: a join's build subtree is disjoint from its probe
+subtree and is never held by this rule, and completing the build is what lifts the hold. Nested joins resolve outermost-first.
 
 Livelock has the same answer: the one thing that can block a batch is a join waiting on its
 other side, and orienting the tree so the build side is the left child removes the wait, because
@@ -815,8 +819,10 @@ whose build lane got nothing still answers it, through `set_build(None)` ([Joins
 
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
 ready bitset over it, per-node ready-lane counters, and hold counters — counters rather than
-flags, since one node can sit in two joins' probe subtrees. A pick is the lowest set bit. A step
-re-checks the node that ran and its parent and nothing else, because nothing else can have
+flags, since one node can sit in two joins' probe regions. Holds are regions, lists of nodes
+the index computes once (`PlanShape.regions`, `JoinShape.probe`): a building join holds its probe
+edge's, a satisfied limit its own node's. A pick is the lowest set bit. A step re-checks the node
+that ran and the parent of each of its readers and nothing else, because nothing else can have
 changed. A naive rescan survives as a test-only oracle compared pick by pick, since an
 incremental schedule that disagrees with it is wrong by definition. A Python model of these
 same rules — the scheduler, both drivers, the accountant, operators over pandas — is

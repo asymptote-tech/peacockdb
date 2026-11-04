@@ -44,9 +44,9 @@ pub(crate) fn run_with_hook<B: Backend>(
     partitioned::run_with_hook::<B>(root, ctx, budget, hook)
 }
 
-/// The tree indexed once — heights, pre-order numbering, lane counts and slot ranges.
-pub(crate) fn build_index<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanError> {
-    index::build(root)
+/// The plan indexed once — heights, numbering, regions, lane counts and slot ranges.
+pub(crate) fn build_index<'a>(roots: &[&'a dyn GpuNode]) -> Result<PlanIndex<'a>, PlanError> {
+    index::build(roots)
 }
 
 /// Where a node's lane keeps its accounting slot.

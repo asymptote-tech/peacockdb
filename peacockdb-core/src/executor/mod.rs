@@ -42,7 +42,7 @@ use datafusion::arrow::array::RecordBatch;
 
 use crate::plan::ExecutorCategory;
 use crate::plan::PlanError;
-use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{GpuNode, Reader, RowInterval};
 use crate::wire::{AbiSymbol, FbKind, Seq};
 
 #[cfg(not(feature = "rust-only"))]
@@ -1083,24 +1083,28 @@ pub(crate) fn collect_regions(executor: *mut PeacockExecutor) -> Result<Vec<Regi
     gpu_backend::collect_regions(executor)
 }
 
-/// A join, as the schedule sees one: the range of its probe subtree, and how many lanes
-/// have yet to leave their build phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A join, as the schedule sees one: the region its build holds, and how many lanes have
+/// yet to leave their build phase.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JoinShape {
     pub(crate) node: usize,
-    /// `[start, end)` of the probe child's subtree in pre-order.
-    pub(crate) probe: (usize, usize),
+    /// The nodes all of whose paths to a root pass through the probe edge, ascending.
+    pub(crate) probe: Vec<usize>,
     pub(crate) lanes: usize,
 }
 
-/// The tree as plain numbers. Node indices are pre-order, so a subtree is a contiguous
-/// range and "order" — the leftmost tie-break — is the index itself.
+/// The plan as plain numbers. Node indices are `PlanDag`'s first-visit pre-order, which is
+/// "order", the leftmost tie-break. A height is the longest path to a root, so every reader
+/// is strictly lower than what it reads. `regions[n]` is what a hold on `n` covers: on a
+/// tree, its subtree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanShape {
     pub(crate) heights: Vec<u32>,
     pub(crate) lanes: Vec<usize>,
-    pub(crate) subtree: Vec<(usize, usize)>,
+    pub(crate) regions: Vec<Vec<usize>>,
+    pub(crate) readers: Vec<Vec<Reader>>,
     pub(crate) joins: Vec<JoinShape>,
+    pub(crate) roots: Vec<usize>,
 }
 
 impl PlanShape {
@@ -1113,7 +1117,13 @@ pub(crate) struct IndexedNode<'a> {
     pub(crate) node: &'a dyn GpuNode,
     pub(crate) category: ExecutorCategory,
     pub(crate) children: Vec<usize>,
-    pub(crate) parent: Option<usize>,
+    /// One per edge into this node, in first-seen order; empty only at a root.
+    pub(crate) readers: Vec<Reader>,
+    /// Per child slot, this edge's ordinal among that child's `readers`: the cursor it reads
+    /// the child's queue by.
+    // The queues get one cursor per reader with several roots; until then every one is 0.
+    #[allow(dead_code)]
+    pub(crate) child_readers: Vec<usize>,
     pub(crate) lanes: usize,
     /// This node's position in a children-first walk, which is what `RecipePlan` indexes
     /// by and what a backend hands to `executors_for`. Pre-order is what the schedule
@@ -1141,7 +1151,12 @@ pub(crate) struct PlanIndex<'a> {
 
 impl<'a> PlanIndex<'a> {
     pub(crate) fn build(root: &'a dyn GpuNode) -> Result<Self, PlanError> {
-        driver::build_index(root)
+        Self::build_roots(&[root])
+    }
+
+    /// Several roots indexed as one plan, numbered in `PlanDag`'s pre-order across them.
+    pub(crate) fn build_roots(roots: &[&'a dyn GpuNode]) -> Result<Self, PlanError> {
+        driver::build_index(roots)
     }
 
     pub(crate) fn len(&self) -> usize {

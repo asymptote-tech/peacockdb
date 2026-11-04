@@ -238,7 +238,8 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.run_node(node)?;
         self.settle_limit(node)?;
         self.refresh(node);
-        if let Some(parent) = self.index.nodes[node].parent {
+        for at in 0..self.index.nodes[node].readers.len() {
+            let parent = self.index.nodes[node].readers[at].parent;
             self.refresh(parent);
         }
         Ok(true)
@@ -388,7 +389,7 @@ impl<'a, B: Backend> Driver<'a, B> {
             };
             // The call ends a lane's build phase whether a batch arrived or not, and the
             // hold lifts when every lane has: a lane that owed nothing still has to say
-            // so, or the probe subtree is held by a lane that will never build.
+            // so, or the probe region is held by a lane that will never build.
             if call == LaneCall::SetBuild {
                 self.scheduler.lane_left_build(node);
             }
@@ -570,8 +571,8 @@ impl<'a, B: Backend> Driver<'a, B> {
 
     // -- schedule ----------------------------------------------------------------
 
-    /// Recompute this node's ready lanes. Only the node just run and its parent can have
-    /// changed: a node's readiness is a fact about its inputs, and nothing else moved.
+    /// Recompute this node's ready lanes. Only the node just run and the parent of each of
+    /// its readers can have changed: a node's readiness is a fact about its inputs, and nothing else moved.
     fn refresh(&mut self, node: usize) {
         for lane in 0..self.index.nodes[node].ready_lanes {
             let ready = self.lane_ready(node, lane);

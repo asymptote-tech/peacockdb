@@ -1214,15 +1214,12 @@ impl<'a> PlanDag<'a> {
 
     /// `node` and the nodes all of whose paths to a root pass through it, ascending. On a
     /// tree, its subtree; on a DAG, not contiguous — a node also read from outside is not in.
-    // The driver indexes trees, and nothing else asks for a region yet.
-    #[allow(dead_code)]
     pub(crate) fn region_of_node(&self, node: usize) -> Vec<usize> {
         dag::region_of_node(self, node)
     }
 
     /// The nodes all of whose paths to a root pass through the edge `(parent, slot)`,
     /// ascending; `parent` is not one. On a tree, the subtree below that edge.
-    #[allow(dead_code)]
     pub(crate) fn region_of_edge(&self, parent: usize, slot: usize) -> Vec<usize> {
         dag::region_of_edge(self, parent, slot)
     }

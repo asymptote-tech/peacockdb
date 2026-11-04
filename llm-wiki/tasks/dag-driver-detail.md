@@ -6,6 +6,7 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 ## Dispatches
 
 - 2026-11-04: developer dispatched at Task 1 Step 1. Verda unreachable (no VERDA_CLIENT_ID); CPU tests run locally. Device steps on nebius-gpu (L40S).
+- 2026-11-04: developer dispatched at Task 3, all steps, CPU only, local (verda unreachable).
 
 ## Task 1 notes
 
@@ -27,6 +28,22 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - `#[allow(dead_code)]` with a reason on `SharedSource::new`, `region_of_node` and `region_of_edge`. Nothing in production builds a DAG or asks for a region until Task 3 (the index) and query-fuser. `PlanDag.roots` has a production reader, validation's root check, so it needs no allow.
 - architecture.md "Traits" gains "Only a source is shared". The plan lists no doc for Task 2, but the commit must keep code and wiki in agreement. build-test.md: `--lib` 997, cpu 3456, and a new row, `plan::dag::tests` 8. The `plan::validate::tests` row said 43, but HEAD had 35 cases (drift). It now says 37, the count `--list` gives.
 - Mutation check: `all`→`any` in `decide` and dropping the `max` in `longest_paths` turn 3 dag tests red.
+
+## Task 3 notes
+
+- Dispatched 2026-11-04, CPU only, local. Task 3 has no device step.
+- The plan's line references in `executor/mod.rs` are stale. `JoinShape`…`PlanIndex` sit at :1086–1156, not :929–997.
+- `index::build` takes `&[&dyn GpuNode]` and reads every number off one `PlanDag`. That covers pre-order, children, readers, post-order and heights. Lanes are set in `in_post_order()`, so a sink takes its input's lanes. `regions[n]` is `region_of_node(n)`, and a join's `probe` is `region_of_edge(join, PROBE_CHILD)`. The old `walk` and `subtree_ranges` are gone. Building every region costs O(n² log n) per index; the corpus plans are small.
+- Two old index tests were renamed because their fields went. `nodes_are_numbered_pre_order_and_each_knows_its_parent` became `…_its_readers`. `a_subtree_is_a_contiguous_range_of_the_numbering` became `a_region_on_a_tree_is_a_contiguous_range_of_the_numbering`. Their assertions are the same numbers, written as readers and as region lists.
+- `a_tree_indexes_exactly_as_before` compares against a copy of the old recursive walk, over `every_kind()` plus the index's own `plan()`. It checks heights, lanes, post-order, `slot_base`, regions, probe regions, and `child_readers` all 0.
+- The scheduler tests' `shape(readers, lanes, joins)` works regions out from their definition: the nodes no root reaches once the node or the edge is cut. Heights come from a memoized longest path. None of this goes through `dag.rs`'s `decide`, so the oracle stands on its own. `tree(parents, …)` turns the old parent lists into readers. `joins` now lists join nodes, and the probe is always slot 1.
+- `random_shape` grows one or two trees in pre-order. Each leaf then has a 1-in-3 chance of an extra reader edge from a node that already has children. A leaf gains no child, so no edge makes a cycle. A node may read one leaf twice. Joins are drawn among the nodes left with exactly two children. `assert_regions_are_dominated` checks three things: every reader is strictly lower, every region member other than its own node is read only from inside, and a probe member is read only from inside or through the held edge.
+- One test the plan does not list: `a_satisfied_root_holds_only_its_own_region`. `satisfy` holds `regions[node]`, so a second root's reader of a shared source stays runnable. Task 6 adds reader retirement on top.
+- Mutation check: making `satisfy` hold the span `regions[n][0]..=last` (a contiguous range) turns `the_incremental_schedule_picks_what_a_full_rescan_would` red. Trees alone would not catch it.
+- `step` refreshes the parent of each reader of the node that ran, not one `parent`. No test isolates this. A tree has one reader per node, so the 168 old driver tests cover it unchanged, and DAG runs arrive in Task 5.
+- `#[allow(dead_code)]` sits only on `IndexedNode.child_readers`, which Task 5's cursors read. `PlanShape.readers` and `roots` need none, because the derived `PartialEq` reads them; building without the allows showed only `child_readers`. The allows on `region_of_node` and `region_of_edge` went, since the index calls them now.
+- architecture.md "The scheduling rule" now says: height is the longest path; order is `PlanDag`'s pre-order; holds are regions (`PlanShape.regions`, `JoinShape.probe`); a step re-checks the parent of each reader. "It cannot deadlock — plans are trees" became "The driver runs one tree, and there it cannot deadlock". Task 5 replaces that with the argument.
+- Counts after Task 3: `--lib` 1003 (1001 passed + 2 ignored), `executor::driver::` 174 (168 before), Driver internals 49 (index 4→8, scheduler 15→17). build-test.md: cpu 3462, `--lib` 1003, Driver internals 49.
 
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 

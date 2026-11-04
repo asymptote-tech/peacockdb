@@ -1,21 +1,64 @@
-//! The tree indexed once: heights, pre-order numbering, lane counts, and the ranges every
-//! hold is expressed over.
+//! The plan indexed once: heights, the numbering, lane counts, and the regions every hold is
+//! expressed over.
 //!
-//! Node indices are pre-order, which buys two things the driver leans on: a subtree is a
-//! contiguous range, and "order" — the leftmost tie-break — is the index itself. Children
-//! are snapshotted here because [`GpuNode::children`] builds a `Vec` per call, and the
-//! schedule asks for them on every step.
+//! Every number is `PlanDag`'s, so one walk decides them for every consumer: a node read by
+//! several parents is indexed once, at its first visit, and "order" — the leftmost tie-break
+//! — is the index itself. On a tree a region is a contiguous range, as it always was.
+//! Children are snapshotted here because [`GpuNode::children`] builds a `Vec` per call, and
+//! the schedule asks for them on every step.
 
 use crate::executor::{IndexedNode, JoinShape, PlanIndex, PlanShape};
-use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::{ExecutorCategory, category_of};
+use crate::plan::{GpuNode, PlanDag, Reader};
 
-pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanError> {
-    let mut nodes = Vec::new();
-    let mut heights = Vec::new();
-    let mut post_order = 0;
-    walk(root, 0, None, &mut nodes, &mut heights, &mut post_order);
+pub(crate) fn build<'a>(roots: &[&'a dyn GpuNode]) -> Result<PlanIndex<'a>, PlanError> {
+    let dag = PlanDag::of(roots);
+    let mut nodes: Vec<IndexedNode<'a>> = dag
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(at, node)| IndexedNode {
+            node: node.node,
+            category: category_of(node.node),
+            children: node.children.clone(),
+            readers: node.readers.clone(),
+            child_readers: node
+                .children
+                .iter()
+                .enumerate()
+                .map(|(slot, child)| {
+                    dag.nodes[*child]
+                        .readers
+                        .iter()
+                        .position(|reader| *reader == Reader { parent: at, slot })
+                        .expect("every edge is one of its child's readers")
+                })
+                .collect(),
+            lanes: 0,
+            post_order: node.post_order,
+            input_lanes: 0,
+            interval: node.node.row_interval(),
+            ready_lanes: 0,
+            slot_base: 0,
+        })
+        .collect();
+
+    // Children first, so a sink, which declares no layout, can take its input's lanes.
+    for at in dag.in_post_order() {
+        let node = &nodes[at];
+        let lanes = match node.node.kind().layout() {
+            Some(layout) => layout.n,
+            None => nodes[node.children[0]].lanes,
+        };
+        let input_lanes = if node.category == ExecutorCategory::PartitionAccumulator {
+            nodes[node.children[0]].lanes
+        } else {
+            0
+        };
+        nodes[at].lanes = lanes;
+        nodes[at].input_lanes = input_lanes;
+    }
 
     for node in &mut nodes {
         node.ready_lanes = match node.category {
@@ -24,14 +67,13 @@ pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanErro
             _ => node.lanes,
         };
     }
-    let subtree = subtree_ranges(&nodes);
     let joins = nodes
         .iter()
         .enumerate()
         .filter(|(_, node)| node.category == ExecutorCategory::Join)
-        .map(|(index, node)| JoinShape {
-            node: index,
-            probe: subtree[node.children[PROBE_CHILD]],
+        .map(|(at, node)| JoinShape {
+            node: at,
+            probe: dag.region_of_edge(at, PROBE_CHILD),
             lanes: node.lanes,
         })
         .collect();
@@ -48,10 +90,12 @@ pub(crate) fn build<'a>(root: &'a dyn GpuNode) -> Result<PlanIndex<'a>, PlanErro
 
     Ok(PlanIndex {
         shape: PlanShape {
-            heights,
+            heights: dag.nodes.iter().map(|node| node.height).collect(),
             lanes: nodes.iter().map(|node| node.ready_lanes).collect(),
-            subtree,
+            regions: (0..nodes.len()).map(|at| dag.region_of_node(at)).collect(),
+            readers: dag.nodes.iter().map(|node| node.readers.clone()).collect(),
             joins,
+            roots: dag.roots.clone(),
         },
         nodes,
         slots,
@@ -70,67 +114,6 @@ pub(crate) fn slot(index: &PlanIndex<'_>, node: usize, lane: usize) -> usize {
 
 pub(crate) const PROBE_CHILD: usize = 1;
 
-fn walk<'a>(
-    node: &'a dyn GpuNode,
-    height: u32,
-    parent: Option<usize>,
-    nodes: &mut Vec<IndexedNode<'a>>,
-    heights: &mut Vec<u32>,
-    post_order: &mut usize,
-) -> usize {
-    let index = nodes.len();
-    let category = category_of(node);
-    nodes.push(IndexedNode {
-        node,
-        category,
-        children: Vec::new(),
-        parent,
-        lanes: 0,
-        input_lanes: 0,
-        interval: node.row_interval(),
-        ready_lanes: 0,
-        slot_base: 0,
-        post_order: 0,
-    });
-    heights.push(height);
-    let children: Vec<usize> = node
-        .children()
-        .into_iter()
-        .map(|child| walk(child, height + 1, Some(index), nodes, heights, post_order))
-        .collect();
-    // A sink declares no layout of its own, so it runs the lanes its input hands it.
-    let lanes = match node.kind().layout() {
-        Some(layout) => layout.n,
-        None => nodes[children[0]].lanes,
-    };
-    let input_lanes = if category == ExecutorCategory::PartitionAccumulator {
-        nodes[children[0]].lanes
-    } else {
-        0
-    };
-    nodes[index].children = children;
-    nodes[index].lanes = lanes;
-    nodes[index].input_lanes = input_lanes;
-    // Children first, so this is the position `attach_recipes` gave the same node — the
-    // address a recipe is looked up by, and the one the FFI's seqs are numbered in. Taken
-    // from the walk the driver already makes rather than derived a third time.
-    nodes[index].post_order = *post_order;
-    *post_order += 1;
-    index
-}
-
-/// `[start, end)` per node. Pre-order makes every subtree contiguous, so the end is the
-/// largest end among the children.
-fn subtree_ranges(nodes: &[IndexedNode<'_>]) -> Vec<(usize, usize)> {
-    let mut end: Vec<usize> = (0..nodes.len()).map(|index| index + 1).collect();
-    for index in (0..nodes.len()).rev() {
-        for child in &nodes[index].children {
-            end[index] = end[index].max(end[*child]);
-        }
-    }
-    (0..nodes.len()).map(|index| (index, end[index])).collect()
-}
-
 /// Each node as a record names it — its type and its children-first position — in the
 /// driver's own pre-order, which is the order `RunReport` is indexed by. From here rather
 /// than from a caller's own walk, so the two orders cannot disagree.
@@ -138,7 +121,7 @@ fn subtree_ranges(nodes: &[IndexedNode<'_>]) -> Vec<(usize, usize)> {
 pub(crate) fn nodes_as_recorded(
     root: &dyn GpuNode,
 ) -> Result<Vec<(&'static str, usize)>, PlanError> {
-    Ok(build(root)?
+    Ok(build(&[root])?
         .nodes
         .iter()
         .map(|node| (node.node.name(), node.post_order))
