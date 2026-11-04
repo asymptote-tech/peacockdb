@@ -2,6 +2,7 @@
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
+#include "peacock/pinned_host_cache.h"
 
 #include <cudf/column/column_factories.hpp>
 #include <cudf/io/parquet.hpp>
@@ -13,8 +14,10 @@
 #include <cudf/utilities/default_stream.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace peacock {
 
@@ -89,9 +92,16 @@ TableResult execute_scan(const fb::CudfScan* scan,
     projected_names = all_names;
   }
 
-  auto opts = cudf::io::parquet_reader_options::builder(cudf::io::source_info{paths})
-                  .columns(projected_names)
-                  .build();
+  // Every file pinned, or none and the paths: a scan never mixes sources. The lease outlives
+  // the read, whose copies from the spans have synced by the time it returns.
+  const auto lease = pinned_host_cache().acquire(paths);
+  std::vector<cudf::host_span<std::byte const>> spans;
+  for (auto const& span : lease.spans()) spans.emplace_back(span.data(), span.size());
+  auto source =
+      lease.cached()
+          ? cudf::io::source_info(cudf::host_span<cudf::host_span<std::byte const>>(spans))
+          : cudf::io::source_info{paths};
+  auto opts = cudf::io::parquet_reader_options::builder(source).columns(projected_names).build();
   if (!rgs.empty()) {
     opts.set_row_groups({rgs});
   }
@@ -102,9 +112,9 @@ TableResult execute_scan(const fb::CudfScan* scan,
   // whether row-group pruning applied — evidence that a clustered-predicate scan
   // reads only surviving groups (q6 lineitem -> 983040, not 6001215).
   if (std::getenv("PEACOCK_LOG_SCAN_ROWS")) {
-    std::fprintf(stderr, "[PEACOCK_SCAN] %s rows=%ld row_groups=%s(%zu)\n",
+    std::fprintf(stderr, "[PEACOCK_SCAN] %s rows=%ld row_groups=%s(%zu) source=%s\n",
                  paths.empty() ? "?" : paths[0].c_str(), static_cast<long>(result.tbl->num_rows()),
-                 rgs.empty() ? "all" : "pruned", rgs.size());
+                 rgs.empty() ? "all" : "pruned", rgs.size(), lease.cached() ? "pinned" : "path");
   }
 
   // Use column names from the reader metadata.

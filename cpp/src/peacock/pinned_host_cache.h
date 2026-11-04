@@ -151,4 +151,42 @@ class PinnedHostCache {
   PinnedCacheStats counters_;
 };
 
+// The process's cache. The C ABI's PEACOCK_PINNED_CACHE_* values mirror these two in order.
+enum class PinnedCacheState { On, Off, Integrated, NoDevice };
+enum class PinnedCacheSource { Default, Session, Env };
+
+// What sizes it: the device first, then PEACOCK_PINNED_HOST_CACHE_BYTES, then the session's
+// pinned_host_cache_bytes (the last set in the process), then the default from host RAM.
+struct PinnedCacheConfig {
+  DeviceKind device = DeviceKind::NoDevice;
+  std::optional<std::size_t> env_bytes, session_bytes;
+  std::size_t host_ram_bytes = 0;
+  std::optional<std::size_t> cgroup_limit_bytes;
+};
+
+struct PinnedCacheSizing {
+  PinnedCacheState state = PinnedCacheState::Off;
+  PinnedCacheSource source = PinnedCacheSource::Default;
+  std::size_t capacity_bytes = 0;
+};
+
+PinnedCacheSizing size_pinned_cache(PinnedCacheConfig const& config);
+// The line said at the cache's first use, after "[pinned-cache] ".
+std::string describe_pinned_cache(PinnedCacheConfig const& config, PinnedCacheSizing const& sized);
+// PEACOCK_PINNED_HOST_CACHE_BYTES's text: decimal bytes and nothing else, or a throw naming it.
+std::size_t parse_pinned_host_cache_bytes(std::string_view text);
+
+// Every executor's: the cache is per process, not per device. Built at first use from the
+// current device and the environment, and leaked on purpose, so no static destructor unpins a
+// buffer a thread still reads at exit. Throws while the environment variable is not a count.
+PinnedHostCache& pinned_host_cache();
+
+struct PinnedCacheStatus {
+  PinnedCacheSizing sizing;
+  PinnedCacheStats stats;
+};
+PinnedCacheStatus pinned_host_cache_status();
+// nullopt asks for the default. The last set wins; shrinking evicts unleased files now.
+PinnedCacheStatus set_pinned_host_cache_bytes(std::optional<std::size_t> session_bytes);
+
 }  // namespace peacock

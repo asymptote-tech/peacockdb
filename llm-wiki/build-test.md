@@ -641,6 +641,14 @@ what the sink says when the device's schema is not the declared one: every diver
 named with its index and both types, so a year and a narrow decimal read as two findings
 rather than `try_new`'s first; nullability is never a clause, since `try_new` does not check it
 
+| Pinned host cache, no FFI | [executor::pinned_cache::tests](../peacockdb-core/src/executor/pinned_cache/tests.rs) | 8 |
+|---|---|--:|
+
+`peacock.pinned_host_cache_bytes`: unset in a fresh session, `SET` read back, a non-number
+refused naming the key; the cache's trailer value in its four forms, on one line; a prefill's
+refusal as its two sizes; and the files a plan reads, from tpch sf1's q3 and q6 planned whole:
+each file once over several roots, a load of no column skipped
+
 | Schema validator null counts | [test_support::schema_validation::tests](../peacockdb-core/src/test_support/schema_validation/tests.rs) | 3 |
 |---|---|--:|
 
@@ -723,14 +731,16 @@ is invisible in plan text and wrong on a device. Each of DataFusion's three inte
 crosses as months, days and nanoseconds, a NULL one as a typed null, and an interval anywhere but
 a date or naive timestamp ± it is refused naming #249
 
-#### ffi — default features: FFI linked, no device. 7 cases: `--lib -- ffi_tests::` 4, `peacockdb-ffi --test test_ffi` 3
+#### ffi — default features: FFI linked, no device. 9 cases: `--lib -- ffi_tests::` 5, `peacockdb-ffi --test test_ffi` 4
 
 *crate integration, external*
 
-| FFI smoke | [test_executor_lifecycle](../peacockdb-ffi/tests/test_ffi.rs) | 3 |
+| FFI smoke | [test_executor_lifecycle](../peacockdb-ffi/tests/test_ffi.rs) | 4 |
 |---|---|--:|
 
-the crate links; executor lifecycle; `install_rmm_pool` refuses a zero request
+the crate links; executor lifecycle; `install_rmm_pool` refuses a zero request; with no device the
+pinned host cache is `NO_DEVICE` at capacity 0 whatever is set, a prefill answers `OFF`, and a
+null output is refused
 
 *component*
 
@@ -913,6 +923,16 @@ the node that produced the handle
 three of the four per-call symbols on a live GPU — a scan's row groups, an export range, a
 slice; `handle_schema` is `test_support`'s schema read — and
 the release skipped exactly where a call consumed the handle
+
+*module unit*
+
+| Pinned host cache on a device | [executor::pinned_cache::gpu_tests](../peacockdb-core/src/executor/pinned_cache/gpu_tests.rs) | 2 |
+|---|---|--:|
+
+a session's `pinned_host_cache_bytes` reaching the cache, `0` as `Off` and unset as the default;
+a prefill's files and bytes, a repeat reading nothing, a refusal of what does not fit that pins
+nothing, a missing file as `Io` naming it, and `Off` at 0. With
+`PEACOCK_PINNED_HOST_CACHE_BYTES` set, each checks only that the environment won
 
 
 ### Everything else

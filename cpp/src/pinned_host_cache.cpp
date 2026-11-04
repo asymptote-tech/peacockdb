@@ -15,10 +15,12 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace peacock {
@@ -454,6 +456,124 @@ PinnedCacheStats PinnedHostCache::stats() const {
         return kv.second->state == Entry::State::Ready;
       }));
   return out;
+}
+
+PinnedCacheSizing size_pinned_cache(PinnedCacheConfig const& config) {
+  PinnedCacheSizing sized;
+  sized.source = config.env_bytes       ? PinnedCacheSource::Env
+                 : config.session_bytes ? PinnedCacheSource::Session
+                                        : PinnedCacheSource::Default;
+  if (config.device == DeviceKind::NoDevice) {
+    sized.state = PinnedCacheState::NoDevice;
+    return sized;
+  }
+  if (config.device == DeviceKind::Integrated) {
+    sized.state = PinnedCacheState::Integrated;
+    return sized;
+  }
+  sized.capacity_bytes =
+      config.env_bytes ? *config.env_bytes
+      : config.session_bytes
+          ? *config.session_bytes
+          : default_pinned_host_cache_bytes(config.host_ram_bytes, config.cgroup_limit_bytes);
+  sized.state = sized.capacity_bytes == 0 ? PinnedCacheState::Off : PinnedCacheState::On;
+  return sized;
+}
+
+std::string describe_pinned_cache(PinnedCacheConfig const& config, PinnedCacheSizing const& sized) {
+  const char* source = sized.source == PinnedCacheSource::Env ? "env" : "session";
+  switch (sized.state) {
+    case PinnedCacheState::NoDevice:
+      return "off: no CUDA device";
+    case PinnedCacheState::Integrated:
+      return "off: integrated device (pageable memory access)";
+    case PinnedCacheState::Off:
+      return std::string("off (pinned_host_cache_bytes = 0, ") + source + ")";
+    case PinnedCacheState::On:
+      break;
+  }
+  const std::string capacity = format_bytes(sized.capacity_bytes);
+  if (sized.source != PinnedCacheSource::Default)
+    return capacity + " (pinned_host_cache_bytes, " + source + ") on a discrete device";
+  const bool cgroup =
+      config.cgroup_limit_bytes && *config.cgroup_limit_bytes < config.host_ram_bytes;
+  const std::string of = cgroup ? format_bytes(*config.cgroup_limit_bytes) + " cgroup limit"
+                                : format_bytes(config.host_ram_bytes) + " host RAM";
+  return capacity + " of " + of + " (default) on a discrete device";
+}
+
+std::size_t parse_pinned_host_cache_bytes(std::string_view text) {
+  std::size_t bytes = 0;
+  const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), bytes);
+  if (text.empty() || ec != std::errc{} || end != text.data() + text.size())
+    throw std::runtime_error("PEACOCK_PINNED_HOST_CACHE_BYTES=\"" + std::string(text) +
+                             "\" is not a decimal byte count");
+  return bytes;
+}
+
+namespace {
+
+// A failed query leaves the runtime's last error set, which cuDF's next check would throw.
+DeviceKind current_device_kind() {
+  int count = 0, device = 0, pageable = 0;
+  const bool ok =
+      cudaGetDeviceCount(&count) == cudaSuccess && count > 0 &&
+      cudaGetDevice(&device) == cudaSuccess &&
+      cudaDeviceGetAttribute(&pageable, cudaDevAttrPageableMemoryAccess, device) == cudaSuccess;
+  if (!ok) cudaGetLastError();
+  return classify_device(ok, count, pageable);
+}
+
+struct ProcessCache {
+  explicit ProcessCache(PinnedCacheConfig c)
+      : config(std::move(c)),
+        cache(size_pinned_cache(config).capacity_bytes, cuda_pinned_allocator()) {}
+  std::mutex mutex;  // config.session_bytes, and keeps a set and its capacity together
+  PinnedCacheConfig config;
+  PinnedHostCache cache;
+  std::once_flag said;
+};
+
+ProcessCache& process_cache() {
+  static ProcessCache* process = [] {
+    PinnedCacheConfig config;
+    config.device = current_device_kind();
+    if (const char* env = std::getenv("PEACOCK_PINNED_HOST_CACHE_BYTES"))
+      config.env_bytes = parse_pinned_host_cache_bytes(env);
+    config.host_ram_bytes = static_cast<std::size_t>(sysconf(_SC_PHYS_PAGES)) *
+                            static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    config.cgroup_limit_bytes = cgroup_memory_limit_bytes();
+    return new ProcessCache(std::move(config));
+  }();
+  return *process;
+}
+
+}  // namespace
+
+PinnedHostCache& pinned_host_cache() {
+  ProcessCache& process = process_cache();
+  std::call_once(process.said, [&] {
+    std::lock_guard lock(process.mutex);
+    const std::string line =
+        describe_pinned_cache(process.config, size_pinned_cache(process.config));
+    std::fprintf(stderr, "[pinned-cache] %s\n", line.c_str());
+  });
+  return process.cache;
+}
+
+PinnedCacheStatus pinned_host_cache_status() {
+  ProcessCache& process = process_cache();
+  std::lock_guard lock(process.mutex);
+  return {size_pinned_cache(process.config), process.cache.stats()};
+}
+
+PinnedCacheStatus set_pinned_host_cache_bytes(std::optional<std::size_t> session_bytes) {
+  ProcessCache& process = process_cache();
+  std::lock_guard lock(process.mutex);
+  process.config.session_bytes = session_bytes;
+  const PinnedCacheSizing sized = size_pinned_cache(process.config);
+  process.cache.set_capacity(sized.capacity_bytes);
+  return {sized, process.cache.stats()};
 }
 
 }  // namespace peacock

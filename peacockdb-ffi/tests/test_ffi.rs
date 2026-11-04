@@ -1,10 +1,15 @@
 #[cfg(not(feature = "rust-only"))]
 mod ffi_tests {
     use peacockdb_ffi::raw::{
-        PEACOCK_RMM_POOL_UNAVAILABLE, PeacockExecutor, PeacockRmmPoolInfo, peacock_executor_create,
-        peacock_executor_destroy, peacock_install_rmm_pool,
+        PEACOCK_PINNED_CACHE_DEFAULT_BYTES, PEACOCK_PINNED_CACHE_NO_DEVICE,
+        PEACOCK_PREFILL_BAD_ARGUMENT, PEACOCK_PREFILL_OFF, PEACOCK_RMM_POOL_UNAVAILABLE,
+        PeacockExecutor, PeacockPinnedCacheStats, PeacockPrefillStats, PeacockRmmPoolInfo,
+        peacock_executor_create, peacock_executor_destroy, peacock_install_rmm_pool,
+        peacock_pinned_cache_prefill, peacock_pinned_host_cache_stats,
+        peacock_set_pinned_host_cache_bytes,
     };
     use peacockdb_ffi::version;
+    use std::ffi::CString;
     use std::ptr;
 
     #[test]
@@ -36,5 +41,44 @@ mod ffi_tests {
             "a zero-byte request reported state {}",
             info.state
         );
+    }
+
+    /// The ffi rung has no device, which is CI's dataset-matrix and a container without
+    /// `--gpus`: the cache is off, a prefill says so, and nothing throws across the ABI.
+    /// One case, so libtest's other threads share no cache state with it.
+    #[test]
+    fn pinned_host_cache_is_off_without_a_device() {
+        let mut stats = PeacockPinnedCacheStats::default();
+        assert_eq!(unsafe { peacock_pinned_host_cache_stats(&mut stats) }, 0);
+        assert_eq!(stats.state, PEACOCK_PINNED_CACHE_NO_DEVICE);
+        assert_eq!(stats.capacity_bytes, 0);
+
+        let rc = unsafe {
+            peacock_set_pinned_host_cache_bytes(PEACOCK_PINNED_CACHE_DEFAULT_BYTES, &mut stats)
+        };
+        assert_eq!(rc, 0);
+        assert_eq!(stats.state, PEACOCK_PINNED_CACHE_NO_DEVICE);
+        assert_eq!(stats.capacity_bytes, 0);
+
+        let file = std::env::temp_dir().join(format!("peacock-ffi-{}.bin", std::process::id()));
+        std::fs::write(&file, [7u8; 4096]).expect("write the temp file");
+        let path = CString::new(file.to_str().expect("a UTF-8 temp path")).expect("no NUL");
+        let paths = [path.as_ptr()];
+        let mut executor: *mut PeacockExecutor = ptr::null_mut();
+        assert_eq!(unsafe { peacock_executor_create(0, &mut executor) }, 0);
+        let mut prefill = PeacockPrefillStats::default();
+        let rc = unsafe { peacock_pinned_cache_prefill(executor, paths.as_ptr(), 1, &mut prefill) };
+        assert_eq!(rc, PEACOCK_PREFILL_OFF);
+        assert_eq!(prefill.files, 0);
+
+        assert_ne!(
+            unsafe { peacock_pinned_host_cache_stats(ptr::null_mut()) },
+            0
+        );
+        let rc =
+            unsafe { peacock_pinned_cache_prefill(executor, paths.as_ptr(), 1, ptr::null_mut()) };
+        assert_eq!(rc, PEACOCK_PREFILL_BAD_ARGUMENT);
+        unsafe { peacock_executor_destroy(executor) };
+        std::fs::remove_file(&file).expect("remove the temp file");
     }
 }

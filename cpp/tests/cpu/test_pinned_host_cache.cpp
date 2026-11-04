@@ -23,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -603,6 +604,88 @@ TEST_F(PinnedHostCache, PrefillWhenOffIsOff) {
   Cache cache(0, kCounting);
   EXPECT_EQ(cache.prefill({a}).status, Status::Off);
   EXPECT_EQ(heap->call_count(), 0u);
+}
+
+// The process's cache: what sizes it, in order, and the one line it says at first use.
+
+peacock::PinnedCacheConfig discrete_host(std::size_t ram) {
+  peacock::PinnedCacheConfig config;
+  config.device = peacock::DeviceKind::Discrete;
+  config.host_ram_bytes = ram;
+  return config;
+}
+
+TEST_F(PinnedHostCache, EnvironmentBytesAreADecimalCount) {
+  EXPECT_EQ(peacock::parse_pinned_host_cache_bytes("0"), 0u);
+  EXPECT_EQ(peacock::parse_pinned_host_cache_bytes("147000000000"), 147'000'000'000u);
+  for (const char* bad : {"", "1G", "-1", " 12", "12 ", "lots", "18446744073709551616"}) {
+    try {
+      peacock::parse_pinned_host_cache_bytes(bad);
+      ADD_FAILURE() << '"' << bad << "\" was taken as a byte count";
+    } catch (std::runtime_error const& e) {
+      EXPECT_NE(std::string(e.what()).find("PEACOCK_PINNED_HOST_CACHE_BYTES"), std::string::npos)
+          << e.what();
+    }
+  }
+}
+
+TEST_F(PinnedHostCache, TheEnvironmentWinsOverTheSessionOverTheDefault) {
+  using peacock::PinnedCacheSource;
+  using peacock::PinnedCacheState;
+  auto config = discrete_host(196'000'000'000);
+  auto sized = peacock::size_pinned_cache(config);
+  EXPECT_EQ(sized.state, PinnedCacheState::On);
+  EXPECT_EQ(sized.source, PinnedCacheSource::Default);
+  EXPECT_EQ(sized.capacity_bytes, 147'000'000'000u);
+
+  config.cgroup_limit_bytes = 64'000'000'000;
+  EXPECT_EQ(peacock::size_pinned_cache(config).capacity_bytes, 48'000'000'000u);
+
+  config.session_bytes = 0;
+  sized = peacock::size_pinned_cache(config);
+  EXPECT_EQ(sized.state, PinnedCacheState::Off);
+  EXPECT_EQ(sized.source, PinnedCacheSource::Session);
+  EXPECT_EQ(sized.capacity_bytes, 0u);
+
+  config.env_bytes = KiB;
+  sized = peacock::size_pinned_cache(config);
+  EXPECT_EQ(sized.state, PinnedCacheState::On);
+  EXPECT_EQ(sized.source, PinnedCacheSource::Env);
+  EXPECT_EQ(sized.capacity_bytes, KiB);
+}
+
+TEST_F(PinnedHostCache, NoDeviceAndAnIntegratedOnePinNothing) {
+  using peacock::PinnedCacheState;
+  auto config = discrete_host(196'000'000'000);
+  config.session_bytes = kRoomy;
+  config.device = peacock::DeviceKind::NoDevice;
+  auto sized = peacock::size_pinned_cache(config);
+  EXPECT_EQ(sized.state, PinnedCacheState::NoDevice);
+  EXPECT_EQ(sized.source, peacock::PinnedCacheSource::Session);
+  EXPECT_EQ(sized.capacity_bytes, 0u);
+  config.device = peacock::DeviceKind::Integrated;
+  sized = peacock::size_pinned_cache(config);
+  EXPECT_EQ(sized.state, PinnedCacheState::Integrated);
+  EXPECT_EQ(sized.capacity_bytes, 0u);
+}
+
+TEST_F(PinnedHostCache, FirstUseSaysWhereTheCapacityCameFrom) {
+  constexpr std::size_t GiB = 1024 * 1024 * KiB;
+  auto said = [](peacock::PinnedCacheConfig const& config) {
+    return peacock::describe_pinned_cache(config, peacock::size_pinned_cache(config));
+  };
+  auto config = discrete_host(200 * GiB);
+  EXPECT_EQ(said(config), "150.0 GiB of 200.0 GiB host RAM (default) on a discrete device");
+  config.cgroup_limit_bytes = 64 * GiB;
+  EXPECT_EQ(said(config), "48.0 GiB of 64.0 GiB cgroup limit (default) on a discrete device");
+  config.session_bytes = GiB;
+  EXPECT_EQ(said(config), "1.0 GiB (pinned_host_cache_bytes, session) on a discrete device");
+  config.env_bytes = 0;
+  EXPECT_EQ(said(config), "off (pinned_host_cache_bytes = 0, env)");
+  config.device = peacock::DeviceKind::Integrated;
+  EXPECT_EQ(said(config), "off: integrated device (pageable memory access)");
+  config.device = peacock::DeviceKind::NoDevice;
+  EXPECT_EQ(said(config), "off: no CUDA device");
 }
 
 }  // namespace

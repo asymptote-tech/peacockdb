@@ -1047,7 +1047,7 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)` over the file's bytes in the process's pinned host cache when it holds them, else over the path, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — the mask from `cudf::compute_column(tv, predicate)`, or from `build_column` when the AST cannot take the predicate (LIKE, CASE, a scalar function), then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and what `cudf_ast_can_evaluate` refuses takes `build_column` instead — among others LIKE, CASE, a scalar function, a binary with a decimal operand or a string literal, and a decimal literal not directly under a cast to `Float64` or `Int64`. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args` and `state_names`; its `ddof` is read by nobody, since the finalize is a project), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys and no `stddev` or `var` it is `cudf::reduce` to one row; a keyless node holding one runs the groupby on one constant key, dropped after; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
@@ -1114,7 +1114,7 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is twenty-six symbols in six groups: lifecycle (`peacock_gpu_version`,
+The ABI is twenty-nine symbols in seven groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
@@ -1122,7 +1122,9 @@ entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, an
 session (`peacock_join_build`, `_probe`, `_finish`, `_release`, below);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
 `nvtx_pop_range`, `executor_collect_node_regions`, and `device_info`, the card's name and CUDA
-runtime a benchmark's provenance names); and two test hooks:
+runtime a benchmark's provenance names); the pinned host file cache, which is the process's and
+not an executor's (`set_pinned_host_cache_bytes`, how the session option `pinned_host_cache_bytes`
+reaches it; `pinned_host_cache_stats`; and `pinned_cache_prefill`); and two test hooks:
 `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so the
 Rust side can compare it against the production lane rule, and `peacock_handle_from_arrow`, which adopts one such
 batch into the live session as a handle so the operator harness can hand an executor a table it

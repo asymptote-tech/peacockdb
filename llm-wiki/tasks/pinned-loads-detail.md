@@ -16,6 +16,8 @@
   limit) still waits for the H100 path.
 - 2026-11-04: Task 3 offline (the cache alone, no VM): `pinned_host_cache.h`/`.cpp`, 30 CPU
   cases, 2 GPU cases. Notes below.
+- 2026-11-04: Task 4 offline (the scan reads the cache; the option and the three symbols), no
+  VM. Notes below.
 
 ## Task 1: the load breakdown
 
@@ -105,6 +107,63 @@
 - **For Task 4:** the singleton is still to write (`pinned_host_cache()`); nothing calls the
   cache yet, and `scan.cpp` is untouched. `PrefillOutcome::failed_index` is an index into the
   caller's `paths` (the first occurrence of a duplicate).
+
+## Task 4: the scan reads the cache; the option and the prefill
+
+- **Red → green.** Rust, rust-only: `cargo test … --lib -- pinned_cache` failed to compile
+  (`unresolved imports crate::executor::PeacockOptions, PinnedCache, …, plan_files`); then the
+  three option tests failed on `Could not find config namespace "peacock"` until
+  `build_session_state` registered the extension; then 8/8. C++, in the 25.02 image: both
+  `peacock_cpu_tests` (`‘PinnedCacheConfig’ in namespace ‘peacock’ does not name a type`) and
+  `peacock_plan_tests` (`‘peacock_pinned_cache_prefill’ was not declared`) failed to compile;
+  then `peacock_cpu_tests` 60/60. The FFI shape first failed on `SessionConfig`'s path
+  (`datafusion::execution::context::SessionConfig` in DataFusion 45), which no rust-only build
+  compiles.
+- **Departures from the plan's text:**
+  - No `options.rs` and no `pub mod options;`. `pub_mod_declares_a_component_and_nothing_else`
+    pins `lib.rs` to six components, and `bare_pub_is_the_surface_and_nothing_else` refuses a
+    bare `pub` outside `SURFACE`. `PeacockOptions` and the cache's types are `pub(crate)` in
+    `executor/mod.rs`, beside `RmmPool`; `executor/pinned_cache.rs` holds their trait impls and
+    `plan_files`. Fields are `pub(crate)`: `executor/mod.rs` is a surface file, and a bare `pub`
+    field there fails the same gate. The option's tests are in `executor/pinned_cache/tests.rs`.
+  - `extensions_options!` cannot carry `Option<u64>`: its `set` calls `FromStr` and its
+    `entries` calls `Display`. `ExtensionOptions` is written by hand; its entry's key carries the
+    `peacock.` prefix, since DataFusion 45 adds none to an extension's entries.
+  - No `GpuContext::prefill_pinned_cache` and no `Session::prefill_pinned_cache` yet: neither
+    has a caller before Task 4b, and either would be a dead-code warning. Task 4b adds the
+    `Session` one-liner over `executor::prefill_on` with its first caller.
+  - One case more than the plan in the lib's ffi rung, `executor::pinned_cache::ffi_tests::
+    the_cache_is_off_without_a_device`: the Rust mapping of `NO_DEVICE` and `OFF`. It is also
+    what keeps `apply_pinned_host_cache`, `pinned_host_cache` and `prefill_on` from being dead
+    in a test build until Task 4b. Each carries `#[cfg_attr(not(test), allow(dead_code))]`;
+    Task 4b turns that into the harness's `not(feature = "test-support")` form.
+  - Four CPU cases more than the plan: the process cache's sizing is pure functions
+    (`size_pinned_cache`, `describe_pinned_cache`, `parse_pinned_host_cache_bytes`), so the
+    environment > session > default order, no-device and integrated, and the first-use line
+    are tested without a device.
+  - The two GPU gtests are in a new file, `cpp/tests/gpu/test_pinned_scan.cpp`, in
+    `peacock_plan_tests`, not in `test_plan_executor.cpp` (already 3046 lines).
+  - The scan builds its source from the multi-span constructor whatever the file count; one
+    span is the one-file case.
+  - A non-UTF-8 path is not refused: `prefill_on` hands a path over as its bytes. Only a NUL
+    is refused, as that file's `Io`.
+  - `source` is reported as `Env`/`Session`/`Default` in every state, no-device and integrated
+    included; `PEACOCK_PINNED_HOST_CACHE_BYTES` is parsed at first use whatever the device.
+- **What is subtle.** The first-use line is said at the first scan or prefill, not at the
+  first `set` or `stats`: a benchmark applies its session option first, so the line names the
+  capacity it will run with. A prefill answers `OFF` before it `stat`s anything, so an off
+  cache never reports a missing file. The process cache's mutex keeps a set and the capacity
+  it computes together; the cache's own mutex is taken inside it.
+- **Both cuDF versions compile**, with no warning from a changed file: 25.02 in `/tmp/pl-build25`,
+  26.02 configured fresh in `/tmp/pl-build26` (`scripts/build.sh --configure --build`); `ctest -L cpu`
+  and `peacock_cpu_tests` 60/60 in each. This also covers Task 3's 26.02 compile. The 25.02 image
+  and `target-img-25.02/` (19 GB) were removed after the 25.02 runs to fit the 26.02 image; dev
+  holds the 26.02 build image now, and Task 4b's FFI rung rebuilds its target dir cold.
+- **Unrun (no device):** `PinnedHostCache.ScanFromTheCacheEqualsThePath`,
+  `PinnedHostCache.PrefilledScanFillsNothing` (`peacock_plan_tests`, listed by
+  `--gtest_list_tests`), and `executor::pinned_cache::gpu_tests::{the_session_option_reaches_
+  the_cache, prefill_reports_its_files_and_refuses_what_does_not_fit}` (compiled by
+  `cargo test --no-run --features gpu`). They run in Task 7, cache on and off.
 
 ## cuDF 25.02 default
 
