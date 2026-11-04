@@ -142,3 +142,32 @@
 new-hosts' block (the human's GitHub PAT; `new-hosts-detail.md`, "Blocked"); the same obstacle the
 analyst diagnosed there. Tasks 1–4 are committed (`d0866f27`, `bcefeab4`). Resume at Task 5 once
 new-hosts' Task 10 has proven the H100 path and pinned-loads is through its H100 runs.
+
+## Rebase onto master (2026-11-04)
+
+Rebased onto ENS-pinned-loads, which is on master (the ENS-optimizer merge #165 and the
+inventory-based case listing). HEAD `1bdc89f3`.
+
+- **`benchmark.rs` conflict (bcefeab4's replay):** the import list. Kept the commit's, without
+  `macro_invocations_in`, which master removed. The record tests' imports went with the tests to
+  `benchmark_record.rs`. `the_benchmark_report_matches_the_trees` took its row order from
+  `macro_invocations_in(CASE_LIST, …)`. It now takes it from `registry_cases()`. The list is
+  written from the registry in that order, and `the_benchmark_cases_follow_the_registry` holds
+  them byte for byte, so the order is the list's without reading the list's text. The committed
+  page renders unchanged.
+- **`build-test.md`:** the replay kept HEAD's side of two hunks. Restored by meaning: the cpu
+  header is master's plus bench-rows' 25 cases (`--lib` 952, `test_cpu_corpus` 2447,
+  `test_corpus_goldens` 50, `test_cost_model` 3 = 3452, each the binary's `--list` total), and the
+  grand total moves by the same 25 (7755; Rust 6001). The `benchmark-report.html` golden row is back
+  beside HEAD's four new rows; it and **The page** now say the order comes from the registry.
+- **Re-proven offline, no VM:** `cargo test --features rust-only -p peacockdb-core` exit 0 —
+  `--lib` 950 passed, 2 ignored; `test_cpu_corpus` 2447; `test_corpus_goldens` 50;
+  `test_cost_model` 3; `test_golden_format` 41; `test_crate_privacy` 1; no warnings; `testdata/`
+  clean after it. `cargo test -p cost-report`: 49 + `test_source_formatting` 32. `--features gpu`
+  compiles every target against the local rapids-cuda-12.2 env with no warnings. No C++ changed,
+  so no ctest.
+
+## Blocked (2026-11-04, after the rebase)
+
+Still `blocked(building)` at Task 5: the H100 run waits on new-hosts' new block, the two VMs'
+disks (`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared.

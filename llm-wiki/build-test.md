@@ -1176,6 +1176,7 @@ The generator scripts live in `testdata/`.
 | `<bench>/tp1-single.cardinality.txt`, in `scripts/exec_model/testdata/goldens/` | `test_cardinality_corpus.py` with `UPDATE_CANONICAL=1` | the plan golden, `tp1-single-mini.cpu.txt`, the stats sidecar and the sf1 footers, `optimizer/cardinality.py`. One line per join: its estimate, its rows in the engine's run, the q-error | `test_cardinality_corpus` in dataset-matrix, the whole file |
 | `<bench>/<mode>.cpu.txt`, `<mode>.optimizer.txt`, `<mode>.plandiff.txt`, `<mode>.costs.txt` and `<mode>.optimizer.md`, in `scripts/exec_model/testdata/goldens/` | `scripts/exec_model/run.py`; with `--query` it rewrites only its own sections | the plan golden, the sf1 tables and sidecar, the whole optimizer, `cost_model.conf`, and pandas' byte counts. A `== <query>` section each: the optimized run in the `.cpu.txt` format plus each clustered join's `mj=`, what each rule did, the plan's diff, and both runs priced by the engine's cost function with the rules counted. The page has a `## <query>` section each, from the same report as `.optimizer.txt`: each cluster's successive orders and the dynamic filters. `.costs.txt` is not a function of the `.cpu.txt` beside it: it prices the planned run, the probe plans and the stopped runs too | nothing: generation only |
 | `cost_report.html`, in `scripts/exec_model/testdata/goldens/` | `run.py` at the end of every run, or `scripts/exec_model/cost_report.py` alone; committed with relative links | every `<bench>/<mode>.costs.txt` and `.optimizer.txt` beside it, the engine's `-mini.cost.txt` and the `<q>.duckdb_cost.txt` | the cost-report job renders it again with `--sha`, its links at the commit, and on master publishes it at `join-optimizer/` |
+| `benchmark-report.html` | `the_benchmark_report_matches_the_trees` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | every device tree under `testdata/benchmark-results/` and its `cases.csv`; the registry's row order, which is the main list's | that test, byte for byte |
 | `peacockdb-core/tests/common/corpus_benchmark_cases.inc` (source, not testdata) | `the_benchmark_cases_follow_the_registry` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | `testdata/cost-registry.csv`'s `gpu_*` columns, tpch and tpcds rows, timed at sf40 | that test, byte for byte |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
@@ -2747,7 +2748,8 @@ record instead (above).
 
 **The page**, `testdata/benchmark-report.html`, is committed: every device tree side by side. One
 row per (dataset, query, mode) that some tree has a section for, a table per (dataset, sf), in the
-main list's order; four columns per device, by name. A timed section shows load, execute, total
+main list's order; four columns per device, by name. The test takes that order from the registry,
+which writes the list; it never reads the list's text. A timed section shows load, execute, total
 (each in ms, the total `device_us` linked to the section) and `peak_bytes` in GiB, labelled the
 accountant's peak, a lower bound on device memory. An `h200/` section's load is `tree_load_us()`
 and its peak `—`. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; where the
