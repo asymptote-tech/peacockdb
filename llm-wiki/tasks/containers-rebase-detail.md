@@ -388,3 +388,4 @@ ENS-optimizer's `c5d12789`, not carried).
     fetched records sit under `<device>/`, so step 5 does not find them there yet.
   - `scripts/env/tests/test_run_tests.py` runs `docker run` on a run image that is not there,
     which pulls it (25.02, 8.3 GB; 26.02 timed out at 120 s). Remove it afterwards.
+- Device CI: `pipeline.yml` dispatched 2026-11-04T01:51:56Z on `2b89446c`, run 41756935974. Waiting for `GPU Tests (nebius-gpu)`.
