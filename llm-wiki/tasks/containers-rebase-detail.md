@@ -392,3 +392,5 @@ ENS-optimizer's `c5d12789`, not carried).
 - Run 41756935974 failed at "Start nebius-gpu": no capacity (exit 75) from 2026-11-04T02:17Z for 30 min. GPU capacity clock starts 2026-11-04T02:17Z (10 hours → 12:17Z). The coordinator retries `gpu-host.sh start` every 15 min and re-dispatches once the VM is up.
 - Re-dispatched 2026-11-04T02:52:57Z on `77ca5879` after `gpu-host.sh start` succeeded at 02:52Z: run 41763580580.
 - Run 41763580580: `build 25.02 for GPU` failed in "Initialize containers": the runner had no space left pulling the image (infra). Re-run of failed jobs.
+- Dispatched again 2026-11-04T03:28:09Z on `ceaa2615`: run 41767310779 (41763580580 left to finish its CPU legs; its GPU job never ran).
+- Run 41767310779 green, `GPU Tests (nebius-gpu)` included (the new provenance test passed on the L40S; 9 harness tests, 740 gpu_tests, 989 corpus cells). GPU host hard-stopped. Board `done` (2026-11-04).
