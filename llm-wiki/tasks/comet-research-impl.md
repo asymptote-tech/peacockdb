@@ -174,7 +174,7 @@ needs.
   batching exotic; do for h in Summary Sources 'Follow-up experiments'; do grep -qF "## $h"
   $f.md || echo "$f: $h"; done; grep -q 'accessed 20' $f.md || echo "$f: no dates"; done` prints
   nothing, and `exotic.md` has the tier table's header. Re-dispatch the owner for any gap.
-- [ ] **Step 4: Amendments** (revision). Dispatch two subagents with the same template, each
+- [x] **Step 4: Amendments** (revision). Dispatch two subagents with the same template, each
   editing an existing file in place:
   - **comet-internals**, a new `## Recipes` section, at the pinned tag:
     - how to get each query's *final executed* plan after `collect()` under AQE
@@ -192,7 +192,7 @@ needs.
       Nebius's 8- and 16-vCPU CPU sizes;
     - the local NVMe tier as rows in the tier-table format above;
     - Comet's published results at SF100 and SF1000, or the nearest, for CPU scaling past sf40.
-- [ ] **Step 5:** Re-run Step 3's check. Report a checkpoint `comet-research: desk wave amendments`.
+- [x] **Step 5:** Re-run Step 3's check. Report a checkpoint `comet-research: desk wave amendments`.
 
 **The prompt template** (fill the brackets):
 

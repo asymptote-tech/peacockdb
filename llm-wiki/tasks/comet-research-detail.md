@@ -19,7 +19,7 @@
 ## Tasks
 
 - Task 0 (set up the run): done, committed.
-- Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): todo, next.
+- Task 1 (desk wave): Steps 1-3 done, committed (5330543d). Steps 4-5 (amendments): done 2026-11-04, checkpoint `comet-research: desk wave amendments` reported, awaiting commit.
 - Task 2 (experiment scripts): todo (a dispatch was killed with no output)
 - Task 3 (experiment 1, VM-to-S3 throughput): todo
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): todo
@@ -132,6 +132,19 @@ wording edits, no change of substance).
   low concurrency; a CPU engine could share scans the same way. With 8 small nodes at equal
   NIC each, the GPU node needs an 8x cut just to tie on the wire.
 
+### Amendments (Steps 4-5, 2026-11-04)
+Two foreground `Explore` subagents; the developer wrote their text in place and spot-checked the key facts against the clone at ab46419f (fallback key and alias, no `scan.impl`, profile providers in `s3.rs:640`, benchmark conf verbatim) and over HTTP (jar and Spark tarball return 200). Step 3's check printed nothing; `exotic.md` keeps its tier header.
+- `comet-internals.md` `## Recipes` (replaces `## Plan-dump recipe`): plan dumps through py4j with a pasteable `dump(spark, name, sql, outdir)`: `collect()`, then walk `df._jdf.queryExecution().executedPlan()`, assert `isFinalPlan()`, follow `executedPlan()`/`plan()`/`child()` of reused nodes/`subqueries()`, write each `CometNativeExec` block's `serializedPlanOpt().plan().get()` (dedup by hash) and `fallbacks.tsv` rows from the `CometExplainInfo.FALLBACK_REASONS` tag. Classic PySpark only (not the `-connect` tarball); Comet jar on `spark.driver.extraClassPath`.
+- Fallback keys: `spark.comet.explain.fallback.enabled` (current; `spark.comet.explainFallback.enabled` is an alias), driver WARN to stderr; `spark.comet.explain.native.enabled` logs per task to executor stderr (debug only); `spark.sql.extendedExplainProviders=org.apache.comet.ExtendedExplainInfo`.
+- **Scan:** 1.2.0 has no `spark.comet.scan.impl` (removed by 0.17). V1 Parquet is either `CometNativeScanExec` or Spark's scan, so local and S3 share one scan by construction; Task 4 checks there are no scan rows in `fallbacks.tsv`. Plan drift: the plan's "`spark.comet.scan.impl` values" and "same scan implementation" check become this check.
+- **S3:** `fs.s3a.endpoint=https://storage.eu-west1.nebius.cloud:443`, `fs.s3a.endpoint.region=eu-west1`, `fs.s3a.path.style.access=true`, `fs.s3a.aws.credentials.provider=software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider`; `export AWS_PROFILE=eu-west1` for the driver and `spark.executorEnv.AWS_PROFILE=eu-west1`. Native ignores the profile's endpoint/region, so they go in conf (not secrets). Every `fs.s3a.*` value is copied into the plan bytes, so no key may be in conf. Comet's own benchmark provider `DefaultAWSCredentialsProviderChain` is rejected by native: a required deviation. JVM S3A needs `hadoop-aws-3.4.2.jar` and AWS SDK `bundle-2.29.52.jar` in `$SPARK_HOME/jars`. Unverified: Nebius path-style and signing region.
+- **Jar:** https://repo1.maven.org/maven2/org/apache/datafusion/comet-spark-spark4.1_2.13/1.2.0/comet-spark-spark4.1_2.13-1.2.0.jar (98,985,596 B; amd64 and aarch64 `libcomet.so`; x86-64-v3 so AVX2; glibc >= 2.30). Spark: https://archive.apache.org/dist/spark/spark-4.1.3/spark-4.1.3-bin-hadoop3.tgz. Java 17. Comet's benchmark conf (`benchmarks/tpc/run.py:107-137`, `engines/comet.toml:24-33`) is quoted verbatim with the single-executor deviations.
+- `data-path.md` `## Rates for the cost model`: **Nebius states no NIC rate for any VM** (H100, L40S, cpu-d3/cpu-e2 at 8, 16, 128 vCPU). Only `gpu-h100-sxm` lists a ConnectX-6 100 Gbps host adapter. Assumed ranges, Gbit/s: H100 10-100; L40S 5-20; 128 vCPU 32-100; 16 vCPU 6.25-32; 8 vCPU 3.125-16 (0.39-2 Gbit/s per vCPU from AWS/GCP/Azure peers). At parity small nodes sum to 50-256 Gbit/s, 2.6-5× the H100 node at matching ends; a Standard bucket caps a tenant at 160 Gbit/s.
+- Local NVMe tier: six TSV rows (g6e 0.9, a3 1.38, NC40ads 2, Nebius H100 none, B300 5.1 per GPU, on-prem 8×Gen4 GDS 54 GB/s); single-GPU cloud NVMe is slower than the same VM's NIC and lost on stop.
+- Comet scale results: TPC-DS SF1000 1.84× (1.1.0, tag), 2.04× / 2.51× (1.2.0 on Spark 4.2 / 4.1.3, PR #7444); TPC-H SF1000 1.64× (2.01× hash join, 0.16.0); SF100 single box 2.27× TPC-H, 1.42× TPC-DS; SF3000 1.57×. No run at two SFs on one setup; S3 cluster costs 5-7× the core-seconds per SF of one local-NVMe box.
+- Drift fixed in `data-path.md`: our L40S is `1gpu-8vcpu-32gb` (was 16 vCPU / 64 GiB, $1.75 → $1.55). Drift **not** fixed (outside this step's files): `exotic.md`'s p5.4xlarge NVMe 6 GB/s may be ~3.9 (IOPS-scaled), and its `local_nvme_x4_gds` 24.3 GiB/s is an L40S PCIe Gen4 link limit, not a drive limit.
+- Platforms read with `nebius compute instance get` (control plane only; all three STOPPED, none started): CPU VM `cpu-d3` `128vcpu-512gb`, L40S `gpu-l40s-a` `1gpu-8vcpu-32gb`, H100 `gpu-h100-sxm` `1gpu-16vcpu-200gb`. The `nebius` CLI is at `~/.nebius/bin`, not on an agent shell's PATH (`gpu-host.sh` adds it).
+
 ## VM hours
 
 ## Rulings
@@ -144,3 +157,11 @@ wording edits, no change of substance).
   `spark.comet.exec.inMemoryCache.enabled=true`, as a fairer batching baseline, goes after the
   spec's whole matrix in Task 4, lowest priority, and is skipped under the cap like any other
   configuration. The spec's matrix keeps Spark defaults.
+
+- 2026-11-04 (coordinator, after the amendments): Comet 1.2.0 has no `spark.comet.scan.impl`
+  (removed in 0.17). Task 4 Step 3's scan-parity check reads as: an S3 run's `fallbacks.tsv` has
+  no scan rows that the local run lacks; otherwise `scan mismatch`. Nebius states no NIC rate for
+  any type used; the cost model takes the assumed ranges in `data-path.md` `## Rates for the cost
+  model`, tagged as assumptions. Known drift left for Task 5: `exotic.md`'s p5.4xlarge NVMe 6 GB/s
+  (likely ~3.9) and `local_nvme_x4_gds` 24.3 GiB/s (the L40S PCIe limit, not a drive's). The
+  `nebius` CLI is at `~/.nebius/bin`, not on an agent shell's PATH.

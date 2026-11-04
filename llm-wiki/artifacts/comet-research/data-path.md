@@ -2,7 +2,7 @@
 
 ## Summary
 - On cloud VMs the wire sets the speed. One H100 would need roughly 50-80 GB/s of compressed Parquet to stay busy on TPC-H scan and join shapes (estimate). Single-GPU VMs get 2.5-12.5 GB/s (20-100 Gbit/s), so the GPU idles 75-95% of the time unless the data is already in host RAM or VRAM (estimate).
-- At the human's price parity, small CPU nodes buy as much or more NIC as the GPU node, except on AWS p5.4xlarge: about 0.5-1.9× (vs baseline or burst) on AWS, 3× on Azure, 18× on GCP. On single-GPU shapes local NVMe is no faster than the NIC, or unpublished. So one-pass ETL from S3 should not clear 2× on the data path (estimate).
+- At the human's price parity, small CPU nodes buy as much or more NIC as the GPU node, except on AWS p5.4xlarge: about 0.5-1.9× (vs baseline or burst) on AWS, 3× on Azure, 18× on GCP; on Nebius, which states no rates, small nodes get 2.6-5× the GPU node's NIC under assumed rates. On single-GPU shapes local NVMe is no faster than the NIC, or unpublished. So one-pass ETL from S3 should not clear 2× on the data path (estimate).
 - The GPU's data-path edge exists only where bytes are reused: pinned host RAM (47 GB/s measured on H200) and VRAM. Batched ETL gets that, but a CPU engine that batched the same way would cut its wire bytes just as much.
 - Nebius sells local NVMe only on its 8-GPU B300 VM. GPUDirect Storage runs in "compatibility mode" (a copy through host memory) on cloud VMs. RAM per GPU is about 200-320 GB on every cloud and on a DGX H100, so on-prem does not fix RAM; only custom or bare-metal builds do.
 - Layout to target first: local NVMe plus host RAM as a cache in front of the lake (Databricks, Fabric, Meta, Uber run it). Local SSD as the primary store is real only historically (Meta's Raptor, replaced 2022). Co-located HDFS is large on-prem but its biggest users are moving to object storage.
@@ -15,7 +15,7 @@
 - AWS "up to" NICs have a lower baseline: m7i.4xlarge 6.25 Gbit/s baseline, 12.5 burst, burst lasting 5-60 minutes [S4][S5] (accessed 2026-11-04). Batched ETL windows are longer, so the baseline counts (estimate).
 - Mountpoint for S3 measured 4.85 GB/s read per c6i.16xlarge node [S6] (accessed 2026-11-04).
 - Nebius Object Storage, Standard class: "limited to 20 GBps per tenant in each region"; Enhanced Throughput is unthrottled [S7] (accessed 2026-11-04). All of a tenant's nodes share the Standard limit, the H100 and all eight small nodes alike.
-- Nebius lists no NIC rate for its 1-GPU H100 preset or CPU presets. The H100 platform lists a "ConnectX-6 100 Gbps network adapter" and 8×400 Gbit/s InfiniBand [S8] (accessed 2026-11-04). In the cost model both Nebius NIC rates are assumptions until experiment 1 measures them.
+- Nebius states no NIC rate for any VM: not for the 1-GPU H100, the L40S, or the cpu-d3 and cpu-e2 presets [S8][S57] (accessed 2026-11-04). The H100 platform lists a "ConnectX-6 100 Gbps" network adapter and 8×400 Gbit/s InfiniBand. The L40S and CPU platforms list no adapter [S8] (accessed 2026-11-04). The cost model uses the assumed ranges in "Rates for the cost model" until experiment 1 measures what it can.
 
 **When the GPU stalls, by query shape (modelled).** Uses peacockdb's measured H200 sf40 execute times (load excluded) from `llm-wiki/reports/benchmark-minimal.md` @ `de17e8bc` (measured), and q6's 1.5 GB of compressed columns (lakehouse-iceberg.md, a local lead). H100 has about 70% of H200's HBM bandwidth, so its required rates are about 30% lower (estimate).
 
@@ -62,11 +62,11 @@ On-demand Linux $/h, US regions (Nebius: eu-north1). n/p = rate not published; n
 | Azure L16as v4 | 16 | 128 GiB | – | 12.5 | 4×960 GB | 6 GB/s | – | 1.376 |
 | Azure L96as v4 | 96 | 768 GiB | – | 40 | 12×1.92 TB | 36 GB/s | – | n/f |
 | Azure D16s v5 / E16s v5 | 16 | 64 / 128 GiB | – | 12.5 / n/f | – | – | – | 0.768 / 1.008 |
-| Nebius H100 1gpu-16vcpu-200gb | 16 | 200 GiB | 1×H100 | not stated (assumption) | none | – | – | 4.50 |
-| Nebius H100 8gpu-128vcpu-1600gb | 128 | 1,600 GiB | 8×H100 | 8×400 IB | none | – | – | 36.00 (8×4.50) |
-| Nebius L40S 1gpu-16vcpu-64gb | 16 | 64 GiB | 1×L40S | not stated | none | – | – | 1.75 (computed) |
-| Nebius B300 8gpu-192vcpu-2768gb | 192 | 2,768 GiB | 8×B300 | 8 GPUs' IB | 6×3.84 TB | 6.8 GB/s per disk | not stated | n/f |
-| Nebius cpu-d3 8/16/128 vCPU | 8/16/128 | 32/64/512 GiB | – | not stated (assumption) | none | – | – | 0.264 / 0.528 / 4.224 (computed) |
+| Nebius H100 1gpu-16vcpu-200gb | 16 | 200 GiB | 1×H100 | not stated; host adapter ConnectX-6 100; 10-100 (assumption) | none | – | – | 4.50 |
+| Nebius H100 8gpu-128vcpu-1600gb | 128 | 1,600 GiB | 8×H100 | 8×400 IB + ConnectX-6 100 Ethernet | none | – | – | 36.00 (8×4.50) |
+| Nebius L40S gpu-l40s-a 1gpu-8vcpu-32gb (our VM) | 8 | 32 GiB | 1×L40S | not stated, no adapter listed; 5-20 (assumption) | none | – | – | 1.55 (computed: 1.35 + 8×0.012 + 32×0.0032) |
+| Nebius B300 8gpu-192vcpu-2768gb | 192 | 2,768 GiB | 8×B300 | 8×800 IB + BlueField-3 400 | 6×3.84 TB | 6.8 GB/s per disk | not stated | 76.00 (8×9.50) + 1.91 local SSD (computed) |
+| Nebius cpu-d3 8/16/128 vCPU | 8/16/128 | 32/64/512 GiB | – | not stated; 3.1-16 / 6.25-32 / 32-100 (assumption) | none | – | – | 0.264 / 0.528 / 4.224 (computed) |
 
 - AWS publishes sequential read rates only for i4i (128 KB blocks, 2022 launch blog [S17]); for p5, g6e, i7ie, im4gn only random IOPS [S16] (accessed 2026-11-04). No independent fio results for these drives were found.
 - **NIC per dollar at the human's parity (computed from the table):**
@@ -79,7 +79,7 @@ On-demand Linux $/h, US regions (Nebius: eu-north1). n/p = rate not published; n
 | GCP | same | 8.7× c3-standard-22-lssd: 200 Gbit/s + 22.5 GiB/s SSD | 0.13 : 1 |
 | Azure | NC40ads H100 v5, 40 Gbit/s, $6.98 | 9× D16s v5: 114 Gbit/s | 0.35 : 1 |
 | Azure | same | 5× L16as v4: 63 Gbit/s + 30 GB/s NVMe | 0.63 : 1 |
-| Nebius | H100 1-GPU, $4.50 | 8.5× cpu-d3 16 vCPU | unknown; experiment 1 |
+| Nebius | H100 1-GPU, 10-100 Gbit/s (assumption), $4.50 | 8.5× cpu-d3 16 vCPU: 53-272 Gbit/s (assumption) | 0.19 : 1 (low ends), 0.37 : 1 (high ends) |
 
 - The one 128-core box differs: on AWS, p5.4xlarge has 2.2× the NIC per dollar of m7a.32xlarge (100 vs 50 Gbit/s at a similar price). The single-box comparison flatters the GPU; the small-node layout does not (estimate).
 
@@ -93,7 +93,7 @@ On-demand Linux $/h, US regions (Nebius: eu-north1). n/p = rate not published; n
   - **The GPU node's one wire advantage:** one H100 node shuffles inside the box, while eight small CPU nodes shuffle over their NICs. That favours the GPU on join-heavy shapes (estimate). Experiment 2's 8×16 layout shuffles over loopback, so it misses this.
 
 ## 4. Local SSD: throughput, the GDS model, capacity and loss
-- **NVMe vs NIC, same instance, rated:** AWS i4i.4xlarge 2.8 vs 1.17 GB/s baseline NIC, 2.4×; i4i.32xlarge 22.4 vs 9.4, 2.4×. Azure L16as v4 6 vs 1.56, 3.8×; L8s v3 2 vs 1.56, 1.3×. GCP c3-standard-8-lssd 1.4 vs 2.9, 0.5×; c3-standard-176-lssd about 1×; a3-highgpu-1g 1.4 vs 3.1, 0.45×. AWS p5.4xlarge: one drive, rate unpublished, vs 12.5 GB/s; one Gen4 drive is about 6-7 GB/s, about 0.5× (estimate). Sources: §2 table.
+- **NVMe vs NIC, same instance, rated:** AWS i4i.4xlarge 2.8 vs 1.17 GB/s baseline NIC, 2.4×; i4i.32xlarge 22.4 vs 9.4, 2.4×. Azure L16as v4 6 vs 1.56, 3.8×; L8s v3 2 vs 1.56, 1.3×. GCP c3-standard-8-lssd 1.4 vs 2.9, 0.5×; c3-standard-176-lssd about 1×; a3-highgpu-1g 1.4 vs 3.1, 0.45×. AWS p5.4xlarge: one drive, rate unpublished, vs 12.5 GB/s; about 3.9 GB/s scaled from its stated 550,000 IOPS at i4i's rate, up to 6-7 GB/s for a fast Gen4 drive, so about 0.3-0.5× (estimate). Sources: §2 table.
   - **Storage-optimized CPU shapes get 1.3-3.8× the NIC from local NVMe; single-GPU shapes 0.5× or less.** Only 8-GPU shapes have many drives (e.g. 8×3.84 TB on p5.48xlarge).
 - **GDS on cloud VMs.** NVIDIA: "cuFile APIs can be used in Cloud-service-providers environments in compatibility mode"; with IOMMU on, GDS is "not guaranteed to work" [S40] (accessed 2026-11-04). Compatibility mode falls back to POSIX reads through host memory [S41] (accessed 2026-11-04). The real cloud GDS path is AWS FSx for Lustre on P5-class: up to 1,200 Gbit/s per client [S12] (accessed 2026-11-04). No provider documents GDS from local instance NVMe. On bare metal the direct P2P path works, e.g. NVMe P2PDMA on ext4/XFS since GDS 1.13 [S40] (accessed 2026-11-04).
 - **Model: tables staged on local NVMe, read to the GPU.** Rate = min(NVMe, PCIe ~47 GB/s pinned, decode); decode is 6.8-8.7 GB/s today. The host bounce costs CPU and RAM bandwidth but does not cap the rate while NVMe stays below PCIe (estimate). On p5.4xlarge, half from NVMe and half from S3 gives about 19 GB/s (estimate) vs 12.5 from S3 alone, 1.5× at most. A 128-vCPU CPU box like i4i.32xlarge gets 22.4 GB/s from NVMe alone.
@@ -120,6 +120,75 @@ On-demand Linux $/h, US regions (Nebius: eu-north1). n/p = rate not published; n
 - Batching cuts wire bytes per query for any engine. The batching win belongs to the fuser, not the GPU, unless the CPU engine cannot batch (estimate).
 - Theseus, a GPU engine built around data movement, was only 12.3% faster than Photon at cost parity at SF1k on g6.4xlarge (25 Gbit/s); it led by 4.46× only at SF30k [S30] (accessed 2026-11-04).
 - peacockdb's reader (3.8 GB/s compressed input on q6) is slower than a 40 Gbit/s NIC today. NVIDIA's own reader rework is P0 (spark-plugin.md lead).
+
+## Rates for the cost model
+The VMs, from `nebius compute instance get`, 2026-11-04: the H100 is `gpu-h100-sxm` `1gpu-16vcpu-200gb` and the L40S is `gpu-l40s-a` `1gpu-8vcpu-32gb`, both in eu-north1. The CPU VM is `cpu-d3` `128vcpu-512gb` in eu-west1.
+
+**NIC: Nebius states no rate for any of these VMs.** These pages give no bandwidth per VM or per vCPU: VM types, Compute and VPC quotas, VM addresses, TCP tuning, InfiniBand, pricing, the changelog and the H100 product page [S8][S27][S57] (accessed 2026-11-04). The only Ethernet figure is per platform: `gpu-h100-sxm` lists a "ConnectX-6 100 Gbps" network adapter; `gpu-l40s-a`, `cpu-d3` and `cpu-e2` list none [S8] (accessed 2026-11-04). No measured iperf3 result for a Nebius VM was found, and Cloud Mercato's Nebius pages have no results [S58] (accessed 2026-11-04). One third-party post gives Nebius's default Ethernet as "10 Gbit/s", but it measured nothing [S59] (accessed 2026-11-04).
+
+| instance type | vCPU | stated NIC Gbit/s | GB/s | stated or assumption | source |
+|---|--:|---|---|---|---|
+| gpu-h100-sxm 1gpu-16vcpu-200gb | 16 | none (host adapter ConnectX-6 100) | 1.25-12.5 | assumption: 10-100 | [S8][S59] |
+| gpu-l40s-a 1gpu-8vcpu-32gb | 8 | none (no adapter listed) | 0.63-2.5 | assumption: 5-20 | [S8][S14] |
+| cpu-d3 128vcpu-512gb | 128 | none | 4-12.5 | assumption: 32-100 | [S8][S25][S60] |
+| cpu-d3 or cpu-e2 16vcpu-64gb | 16 | none | 0.78-4 | assumption: 6.25-32 | [S5][S25][S60] |
+| cpu-d3 or cpu-e2 8vcpu-32gb | 8 | none | 0.39-2 | assumption: 3.125-16 | [S5][S25][S60] |
+
+- **Why these ranges (assumption).**
+  - **H100.** The 1-GPU preset is 1/8 of the 8-GPU preset (16 of 128 vCPU), so a fair share of the host's 100 Gbps adapter is 12.5; Nebius does not say the adapter is shared (inference). The low end, 10, is the third-party figure [S59]; the high end, 100, the adapter's line rate. Peers: p5.4xlarge 100, NC40ads 40, a3-highgpu-1g 25 (§2).
+  - **L40S.** AWS g6e.2xlarge, 8 vCPU and one L40S, states 5 baseline and 20 burst [S14].
+  - **CPU.** Peers give 0.39-2 Gbit/s per vCPU. AWS m7i: 3.125 baseline at 8 vCPU and 6.25 at 16 [S5]. GCP: "generally 2 Gbps per vCPU", capped at 32 (N2, N2D) or 100 (C3, C3D) [S60]. Azure: 12.5 at 8 and 16 vCPU, 35 at 96 [S25] (all accessed 2026-11-04).
+  - Model formula: 0.39-2 Gbit/s × vCPU, capped at 32-100 (assumption). cpu-e2 gets the same range.
+
+**Summed NIC at the human's parity** (assumption, from the table above):
+
+| What one H100 node's money buys | Low Gbit/s (GB/s) | High Gbit/s (GB/s) | Against the H100 node, same end |
+|---|--:|--:|---|
+| 1 × H100 1-GPU | 10 (1.25) | 100 (12.5) | 1 |
+| 8 × 16 vCPU | 50 (6.25) | 256 (32) | 5× low, 2.6× high |
+| 16 × 8 vCPU | 50 (6.25) | 256 (32) | 5× low, 2.6× high |
+| 1 × 128 vCPU | 32 (4) | 100 (12.5) | 3.2× low, 1× high |
+
+- **Small nodes get 2.6-5× the H100 node's NIC** when both sides take the same end of the range. Only the cross corner favours the GPU: the H100 at 100 against small nodes at 50 is 2 : 1. The opposite corner is 1 : 25.6.
+- **The Standard bucket class caps the high end.** It limits all of a tenant's nodes to 20 GBps (160 Gbit/s) together [S7], so reading from Standard, the small nodes' high end is 1.6× the H100's.
+- Eight 16-vCPU cpu-d3 nodes cost $4.22/h against $4.50/h for the H100 [S27] (computed). Experiment 1 measures S3 throughput on the L40S and the 128-vCPU VM only; the H100 and small-node rows stay assumptions.
+
+**Local NVMe tier.** The rows below use exotic.md's format. `local_nvme_x1_p5_4xlarge` is already in exotic.md and is not repeated. Prices are per GPU-hour.
+```tsv
+tier	GB_per_s_to_GPU	capacity_GB	price_per_hour	cloud|on-prem	source
+local_nvme_x1_g6e_4xlarge	0.9	600	3.004	cloud	1x600 GB NVMe, 125,000 random-read IOPS, sequential rate not published https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html (accessed 2026-11-04); rate scaled from i4i.4xlarge 2.8 GB/s at 400,000 IOPS (estimate); $3.004/h https://instances.vantage.sh/aws/ec2/g6e.4xlarge (accessed 2026-11-04); L40S not H100
+local_nvme_x2_a3_highgpu_1g	1.38	805	11.06	cloud	2x375 GiB Local SSD, 1,320 MiB/s read https://docs.cloud.google.com/compute/docs/disks/local-ssd (accessed 2026-11-04); $11.06/h https://gcloud-compute.com/a3-highgpu-1g.html (accessed 2026-11-04)
+local_nvme_x1_nc40ads_h100_v5	2	3840	6.98	cloud	1x3,576 GiB temp NVMe, rate not published https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ncadsh100v5-series (accessed 2026-11-04); Azure L-series drives state 1.5-2 GB/s each, so 2 (estimate); $6.98/h https://www.azurespeed.com/AzureVmPricing/Standard_NC40ads_H100_v5 (accessed 2026-11-04); H100 NVL
+nebius_h100_1gpu_no_local	0	0	4.50	cloud	gpu-h100-sxm has no local disks; only gpu-b300-sxm 8gpu-192vcpu-2768gb has them https://docs.nebius.com/compute/storage/local-disks (accessed 2026-11-04); $4.50/GPU-h https://docs.nebius.com/compute/resources/pricing (accessed 2026-11-04)
+local_nvme_x6_nebius_b300_per_gpu	5.1	2880	9.74	cloud	6x3.84 TB at 6.8 GB/s peak read each = 40.8 GB/s per VM, split over 8 GPUs https://docs.nebius.com/compute/storage/types (accessed 2026-11-04); $9.50/GPU-h plus local SSD $0.065/GiB per 730 h = $0.24/GPU-h https://docs.nebius.com/compute/resources/pricing (accessed 2026-11-04); B300 not H100; uk-south1, eu-west2, us-north1 only
+local_nvme_x8_gen4_gds_onprem	54	61440	4.96	on-prem	8x7.68 TB Gen4 at about 7 GB/s = 56 GB/s, capped by the GPU's PCIe Gen5 x16: one H100 PCIe read 53.5-54.8 GB/s via GDS https://www.storagereview.com/review/western-digital-openflex-data24-gpudirect-performance-analysis (accessed 2026-11-04), over NVMe-oF there, not local; drive cost over 3 y as in local_nvme_x4_gds (estimate)
+```
+- **Cloud rows pass through host memory.** GDS runs in compatibility mode on cloud VMs [S40][S41]. These rates are far below the ~47 GB/s pinned copy, so the bounce costs CPU time but does not cap them (estimate). On bare metal the direct path needs the drives and the GPU under one PCIe switch [S40].
+- **Cloud local NVMe is lost when the VM stops:** AWS [S42], GCP [S20], Azure [S23], Nebius [S43] (accessed 2026-11-04).
+- **Capacity against data size.** TPC-H Parquet is about 0.38 GB per SF (`batching.md` §6 @ 5330543d, estimate). At that rate the drives hold about SF1,500 (g6e), SF2,100 (a3), SF7,500 (B300 per GPU) and SF10,000 (p5, Azure). The H100 VM's host RAM (~150 GB usable, §6) runs out near SF390.
+- **Two corrections to exotic.md's estimates.** At i4i's rate (2.8 GB/s at 400,000 IOPS [S16][S17]), p5.4xlarge's 550,000-IOPS drive gives about 3.9 GB/s (estimate), below exotic.md's 6. The 24.3 GiB/s in exotic.md's `local_nvme_x4_gds` row was measured on one L40S, a PCIe Gen4 x16 card, so it is the GPU's link limit, not the drives' [S62] (accessed 2026-11-04).
+
+**Comet's published results past sf40.** Totals are sums of per-query times, one run per query unless noted.
+
+| Source | Data, queries | Hardware | Versions | Spark s | Comet s | Speedup |
+|---|---|---|---|--:|--:|--:|
+| `contributor-guide/benchmark-results/tpc-ds.md:22-23,48-55` @ab46419f | TPC-DS SF1000, 103 | EKS r6i.24xlarge, 32 executors × 8 CPUs (16 slots), EBS, data in S3 | Spark 4.2.0, Comet 1.1.0 | 966 | 525 | 1.84× |
+| PR #7444, merged 2026-11-03 [S63] | same | same | Spark 4.2.0 / 4.1.3, Comet 1.2.0 | 994 / 1,336 | 488 / 532 | 2.04× / 2.51× |
+| `benchmarks/results/1.0.0/*.json:13` @ab46419f | TPC-DS SF1000, 103 | same | Spark 3.5, Comet 1.0.0 | 1,410 | 638 | 2.21× |
+| `benchmarks/results/0.16.0/*tpch*.json:13` @ab46419f | TPC-H SF1000, 22 | same | Spark 3.5, Comet 0.16.0 | 1,046 | 638 (522 hash join) | 1.64× (2.01×) |
+| AWS data-on-eks [S65] | TPC-DS SF3000, 103 | 4 × r8gd.12xlarge (48 vCPU, 384 GB, 1.8 TB NVMe), 23 executors × 5 cores, S3 | Spark 3.5.8, Comet 1.0.0 | 3,651 | 2,319 | 1.57× (Iceberg 1.75×) |
+| Nested TPC-H post [S70] | nested TPC-H SF1000, 22, Iceberg | 32 executors × 8 CPUs | Spark 4.1.3, Comet 1.2.0 | 1,519 | 790 | 1.92× |
+| IOMETE [S68] | TPC-DS SF100, 103 | 4 executors × 8 vCPU, 64 GiB; storage not stated | Spark 4.1.3, Comet 1.0.0 | 1,716 | 990 | 1.73× |
+| `tpc-h.md:22`, `tpc-ds.md:22` @3705c214 [S71] | TPC-H / TPC-DS SF100 | one 7950X box, 1 executor × 8 cores, 16+16 GB, local NVMe | Spark 3.5.3, Comet 0.11.0 | 687 / 845 | 303 / 596 | 2.27× / 1.42× |
+| Comet 0.1.0 post [S66] | TPC-H SF100, 22 | 1 executor × 8 cores | Comet 0.1.0 | 626 | 407 | 1.54× |
+
+- **Per query** (`benchmarks/results/{0.16.0,1.0.0,1.1.0}/*.json` @ab46419f, computed): at 1.1.0 the median TPC-DS speedup is 1.60×, and four queries are slower than Spark, among them q54 (0.43×) and q68 (0.60×). TPC-H at 0.16.0 runs from q1 at 8.2× down to q8 at 0.90×. Project headlines: "about 1.8 times faster than Spark 4.2 on TPC-DS at scale factor 1000" (`docs/source/about/top_level_project_proposal.md:87-88` @ab46419f); "2x speedup for TPC-H @ SF1000" for 0.15.0 [S67] (accessed 2026-11-04).
+- **Evidence against a GPU backend.** The tag's 525 s "does not reproduce with the release": the release ran in 601-606 s, and 525 s came from a branch-1.1 build [S63]. The CPU baseline keeps getting faster: Comet 1.2.0 is 1.23× faster than 1.1.0, and Hadoop 3.5's S3 reader cut Spark 4.2 from 1,294 s to 994 s; Comet's `object_store` scan does not use that reader [S64]. A vendor reports Gluten ~9% faster than Comet at SF3000, and Photon "significantly faster" at SF10000 [S69] (all accessed 2026-11-04).
+
+**How time scales with SF (estimate).** No source runs Comet at two SFs on the same hardware.
+- Comet 1.0.0 across three clusters: TPC-DS used 317 core-seconds per SF at SF100 (32 vCPU), 163 at SF1000 (256 CPUs) and 89-148 at SF3000. If time scales evenly with cores, core-time grows as about SF^0.5-0.9; fixed per-query costs weigh most at small SF.
+- Storage and layout weigh more than SF. TPC-H on one 8-core box with local NVMe (0.11.0, SF100) took 24 core-seconds per SF; on the S3 cluster (0.16.0, SF1000) 134-163, 5.5-6.7× more. Spark shows the same, 55 → 268 (4.9×).
+- For our sf40 on the 128-core VM: fit t = a + b·SF per query from sf40 and one larger SF on the same VM. Multiplying by 25 to reach SF1000 probably overstates CPU time while the data fits in RAM, which flatters the GPU. Above about SF1,000-1,300 of TPC-H Parquet the data no longer fits in 512 GB; from there S3 reads set the rate and the NIC table above applies.
 
 ## Follow-up experiments
 1. Experiment 1 as planned, plus: Nebius NIC rate for 1-GPU H100 and cpu-d3 16 vCPU (iperf3 between VMs); S3 at 1, 16, 64 and 256 in-flight 16 MiB range GETs; Standard vs Enhanced bucket class.
@@ -186,3 +255,18 @@ On-demand Linux $/h, US regions (Nebius: eu-north1). n/p = rate not published; n
 - [S55] Spark 4.3.0 job scheduling, dynamic allocation: https://spark.apache.org/docs/latest/job-scheduling.html (accessed 2026-11-04)
 - [S56] DGX H100 specs (secondary): https://www.weka.io/learn/glossary/gpu/nvidia-dgx-h100 ; NVIDIA guide https://docs.nvidia.com/dgx/dgxh100-user-guide/introduction-to-dgxh100.html (accessed 2026-11-04)
 - Code: Comet `ab46419fcc99bcd34aa4d89f7b545d5d51694a88` (tag 1.2.0); spark-rapids `ce6349699ccb3bd527c223c66ba24bd708e67e18`; Gluten `d64a51dfd01bbe1b8e4adb6c1f74331fb75f531f`. Local: `llm-wiki/reports/benchmark-minimal.md` (commit `de17e8bc`), `llm-wiki/artifacts/product-research/inventory.md`, `llm-wiki/artifacts/product-research/options/lakehouse-iceberg.md`, `llm-wiki/artifacts/product-research/options/spark-plugin.md`.
+- [S57] Nebius pages with no VM NIC rate: Compute quotas https://docs.nebius.com/compute/resources/quotas-limits ; VPC quotas https://docs.nebius.com/vpc/resources/quotas-limits ; VM addresses https://docs.nebius.com/compute/virtual-machines/network ; TCP tuning https://docs.nebius.com/compute/virtual-machines/tcp-window-tuning ; InfiniBand https://docs.nebius.com/compute/clusters/gpu ; changelog https://docs.nebius.com/changelog ; Object Storage best practices https://docs.nebius.com/object-storage/performance-cost-best-practices ; H100 product page https://nebius.com/compute/h100 (accessed 2026-11-04)
+- [S58] Cloud Mercato, Nebius via Shadeform, network bandwidth (no results): https://pcr.cloud-mercato.com/providers/shadeform/flavors/nebius-L40S/performance/network-bandwidth , https://pcr.cloud-mercato.com/providers/shadeform/flavors/nebius-H100_sxm5/performance/network-bandwidth (accessed 2026-11-04)
+- [S59] Maknee, network and storage benchmarks on the cloud (third party; Nebius "10 Gbit/s NIC", theoretical): https://maknee.github.io/blog/2025/Network-And-Storage-Training-Skypilot (accessed 2026-11-04)
+- [S60] GCP network bandwidth: https://docs.cloud.google.com/compute/docs/network-bandwidth (accessed 2026-11-04)
+- [S61] StorageReview, WD OpenFlex Data24 GPUDirect, 2024-08-05: https://www.storagereview.com/review/western-digital-openflex-data24-gpudirect-performance-analysis (accessed 2026-11-04)
+- [S62] GDS report (L40S, 4× Solidigm D7-PS1010): https://gds-report.pages.dev/ (accessed 2026-11-04)
+- [S63] Comet PR #7444, TPC-DS results for 1.2.0 (merged 2026-11-03): https://github.com/apache/datafusion-comet/pull/7444 (accessed 2026-11-04)
+- [S64] Comet issue #7451, smaller speedup on Spark 4.2.0: https://github.com/apache/datafusion-comet/issues/7451 (accessed 2026-11-04)
+- [S65] AWS Data on EKS, Spark with Comet benchmark: https://awslabs.github.io/data-on-eks/docs/benchmarks/spark-datafusion-comet-benchmark (accessed 2026-11-04)
+- [S66] Comet 0.1.0 release post: https://datafusion.apache.org/blog/2024/07/20/datafusion-comet-0.1.0/ (accessed 2026-11-04)
+- [S67] Comet 0.15.0 release post: https://datafusion.apache.org/blog/2026/04/18/datafusion-comet-0.15.0 (accessed 2026-11-04)
+- [S68] IOMETE, Comet in IOMETE 4.0, 2026-09-07: https://iomete.com/resources/blog/apache-datafusion-comet-spark-acceleration (accessed 2026-11-04)
+- [S69] Onehouse, DataFusion Comet (vendor), 2026-10-05: https://www.onehouse.ai/blog/apache-datafusion-comet (accessed 2026-11-04)
+- [S70] datafusion-site PR #214, nested TPC-H post: https://github.com/apache/datafusion-site/pull/214 (accessed 2026-11-04)
+- [S71] Comet benchmark pages and scripts before the tag: 3705c2142243614bb32fb13afdda17d7e7067c38 (0.11.0, `docs/source/contributor-guide/benchmark-results/`, `dev/benchmarks/comet-tpch.sh:32-37`), 76adfa252df0d989b187df13418ac5b716e816ba (0.16.0 TPC-H page): https://github.com/apache/datafusion-comet (accessed 2026-11-04)

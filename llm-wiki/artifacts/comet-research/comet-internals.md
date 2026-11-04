@@ -5,14 +5,14 @@
 - The execution unit is one Spark task: each task sends its block's protobuf (with its own file list injected) to `Native.createPlan`; Rust builds a DataFusion 55 plan and runs partition 0, returning batches to the JVM over the Arrow C Data interface.
 - Parquet is read natively via `object_store`; shuffle is compressed Arrow IPC written and read natively; memory is Spark off-heap via a JNI-backed DataFusion pool, with native operators spilling themselves.
 - A GPU executor fits at one seam: the native `execute_plan`/`PhysicalPlanner::create_plan` step (protobuf `Operator` in, Arrow `RecordBatch` stream out). There is no extension point there, so it means forking Comet's native crate or a JVM-side block swap rule (estimate).
-- Plans are dumped by a driver-side script over `executedPlan`; no config writes the bytes. Decode with `protoc --decode=spark.spark_operator.Operator` against `native/proto/src/proto`.
+- No config writes the plan bytes. After `collect()`, a PySpark py4j walker over the final AQE plan writes each `CometNativeExec` block's protobuf and a `fallbacks.tsv` row per (query, operator, reason); see `## Recipes`. At 1.2.0 one native V1 Parquet scan serves local and `s3a://` paths (no `spark.comet.scan.impl`); S3 credentials come from the AWS profile provider.
 
 ## Versions and pin
 - Tag 1.2.0 → ab46419fcc99bcd34aa4d89f7b545d5d51694a88 ([release](https://github.com/apache/datafusion-comet/releases/tag/1.2.0), accessed 2026-11-04).
 - Rust: `native/Cargo.toml:27` version 1.2.0; `:41` arrow 59.2.0; `:46` parquet 59.2.0; `:47-51` datafusion 55.2.0 (+ datafusion-spark 55.2.0); `:78` object_store 0.13.2; `:88` iceberg-rust git rev. `native/core/Cargo.toml:56` prost 0.14.3 (all @ab46419f).
 - JVM: `pom.xml:84` spark.version 4.1.3, `:91` arrow.version 18.3.0; profiles Spark 3.4.3, 3.5.9, 4.0.4, 4.1.3, 4.2.0 (`pom.xml:760-860` @ab46419f). Java 17, Scala 2.13.
 - Gap to peacockdb: peacockdb pins DataFusion 45 and arrow 54.2.0, and already depends on `datafusion-comet-spark-expr` 0.6.0 (`peacockdb-core/Cargo.toml:20-30` @f4e2767d). DataFusion 45 and 55 types are distinct in one Rust binary, so peacockdb's translator cannot take Comet's DF55 `ExecutionPlan` directly: either peacockdb moves to DF55 or it translates from the protobuf.
-- Scan history: `native_comet` and `native_iceberg_compat` scan modes were removed in 0.17 (`docs/source/changelog/0.17.0.md:115,159-160` @ab46419f). At 1.2.0 the V1 Parquet path has one fully native scan; the legacy JVM fallback is gone (`CometExecRule.scala:457-460` @ab46419f).
+- Scan history: `native_comet` was dropped as a scan option in 0.14 (`docs/source/changelog/0.14.0.md:68` @ab46419f). The `native_iceberg_compat` config and the `native_datafusion` name went in 0.17 (`docs/source/changelog/0.17.0.md:115,159-160,166` @ab46419f). At 1.2.0 there is no `spark.comet.scan.impl` key. At 1.2.0 the V1 Parquet path has one fully native scan; the legacy JVM fallback is gone (`CometExecRule.scala:457-460` @ab46419f).
 
 ## Where the plan is decided (driver)
 - Entry: `CometPlugin`/`CometDriverPlugin` appends `CometSparkSessionExtensions` to `spark.sql.extensions` (`docs/source/contributor-guide/plugin_overview.md:34-48` @ab46419f).
@@ -152,27 +152,131 @@ JVM-only Comet nodes that never appear in the protobuf: Union, Coalesce, Collect
 
 Every `AggExpr` can carry a `filter` (FILTER WHERE). `Literal`/`DataType` cover bool, int8-64, float, double, string, bytes, timestamp(_ntz), decimal, date, null, list, map, struct, time, interval types and variant (`types.proto:43-70`).
 
-## Plan-dump recipe (verified against code)
-- No config writes the protobuf. `spark.comet.explain.native.enabled=true` logs the DataFusion 55 plan *after* translation, per task, at INFO ("Comet native query plan:"), and again with metrics at the end (`jni_api.rs:1555-1558, 1726-1735`; `CometConf.scala:1160-1167`); native logs go to stderr, set `spark.executorEnv.COMET_LOG_LEVEL` (`debugging.md:177-190`). `spark.comet.explain.fallback.enabled=true` logs fallback reasons; `spark.sql.extendedExplainProviders=org.apache.comet.ExtendedExplainInfo` adds coverage to EXPLAIN; `spark.comet.explain.planOnly.enabled` logs only the Spark-level tree.
-- Base confs: `spark.plugins=org.apache.spark.CometPlugin`, `spark.shuffle.manager=org.apache.spark.sql.comet.execution.shuffle.CometShuffleManager`, `spark.memory.offHeap.enabled=true`, `spark.memory.offHeap.size=…` (the `isCometLoaded` checks, `CometSparkSessionExtensions.scala:144-174`).
-- Smallest hook: a driver-side spark-shell script (`-i dump.scala`), no jar. `CometNativeExec`, `serializedPlanOpt` and `nativeOp` are public (`operators.scala:895-905, 1429`); `collectWithSubqueries` from `AdaptiveSparkPlanHelper` walks AQE stages and subqueries (used by Comet's own Spark 4.1 tests, `CometMergeRowsSuite.scala:187`).
-```scala
-import java.nio.file.{Files, Paths}
-import org.apache.spark.sql.comet.CometNativeExec
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
-object H extends AdaptiveSparkPlanHelper
-def dump(q: String, sqlText: String, dir: String): Unit = {
-  val df = spark.sql(sqlText); df.collect()            // run, so AQE stages are final
-  val blocks = H.collectWithSubqueries(df.queryExecution.executedPlan) {
-    case n: CometNativeExec if n.serializedPlanOpt.isDefined => n }
-  blocks.zipWithIndex.foreach { case (n, i) =>
-    val base = f"$dir/$q-$i%02d-${n.nodeName}"
-    Files.write(Paths.get(base + ".pb"), n.serializedPlanOpt.plan.get)
-    Files.write(Paths.get(base + ".txt"), n.nativeOp.toString.getBytes) } }
+## Recipes
+Checked against code at ab46419f, Spark tag v4.1.3, object_store v0.13.2 and Maven Central. Nothing here was run. Spark paths are cited by file name; the full tree is in Sources.
+
+### 1. Final plans and native plan bytes through py4j (PySpark driver)
+- Run the query first. PySpark `collect()` calls `collectToPython` on the same `queryExecution` (`Dataset.scala:1504,2081 @v4.1.3`). Then `df._jdf.queryExecution().executedPlan()` is the `AdaptiveSparkPlanExec` (AQE) node.
+- `isFinalPlan` is a public method (`AdaptiveSparkPlanExec.scala:229 @v4.1.3`). It becomes true at `:377`. `toString` also prints it through `stringArgs` (`:422`). Spark adds AQE only to plans with an exchange or a subquery, so the root is not always AQE.
+- Accessors, all public: `executedPlan()` (`AdaptiveSparkPlanExec.scala:227`), `plan()` on `QueryStageExec` (`QueryStageExec.scala:57`), `child()` on `ReusedExchangeExec` (`Exchange.scala:48`) and on `ReusedSubqueryExec` (`basicPhysicalOperators.scala:974`). Both of those are leaves, so `children()` is empty. Also `subqueries()` (`QueryPlan.scala:520`) and `innerChildren()` (`TreeNode.scala:1030`; on plans it is `subqueries`, `QueryPlan.scala:650`), all @v4.1.3. Comet's `CometSubqueryBroadcastExec` keeps its plan in `children` (`CometSubqueryBroadcastExec.scala:55-62 @ab46419f`). On Comet nodes: `serializedPlanOpt()` and `nativeOp()` are public (`operators.scala:895-904 @ab46419f`). `SerializedPlan.plan()` is a Scala `Option[Array[Byte]]` (`operators.scala:1429-1433`). From Python, call `.isDefined()` and `.get()`. Py4J turns a Java `byte[]` into Python `bytes` ([Py4J](https://www.py4j.org/advanced_topics.html), accessed 2026-11-04). For a Scala `Seq`, use `.size()` and `.apply(i)`.
+- Do not name files after `nodeName`. For scans it contains the relation and spaces (`CometNativeScanExec.scala:90-91 @ab46419f`). Use the simple class name. Fallback reasons are a tag on each node, `CometExplainInfo.FALLBACK_REASONS`. Reasons found on expressions are moved up onto their operator (`ExtendedExplainInfo.scala:318-319`; `CometExecRule.scala:1220 @ab46419f`). `ExtendedExplainInfo().generateVerboseInfo(plan)` returns the tree with `[COMET: …]` marks and the coverage line (`ExtendedExplainInfo.scala:56-61`). Use classic PySpark, where `df._jdf` exists. Put the Comet jar on the driver classpath (`spark.driver.extraClassPath`, as Comet's runner does, `benchmarks/tpc/engines/comet.toml:26,29`) so py4j can load `org.apache.comet.*`.
+```python
+import hashlib, os
+P = "org.apache.spark.sql.execution."
+AQE, QS, NATIVE = P + "adaptive.AdaptiveSparkPlanExec", P + "adaptive.QueryStageExec", "org.apache.spark.sql.comet.CometNativeExec"
+REUSED = {P + "exchange.ReusedExchangeExec", P + "ReusedSubqueryExec"}
+
+def _isa(o, fqcn):  # walk superclasses; no class loading through py4j
+    c = o.getClass()
+    while c is not None:
+        if c.getName() == fqcn: return True
+        c = c.getSuperclass()
+    return False
+def _seq(s): return [s.apply(i) for i in range(s.size())]
+def dump(spark, name, sql, outdir):
+    jvm = spark.sparkContext._jvm; os.makedirs(outdir, exist_ok=True)
+    df = spark.sql(sql); nrows = len(df.collect())        # run first: AQE plan is final
+    qe = df._jdf.queryExecution(); root = qe.executedPlan()
+    assert not _isa(root, AQE) or root.isFinalPlan(), name
+    nodes, seen, stack = [], set(), [root]
+    while stack:
+        n = stack.pop(); k = (n.getClass().getName(), jvm.java.lang.System.identityHashCode(n))
+        if k in seen: continue
+        seen.add(k); nodes.append(n)
+        if _isa(n, AQE): kids = [n.executedPlan()]
+        elif _isa(n, QS): kids = [n.plan()]
+        elif k[0] in REUSED: kids = [n.child()]
+        else: kids = _seq(n.children())
+        stack += kids + _seq(n.subqueries())
+    nonfinal = sum(1 for n in nodes if _isa(n, AQE) and not n.isFinalPlan())
+    expl = jvm.org.apache.spark.sql.api.python.PythonSQLUtils.explainString(qe, "formatted")
+    cov = jvm.org.apache.comet.ExtendedExplainInfo().generateVerboseInfo(root)
+    with open(f"{outdir}/{name}.plan.txt", "w") as f: f.write(expl + "\n" + cov)
+    tag, hashes, rows = jvm.org.apache.comet.CometExplainInfo.FALLBACK_REASONS(), set(), []
+    for n in nodes:
+        op = n.getClass().getSimpleName()
+        if _isa(n, NATIVE) and n.serializedPlanOpt().isDefined():
+            b = bytes(n.serializedPlanOpt().plan().get())
+            h = hashlib.sha1(b).hexdigest()
+            if h not in hashes:                            # reused exchanges repeat blocks
+                base = f"{outdir}/{name}-{len(hashes):02d}-{op}"; hashes.add(h)
+                with open(base + ".pb", "wb") as f: f.write(b)
+                with open(base + ".txt", "w") as f: f.write(n.nativeOp().toString())
+        v = n.getTagValue(tag)
+        if v.isDefined():
+            rows += [(name, op, r) for r in v.get().mkString("\n").split("\n") if r]
+    with open(f"{outdir}/fallbacks.tsv", "a") as f:
+        for r in rows: f.write("\t".join(x.replace("\t", " ") for x in r) + "\n")
+    return nrows, len(hashes), len(rows), nonfinal
 ```
-- What the bytes are: one blob per native block, a template shared by every task of its stage (not per stage, not per task). `NativeScan` has `common` but no `file_partition` (`CometNativeScan.scala:314`). Native-shuffle blocks lack their `ShuffleWriter` root (the partitioning shows in Spark EXPLAIN; the root is built on the executor, `CometNativeShuffleWriter.scala:295`). Reused exchanges can repeat blocks: dedupe by bytes.
-- True per-task bytes need a patched Comet build: write `protobufQueryPlan` from the `CometExecIterator` constructor (`CometExecIterator.scala:88-140`), keyed by `TaskContext` stage/partition. This covers every path, shuffle writer included.
-- Decode: `protoc --proto_path=<comet>/native/proto/src/proto --decode=spark.spark_operator.Operator operator.proto < q01-00-CometHashAggregateExec.pb`. `operator.proto` imports `expr.proto`, `literal.proto`, `partitioning.proto`, `types.proto` (`operator.proto:24-27`). The `.txt` is the same tree in TextFormat, before SQL-text interning.
+- Some TPC-DS files hold two SELECTs. Comet's runner splits each file on `;` (`benchmarks/tpc/tpcbench.py:160-175 @ab46419f`), so call `dump` once per statement. In Scala, `AdaptiveSparkPlanHelper.collectWithSubqueries` does the same walk, but it does not follow `ReusedExchangeExec` or `ReusedSubqueryExec` (`AdaptiveSparkPlanHelper.scala:112-129 @v4.1.3`).
+- What the bytes are: one blob per native block, after SQL text is moved into `sql_text_pool` (`operators.scala:1248-1260`). It is a template shared by every task of its stage. `NativeScan` has `common` but no `file_partition` (`CometNativeScan.scala:314`). Native-shuffle blocks lack their `ShuffleWriter` root, which is built on the executor (`CometNativeShuffleWriter.scala:295`). The `.txt` is `nativeOp` as protobuf text, before the SQL text is moved. True per-task bytes need a patched build that writes `protobufQueryPlan` in the `CometExecIterator` constructor (`CometExecIterator.scala:88-140`). Decode: `protoc --proto_path=<comet>/native/proto/src/proto --decode=spark.spark_operator.Operator operator.proto < q01-00-CometHashAggregateExec.pb` (imports at `operator.proto:24-27`).
+
+### 2. Fallback and native-plan logging
+- `spark.comet.explain.fallback.enabled` is the current key. `spark.comet.explainFallback.enabled` is an older alias for it (`CometConf.scala:1186-1188 @ab46419f`); reading an alias logs a one-time deprecation warning (`:1902-1910`). With it on, `CometExecRule` logs one WARN per planning pass that has fallbacks, "Comet cannot execute some parts of this plan natively", then the explain tree (`CometExecRule.scala:1019-1026`). It runs on the driver for each AQE stage, so it repeats. Logger: `org.apache.comet.rules.CometExecRule`, log4j2.
+- `spark.comet.explain.fallback.log.enabled` (alias `spark.comet.logFallbackReasons.enabled`, env `ENABLE_COMET_LOG_FALLBACK_REASONS`) logs a driver WARN per reason as it is tagged: "Comet cannot accelerate X because: …" (`CometConf.scala:1178-1184`; `CometSparkSessionExtensions.scala:333-337`).
+- `spark.comet.explain.native.enabled` (`CometConf.scala:1160-1167`): each task logs the DataFusion plan at INFO, "Comet native query plan:", and again with metrics at the end (`jni_api.rs:1555-1558, 1726-1738`). This is the native logger (log4rs), not log4j2, writing to the executor process's stderr (`lib.rs:334-350`). `COMET_LOG_LEVEL` sets the level (`NativeBase.java:148-168`); pass it as `spark.executorEnv.COMET_LOG_LEVEL`. One plan per task per stage: debug runs only.
+- Where output lands. Driver log4j2 goes to stderr at INFO (`conf/log4j2.properties.template:19-30 @v4.1.3`). In standalone mode, executor stderr is `$SPARK_HOME/work/<app-id>/<exec-id>/stderr` (`Worker.scala:613`, `ExecutorRunner.scala:188-191 @v4.1.3`). In `local[*]` mode it is all the driver's stderr. Neither log is in the event log. The event log does get the final plan text with the Comet section: AQE posts `SparkListenerSQLAdaptiveExecutionUpdate` with `explainString(spark.sql.ui.explainMode)` when the plan becomes final (`AdaptiveSparkPlanExec.scala:377,390,847-858 @v4.1.3`; not yet seen in a real log).
+- `spark.sql.extendedExplainProviders=org.apache.comet.ExtendedExplainInfo` adds a "Comet" section to `explainString` in the extended and formatted modes (`QueryExecution.scala:358,418,471-485 @v4.1.3`). From Python: `PythonSQLUtils.explainString(qe, mode)` (`PythonSQLUtils.scala:115 @v4.1.3`). For the TSV, read the tags as `dump` does; `getFallbackReasons(plan)` returns reasons without their operators (`ExtendedExplainInfo.scala:63-65`).
+
+### 3. Comet's TPC benchmark configuration
+- The runner is `benchmarks/tpc/run.py`. It merges the common conf, then the benchmark profile, then the engine TOML (`run.py:253-262`). Comet engine, `benchmarks/tpc/engines/comet.toml:28-33 @ab46419f`:
+```toml
+[spark_conf]
+"spark.driver.extraClassPath" = "$COMET_JAR"
+"spark.executor.extraClassPath" = "$COMET_JAR"
+"spark.plugins" = "org.apache.spark.CometPlugin"
+"spark.shuffle.manager" = "org.apache.spark.sql.comet.execution.shuffle.CometShuffleManager"
+"spark.comet.expression.Cast.allowIncompatible" = "true"
+```
+- Common conf, `benchmarks/tpc/run.py:107-116 @ab46419f`:
+```python
+COMMON_SPARK_CONF = {
+    "spark.driver.memory": "8G",
+    "spark.executor.memory": "16g",
+    "spark.memory.offHeap.enabled": "true",
+    "spark.memory.offHeap.size": "16g",
+    "spark.eventLog.enabled": "true",
+    "spark.eventLog.dir": os.environ.get("SPARK_EVENT_LOG_DIR", "/tmp/spark-events"),
+    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+    "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+}
+```
+- TPC-H and TPC-DS use the same profile: `"executor_instances": "2"`, `"executor_cores": "8"`, `"max_cores": "16"` (`run.py:122-137`). They differ only in the data variable and `--format parquet` for TPC-H. Nothing sets shuffle partitions or AQE, so Spark defaults apply. The published TPC-DS numbers used Comet 1.1.0 on Spark 4.2.0 with 32 executors and other memory settings (`docs/source/contributor-guide/benchmark-results/tpc-ds.md:22-72`).
+- Deviations for one 128-vCPU, 512 GB executor (all estimates, untested): 1 executor, `executor_cores`/`max_cores` about 128 (Comet sizes its Tokio pool from `spark.executor.cores`, `jni_api.rs:375-384`); driver 16g, executor heap 64g, off-heap 320g, `spark.executor.memoryOverhead` 48g for untracked native memory; `spark.sql.shuffle.partitions` at least 256; `SPARK_LOCAL_DIRS` on local disk (`benchmarking_aws_ec2.md:76-88`). Keep `Cast.allowIncompatible=true` only to match Comet's runs. The provider `DefaultAWSCredentialsProviderChain` must change: native rejects it and Hadoop 3.4 does not remap it (see 4).
+
+### 4. Native S3 scan: same scan for local disk and S3
+- There is no `spark.comet.scan.impl` at 1.2.0; `CometConf.scala` has only the test-only `spark.comet.scan.enabled`, default true (`:96-101`). `native_comet` was dropped in 0.14 (`changelog/0.14.0.md:68`), the `native_datafusion` name in 0.17 (`0.17.0.md:166`). A V1 Parquet scan becomes `CometNativeScanExec` or stays Spark's own scan (`CometExecRule.scala:457-460`). So local and S3 runs share one scan. Check that `fallbacks.tsv` has no scan rows in either run.
+- An `s3a://` scan still falls back for: a scheme object_store cannot parse, a scheme in `fs.comet.libhdfs.schemes`, mixed stores, a rejected path, or the vectorized reader off (`CometScanRule.scala:247-345`). Native rewrites `s3a` to `s3` (`parquet_support.rs:869`). No driver-side check of the credential provider was found, so a bad provider name fails inside the task (estimate) with "Unsupported credential provider" (`s3.rs:641-644`).
+- The driver copies every `fs.s3a.*` key of the session Hadoop conf into the plan's `object_store_options`, `core-default.xml` defaults included (`NativeConfig.scala:338-380`; `CometNativeScan.scala:267-295`). Those values are in every dumped `.pb`: one more reason never to put a key in conf.
+- Key mapping, per bucket first (`fs.s3a.bucket.<b>.<p>`), then global (`s3.rs:420-430`): `endpoint.region` → `Region`; `path.style.access=v` → `VirtualHostedStyleRequest=v`, and when true `/<bucket>` is appended to the endpoint; `endpoint` gets `https://` if it has no scheme; `requester.pays.enabled` → `RequestPayer` (`s3.rs:345-418`). With a custom endpoint object_store sends path-style URLs either way (`src/aws/builder.rs:1214-1220 @v0.13.2`); set `path.style.access=true` so the JVM's S3A matches. With no endpoint and no region, native probes AWS with a HEAD request (`s3.rs:161-177`).
+- Providers native accepts (`s3.rs:494-516, 620-645`): Hadoop `Simple`, `Temporary`, `AssumedRole`, `IAMInstance`, `Anonymous`; SDK v1 and v2 names for Environment, InstanceProfile, Container, WebIdentity, Anonymous and **Profile**. Not accepted: `DefaultAWSCredentialsProviderChain`, v2 `DefaultCredentialsProvider`.
+  - Both Profile names build aws-config 1.12.0's `ProfileFileCredentialsProvider` with no profile name (`s3.rs:973-977`; `native/Cargo.lock:643-644`). The profile then comes from `AWS_PROFILE`, default `default`; files from `AWS_CONFIG_FILE`/`~/.aws/config` and `AWS_SHARED_CREDENTIALS_FILE`/`~/.aws/credentials` ([docs.rs](https://docs.rs/aws-config/1.12.0/aws_config/profile/struct.ProfileFileCredentialsProvider.html), accessed 2026-11-04).
+  - Native does not read the endpoint or region from the profile. Repeat them in `fs.s3a.*`; they are not secrets.
+  - An empty provider key uses aws-config's default chain, but Hadoop 3.4.2's `core-default.xml` sets a 4-entry list without Profile ([core-default](https://hadoop.apache.org/docs/r3.4.2/hadoop-project-dist/hadoop-common/core-default.xml), accessed 2026-11-04). So set the provider explicitly. Unverified: that Nebius accepts path-style requests and signs as region `eu-west1` (the profile files are off limits).
+- JVM side (listing on the driver): Hadoop 3.4 remaps the v1 Profile name to v2 `ProfileCredentialsProvider` and builds it with `create()`, which reads `AWS_PROFILE` ([Hadoop SDK upgrade](https://hadoop.apache.org/docs/r3.4.2/hadoop-aws/tools/hadoop-aws/aws_sdk_upgrade.html), accessed 2026-11-04). Spark 4.1.3 uses Hadoop 3.4.2 and AWS SDK v2 2.29.52 (`pom.xml:130,165 @v4.1.3`). Jars for `$SPARK_HOME/jars`: [hadoop-aws-3.4.2.jar](https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/hadoop-aws-3.4.2.jar) (936,997 B) and [bundle-2.29.52.jar](https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.29.52/bundle-2.29.52.jar) (641,534,749 B) (accessed 2026-11-04). Whether hadoop-aws's compile-scope `analyticsaccelerator-s3` 1.2.1 is needed at runtime is unverified. Native TLS uses the system root certificates in `/etc/ssl/certs`, not the JVM trust store (`datasources.md:296-301`).
+```properties
+# (a) local disk and (b) S3: same lines; (b) adds the S3 block
+spark.plugins=org.apache.spark.CometPlugin
+spark.shuffle.manager=org.apache.spark.sql.comet.execution.shuffle.CometShuffleManager
+spark.driver.extraClassPath=/opt/comet/comet-spark-spark4.1_2.13-1.2.0.jar
+spark.executor.extraClassPath=/opt/comet/comet-spark-spark4.1_2.13-1.2.0.jar
+spark.memory.offHeap.enabled=true
+spark.memory.offHeap.size=320g
+spark.comet.explain.fallback.enabled=true
+spark.sql.extendedExplainProviders=org.apache.comet.ExtendedExplainInfo
+# (b) only; also `export AWS_PROFILE=eu-west1` before spark-submit (driver S3A listing)
+spark.hadoop.fs.s3a.endpoint=https://storage.eu-west1.nebius.cloud:443
+spark.hadoop.fs.s3a.endpoint.region=eu-west1
+spark.hadoop.fs.s3a.path.style.access=true
+spark.hadoop.fs.s3a.aws.credentials.provider=software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider
+spark.executorEnv.AWS_PROFILE=eu-west1
+```
+
+### 5. Release jar, Spark binary, Java
+- Comet jar: https://repo1.maven.org/maven2/org/apache/datafusion/comet-spark-spark4.1_2.13/1.2.0/comet-spark-spark4.1_2.13-1.2.0.jar (98,985,596 B, dated 2026-10-31; HTTP 200 checked 2026-11-04). Its pom builds against `spark-sql_2.13` 4.1.3. It bundles `org/apache/comet/linux/amd64/libcomet.so` and `linux/aarch64/libcomet.so`. The amd64 build targets `x86-64-v3`, so the CPU needs AVX2 (`installation.md:128-130`). Its highest glibc symbol version is `GLIBC_2.30` (read from the jar by HTTP range requests, accessed 2026-11-04); releases build in `ubuntu:20.04` (`dev/release/comet-rm/Dockerfile:19`).
+- Spark: https://archive.apache.org/dist/spark/spark-4.1.3/spark-4.1.3-bin-hadoop3.tgz (572,874,252 B; HTTP 200 checked 2026-11-04; the dlcdn URL returned 404). Not the `-connect` tarball, which defaults to Spark Connect, where `df._jdf` does not exist (estimate).
+- Java 17: `java.version` 17 (`pom.xml:120 @v4.1.3`). Comet lists Java 17 and 21 for Spark 4.1.3 (`installation.md:48,61`).
 
 ## Follow-up experiments
 - Run the dump script for TPC-H q1-q22 and a TPC-DS sample on Comet 1.2.0 / Spark 4.1.3 with AQE on; count operators, `Expr` variants and `ScalarFunc` names per block for Task 5.
@@ -186,3 +290,10 @@ def dump(q: String, sqlText: String, dir: String): Unit = {
 - spark-rapids (NVIDIA/cudf-spark) at ce6349699ccb3bd527c223c66ba24bd708e67e18: https://github.com/NVIDIA/cudf-spark (accessed 2026-11-04).
 - Spark configuration, custom resource scheduling: https://spark.apache.org/docs/latest/configuration.html (accessed 2026-11-04).
 - peacockdb `architecture.md` and `peacockdb-core/Cargo.toml` at f4e2767d (local).
+- Apache Spark v4.1.3 source (`AdaptiveSparkPlanExec.scala`, `QueryStageExec.scala`, `Exchange.scala`, `basicPhysicalOperators.scala`, `QueryPlan.scala`, `TreeNode.scala`, `AdaptiveSparkPlanHelper.scala`, `QueryExecution.scala`, `classic/Dataset.scala`, `PythonSQLUtils.scala`, `deploy/worker/*`, `pom.xml`, `conf/log4j2.properties.template`): https://github.com/apache/spark/tree/v4.1.3 (accessed 2026-11-04).
+- Py4J type conversion (byte[] to bytes): https://www.py4j.org/advanced_topics.html (accessed 2026-11-04).
+- object_store v0.13.2 `src/aws/builder.rs`: https://github.com/apache/arrow-rs-object-store/blob/v0.13.2/src/aws/builder.rs (accessed 2026-11-04).
+- aws-config 1.12.0 profile provider: https://docs.rs/aws-config/1.12.0/aws_config/profile/struct.ProfileFileCredentialsProvider.html ; profile selection in aws-sdk-rust `sdk/aws-runtime/src/env_config/source.rs` (main branch): https://github.com/awslabs/aws-sdk-rust (accessed 2026-11-04).
+- Hadoop 3.4.2 S3A SDK v2 upgrade and `core-default.xml`: https://hadoop.apache.org/docs/r3.4.2/hadoop-aws/tools/hadoop-aws/aws_sdk_upgrade.html , https://hadoop.apache.org/docs/r3.4.2/hadoop-project-dist/hadoop-common/core-default.xml (accessed 2026-11-04).
+- Maven Central: Comet 1.2.0 for Spark 4.1 / Scala 2.13 https://repo1.maven.org/maven2/org/apache/datafusion/comet-spark-spark4.1_2.13/1.2.0/ ; hadoop-aws 3.4.2 https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.2/ ; AWS SDK bundle 2.29.52 https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.29.52/ (accessed 2026-11-04).
+- Spark 4.1.3 binaries: https://archive.apache.org/dist/spark/spark-4.1.3/ (accessed 2026-11-04).
