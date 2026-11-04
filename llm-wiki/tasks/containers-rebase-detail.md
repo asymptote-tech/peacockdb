@@ -11,7 +11,7 @@
 
 ## Surgery
 
-Folded from `.claude/ensemble/L.surgery` at Task 1 Step 5; kept in step with it through Step 10.
+Folded from `.claude/ensemble/L.surgery` at Task 1 Step 5; kept in step with it through Step 10. Done: Step 10 pushed; `L.surgery` deleted at Task 5.
 
 ```
 # containers-rebase surgery state (coordinator)
@@ -252,3 +252,62 @@ chain), task 5 step 3 and the embeddings' S3 path (deleted in Task 2).
 
 PR 192 and `ENS-containers` are left as they are; what happens to them is the human's call, and
 the mapping above is for that decision.
+
+## From containers' record
+
+The full record and plan: `git show origin/ENS-containers:llm-wiki/tasks/containers-detail.md`
+(and `…/containers-impl.md`). What is still open or not written down elsewhere:
+
+- **The CUDA mix in the 25.02 build image.** nvcc 12.9 compiles everything (`CUDART_VERSION`
+  12090). The shared CUDA libraries link from `/opt/cudf/lib` (12.2). nvcc also adds 12.9's
+  `libcudadevrt.a` and `libcudart_static.a`. 36 runtime entry points exist in 12.9's static
+  cudart and not in 12.2's `libcudart.so`, `cudaGetDriverEntryPointByVersion` among them. A call to
+  one binds to a second, static runtime instead of failing to link. `scripts/env/no-static-cudart.sh`
+  guards it. Open: compare nebius-gpu's native `cpp/build/build.ninja` and `CMakeCache.txt` with
+  the image's.
+- **Run image, never seen on a device (new-hosts):** the `dlopen`s of `libcuda.so.1`, nvrtc and
+  cufile under `--gpus all`; `/proc/driver/nvidia/version` inside the container; `host=` under
+  `--hostname`. Neither image has `/usr/share/zoneinfo`; tzdata is under
+  `/opt/cudf/share/zoneinfo`. `libnvrtc.so` and `libnvJitLink.so`, which libcudf names
+  unversioned, resolve in neither image. After a pull, the record must be moved aside on the host:
+  `run-tests.sh bench` refuses a record with rows.
+- **`nsys_hbm.py`'s device check** was never run on a real Nsight export. The fixture's
+  `TARGET_INFO_GPU (id, name)` is a reading of nsys's schema.
+- **Fresh VM, what the fakes cannot show (new-hosts):** `useradd`, `usermod`, `groupadd` and
+  `install -m 440 /dev/stdin` as root on Ubuntu; sudo for the new user with no tty; `docker.io`'s
+  postinst with a `docker` group made first; bootstrap run over ssh with stdin at EOF; sshd taking
+  a key login for a user whose password is locked, under `UsePAM no`;
+  `claude auth login` over `ssh -t` at the pinned version; `gh auth login --with-token
+  --insecure-storage` reading the PAT from ssh's stdin; a second developer reusing the shared sf1
+  and cuDF checkout, git accepting a checkout another uid owns; the FFI build from the sparse
+  `third_party/cudf`.
+- **Benchmark (sf40-baseline, tp4-sized):** a case that kills the process (segfault, abort, OOM)
+  writes nothing, and every rerun reaches it again. Skip it by name in the device's `cases.csv`
+  with the reason.
+- **Drift containers could not fix:** `scripts/build-test-shadgpu.sh:683` and `:702` say "a failing
+  case appends its rows before it panics". Since containers' Task 9 a failed case appends none,
+  and a case's rows go in before its section.
+- **ghcr.io:** only an organization member can create a package; an outside collaborator's push is
+  denied (`permission_denied: create_package`). A new package is private. Making it public needs
+  the organization's setting to allow public packages, and is done in the package's settings (no
+  REST endpoint). ghcr.io caps a layer at 10 GB. A push that dies is rerun, and the layers already
+  up are skipped.
+- **tpcds sf40:** the copy the H200 results were measured on is on shad-gpu. Its sha256s are not yet
+  compared with the bucket's (build-test.md has the sum; containers' record has each file's).
+
+## Task 5 notes
+
+- Recount (developer, 2026-11-04): 6795 = Rust 5863, C++ 233, Python 699. cpu 3367 (`--list`,
+  rust-only); ffi 7 and gpu-rung lib/corpus/timing carried from master (no test file in them
+  changed count; cannot build those shapes here); `peacock_gpu_benchmarks` 638 = 8 + 630 from
+  source; Python `scripts/env/tests` 155 (collected), calibration 41 (34 collected + `test_plot`'s
+  7 from source, no matplotlib on dev); C++ 232 + `PeacockGpu.DeviceInfoDescribesTheDevice`.
+- `architecture.md` already says twenty-six ABI symbols after the replay; the header declares 26.
+- **#226 left open.** Containers never closed it (the human kept it open in containers' round
+  1), and it still lists open work: the H200 record move, two hazards, the first run with
+  provenance (sf40-baseline's, on the H100). Closing it would misstate the engine's state, so the
+  spec's "closes #226" is not carried out here; named in the signoff.
+- `docker/run-tests.sh:2` and `scripts/env/image.sh:2` still cite `llm-wiki/tasks/containers.md`
+  (now archived). Left: both files are untouched by decision, and `run-tests.sh` is an image input.
+- Master drift seen, not edited: `build-test.md`'s `test_gpu_corpus` paragraph says "987 cells
+  today. From tpch, 220 … From tpcds, 410".

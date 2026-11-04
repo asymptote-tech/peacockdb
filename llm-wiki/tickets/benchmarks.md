@@ -11,8 +11,8 @@
 The H200's tree and record predate provenance, and no file carries it yet. The harness now writes
 `device=`, `driver=`, `cuda=`, `cudf=` and `host=` into every trailer and record heading. It files
 results under `benchmark-results/<slug>/`, and a new record is keyed and pinned by its device. The
-first run that writes the five is containers Task 11. The H200's tree is under `h200/` with none of
-them. Its two records are still keyed `<dataset>.sf40/<sha256>.tsv` and pinned as
+first run that writes the five is sf40-baseline's, on the H100. The H200's tree is under `h200/`
+with none of them. Its two records are still keyed `<dataset>.sf40/<sha256>.tsv` and pinned as
 `<dataset>.sf40/records.tsv`.
 
 Moving the H200 record under `h200/` is one change:
