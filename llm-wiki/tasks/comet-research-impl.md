@@ -364,7 +364,7 @@ and Experiment 1, and about 100 min for the matrix.
   name from `exotic.md`. `sensitivity(...)` takes the same arguments and returns rows of
   `(input, ratio_at_low, ratio_at_high)`, sorted by swing.
 
-- [ ] **Step 1 (one subagent):** given `comet-internals.md`, `plans/` (with `fallbacks.tsv`),
+- [x] **Step 1 (one subagent):** given `comet-internals.md`, `plans/` (with `fallbacks.tsv`),
   `peacockdb-core/src/plan/mod.rs` and `architecture.md`'s node set, write two files:
   - `translatability.md`: every operator and expression in the final plans, classed supported,
     adaptable or missing, with counts per query and overall, and the cost of the gap from
@@ -372,7 +372,7 @@ and Experiment 1, and about 100 min for the matrix.
   - `split.md`: the per-operator placement rule (scan, decode, filter, project, join, aggregate,
     shuffle write and read, Spark-exact expressions), fallback inside one stage, and each query's
     GPU-eligible fraction of its operator time. The fractions are rows Task 5 Step 4 reads.
-- [ ] **Step 2: Write the failing tests** in `test_cost_model.py`:
+- [x] **Step 2: Write the failing tests** in `test_cost_model.py`:
   - `test_nic_bound_scan`: 40 GB over 5 GB/s, with GPU compute 1 s and no other term, is 8 s.
   - `test_spark_overhead_floor`: a query with zero bytes and zero compute still costs its
     `spark_overhead`.
@@ -389,9 +389,9 @@ and Experiment 1, and about 100 min for the matrix.
     node (80 GB VRAM, 200 GB RAM, the local NVMe tier's capacity).
   - `test_one_pass`: `one-pass` is the median, and separately the worst, of the sequential
     run's per-query ratios.
-- [ ] **Step 3:** Run `python3 -m pytest llm-wiki/artifacts/comet-research/test_cost_model.py`.
+- [x] **Step 3:** Run `python3 -m pytest llm-wiki/artifacts/comet-research/test_cost_model.py`.
   Expected: FAIL, no `ratio`.
-- [ ] **Step 4:** Write `cost_model.py` and fill `inputs.tsv`. The model, per query q, stated in
+- [x] **Step 4:** Write `cost_model.py` and fill `inputs.tsv`. The model, per query q, stated in
   `cost.md`'s header:
   - GPU time:
     `spark_overhead(q) + max(wire_bytes(q)/rate(tier), load_bytes(q)/decode_rate, compute(q)) + shuffle_bytes(q)/NIC + cpu_part(q)/(16-core rate)`.
@@ -408,8 +408,8 @@ and Experiment 1, and about 100 min for the matrix.
     spill begins where data per node exceeds executor memory. `8x16` and `16x8` are modelled
     from the 1 × 128 measurements and per-node NIC rates.
   - S3 GET counts and egress bytes from `bytes.tsv` are listed beside each ratio, not folded in.
-- [ ] **Step 5:** Run the tests. Expected: PASS.
-- [ ] **Step 6:** Generate `cost.md` with `python3 cost_model.py > cost.md`, never by hand:
+- [x] **Step 5:** Run the tests. Expected: PASS.
+- [x] **Step 6:** Generate `cost.md` with `python3 cost_model.py > cost.md`, never by hand:
   - first, the headline cells by the spec's verdict rule, with bands and the verdict each implies;
   - ratio tables for batched (3, 10, 20, all) and one-pass (median, worst), against both
     baselines for "all" and the sequential baseline for 3, 10 and 20, for each deployment, by data size (sf40, sf200, 1 TB, 10 TB), each size's tier
@@ -418,7 +418,7 @@ and Experiment 1, and about 100 min for the matrix.
   - the batched table again for the local NVMe tier and each `exotic.md` tier, at its price;
   - per TPC-H query, the NIC rate below which the GPU stalls;
   - the sensitivity table for each headline cell; its top row is the settling measurement.
-- [ ] **Step 7 (one subagent):** given all artifacts, write `design.md`. On a go or conditional
+- [x] **Step 7 (one subagent):** given all artifacts, write `design.md`. On a go or conditional
   go: the alpha design (seam, IR and translation, `split.md`'s rule, the data path and cache,
   which local-SSD layout first, whether an exotic tier changes it, the batching API, and the
   whole-batch CBO for probe-side holds after query-fuser's item 1a, placed relative to Catalyst,

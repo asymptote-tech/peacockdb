@@ -25,7 +25,7 @@
 - Task 2 (experiment scripts): Steps 1-4 done 2026-11-04; checkpoint `comet-research: experiment scripts` reported, awaiting commit.
 - Task 3 (experiment 1, VM-to-S3 throughput): Steps 1-2 done 2026-11-04 on the L40S; checkpoint `comet-research: S3 throughput (L40S)` reported, awaiting commit.
 - Task 4 (experiments 2 and 3, Comet on the CPU VM, plan dumps): Steps 0-5 done 2026-11-04; cpu128 STOPPED 04:33:49; checkpoint `comet-research: Comet runs and plan dumps` reported, awaiting commit.
-- Task 5 (analysis and the cost model): todo
+- Task 5 (analysis and the cost model): Steps 1-7 done 2026-11-04; checkpoint `comet-research: analysis and cost model` reported, awaiting commit. Notes in `## Task 5` below.
 - Task 6 (the report and its audit): todo
 
 Plan drift (fixed by the coordinator, 2026-11-04): Global Constraints and Review Focus in
@@ -381,6 +381,63 @@ Times are the local host's (UTC). The count is `vm.sh hours <vm>`, from `.claude
   `plans/{tpch,tpcds}/` from the calibration runs (21.4 MB, 2,322 files, none over 5 MB).
   `measurements/s3/cpu128.tsv`, cpu128 rows in `measurements/s3/summary.tsv`, a cpu128 section
   in `measurements/s3/notes.md`. `measurements/vm-log.tsv` copied after the stop.
+
+## Task 5: analysis and the cost model (2026-11-04)
+
+- No VM used in this task.
+- New measurement, no VM: `scripts/footers.py` read every sf40 Parquet footer from eu-north1 by
+  ranged GETs (default profile, from dev, 04:44:41-04:44:45 UTC) into
+  `measurements/footers/sf40.tsv` (490 columns; TPC-H 42.43 GB compressed, TPC-DS 15.26 GB).
+  It gives exact per-column bytes for the batch-union (shared-scan) model.
+- `scripts/plan_census.py plans` parses every native block's protobuf text (no `protoc` here,
+  so a small text-format parser) and writes `plans/{census,eligible,columns}.tsv`. Class tables
+  (supported / adaptable / missing) live in the script; `translatability.md` explains them.
+  Tests: `scripts/tests/test_plan_census.py` (7), `test_footers.py` (2), watched failing first.
+- Census: no missing operator in any plan (the 82 TPC-DS exclude the window queries). Missing
+  expressions only in TPC-H q2, q20 (runtime bloom filter: `bloomFilterAgg`,
+  `bloom_filter_might_contain`, `xxhash64`), TPC-DS q9 (`create_named_struct`), q24, q99
+  (`jvm_scalar_udf`); Spark-side fallbacks in q10, q14, q35 (`fallbacks.tsv`).
+- Batch union from footers and the plans' column sets: TPC-H cut 1.05 / 3.34 / 4.37 / 5.31 at
+  3 / 10 / 20 / all; TPC-DS 1.08 / 1.94 / 2.62 / 8.07 (measured scan bytes over union bytes).
+- `exotic.md` drift fixed (the Rulings' two items): `local_nvme_x1_p5_4xlarge` 6 -> 3.9 GB/s;
+  `local_nvme_x4_gds` and section 4 now say 24.3 GiB/s is the L40S PCIe Gen4 link limit.
+- Subtle: `bytes.tsv` `scheduler_ms` sums per-stage gaps over stages that run in parallel, so it
+  can exceed the query's wall time (TPC-H q8: 7.1 s of scheduler gaps in a 2.9 s query). It is
+  not a wall-time overhead. The model takes `driver_ms` whole and a modelled share of
+  `scheduler_ms`, capped at the query's own time.
+
+- Results (all four headline cells conditional go; 8 x 16, batch "all", faster baseline, NIC tier):
+  TPC-H sf40 1.88 [0.50-12.88], sf200 1.38 [0.22-13.40]; TPC-DS sf40 2.14 [0.54-18.10], 1 TB
+  1.58 [0.06-37.40]. Device factor 0.42-0.88 in every cell; sharing 2.38-3.74. One-pass median
+  0.81 (TPC-H) and 0.83 (TPC-DS) at sf40. Top sensitivity rows: `shuffle_rate_gpu_node` (TPC-H
+  both), `scheduler_share` (TPC-DS sf40), `cpu128_s3_concurrent_all_s.tpcds` (TPC-DS 1 TB).
+- Tests: `python3 -m pytest llm-wiki/artifacts/comet-research/test_cost_model.py
+  llm-wiki/artifacts/comet-research/scripts/tests` 47 passed (cost model 14); `bash
+  .../scripts/tests/test_vm_log.sh` 14 passed. `cost.md` and `plans/*.tsv` regenerate byte for byte.
+- Two bugs found by the generator, each pinned by a test written red first: the NIC tier's rate
+  became an array over corners and `math.isinf` on it failed (the `vram` tier now says "no wire"
+  with `None`); an empty tier (`nebius_h100_1gpu_no_local`, 0 GB/s, 0 GB) divided by zero (now
+  all its bytes go over the NIC).
+- Model choices that depart from the plan's text, each stated in cost.md's header:
+  - shuffle on the H100 node is `shuffle_bytes / shuffle_rate_gpu_node` (Comet's CPU-side codec
+    on 16 cores), not `/ NIC`: one node shuffles inside the box;
+  - `spark_overhead` = `driver_ms` + `scheduler_share` x `scheduler_ms` (see the subtle point above);
+  - compute for TPC-H q1, q3, q6, q8 is benchmark-minimal's measured H100 G=1 time (8 x H100 table),
+    not H200 scaled by HBM; the H200-scaled figure is `gpu_measured_scale`'s high end;
+  - one-pass reads S3 at `s3_efficiency_sequential` (0.490, Comet's sequential run), batches at
+    `s3_efficiency` (0.892, the concurrent run), both measured-derived;
+  - `ratio()` also takes baseline `faster` (per corner, the lesser CPU time) and `cpu_shares=True`
+    (the "CPU with shared scans" row);
+  - in-repo report figures (benchmark-minimal.md) are tagged `published`, since `measured` must
+    point under `measurements/` (a test enforces it);
+  - the tier table leaves out `gb10_unified`: a tier swaps the data path and keeps the H100's
+    compute, and GB10's GPU is about 19x slower in memory bandwidth.
+- Steps 1 and 7 were written by the developer, not a subagent: Step 1 needed code (the census),
+  and Explore subagents cannot write files. `cost.md` is 420 lines, over the 300-line cap for
+  findings files; it is generated and holds the plan's required tables.
+- Plan drift: Task 5 Step 4 says `spark_overhead` is `driver_ms` plus `scheduler_ms`; that sum is
+  not wall time (above). Files beyond the plan's list: `scripts/plan_census.py`,
+  `scripts/footers.py`, their tests, `measurements/footers/sf40.tsv`, `plans/{census,eligible,columns}.tsv`.
 
 ## Rulings
 
