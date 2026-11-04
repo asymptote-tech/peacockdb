@@ -297,3 +297,41 @@ diagnosed there. Tasks 1–7 are committed (`2a6b0821`, `641a69af`, `a5458f7b`).
   (publickey)` on most pushes and fetches, though `ssh -T git@github.com` authenticated). Pushes
   went over HTTPS with gh's credentials, no config change:
   `git -c credential.helper='!gh auth git-credential' push https://github.com/asymptote-tech/peacockdb.git <b>:<b>`.
+
+## Rebase onto master (2026-11-04)
+
+Rebased onto ENS-bench-rows, which is on master (the ENS-optimizer merge #165 and the
+inventory-based case listing). HEAD `b047597f`.
+
+- **`benchmark.rs` conflict (2a6b0821's replay):** this commit moves the device-list checks to
+  `benchmark_lists.rs`. HEAD had ported that code to the inventory. So the port moved with it:
+  `declared_files(cases: &[Case])`, its 5 callers on `&listed_cases()`, no `CASE_LIST` and no
+  `macro_invocations_in` there. `Case` and `listed_cases` are `pub(crate)` in `benchmark.rs`;
+  `CASE_LIST` is private again, read only by `the_benchmark_cases_follow_the_registry`.
+- **`build-test.md`:** the replay kept HEAD's side of seven hunks. Restored by meaning: the sf40
+  tier's paragraph before the order tier (202, master's); the calibration row with the device-list
+  reader, the joined segments and the publish (70); the Images row with `run-gpu.sh`'s case timeout
+  and answer switch, `create_nsys_profile.sh --cases` and `bench-each.sh` (237); the new DuckDB
+  benchmark script row (9); the sf40 rules in the `duckdb-result.txt` and `gpu-result.txt` golden
+  rows. Recounted from `--list`: cpu 3491 (`--lib` 984, `test_cpu_corpus` 2451,
+  `test_corpus_goldens` 53, `test_cost_model` 3), the corpus cpu row 2450, grand total 7842 (Rust
+  6040, C++ 277, Python 1525). The Python rows were checked against pytest's collection.
+- **Re-proven offline, no VM:** `cargo test --features rust-only -p peacockdb-core` exit 0:
+  `--lib` 982 passed, 2 ignored; `test_cpu_corpus` 2451; `test_corpus_goldens` 53;
+  `test_cost_model` 3; `test_golden_format` 41; `test_crate_privacy` 1. No warnings, and
+  `testdata/` was clean afterwards. `cargo test -p cost-report`: 49, plus 32 in
+  `test_source_formatting`. `--features gpu` compiles every target against the local
+  rapids-cuda-12.2 env with no warnings. No C++ changed, so no ctest.
+- **Python:** `scripts/calibration/tests` 70 passed, each file also exiting 0 run alone as CI runs
+  it. Locally this needs matplotlib on `PYTHONPATH`, as CI installs it. `test_duckdb_minimal.py`
+  (DuckDB 1.5.4, the local sf1) and `testdata/test_duckdb_result.py` 36. `test_bench_each.py` and
+  `test_run_gpu.py` 44. All of `scripts/env/tests`: 234 passed, 3 failed. The 3 need what this host
+  lacks, and sf40-baseline touched none of them: `test_the_26_02_image_runs_as_any_user` (no local
+  `peacockdb-build:cudf-26.02` image), and `test_every_needed_library_resolves_25_02` and `_26_02`
+  (`PEACOCK_STAGED_INSTALLS` unset; the staged installs come from the CPU VM).
+
+## Blocked (2026-11-04, after the rebase)
+
+Still `blocked(building)` at Task 8: the VMs wait on new-hosts' new block, the two VMs' disks
+(`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared. DuckDB's sf40
+database on nebius-cpu128 needs the bigger disk too.
