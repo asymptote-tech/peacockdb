@@ -83,8 +83,9 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
 >   of #165 (`ENS-optimizer`, 17 commits, about 450 files), so the rebase this note arrives
 >   with carries the join optimizer into every chain L branch, from containers-rebase up,
 >   although the chain forked without it. Do not undo it: run the rebase protocol over the
->   whole chain, lowest branch first. `02f6a4d8` is already on master through the optimizer, so
->   drop containers-rebase's copy of it. Code conflicts go to a developer. Each branch
+>   whole chain, lowest branch first. containers-rebase's `02f6a4d8` reached master as
+>   `a5c852e4` (same subject, not patch-identical): master's version wins, and whatever
+>   containers-rebase changed on top of it stays. Code conflicts go to a developer. Each branch
 >   re-proves on its new base, and containers-rebase's PR #193 needs a green CI again before
 >   `done` comes back.
 
