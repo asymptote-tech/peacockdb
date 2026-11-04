@@ -571,14 +571,14 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   `test_fetch_refuses_an_unknown_dataset` (rc 2); `test_fetch_keys_from_stdin` (`--env -`);
   `test_install_duckdb_checks_the_sha` and `test_install_duckdb_skips_the_pinned_version`.
 - [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → `0 failed`; commit.
-- [ ] **Step 5: CPU VM, live.** `$C start`; `$C ssh 'df -h /var/lib/peacock'` — at least 110 GB
+- [x] **Step 5: CPU VM, live.** `$C start`; `$C ssh 'df -h /var/lib/peacock'` — at least 110 GB
   free (parquet 56 GB + the tpch db ~38 GB + 10 %), else stall. The tree reaches the VM as the
   CPU-VM build sends it, never by `git pull`:
   `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`; then
   `$C ssh "cd ~/$D && time scripts/env/fetch-sf40.sh tpch.sf40 tpcds.sf40"` → both lines,
   exit 0; again → `fetched 0` twice. Record tpch.sf40's aggregate sha256 and pin it in
   `fetch-sf40.sh` (it must match the H100's in Task 10).
-- [ ] **Step 6: DuckDB.** `$C ssh "cd ~/$D && scripts/env/install-duckdb.sh && time benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb"`
+- [x] **Step 6: DuckDB.** `$C ssh "cd ~/$D && scripts/env/install-duckdb.sh && time benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb"`
   → `/var/lib/peacock/tpch.sf40.duckdb` exists, row counts match, every query verified. Record the
   timing run's wall time: over 4 h means `CAP` for `cpu` is raised in `idle_watch.py` with that
   measurement in the comment, else it stays. (The tpcds database comes with sf40-baseline's

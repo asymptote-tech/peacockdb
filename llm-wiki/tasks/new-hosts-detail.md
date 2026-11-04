@@ -21,8 +21,10 @@
 | nebius-cpu128 | 2026-11-04 19:28:33 | 19:40:56 | 0.21 | Task 10 Step 1: the CPU-VM build |
 | nebius-h100 | 2026-11-04 19:41:13 | 19:43:01 | 0.03 | Task 10 Step 2: the disk check (78 G free; stalled before `prepare`) |
 | nebius-cpu128 | 2026-11-04 19:45:38 | 19:47:58 | 0.04 | Task 6 Step 5: the running leg of nebius-watch.yml (coordinator) |
+| nebius-cpu128 | 2026-11-04 22:01:07 | 22:23:17 | 0.37 | Task 8 Steps 5–6: the disk check, both fetches, DuckDB and its database |
+| nebius-h100 | 2026-11-04 22:23:24 | 22:24:59 | 0.03 | the grown disk's `df -h /` (174 G, grown at boot) |
 
-Hours so far: nebius-gpu 0.07, nebius-h100 0.16, nebius-cpu128 0.49. Dev's local time is UTC.
+Hours so far: nebius-gpu 0.07, nebius-h100 0.19, nebius-cpu128 0.86. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -699,6 +701,45 @@ rebuilt from `git merge-file --diff3` of HEAD, `687b61fe` and the old tip: 17 co
   peacockdb-core's record and trailer tests, `test_split.py` and the page's sample trailer. The
   old tip has the same matches. It names a host in a sample record, not a script, so it stays.
   `docker/run-tests.sh:7` is still the one recorded exception.
+
+Developer, 2026-11-04, Steps 5–6 (live), after the human grew the disks. Changed:
+`scripts/env/sf40.sha256` (the tpch line) and this file.
+
+- **The disks.** Both roots had already grown at boot, so no `growpart` or `resize2fs` ran.
+  - nebius-cpu128: `vda` 220 G, `/dev/vda1` 213 G, 37 G used, **177 G free**. `/var/lib/peacock`
+    is on `/` and is `dmitry:peacock` 2775. The gate is 110 G, so it passes.
+  - nebius-h100: `vda` 180 G, `/dev/vda1` 174 G, 18 G used, **156 G free**. It has no
+    `/var/lib/peacock` yet; `prepare` makes it. Nothing was written there.
+- **Step 5.** Offline first: 23 passed and 8 passed. The tree went over by `nebius-sync.sh --no-data`.
+  - First fetch: rc 0, 6 min 41 s. It printed `tpch.sf40: fetched 8, kept 0` and
+    `tpcds.sf40: fetched 24, kept 0`. tpcds matched its pin live. aws CLI v2 was installed
+    into `~/.local/aws-cli`. On disk: tpch.sf40 40 G, tpcds.sf40 15 G.
+  - tpch.sf40's aggregate is
+    `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It is now pinned in
+    `scripts/env/sf40.sha256`. Task 10 Step 2 checks the H100's fetch against it.
+    After the pin, both test files still pass (23 and 8).
+  - Second run, re-synced with the pin: rc 0, 28 s. It printed `fetched 0, kept 8` and
+    `fetched 0, kept 24`, and checked both pins. The parquet was in the page cache, so this
+    was not a cold read.
+- **Step 6.** `install-duckdb.sh` installed `/usr/local/bin/duckdb` v1.5.4 (08e34c447b). A
+  rerun printed `is v1.5.4 already`, rc 0.
+  - `duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb`
+    finished rc 0. Wall time **9 min 16 s**, of which the import took 392 s (partsupp 240 s,
+    lineitem 88 s).
+  - Row counts were verified against the parquet. `/var/lib/peacock/tpch.sf40.duckdb` is 32.73 GiB
+    (partsupp 21.74, lineitem 6.07). It was 100 % resident.
+  - All 10 queries matched `testdata/goldens/tpch.sf40/`: q6 q1 q3 q8, q11v img_000/017/034,
+    q12v/txt_000, q10v/txt_017, q9v/txt_034. Every timed run read 0.00 G from disk.
+    Second-smallest times: q6 121 ms, q1 738, q3 513, q8 934, q11v 1317/1340/1400,
+    q12v 506, q10v 819, q9v 1459 ms.
+  - 9 min is under 4 h, so `CAP` for `cpu` stays at 14400 in `idle_watch.py`.
+  - Afterwards the root had 124 G used and 89 G free. No `duckdb_tmp` was left behind.
+- **A launch detail.** In `cd … && nohup … & echo`, the `&` backgrounds the whole `&&` chain.
+  The forked shell then holds ssh's stdout until the job ends, so the launching ssh timed out
+  (rc 124) while the fetch kept running. Wrap the job instead:
+  `cd … && { nohup … </dev/null >/dev/null 2>&1 & }`. After that, the launches returned at once.
+- Both VMs stopped softly (rc 0, `STOPPED`). The CPU VM's scratch log dir was removed.
+- The disk part of "Blocked (2026-11-04, second)" is resolved. Next is Task 10 Step 2 on the H100.
 
 ## Analyst: disk (2026-11-04)
 
