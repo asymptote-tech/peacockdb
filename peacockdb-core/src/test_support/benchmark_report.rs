@@ -3,9 +3,9 @@
 //!
 //! - A device is a directory directly under the root holding a `<ds>.sf<sf>/<mode>.benchmark.txt`
 //!   for one of `MODES`. One row per (dataset, sf, query, mode) some device has a section for.
-//! - A timed cell is load, execute, total and peak, a pre-bench-rows section's load derived and
-//!   its peak `—`. Any other cell spans the four: the list's `skipped` note where it has one,
-//!   else the failure's or the marker's reason, else `—`.
+//! - A timed cell is load, execute, total and peak. A section without `load_us` has its load
+//!   derived and its peak `—`. Any other cell spans the four: the list's `skipped` note where it
+//!   has one, else the failure's or the marker's reason, else `—`.
 //! - No time, no host, no absolute path: the same trees give the same bytes.
 
 #[cfg(test)]
@@ -93,9 +93,13 @@ pub(crate) fn render(root: &Path, order: &[(String, String)], extra: &[ReportTab
                     mode: mode_rank(&mode),
                 };
                 let rel = format!("benchmark-results/{rel}");
-                rows.entry(place)
-                    .or_default()
-                    .insert(at, Found { rel, line, body });
+                let found = Found { rel, line, body };
+                if let Some(first) = rows.entry(place).or_default().insert(at, found) {
+                    panic!(
+                        "{}: {query} has two sections, at lines {} and {line}",
+                        first.rel, first.line
+                    );
+                }
             }
         }
     }
@@ -278,6 +282,7 @@ fn dataset_table(
 
 /// One device's four cells for a row, or one cell across them.
 fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> String {
+    // The first is the only one: `parse_device_cases` refuses a case listed twice.
     let case = device.cases.iter().find(|case| {
         case.dataset == place.dataset.1
             && case.sf == place.sf.1

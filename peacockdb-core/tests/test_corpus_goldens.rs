@@ -1,25 +1,20 @@
-//! What proves the corpus infra, since every way it fails is quiet.
+//! What proves the corpus infra, since every way it fails is quiet: a dropped section, a
+//! filtered regeneration that deletes coverage, a marker a reader cannot tell from an absence.
+//! Each has a deterministic case here, built from strings and temporary files.
 //!
-//! A dropped section, a filtered regeneration that deletes coverage, a marker a reader
-//! cannot tell from an absence — none of these turn a run red on their own. So each has a
-//! case here, built from strings and temporary files rather than by editing a committed
-//! golden and undoing it, and every one is deterministic: this tier's whole claim is that a
-//! golden means something, and a case that passes on the third run is a golden that means
-//! nothing.
+//! The second half reads the committed goldens back against their own redundancy: a file that
+//! contradicts itself is one the renderer got wrong, and there is no other oracle.
 //!
-//! The second half reads the committed corpus goldens back and checks them against their
-//! own redundancy. The cost tree has no external oracle — the golden is written by the run
-//! that will later check it — but a file that contradicts itself is a file the renderer got
-//! wrong, and the renderer is most of what could be wrong.
-//!
-//! The benchmark tree, read back the same way, is `benchmark`; the calibration record's format
-//! is `benchmark_record`; what a run writes into the tree when a case fails or is run again is
-//! `benchmark_run`.
+//! The benchmark tree read back is `benchmark`, one section's checks `benchmark_checks`, the
+//! calibration record's format `benchmark_record`, and what a run writes when a case fails or
+//! runs again `benchmark_run`.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps it under a directory named for this one.
 #[path = "test_corpus_goldens/benchmark.rs"]
 mod benchmark;
+#[path = "test_corpus_goldens/benchmark_checks.rs"]
+mod benchmark_checks;
 #[path = "test_corpus_goldens/benchmark_record.rs"]
 mod benchmark_record;
 #[path = "test_corpus_goldens/benchmark_run.rs"]

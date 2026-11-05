@@ -5,11 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use super::benchmark_checks::{rows_problem, section_problem};
 use peacockdb_core::test_support::{
-    BUILD, DEVICE_CASES_HEADER, FAILED, MEASURED_RUNS, MODES, Mode, SKIPPED, benchmark_report_path,
-    device_slug, line_difference, load_csv, ordered_sections, parse_benchmark_section,
-    parse_device_cases, render_benchmark_report, rewrite_source_file, testdata_root,
-    write_benchmark_report,
+    BUILD, DEVICE_CASES_HEADER, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, device_slug,
+    line_difference, load_csv, ordered_sections, parse_benchmark_section, parse_device_cases,
+    render_benchmark_report, rewrite_source_file, testdata_root, write_benchmark_report,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -113,108 +113,27 @@ fn key_values<'a>(lines: impl Iterator<Item = &'a str>, at: &str) -> Vec<(&'a st
         .collect()
 }
 
-fn number(text: &str, what: &str) -> u64 {
-    text.parse()
-        .unwrap_or_else(|_| panic!("{what}: {text:?} is not a number"))
-}
-
-/// Every `total_us` in a benchmark file is the sum of the `time_us` beside it, and the
-/// trailer's `device_us` is the sum of those totals. Where a section carries them, `load_us` is
-/// the loaders' totals, `load_us + execute_us` is `device_us`, `batch_rows` and `batch_bytes`
-/// have one shape, and `peak_bytes` is at least every batch, since every batch is held first.
+/// Every timed section in the committed trees passes `section_problem`: its `total_us`, its
+/// `device_us`, its load, execute and peak where it carries them, and its runs.
 ///
 /// Checkable without a device and without a second oracle: the renderer writes them all from
-/// one measurement, so a file where they disagree is a file it got wrong. `run_us` is the wall
-/// clock and is summed into nothing. A `0` entry is a call that opened no region; a `1` is a
-/// region the clock rounded down.
+/// one measurement, so a file where they disagree is a file it got wrong.
 #[test]
 fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
     let mut checked = 0;
     for path in benchmark_files() {
         let text = std::fs::read_to_string(&path).expect("a benchmark file");
         for (query, body) in ordered_sections(&text) {
-            let at = format!("{} {query}", path.display());
             // A query declared with no mode to time it at writes a marker and no tree, and a
             // failed case its record.
             let Some(section) = parse_benchmark_section(&body) else {
                 continue;
             };
-            for node in &section.nodes {
-                let entries: Vec<u64> = node.time_us.iter().flatten().copied().collect();
-                assert_eq!(
-                    node.total_us,
-                    entries.iter().sum::<u64>(),
-                    "{at}: {}'s total_us disagrees with the {} entries beside it",
-                    node.line.name,
-                    entries.len()
-                );
-                let shape = |lists: &Option<Vec<Vec<u64>>>| {
-                    lists
-                        .as_ref()
-                        .map(|lanes| lanes.iter().map(Vec::len).collect::<Vec<_>>())
-                };
-                assert_eq!(
-                    shape(&node.batch_rows),
-                    shape(&node.batch_bytes),
-                    "{at}: {}'s batch_rows and batch_bytes differ in shape",
-                    node.line.name
-                );
-                checked += 1;
+            if let Err(problem) = section_problem(&section, &format!("{} {query}", path.display()))
+            {
+                panic!("{problem}");
             }
-            let device_us = section.count("device_us");
-            assert_eq!(
-                device_us,
-                Some(section.tree_device_us()),
-                "{at}: the trailer's device_us is not the sum of the tree's total_us"
-            );
-            if let Some(load_us) = section.count("load_us") {
-                assert_eq!(
-                    load_us,
-                    section.tree_load_us(),
-                    "{at}: load_us is not the loaders' total_us"
-                );
-                assert_eq!(
-                    section.count("execute_us").map(|execute| load_us + execute),
-                    device_us,
-                    "{at}: load_us + execute_us is not device_us"
-                );
-            }
-            if let Some(peak) = section.count("peak_bytes") {
-                let batches = section
-                    .nodes
-                    .iter()
-                    .flat_map(|node| node.batch_bytes.iter());
-                let largest = batches.flatten().flatten().max().copied().unwrap_or(0);
-                assert!(
-                    peak >= largest,
-                    "{at}: peak_bytes={peak} is below a batch of {largest} bytes, which the \
-                     accountant held"
-                );
-            }
-            let runs = section
-                .field("runs")
-                .unwrap_or_else(|| panic!("{at}: the trailer has no runs"));
-            let spread: Vec<u64> = runs
-                .trim_matches(|c| c == '[' || c == ']')
-                .split(',')
-                .map(|e| number(e, &at))
-                .collect();
-            assert_eq!(
-                spread.len(),
-                MEASURED_RUNS,
-                "{at}: the spread holds {} executions",
-                spread.len()
-            );
-            // The reported run is the second-smallest of the spread, which is the whole
-            // reason the spread is written: the file would otherwise state one number with
-            // nothing saying which of the ten it is.
-            let mut sorted = spread.clone();
-            sorted.sort_unstable();
-            assert_eq!(
-                section.count("run_us"),
-                Some(sorted[1]),
-                "{at}: run_us is not the second-smallest of {spread:?}"
-            );
+            checked += section.nodes.len();
         }
     }
     assert!(
@@ -685,51 +604,6 @@ const PROVENANCE_KEYS: [&str; 5] = ["device", "driver", "cuda", "cudf", "host"];
 /// none of it. Only the H200's: both hosts that ran the benchmark before then, shad-gpu and
 /// verda-gpu, are H200s. A tree copied or written under any other name is held to the five.
 const PREDATES_PROVENANCE: &[&str] = &["h200"];
-
-/// The device trees written before bench-rows, whose sections carry no batches and no load,
-/// execute, peak, cache or prefill keys. Only the H200's, for the same reason as above.
-const PREDATES_ROWS: &[&str] = &["h200"];
-
-/// The trailer keys bench-rows added, which every section outside `PREDATES_ROWS` carries.
-const ROWS_KEYS: [&str; 7] = [
-    "load_us",
-    "execute_us",
-    "peak_bytes",
-    "pinned_cache",
-    "prefill_files",
-    "prefill_bytes",
-    "prefill_us",
-];
-
-/// The first field a timed section under `device` lacks, outside `PREDATES_ROWS`: a section an
-/// old binary wrote after the format moved, which the page and the later readers cannot use.
-fn rows_problem(device: &str, body: &str, at: &str) -> Result<(), String> {
-    let Some(section) = parse_benchmark_section(body) else {
-        return Ok(());
-    };
-    if PREDATES_ROWS.contains(&device) {
-        return Ok(());
-    }
-    let lacking = |field: &str| {
-        format!(
-            "{at}: carries no {field}, and only {PREDATES_ROWS:?} were written before bench-rows"
-        )
-    };
-    for node in &section.nodes {
-        for (field, lists) in [
-            ("batch_rows", &node.batch_rows),
-            ("batch_bytes", &node.batch_bytes),
-        ] {
-            if lists.is_none() {
-                return Err(lacking(&format!("{field} under {}", node.line.name)));
-            }
-        }
-    }
-    match ROWS_KEYS.iter().find(|key| section.field(key).is_none()) {
-        Some(key) => Err(lacking(key)),
-        None => Ok(()),
-    }
-}
 
 /// Every file is `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, its device directory a
 /// slug, and every timed section's trailer ends with the five provenance keys, `device=`

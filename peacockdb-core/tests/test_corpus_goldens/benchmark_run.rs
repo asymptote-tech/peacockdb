@@ -22,11 +22,14 @@ fn this_run() -> Provenance {
     }
 }
 
-/// A timed section's body as the harness writes one: a node, the trailer, the five.
+/// A timed section's body as the harness writes one: a node with its batches, the trailer's
+/// seventeen keys, the five last.
 fn timed(provenance: &Provenance, run_us: u64) -> String {
     format!(
-        "GpuUnload\n  time_us=[[{run_us}]] total_us={run_us}\n--- run ---\n\
-         run_us={run_us}\ndevice_us={run_us}\nruns=[{}]\nbuild=release\nallocator=rmm-pool\n\
+        "GpuUnload\n  time_us=[[{run_us}]] total_us={run_us} batch_rows=[[1]] batch_bytes=[[8]]\n\
+         --- run ---\nrun_us={run_us}\ndevice_us={run_us}\nload_us=0\nexecute_us={run_us}\n\
+         peak_bytes=8\nruns=[{}]\nbuild=release\nallocator=rmm-pool\npinned_cache=off no-device\n\
+         prefill_files=0\nprefill_bytes=0\nprefill_us=0\n\
          device={}\ndriver={}\ncuda={}\ncudf={}\nhost={}\n",
         vec![run_us.to_string(); 10].join(","),
         provenance.device,

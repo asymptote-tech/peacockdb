@@ -1,10 +1,10 @@
-//! The benchmark tree's one reader, over literal sections: a section written now, one written
-//! before bench-rows, and the shapes it refuses.
+//! The benchmark tree's one reader, over literal sections: a timed section with every field, one
+//! without batches or the load (the `h200/` shape), and the shapes it refuses.
 
 use crate::test_support::{FAILED, SKIPPED, parse_benchmark_section};
 
-/// Two loaders under a join, with every key a section written now carries.
-const NEW: &str = "\
+/// Two loaders under a join, with every key a timed section carries.
+const TIMED: &str = "\
 GpuUnload
   time_us=[[5]] total_us=5 batch_rows=[[10]] batch_bytes=[[80]]
   GpuHashJoin: join_type=Inner, on=[(a@0, b@0)], lanes=1, batches=multiple
@@ -34,7 +34,7 @@ host=nebius-h100
 ";
 
 /// The nested-loop-join section of `h200/tpch.sf40/tp1_single`, verbatim.
-const LEGACY: &str = "\
+const UNBATCHED: &str = "\
 GpuUnload
   time_us=[[149]] total_us=149
   GpuNestedLoopJoin: join_type=Inner, filter=n_regionkey@probe:2 > r_regionkey@build:0, lanes=1, batches=multiple
@@ -54,8 +54,8 @@ allocator=rmm-pool initial=69.0GiB max=69.0GiB of 139.2GiB free on a discrete de
 ";
 
 #[test]
-fn a_new_section_with_its_provenance_last_is_read() {
-    let s = parse_benchmark_section(NEW).expect("timed");
+fn a_timed_section_with_its_provenance_last_is_read() {
+    let s = parse_benchmark_section(TIMED).expect("timed");
     assert_eq!(s.nodes.len(), 4);
     assert_eq!(s.nodes[3].batch_rows, Some(vec![vec![6, 4]]));
     assert_eq!(s.nodes[3].batch_bytes, Some(vec![vec![48, 32]]));
@@ -76,8 +76,8 @@ fn a_new_section_with_its_provenance_last_is_read() {
 }
 
 #[test]
-fn a_legacy_section_reads_with_no_batches_and_no_load() {
-    let s = parse_benchmark_section(LEGACY).expect("timed");
+fn an_h200_section_reads_with_no_batches_and_no_load() {
+    let s = parse_benchmark_section(UNBATCHED).expect("timed");
     assert_eq!(s.nodes.len(), 5);
     assert!(
         s.nodes
@@ -125,7 +125,7 @@ fn an_unknown_token_beneath_a_node_is_refused() {
 #[test]
 #[should_panic(expected = "twice")]
 fn a_trailer_key_read_twice_is_refused() {
-    let body = format!("{LEGACY}device_us=1\n");
+    let body = format!("{UNBATCHED}device_us=1\n");
     parse_benchmark_section(&body)
         .expect("timed")
         .field("device_us");

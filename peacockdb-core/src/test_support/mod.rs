@@ -341,7 +341,7 @@ pub fn parse_run_section(body: &str) -> (String, Vec<RunNode<'_>>) {
 /// A node as a `.benchmark.txt` section records it: its line, and the line beneath.
 ///
 /// `time_us` is by driving lane and call; `batch_rows` and `batch_bytes` by output lane and
-/// batch, as `RunNode`'s, and `None` in a section written before bench-rows.
+/// batch, as `RunNode`'s, and `None` where the section carries none, as the `h200/` tree's.
 pub struct BenchNode<'a> {
     pub line: NodeLine<'a>,
     pub time_us: Vec<Vec<u64>>,

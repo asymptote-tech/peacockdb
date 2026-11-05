@@ -36,8 +36,8 @@ cudf=25.02.02
 host=nebius-h100
 ";
 
-/// A section written before bench-rows: no batches, no load, no peak.
-const LEGACY: &str = "\
+/// A section without batches, load or peak, as the `h200/` tree's are.
+const UNBATCHED: &str = "\
 GpuUnload
   time_us=[[149]] total_us=149
   GpuNestedLoopJoin: join_type=Inner, lanes=1, batches=multiple
@@ -143,14 +143,14 @@ fn a_timed_section_gives_its_load_execute_total_and_peak() {
     put(
         &root,
         "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q1", LEGACY), ("q3", TIMED)],
+        &[("q1", UNBATCHED), ("q3", TIMED)],
     );
     let html = page(root, &[("tpch", "q1"), ("tpch", "q3")]);
     assert_eq!(
         row(&html, "q3", "tp1_single"),
         ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00"]
     );
-    // The total links to the section's header: line 1 is q1's, then LEGACY's 14 lines.
+    // The total links to the section's header: line 1 is q1's, then UNBATCHED's 14 lines.
     let href = section_href(
         "benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
         16,
@@ -162,12 +162,12 @@ fn a_timed_section_gives_its_load_execute_total_and_peak() {
 }
 
 #[test]
-fn a_legacy_section_derives_load_and_shows_no_peak() {
-    let root = tree("legacy");
+fn an_h200_section_derives_load_and_shows_no_peak() {
+    let root = tree("h200-shape");
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q1", LEGACY)],
+        &[("q1", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q1")]);
     // load (766 + 849) µs, execute 2321 − 1615.
@@ -239,7 +239,7 @@ fn devices_sit_side_by_side_and_a_case_one_lacks_is_absent() {
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q6", LEGACY)],
+        &[("q6", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
     let h100 = html.find(">h100-80gb-hbm3</th>").expect("an h100 column");
@@ -276,7 +276,7 @@ fn a_directory_without_benchmark_files_is_no_column() {
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q1", LEGACY)],
+        &[("q1", UNBATCHED)],
     );
     std::fs::create_dir_all(root.join("duckdb/tpch.sf40")).unwrap();
     std::fs::write(root.join("duckdb/tpch.sf40/duckdb.tsv"), "q1\t1\n").unwrap();
@@ -291,16 +291,16 @@ fn rows_follow_the_main_list_then_modes_in_order() {
     put(
         &root,
         "h200/tpch.sf40/tp4_sized.benchmark.txt",
-        &[("q1", LEGACY)],
+        &[("q1", UNBATCHED)],
     );
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
         &[
-            ("aggregate-groupby", LEGACY),
-            ("q1", LEGACY),
-            ("q6", LEGACY),
-            ("unlisted", LEGACY),
+            ("aggregate-groupby", UNBATCHED),
+            ("q1", UNBATCHED),
+            ("q6", UNBATCHED),
+            ("unlisted", UNBATCHED),
         ],
     );
     let html = page(
@@ -353,7 +353,7 @@ fn the_page_is_the_same_twice() {
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q3", LEGACY)],
+        &[("q3", UNBATCHED)],
     );
     let pairs = order(&[("tpch", "q3")]);
     let first = render_benchmark_report(&root, &pairs, &[]);
@@ -372,7 +372,7 @@ fn an_extra_table_follows_the_datasets() {
     put(
         &root,
         "h200/tpch.sf40/tp1_single.benchmark.txt",
-        &[("q1", LEGACY)],
+        &[("q1", UNBATCHED)],
     );
     let extra = ReportTable {
         id: "fused".to_string(),
@@ -414,5 +414,24 @@ fn section_href_names_the_line() {
         ),
         "https://github.com/asymptote-tech/peacockdb/blob/master/testdata/benchmark-results/\
          h200/tpch.sf40/tp1_single.benchmark.txt#L29"
+    );
+}
+
+/// One query twice in one file is refused naming both lines, never shown as whichever is last.
+#[test]
+fn a_query_with_two_sections_in_one_file_is_refused() {
+    let root = tree("twice");
+    let rel = "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt";
+    put(&root, rel, &[("q3", TIMED), ("q3", TIMED)]);
+    let render = std::panic::catch_unwind(|| render_benchmark_report(&root, &[], &[]));
+    let _ = std::fs::remove_dir_all(&root);
+    let panic = render.expect_err("a file holding q3 twice rendered");
+    let message = panic
+        .downcast_ref::<String>()
+        .expect("a formatted panic message");
+    let second = 2 + TIMED.lines().count();
+    assert!(
+        message.contains(&format!("q3 has two sections, at lines 1 and {second}")),
+        "{message}"
     );
 }

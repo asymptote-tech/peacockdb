@@ -223,6 +223,29 @@ cudf=25.02.02
 host=computeinstance-e00e6yena4nzjgaym0
 ```
 
+## Review round 1 (PR #197)
+
+- **The new checks could not fail on the committed tree**, which is `h200/`'s alone. They are now
+  `section_problem` (a timed section's arithmetic) and `rows_problem` (the batches and the seven
+  trailer keys), both in `tests/test_corpus_goldens/benchmark_checks.rs` and both returning
+  `Result`. The committed-tree tests in `benchmark.rs` call them. The H100's q3 section from
+  Task 5 is a literal there (`TIMED`; its `partition_groups` lists cut to their ends). It passes,
+  and five mutations of it are refused: `load_us` +1, `execute_us` +1, `peak_bytes` one byte below
+  lineitem's batch, orders' `batch_bytes` entry gone, and `prefill_us` deleted (which arithmetic
+  alone passes). Shown red by flipping a check: `peak < largest / 2` failed
+  `a_peak_below_a_batch_is_refused`, and dropping `prefill_us` from `ROWS_KEYS` failed
+  `a_section_without_prefill_us_is_refused`. Both were restored.
+- **The report page** panics on one query twice in one file, naming both lines
+  (`a_query_with_two_sections_in_one_file_is_refused`, red first). The device-list lookup in
+  `cells` says why its first match is the only one.
+- **Names state the fact, not the history:** `NEW` became `TIMED`, `LEGACY` became `UNBATCHED`,
+  and the `legacy` and `new` test names became `h200` and `timed` ones. "Written before
+  bench-rows" became "written before the harness wrote batches and the load". The
+  `benchmark_run.rs` fixture is in the current shape (batches, seventeen keys).
+- Gates: `--lib` 952 passed, 2 ignored; `test_corpus_goldens` 56; the full rust-only suite exit 0;
+  cost-report 49 + 32; `--features gpu` compiles with no warnings. Recount: cpu 3460, grand
+  total 7778 (Rust 6009).
+
 ## VM time
 
 | VM | start (UTC) | stop (UTC) | hours | why |

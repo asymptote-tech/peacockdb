@@ -1,12 +1,10 @@
 //! The benchmark record's text: the plan tree, and what each node's calls cost.
 //!
 //! A sibling of [`run_text`](super::run_text), not a mode of it: the two answer different
-//! questions of one tree and are written by different runs into different files. They
-//! share the node line by calling one function, not by a renderer growing a flag.
-//!
-//! Beside the times go the chosen run's `batch_rows` and `batch_bytes`, written by the
-//! execution golden's own list renderer: query-fuser sizes how many queries run at once from
-//! the bytes a query's batches hold, and only the timed run says what they were at sf40.
+//! questions of one tree, written by different runs into different files, and share the node
+//! line and the batch lists by calling one function each. The chosen run's `batch_rows` and
+//! `batch_bytes` go beside the times because query-fuser sizes a batch of queries from the
+//! bytes they hold, and only the timed run says what those were at sf40.
 //!
 //! Its tests are the driver's: rendering takes a run, and the mock backend is there.
 
