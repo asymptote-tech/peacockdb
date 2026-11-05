@@ -6,6 +6,8 @@ use std::path::Path;
 
 use futures::FutureExt;
 
+use super::benchmark_trailer::TRAILER_KEYS;
+use super::benchmark_tree::parse_benchmark_section;
 use super::provenance::fields;
 use super::{
     CaseOutcome, FAILED, Provenance, Regeneration, Resume, data_dir_for, merge_section,
@@ -55,26 +57,28 @@ pub(crate) async fn measure_into<T>(
     outcome
 }
 
-/// Whether `query`'s section was measured under `provenance`: its trailer ends with the five
-/// as this run would write them. A failed case's record has no trailer, so it is run again,
-/// and so is a section another card, driver, CUDA, cuDF or host measured.
+/// Whether `query`'s section was measured by this harness under `provenance`: a timed section
+/// whose trailer is `TRAILER_KEYS` in order, the five with this run's values, and whose every
+/// node carries its batches. A failed case's record is run again, and so is a section another
+/// card, driver, CUDA, cuDF or host measured, or an older binary wrote under this one.
 fn holds_measured(path: &Path, query: &str, provenance: &Provenance) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
-    let ours: Vec<String> = fields(provenance)
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect();
     ordered_sections(&text)
         .into_iter()
         .filter(|(name, _)| name == query)
         .any(|(_, body)| {
-            body.split_once("--- run ---\n")
-                .is_some_and(|(_, trailer)| {
-                    let lines: Vec<String> = trailer.lines().map(str::to_string).collect();
-                    lines.ends_with(&ours)
-                })
+            parse_benchmark_section(&body).is_some_and(|section| {
+                let keys: Vec<&str> = section.trailer.iter().map(|(key, _)| *key).collect();
+                let five = &section.trailer[section.trailer.len().saturating_sub(5)..];
+                keys == TRAILER_KEYS
+                    && five == fields(provenance)
+                    && section
+                        .nodes
+                        .iter()
+                        .all(|node| node.batch_rows.is_some() && node.batch_bytes.is_some())
+            })
         })
 }
 

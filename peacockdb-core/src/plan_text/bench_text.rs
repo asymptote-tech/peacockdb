@@ -1,18 +1,18 @@
 //! The benchmark record's text: the plan tree, and what each node's calls cost.
 //!
 //! A sibling of [`run_text`](super::run_text), not a mode of it: the two answer different
-//! questions of one tree and are written by different runs into different files. They
-//! share the node line by calling one function, not by a renderer growing a flag.
-//!
-//! Rows and bytes are deliberately absent — a correctness fact carried elsewhere, and
-//! repeating it here would make this file diff on a data change unrelated to time.
+//! questions of one tree, written by different runs into different files, and share the node
+//! line and the batch lists by calling one function each. The chosen run's `batch_rows` and
+//! `batch_bytes` go beside the times because query-fuser sizes a batch of queries from the
+//! bytes they hold, and only the timed run says what those were at sf40.
 //!
 //! Its tests are the driver's: rendering takes a run, and the mock backend is there.
 
 use std::fmt::Write as _;
 
-use super::node_text::{join_parts, node_line_parts};
-use crate::executor::{Measured, Measurements};
+use super::LOAD_NODE;
+use super::node_text::{join_parts, lanes_of, node_line_parts};
+use crate::executor::{Measured, Measurements, RunReport};
 use crate::executor::{PlanIndex, ROOT};
 use crate::plan::GpuNode;
 
@@ -34,17 +34,22 @@ fn call_us(call: &Option<Measured>) -> u64 {
 }
 
 /// `root` as it was timed: one node per line with the microseconds its calls spent on the
-/// device beneath it.
-pub(crate) fn render_timings(root: &dyn GpuNode, times: &Measurements) -> String {
+/// device beneath it, and the batches `report`, the same run, says it emitted.
+pub(crate) fn render_timings(
+    root: &dyn GpuNode,
+    times: &Measurements,
+    report: &RunReport,
+) -> String {
     let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
     let mut text = String::new();
-    render_node(&index, times, ROOT, 0, &mut text);
+    render_node(&index, times, report, ROOT, 0, &mut text);
     text
 }
 
 fn render_node(
     index: &PlanIndex<'_>,
     times: &Measurements,
+    report: &RunReport,
     node: usize,
     depth: usize,
     text: &mut String,
@@ -56,16 +61,19 @@ fn render_node(
         join_parts(node_line_parts(index.nodes[node].node))
     );
     // Lanes outermost and calls within, the nesting `batch_rows` and `partition_groups`
-    // use, so a reader comparing this file against the execution golden compares index for
-    // index rather than by counting brackets.
+    // use. `time_us` is by driving lane and call, the batches by output lane and batch: an
+    // accumulator makes many calls and emits one batch.
+    let batches = &report.emitted[node];
     let _ = writeln!(
         text,
-        "{indent}  time_us={} total_us={}",
-        lanes_of(times, node),
+        "{indent}  time_us={} total_us={} batch_rows={} batch_bytes={}",
+        time_lanes(times, node),
         total_of(times, node),
+        lanes_of(batches, |batch| batch.rows),
+        lanes_of(batches, |batch| batch.bytes as u64),
     );
     for child in &index.nodes[node].children {
-        render_node(index, times, *child, depth + 1, text);
+        render_node(index, times, report, *child, depth + 1, text);
     }
 }
 
@@ -74,7 +82,7 @@ fn render_node(
 /// A lane the node was never driven on renders `[]` rather than being left out: a routing
 /// node the driver answers itself has as many empty lanes as it has, and dropping them
 /// would make its four lanes read as none.
-fn lanes_of(times: &Measurements, node: usize) -> String {
+fn time_lanes(times: &Measurements, node: usize) -> String {
     let rendered: Vec<String> = times
         .lanes(node)
         .iter()
@@ -90,6 +98,16 @@ fn lanes_of(times: &Measurements, node: usize) -> String {
 /// the file's own arithmetic (Σ `total_us` == `device_us`) holds by construction.
 pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
     (0..times.nodes()).map(|node| total_of(times, node)).sum()
+}
+
+/// Every load node's `total_us` added, under the same rule as `device_us`: the trailer's
+/// `load_us`. A plan with no loader (`GpuEmpty` answers from no file) loads for 0.
+pub(crate) fn timed_load_us(root: &dyn GpuNode, times: &Measurements) -> u64 {
+    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
+    (0..index.nodes.len())
+        .filter(|node| index.nodes[*node].node.name() == LOAD_NODE)
+        .map(|node| total_of(times, node))
+        .sum()
 }
 
 /// The node's whole device time: the entries above, added. A node that made no call at all

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7746 test cases — Rust 5977, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7780 test cases — Rust 6011, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3428 cases: `--lib` 931, `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3462 cases: `--lib` 955, `test_cpu_corpus` 2447, `test_corpus_goldens` 57, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -88,7 +88,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 47 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 57 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -96,9 +96,21 @@ abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's
 prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and the
 tree the indentation draws. The golden is written by the run it will later check, so a file that
 contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets the
-same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree reports
-a release build, every timed (query, mode) is enabled on a device in `corpus_cases.inc`, and the
-case list is, byte for byte, what the registry's enabled device cells for tpch and tpcds write.
+same reading, through its one reader, `parse_benchmark_section`, and each timed section through
+`section_problem`: every `total_us` is the sum of the `time_us` beside it and `device_us` the sum
+of the totals. Where a section carries them, `load_us` is the `GpuLoadParquet` totals,
+`load_us + execute_us` is `device_us`, each node's `batch_rows` and `batch_bytes` have one shape,
+and `peak_bytes` is at least every `batch_bytes` entry. Every timed section outside `h200/` must
+carry the batches and the seven keys of the load, the peak, the cache and the prefill;
+`h200/`'s own section under another device's name is refused, naming `batch_rows`. The committed
+tree is `h200/`'s alone, so the H100's q3 section is held as a literal: it passes both checks,
+and each is shown refusing it with `load_us` or `execute_us` one off, `peak_bytes` one byte below
+its largest batch, one `batch_bytes` entry gone, or `prefill_us` deleted. Every
+committed tree reports a release build, every timed (query, mode) is enabled on a device in
+`corpus_cases.inc`, and the case list is, byte for byte, what the registry's enabled device cells
+for tpch and tpcds write. `testdata/benchmark-report.html` is, byte for byte, what the trees render
+through that reader; a page that is missing or stale fails, naming its first moved line and the
+command that rewrites it.
 Every case the list declares has its section, timed or a failure's record, in every device's tree
 that holds no `cases.csv`. A tree that holds one is held to its `ok` and `wrong` rows instead:
 `h200/` is held to `h200/cases.csv`, the list it was measured from. Every device list parses.
@@ -113,7 +125,8 @@ naming its own passes; a failure's record without the five is refused even under
 temp file, a run's write path: a case that panics is recorded on one line and the next case is
 measured into the same file; a resumed run keeps the section this run's five measured, byte for
 byte and without running the case, and runs again one measured under another cuDF, one that failed
-and one never reached; a run that does not resume measures a section with this run's five again;
+and one never reached, and one under this run's five short of the batches or the load; a run
+that does not resume measures a section with this run's five again;
 the rows go in before the section, and rows the record refuses fail the case.
 `PEACOCK_BENCH_RESUME` is unset, `0` or `1`, and anything else is refused. Before any case, a
 missing dataset is refused, and a record another run wrote. The record, which lives in S3, is held
@@ -380,7 +393,7 @@ batch types, so the trait's associated types are exercised the way both engines 
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 123 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 125 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -395,7 +408,9 @@ script, every empty scatter lane dropped while a lane that owes its probe reache
 batch, a zero-row build draining like none, and the mock against its own
 script; then the measurement side: the ABI-call record indexed by the lanes a node is driven on,
 holding the backend's calls and not the driver's own, a backend that names no seq leaving every
-entry unmeasured, the timing tree rendered with what each node cost, a call without a region and
+entry unmeasured, the timing tree rendered with what each node cost, its batch tokens the
+execution golden's node for node, and its load every loader's total rather than the first one's,
+a call without a region and
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order; and a sink that
 received nothing answering one zero-row batch under its input's columns, which no node emitted
@@ -516,11 +531,33 @@ name gives a slug with a `/` or a space, or one that slugs to something else. Th
 `/proc/driver/nvidia/version` in both module flavours' wording, nothing out of a text with no
 module line, two, or one naming no release or two, and an unreadable file refused naming it
 
-| Benchmark trailer | [test_support::benchmark_trailer::tests](../peacockdb-core/src/test_support/benchmark_trailer/tests.rs) | 1 |
+| Benchmark trailer | [test_support::benchmark_trailer::tests](../peacockdb-core/src/test_support/benchmark_trailer/tests.rs) | 3 |
 |---|---|--:|
 
-the `--- run ---` trailer a section ends with: its keys in order, the five provenance keys
-last, each with the run's own value
+the `--- run ---` trailer a section ends with: its seventeen keys in order, the five provenance
+keys last, each with the run's own value; `execute_us` is `device_us` less `load_us`; the
+pinned cache's line as it prints, and the prefill's three numbers apart from `load_us`
+
+| Benchmark tree reader | [test_support::benchmark_tree::tests](../peacockdb-core/src/test_support/benchmark_tree/tests.rs) | 6 |
+|---|---|--:|
+
+`parse_benchmark_section`, the tree's one reader: a timed section with every field, two loaders
+under a join and the trailer's seventeen keys, reads its batches, its children and its load, execute and
+peak, provenance last; an `h200/` section reads with no batches and no `load_us` or `peak_bytes`,
+its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
+record are not timed; an unknown key beneath a node and a trailer key held twice are refused
+
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 14 |
+|---|---|--:|
+
+the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
+`== ` line; an `h200/`-shaped section's load derived and its peak `—`; a failure's and a marker's
+reason, and the device list's `skipped` note over both; a `wrong` row's `wrong answer #NN`; two
+devices side by side, a case one lacks `—`; a directory with no mode file is no column; rows in
+the main list's order, then by name, modes in `MODES` order; text escaped; the same page twice,
+with no temp path in it; a later task's extra table under its heading; a file holding one query
+twice refused, naming both lines; a temp tree's name taken once per process, so parallel tests
+never share one; `section_href`'s line
 
 | Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
 |---|---|--:|
@@ -1148,6 +1185,7 @@ The generator scripts live in `testdata/`.
 | `<bench>/tp1-single.cardinality.txt`, in `scripts/exec_model/testdata/goldens/` | `test_cardinality_corpus.py` with `UPDATE_CANONICAL=1` | the plan golden, `tp1-single-mini.cpu.txt`, the stats sidecar and the sf1 footers, `optimizer/cardinality.py`. One line per join: its estimate, its rows in the engine's run, the q-error | `test_cardinality_corpus` in dataset-matrix, the whole file |
 | `<bench>/<mode>.cpu.txt`, `<mode>.optimizer.txt`, `<mode>.plandiff.txt`, `<mode>.costs.txt` and `<mode>.optimizer.md`, in `scripts/exec_model/testdata/goldens/` | `scripts/exec_model/run.py`; with `--query` it rewrites only its own sections | the plan golden, the sf1 tables and sidecar, the whole optimizer, `cost_model.conf`, and pandas' byte counts. A `== <query>` section each: the optimized run in the `.cpu.txt` format plus each clustered join's `mj=`, what each rule did, the plan's diff, and both runs priced by the engine's cost function with the rules counted. The page has a `## <query>` section each, from the same report as `.optimizer.txt`: each cluster's successive orders and the dynamic filters. `.costs.txt` is not a function of the `.cpu.txt` beside it: it prices the planned run, the probe plans and the stopped runs too | nothing: generation only |
 | `cost_report.html`, in `scripts/exec_model/testdata/goldens/` | `run.py` at the end of every run, or `scripts/exec_model/cost_report.py` alone; committed with relative links | every `<bench>/<mode>.costs.txt` and `.optimizer.txt` beside it, the engine's `-mini.cost.txt` and the `<q>.duckdb_cost.txt` | the cost-report job renders it again with `--sha`, its links at the commit, and on master publishes it at `join-optimizer/` |
+| `benchmark-report.html` | `the_benchmark_report_matches_the_trees` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | every device tree under `testdata/benchmark-results/` and its `cases.csv`; the registry's row order, which is the main list's | that test, byte for byte |
 | `peacockdb-core/tests/common/corpus_benchmark_cases.inc` (source, not testdata) | `the_benchmark_cases_follow_the_registry` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | `testdata/cost-registry.csv`'s `gpu_*` columns, tpch and tpcds rows, timed at sf40 | that test, byte for byte |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
@@ -2551,11 +2589,13 @@ that stops partway is cut back to the length before it. A case that kills the pr
 segfault or an abort, writes nothing.
 
 A run measures every case it is given, whatever its file holds. `PEACOCK_BENCH_RESUME=1` makes it
-resume instead: a section whose trailer ends with this run's five is kept, its case is not run,
-and the case prints a `kept` line. A failed case, a case never reached, and one measured on
-another device, driver, CUDA, cuDF or host are run again. Use it only to finish a run that was
-cut short — preempted, or stopped by the idle watcher — with the same binary: the five do not
-name the build, so a resumed run after a rebuild keeps the old binary's numbers. `0` or unset
+resume instead: a section is kept, its case not run, and a `kept` line printed, when its trailer
+is the seventeen keys below in order with this run's five last, and its every node carries its
+batches. A failed case, a case never reached, one measured on another device, driver, CUDA, cuDF
+or host, and an older binary's section without the batches or the load are run again. Use it only
+to finish a run that was cut short — preempted, or stopped by the idle watcher — with the same
+binary: the five do not name the build, so a resumed run after a rebuild of the same format keeps
+the old binary's numbers. `0` or unset
 measures everything; any other value is refused. A captured run writes no section and keeps
 none. A resumed run's record holds only the cases it ran, and `split_record.py` refuses a record
 short of the list, so a resumed run's record is not published today.
@@ -2583,10 +2623,11 @@ a section without numbers says why. With the cache off (`pinned_host_cache_bytes
 discrete device) the cases measure from the path. A case also fails if one of its files is outside
 the prefill (`prefill: <path> was not prefilled`), or if the cache filled, fell back, reloaded or
 evicted during its rounds (`pinned cache: <f> fills, <b> fallbacks, <r> reloads, <e> evictions
-during the rounds`). After its runs a case prints two stderr lines: `[pinned-cache] <case>:` and
-the cache's counters, and `[load-bytes] <case>: compressed=<n> decoded=<n>`. `compressed` is the
-footer's compressed size of its loads' row groups over the projected columns; `decoded` is the
-bytes of the batches its loads emitted in the reported run.
+during the rounds`). After its runs a case prints one stderr line,
+`[load-bytes] <case>: compressed=<n> decoded=<n>`; the cache's counters are in its trailer
+(`pinned_cache`, under **The tree**). `compressed` is the footer's compressed size of its loads'
+row groups over the projected columns; `decoded` is the bytes of the batches its loads emitted in
+the reported run.
 
 It asserts nothing about an answer, so it can never gate a merge. Its nine harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here. The prefill's
@@ -2670,18 +2711,72 @@ trailers' `cudf=` tells them apart.
 section each. The committed H200 run is under `h200/`. A section is the plan tree with one
 line under every node:
 
-    time_us=[[22,37,40],[55,1,30]] total_us=185
+    time_us=[[22,37,40],[55,1,30]] total_us=185 batch_rows=[[6001215],[5998785]] batch_bytes=[[96019440],[95980560]]
 
-Lanes outermost, one entry per call the lane made, each entry the call's device microseconds summed
-over its output partitions; `1` where the clock rounded a region to zero, since every call opens
+`time_us` is by driving lane and call; `batch_rows` and `batch_bytes` are by output lane and
+emitted batch, as in `.cpu.txt` and from the same reported run. The two axes differ: an
+accumulator makes many calls and emits one batch. The `h200/` sections predate the two batch
+keys and carry only `time_us` and `total_us`. In `time_us`, lanes are outermost, with one entry
+per call the lane made, each entry the call's device microseconds summed over its output
+partitions; `1` where the clock rounded a region to zero, since every call opens
 one; `0` where the call crossed no ABI — the backend answered from what it held, as an accumulator
-taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`. Then a
-`--- run ---` trailer: `run_us` (the chosen execution end to end, after planning), `device_us` (Σ
-of the tree's `total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution,
-in order), `build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default
-every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated
-it, which moves the profile and not just the scale), then the five provenance keys, `device=` to
-`host=`. A failed case's section is its record instead (above). The reported execution is the
+taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`.
+
+Then a `--- run ---` trailer, one `key=value` a line, seventeen keys in this order:
+
+- `run_us`: the chosen execution end to end, after planning.
+- `device_us`: Σ of the tree's `total_us`. The gap to `run_us` is the host.
+- `load_us`: Σ of the `GpuLoadParquet` nodes' `total_us`, 0 in a plan with none. It is the
+  device-side load. The pinned cache's host IO is never in it.
+- `execute_us`: `device_us` − `load_us`.
+- `peak_bytes`: the most bytes the run's memory accountant held at once: driver-held batches
+  plus every live executor's `resident_bytes()`. It is exact for that figure. As device memory it
+  is a lower bound: it leaves out a call's scratch (no device executor measures it), cuDF and rmm
+  temporaries inside a call, pool fragmentation and the parquet reader's staging. It is at least
+  every `batch_bytes` entry of its section, since every emitted batch is held first.
+- `runs=[…]`: every measured execution, in order.
+- `build=release`.
+- `allocator=`: what `install_rmm_pool` reported. With rmm's default every cuDF intermediate is a
+  `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it, which moves the
+  profile and not just the scale.
+- `pinned_cache=`: the pinned host cache as it prints at the end of the case, nothing appended:
+  `on cap=… resident=… files=… fills=… fill_us=… fallbacks=… evictions=… reloads=… source=…`,
+  `off source=<default|session|env>`, `off integrated` or `off no-device`. Its counters are the
+  process's, cumulative.
+- `prefill_files`, `prefill_bytes`, `prefill_us`: the process's one prefill (**The prefill**,
+  above), what it read from disk and its wall time. Every section one process writes carries the
+  same three; under one process per query they are that query's. All three are `0` with the cache
+  off. There is no per-round key: a round that filled, reloaded, evicted or fell back fails its
+  case, so a timed section whose `pinned_cache` starts `on` read pinned buffers only.
+- the five provenance keys, `device=` to `host=`, always last: a resumed run keeps a section only
+  when its trailer is these seventeen with this run's five, and its nodes carry their batches.
+
+The `h200/` sections predate `load_us`, `execute_us`, `peak_bytes`, `pinned_cache` and the three
+`prefill_*` keys. Only `h200/` may lack them (`PREDATES_ROWS` in `test_corpus_goldens`); a section
+in any other tree without them is refused. One reader, `parse_benchmark_section` in
+`test_support`, reads a section in either shape: a field a section lacks reads as `None`, never as
+a derived value, and `tree_load_us()` gives an old section's load. A failed case's section is its
+record instead (above).
+
+**The page**, `testdata/benchmark-report.html`, is committed: every device tree side by side. One
+row per (dataset, query, mode) that some tree has a section for, a table per (dataset, sf), in the
+main list's order; four columns per device, by name. The test takes that order from the registry,
+which writes the list; it never reads the list's text. A timed section shows load, execute, total
+(each in ms, the total `device_us` linked to the section) and `peak_bytes` in GiB, labelled the
+accountant's peak, a lower bound on device memory. An `h200/` section's load is `tree_load_us()`
+and its peak `—`. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; where the
+device's `cases.csv` has a `skipped` row for the query, its note is shown instead, and a `wrong`
+row adds `wrong answer #NN`. Any other cell is `—`. `render_benchmark_report` in `test_support`
+writes it through `parse_benchmark_section`, with no time, host or absolute path, in
+`testdata/report.html`'s look. **A commit that changes a results tree or the registry's device
+cells regenerates the page**, since the registry gives its row order:
+
+```
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens \
+    -- the_benchmark_report_matches_the_trees
+```
+
+The same test without the variable enforces it: a page that differs from the render fails. The reported execution is the
 second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
 likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
 minimum, which would be a tree belonging to no execution. Both counts are constants in

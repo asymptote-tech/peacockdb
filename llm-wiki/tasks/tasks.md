@@ -169,7 +169,7 @@ measured alone and together on the H100. Each benchmark process prefills every c
 before its first case, and every round reads them pinned; every later H100 run records the cache
 and the prefill in the trailer (`pinned_cache=`, `prefill_files=`, `prefill_bytes=`, `prefill_us=`).
 
-### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: building
+### 4. [`bench-rows.md`](bench-rows.md) — closes no ticket — state: done — PR #197
 
 Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (device-side), `execute_us`,
 `peak_bytes`, the pinned host cache's state (`pinned_cache`) and the prefill (`prefill_files`,
