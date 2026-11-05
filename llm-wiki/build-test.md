@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7779 test cases — Rust 6010, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7780 test cases — Rust 6011, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3461 cases: `--lib` 955, `test_cpu_corpus` 2447, `test_corpus_goldens` 56, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3462 cases: `--lib` 955, `test_cpu_corpus` 2447, `test_corpus_goldens` 57, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -88,7 +88,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 56 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 57 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -125,7 +125,8 @@ naming its own passes; a failure's record without the five is refused even under
 temp file, a run's write path: a case that panics is recorded on one line and the next case is
 measured into the same file; a resumed run keeps the section this run's five measured, byte for
 byte and without running the case, and runs again one measured under another cuDF, one that failed
-and one never reached; a run that does not resume measures a section with this run's five again;
+and one never reached, and one under this run's five short of the batches or the load; a run
+that does not resume measures a section with this run's five again;
 the rows go in before the section, and rows the record refuses fail the case.
 `PEACOCK_BENCH_RESUME` is unset, `0` or `1`, and anything else is refused. Before any case, a
 missing dataset is refused, and a record another run wrote. The record, which lives in S3, is held
@@ -2588,11 +2589,13 @@ that stops partway is cut back to the length before it. A case that kills the pr
 segfault or an abort, writes nothing.
 
 A run measures every case it is given, whatever its file holds. `PEACOCK_BENCH_RESUME=1` makes it
-resume instead: a section whose trailer ends with this run's five is kept, its case is not run,
-and the case prints a `kept` line. A failed case, a case never reached, and one measured on
-another device, driver, CUDA, cuDF or host are run again. Use it only to finish a run that was
-cut short — preempted, or stopped by the idle watcher — with the same binary: the five do not
-name the build, so a resumed run after a rebuild keeps the old binary's numbers. `0` or unset
+resume instead: a section is kept, its case not run, and a `kept` line printed, when its trailer
+is the seventeen keys below in order with this run's five last, and its every node carries its
+batches. A failed case, a case never reached, one measured on another device, driver, CUDA, cuDF
+or host, and an older binary's section without the batches or the load are run again. Use it only
+to finish a run that was cut short — preempted, or stopped by the idle watcher — with the same
+binary: the five do not name the build, so a resumed run after a rebuild of the same format keeps
+the old binary's numbers. `0` or unset
 measures everything; any other value is refused. A captured run writes no section and keeps
 none. A resumed run's record holds only the cases it ran, and `split_record.py` refuses a record
 short of the list, so a resumed run's record is not published today.
@@ -2746,7 +2749,7 @@ Then a `--- run ---` trailer, one `key=value` a line, seventeen keys in this ord
   off. There is no per-round key: a round that filled, reloaded, evicted or fell back fails its
   case, so a timed section whose `pinned_cache` starts `on` read pinned buffers only.
 - the five provenance keys, `device=` to `host=`, always last: a resumed run keeps a section only
-  when its trailer ends with this run's five.
+  when its trailer is these seventeen with this run's five, and its nodes carry their batches.
 
 The `h200/` sections predate `load_us`, `execute_us`, `peak_bytes`, `pinned_cache` and the three
 `prefill_*` keys. Only `h200/` may lack them (`PREDATES_ROWS` in `test_corpus_goldens`); a section

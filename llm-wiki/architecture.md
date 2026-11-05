@@ -857,9 +857,9 @@ the driver-held in-flight batches plus Σ cached `resident_bytes()` over live ex
 Per call: pre-check `resident + scratch_bytes(rows, bytes)` against the budget; execute; remove
 consumed inputs, add outputs at actual `byte_size()`, refresh that one executor's figure, and
 post-check. The three calls that consume their executor skip the post-call read and forget the
-slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is measured — the
-CPU directly, a device through RMM hooks — so model quality is observable and under-estimates
-are recorded with their magnitude.
+slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is measured on the
+CPU backend, so model quality is observable there and under-estimates are recorded with their
+magnitude. No device executor measures it (`None`), so a device under-estimate goes unrecorded.
 
 Four things in `executor/driver/accounting.rs` are load-bearing.
 

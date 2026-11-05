@@ -254,6 +254,21 @@ host=computeinstance-e00e6yena4nzjgaym0
   already taken in the process (a static set; `a_tree_name_taken_twice_panics`, red first).
   `--lib` 953 passed, 2 ignored (955). Recount: cpu 3461, grand total 7779 (Rust 6010).
 
+## Completeness (2026-11-05)
+
+- `holds_measured` kept any section whose trailer ended with this run's five, so under
+  `PEACOCK_BENCH_RESUME=1` an older binary's section on the same host (the H100's q1, q6 and q8)
+  was kept and refused only later. It now keeps a section only when it parses as timed, its
+  trailer's keys are `TRAILER_KEYS` (the seventeen `run_section` writes, in order;
+  `trailer_names_its_provenance` holds the const to the writer) with this run's five, and every
+  node carries `batch_rows` and `batch_bytes`.
+- `a_section_short_of_the_batches_or_the_load_is_measured_again` (red first: the older binary's
+  section was `Held`) covers an older binary's shape, a full trailer with no batches, and batches
+  with no `load_us`. Each half was flipped once: the key check weakened to the five kept
+  `no-load`, and the node check removed kept `no-batches`.
+- Full rust-only suite exit 0 (`--lib` 953 passed, 2 ignored; `test_corpus_goldens` 57). Recount:
+  cpu 3462, grand total 7780 (Rust 6011).
+
 ## VM time
 
 | VM | start (UTC) | stop (UTC) | hours | why |

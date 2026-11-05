@@ -11,6 +11,28 @@ use super::provenance::fields;
 use super::{BUILD, Provenance};
 use crate::executor::{PinnedCache, PrefillStats};
 
+/// The keys `run_section` writes, in order, the five provenance keys last. A resumed run keeps a
+/// section only when its trailer is exactly these.
+pub(crate) const TRAILER_KEYS: [&str; 17] = [
+    "run_us",
+    "device_us",
+    "load_us",
+    "execute_us",
+    "peak_bytes",
+    "runs",
+    "build",
+    "allocator",
+    "pinned_cache",
+    "prefill_files",
+    "prefill_bytes",
+    "prefill_us",
+    "device",
+    "driver",
+    "cuda",
+    "cudf",
+    "host",
+];
+
 /// What the chosen run cost, as the trailer reports it.
 pub(crate) struct RunTotals {
     pub(crate) run_us: u64,

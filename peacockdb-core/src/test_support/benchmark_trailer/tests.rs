@@ -1,7 +1,7 @@
 use crate::executor::{PinnedCache, PinnedCacheSource, PinnedCacheState, PrefillStats};
 use crate::test_support::Provenance;
 
-use super::{RunTotals, run_section};
+use super::{RunTotals, TRAILER_KEYS, run_section};
 
 fn provenance() -> Provenance {
     Provenance {
@@ -67,6 +67,10 @@ fn trailer_names_its_provenance() {
             "host"
         ],
         "{trailer}"
+    );
+    assert_eq!(
+        keys, TRAILER_KEYS,
+        "the keys a resumed run holds a section to"
     );
     for line in [
         "pinned_cache=off source=env",
