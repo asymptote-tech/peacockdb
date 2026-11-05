@@ -734,3 +734,5 @@ target dir hold it). Freeing that shared disk is the human's.
   - tpch's `cross_join` (125 rows) is 32 ms, nearly all floor.
 - **Counts:** `--lib` 994 (`--list`): two more `benchmark_section` tests, the row now 8. cpu 3509,
   grand total 7883: Rust 6058, C++ 278, Python 1547.
+- completeness approved 2026-11-05; dispatch 42073894538 (17:21:54Z; its GPU Tests (nebius-gpu) is the plan's L40S run), PR run 42073903744.
+- done 2026-11-05: dispatch 42073894538 and PR run 42073903744 green (GPU Tests (nebius-gpu) included).
