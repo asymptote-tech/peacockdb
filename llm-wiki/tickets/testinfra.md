@@ -63,20 +63,16 @@ the `s3-datasets` comment says so. Only (a) is open.
 
 <a id="t306"></a>
 ### #306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail
-The DuckDB oracle compares a `no_sort` line row by row (`same_sequence` in
-`test_support/duckdb_oracle.rs`), with no tie rule. Rows that tie on every `ORDER BY` key may come
-in either order, and each engine is right. So two correct answers fail as different.
+`same_sequence` in `test_support/duckdb_oracle.rs` compares a `no_sort` line row by row, with no
+tie rule, so two engines that order tied rows differently both fail, though each is right.
 
-Found at sf40, H100, tp1_single (sf40-baseline). Both sides hold the same rows; only tied rows
-swap:
+Found at sf40, H100, tp1_single (sf40-baseline). Both sides hold the same rows; only rows tied on
+every `ORDER BY` key swap (rows counted from 1):
 
-- tpcds q18 (`ORDER BY ca_country NULLS FIRST, ca_state, ca_county, i_item_id LIMIT 100`): the two
-  `AAAAAAAAAACJAAAA` rows of one rollup group tie on all four keys. The device has `agg1` 22 then
-  16, and DuckDB 16 then 22, at rows 23/24 (and 60/61 likewise). The 100 rows agree as a set.
-- tpcds q73 (`ORDER BY cnt DESC, c_last_name`): the two `Hamilton` rows with `cnt` 5 swap at rows
-  15/16 (Nicholas, Harry). The rows agree as a set.
+- tpcds q18 (`… LIMIT 100`): the `AAAAAAAAAACJAAAA` pair at 24/25 and the `AAAAAAAAAAHHAAAA`
+  pair at 61/62, each a rollup group whose other keys are null.
+- tpcds q73 (`ORDER BY cnt DESC, c_last_name`): the Hamilton pair at 16/17 (Nicholas, Harry) and
+  the Jones pair at 22/23 (Cynthia, Robert).
 
-At sf1 no such answer had a tie, which `same_sequence`'s comment records (2026-10-20). Both rows
-are `wrong` with this ticket in `testdata/benchmark-results/h100-80gb-hbm3/cases.csv` until the
-oracle accepts a permutation of tied rows. Then they go back to `ok`. The fix needs the sort
-keys, which the oracle does not know today.
+Both rows are `wrong #306` in the H100's `cases.csv` until the oracle accepts a permutation of
+tied rows. The fix needs the sort keys, which the oracle does not hold today.

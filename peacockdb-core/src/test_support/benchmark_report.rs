@@ -1,13 +1,10 @@
 //! The benchmark report page, `testdata/benchmark-report.html`: every device tree under
-//! `benchmark-results/` side by side, through the tree's one reader; build-test.md, **The page**.
+//! `benchmark-results/` side by side, through the tree's one reader. Its rules are build-test.md's
+//! **The page**.
 //!
-//! - A device is a directory holding a `<ds>.sf<sf>/<mode>.benchmark.txt` for one of `MODES`;
-//!   one row per (dataset, sf, query, mode) some device has a section for.
-//! - A timed cell is load, execute, total and peak; without `load_us`, the load is derived and the
-//!   peak `—`. A load read without the pinned host cache (`pinned_cache` off, or no such line) is
-//!   marked `unpinned`. Any other cell spans the four: the list's `skipped` note, the reason, or `—`.
-//! - A DuckDB tree holds `<ds>.sf<sf>/duckdb.tsv`: one column after the devices, its warm time on
-//!   every mode's row of a query its file holds.
+//! - A device is a directory holding a `<ds>.sf<sf>/<mode>.benchmark.txt` for one of `MODES`.
+//! - A timed cell is load, execute, total and peak; any other cell spans the four.
+//! - A DuckDB tree holds `<ds>.sf<sf>/duckdb.tsv`: one column after the devices.
 //! - No time, no absolute path, and no host but a DuckDB file's own: the same trees, same bytes.
 
 #[cfg(test)]
@@ -343,7 +340,7 @@ fn dataset_table(
         let _ = write!(html, "<th colspan=\"4\">{}</th>", escape(&device.name));
     }
     for duckdb in duckdbs {
-        let _ = write!(html, "<th rowspan=\"1\">{}</th>", escape(&duckdb.name));
+        let _ = write!(html, "<th>{}</th>", escape(&duckdb.name));
     }
     html.push_str("</tr>\n<tr>");
     for _ in devices {
@@ -449,7 +446,8 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
     format!("<td colspan=\"4\" class=\"{class}\">{text}</td>")
 }
 
-/// A DuckDB tree's cell for a row: its time, linked to its line, or `failed`, or `—`.
+/// A DuckDB tree's cell for a row: its time, linked to its line, or `failed`, or `—`. A time
+/// whose warm verdict is not `yes` says what it was: it is not the warm protocol's.
 fn duckdb_cell(place: &Place, duckdb: &Duckdb) -> String {
     let (dataset, sf) = (&place.dataset.1, &place.sf.1);
     let found = duckdb
@@ -473,8 +471,12 @@ fn duckdb_cell(place: &Place, duckdb: &Duckdb) -> String {
             );
             // Rows start on the file's third line, after the preamble and the column line.
             let href = section_href(&rel, index + 3);
+            let cold = match row.warm.as_str() {
+                "yes" => String::new(),
+                warm => format!(" <span class=\"missing\">not warm: {}</span>", escape(warm)),
+            };
             format!(
-                "<td class=\"n\"><a href=\"{}\">{}</a></td>",
+                "<td class=\"n\"><a href=\"{}\">{}</a>{cold}</td>",
                 escape(&href),
                 escape(&format!("{ms:.1}"))
             )

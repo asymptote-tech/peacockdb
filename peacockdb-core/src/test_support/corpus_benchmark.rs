@@ -113,21 +113,14 @@ struct Run {
     regions: Vec<Region>,
 }
 
-/// Time `query` at `mode`.
+/// Time `query` at `mode`, the mode as the case list spells it (`tp4_sized`); `mode_named`
+/// panics naming the five when it is not one of them.
 ///
-/// Takes the mode as its macro spelling (`tp4_sized`) rather than a `&Mode`, so a
-/// case-list line and a call site read alike; `mode_named` resolves it and panics naming
-/// the five when it is not one of them.
-///
-/// A plain run goes through `measure_into`: a case that panics is recorded in its section and
-/// then fails, so the run goes on to the next, and under `PEACOCK_BENCH_RESUME=1` a section
-/// this run's device, driver, CUDA, cuDF and host measured is kept and its case not run. A
-/// captured run writes no section, so it measures every case and a panic is only a panic.
-///
-/// A plain run under `PEACOCK_BENCH_CASE_TIMEOUT_S` is watched: past it the case's section
-/// records the timeout and the process exits. Under `PCK_WRITE_GPU_RESULT` a measured case
-/// records the chosen run's answer in `gpu-result.txt` at its sf, which the sf40 answer check
-/// holds to DuckDB's.
+/// A plain run goes through `measure_into`: a panicking case is recorded in its section, then
+/// fails, and the run goes on. It keeps this run's section under `PEACOCK_BENCH_RESUME=1`, records
+/// a timeout past `PEACOCK_BENCH_CASE_TIMEOUT_S`, and writes the chosen answer under
+/// `PCK_WRITE_GPU_RESULT`. A captured run writes no section. The rules: build-test.md,
+/// "Corpus benchmarks".
 pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     let mode = mode_named(mode);
     let what = format!("{dataset}/{query} at {} on a device", mode.name);

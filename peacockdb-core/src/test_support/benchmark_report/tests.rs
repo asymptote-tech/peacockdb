@@ -357,9 +357,7 @@ fn a_duckdb_tree_is_a_column_of_its_own() {
         "not a device: {html}"
     );
     let h100 = html.find(">h100-80gb-hbm3</th>").unwrap();
-    let duckdb = html
-        .find("<th rowspan=\"1\">duckdb-cpu128</th>")
-        .expect("a column");
+    let duckdb = html.find("<th>duckdb-cpu128</th>").expect("a column");
     assert!(h100 < duckdb, "after the devices: {html}");
     assert!(html.contains("<th>warm (ms)</th>"), "{html}");
     let timed = ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00", "412.0"];
@@ -377,6 +375,25 @@ fn a_duckdb_tree_is_a_column_of_its_own() {
         )),
         "{html}"
     );
+}
+
+/// A time taken with the database not resident in the page cache is not the warm protocol's: its
+/// cell says what the verdict was.
+#[test]
+fn a_duckdb_time_not_warm_says_so() {
+    let root = tree("duckdb-not-warm");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED), ("q6", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let file = root.join("duckdb-cpu128/tpch.sf40/duckdb.tsv");
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, text.replace("0\tyes\tok", "0\tpartial\tok")).unwrap();
+    let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
+    assert_eq!(row(&html, "q3", "tp1_single")[6], "412.0 not warm: partial");
+    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
 }
 
 #[test]

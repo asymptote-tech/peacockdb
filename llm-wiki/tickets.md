@@ -12,14 +12,14 @@ most 25 characters and is what `scripts/ticket_widget.py` shows beside the numbe
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 307), one ID space across every file. 264–279
+New tickets take the next free number (currently 308), one ID space across every file. 264–279
 are reserved for chain J, whose next number is 268.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.
 
 ## Contents
 
-90 open tickets, in file order.
+91 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -32,5 +32,5 @@ are never reused, so an old reference still resolves there.
 | [`optimizer.md`](tickets/optimizer.md) | The optimizer project | 25 | #73 #101 #140 #170 #141 #139 #147 #20 #71 #19 #16 #75 #146 #158 #142 #138 #298 #299 #300 #301 #304 #291 #294 #295 #297 |
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #148 #231 #242 #248 #286 #290 #305 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
-| [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 9 | #238 #13 #196 #169 #128 #244 #260 #204 #289 |
+| [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 10 | #238 #13 #196 #169 #128 #244 #260 #204 #289 #307 |
 | [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 4 | #178 #176 #129 #306 |

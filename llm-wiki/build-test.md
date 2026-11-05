@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7879 test cases — Rust 6054, C++ 278, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7881 test cases — Rust 6056, C++ 278, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3505 cases: `--lib` 990, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3507 cases: `--lib` 992, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -112,8 +112,8 @@ of the totals. Where a section carries them, `load_us` is the `GpuLoadParquet` t
 and `peak_bytes` is at least every `batch_bytes` entry. Every timed section outside `h200/` must
 carry the batches and the seven keys of the load, the peak, the cache and the prefill;
 `h200/`'s own section under another device's name is refused, naming `batch_rows`. The committed
-tree is `h200/`'s alone, so the H100's q3 section is held as a literal: it passes both checks,
-and each is shown refusing it with `load_us` or `execute_us` one off, `peak_bytes` one byte below
+`h100-80gb-hbm3/` tree passes both checks, and a section that fails one is never committed, so
+the H100's q3 section is also held as a literal: it passes both checks, and each is shown refusing it with `load_us` or `execute_us` one off, `peak_bytes` one byte below
 its largest batch, one `batch_bytes` entry gone, or `prefill_us` deleted. Every
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, and the case list is, byte for byte, what the registry's enabled device cells
@@ -561,7 +561,7 @@ peak, provenance last; an `h200/` section reads with no batches and no `load_us`
 its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
 record are not timed; an unknown key beneath a node and a trailer key held twice are refused
 
-| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 17 |
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 18 |
 |---|---|--:|
 
 the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
@@ -573,8 +573,8 @@ the main list's order, then by name, modes in `MODES` order; text escaped; the s
 with no temp path in it; a later task's extra table under its heading; a file holding one query
 twice refused, naming both lines; a temp tree's name taken once per process, so parallel tests
 never share one; `section_href`'s line; a DuckDB tree a column of its own after the devices, its
-time on each mode's row linked to its line, `failed` and `—`, and its version, threads and host
-named in the intro
+time on each mode's row linked to its line, a time not warm saying its verdict, `failed` and `—`,
+and its version, threads and host named in the intro
 
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
 |---|---|--:|
@@ -633,7 +633,7 @@ the path, both ways; refused where two such lines disagree; and the same rule at
 has no rows, a recorded answer keeps the others: the cells are read at sf1, the benchmark's; at sf1
 a cell the registry leaves off still loses its section
 
-| DuckDB oracle | [test_support::duckdb_oracle::tests](../peacockdb-core/src/test_support/duckdb_oracle/tests.rs) | 49 |
+| DuckDB oracle | [test_support::duckdb_oracle::tests](../peacockdb-core/src/test_support/duckdb_oracle/tests.rs) | 50 |
 |---|---|--:|
 
 the grammar parsed — each order and value, `rel` taking a column name with spaces, dots and
@@ -647,9 +647,9 @@ twice, failing by name; a fingerprinted section and the fingerprint oracle each 
 other, and `duckdb_none` refusing two sections that both exist. Then `gpu: fingerprint`: parsed
 last and with `fingerprint` only, refused on the two bare oracles; a fingerprinted device section
 compared under it and failing without it, a device section of rows failing under it, and the
-cpu's fingerprinted section still refused on its line. At sf40, where no line is written, a
-device section compared by its fingerprint when it holds one and as rows when not, whatever
-the line declares. Plus the
+cpu's fingerprinted section still refused on its line. At sf40, where no line is written, the
+two sections compared by fingerprint when either holds one, the device's or DuckDB's, and as rows
+when neither does, whatever the line declares. Plus the
 `gpu-result.txt` coverage rule both ways, over a file handed in as text: a cell with no section
 and a section no cell enables each failing, and an absent file passing where no cell is
 enabled
@@ -1180,7 +1180,8 @@ sha256 matches local). Notes on the rows above:
   `calibration/<device>/tpch.sf40/`. The aws CLI it runs is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
   CI the runner's own with the `S3_*` secrets; a dev box without credentials runs it on
   shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
-  Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
+  Two scripts write the bucket: `build-test-shadgpu.sh --pull-benchmarks` through shad-gpu, and
+  `scripts/calibration/publish_record.sh` from dev, with the keys from `peacock.env`.
 - **sf40 lives on shad-gpu**, and `fetch-sf40.sh` fetches it to nebius-h100 and nebius-cpu128.
   tpch.sf40's aggregate is
   `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It was pinned from the CPU
@@ -2909,7 +2910,8 @@ the cache. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; whe
 device's `cases.csv` has a `skipped` row for the query, its note is shown instead, and a `wrong`
 row adds `wrong answer #NN`. Any other cell is `—`. After the devices, one column per DuckDB tree
 (below), `warm (ms)`: on every mode's row of a query its file holds, `ms_2nd_min` with one decimal,
-linked to its line, or `failed`; else `—`. The intro names each DuckDB file's `duckdb`, `threads`
+linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not `yes` adds
+`not warm: <verdict>`. The intro names each DuckDB file's `duckdb`, `threads`
 and `host`. `render_benchmark_report` in `test_support` writes it through `parse_benchmark_section`
 and `parse_duckdb_results`, with no time and no absolute path, in `testdata/report.html`'s look.
 **A commit that changes a results tree or the registry's device cells regenerates the page**, since
@@ -2993,7 +2995,8 @@ UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test
 
 On 2026-11-05 the list held 124 `ok`, 4 `skipped` and 2 `wrong` rows:
 
-- skipped: tpch `anti_join`, whose export's `o_comment` comes back LargeUtf8, not Utf8; tpcds
+- skipped: tpch `anti_join`, whose export's `o_comment` comes back LargeUtf8, not Utf8
+  ([#307](tickets/system-hardening.md#t307)); tpcds
   q17, q25 and q29, which tp1_single's planner refuses because their accumulators need more than
   the 2 GiB budget;
 - wrong, [#306](tickets/testinfra.md#t306): tpcds q18 and q73. Both answers hold DuckDB's rows;
@@ -3057,9 +3060,9 @@ reads a plan. tpch's three files cover all 47. No sf40 plan goldens are kept.
 **The sf40 answer check**, `every_sf40_device_answer_meets_duckdb` in `test_cpu_corpus`. It holds
 each `ok` and `wrong` row's `goldens/<ds>.sf40/gpu-result.txt` section to DuckDB's, under the
 oracle of the query's sf1 registry line. An `ok` row must meet DuckDB and a `wrong` row must still
-differ; a `skipped` row is not judged. No registry line is written for sf40, so a device section
-is compared by its fingerprint whenever it holds one: at sf40 an answer passes the cap by scale,
-whatever the sf1 line declares.
+differ; a `skipped` row is not judged. No registry line is written for sf40, so the two sections
+are compared by fingerprint whenever either holds one: at sf40 an answer passes the cap by scale,
+whatever the sf1 line declares. Near the cap DuckDB's longer floats can pass it alone.
 
 ### Wall-time C++ suites (currently unscripted)
 

@@ -659,6 +659,19 @@ fn an_sf40_section_over_the_cap_is_compared_by_its_fingerprint() {
         .expect_err("a different answer behind the fingerprint");
 }
 
+/// Near the cap DuckDB's `repr` prints longer floats than arrow-rs, so DuckDB alone can pass it:
+/// rows on the device against DuckDB's fingerprint are compared by fingerprint too.
+#[test]
+fn an_sf40_section_of_rows_meets_a_fingerprint_on_duckdb_s_side() {
+    assert_eq!(
+        compare_scaled_section(&exact(), OURS, &fp(), &KINDS),
+        Ok(())
+    );
+    let off = OURS.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
+    compare_scaled_section(&exact(), &off, &fp(), &KINDS)
+        .expect_err("a different answer behind DuckDB's fingerprint");
+}
+
 #[test]
 fn an_sf40_section_of_rows_is_compared_as_rows_under_either_line() {
     assert_eq!(compare_scaled_section(&exact(), OURS, DUCK, &KINDS), Ok(()));

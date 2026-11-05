@@ -288,15 +288,16 @@ pub(crate) fn compare_device_section(
 }
 
 /// The device's section at a scale no registry line is written for (sf40) against DuckDB's:
-/// fingerprinted exactly when it holds a fingerprint, since there the cap is passed by scale and
-/// the sf1 line's `gpu: fingerprint` says nothing about it.
+/// by fingerprint when either side holds one, since there the cap is passed by scale, and near it
+/// DuckDB's longer floats can pass it alone. The sf1 line's `gpu: fingerprint` says nothing here.
 pub(crate) fn compare_scaled_section(
     oracle: &DuckdbOracle,
     ours: &str,
     duckdb: &str,
     kinds: &[CellKind],
 ) -> Result<(), String> {
-    match fingerprint::is_fingerprint(ours) && matches!(oracle, DuckdbOracle::Compare { .. }) {
+    let either = fingerprint::is_fingerprint(ours) || fingerprint::is_fingerprint(duckdb);
+    match either && matches!(oracle, DuckdbOracle::Compare { .. }) {
         true => fingerprint::compare_over_cap(ours, duckdb, DUCKDB_FLOAT_TOLERANCE),
         false => compare_sections(oracle, ours, duckdb, kinds),
     }

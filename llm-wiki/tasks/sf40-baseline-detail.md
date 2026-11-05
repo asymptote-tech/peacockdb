@@ -443,11 +443,11 @@ Work items handed to this task:
 - **Wall time per query** (`run-gpu.sh exited … after <s> s`): 130 cases, 2389 s in all; the
   longest is tpch filter_project at 133 s. Each figure includes the container start, the prefill
   and the ten rounds. tpch q1 19; tpch q2 28; tpch q3 17; tpch q4 17; tpch q5 16; tpch q6 13; tpch q7 20; tpch q8 22; tpch q9 39; tpch q10 19; tpch q11 29; tpch q12 13; tpch q13 11; tpch q14 14; tpch q15 17; tpch q16 27; tpch q17 20; tpch q18 20; tpch q19 16; tpch q20 33; tpch q21 23; tpch q22 12; tpch aggregate_groupby 12; tpch anti_join 29 (exit 1); tpch anti_join_reorder 8; tpch cross_join 7; tpch distinct_functions 19; tpch filter_project 133; tpch hash_join 21; tpch join_int 8; tpch left_join 18; tpch left_join_fixed 18; tpch left_join_reorder 16; tpch mixed_join 17; tpch nested_limits 9; tpch nested_loop_join 7; tpch nested_loop_left_join 7; tpch rollup_distinct 30; tpch rollup_grouping 11; tpch rollup_over_join 8; tpch scan_limit 13; tpch semi_join 79; tpch semi_join_reorder 9; tpch shuffle_additive 13; tpch shuffle_additive_avg 13; tpch shuffle_stddev 13; tpch rollup_stddev 16; tpch global_stddev 11; tpcds q1 9; tpcds q2 14; tpcds q3 10; tpcds q4 46; tpcds q5 22; tpcds q6 20; tpcds q7 11; tpcds q8 12; tpcds q9 18; tpcds q10 18; tpcds q11 38; tpcds q13 13; tpcds q14 41; tpcds q15 13; tpcds q16 16; tpcds q17 7 (exit 1); tpcds q18 14; tpcds q19 13; tpcds q21 7; tpcds q22 6; tpcds q23 40; tpcds q24 19; tpcds q25 6 (exit 1); tpcds q26 12; tpcds q28 15; tpcds q29 9 (exit 1); tpcds q30 12; tpcds q31 21; tpcds q32 18; tpcds q33 19; tpcds q34 16; tpcds q35 19; tpcds q37 15; tpcds q38 20; tpcds q39 11; tpcds q40 23; tpcds q41 12; tpcds q42 10; tpcds q43 10; tpcds q45 9; tpcds q46 27; tpcds q48 15; tpcds q50 20; tpcds q52 17; tpcds q54 22; tpcds q55 12; tpcds q56 21; tpcds q58 20; tpcds q59 14; tpcds q60 24; tpcds q61 16; tpcds q62 7; tpcds q64 67; tpcds q65 22; tpcds q66 18; tpcds q68 13; tpcds q69 17; tpcds q71 17; tpcds q73 19; tpcds q74 23; tpcds q75 27; tpcds q76 18; tpcds q77 18; tpcds q78 29; tpcds q79 12; tpcds q80 24; tpcds q81 14; tpcds q82 16; tpcds q83 9; tpcds q84 9; tpcds q85 10; tpcds q87 18; tpcds q88 20; tpcds q90 9; tpcds q91 7; tpcds q92 9; tpcds q93 16; tpcds q94 9; tpcds q95 13; tpcds q96 10; tpcds q97 16; tpcds q99 11.
-- **Skips** (`status=failed`; each a `skipped` row in `cases.csv`; no ticket, per the spec):
+- **Skips** (`status=failed`; each a `skipped` row in `cases.csv`; tickets per review round 1):
 
 | dataset | query | reason |
 |---|---|---|
-| tpch | anti_join | `call failed: GpuUnload lane 0: the exported stream is not the sink's rows: … expected Utf8 but found LargeUtf8 at column index 8 (declared vs exported: 8 o_comment: Utf8 vs LargeUtf8)`. At sf40 the export's `o_comment` passes 2 GiB of string bytes and comes back as LargeUtf8. |
+| tpch | anti_join | `call failed: GpuUnload lane 0: the exported stream is not the sink's rows: … expected Utf8 but found LargeUtf8 at column index 8 (declared vs exported: 8 o_comment: Utf8 vs LargeUtf8)`. At sf40 the export's `o_comment` passes 2 GiB of string bytes and comes back as LargeUtf8. A production failure: [#307](../tickets/system-hardening.md#t307), filed in review round 1. |
 | tpcds | q17 | `this mode refuses it: invalid plan: what the accumulators hold and cannot be holding less of (2593119555 bytes) is already the whole budget (2147483648)` |
 | tpcds | q25 | the same refusal, 3146023251 bytes |
 | tpcds | q29 | the same refusal, 2593120563 bytes |
@@ -584,8 +584,11 @@ Work items handed to this task:
     (unresolved import). Mutation: always comparing rows fails the first.
   - **Two were ties under `no_sort`**: tpcds q18 (`… LIMIT 100`) and q73. Both sides hold the same
     rows: q18's 100 agree as a set at 4 dp, and q73's sorted rows have the same md5. Only rows
-    tying on every `ORDER BY` key swap: q18 at 23/24 and 60/61, the two `AAAAAAAAAACJAAAA`
-    rollup rows; q73 at 15/16, the two `Hamilton` rows with `cnt` 5. None is at q18's LIMIT edge.
+    tying on every `ORDER BY` key swap, counting rows from 1: q18 at 24/25 (the `AAAAAAAAAACJAAAA`
+    pair) and 61/62 (the `AAAAAAAAAAHHAAAA` pair), rollup groups whose other keys are null; q73 at
+    16/17 (Hamilton: Nicholas, Harry) and 22/23 (Jones: Cynthia, Robert), all with `cnt` 5. None
+    is at q18's LIMIT edge. (First written 0-based, with the second pair of each missed; corrected
+    in review round 1.)
     The tie rule is the oracle's: `no_sort` is `same_sequence`, row by row with no tie rule, and
     its own comment says no sf1 answer tied. Per the plan, that is a ticket against the oracle,
     never an operator one: **#306** in `tickets/testinfra.md`. Both rows are `wrong`, note
@@ -662,3 +665,30 @@ dispatch at `completeness approved`, which runs the same L40S list from binaries
 shipped, so it needs no build on nebius-gpu's full disk (4.9 GB free; chain K's tree and this tree's
 target dir hold it). Freeing that shared disk is the human's.
 - 2026-11-05: green (Task 12) at the reviewing commit; PR #198 (base ENS-bench-rows); reviewer round 1.
+
+## Review round 1 (2026-11-05, PR #198)
+
+- **Three stale statements reworded.** In build-test.md "the committed tree is `h200/`'s alone"
+  now says the `h100-80gb-hbm3/` tree passes both checks, so the literal is what shows them
+  refusing; `benchmark_checks.rs`' module comment likewise. "Only `--pull-benchmarks` writes the
+  bucket" now names `publish_record.sh` too.
+- **`compare_scaled_section`** compares by fingerprint when either side holds one. Before, a
+  DuckDB-only fingerprint (DuckDB's longer floats near the cap) fell to `compare_sections` and
+  read as a false `wrong`. Test: `an_sf40_section_of_rows_meets_a_fingerprint_on_duckdb_s_side`.
+  It failed first with "the section is fingerprinted (over the cap) — declare
+  duckdb_fingerprint". No committed answer was affected: the compare passed before and after.
+- **Comment caps.** `benchmark_case`'s doc is down from 15 lines to 8 and `benchmark_report.rs`'s
+  module doc from 11 to 8, each pointing at build-test.md.
+- **#307** (system-hardening): tpch `anti_join`'s LargeUtf8 export, a production refusal. It is in
+  the file's Contents and `tickets.md` (91 open; system-hardening 10; next free 308). build-test.md's
+  skip line and the skip table above name it. `cases.csv` does not: a `skipped` row's note is the
+  tree's failure reason, which `the_h100_list_is_the_lists_measured` writes, so a hand edit there
+  fails the test.
+- **#306** rewritten to the asked shape (15 lines): both tied pairs of each query, rows counted
+  from 1 — q18 24/25 and 61/62, q73 16/17 and 22/23. The Task 11 entry is corrected to match.
+- **The page.** A DuckDB time whose `warm` verdict is not `yes` adds `not warm: <verdict>`. Test:
+  `a_duckdb_time_not_warm_says_so`, which failed first. Mutation: ignoring the verdict fails it.
+  The no-op `rowspan="1"` is gone. The committed page changed by those two attributes only; every
+  DuckDB row is warm `yes`.
+- **Counts:** `--lib` 992 (`--list`), DuckDB oracle 50, report page 18. cpu 3507, grand total 7881:
+  Rust 6056, C++ 278, Python 1547.
