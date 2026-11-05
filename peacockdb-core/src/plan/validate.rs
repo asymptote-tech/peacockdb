@@ -276,7 +276,6 @@ fn hold_cycle(dag: &PlanDag<'_>, holds: Vec<usize>) -> PlanError {
     }
 }
 
-/// A sink's output has already crossed to the host, so nothing on the device can read it.
 /// A root answers once, so one given twice would answer the same rows under two ordinals.
 fn roots_are_distinct(dag: &PlanDag<'_>) -> Result<(), PlanError> {
     for (ordinal, root) in dag.roots.iter().enumerate() {
@@ -290,6 +289,7 @@ fn roots_are_distinct(dag: &PlanDag<'_>) -> Result<(), PlanError> {
     Ok(())
 }
 
+/// A sink's output has already crossed to the host, so nothing on the device can read it.
 fn sinks_are_roots(dag: &PlanDag<'_>) -> Result<(), PlanError> {
     match dag
         .nodes
