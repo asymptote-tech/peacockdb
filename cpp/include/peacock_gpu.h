@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -122,6 +123,83 @@ typedef struct PeacockRmmPoolInfo {
 ///         caller's call, and for anything being timed it is: a time taken with a
 ///         pool and one taken without differ by more than noise.
 int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info);
+
+// ---------------------------------------------------------------------------
+// The pinned host file cache
+//
+// Whole parquet files kept in cudaHostAlloc'd memory, so a scan's copy to the device is a DMA
+// from pinned pages. Process-wide, like the rmm pool: every executor in the process shares it.
+// On by default on a discrete device; off on an integrated one and with no device.
+// ---------------------------------------------------------------------------
+
+enum {
+  PEACOCK_PINNED_CACHE_ON = 0,
+  /// pinned_host_cache_bytes is 0.
+  PEACOCK_PINNED_CACHE_OFF = 1,
+  /// The device reads pageable memory itself (pageableMemoryAccess), so nothing is pinned.
+  PEACOCK_PINNED_CACHE_INTEGRATED = 2,
+  /// No CUDA device, or the query for one failed.
+  PEACOCK_PINNED_CACHE_NO_DEVICE = 3
+};
+
+/// Where the capacity came from. PEACOCK_PINNED_HOST_CACHE_BYTES wins over a set, a set over
+/// the default.
+enum {
+  PEACOCK_PINNED_CACHE_FROM_DEFAULT = 0,
+  PEACOCK_PINNED_CACHE_FROM_SESSION = 1,
+  PEACOCK_PINNED_CACHE_FROM_ENV = 2
+};
+
+/// Asks peacock_set_pinned_host_cache_bytes for the engine's default: three quarters of the
+/// smaller of host RAM and the cgroup memory limit.
+#define PEACOCK_PINNED_CACHE_DEFAULT_BYTES UINT64_MAX
+
+typedef struct PeacockPinnedCacheStats {
+  int32_t state;   ///< one of PEACOCK_PINNED_CACHE_ON..._NO_DEVICE
+  int32_t source;  ///< one of PEACOCK_PINNED_CACHE_FROM_*
+  uint64_t capacity_bytes;
+  uint64_t resident_bytes;              ///< every pinned buffer still allocated
+  uint64_t files;                       ///< files resident now
+  uint64_t fills, fill_bytes, fill_us;  ///< reads from disk into pinned memory, and their time
+  uint64_t fallbacks;  ///< scans that read their path: the file did not fit or was refused
+  uint64_t evictions, reloads;
+} PeacockPinnedCacheStats;
+
+/// Size the cache: `bytes`, or the default for PEACOCK_PINNED_CACHE_DEFAULT_BYTES. The last
+/// set in the process wins, and shrinking evicts unleased files now. The session option
+/// pinned_host_cache_bytes reaches the cache through here, before the first prefill or read.
+/// @param out  Filled with the cache after the set. Required.
+/// @return 0; non-zero when out is NULL, and -1 when PEACOCK_PINNED_HOST_CACHE_BYTES is not a
+///         byte count (the reason on stderr).
+int peacock_set_pinned_host_cache_bytes(uint64_t bytes, PeacockPinnedCacheStats* out);
+
+/// The cache's state and counters. Returns as peacock_set_pinned_host_cache_bytes does.
+int peacock_pinned_host_cache_stats(PeacockPinnedCacheStats* out);
+
+enum {
+  PEACOCK_PREFILL_OK = 0,
+  PEACOCK_PREFILL_DOES_NOT_FIT = 1,
+  PEACOCK_PREFILL_IO = 2,
+  PEACOCK_PREFILL_OFF = 3,
+  PEACOCK_PREFILL_BAD_ARGUMENT = -1
+};
+
+/// What one prefill read from disk, and the total it checked against the limit.
+typedef struct {
+  uint64_t files, bytes, us;
+  uint64_t needed, limit;
+} peacock_prefill_stats_t;
+
+/// Make every named file resident in the cache, whole, from disk. A file resident and
+/// unchanged costs nothing, so a repeat reads nothing (files = bytes = 0). Refuses before
+/// pinning anything when the total exceeds the cache's limit (DOES_NOT_FIT, with needed and
+/// limit set). The executor only carries the error: on PEACOCK_PREFILL_IO, out->files is the
+/// index into paths of the file that failed and peacock_last_error(executor) reads
+/// "<path>: <strerror>". OFF when the cache is off, integrated or without a device. A NULL
+/// executor or out, or NULL paths with n_paths > 0, is BAD_ARGUMENT, and so is
+/// PEACOCK_PINNED_HOST_CACHE_BYTES that is not a byte count (the reason in last_error).
+int peacock_pinned_cache_prefill(peacock_executor_t* executor, const char* const* paths,
+                                 size_t n_paths, peacock_prefill_stats_t* out);
 
 /// Per-node timing modes for peacock_set_node_timing.
 enum {

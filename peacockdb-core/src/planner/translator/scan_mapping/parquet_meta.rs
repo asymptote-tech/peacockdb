@@ -116,7 +116,7 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
         }
         // A projection index with no column chunk would silently make the source look
         // smaller, and bytes decide both the batch size and the lane count.
-        let mut bytes: i64 = 0;
+        let (mut bytes, mut compressed_bytes): (i64, i64) = (0, 0);
         for column in &projected {
             let chunk = group.columns().get(*column).ok_or_else(|| {
                 PlanError::Invalid(format!(
@@ -125,6 +125,7 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
                 ))
             })?;
             bytes += chunk.uncompressed_size();
+            compressed_bytes += chunk.compressed_size();
         }
         for (position, column) in projected.iter().enumerate() {
             can_be_null[position] |= nulls_possible(group.columns()[*column].statistics());
@@ -133,6 +134,7 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
             index,
             rows: group.num_rows() as u64,
             bytes: bytes as u64,
+            compressed_bytes: compressed_bytes as u64,
         });
     }
     Ok(ScanMetadata {

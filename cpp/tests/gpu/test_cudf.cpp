@@ -1,17 +1,21 @@
 #include <cudf/aggregation.hpp>
 #include <cudf/filling.hpp>
+#include <cudf/io/parquet.hpp>
 #include <cudf/reduction.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/scalar/scalar_factories.hpp>
 #include <cudf/types.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <gtest/gtest.h>
 
 #include <peacock_gpu.h>
 #include "plan_executor.h"
+#include "peacock/pinned_host_cache.h"
 #include "peacock/rmm_pool.hpp"
 
 // What a benchmark's provenance reads: a named device, and the runtime's version as
@@ -61,6 +65,29 @@ TEST(RmmPool, ReservesTheDeclaredBudget) {
   ASSERT_EQ(status.state, peacock::RmmPoolStatus::State::Installed);
   EXPECT_EQ(status.initial_bytes, peacock::pool_align_down(peacock::pool_budget_bytes(kPoolBytes)));
   EXPECT_EQ(status.maximum_bytes, status.initial_bytes);
+}
+
+TEST(PinnedHostCache, CudaAllocatorPinsHostMemory) {
+  constexpr std::size_t kBytes = 1 << 20;
+  const peacock::HostAllocator pinned = peacock::cuda_pinned_allocator();
+  void* p = pinned.allocate(kBytes);
+  ASSERT_NE(p, nullptr);
+  cudaPointerAttributes attributes{};
+  ASSERT_EQ(cudaPointerGetAttributes(&attributes, p), cudaSuccess);
+  EXPECT_EQ(attributes.type, cudaMemoryTypeHost);
+  pinned.deallocate(p, kBytes);
+}
+
+// A refused cudaHostAlloc leaves the runtime's last error set, and cuDF's next
+// cudaPeekAtLastError check would throw it from an unrelated call.
+TEST(PinnedHostCache, RefusedAllocationClearsTheCudaError) {
+  EXPECT_EQ(peacock::cuda_pinned_allocator().allocate(1ull << 50), nullptr);
+  EXPECT_EQ(cudaPeekAtLastError(), cudaSuccess);
+  const char* env = std::getenv("PEACOCK_TESTDATA_DIR");
+  const std::string customer =
+      std::string(env ? env : PEACOCK_TESTDATA_DIR) + "/tpch.minimal/customer.parquet";
+  auto options = cudf::io::parquet_reader_options::builder(cudf::io::source_info{customer}).build();
+  EXPECT_GT(cudf::io::read_parquet(options).tbl->num_rows(), 0);
 }
 
 int main(int argc, char** argv) {

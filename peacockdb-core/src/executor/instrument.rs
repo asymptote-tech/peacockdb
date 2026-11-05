@@ -1,20 +1,34 @@
-//! The process-global instrumentation switches, and the pooled allocator a measured run
-//! must be taken under.
+//! The process-global instrumentation switches, the pooled allocator a measured run must be
+//! taken under, and the pinned host file cache its loads read from.
 //!
 //! Thin wrappers over `peacockdb_ffi::raw`, here because this is the only path that calls
 //! them: the node-at-a-time executors that used to share them are gone. Nothing in a
 //! shipping query reaches this file — a run that never turns the switches on pays one
 //! relaxed load per call and nothing else.
 
+use std::ffi::{CString, c_char};
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::executor::{DeviceInfo, NodeTiming, NvtxRange, RmmPool};
+use datafusion::execution::context::SessionConfig;
+
+use crate::executor::{
+    DeviceInfo, NodeTiming, NvtxRange, PeacockOptions, PinnedCache, PinnedCacheSource,
+    PinnedCacheState, PrefillError, PrefillStats, RmmPool,
+};
 
 use peacockdb_ffi::raw::{
-    PEACOCK_NODE_TIMING_EVENTS, PEACOCK_NODE_TIMING_OFF, PEACOCK_RMM_POOL_INSTALLED,
-    PeacockDeviceInfo, PeacockRmmPoolInfo, peacock_device_info, peacock_install_rmm_pool,
-    peacock_nvtx_pop_range, peacock_nvtx_push_range, peacock_set_node_timing,
-    peacock_set_nvtx_ranges,
+    PEACOCK_NODE_TIMING_EVENTS, PEACOCK_NODE_TIMING_OFF, PEACOCK_PINNED_CACHE_DEFAULT_BYTES,
+    PEACOCK_PINNED_CACHE_FROM_DEFAULT, PEACOCK_PINNED_CACHE_FROM_ENV,
+    PEACOCK_PINNED_CACHE_FROM_SESSION, PEACOCK_PINNED_CACHE_INTEGRATED,
+    PEACOCK_PINNED_CACHE_NO_DEVICE, PEACOCK_PINNED_CACHE_OFF, PEACOCK_PINNED_CACHE_ON,
+    PEACOCK_PREFILL_DOES_NOT_FIT, PEACOCK_PREFILL_IO, PEACOCK_PREFILL_OFF, PEACOCK_PREFILL_OK,
+    PEACOCK_RMM_POOL_INSTALLED, PeacockDeviceInfo, PeacockExecutor, PeacockPinnedCacheStats,
+    PeacockPrefillStats, PeacockRmmPoolInfo, peacock_device_info, peacock_install_rmm_pool,
+    peacock_nvtx_pop_range, peacock_nvtx_push_range, peacock_pinned_cache_prefill,
+    peacock_pinned_host_cache_stats, peacock_set_node_timing, peacock_set_nvtx_ranges,
+    peacock_set_pinned_host_cache_bytes,
 };
 
 /// The current device as the CUDA runtime names it, or `None` when it has none to name.
@@ -122,4 +136,108 @@ pub(crate) fn nvtx_range(name: &str) -> NvtxRange {
 /// Closes the range [`nvtx_range`] opened; `NvtxRange`'s `Drop` is the only caller.
 pub(crate) fn nvtx_pop() {
     unsafe { peacock_nvtx_pop_range() };
+}
+
+/// Hand the session's `pinned_host_cache_bytes` to the process's cache, unset as the engine's
+/// default, and report the cache after it.
+pub(crate) fn apply_pinned_host_cache(config: &SessionConfig) -> PinnedCache {
+    let bytes = config
+        .options()
+        .extensions
+        .get::<PeacockOptions>()
+        .and_then(|options| options.pinned_host_cache_bytes)
+        .unwrap_or(PEACOCK_PINNED_CACHE_DEFAULT_BYTES);
+    let mut stats = PeacockPinnedCacheStats::default();
+    let rc = unsafe { peacock_set_pinned_host_cache_bytes(bytes, &mut stats) };
+    pinned_cache_of(rc, &stats)
+}
+
+pub(crate) fn pinned_host_cache() -> PinnedCache {
+    let mut stats = PeacockPinnedCacheStats::default();
+    let rc = unsafe { peacock_pinned_host_cache_stats(&mut stats) };
+    pinned_cache_of(rc, &stats)
+}
+
+/// -1 is the one refusal with a non-null `out`: an environment the run cannot be sized from,
+/// so nothing measured after it would mean what it says.
+fn pinned_cache_of(rc: i32, stats: &PeacockPinnedCacheStats) -> PinnedCache {
+    assert_eq!(
+        rc, 0,
+        "the pinned host cache refused PEACOCK_PINNED_HOST_CACHE_BYTES; stderr says why"
+    );
+    let state = match stats.state {
+        PEACOCK_PINNED_CACHE_ON => PinnedCacheState::On,
+        PEACOCK_PINNED_CACHE_OFF => PinnedCacheState::Off,
+        PEACOCK_PINNED_CACHE_INTEGRATED => PinnedCacheState::Integrated,
+        PEACOCK_PINNED_CACHE_NO_DEVICE => PinnedCacheState::NoDevice,
+        other => {
+            panic!("the ABI answered pinned cache state {other}, which this side does not name")
+        }
+    };
+    let source = match stats.source {
+        PEACOCK_PINNED_CACHE_FROM_DEFAULT => PinnedCacheSource::Default,
+        PEACOCK_PINNED_CACHE_FROM_SESSION => PinnedCacheSource::Session,
+        PEACOCK_PINNED_CACHE_FROM_ENV => PinnedCacheSource::Env,
+        other => {
+            panic!("the ABI answered pinned cache source {other}, which this side does not name")
+        }
+    };
+    PinnedCache {
+        state,
+        source,
+        capacity_bytes: stats.capacity_bytes,
+        resident_bytes: stats.resident_bytes,
+        files: stats.files,
+        fills: stats.fills,
+        fill_bytes: stats.fill_bytes,
+        fill_us: stats.fill_us,
+        fallbacks: stats.fallbacks,
+        evictions: stats.evictions,
+        reloads: stats.reloads,
+    }
+}
+
+/// A path is handed over as its bytes, so one that is not UTF-8 still names its file; a NUL
+/// cannot cross, and is refused before the call as that file's `Io`.
+pub(crate) fn prefill_on(
+    executor: *mut PeacockExecutor,
+    files: &[PathBuf],
+) -> Result<PrefillStats, PrefillError> {
+    let mut owned = Vec::with_capacity(files.len());
+    for path in files {
+        let text = CString::new(path.as_os_str().as_bytes()).map_err(|_| PrefillError::Io {
+            path: path.clone(),
+            error: "the path holds a NUL byte".to_string(),
+        })?;
+        owned.push(text);
+    }
+    let paths: Vec<*const c_char> = owned.iter().map(|path| path.as_ptr()).collect();
+    let mut out = PeacockPrefillStats::default();
+    let rc =
+        unsafe { peacock_pinned_cache_prefill(executor, paths.as_ptr(), paths.len(), &mut out) };
+    match rc {
+        PEACOCK_PREFILL_OK => Ok(PrefillStats {
+            files: out.files,
+            bytes: out.bytes,
+            us: out.us,
+            needed: out.needed,
+            limit: out.limit,
+        }),
+        PEACOCK_PREFILL_DOES_NOT_FIT => Err(PrefillError::DoesNotFit {
+            needed: out.needed,
+            limit: out.limit,
+        }),
+        PEACOCK_PREFILL_IO => {
+            let path = files[out.files as usize].clone();
+            let message = super::gpu_backend::last_error(executor);
+            let named = format!("{}: ", path.display());
+            let error = message.strip_prefix(&named).unwrap_or(&message).to_string();
+            Err(PrefillError::Io { path, error })
+        }
+        PEACOCK_PREFILL_OFF => Err(PrefillError::Off),
+        other => panic!(
+            "peacock_pinned_cache_prefill answered {other}: {}",
+            super::gpu_backend::last_error(executor)
+        ),
+    }
 }

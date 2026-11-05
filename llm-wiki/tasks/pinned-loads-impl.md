@@ -1037,6 +1037,8 @@ cudf::io::table_with_metadata read_scan_table(cudf::io::parquet_reader_options c
 Skip it when the Decision is `NULL_RESULT`. Then write "Task 6 skipped: NULL_RESULT" in the detail
 file and go to Task 7.
 
+**Skipped, 2026-11-05: the Decision is `NULL_RESULT`** (detail file, "Decision").
+
 **Files:**
 - Create: `cpp/src/peacock/pinned_io.h` (declarations), `cpp/src/pinned_io.cpp`
 - Modify: `cpp/CMakeLists.txt:148-169`: add `src/pinned_io.cpp` to `peacock_gpu`
