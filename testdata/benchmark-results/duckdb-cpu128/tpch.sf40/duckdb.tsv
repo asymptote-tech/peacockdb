@@ -1,4 +1,4 @@
-# duckdb=1.5.4 threads=128 host=computeinstance-e01t2mm4265y8x88ey cpu=AMD_EPYC-Genoa_Processor cores=128 memory_gib=503.7 db=/var/lib/peacock/tpch.sf40.duckdb resident_pct=100.0
+# duckdb=1.5.4 threads=128 host=computeinstance-e01t2mm4265y8x88ey cpu=AMD_EPYC-Genoa_Processor cores=128 memory_gib=503.7 db=/var/lib/peacock/tpch.sf40.duckdb resident_pct=100.0 floor_ms=30
 query	ms_2nd_min	runs_ms	workset_bytes	disk_read_bytes	warm	status
 q1	694	701,715,742,691,811,694	4099407872	0	yes	ok
 q2	272	278,296,284,272,262,277	410517504	0	yes	ok

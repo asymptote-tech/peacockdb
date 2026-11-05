@@ -32,6 +32,7 @@ fn the_shared_fixture_reads_as_expected() {
                 ("memory_gib", "1007.7"),
                 ("db", "/var/lib/peacock/tpch.sf40.duckdb"),
                 ("resident_pct", "100.0"),
+                ("floor_ms", "31"),
             ]),
             rows: vec![
                 DuckdbRow {

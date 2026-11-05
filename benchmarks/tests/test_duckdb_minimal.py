@@ -133,7 +133,10 @@ def test_results_name_version_threads_host():
         first, preamble, _, _ = results(tmp / "duckdb.tsv")
         assert first.startswith("# duckdb=1.5.4 threads="), first
         assert list(preamble) == ["duckdb", "threads", "host", "cpu", "cores", "memory_gib", "db",
-                                  "resident_pct"], preamble
+                                  "resident_pct", "floor_ms"], preamble
+        # The floor: `SELECT 1` timed as each query is, a CLI process that starts, opens the
+        # database and answers, so a reader can subtract what every time holds besides its query.
+        assert preamble["floor_ms"].isdigit(), preamble
         threads = subprocess.run([DUCKDB, "-csv", "-noheader", "-c", "SELECT current_setting('threads')"],
                                  capture_output=True, text=True, check=True).stdout.strip()
         assert preamble["threads"] == threads, (preamble, threads)

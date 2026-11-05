@@ -27,7 +27,7 @@ use super::benchmark_prefill::{
     ProcessPrefill, case_query_file, prefill_reason, rounds_were_pinned, selected_benchmark_cases,
     unprefilled,
 };
-use super::benchmark_section::{assert_dataset_present, case_timeout, measure_into, watch_case};
+use super::benchmark_section::{assert_dataset_present, case_timeout, measure_case, watch_case};
 use super::benchmark_trailer::{RunTotals, run_section};
 use super::corpus::{line_row_order, plan_at};
 use super::corpus_golden::declared_sf;
@@ -169,7 +169,9 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
     let declared = declared_for(dataset, sf, &ident);
     let watch = timeout.map(|seconds| {
         let (path, query) = (file.clone(), query.to_string());
-        let exit = || std::process::exit(1);
+        // Abort, not exit: exit runs the C++ and CUDA static destructors, which can block on the
+        // hung case's device work. The timeout's section is written before this is called.
+        let exit = || std::process::abort();
         watch_case(
             seconds,
             path,
@@ -179,24 +181,29 @@ pub(crate) async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &
             exit,
         )
     });
-    // The rows before the section: the section is what a resumed run keeps, so a crash between
-    // the two leaves the case to be measured again rather than kept with no rows.
-    let mut answer = None;
-    let append = |(rows, batches): (Vec<String>, Vec<RecordBatch>)| {
-        append_records(&rows, &meta);
-        answer = Some(batches);
+    // The rows and the answer before the section, which is what a resumed run keeps: a crash
+    // between them leaves the case to be measured again rather than kept without them.
+    let rows = |rows: &[String]| append_records(rows, &meta);
+    let answer = |batches: &[RecordBatch]| {
+        if gpu_recording() != GpuRecording::No {
+            let order = answer_order(dataset, sf, query);
+            record_gpu_result(dataset, sf, query, mode, order, batches);
+        }
     };
-    let outcome = measure_into(&file, &declared, query, &provenance, resume, case, append).await;
+    let outcome = measure_case(
+        &file,
+        &declared,
+        query,
+        &provenance,
+        resume,
+        case,
+        rows,
+        answer,
+    )
+    .await;
     drop(watch);
     match outcome {
-        CaseOutcome::Measured => {
-            if let Some(batches) = answer
-                && gpu_recording() != GpuRecording::No
-            {
-                let order = answer_order(dataset, sf, query);
-                record_gpu_result(dataset, sf, query, mode, order, &batches);
-            }
-        }
+        CaseOutcome::Measured => {}
         CaseOutcome::Held => println!(
             "{what}: kept, {} holds its section from this device, driver, CUDA, cuDF and host \
              and {RESUME_ENV}=1",

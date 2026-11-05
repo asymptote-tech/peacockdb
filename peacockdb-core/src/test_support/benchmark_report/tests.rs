@@ -328,7 +328,7 @@ fn duckdb(root: &Path, tree: &str, dataset: &str, host: &str) {
         dir.join("duckdb.tsv"),
         format!(
             "# duckdb=1.5.4 threads=128 host={host} cpu=x cores=128 memory_gib=1007.7 db=/d \
-             resident_pct=100.0\n\
+             resident_pct=100.0 floor_ms=29\n\
              query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus\n\
              q3\t412\t431,412\t100\t0\tyes\tok\n\
              q6\t-\t-\t100\t-\t-\tfailed\n"
@@ -407,11 +407,16 @@ fn the_duckdb_column_names_its_provenance() {
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let html = page(root, &[("tpch", "q3")]);
     assert!(
-        html.contains("duckdb-cpu128, tpch sf40: DuckDB 1.5.4, 128 threads, host nebius-cpu128"),
+        html.contains(
+            "duckdb-cpu128, tpch sf40: DuckDB 1.5.4, 128 threads, host nebius-cpu128, floor 29 ms"
+        ),
         "{html}"
     );
+    // What one time holds: a whole CLI process, so its floor is named for a reader to subtract.
     assert!(
-        html.contains("query wall time over warm native storage"),
+        html.contains(
+            "one DuckDB CLI process's wall time: the process started, the database opened"
+        ),
         "{html}"
     );
 }

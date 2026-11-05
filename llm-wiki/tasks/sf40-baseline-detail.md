@@ -290,6 +290,7 @@
 | nebius-h100 | 2026-11-05 12:35 | 14:14 | 1.65 | Task 10: both Nsight passes, both datasets |
 | nebius-cpu128 | 2026-11-05 14:15 | 14:40 | 0.42 | Task 11: DuckDB's corpus runs, both datasets |
 | nebius-gpu | 2026-11-05 15:29 | 15:32 | 0.05 | the L40S list: synced, disk 4.9 GB free, no build (below) |
+| nebius-cpu128 | 2026-11-05 16:56 | 17:06 | 0.17 | completeness: DuckDB's `SELECT 1` floor, one-query run per database |
 
 Totals on 2026-11-05: nebius-h100 2.97 h, nebius-cpu128 0.65 h. Both VMs were stopped softly at
 the end of each step, and both read `STOPPED` at 14:40.
@@ -693,3 +694,43 @@ target dir hold it). Freeing that shared disk is the human's.
 - **Counts:** `--lib` 992 (`--list`), DuckDB oracle 50, report page 18. cpu 3507, grand total 7881:
   Rust 6056, C++ 278, Python 1547.
 - review round 2: all findings closed; completing.
+
+## Completeness (2026-11-05, after de232200)
+
+- **The sf40 answer is recorded before the section.** Before, `benchmark_case` recorded
+  `gpu-result.txt` after `measure_into` had written the section. A recording that failed or was
+  killed left a section a resumed run keeps for ever, with no answer. Now:
+  - `benchmark_section::measure_case` (every build) runs the record's rows and then the answer
+    as `measure_into`'s `before_section`, so both land before the section, and either failing is
+    the case's failed section. `benchmark_case` calls it.
+  - Tests: `the_answer_is_recorded_before_the_section` (the answer finds no section in the file)
+    and `a_refused_answer_is_the_case_s_failure`. Both failed first, to compile, since there was
+    no device-free function to test.
+  - Mutation: recording the answer after `measure_into`, as before, fails both.
+- **The case timeout aborts.** The watch now calls `std::process::abort()`, not `exit(1)`, so no
+  C++ or CUDA static destructor runs, which could block on the hung case's device work. The
+  section is written before `expire` is called. `a_case_past_its_timeout_is_recorded_failed` now
+  reads the file from inside `expire` and finds the timeout's section there. Mutation: writing
+  the section on another thread after a delay fails it. The abort itself cannot run in a unit
+  test. `run-tests.sh` judges a SIGABRT (134) as a failed binary, exit 1, so `bench-each.sh`
+  goes on as before.
+- **DuckDB's floor.** One DuckDB time is one CLI process: it starts, opens the database and runs
+  the query. `duckdb_minimal.sh` now times `SELECT 1` through the same `run_once`, `--runs` times
+  after the timing loop, and writes the second-smallest as `floor_ms`, the `# ` line's ninth key.
+  - Test-first: `test_results_name_version_threads_host` expects the key, a whole number, and
+    failed first. The shared fixture gained `floor_ms=31`, with Rust's literal and the README
+    following. `test_results_have_the_fixtures_shape` failed until the fixture had the key.
+  - The page's note says what one time is and names each file's floor
+    (`the_duckdb_column_names_its_provenance`, which failed first). build-test.md's "The protocol"
+    gives the floors.
+  - **Measured** on nebius-cpu128, 16:56–17:06, with the synced tree (`duckdb_minimal.sh` sha256
+    agreed). A one-query run per database (`--cases` of tpch q6 and tpcds q96, no `--answers`)
+    warmed each database to 100.0% resident. tpch.sf40's floor is **30 ms** (30 31 31 30 30 31)
+    and tpcds.sf40's **36 ms** (36 37 35 36 36 36). That run's q6 was 246 ms, against 252 ms in
+    the committed file. Evidence is in `/tmp/Lsurg/sf40run/floor/`.
+  - The committed `duckdb-cpu128/<ds>.sf40/duckdb.tsv` preambles gained `floor_ms=30` and `=36`
+    from that run: same host, databases, DuckDB and script. The timing rows are untouched, and
+    the whole set was not re-run. The page was regenerated.
+  - tpch's `cross_join` (125 rows) is 32 ms, nearly all floor.
+- **Counts:** `--lib` 994 (`--list`): two more `benchmark_section` tests, the row now 8. cpu 3509,
+  grand total 7883: Rust 6058, C++ 278, Python 1547.

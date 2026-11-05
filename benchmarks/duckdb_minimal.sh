@@ -46,7 +46,8 @@
 #               this database, under the oracle's two settings (testdata/duckdb_result.py renders
 #               them); a query DuckDB refuses has no table and is still timed.
 #   --results   the timing table as TSV, for test_support's parse_duckdb_results: a `# ` line of
-#               duckdb, threads, host, cpu, cores, memory_gib, db and resident_pct, then
+#               duckdb, threads, host, cpu, cores, memory_gib, db, resident_pct and floor_ms
+#               (`SELECT 1` timed as a query is, the second-smallest of the same runs), then
 #               query, ms_2nd_min, runs_ms, workset_bytes, disk_read_bytes, warm, status.
 #   --build-only import <ds>'s database and check its row counts, then stop: no query is run.
 #
@@ -734,6 +735,18 @@ EOF
 done < "$QUERIES"
 echo
 
+# THE FLOOR — every time above is one CLI process: it starts, opens the database and runs its
+# query. `SELECT 1` timed the same way is what each time holds besides its query, which a
+# reader subtracts; it is reported, never taken off here.
+floors=""
+for i in $(seq 1 "$RUNS"); do
+  out=$(run_once "SELECT 1;" "$TIMED_PRAGMA") || fail "SELECT 1 failed against ${DB}"
+  floors="${floors}${out%% *} "
+done
+FLOOR_MS=$(printf '%s\n' $floors | sort -n | sed -n "$(( RUNS > 1 ? 2 : 1 ))p")
+echo "floor     : SELECT 1 in ${FLOOR_MS} ms, second-smallest of ${RUNS} ($floors)"
+echo
+
 # --------------------------------------------------------------------------- report
 # WARM VERDICT — from the measurement, not the intention. A run that pulled essentially
 # nothing from the block device was served from RAM whatever the global warm-up managed.
@@ -782,9 +795,10 @@ if [ -n "$RESULTS_TSV" ]; then
   threads=$("$DUCKDB" "$DB" -csv -noheader -c "${TIMED_PRAGMA} SELECT current_setting('threads');" 2>/dev/null | tail -1)
   cpu=$(awk -F': *' '/^model name/ { print $2; exit }' /proc/cpuinfo)
   {
-    printf '# duckdb=%s threads=%s host=%s cpu=%s cores=%s memory_gib=%s db=%s resident_pct=%s\n' \
+    printf '# duckdb=%s threads=%s host=%s cpu=%s cores=%s memory_gib=%s db=%s resident_pct=%s floor_ms=%s\n' \
       "$(word "${version#v}")" "$(word "$threads")" "$(word "$(hostname)")" "$(word "${cpu:-unknown}")" \
-      "$(nproc)" "$(awk -v b="$MEM_TOTAL" 'BEGIN{printf "%.1f", b/1073741824}')" "$(word "$DB")" "$RESIDENT_PCT"
+      "$(nproc)" "$(awk -v b="$MEM_TOTAL" 'BEGIN{printf "%.1f", b/1073741824}')" "$(word "$DB")" "$RESIDENT_PCT" \
+      "$FLOOR_MS"
     printf 'query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus\n'
     while IFS=$'\t' read -r qid ws best2 best2_read times verdict; do
       if [ "$best2" = "FAILED" ]; then

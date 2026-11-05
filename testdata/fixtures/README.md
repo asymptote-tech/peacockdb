@@ -24,7 +24,7 @@ comma, and a tpcds row. `parse_device_cases` in Rust and `device_cases.py` for s
 to the same literal, so a drift fails the drifting side.
 
 `duckdb-results.tsv` is DuckDB's results file (`benchmark-results/<tree>/<ds>.sf<sf>/duckdb.tsv`,
-`benchmarks/duckdb_minimal.sh --results`): the `# ` line's eight keys, the column line, an `ok` row
+`benchmarks/duckdb_minimal.sh --results`): the `# ` line's nine keys, the column line, an `ok` row
 and a `failed` row. `parse_duckdb_results` in Rust reads it to a literal, and
 `benchmarks/tests/test_duckdb_minimal.py` holds the script's output to its keys and columns. A
 script that reads the format is tested against it too, so a drift fails the drifting side.

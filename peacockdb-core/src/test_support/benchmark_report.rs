@@ -303,11 +303,12 @@ fn duckdb_intro(duckdbs: &[Duckdb]) -> String {
                         .map_or("?", |(_, v)| v.as_str())
                 };
                 format!(
-                    "{}, {dataset} sf{sf}: DuckDB {}, {} threads, host {}",
+                    "{}, {dataset} sf{sf}: DuckDB {}, {} threads, host {}, floor {} ms",
                     duckdb.name,
                     of("duckdb"),
                     of("threads"),
-                    of("host")
+                    of("host"),
+                    of("floor_ms")
                 )
             })
         })
@@ -316,8 +317,10 @@ fn duckdb_intro(duckdbs: &[Duckdb]) -> String {
         return String::new();
     }
     format!(
-        "<p>DuckDB's time is query wall time over warm native storage, the second-smallest of \
-         its runs, in ms: {}.</p>\n",
+        "<p>DuckDB's time is one DuckDB CLI process's wall time: the process started, the database \
+         opened and the query run, over warm native storage, the second-smallest of its runs, in \
+         ms. The floor is SELECT 1 timed the same way, what each time holds besides its query: \
+         {}.</p>\n",
         escape(&named.join("; "))
     )
 }

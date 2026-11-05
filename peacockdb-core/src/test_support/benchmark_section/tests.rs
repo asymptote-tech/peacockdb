@@ -1,10 +1,12 @@
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use super::{case_timeout_asked, timeout_record, watch_case};
+use super::{case_timeout_asked, measure_case, timeout_record, watch_case};
 use crate::test_support::{
-    FAILED, Provenance, Regeneration, merge_section, ordered_sections, parse_benchmark_section,
+    CaseOutcome, FAILED, Provenance, Regeneration, Resume, merge_section, ordered_sections,
+    parse_benchmark_section,
 };
 
 fn this_run() -> Provenance {
@@ -44,26 +46,30 @@ fn the_timeout_record_is_a_failed_record() {
 }
 
 /// A case still running at its timeout: its section becomes the timeout's record, the other
-/// sections of the file stay, and the watch then ends the process (here, a signal instead).
+/// sections of the file stay, and only then does the watch end the process (an abort in a
+/// benchmark run; here, the file as `expire` finds it, sent back).
 #[test]
 fn a_case_past_its_timeout_is_recorded_failed() {
     let (root, path) = scratch("past");
     let both = declared(&["q1", "q6"]);
     merge_section(&path, &both, "q1", "q1's section\n", Regeneration::Sections);
     let (expired, heard) = mpsc::channel();
+    let at_expiry = path.clone();
     let watch = watch_case(
         1,
         path.clone(),
         both,
         "q6".to_string(),
         this_run(),
-        move || expired.send(()).expect("the test listens"),
+        move || {
+            let text = std::fs::read_to_string(&at_expiry).unwrap_or_default();
+            expired.send(text).expect("the test listens");
+        },
     );
     let heard = heard.recv_timeout(Duration::from_secs(20));
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
     drop(watch);
     let _ = std::fs::remove_dir_all(&root);
-    assert_eq!(heard, Ok(()), "the watch never expired");
+    let text = heard.expect("the watch never expired");
     assert_eq!(
         ordered_sections(&text),
         vec![
@@ -117,4 +123,69 @@ fn a_case_timeout_in_other_units_is_refused() {
 #[should_panic(expected = "PEACOCK_BENCH_CASE_TIMEOUT_S=0")]
 fn a_zero_case_timeout_is_refused() {
     case_timeout_asked(Some("0"));
+}
+
+// --- what a measured case writes before its section ---------------------------------------
+
+fn q6() -> Vec<(String, Option<String>)> {
+    vec![("q6".to_string(), None)]
+}
+
+/// Recorded after the section, a killed or refused recording would leave a section a resumed run
+/// keeps for ever, with no answer to hold to DuckDB's.
+#[tokio::test]
+async fn the_answer_is_recorded_before_the_section() {
+    let (root, path) = scratch("answer-first");
+    let section_at_answer = Cell::new(None);
+    let outcome = measure_case(
+        &path,
+        &q6(),
+        "q6",
+        &this_run(),
+        Resume::No,
+        async { ("q6's section\n".to_string(), (vec![], vec![])) },
+        |_| {},
+        |_| {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            section_at_answer.set(Some(ordered_sections(&text).len()));
+        },
+    )
+    .await;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(matches!(outcome, CaseOutcome::Measured));
+    assert_eq!(
+        section_at_answer.get(),
+        Some(0),
+        "the section was written first"
+    );
+    assert_eq!(
+        ordered_sections(&text),
+        vec![("q6".to_string(), "q6's section\n".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn a_refused_answer_is_the_case_s_failure() {
+    let (root, path) = scratch("answer-refused");
+    let outcome = measure_case(
+        &path,
+        &q6(),
+        "q6",
+        &this_run(),
+        Resume::No,
+        async { ("q6's section\n".to_string(), (vec![], vec![])) },
+        |_| {},
+        |_| panic!("no sf1 registry row to read its row order from"),
+    )
+    .await;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&root);
+    match outcome {
+        CaseOutcome::Failed(reason) => assert!(reason.contains("no sf1 registry row"), "{reason}"),
+        _ => panic!("a refused answer did not fail the case"),
+    }
+    let sections = ordered_sections(&text);
+    assert_eq!(sections.len(), 1, "{text}");
+    assert!(sections[0].1.starts_with(FAILED), "{text}");
 }

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+use datafusion::arrow::array::RecordBatch;
 use futures::FutureExt;
 
 use super::benchmark_trailer::TRAILER_KEYS;
@@ -61,6 +62,38 @@ pub(crate) async fn measure_into<T>(
     outcome
 }
 
+/// A benchmark case measured into `path` through [`measure_into`], with what must precede its
+/// section run as `before_section`: the record's rows, then the chosen run's answer. A resumed
+/// run keeps the section, so neither may come after it, and a refusal of either is the case's
+/// failure, recorded in place of the section.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn measure_case(
+    path: &Path,
+    declared: &[(String, Option<String>)],
+    query: &str,
+    provenance: &Provenance,
+    resume: Resume,
+    case: impl Future<Output = (String, (Vec<String>, Vec<RecordBatch>))>,
+    rows: impl FnOnce(&[String]),
+    answer: impl FnOnce(&[RecordBatch]),
+) -> CaseOutcome {
+    let before_section = |(record, batches): (Vec<String>, Vec<RecordBatch>)| {
+        rows(&record);
+        answer(&batches);
+    };
+    measure_into(
+        path,
+        declared,
+        query,
+        provenance,
+        resume,
+        case,
+        before_section,
+    )
+    .await
+}
+
 /// A failed case's section: `FAILED` and the one-line reason, then the five.
 fn failed_record(reason: &str, provenance: &Provenance) -> String {
     let mut body = format!("{FAILED}{reason}\n");
@@ -105,9 +138,10 @@ pub(crate) struct CaseWatch {
 }
 
 /// Watch one case for `seconds`. Past them, a thread writes the case's section as
-/// [`timeout_record`] through `merge_section` and calls `expire`, which in a benchmark run ends
-/// the process: a hung case cannot be unwound, and a section saying why is all a rerun needs to
-/// skip it. Everything is held by value, since the case's own frame is the one that hangs.
+/// [`timeout_record`] through `merge_section` and then calls `expire`, which in a benchmark run
+/// aborts the process, with no destructors: a hung case cannot be unwound, and a section saying
+/// why is all a rerun needs to skip it. Everything is held by value, since the case's own frame
+/// is the one that hangs.
 #[cfg_attr(feature = "rust-only", allow(dead_code))]
 pub(crate) fn watch_case(
     seconds: u64,
