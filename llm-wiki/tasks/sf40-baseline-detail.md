@@ -335,3 +335,23 @@ inventory-based case listing). HEAD `b047597f`.
 Still `blocked(building)` at Task 8: the VMs wait on new-hosts' new block, the two VMs' disks
 (`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared. DuckDB's sf40
 database on nebius-cpu128 needs the bigger disk too.
+
+## Resume after the chain's dependencies (2026-11-05)
+
+new-hosts, pinned-loads and bench-rows are done; this branch is rebased onto bench-rows' `9e1b6bf7`.
+Three code stops were resolved (device lists onto bench-rows' check split; the case timeout and answer
+switch beside pinned-loads' switches and new-hosts' `--instance-id`; the DuckDB column beside
+bench-rows' report guards). `bench-each.sh` now refuses a run without `--instance-id` (exit 2).
+
+Work items handed to this task:
+- **`nsys_calls.py` refuses every query with a join** (accepted scope addition; pinned-loads' review):
+  its pattern at `scripts/calibration/nsys_calls.py:124` (`execute_\w+\(#(\d+) (\w+)`) does not match
+  the `join_build(#N CudfJoin …` / `join_probe` recipes master's join-backend writes, so
+  `create_nsys_profile.sh --trace` refuses q3, q8 and every join query. Map `join_build`/`join_probe`
+  onto `CudfJoin`, with a test over a join recipe. Pinned-loads derived q3/q8 by hand.
+- **The page does not mark unpinned loads** (bench-rows' signoff): every H200 load predates the pinned
+  cache; once the H100 joins the page, mark a section run with `pinned_cache=off` (or without it).
+- **The H100's stale results**: `~/peacock/peacockdb-beta/testdata/benchmark-results/h100-80gb-hbm3/`
+  holds q1/q6/q8 from an older binary and q3 from bench-rows' Task 5. A resumed run now re-measures
+  the old-format ones (`holds_measured`), but clear the directory before the first run so nothing
+  stale is pulled home.
