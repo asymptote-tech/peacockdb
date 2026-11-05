@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7746 test cases — Rust 5977, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7771 test cases — Rust 6002, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3428 cases: `--lib` 931, `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3453 cases: `--lib` 953, `test_cpu_corpus` 2447, `test_corpus_goldens` 50, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -2612,10 +2612,11 @@ a section without numbers says why. With the cache off (`pinned_host_cache_bytes
 discrete device) the cases measure from the path. A case also fails if one of its files is outside
 the prefill (`prefill: <path> was not prefilled`), or if the cache filled, fell back, reloaded or
 evicted during its rounds (`pinned cache: <f> fills, <b> fallbacks, <r> reloads, <e> evictions
-during the rounds`). After its runs a case prints two stderr lines: `[pinned-cache] <case>:` and
-the cache's counters, and `[load-bytes] <case>: compressed=<n> decoded=<n>`. `compressed` is the
-footer's compressed size of its loads' row groups over the projected columns; `decoded` is the
-bytes of the batches its loads emitted in the reported run.
+during the rounds`). After its runs a case prints one stderr line,
+`[load-bytes] <case>: compressed=<n> decoded=<n>`; the cache's counters are in its trailer
+(`pinned_cache`, under **The tree**). `compressed` is the footer's compressed size of its loads'
+row groups over the projected columns; `decoded` is the bytes of the batches its loads emitted in
+the reported run.
 
 It asserts nothing about an answer, so it can never gate a merge. Its nine harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here. The prefill's
