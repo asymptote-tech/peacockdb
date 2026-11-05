@@ -131,10 +131,104 @@
 - **Gates:** `--lib` 952 passed, 2 ignored (954); `test_corpus_goldens` 50;
   `cost-report --test test_source_formatting` 32.
 
+## Task 5: one case on the H100, end to end (2026-11-05)
+
+- **The case:** `bench_tpch_sf40_q3_tp1_single`. The registry enables q3 at `gpu_tp1_single`, and its
+  plan has three loaders (customer, orders, lineitem) under two joins, so no substitute was needed.
+- **Build:** the CPU-VM build as `build-test.md` "The CPU-VM build" gives it, from this worktree
+  with Tasks 1-4 in it: `check-build-image.sh` passed, `stage-install.sh` exit 0, no warnings.
+  **Departure:** the install came home to `~/.cache/peacock/bench-rows-install/`, not this tree's
+  `cpp/install/`, and went out with `ship --install` on that path. The local `cpp/install/` serves
+  the local gpu builds and was left alone.
+- **Run:** `G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"; $G prepare && $G ship --install ~/.cache/peacock/bench-rows-install && PCK_TEST_FILTER=bench_tpch_sf40_q3_tp1_single $G run bench && $G pull`.
+  Then the VM's `records.tsv` was removed and the H100 stopped. `prepare` exit 0 (11 min; nothing
+  to fetch). The case passed in 10 s, and `run-tests.sh bench` was green. stderr:
+  `[pinned-cache] prefill: cases=1 files=3 bytes=12051239504 us=6306272 needed=12051239504 limit=158302439424`
+  and `[load-bytes] tpch/q3 at tp1-single on a device: compressed=1694871140 decoded=6603217369`.
+- **`ship` is slow from dev:** about 300 KB/s up, so the 650 MB install took 20 min. That was most
+  of the H100's 35 min. An unchanged install ships in seconds (rsync), so ship once per build.
+- **The pulled file held four sections, not one.** The VM's
+  `testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt` still had q1, q6
+  and q8 from pinned-loads' runs (an older binary: no batches, no `load_us`), and `pull` brought
+  them home with the new q3. So the plan's whole-file grep counted 68 `time_us` lines against 16
+  `batch_bytes`. Over the q3 section alone: 16 = 16, and all seven lines, as below. Over the whole
+  file, `every_section_outside_h200_carries_batches_and_the_load` refuses it, naming
+  `q1: carries no batch_rows under GpuUnload` — the check doing its job on an old binary's output.
+  **For sf40-baseline's full H100 run:** those three old sections carry this host's own five
+  provenance keys, so a resumed run (`PEACOCK_BENCH_RESUME=1`) would keep them as measured. Remove
+  the VM's `h100-80gb-hbm3/` tree first, or run without resume.
+- **Read back** (q3 only, in a scratch `PEACOCK_TESTDATA_DIR`):
+  `every_total_us_is_the_sum_of_the_time_us_beside_it` and
+  `every_section_outside_h200_carries_batches_and_the_load` both pass. `load_us` 203448 is the
+  three loaders' 35540 + 45060 + 122848. `load_us + execute_us` = `device_us` = 249119.
+  `peak_bytes` 5948138877 (5.54 GiB) is at least the largest batch (lineitem's 5759202908). The
+  page rendered once over the scratch tree (`UPDATE_CANONICAL=1`) shows the H100 column: q3
+  tp1_single, load 203.4, execute 45.7, total 249.1 ms (linked to the section), peak ≥ 5.54 GiB.
+- **Clean-up:** both VMs `STOPPED`. The h100 file is removed from the checkout, and `git status`
+  shows nothing under `testdata/benchmark-results/`. The pulled file and the run log are kept
+  outside git in `~/.cache/peacock/bench-rows-task5/`.
+- **The section** (each `partition_groups` list elided to its first and last group):
+
+```
+== q3
+GpuUnload
+  time_us=[[118]] total_us=118 batch_rows=[[10]] batch_bytes=[[328]]
+  GpuAccumulateBatchesAndSort: by=[revenue@1 desc nulls_first, o_orderdate@2 asc nulls_last], fetch=10, lanes=1, batches=single, sorted_on=[revenue@1 desc nulls_first, o_orderdate@2 asc nulls_last]
+    time_us=[[152,20]] total_us=172 batch_rows=[[10]] batch_bytes=[[328]]
+    GpuSort: by=[revenue@1 desc nulls_first, o_orderdate@2 asc nulls_last], fetch=10, lanes=1, batches=single, sorted_on=[revenue@1 desc nulls_first, o_orderdate@2 asc nulls_last]
+      time_us=[[636]] total_us=636 batch_rows=[[10]] batch_bytes=[[328]]
+      GpuProject: exprs=[l_orderkey@0, `sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)`@3 as revenue, o_orderdate@1, o_shippriority@2], lanes=1, batches=single
+        time_us=[[2]] total_us=2 batch_rows=[[453784]] batch_bytes=[[14747980]]
+        GpuAggregateBatches: group_by=[l_orderkey@0, o_orderdate@1, o_shippriority@2], aggs=[sum(`sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)`@3) as `sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)`], final=[`sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)`@3], lanes=1, batches=single
+          time_us=[[0,583]] total_us=583 batch_rows=[[453784]] batch_bytes=[[14747980]]
+          GpuAggregate: group_by=[l_orderkey@2, o_orderdate@0, o_shippriority@1], aggs=[sum(l_extendedprice@3 * (1 - l_discount@4)) as `sum(lineitem.l_extendedprice * Int64(1) - lineitem.l_discount)`], lanes=1, batches=multiple
+            time_us=[[1646,0]] total_us=1646 batch_rows=[[453784]] batch_bytes=[[14747980]]
+            GpuHashJoin: join_type=Inner, on=[(o_orderkey@0, l_orderkey@0)], projection=[o_orderdate@1, o_shippriority@2, l_orderkey@3, l_extendedprice@4, l_discount@5], lanes=1, batches=multiple
+              time_us=[[436,24241,0]] total_us=24677 batch_rows=[[1198277]] batch_bytes=[[58266221]]
+              GpuCoalesceAllBatches: lanes=1, batches=single
+                time_us=[[0,75]] total_us=75 batch_rows=[[5835860]] batch_bytes=[[95562209]]
+                GpuHashJoin: join_type=Inner, on=[(c_custkey@0, o_custkey@1)], projection=[o_orderkey@1, o_orderdate@3, o_shippriority@4], lanes=1, batches=multiple
+                  time_us=[[96,7084,0]] total_us=7180 batch_rows=[[5835860]] batch_bytes=[[95562209]]
+                  GpuCoalesceAllBatches: lanes=1, batches=single
+                    time_us=[[0,18]] total_us=18 batch_rows=[[1200419]] batch_bytes=[[9753405]]
+                    GpuFilter: predicate=c_mktsegment@1 = BUILDING, projection=[c_custkey@0], lanes=1, batches=multiple
+                      time_us=[[519]] total_us=519 batch_rows=[[1200419]] batch_bytes=[[9753405]]
+                      GpuLoadParquet: table=customer, projections=[c_custkey@0, c_mktsegment@6], partition_groups=[[[0,…,48]]], lanes=1, batches=multiple
+                        time_us=[[35540]] total_us=35540 batch_rows=[[6000000]] batch_bytes=[[127501181]]
+                  GpuFilter: predicate=o_orderdate@2 < 1995-03-15, lanes=1, batches=multiple
+                    time_us=[[1674]] total_us=1674 batch_rows=[[29150056]] batch_bytes=[[714176372]]
+                    GpuLoadParquet: table=orders, projections=[o_orderkey@0, o_custkey@1, o_orderdate@4, o_shippriority@7], partition_groups=[[[0,…,237]]], lanes=1, batches=multiple
+                      time_us=[[45060]] total_us=45060 batch_rows=[[29245440]] batch_bytes=[[716513280]]
+              GpuFilter: predicate=l_shipdate@3 > 1995-03-15, projection=[l_orderkey@0, l_extendedprice@1, l_discount@2], lanes=1, batches=multiple
+                time_us=[[8371]] total_us=8371 batch_rows=[[129398483]] batch_bytes=[[5224463753]]
+                GpuLoadParquet: table=lineitem, projections=[l_orderkey@0, l_extendedprice@5, l_discount@6, l_shipdate@10], partition_groups=[[[900,…,1953]]], lanes=1, batches=multiple
+                  time_us=[[122848]] total_us=122848 batch_rows=[[129420290]] batch_bytes=[[5759202908]]
+--- run ---
+run_us=249880
+device_us=249119
+load_us=203448
+execute_us=45671
+peak_bytes=5948138877
+runs=[265479,251120,251474,251307,250587,249880,250096,249202,250998,250099]
+build=release
+allocator=rmm-pool initial=69.0GiB max=69.0GiB of 78.7GiB free on a discrete device
+pinned_cache=on cap=147.4GiB resident=11.2GiB files=3 fills=3 fill_us=6306227 fallbacks=0 evictions=0 reloads=0 source=default
+prefill_files=3
+prefill_bytes=12051239504
+prefill_us=6306272
+device=NVIDIA H100 80GB HBM3
+driver=580.173.02
+cuda=12.2
+cudf=25.02.02
+host=computeinstance-e00e6yena4nzjgaym0
+```
+
 ## VM time
 
 | VM | start (UTC) | stop (UTC) | hours | why |
 |---|---|---|---|---|
+| nebius-cpu128 | 2026-11-05 07:11 | 07:18 | 0.12 | Task 5: the CPU-VM build |
+| nebius-h100 | 2026-11-05 07:18 | 07:53 | 0.58 | Task 5: prepare, ship (20 min of upload), one case, pull |
 
 ## Blocked (2026-11-04)
 
@@ -166,6 +260,17 @@ inventory-based case listing). HEAD `1bdc89f3`.
   clean after it. `cargo test -p cost-report`: 49 + `test_source_formatting` 32. `--features gpu`
   compiles every target against the local rapids-cuda-12.2 env with no warnings. No C++ changed,
   so no ctest.
+
+- **Second rebase (2026-11-05)** onto pinned-loads' tip `652f521e` (the pinned host cache;
+  `[load-bytes] compressed=` now the footer's compressed size; `run-gpu.sh` requires
+  `--instance-id`). No code conflict. `build-test.md`: three hunks. The case's stderr is one
+  `[load-bytes]` line, with the cache's counters in the trailer (the code: `corpus_benchmark.rs`,
+  `benchmark_trailer.rs`), in pinned-loads' "footer's compressed size" wording. Recount: cpu 3453
+  (`--lib` 953, `test_cpu_corpus` 2447, `test_corpus_goldens` 50, `test_cost_model` 3), grand
+  total 7771 (Rust 6002, C++ 278, Python 1491). `architecture.md` merged cleanly and still agrees.
+  Re-proven: `cargo test --features rust-only -p peacockdb-core` exit 0 (`--lib` 951 passed,
+  2 ignored; `test_cpu_corpus` 2447; `test_corpus_goldens` 50), with `testdata/` clean afterwards;
+  `cargo test -p cost-report` 49 + 32.
 
 ## Blocked (2026-11-04, after the rebase)
 
