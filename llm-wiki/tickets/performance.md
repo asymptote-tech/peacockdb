@@ -14,6 +14,7 @@ These issues should be fixed on a pre-prod performance path.
 - [#248 (join parallelism gaps) three join shapes run on one lane or skewed after the rewrite](#t248)
 - [#286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips](#t286)
 - [#290 (stacked limits) a limit DataFusion pushed down and kept above becomes two adjacent `GpuLimit`s](#t290)
+- [#305 (snappy batch floor) a parquet load's Snappy decompression takes about 29 ms however few bytes it holds](#t305)
 
 <a id="t150"></a>
 ### #150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
@@ -229,3 +230,19 @@ the part scan's `GpuLimit 0..+28`, at every mode.
 pair with one `GpuLimit` whose interval is `RowInterval::over(outer, inner)`, the composition
 the limits task adds for the root fold. Test: the three examples above plan one `GpuLimit`
 each and answer as today. Their plan goldens and `nested-limits`' lose a line.
+
+
+<a id="t305"></a>
+### #305 (snappy batch floor) a parquet load's Snappy decompression takes about 29 ms however few bytes it holds
+On the H100 (tpch sf40, tp1-single, from the pinned cache) each load's decompression is one
+`nvcomp::unsnap_kernel` launch, and it takes about 29 ms whatever the load holds: q8's `supplier`
+(1.9 MB copied) 29.0 ms, q3's `customer` 29.3 ms, against 125.8 ms for q8's 4.9 GB `lineitem`.
+
+It is now the largest part of a small load: 81 % of `customer` (29.4 of 36.0 ms), and q8's four
+mid-size loads pay 119 ms of it together. The before profile shows the same 29 ms, so the cache
+did not cause it; it only stopped hiding it behind the host read.
+
+One launch decompresses every page of the load as a batch, so its time follows its slowest page,
+not its bytes. Next: the page sizes per column chunk from the footers, and the launch's per-chunk
+time. If one large page sets it, it is a writer setting in `testdata/generate_testdata.sh`, as
+#150 is. Evidence: `tasks/pinned-loads-detail.md`, "Before/after".

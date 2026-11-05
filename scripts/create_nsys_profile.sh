@@ -165,6 +165,11 @@ remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
 # Exported on the machine that captured, since `nsys export` needs the same nsys, and even
 # after a failure: a capture of the executions that did happen is the only copy of them.
 # <filter> is the test binary's own: a substring, or a name and --exact.
+# The engine's two measurement switches, set here, exported there: ssh forwards no environment.
+switches=""
+for name in PEACOCK_PINNED_HOST_CACHE_BYTES PEACOCK_SCAN_READER; do
+  [ -z "${!name:-}" ] || switches+="export $name=$(printf '%q' "${!name}")"$'\n'
+done
 remote_pass() {    # remote_pass <label> <capture rel> <record rel|""> <filter> <nsys flags…>
   local label=$1 capture_rel=$2 record_rel=$3 filter=$4; shift 4
   local flags="$*"
@@ -173,7 +178,7 @@ set -uo pipefail
 # The harness finds each dataset as <dataset>.sf<sf> under this, so the host's symlinks
 # (build-test-shadgpu.sh's run makes them) are the only dataset configuration there is.
 export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
-# The one variable that turns the harness's NVTX ranges on. It also stamps the record's
+$switches# The one variable that turns the harness's NVTX ranges on. It also stamps the record's
 # heading and stops the run publishing a .benchmark.txt: the tree belongs to the clean run,
 # and either pass would overwrite each section with times taken under a profiler.
 export PEACOCK_BENCHMARK_CAPTURE=$label

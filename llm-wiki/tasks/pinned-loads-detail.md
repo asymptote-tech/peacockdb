@@ -23,6 +23,8 @@
   reader), no VM. Notes below.
 - 2026-11-05: new-hosts done; the block lifted. Rebased onto `596261f8`, re-proven offline, then
   Task 2 Steps 3–8 on the H100 path. Notes under "Resumed after new-hosts".
+- 2026-11-05: Task 6 skipped (`NULL_RESULT`). Task 7: the CPU-VM build, the H100's filter run,
+  bench and traces, the L40S list on and off; #305 opened. Notes from "After runs" on.
 
 ## Task 1: the load breakdown
 
@@ -521,6 +523,244 @@ buffer. The cache (Tasks 3–4) and the chunked reader (Task 5) stay in; Task 6 
 pool part closes as misdiagnosed. What costs a load is the page-cache read before each copy, not the
 copy's memory kind.
 
+## Task 6 skipped: NULL_RESULT
+
+The Decision above is `NULL_RESULT`, so the engine configures no cuDF pinned pool: no
+`pinned_io.h`/`.cpp`, no `PinnedIo.*` cases, and Task 7 has no `pool` configuration (agreed with the
+coordinator, 2026-11-05).
+
+## After runs
+
+Unprofiled, 2026-11-05 03:00–03:07Z on nebius-h100, the install of this branch (`b3e3dc37`'s engine), `run-gpu.sh … run bench` per query with the configuration's variables (Task 7's table; no `pool`, Task 6 skipped), `pull`, the VM's `records.tsv` removed after each. All twelve exit 0, and no section is `status=failed`. Sections aside on dev in `/tmp/Lsurg/pl-after/tp1_single.<config>.txt`; logs `bench-<config>-<q>.log` there.
+
+| query | config | `run_us` | each `GpuLoadParquet` `total_us`, in plan order | prefill: files, bytes, `us` | cache after the rounds |
+|---|---|--:|---|---|---|
+| q1 | `cache` | 404890 | 154641 | 1, 9030797348, 98525448 | `on resident=8.4GiB files=1 fills=1 fill_us=98525424 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q1 | `chunked` | 636821 | 386539 | skipped: off | `off source=env` |
+| q1 | `all` | 401785 | 151556 | 1, 9030797348, 4263217 | `on resident=8.4GiB files=1 fills=1 fill_us=4263192 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q3 | `cache` | 245041 | 35179, 44467, 119347 | 3, 12051239504, 35601902 | `on resident=11.2GiB files=3 fills=3 fill_us=35601868 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q3 | `chunked` | 454022 | 39599, 50334, 317780 | skipped: off | `off source=env` |
+| q3 | `all` | 244907 | 35309, 44515, 118873 | 3, 12051239504, 5738613 | `on resident=11.2GiB files=3 fills=3 fill_us=5738581 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q6 | `cache` | 57940 | 53299 | 1, 9030797348, 4399811 | `on resident=8.4GiB files=1 fills=1 fill_us=4399788 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q6 | `chunked` | 93009 | 88248 | skipped: off | `off source=env` |
+| q6 | `all` | 57737 | 53071 | 1, 9030797348, 4255164 | `on resident=8.4GiB files=1 fills=1 fill_us=4255132 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q8 | `cache` | 462702 | 790, 763, 675, 32954, 39952, 31550, 37398, 268975 | 7, 15542365278, 43156704 | `on resident=14.5GiB files=7 fills=7 fill_us=43156651 fallbacks=0 evictions=0 reloads=0 source=default` |
+| q8 | `chunked` | 636764 | 909, 802, 731, 37390, 44594, 32186, 44030, 425933 | skipped: off | `off source=env` |
+| q8 | `all` | 465418 | 807, 769, 685, 32955, 40116, 31300, 37563, 271455 | 7, 15542365278, 7625426 | `on resident=14.5GiB files=7 fills=7 fill_us=7625375 fallbacks=0 evictions=0 reloads=0 source=default` |
+
+`[load-bytes]` is the same in all three configurations of a query (the plan does not move): q1 `compressed=2342506873 decoded=18667100168`, q3 `2654465356 / 6603217369`, q6 `339204934 / 1922457600`, q8 `8222326409 / 14304945284`. Under `cache` and `all` the first line is `[pinned-cache] 147.4 GiB of 196.6 GiB host RAM (default) on a discrete device`; under `chunked`, `off (pinned_host_cache_bytes = 0, env)` and `prefill skipped: the pinned host cache is off`.
+
+## After profile
+
+`create_nsys_profile.sh --trace` per query under `all`, `cache` and `chunked`, 03:06–03:10Z, as in the before profile. Captures `/tmp/Lsurg/pl-after/capture-<q>-<config>.sqlite`; `loads-<q>-<config>.tsv` derived from them (q3 and q8 by hand, as before: `nsys_calls.py`'s join refusal, "Resumed after new-hosts"). `host_read_us` is 0 in every load under `all` and `cache`: the prefill ran before the measured rounds, and no load window reads the disk. No launch was ambiguous. The lineitem loads, one row each (`load_us`, host read, H2D µs and pinned GB/s, decompress, decode, other, unattributed):
+
+| query, load | config | `load_us` | `host_read_us` | `h2d_us` | `h2d_pinned_gbps` | `decompress_us` | `decode_us` | `other_device_us` | `unattributed_us` |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| q1 #0 | `before` | 422744 | 284977 | 63092 | 26.8 | 39135 | 40146 | 11829 | 50112 |
+| q1 #0 | `cache` | 162100 | 0 | 36489 | 46.4 | 38998 | 40143 | 11803 | 38719 |
+| q1 #0 | `chunked` | 405561 | 272131 | 58334 | 29.0 | 39082 | 40468 | 11806 | 45702 |
+| q1 #0 | `all` | 164941 | 0 | 36493 | 46.4 | 38997 | 40470 | 11812 | 41253 |
+| q3 #8 | `before` | 353267 | 248329 | 53803 | 25.6 | 54087 | 5688 | 3561 | 42099 |
+| q3 #8 | `cache` | 128342 | 0 | 33115 | 41.6 | 54087 | 5691 | 3544 | 32403 |
+| q3 #8 | `chunked` | 333680 | 234803 | 51098 | 26.9 | 54093 | 5781 | 3546 | 35661 |
+| q3 #8 | `all` | 128389 | 0 | 33101 | 41.6 | 54089 | 5775 | 3545 | 32366 |
+| q6 #0 | `before` | 98574 | 43271 | 9141 | 26.0 | 25851 | 3077 | 1367 | 25788 |
+| q6 #0 | `cache` | 55169 | 0 | 5789 | 41.0 | 25809 | 3076 | 1365 | 20046 |
+| q6 #0 | `chunked` | 91011 | 40465 | 8794 | 27.0 | 25808 | 3103 | 1363 | 21051 |
+| q6 #0 | `all` | 55533 | 0 | 5790 | 41.0 | 25809 | 3104 | 1362 | 20399 |
+| q8 #17 | `before` | 466083 | 280387 | 154142 | 32.1 | 125713 | 12912 | 7468 | 39773 |
+| q8 #17 | `cache` | 283943 | 0 | 100759 | 49.1 | 125700 | 12910 | 7438 | 38069 |
+| q8 #17 | `chunked` | 449929 | 266311 | 148834 | 33.2 | 125691 | 13092 | 7434 | 37590 |
+| q8 #17 | `all` | 284648 | 0 | 100774 | 49.1 | 125764 | 13092 | 7436 | 38469 |
+
+Every other load's row is in its `loads-<q>-<config>.tsv` (gitignored, in `testdata/calibration/` on dev).
+
+## Before/after
+
+Each `GpuLoadParquet` `total_us`, unprofiled, and its change against `before`; the copy share is Task 2 Step 7's `h2d_us / load_us` for that load. The run-to-run spread of `runs=[…]` (runs 2–10, max − min over the median) is 1.0–2.5 % in every run but q6 `before` (8.5 %) and `cache` (7.9 %).
+
+| query | load | before | cache | chunked | all | cache Δ | chunked Δ | all Δ | copy share |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| q1 | lineitem | 403877 | 154641 | 386539 | 151556 | -62 % | -4 % | -62 % | 15 % |
+| q3 | customer | 40065 | 35179 | 39599 | 35309 | -12 % | -1 % | -12 % | 3 % |
+| q3 | orders | 52176 | 44467 | 50334 | 44515 | -15 % | -4 % | -15 % | 21 % |
+| q3 | lineitem | 333341 | 119347 | 317780 | 118873 | -64 % | -5 % | -64 % | 15 % |
+| q6 | lineitem | 91920 | 53299 | 88248 | 53071 | -42 % | -4 % | -42 % | 9 % |
+| q8 | region | 1043 | 790 | 909 | 807 | -24 % | -13 % | -23 % | 1 % |
+| q8 | nation | 866 | 763 | 802 | 769 | -12 % | -7 % | -11 % | 1 % |
+| q8 | nation | 739 | 675 | 731 | 685 | -9 % | -1 % | -7 % | 2 % |
+| q8 | customer | 37872 | 32954 | 37390 | 32955 | -13 % | -1 % | -13 % | 3 % |
+| q8 | orders | 45101 | 39952 | 44594 | 40116 | -11 % | -1 % | -11 % | 14 % |
+| q8 | supplier | 32362 | 31550 | 32186 | 31300 | -3 % | -1 % | -3 % | 0 % |
+| q8 | part | 44424 | 37398 | 44030 | 37563 | -16 % | -1 % | -15 % | 4 % |
+| q8 | lineitem | 447118 | 268975 | 425933 | 271455 | -40 % | -5 % | -39 % | 33 % |
+
+- **The cache.** `before` → `cache` takes the `lineitem` loads down 62 % (q1), 64 % (q3), 42 % (q6)
+  and 40 % (q8), and the small tables 3–24 %; `chunked` → `all` moves them the same way. The gain is
+  far larger than the copy share (15 %, 15 %, 9 %, 33 %), and that is expected rather than a
+  finding: the cache removes the host read, 44–70 % of those loads ("Before profile"), and lifts the
+  copy from 26 to 41–49 GB/s. The shares add up: `all` is `cache` within 2 %.
+- **The reader.** With the cache on, `cache` → `all` is −2.0 % (q1), −0.4 % (q3, q6) and +0.9 %
+  (q8) on `lineitem`: within the 1–2.5 % spread, so noise. From the path, `before` → `chunked` is
+  −4 % to −5 % on the big loads, past the spread. The profile puts that gain outside the reader: q1's
+  `host_read_us` is 272131 against 284977 and `h2d_us` 58334 against 63092 (kvikio's read and copy,
+  which the reader does not touch), while decompression and decode match within 0.3 %. The two runs
+  were 45 minutes and one VM session apart. Recorded as session noise, not the reader's.
+
+## Copy rate (Step 7)
+
+No load under `all` has a copy of 16 MiB or more, so the pass condition holds vacuously and the gap
+to 55.5 GB/s is explained here instead. The four `lineitem` loads copy at 46.4 (q1), 41.6 (q3),
+41.0 (q6) and 49.1 (q8) GB/s pinned; q1 and q8 are within 20 % of 55.5, q3 and q6 are not.
+Pageable bytes are under 0.05 % of `h2d_bytes` in every load but q8's three tiny ones (5–7 % of
+about 2.5 KB). The gap is the copy size. The reader issues one `cudaMemcpyAsync` per coalesced
+column-chunk run, as Task 2 Step 1 read: median 0.8, 0.6, 0.1 and 0.7 MiB, at most 4 MiB (q1),
+over 608–3920 copies per execution (`/tmp/Lsurg/tools/copy_rate.py`). The copies do not overlap:
+their summed time equals the union of their intervals (1.00) in all four. And the source is the
+span: no host read, every byte pinned. The probe's whole-file copies (≤2.2 MB, 35.6 GB/s) agree.
+
+## Readers from pinned memory (#232), after
+
+`cache` (`read_parquet` from the cache) against `all` (one chunk from the cache), the `lineitem`
+load: q1 154641 / 151556 µs, q3 119347 / 118873, q6 53299 / 53071, q8 268975 / 271455. Within the
+run spread, as the probe's 135146 / 135432 µs (Task 2) was. On 25.02 and the H100, one chunk is not
+faster than `read_parquet`, from the path or from pinned memory. #232's premise does not hold here;
+its gain is the source's.
+
+## Cache
+
+| query process (`all`) | files | bytes | prefill `us` | GB/s | `resident` |
+|---|--:|--:|--:|--:|--:|
+| q1 | 1 | 9030797348 | 4263217 | 2.12 | 8.4 GiB |
+| q3 | 3 | 12051239504 | 5738613 | 2.10 | 11.2 GiB |
+| q6 | 1 | 9030797348 | 4255164 | 2.12 | 8.4 GiB |
+| q8 | 7 | 15542365278 | 7625426 | 2.04 | 14.5 GiB |
+
+tpch sf40, the only dataset these runs read: the largest prefill is q8's, 15542365278 bytes; the
+four sum to 45655199478, each in its own process. `limit` is 158302445568 (147.4 GiB, the
+default); the run container has no cgroup limit (`memory.max` = `max`); host RAM 211069919232.
+Every query's files fit the default; no prefill refused. The prefill is the only disk read and no
+round paid it. Its rate depends on the page cache: the session's first, `cache` q1, read the 9 GB
+`lineitem` cold in 98.5 s (91.7 MB/s, the VM's disk); `cache` q3 and q8 took 35.6 s and 43.2 s for
+their cold small tables. From a warm page cache it is 2.0–2.1 GB/s, one `pread` loop per file.
+
+## Signoff: load rate
+
+`load_us` is Σ `GpuLoadParquet` `total_us` of the reported run; each GB/s is `bytes / (load_us ·
+1000)`; the H2D rate is bytes-weighted over the query's loads from `loads-<q>-<config>.tsv`
+(`before`: Task 2's), pinned beside it. The `before` row's bytes are the `all` run's `[load-bytes]`.
+
+**q1**
+
+| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `read_parquet`, path (before) | `before` | 2342506873 | 18667100168 | 403877 | 5.8 | 46.2 | 26.8; 26.8 |
+| `read_parquet`, cache | `cache` | 2342506873 | 18667100168 | 154641 | 15.1 | 120.7 | 46.4; 46.4 |
+| chunked, path | `chunked` | 2342506873 | 18667100168 | 386539 | 6.1 | 48.3 | 29.0; 29.0 |
+| chunked, cache (the default) | `all` | 2342506873 | 18667100168 | 151556 | 15.5 | 123.2 | 46.4; 46.4 |
+
+**q3**
+
+| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `read_parquet`, path (before) | `before` | 2654465356 | 6603217369 | 425582 | 6.2 | 15.5 | 25.7; 25.7 |
+| `read_parquet`, cache | `cache` | 2654465356 | 6603217369 | 198993 | 13.3 | 33.2 | 41.4; 41.4 |
+| chunked, path | `chunked` | 2654465356 | 6603217369 | 407713 | 6.5 | 16.2 | 27.0; 27.0 |
+| chunked, cache (the default) | `all` | 2654465356 | 6603217369 | 198697 | 13.4 | 33.2 | 41.4; 41.4 |
+
+**q6**
+
+| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `read_parquet`, path (before) | `before` | 339204934 | 1922457600 | 91920 | 3.7 | 20.9 | 26.0; 26.0 |
+| `read_parquet`, cache | `cache` | 339204934 | 1922457600 | 53299 | 6.4 | 36.1 | 41.0; 41.0 |
+| chunked, path | `chunked` | 339204934 | 1922457600 | 88248 | 3.8 | 21.8 | 27.0; 27.0 |
+| chunked, cache (the default) | `all` | 339204934 | 1922457600 | 53071 | 6.4 | 36.2 | 41.0; 41.0 |
+
+**q8**
+
+| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| `read_parquet`, path (before) | `before` | 8222326409 | 14304945284 | 609525 | 13.5 | 23.5 | 31.8; 31.8 |
+| `read_parquet`, cache | `cache` | 8222326409 | 14304945284 | 413057 | 19.9 | 34.6 | 48.6; 48.6 |
+| chunked, path | `chunked` | 8222326409 | 14304945284 | 586575 | 14.0 | 24.4 | 32.8; 32.8 |
+| chunked, cache (the default) | `all` | 8222326409 | 14304945284 | 415650 | 19.8 | 34.4 | 48.6; 48.6 |
+
+Prefill, tpch sf40: as in "Cache" (1–7 files, 9.0–15.5 GB, 4.3–7.6 s, 2.0–2.1 GB/s warm).
+
+- The cache's share: `before` → `cache` 2.6× (q1), 2.1× (q3), 1.7× (q6), 1.5× (q8) in compressed
+  GB/s, and `chunked` → `all` the same within 5 % (2.5×, 2.1×, 1.7×, 1.4×).
+- The reader's share: `before` → `chunked` 1.03–1.05× (session noise, above), and `cache` → `all`
+  0.99–1.02×.
+- `compressed` is more than the loads copy (q1 2342506873 against 1693633748 H2D bytes). Both are
+  the same in every configuration; which bytes `[load-bytes]` counts that never cross is
+  bench-rows' to settle when it reads the line.
+
+**#305 (snappy batch floor) opened.** Under `all` a load's decompression is one
+`nvcomp::unsnap_kernel` launch of about 29 ms whatever its size (q8 `supplier`, 1.9 MB copied,
+28969 µs; q3 `customer` 29317 µs; q8 `lineitem` 125777 µs). It is 81 % of q3's `customer` load,
+and q8's four mid-size loads pay 119 ms of it. The before profile has the same floor; the cache
+uncovered it. `/tmp/Lsurg/tools/decomp_floor.py <capture> <seq>`.
+
+## The L40S list, cache on and off (Step 6)
+
+nebius-gpu, 2026-11-05 03:12–03:48Z, the H100 stopped: `nebius-sync.sh`, `build-test-shadgpu.sh
+--build` on the VM (rc 0), then `nebius-test.sh run` at the default and again with
+`PEACOCK_PINNED_HOST_CACHE_BYTES=0` in front of it. Logs on dev in `/tmp/Lsurg/pl-l40s/logs-{on,off}/`.
+
+| binary | cache on | cache off |
+|---|--:|--:|
+| `peacock_cpu_tests` | 63 | 63 |
+| `peacock_gpu_tests` | 5 | 5 |
+| `peacock_join_session_tests` | 56 | 56 |
+| `peacock_plan_tests` | 131 | 129 + 2 skipped |
+| `peacockdb_core_gpu_lib` `gpu_tests::` | 742 | 742 |
+| `test_gpu_corpus` | 1009 | 1009 |
+| `peacock_gpu_benchmarks --skip bench_` | 9 | 9 |
+| `test_node_timing` | 1 | 1 |
+
+Both `ALL rc=0`; `gpu_tpch_q6_tp1_single` passed in both (Step 2's case, see "Task 7 notes").
+stderr: `[pinned-cache] 23.5 GiB of 31.3 GiB host RAM (default) on a discrete device` on, and
+`[pinned-cache] off (pinned_host_cache_bytes = 0, env)` off. The sha256 over every file in the VM's
+`testdata/goldens` is `64fbefd6…` before, after the first run and after the second: no golden moved.
+**The pass counts are not the same:** off, `PinnedHostCache.ScanFromTheCacheEqualsThePath` and
+`PinnedHostCache.PrefilledScanFillsNothing` skip ("PEACOCK_PINNED_HOST_CACHE_BYTES is set",
+`test_pinned_scan.cpp:98, 111`). That is Task 4's design: the environment wins over a session, so a
+case that needs the cache on cannot turn it on. Both ran on the H100 and here with the cache on. Every
+other count is equal, and nothing failed.
+
+## Integrated: deferred
+
+No GB10 is available to this chain. The branch is covered by
+`PinnedHostCache.DefaultIsThreeQuartersOfTheSmallerOfRamAndCgroup`'s `is_discrete_for_pinning`
+cases, and #149's "integrated does not regress" measurement is deferred.
+
+## Task 7 notes
+
+- **The switches did not reach a run** (fixed, outside Scope). `run-gpu.sh run` passed on only
+  `PCK_TEST_FILTER` and `PEACOCK_BENCH_RESUME`, and `create_nsys_profile.sh`'s remote script
+  exported none of dev's environment, so every configuration would have measured the default. Both
+  now pass `PEACOCK_PINNED_HOST_CACHE_BYTES` and `PEACOCK_SCAN_READER` (`scripts/env/run-gpu.sh`,
+  `scripts/create_nsys_profile.sh`). Red first: `test_run_passes_the_pinned_cache_and_scan_reader_switches`
+  and `test_nsys_profile_passes_the_pinned_cache_and_scan_reader_switches`. The second passed at
+  first, because the fake `rsh` handed the remote script dev's whole environment; it now drops
+  `PEACOCK_*`/`PCK_*`, as ssh does, and then failed. `test_run_gpu.py` 34/34. The runs above show
+  the switches arrived: `off source=env` under `chunked` only.
+- **`test_nsys_profile_uses_the_given_ssh` was red on this branch before the change**: Task 1 added
+  `nsys_loads.py` to the trace pass, and new-hosts' fixture stubbed only `nsys_calls.py`. It stubs
+  both now.
+- **Step 2's corpus case name is wrong in the plan.** `duckdb_gpu_tpch_q6_tp1_single` matches no
+  test; the case is `gpu_tpch_q6_tp1_single`. So `run filter` (02:59Z) failed on "matched no test",
+  after every binary it ran had passed: `peacock_cpu_tests` 63, `peacock_gpu_tests` 5 (with
+  `PinnedHostCache.CudaAllocatorPinsHostMemory` and `RefusedAllocationClearsTheCudaError`),
+  `peacock_join_session_tests` 56, `peacock_plan_tests` 131 (with `ScanFromTheCacheEqualsThePath`,
+  `PrefilledScanFillsNothing` and the three device `ScanReader.*`), the lib's `gpu_tests::` 742
+  (with both `pinned_cache::gpu_tests`). stderr: `[pinned-cache] 147.4 GiB of 196.6 GiB host RAM
+  (default) on a discrete device`. The case was not rerun on the H100 (no second bracket for it); it
+  runs in the L40S list, on and off.
+- The after install: the CPU-VM build of this tree at `b3e3dc37` (rc 0, 5.5 min, no warnings),
+  in `/home/dmitry/build/peacock/pinned-loads/after-install`.
+
 ## Task 2 notes
 
 - **devprops** is `/tmp/pl-scratch/devprops.cu` on dev, built in the 25.02 build image with
@@ -546,6 +786,9 @@ copy's memory kind.
 | nebius-h100 | 2026-11-04 07:18:44 (RUNNING 07:19:49) | 2026-11-04 07:20:49 (`stop`: stopped) | 0.03 | Task 2 Step 3, `devprops`, addressing mode, `free -b`, kernel/driver/glibc; its own bracket, before the CPU-VM build |
 | nebius-cpu128 | 2026-11-05 01:51:00 (RUNNING 01:52:09) | 2026-11-05 02:00:20 (`stop`: stopped) | 0.16 | Task 2 Step 3, the CPU-VM build of today's engine (`436b3dd8`'s tree) |
 | nebius-h100 | 2026-11-05 02:01:21 (RUNNING 02:02:21) | 2026-11-05 02:22:50 (`stop`: stopped) | 0.36 | Task 2 Steps 3–6: `prepare` (11 min), `ship`, host memory, before load times, before profile, the probe and its Nsight run |
+| nebius-cpu128 | 2026-11-05 02:45:29 (RUNNING 02:46:40) | 2026-11-05 02:54:04 (`stop`: stopped) | 0.14 | Task 7 Step 1, the CPU-VM build of this tree |
+| nebius-h100 | 2026-11-05 02:54:29 (RUNNING 02:55:32) | 2026-11-05 03:10:41 (`stop`: stopped) | 0.27 | Task 7 Steps 2–4: `ship`, the filter run, 12 bench runs, 12 traces |
+| nebius-gpu (L40S) | 2026-11-05 03:12:09 (RUNNING 03:13:03) | 2026-11-05 03:48:15 (`stop`: stopped) | 0.60 | Task 7 Step 6: sync, build, the list on and off |
 - L40S start for Task 2 Step 3's devprops: no capacity from 2026-11-04T06:57:37Z (developer; treated as 75). The coordinator retries every 15 min up to 10 h (until 16:57Z). Decision: the H100's devprops is read in its own short bracket before the CPU-VM build exists, so Tasks 3–5 (offline) can start once both cards are read; one extra H100 start of a few minutes, against the plan's order (Step 3 reads it after the build).
 - Order change (coordinator, 2026-11-04): Tasks 3, 4, 4b and 5 (offline, tested on no VM) run now, before Task 2's before profile, because the H100 path waits on new-hosts' block. The before profile and the before load times (Task 2 Steps 4–8) are then taken on an install staged from `ENS-new-hosts`'s tip (today's engine, no pinned-loads change), never from this branch. Task 6 waits on Task 2's Decision.
 

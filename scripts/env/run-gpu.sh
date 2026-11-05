@@ -335,6 +335,9 @@ cmd_run() {
   machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
+  # The engine's two measurement switches (pinned-loads): the cache's size and the scan's reader.
+  [ -z "${PEACOCK_PINNED_HOST_CACHE_BYTES:-}" ] || envs+=("PEACOCK_PINNED_HOST_CACHE_BYTES=$PEACOCK_PINNED_HOST_CACHE_BYTES")
+  [ -z "${PEACOCK_SCAN_READER:-}" ] || envs+=("PEACOCK_SCAN_READER=$PEACOCK_SCAN_READER")
   on_vm vm_run "$dir" "$RUN_REF" "$mode" "${envs[@]}"
 }
 
