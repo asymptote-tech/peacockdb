@@ -87,9 +87,10 @@ the estimator's number.
 | `tp4-sized` | 4 | `Sized` | **yes** |
 
 There is no `tp1-sized`: at one lane a source takes essentially the whole budget, so the
-sized form collapses to `Off` and the mode carries no signal. One mode takes a budget, and it
-records the tier in-band in its `--- memory ---` section since the label does not carry it;
-the other four reproduce from the data alone.
+sized form collapses to `Off` and the mode carries no signal. One mode sizes its batches from a
+budget, and it records the tier in-band in its `--- memory ---` section since the label does not
+carry it; the other four reproduce from the data alone. Every mode is still checked against the
+budget: the planner refuses a plan whose certain accumulators exceed it (`planner/pipeline.rs`).
 
 Even with batching off the loader declares `MultipleBatches` — no downstream node may assume
 one batch per lane. The count is known at plan time, so saying so is available and is

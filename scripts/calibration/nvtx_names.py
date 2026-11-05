@@ -36,6 +36,14 @@ DOMAIN_CREATE = 75
 BARE_CALLS = frozenset({"slice_handle", "result_from_handle"})
 
 
+# A join's three ABI calls, each named for itself at the join's seq, which the plan declares
+# once as `join_build(#N CudfJoin)`. A reader checking a seq against the plan reads these as
+# the plan's kind; the breakdown keeps them apart, since the build and the probe cost
+# differently. The spellings are `NodeSession`'s ranges'.
+JOIN_CALLS = frozenset({"join_build", "join_probe", "join_finish"})
+JOIN_KIND = "CudfJoin"
+
+
 def is_case(text):
     """A case range: `<dataset>.sf<sf> <query> <mode>`, pushed by the harness.
 
@@ -70,6 +78,11 @@ def partition_of(text):
 def is_bare_call(kind):
     """Is this call range's kind one of the two that publish no step of their own?"""
     return kind in BARE_CALLS
+
+
+def plan_kind(kind):
+    """The kind the plan's recipes name for a call range's kind: a join call's is `CudfJoin`."""
+    return JOIN_KIND if kind in JOIN_CALLS else kind
 
 
 def call_of(text):

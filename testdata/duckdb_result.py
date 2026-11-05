@@ -18,17 +18,26 @@ than of answers: NULLs last ascending and first descending, and integer `/` trun
 Deterministic: threads=1, and rows are sorted after rendering unless the query's answer is
 ordered by its SQL.
 
+At a scale other than sf1, DuckDB runs elsewhere (`benchmarks/duckdb_minimal.sh --answers` on
+the 128-core VM) and stores each answer as a table; `--answers` renders those into
+`goldens/<dataset>.sf<sf>/duckdb-result.txt` by the same rules.
+
 Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
     python3 testdata/duckdb_result.py [--dataset tpch|tpcds|pbench] [--only q1,q2]
+    python3 testdata/duckdb_result.py --dataset <ds> --sf 40 --answers <answers.duckdb> [--only …]
 """
 
 import argparse
+import collections
 import csv
 import datetime
 import decimal
 import hashlib
+import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
 CAP = 262144
@@ -141,8 +150,15 @@ def fingerprint(names, types, rows):
                 exact += text + CELL_SEPARATOR
         hashed.append(exact)
 
-    out = [f"fingerprint: rows={len(cells)}"]
-    for at in range(width):
+    hashed.sort()
+    return fingerprint_text(len(cells), approximate, nonnull, values,
+                            hashlib.sha256("\n".join(hashed).encode()).hexdigest())
+
+
+def fingerprint_text(rows, approximate, nonnull, values, digest):
+    """The fingerprint's lines from its parts, for both writers of it."""
+    out = [f"fingerprint: rows={rows}"]
+    for at in range(len(approximate)):
         line = f"col {at}: nonnull={nonnull[at]}"
         if approximate[at]:
             # Summed IN VALUE ORDER, so the two sides add in one sequence and float
@@ -164,9 +180,52 @@ def fingerprint(names, types, rows):
                 f" max={approx_number(high)}"
             )
         out.append(line)
-    hashed.sort()
-    out.append("hash: " + hashlib.sha256("\n".join(hashed).encode()).hexdigest())
+    out.append("hash: " + digest)
     return "\n".join(out) + "\n"
+
+
+def fingerprint_stream(names, types, batches):
+    """`fingerprint` over rows that come in batches and need not fit in memory: sf40's largest
+    answer is 96M rows. The hashed rows go through `sort -z` in the C locale, whose byte order
+    over UTF-8 is the order `fingerprint` sorts the text in."""
+    width = len(names)
+    approximate = [is_approximate(t) for t in types]
+    nonnull = [0] * width
+    values = [[] for _ in range(width)]
+    rows = 0
+    digest = hashlib.sha256()
+    with tempfile.TemporaryDirectory() as scratch:
+        unsorted = pathlib.Path(scratch) / "rows"
+        with open(unsorted, "wb") as out:
+            for batch in batches:
+                for row in batch:
+                    rows += 1
+                    exact = ""
+                    for at, value in enumerate(row):
+                        text = cell(value)
+                        if text:
+                            nonnull[at] += 1
+                        if approximate[at]:
+                            if text:
+                                values[at].append(float(text))
+                        else:
+                            exact += text + CELL_SEPARATOR
+                    if "\0" in exact:
+                        sys.exit("duckdb_result.py: a NUL in a cell, which the outside sort splits on")
+                    out.write(exact.encode() + b"\0")
+        sort = subprocess.Popen(["sort", "-z", "-T", scratch, str(unsorted)],
+                                stdout=subprocess.PIPE, env={**os.environ, "LC_ALL": "C"})
+        pending, first = b"", True
+        for chunk in iter(lambda: sort.stdout.read(1 << 20), b""):
+            *records, pending = (pending + chunk).split(b"\0")
+            for record in records:
+                if not first:
+                    digest.update(b"\n")
+                digest.update(record)
+                first = False
+        if sort.wait() != 0:
+            sys.exit(f"duckdb_result.py: sort exited {sort.returncode} over the hashed rows")
+    return fingerprint_text(rows, approximate, nonnull, values, digest.hexdigest())
 
 
 def render(names, rows, keep_order=False):
@@ -249,45 +308,122 @@ def query_files(dataset, only, root=ROOT):
     return kept
 
 
-def generate(dataset, only):
+def session():
+    """A DuckDB connection under the oracle's rules: one thread, and DataFusion's two
+    conventions that would otherwise be divergences of convention rather than of answers."""
     # DuckDB imported here rather than at the top, the way duckdb_cost.py defers
     # pyarrow.parquet: test_duckdb_result.py imports this module to check `cell` and
     # `fingerprint`, neither of which asks DuckDB anything, and the CI job that runs it
     # installs no duckdb wheel. A top-level import makes that test die before its first case.
     import duckdb
 
-    data = ROOT / f"{dataset}.sf1"
-    queries = query_files(dataset, only)
     con = duckdb.connect()
     con.execute("SET threads=1")
     con.execute("SET default_null_order='nulls_last_on_asc_first_on_desc'")
     con.execute("SET integer_division=true")
-    for table in sorted(data.glob("*.parquet")):
-        con.execute(f"CREATE VIEW {table.stem} AS SELECT * FROM read_parquet('{table}')")
+    return con
+
+
+# An answer over the cap by its row count alone, read in batches when fingerprinted.
+Streamed = collections.namedtuple("Streamed", "names types rows batches")
+
+
+def sections(dataset, stems, answer):
+    """One `== <stem>` section per stem, in the order given. `answer(stem)` is the query's
+    `(names, types, rows)`, or the text after `failed: ` where there is none."""
     ordered = ordered_queries(dataset)
     out = []
-    for query in queries:
-        out.append(f"== {query.stem}\n")
-        try:
-            cursor = con.execute(duckdb_text(query.read_text()))
-            names = [d[0] for d in cursor.description]
-            types = [d[1] for d in cursor.description]
-            rows = cursor.fetchall()
-        except duckdb.Error as error:
-            out.append(f"failed: {str(error).splitlines()[0]}\n")
-            print(f"{dataset}/{query.stem}: failed", file=sys.stderr)
+    for stem in stems:
+        out.append(f"== {stem}\n")
+        got = answer(stem)
+        if isinstance(got, str):
+            out.append(f"failed: {got}\n")
+            print(f"{dataset}/{stem}: failed", file=sys.stderr)
             continue
-        table = render(names, rows, keep_order=query.stem in ordered)
+        if isinstance(got, Streamed):
+            out.append(fingerprint_stream(got.names, got.types, got.batches))
+            print(f"{dataset}/{stem}: {got.rows} rows, over the cap by count", file=sys.stderr)
+            continue
+        names, types, rows = got
+        table = render(names, rows, keep_order=stem in ordered)
         if len(table.encode()) >= CAP:
             out.append(fingerprint(names, types, rows))
         else:
             out.append(table)
-        print(f"{dataset}/{query.stem}: {len(rows)} rows", file=sys.stderr)
-    target = ROOT / "goldens" / f"{dataset}.sf1" / "duckdb-result.txt"
+        print(f"{dataset}/{stem}: {len(rows)} rows", file=sys.stderr)
+    return "".join(out)
+
+
+def described(cursor):
+    return [d[0] for d in cursor.description], [d[1] for d in cursor.description], cursor.fetchall()
+
+
+def parquet_sections(dataset, only, root=ROOT):
+    """Every query of the dataset, or `only`'s, run over the sf1 parquet."""
+    import duckdb
+
+    con = session()
+    for table in sorted((root / f"{dataset}.sf1").glob("*.parquet")):
+        con.execute(f"CREATE VIEW {table.stem} AS SELECT * FROM read_parquet('{table}')")
+    queries = {query.stem: query for query in query_files(dataset, only, root)}
+
+    def answer(stem):
+        try:
+            return described(con.execute(duckdb_text(queries[stem].read_text())))
+        except duckdb.Error as error:
+            return str(error).splitlines()[0]
+
+    return sections(dataset, list(queries), answer)
+
+
+def answer_sections(dataset, answers, only, root=ROOT):
+    """The answers `duckdb_minimal.sh --answers` stored, a table per query named by its stem:
+    every table, or `only`'s queries, a query with no table `failed: no answer recorded` (DuckDB
+    refused it, or it was not run). `ORDER BY rowid` keeps the order the query produced, which a
+    `no_sort` line compares."""
+    con = session()
+    con.execute(f"ATTACH '{answers}' AS answers (READ_ONLY)")
+    tables = {
+        name
+        for (name,) in con.execute(
+            "SELECT table_name FROM duckdb_tables() WHERE database_name = 'answers'"
+        ).fetchall()
+    }
+    if only is not None:
+        stems = [query.stem for query in query_files(dataset, only, root)]
+    elif tables:
+        stems = sorted(tables, key=lambda stem: query_order(pathlib.Path(stem)))
+    else:
+        sys.exit(f"duckdb_result.py: {answers} holds no table, so no answer to write")
+
+    def answer(stem):
+        if stem not in tables:
+            return "no answer recorded"
+        rows = con.execute(f'SELECT count(*) FROM answers."{stem}"').fetchone()[0]
+        cursor = con.execute(f'SELECT * FROM answers."{stem}" ORDER BY rowid')
+        names = [d[0] for d in cursor.description]
+        # Every line of the table is as wide as its header at least, and there are rows + 4 of
+        # them, each with its newline: at or over the cap by count, the rows are never held.
+        if (rows + 4) * (len("| " + " | ".join(names) + " |") + 1) >= CAP:
+            batches = iter(lambda: cursor.fetchmany(100000), [])
+            return Streamed(names, [d[1] for d in cursor.description], rows, batches)
+        return names, [d[1] for d in cursor.description], cursor.fetchall()
+
+    return sections(dataset, stems, answer)
+
+
+def generate(dataset, sf, only, answers=None, root=ROOT):
+    """`goldens/<dataset>.sf<sf>/duckdb-result.txt`: sf1's from the parquet, another scale's from
+    the answers database DuckDB stored there."""
+    if answers is None:
+        text = parquet_sections(dataset, only, root)
+    else:
+        text = answer_sections(dataset, answers, only, root)
+    target = root / "goldens" / f"{dataset}.sf{sf}" / "duckdb-result.txt"
     # A dataset's first golden arrives before its directory does, and this writer is the one
     # that may run before any Rust tier has written a thing.
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("".join(out))
+    target.write_text(text)
     print(f"wrote {target}", file=sys.stderr)
 
 
@@ -295,15 +431,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", choices=["tpch", "tpcds", "pbench"], action="append")
     parser.add_argument("--only", help="comma-separated query stems")
+    parser.add_argument("--sf", help="the scale --answers was stored at; sf1 without it")
+    parser.add_argument("--answers", type=pathlib.Path,
+                        help="an answers database (duckdb_minimal.sh --answers), one dataset's")
     args = parser.parse_args()
-    import duckdb  # deferred for the reason `generate` gives
+    if args.answers is not None and args.sf is None:
+        parser.error("--answers needs --sf: the scale its answers were stored at")
+    if args.answers is not None and args.sf == "1":
+        parser.error("--answers with --sf 1: sf1's answers come from the parquet, not a database")
+    if args.answers is None and args.sf not in (None, "1"):
+        parser.error(f"--sf {args.sf} needs --answers: only sf1's parquet is run here")
+    if args.answers is not None and len(args.dataset or []) != 1:
+        parser.error("--answers holds one dataset's answers: name exactly one --dataset")
+    import duckdb  # deferred for the reason `session` gives
 
     if duckdb.__version__ != PINNED:
         sys.exit(f"duckdb {duckdb.__version__}; the oracle is pinned at {PINNED}")
     only = set(args.only.split(",")) if args.only else None
     for dataset in args.dataset or ["tpch", "tpcds", "pbench"]:
-        generate(dataset, only)
-
+        generate(dataset, args.sf or "1", only, answers=args.answers)
 
 if __name__ == "__main__":
     main()

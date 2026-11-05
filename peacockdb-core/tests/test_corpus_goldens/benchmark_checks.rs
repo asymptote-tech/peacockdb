@@ -1,6 +1,6 @@
 //! The checks one timed section answers to, and the fields it must carry, over a literal section
-//! as well as the committed trees. The committed trees are the H200's alone, which carry no
-//! batches and no load, so only a literal can show those checks refusing a section.
+//! as well as the committed trees. The H200's tree carries no batches and no load, and the H100's
+//! passes every check, so only a literal can show those checks refusing a section.
 
 use peacockdb_core::test_support::{BenchSection, MEASURED_RUNS, parse_benchmark_section};
 

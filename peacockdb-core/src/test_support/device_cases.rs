@@ -7,7 +7,7 @@ mod tests;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::{CaseStatus, DEVICE_CASES_HEADER, DeviceCase, MODES, Mode, testdata_root};
+use super::{CaseStatus, DEVICE_CASES_HEADER, DeviceCase, MODES, Measured, Mode, testdata_root};
 
 /// The one spelling of each status, read and written.
 const STATUSES: [(CaseStatus, &str); 3] = [
@@ -127,4 +127,104 @@ pub(crate) fn render(cases: &[DeviceCase]) -> String {
         ));
     }
     text
+}
+
+/// Every candidate's mode: its file is considered even when absent, and a query that failed in
+/// it owes the later modes no section, since tp4-sized does not run it.
+const TP1_SINGLE: &str = "tp1_single";
+
+/// The sf a device list's rows are written at.
+const SF: &str = "40";
+
+pub(crate) fn lines(
+    candidates: &[(String, String, Vec<String>)],
+    modes: &[&str],
+    files: &dyn Fn(&str, &str) -> Option<BTreeMap<String, Measured>>,
+    wrong: &BTreeMap<(String, String), String>,
+) -> Result<Vec<DeviceCase>, String> {
+    let carried_modes = |carried: &[String]| -> Vec<&str> {
+        modes
+            .iter()
+            .copied()
+            .filter(|mode| carried.iter().any(|m| m == mode))
+            .collect()
+    };
+    // Each file is read once, before any of its sections is looked at.
+    let mut sections: BTreeMap<(&str, &str), Option<BTreeMap<String, Measured>>> = BTreeMap::new();
+    for (dataset, _, carried) in candidates {
+        for mode in carried_modes(carried) {
+            sections
+                .entry((dataset, mode))
+                .or_insert_with(|| files(dataset, mode));
+        }
+    }
+    let mut rows = Vec::new();
+    for (dataset, query, carried) in candidates {
+        let mut measured: Vec<(&str, Option<&Measured>)> = Vec::new();
+        for mode in carried_modes(carried) {
+            let file = &sections[&(dataset.as_str(), mode)];
+            if file.is_none() && mode != TP1_SINGLE {
+                continue;
+            }
+            let section = file
+                .as_ref()
+                .and_then(|file| file.get(&query.replace('_', "-")));
+            measured.push((mode, section));
+        }
+        let tp1_failed = measured.iter().any(|(mode, section)| {
+            *mode == TP1_SINGLE && matches!(section, Some(Measured::Failed(_)))
+        });
+        let mut timed = Vec::new();
+        let mut reasons = Vec::new();
+        for (mode, section) in measured {
+            match section {
+                Some(Measured::Timed) => timed.push(mode.to_string()),
+                Some(Measured::Failed(reason)) => reasons.push(reason.clone()),
+                None if tp1_failed => {}
+                None => {
+                    return Err(format!(
+                        "{dataset} {query}: the tree holds no section at {mode}, a mode the main \
+                         list carries for it"
+                    ));
+                }
+            }
+        }
+        let mark = wrong.get(&(dataset.clone(), query.clone()));
+        let (status, note) = match (timed.is_empty(), mark) {
+            (false, None) => (CaseStatus::Ok, String::new()),
+            (false, Some(ticket)) => (CaseStatus::Wrong, ticket.clone()),
+            (true, None) => {
+                let Some(reason) = reasons.into_iter().next() else {
+                    return Err(format!(
+                        "{dataset} {query}: timed at none of {modes:?}, so no row can be written"
+                    ));
+                };
+                (CaseStatus::Skipped, reason)
+            }
+            (true, Some(ticket)) => {
+                return Err(format!(
+                    "{dataset} {query}: marked wrong {ticket} and measured in no mode; a skipped \
+                     query has no answer to be wrong"
+                ));
+            }
+        };
+        rows.push(DeviceCase {
+            dataset: dataset.clone(),
+            sf: SF.to_string(),
+            query: query.clone(),
+            modes: timed,
+            status,
+            note,
+        });
+    }
+    let named: Vec<(&String, &String)> = candidates.iter().map(|(d, q, _)| (d, q)).collect();
+    if let Some(((dataset, query), ticket)) = wrong
+        .iter()
+        .find(|((dataset, query), _)| !named.contains(&(dataset, query)))
+    {
+        return Err(format!(
+            "{dataset} {query}: marked wrong {ticket} and no candidate of the main list"
+        ));
+    }
+    Ok(rows)
 }

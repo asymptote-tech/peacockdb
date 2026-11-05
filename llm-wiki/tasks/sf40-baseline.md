@@ -87,3 +87,15 @@ Component-level API: none.
 - The H100's watcher stops one process after 4 hours. A long run goes in segments with
   `PEACOCK_BENCH_RESUME=1`, and the segments' records are joined, as containers planned.
 - Both VMs are stopped when the run ends.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: 130 sf40 tp1_single cases on the H100 (124 ok, 4 skipped, 2 wrong #306)
+with `cases.csv`, the trees, the record and both Nsight passes; DuckDB on 128 cores for the same set,
+warm and resident, its answers held to the H100's; the page's H100 and DuckDB columns. Shortcuts:
+the plan's L40S run is CI's GPU Tests dispatch (nebius-gpu's disk full); 14 tpcds cases have no call
+breakdown (sf40 join order differs from the sf1 goldens); tpcds q18/q73 are right answers marked
+`wrong` until the oracle's tie rule (#306); tpch anti_join skipped on #307; tpcds q17/q25/q29 refused by
+the planner's 2 GiB test budget, not the card; a DuckDB time is a whole CLI process (floor 30/36 ms,
+recorded); profile files moved by hand; `test_duckdb_minimal`, `test_bench_each`, `test_run_gpu` run in
+no CI job; one Python failure seen once, not reproduced.

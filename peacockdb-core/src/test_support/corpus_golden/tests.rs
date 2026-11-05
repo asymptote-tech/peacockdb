@@ -1,8 +1,8 @@
 use std::sync::{Arc, Barrier};
 
 use super::{
-    gpu_result_cudf_matches_path, merge_mode_section, merge_section, recording_cudf_suits_the_path,
-    recording_knob,
+    declared_sf, gpu_result_cudf_matches_path, merge_mode_section, merge_section, merged_cells,
+    recording_cudf_suits_the_path, recording_knob,
 };
 use crate::test_support::Regeneration;
 
@@ -260,4 +260,47 @@ fn recording_the_committed_file_is_refused_from_another_cudf() {
 fn the_remedy_names_the_value_that_records_the_file_the_case_read() {
     assert_eq!(recording_knob(None), "PCK_WRITE_GPU_RESULT=1");
     assert_eq!(recording_knob(Some("26.02")), "PCK_WRITE_GPU_RESULT=26.02");
+}
+
+/// The benchmark records its answers at sf40, where the registry has no rows: its cells are the
+/// sf1 rows' (`BENCHMARK_SF` in `test_corpus_goldens`). Read at sf40 itself, no cell is enabled,
+/// and each answer recorded would drop every other one.
+#[test]
+fn an_sf40_answer_keeps_the_other_sf40_answers() {
+    let text = "cudf=25.02\n== q1 mode=tp1-single\nq1's answer\n";
+    let merged = merged_cells(
+        text,
+        "tpch",
+        "40",
+        "q2",
+        "tp1-single",
+        "q2's answer\n",
+        "25.02",
+    );
+    assert_eq!(
+        merged,
+        "cudf=25.02\n== q1 mode=tp1-single\nq1's answer\n== q2 mode=tp1-single\nq2's answer\n",
+        "both sections, in the registry's row order"
+    );
+    assert_eq!(declared_sf("40"), "1");
+}
+
+/// At sf1 the rule is the registry's own row: a cell it does not enable loses its section.
+#[test]
+fn an_sf1_answer_still_drops_a_disabled_cell() {
+    let text = "cudf=25.02\n== q12 mode=tp1-single\nan answer from a cell that is na\n";
+    let merged = merged_cells(
+        text,
+        "tpcds",
+        "1",
+        "q1",
+        "tp1-single",
+        "q1's answer\n",
+        "25.02",
+    );
+    assert_eq!(
+        merged, "cudf=25.02\n== q1 mode=tp1-single\nq1's answer\n",
+        "tpcds q12's gpu_tp1_single is na in the registry"
+    );
+    assert_eq!(declared_sf("1"), "1");
 }

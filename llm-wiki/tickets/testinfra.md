@@ -8,6 +8,7 @@ Tests, CI, hosts, testdata etc
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
+- [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -60,3 +61,18 @@ while the repo has no forks, which is exactly why it will bite later.
 (b) is closed. `gpu-tests` now never runs on a pull_request, so a fork PR gets no GPU job, and
 the `s3-datasets` comment says so. Only (a) is open.
 
+<a id="t306"></a>
+### #306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail
+`same_sequence` in `test_support/duckdb_oracle.rs` compares a `no_sort` line row by row, with no
+tie rule, so two engines that order tied rows differently both fail, though each is right.
+
+Found at sf40, H100, tp1_single (sf40-baseline). Both sides hold the same rows; only rows tied on
+every `ORDER BY` key swap (rows counted from 1):
+
+- tpcds q18 (`… LIMIT 100`): the `AAAAAAAAAACJAAAA` pair at 24/25 and the `AAAAAAAAAAHHAAAA`
+  pair at 61/62, each a rollup group whose other keys are null.
+- tpcds q73 (`ORDER BY cnt DESC, c_last_name`): the Hamilton pair at 16/17 (Nicholas, Harry) and
+  the Jones pair at 22/23 (Cynthia, Robert).
+
+Both rows are `wrong #306` in the H100's `cases.csv` until the oracle accepts a permutation of
+tied rows. The fix needs the sort keys, which the oracle does not hold today.

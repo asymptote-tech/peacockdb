@@ -175,7 +175,7 @@ Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (devi
 `peak_bytes`, the pinned host cache's state (`pinned_cache`) and the prefill (`prefill_files`,
 `prefill_bytes`, `prefill_us`) in the trailer.
 
-### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: building
+### 5. [`sf40-baseline.md`](sf40-baseline.md) — closes no ticket — state: done — PR #198
 
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.

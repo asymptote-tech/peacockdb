@@ -4,6 +4,9 @@
     python3 scripts/calibration/split_record.py --record testdata/calibration/records.tsv \
         --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --out-dir <dir>
 
+`--cases` is the main list, or a device's `cases.csv` (its first line `device_cases.HEADER`), whose
+`ok` and `wrong` rows declare their modes and whose `skipped` rows declare none.
+
 Writes `<out-dir>/<device>/<dataset>.sf<sf>/records.tsv` (`<device>` the slug of `device=`): the
 heading and that dataset's rows, byte for byte. Prints each `<device>/<dataset>.sf<sf>` for
 `build-test-shadgpu.sh --pull-benchmarks` to publish. Refused, writing nothing, unless the heading
@@ -15,6 +18,7 @@ import argparse
 import pathlib
 import sys
 
+import device_cases
 import record
 
 MACRO = "corpus_query_benchmark!"
@@ -23,12 +27,20 @@ MACRO = "corpus_query_benchmark!"
 def declared(path):
     """`{(dataset, sf): {(query, mode)}}` from the case file, spelled as the record spells them.
 
-    Read as `test_corpus_goldens` reads it (`read_cases`): one invocation per line, its
-    arguments up to the last `)`, and a trailing comment allowed. `none` declares no mode. Both
-    names lose their `_` as `corpus_query_benchmark!` does (`peacock_gpu_benchmarks.rs`).
+    A device list is read through `device_cases.rows`, its `ok` and `wrong` rows at their modes.
+    The main list is read as `test_corpus_goldens` reads it (`read_cases`): one invocation per
+    line, its arguments up to the last `)`, and a trailing comment allowed. `none` declares no
+    mode. Both names lose their `_` as `corpus_query_benchmark!` does (`peacock_gpu_benchmarks.rs`).
     """
     cases = {}
-    for line in pathlib.Path(path).read_text().splitlines():
+    lines = pathlib.Path(path).read_text().splitlines()
+    if lines[:1] == [device_cases.HEADER]:
+        for case in device_cases.rows(path):
+            if case["status"] != "skipped":
+                cases.setdefault((case["dataset"], case["sf"]), set()).update(
+                    (case["query"].replace("_", "-"), mode.replace("_", "-")) for mode in case["modes"])
+        return cases
+    for line in lines:
         text = line.strip()
         if not text.startswith(MACRO):
             continue
@@ -89,7 +101,7 @@ def by_dataset(columns, rows):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--record", required=True, help="the run's records.tsv")
-    parser.add_argument("--cases", required=True, help="corpus_benchmark_cases.inc")
+    parser.add_argument("--cases", required=True, help="corpus_benchmark_cases.inc, or a device's cases.csv")
     parser.add_argument("--out-dir", required=True, help="where the files are written")
     args = parser.parse_args(argv)
 
