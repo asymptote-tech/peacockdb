@@ -683,6 +683,19 @@ broadcast filter is the optimization #27 was archived for.)
 
 ## Execution
 
+The driver runs one tree per query, or a *fused plan*. A fused plan is several queries' trees as
+one DAG, with one root per query. A load two of them read alike is one `SharedSource`: it loads
+each batch once, and every reader takes it. `run_roots` runs it. It calls `validate_dag` first,
+and answers each root separately, as that query answers alone. The planner builds no fused plan.
+query-fuser will; until then tests build them by hand (`src/tests/share.rs`). The rules follow:
+what may be shared ([Traits](#traits)); holds, hold buffers and why nothing deadlocks
+([The scheduling rule](#the-scheduling-rule)); limits per reader
+([Early exit at a limit](#early-exit-at-a-limit)); one charge per batch
+([Memory accounting](#memory-accounting)); and how it crosses ([The wire format](#the-wire-format)).
+TPC-DS q95 reads `web_sales` on both sides of a join. Fused with its four loads shared and four
+buffers, it answers as q95 alone, on the CPU and on the device (`tests/end_to_end/dag.rs`,
+`tests/gpu_tests/dag_cases.rs`).
+
 ### Traits
 
 The types are declared in `plan/mod.rs` and `executor/mod.rs` — the node vocabulary in the

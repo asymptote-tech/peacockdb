@@ -167,6 +167,20 @@ Tasks 6–10 were done by one developer, whose context ran long; Task 11 goes to
 - **Device step:** nebius-gpu's disk had 4.9 GB free on 2026-11-05. The coordinator's rule: check `df -h /` first; under 10 GB, stop and report, unless deleting this worktree's own `~/peacockdb-peacockdb-beta/target-cudf-*` on the VM frees enough, then rebuild cold. The C++ side changed in Tasks 1 and 10 (`node_session.cpp`, `gpu_plan.fbs`), so the device build is not incremental from Task 1's.
 - q95's shape: the plan describes it from `testdata/goldens/tpcds.sf1/tp1-single-mini.cpu.txt` (`== q95`); check it still reads `web_sales` four times before relying on "1 shared, 4 buffers". If the count differs, record what `buffer_unbuffered_holds` reports and the edges.
 
+## Task 11 notes
+
+- Dispatched 2026-11-05 (fresh developer, after the handoff), all steps, the L40S run included.
+- No production code changed. The tests are `tests/end_to_end/dag.rs` (8 CPU cases) and `tests/gpu_tests/dag_cases.rs` (5 device cases). Each mode is its own case, named `…_at_tp1_single` / `…_at_tp4_sized`.
+- The four tpch queries and `planned(dataset, queries, mode)` live in `tests/share.rs`, beside `share_sources`, since both tiers use them. Every query is planned in one session, because the cpu backend runs a fused plan against one task context.
+- **Deviation: R2 is `SELECT l_quantity, count(l_orderkey) FROM lineitem GROUP BY l_quantity`**, not the plan's `l_orderkey % 7 … GROUP BY k`. The device refuses a computed group key ([#264](../tickets/complete-coverage.md#t264), `CudfAggregate: only ColumnRef group exprs supported`), so the plan's R2 failed on the device *alone*, before any fusing. That was the first L40S run: `peacockdb_core_gpu_lib` 746 passed, 2 failed, both two-root cases. The new R2 reads the same lineitem columns, so it still shares with R1.
+- **`Session` is private to `test_support`**, so `tests::gpu_tests` cannot call `Session::open_roots` directly. Two `pub(crate)` delegates were added to `test_support/mod.rs`, gated like `schema_at`: `answer_on_the_device(tree, join_scratch, what)` (`Session::open`, `run`) and `answers_of_roots_on_the_device(roots, join_scratch, what)` (`Session::open_roots`, `run_roots`). Their bodies are in `gpu_session.rs`, and each asserts `holds == releases` and `in_flight_bytes == 0`. The names avoid the private module `device_answer`.
+- Answers are compared sorted (`batches_to_sorted_str`), as the plan says. The device side compares each root's fused answer with its query's alone, each alone run in its own session.
+- **Buffers the fixture inserts**: R1+R2 0 at both modes; R1+R3+R4 1 at both modes (lineitem on R3's probe edge, which R1 reads from outside the hold). Orders feeds R3's build, which is not held, so R4's read needs none. q95: 1 shared source and 4 buffers, as the plan predicted from the golden. The shape still reads `web_sales` with `{ws_warehouse_sk, ws_order_number}` four times. The tests pin these counts.
+- `a_fused_run_holds_each_shared_batch_once`: fused `holds` == Σ alone `holds` − Σ over shared sources (readers − 1) × the batches it emitted (read off `report.emitted` at the `PlanDag` index).
+- Mutation checks (production, then restored). `CpuBatch::share` returning the first half of the rows turned 6 of the 8 red. q95 stayed green under that, because its 1999 date window sits in the first half of `web_sales`. With the second half instead, `q95_fused_with_buffers_answers_as_q95_alone` was red (order count 0 against 68).
+- Counts: `--lib` 1101 (1099 passed + 2 ignored), +8: End to end 52. gpu `gpu_tests::` 748, +5: new row "Fused plans on a device" 5. build-test.md: cpu 3616, gpu 2417, grand total 8004 (Rust 6171).
+- **L40S run (Step 4), second run after the R2 change: `ALL rc=0`.** `peacock_cpu_tests` 67, `peacock_gpu_tests` 5, `peacock_join_session_tests` 56, `peacock_plan_tests` 136, `peacockdb_core_gpu_lib` 748 (the 5 `dag_cases` OK), `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 9 (`--skip bench_`), `test_node_timing` 1. These equal build-test.md's rows. Against Task 1's run: plan +1 and cpu +3 (Tasks 1 and 10, after rebase 2), corpus +20 (rebase 2), gpu lib +5 (this task). Disk before the build: 22 GB free on `/`, so nothing was deleted. The C++ rebuilt (`node_session.cpp`, `libpeacock_gpu.so`), so the device ran Task 10's numbering.
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).
@@ -179,6 +193,9 @@ Tasks 6–10 were done by one developer, whose context ran long; Task 11 goes to
 | VM | start | stop | hours |
 |---|---|---|---|
 | nebius-gpu (Task 1 Step 4) | 2026-11-04 14:24 UTC | 2026-11-04 14:57 UTC | 0.55 |
+| nebius-gpu (Task 11 Step 4) | 2026-11-05 21:56 UTC | 2026-11-05 22:34 UTC | 0.63 |
+
+Task total, nebius-gpu: 1.18 h.
 
 ## Carry-over (coordinator)
 

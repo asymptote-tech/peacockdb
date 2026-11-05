@@ -5,9 +5,56 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 
+use datafusion::execution::context::SessionContext;
+
 use crate::plan::{GpuLoadParquet, GpuNode, NodeRef, Schema, SharedSource, as_node_ref};
 use crate::plan::{PlanDag, PlanError, new_hold_buffer, validate_dag};
+use crate::planner;
+use crate::test_support::{Mode, data_dir_for};
 use crate::tests::rebuild::{rebuild, schema_of};
+
+/// Four tpch queries to fuse. Wherever two read one table they read the same columns, so
+/// their loads match and share: lineitem as `{l_orderkey, l_quantity}`, orders as
+/// `{o_orderkey, o_orderpriority}`.
+pub(crate) const LINEITEM_TOTALS: &str = "SELECT sum(l_quantity), count(l_orderkey) FROM lineitem";
+/// Grouped on a bare column: the device refuses a computed group key
+/// ([#264](../../../llm-wiki/tickets/complete-coverage.md#t264)).
+pub(crate) const LINEITEM_BY_QUANTITY: &str =
+    "SELECT l_quantity, count(l_orderkey) FROM lineitem GROUP BY l_quantity";
+pub(crate) const QUANTITY_BY_PRIORITY: &str = "SELECT o_orderpriority, sum(l_quantity) \
+     FROM orders JOIN lineitem ON l_orderkey = o_orderkey GROUP BY o_orderpriority";
+pub(crate) const ORDERS_BY_PRIORITY: &str =
+    "SELECT o_orderpriority, count(o_orderkey) FROM orders GROUP BY o_orderpriority";
+
+/// Each of `queries` over `dataset` at sf1, planned at `mode` in one session, which comes back
+/// with the trees: the cpu backend runs against its task context.
+pub(crate) async fn planned(
+    dataset: &str,
+    queries: &[&str],
+    mode: &Mode,
+) -> (SessionContext, Vec<Box<dyn GpuNode>>) {
+    let ctx = crate::register_tables_for(
+        crate::build_session_state(mode.target_partitions),
+        &data_dir_for(dataset, "1"),
+    )
+    .await
+    .expect("register the tables");
+    let mut trees = Vec::new();
+    for sql in queries {
+        let what = format!("{sql} at {}", mode.name);
+        let plan = ctx
+            .sql(sql)
+            .await
+            .unwrap_or_else(|why| panic!("{what}: {why}"))
+            .create_physical_plan()
+            .await
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        let (tree, _memory) = planner::plan(&plan, mode.knobs_for(dataset))
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        trees.push(tree);
+    }
+    (ctx, trees)
+}
 
 /// What two loads must agree on to be read once: the table, the columns, the mapping and the
 /// schema they declare.

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7991 test cases — Rust 6158, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8004 test cases — Rust 6171, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3608 cases: `--lib` 1093, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3616 cases: `--lib` 1101, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -161,7 +161,7 @@ is off is never decoded and would arm itself when that cell is enabled
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 44 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting`, `schema_validation` and `dag` beneath it | 52 |
 |---|---|--:|
 
 SQL in, rows out: 18 queries planned and run at all five modes against DataFusion on the same
@@ -187,9 +187,13 @@ companions, a DISTINCT argument holding NULLs, an empty keyless input answering 
 and two on an answer with no rows — an ordered query answering zero rows under its one column at
 every mode, and the empty sort's and merge's own emissions read off the run, which the answer
 cannot show; and an aggregate beside a full outer join over an input no row survives, and a count
-over a scan no row group survives answering 0. Two of the 44 are `#[ignore]`d against
+over a scan no row group survives answering 0. Eight run fused plans (`dag`), at tp1-single
+and tp4-sized: two tpch roots over one shared lineitem, and three over a shared lineitem and a
+shared orders, each root answering as its query alone; the three holding each shared batch
+once; and TPC-DS q95 at tp1-single, its four `web_sales` loads one source, refused without
+buffers and answering as q95 alone with its four. Two of the 52 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 42 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 50 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -915,7 +919,7 @@ release is null-guarded on the executor
 the Rust side of the same no-device answer: `NoDevice`, `off no-device`, a session's option
 reaching the C side as `Session` and pinning nothing, a prefill `Err(Off)`
 
-#### gpu — `--features gpu`: shad-gpu only. 2412 cases: `--lib -- gpu_tests::` 743, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 2417 cases: `--lib -- gpu_tests::` 748, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -1031,6 +1035,14 @@ with and without a crossing projection, Left and Full also through a finish that
 no probe matched, and Inner, Right and LeftAnti on each key type; the cross join, and the nested
 loop of every type, each with and without a projection; and each aggregate's init, the merges,
 and the sum, avg, stddev and var finalizes, grouped on each key type and global
+
+| Fused plans on a device | [tests::gpu_tests::dag_cases](../peacockdb-core/src/tests/gpu_tests/dag_cases.rs) | 5 |
+|---|---|--:|
+
+`end_to_end::dag`'s fused plans on the device. Each query runs alone in its own session, then
+all of them as one plan in one session (`Session::open_roots`), and each root's answer equals its
+query's alone, sorted. Two tpch roots over one shared lineitem and three over two shared sources,
+at tp1-single and tp4-sized; TPC-DS q95 at tp1-single, with its four buffers
 
 *component*
 
