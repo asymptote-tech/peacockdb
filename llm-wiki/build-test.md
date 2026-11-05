@@ -2156,6 +2156,11 @@ hand. A new region repeats these steps.
   `cudaErrorMemoryAllocation` failures under it are its consequence. The GPU host is shared,
   so check `nvidia-smi` before debugging a red GPU tier ([#178](tickets/testinfra.md#t178)). Budgets are
   H200 numbers; `PEACOCK_RMM_POOL_BYTES=<bytes>` replaces one for a sweep or another host.
+  Two more variables win over the engine the same way: `PEACOCK_PINNED_HOST_CACHE_BYTES=<bytes>`
+  sizes the pinned host file cache (`0` is off), and `PEACOCK_SCAN_READER=read_parquet` swaps the
+  scan's one-chunk reader for `read_parquet`. A device tier with the cache off is still green, but
+  `peacock_plan_tests`' two cache-on cases skip. A benchmark prefills its cases' files first
+  ("The prefill" under Benchmarks).
 - **`verda` and `verda-gpu` are names for a host, not addresses of one.** They are ephemeral
   Verda Cloud instances, reprovisioned with a new IP, so `--host` takes `<user@ip>` and
   `scripts/list_verda_instances.sh` is what finds it (`VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET`).

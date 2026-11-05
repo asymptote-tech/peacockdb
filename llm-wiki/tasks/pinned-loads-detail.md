@@ -25,6 +25,7 @@
   Task 2 Steps 3–8 on the H100 path. Notes under "Resumed after new-hosts".
 - 2026-11-05: Task 6 skipped (`NULL_RESULT`). Task 7: the CPU-VM build, the H100's filter run,
   bench and traces, the L40S list on and off; #305 opened. Notes from "After runs" on.
+- 2026-11-05: Task 8: architecture.md, build-test.md, #149 and #232 archived; the CPU gates.
 
 ## Task 1: the load breakdown
 
@@ -760,6 +761,37 @@ cases, and #149's "integrated does not regress" measurement is deferred.
   runs in the L40S list, on and off.
 - The after install: the CPU-VM build of this tree at `b3e3dc37` (rc 0, 5.5 min, no warnings),
   in `/home/dmitry/build/peacock/pinned-loads/after-install`.
+
+## Suites
+
+| suite | where | last result |
+|---|---|---|
+| `cargo test -p peacockdb-core --features rust-only --lib`, `--test test_corpus_goldens` (and the whole rust-only suite) | dev | 928 + 2 ignored, 47 (whole suite: + 2447, 3, 1, 41), 2026-11-05 |
+| `cargo test -p cost-report` (`test_source_formatting`) | dev | 49 + 32 |
+| `scripts/calibration/tests/test_*.py` | dev, the 25.02 build image's venv (the host has no matplotlib) | 53 |
+| `scripts/env/tests/test_run_gpu.py` | dev | 34 |
+| `ctest -L cpu`, `peacock_cpu_tests` | dev, 25.02 build image | 1/1, 63 |
+| the ffi rung, `--lib -- ffi_tests::` and `peacockdb-ffi --test test_ffi`; `--features gpu --no-run` | dev, host cuDF 25.02, no device | 5, 4; builds |
+| `peacock_gpu_tests`, `peacock_plan_tests`, `peacock_join_session_tests`, the lib's `gpu_tests::` | nebius-h100 (Task 7 Step 2), then nebius-gpu | 5, 131, 56, 742 |
+| the L40S list, cache on and off | nebius-gpu | green both; 129 + 2 skipped off |
+| `run-gpu.sh … run bench`, `create_nsys_profile.sh --trace`, the reader probe | nebius-h100 | Tasks 2 and 7 |
+
+CI runs `scripts/calibration/tests` (its glob) and `peacock_cpu_tests` (`ctest -L cpu`); the new
+test files fall under existing globs and targets, so nothing needs a CI step.
+
+## Task 8 notes
+
+- architecture.md: the reader row's evidence is now the H100's (equal readers), and a "parquet
+  source" row carries the cache, its cost, scope, prefill, who applies it, leases, no device and
+  the cgroup caveat. The ABI paragraph already said twenty-nine symbols (counted in
+  `peacock_gpu.h`).
+- **Not run: the device tiers under `PEACOCK_SCAN_READER=read_parquet`.** Task 5 left that to
+  Task 7, whose Step 6 asks only for cache on and off. The switch is measurement-only; its
+  answers were compared only by `ScanReader.OneChunkEqualsReadParquet` and the probe.
+- `tasks.md`'s board line still links `../tickets/performance.md#t149` and `#t232`, now in the
+  archive. The board is the coordinator's.
+- `python3 scripts/ticket_widget.py`: exit 0; `testdata/report.html` unchanged (the registry names
+  neither ticket).
 
 ## Task 2 notes
 

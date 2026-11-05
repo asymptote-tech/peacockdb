@@ -27,6 +27,96 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t149"></a>
+### #149 — the parquet load must use pinned host memory
+**Priority: high**
+
+Nothing in the engine sets a host memory resource for IO, so parquet loads from pageable host
+memory — 10.6 GB/s H2D on the H200 against 47.3 GB/s pinned, 2 GiB buffers, 2nd-min of 5.
+
+A discrete GPU's DMA engine transfers by physical address and cannot be handed a page the OS may
+move, so a pageable source is bounced through an internal pinned staging buffer: a host memcpy
+of every byte, which is what bounds the rate — H200's 10.6 GB/s sits just under its 11.8 GB/s
+single-core memcpy, nowhere near its link rate. That is 4.4x on every byte the loader moves, and
+the load dominates: 400-690 ms against 19-48 ms of execute on sf40. cuDF exposes
+`cudf::io::set_host_memory_resource` and defaults to pageable — [#148](#t148)'s shape one side
+over. Condition it on the device: GB10 shows 59.5 vs 59.2 because it has one physical pool, so
+`pageableMemoryAccess` is the branch. Tests: compare the existing `[bench] … load_ms=` on both
+hosts, asserting the discrete host improves and the integrated one does not regress.
+
+**Done.** On cuDF 25.02 (pinned-loads, 2026-11-05, tpch sf40 tp1-single on nebius-h100) the copy was
+already pinned: a path read goes through kvikio, whose compat read `pread`s into a 4 MiB pinned
+bounce buffer and copies from it. Nsight, decoded through the export's own `ENUM_CUDA_MEM_KIND`,
+puts pageable bytes at 0.01–0.05 % of each `lineitem` load's H2D and finds no `cudaHostAlloc` in a
+load, so cuDF's pool was left alone (Decision `NULL_RESULT`). What cost the load was the page-cache
+read before each copy: 44–70 % of it. The engine now reads each file from a process-wide pinned
+host file cache (`pinned_host_cache_bytes`, default `min(RAM, cgroup) × 3/4`, prefilled by the
+benchmark), through `source_info` over the pinned bytes:
+
+| `lineitem` load, µs | before | cache | chunked | all (default) |
+|---|--:|--:|--:|--:|
+| q1 | 403877 | 154641 | 386539 | 151556 |
+| q3 | 333341 | 119347 | 317780 | 118873 |
+| q6 | 91920 | 53299 | 88248 | 53071 |
+| q8 | 447118 | 268975 | 425933 | 271455 |
+
+H2D, bytes-weighted per query, all pinned: 25.7–31.8 GB/s before, 41.0–48.6 GB/s from the cache;
+copies stay one per column-chunk run (median 0.1–0.8 MiB), so 55.5 GB/s is not reached. Compressed
+load rate before → default: q1 5.8 → 15.5 GB/s, q3 6.2 → 13.4, q6 3.7 → 6.4, q8 13.5 → 19.8. The
+prefill reads 9.0–15.5 GB per query process at 2.0–2.1 GB/s from the page cache (91.7 MB/s cold).
+The L40S list is green with the cache on and off, goldens unchanged. Integrated: deferred, no GB10.
+Record: `tasks/pinned-loads-detail.md` (archived with the task).
+
+<a id="t232"></a>
+### #232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader
+
+`scan.cpp` loads every row-group batch with `cudf::io::read_parquet`. On GB10 the same bytes
+through `cudf::io::chunked_parquet_reader` with one chunk load 5.6x faster.
+
+Measured in `reports/dgx-spark.md` §2 (GB10, libcudf 26.02, CUDA 13.0, 2nd-minimum of repeated
+runs, idle host), whole-table q6 load:
+
+| reader | batches | q6 load |
+|---|--:|--:|
+| `cudf::io::read_parquet` | — | 340 ms |
+| `chunked_parquet_reader`, 16 GiB chunk | 1 | 60.3-61.6 ms |
+| same, 4 GiB | 4 | 60.7-61.0 ms |
+| same, 1 GiB | 15 | 62.5-64.4 ms |
+| same, 512 MiB | 29 | 81.3-82.2 ms |
+| same, 128 MiB | 115 | 240.1-245.2 ms |
+
+One chunk has the same single-shot semantics, so the gap is the reader, not chunking. Nor is it
+the allocator: reserving 60% of memory up front, which makes pool growth impossible, changes
+nothing (#148). The host floor says the fast number is right: `dd` reads the 9.0 GB file from
+page cache at 23.6 GB/s, so q6's ~1.5 GB of compressed columns needs ~64 ms. `KVIKIO_NTHREADS`
+explains part of the gap (1 thread 480 ms, 16 threads 323 ms) and not the rest; the mechanism is
+unproven. Load dominates a single query: q6 is 19.2 ms execute against 399.9 ms load
+(`reports/benchmark-minimal.md`). A cost, not a wrong answer.
+
+**Corpus queries:** every device scan. The difference shows in the benchmark tree's load
+column, not in any corpus cell.
+
+**Fix proposed:** first re-measure on H200, since every number above is GB10 on CUDA 13.0 and
+shad-gpu runs CUDA 12.2: `read_parquet` against a one-chunk `chunked_parquet_reader` over the
+same row groups, with NVTX ranges to name the mechanism. If it holds, `scan.cpp` builds a
+`chunked_parquet_reader` over the call's row groups, sets `chunk_read_limit` above the batch the
+plan already sized (one chunk), and concatenates only if it returns several. The read limit is
+the plan's, not a second size: 1-4 GiB was the sweet spot and 128 MiB cost 4x, so a batch sized
+below 1 GiB wants re-measuring too. Tests: the device tiers stay byte-identical; a benchmark
+section for the load.
+
+**Done.** Re-measured on the H100 with cuDF 25.02 and CUDA 12.2 (pinned-loads, 2026-11-05): the gap
+does not exist there. A probe over sf40 `lineitem.parquet`, every row group, q6's four columns,
+second-fastest of ten: from the path `read_parquet` 390239 µs and one chunk 390298; from pinned
+memory 135146 and 135432. q1's seven columns: 395900 / 395530 and 143463 / 143466. Under Nsight
+both readers issue the same 5880 copies and the same kernels; only the source moves the time, by
+kvikio's 310 ms of reads. In the engine, `cache` (`read_parquet`) against `all` (one chunk), both
+from the pinned cache, differ by −2.0 % to +0.9 % on the `lineitem` loads, within the run spread.
+The scan reads through a one-chunk `chunked_parquet_reader` anyway (`read_scan_table`,
+`kScanChunkReadLimit = 0`), since the GB10/26.02 measurement above stands; `PEACOCK_SCAN_READER=read_parquet`
+switches back for a measurement. The L40S list is green on the default reader, the cache on and
+off; it was not run under `read_parquet`. The mechanism on GB10 stays unproven.
+
 <a id="t302"></a>
 ### #302 — the named non-inner join queries' device cells have never run
 `tpch/left-join-reorder`, `semi-join-reorder`, `anti-join-reorder` and `left-join-fixed` put a
