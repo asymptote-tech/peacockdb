@@ -126,6 +126,14 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - The stale `#[allow(dead_code)]` on `IndexedNode.child_readers` ("until then every one is 0") went: Task 5's queues read it.
 - Counts after Task 7: `--lib` 1079 (1077 passed + 2 ignored), +12: `executor::driver::tests` 162 (cap +6), Driver internals 63 (scheduler +3), Plan types 57 (`plan::validate::tests` 49). build-test.md: cpu 3594, `--lib` 1079, grand total 7974 (Rust 6144).
 
+## Task 8 notes
+
+- Dispatched 2026-11-05, CPU only, local. Task 8 has no device step.
+- `Tree::of(roots)` is built from `PlanDag`: nodes in its post-order, children mapped to post-order, and `parents` (every reader) in place of the single `parent`. On a tree `PlanDag`'s post-order is the old recursive one, so every `--- memory ---` section is unchanged. `estimate_roots(roots, budget)` lives in `memory_estimation.rs`; `planner::estimate(root)` and `planner::estimate_roots` delegate to it. The tests import `crate::planner::estimate`.
+- `amplification` walks every reader's path from the source up to the accumulator that ends it, taking the maximum. It was one parent chain. One test the plan does not list covers it: `a_shared_source_is_amplified_by_its_widest_reader` (`filter(S)` beside `merge(emit(S, 4))`: 4.0, where the first reader alone gives 1.0). Mutation check: following only a source's first reader turns it red. The plan's three tests do not reach amplification.
+- `plans::shared(table, lanes)` is now in `src/tests/plans.rs`, and `driver/tests/mod.rs`'s copy (Task 6) is gone. `plan/dag/tests.rs` and `plan/validate/tests/holds.rs` keep their own one-lane `shared`/`shared_source`, untouched.
+- Counts after Task 8: `--lib` 1083 (1081 passed + 2 ignored), +4: Memory estimation 19. build-test.md: cpu 3598, `--lib` 1083, grand total 7978 (Rust 6148).
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).

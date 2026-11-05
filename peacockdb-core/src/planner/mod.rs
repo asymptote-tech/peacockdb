@@ -105,7 +105,17 @@ pub fn plan(
 }
 
 pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
-    memory_estimation::estimate(root, budget)
+    estimate_roots(&[root], budget)
+}
+
+/// The memory model over several roots, indexed by `PlanDag`'s post-order: a shared source is
+/// one node, charged one batch per lane once, and a node every root reads is counted once in
+/// `accumulator_bytes` and in the shares.
+pub(crate) fn estimate_roots(
+    roots: &[&dyn GpuNode],
+    budget: u64,
+) -> Result<MemoryModel, PlanError> {
+    memory_estimation::estimate_roots(roots, budget)
 }
 
 /// DataFusion's `NOT IN` is two-valued and so wrong wherever a key can be NULL (#80). This

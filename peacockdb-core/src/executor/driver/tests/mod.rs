@@ -33,17 +33,7 @@ use self::mock::{Mock, Script};
 use super::partitioned::Driver;
 use crate::executor::{CallKind, FusedRun, PlanIndex, RunError, RunReport, TraceEvent};
 use crate::plan::GpuNode;
-use crate::plan::{GpuLoadParquet, SharedSource, new_hold_buffer};
-use crate::tests::plans::source;
-
-/// `plans::source` as the one node several parents may hold.
-fn shared(table: &str, lanes: usize) -> SharedSource {
-    let load = source(table, lanes)
-        .into_any_box()
-        .downcast::<GpuLoadParquet>()
-        .expect("plans::source builds a loader");
-    SharedSource::new(*load)
-}
+use crate::plan::{SharedSource, new_hold_buffer};
 
 fn read(source: &SharedSource) -> Box<dyn GpuNode> {
     Box::new(source.clone())

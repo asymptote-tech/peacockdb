@@ -947,6 +947,11 @@ section. Because `GpuMergePartitions` polls round-robin, all N lanes are live at
 estimator charges the full multi-lane section — N × (per-lane executor state + one in-flight
 batch) between the loader and the merge point. A `GpuHoldBuffer` is charged everything its input
 emits, counted with the accumulators, and passes its input's batch size on unchanged.
+`estimate_roots` prices several roots as one plan, numbered by `PlanDag`'s post-order. A shared
+source is one node: it is charged one batch per lane once, takes one share of the budget, and
+its amplification is the largest along any reader's path. Nothing holds it back longer, since a
+valid plan has no reader that waits on a hold without a buffer, and what a held reader keeps is
+charged at its buffer.
 
 **Run time** the driver keeps a running total incrementally — `resident` is Σ `byte_size` over
 the driver-held in-flight batches plus Σ cached `resident_bytes()` over live executors. A batch is

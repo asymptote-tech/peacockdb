@@ -17,7 +17,7 @@ use crate::plan::{
     GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions, GpuProject, GpuSort, GpuUnion,
     GpuUnload,
 };
-use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{GpuNode, RowInterval, SharedSource};
 
 pub(crate) fn schema() -> Schema {
     Schema::new(Arc::new(ArrowSchema::new(vec![Field::new(
@@ -51,6 +51,15 @@ pub(crate) fn source(table: &str, lanes: usize) -> Box<dyn GpuNode> {
         &scan,
         schema(),
     ))
+}
+
+/// [`source`] as the one node several parents may hold: each clone is one more reader.
+pub(crate) fn shared(table: &str, lanes: usize) -> SharedSource {
+    let load = source(table, lanes)
+        .into_any_box()
+        .downcast::<GpuLoadParquet>()
+        .expect("source builds a loader");
+    SharedSource::new(*load)
 }
 
 pub(crate) fn filter(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
