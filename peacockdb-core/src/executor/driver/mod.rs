@@ -62,7 +62,7 @@ pub(crate) fn run_roots_with_hook<B: Backend>(
         return Err(RunError::Protocol("a run needs at least one root".to_string()));
     }
     validate_dag(roots, cap).map_err(RunError::Backend)?;
-    partitioned::run_roots_with_hook::<B>(roots, ctx, budget, hook)
+    partitioned::run_roots_with_hook::<B>(roots, ctx, budget, cap, hook)
 }
 
 /// The plan indexed once — heights, numbering, regions, lane counts and slot ranges.

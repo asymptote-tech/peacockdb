@@ -10,6 +10,7 @@
 pub(crate) mod mock;
 
 mod budget;
+mod cap;
 mod counts;
 mod dag;
 mod failure;
@@ -24,6 +25,8 @@ mod random_dags;
 mod render;
 mod stress;
 mod wiring;
+
+use std::num::NonZeroUsize;
 
 use super::StepError;
 use self::mock::{Mock, Script};
@@ -71,13 +74,19 @@ fn run_with(
 
 /// Several roots run to completion under no budget.
 fn run_roots(roots: &[&dyn GpuNode], script: &Script) -> FusedRun {
-    Driver::<Mock>::for_roots(roots, script, None)
+    run_capped(roots, script, None)
+}
+
+/// [`run_roots`] with at most `cap` roots running at once.
+fn run_capped(roots: &[&dyn GpuNode], script: &Script, cap: Option<NonZeroUsize>) -> FusedRun {
+    Driver::<Mock>::for_roots(roots, script, None, cap)
         .and_then(|driver| driver.run_fused(10_000))
         .expect("the plan runs")
 }
 
 fn driver_of_roots<'a>(roots: &[&'a dyn GpuNode], script: &'a Script) -> Driver<'a, Mock> {
-    let mut driver = Driver::<Mock>::for_roots(roots, script, None).expect("the plan indexes");
+    let mut driver =
+        Driver::<Mock>::for_roots(roots, script, None, None).expect("the plan indexes");
     driver.seed().expect("the limits settle");
     driver
 }

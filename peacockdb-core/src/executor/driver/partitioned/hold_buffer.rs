@@ -70,9 +70,23 @@ impl<B: Backend> Driver<'_, B> {
             .expect("a join reports its own node")
             .probe
             .clone();
-        for node in probe {
-            if self.index.shape.buffers[node] {
-                self.refresh(node);
+        self.recheck_buffers(&probe);
+    }
+
+    /// A root that has finished frees its slot under the cap, and the buffers of the roots
+    /// that admits are re-checked as a lifted join's are.
+    pub(crate) fn report_root(&mut self, node: usize) {
+        if self.root_of[node].is_none() || !self.states[node].out_done.iter().all(|done| *done) {
+            return;
+        }
+        let lifted = self.scheduler.root_finished(node);
+        self.recheck_buffers(&lifted);
+    }
+
+    fn recheck_buffers(&mut self, nodes: &[usize]) {
+        for node in nodes {
+            if self.index.shape.buffers[*node] {
+                self.refresh(*node);
             }
         }
     }

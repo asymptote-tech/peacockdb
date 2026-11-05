@@ -835,6 +835,18 @@ Several roots run as one plan through `run_roots`, which calls `validate_dag` fi
 one batch list per root, each what that root alone answers. A single tree goes through `run`,
 which needs no such proof: a tree never needs a buffer.
 
+**The concurrency cap.** `run_roots` takes an optional cap: at most that many roots run at
+once, which bounds the executor state alive together. Roots are admitted in root order, the
+first `cap` at the start and the next whenever an admitted root finishes, all its lanes done or
+its limit satisfied. A root waiting for admission is held by the cap over its region, stopping
+at buffers as a join's hold does, since the cap lifts. So rule 3b applies to every root that can
+wait, the roots of ordinal `cap` and above: an edge into its region from outside ends at a
+buffer, or `validate_cap` refuses the plan as `UnbufferedHold` naming the root. A shared source
+is in no root's region, so it never waits on an unadmitted root: it runs on into that root's
+buffer. In `validate_dag`'s wait-for graph a waiting root waits only on the roots before it
+finishing, never on its own region, and a join inside it never waits on its cap, which lifted
+before any of its steps.
+
 Livelock has the same answer: the one thing that can block a batch is a join waiting on its
 other side, and orienting the tree so the build side is the left child removes the wait, because
 at equal heights the leftmost node wins and the build subtree drains first.
@@ -845,8 +857,8 @@ projections below it. A held buffer stays in the schedule: it takes each batch i
 into its lane's store and emits nothing, and a lane offered nothing is not ready. Unheld, it
 emits its store in arrival order, then forwards as batches arrive, one batch per lane per step,
 so the queue above it stays at one. A limit's hold never lifts, so it does not stop at a buffer
-and takes it out of the schedule. When a join's hold lifts, the driver re-checks each buffer it
-covered, since a buffer's readiness reads the hold.
+and takes it out of the schedule. When a join's hold or the cap lifts, the driver re-checks each
+buffer it covered, since a buffer's readiness reads the hold.
 
 > **The only unbounded storage is a node you can see.** A queue between two ordinary nodes
 > stays self-bounding at one batch per lane, as "Queues need no cap" says. Validation
@@ -858,9 +870,10 @@ covered, since a buffer's readiness reads the hold.
 The check is `validate_roots`, per join: an edge out of a member of the probe region, or the
 probe edge itself, to a producer outside the region is refused as `PlanError::UnbufferedHold`
 unless a buffer reads it. On a tree nothing enters a region but through a buffer, so no
-single-query plan is refused. `validate_dag` adds the wait-for graph: a join in its build phase
-waits on each hold whose region holds a node its build side reads, and a cycle is refused as
-`PlanError::HoldCycle`. Under the rule above none forms; the graph is that argument made
+single-query plan is refused. `validate_dag` adds the cap's rule and the wait-for graph: a join
+in its build phase waits on each hold whose region holds a node its build side reads, a root
+waiting for the cap on each hold whose region holds a node of the roots before it, and a cycle
+is refused as `PlanError::HoldCycle`. Under the rule above none forms; the graph is that argument made
 mechanical.
 
 Hash skew needs one decision and no mechanism. Empty scatter outputs are dropped at the
@@ -872,8 +885,8 @@ whose build lane got nothing still answers it, through `set_build(None)` ([Joins
 The schedule is maintained incrementally: a rank order from (height, order) computed once, a
 ready bitset over it, per-node ready-lane counters, and hold counters — counters rather than
 flags, since one node can sit in two joins' probe regions. Holds are regions, lists of nodes
-the index computes once (`PlanShape.regions`, `JoinShape.probe`): a building join holds its probe
-edge's, a satisfied limit its own node's. A pick is the lowest set bit. A step re-checks the node
+the index computes once (`PlanShape.regions`, `JoinShape.probe`, `PlanShape.cap_regions`): a
+building join holds its probe edge's, a satisfied limit its own node's, the cap a waiting root's. A pick is the lowest set bit. A step re-checks the node
 that ran and the parent of each of its readers and nothing else, because nothing else can have
 changed. A naive rescan survives as a test-only oracle compared pick by pick, since an
 incremental schedule that disagrees with it is wrong by definition. A Python model of these

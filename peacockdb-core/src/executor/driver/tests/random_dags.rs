@@ -8,6 +8,7 @@
 //! queue in front of it grows. That growth is what the buffer rule forbids, and what tells an
 //! accepted DAG from a refused one here.
 
+use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::mock::{Mock, Script, spec};
@@ -95,13 +96,24 @@ fn script() -> Script {
 
 /// The mock run under the bound. A driver that stops with work left reports it as a protocol
 /// error, the step bound's included; any other failure is the driver's own and a finding.
-fn simulate(roots: &[&dyn GpuNode], script: &Script) -> Result<FusedRun, String> {
-    match Driver::<Mock>::for_roots(roots, script, None).and_then(|driver| driver.run_fused(10_000))
+fn simulate(
+    roots: &[&dyn GpuNode],
+    script: &Script,
+    cap: Option<NonZeroUsize>,
+) -> Result<FusedRun, String> {
+    match Driver::<Mock>::for_roots(roots, script, None, cap)
+        .and_then(|driver| driver.run_fused(10_000))
     {
         Ok(fused) => Ok(fused),
         Err(RunError::Protocol(said)) => Err(said),
         Err(other) => panic!("the driver failed for a reason no schedule explains: {other:?}"),
     }
+}
+
+/// No cap, or one below the root count: the cap is a hold over every root it keeps waiting,
+/// so it is drawn as often as no cap at all.
+fn cap_of(seed: u64, roots: usize) -> Option<NonZeroUsize> {
+    NonZeroUsize::new(seed as usize % roots)
 }
 
 /// The node whose queues held more than one batch per lane at once, if any.
@@ -128,8 +140,9 @@ fn every_dag_validate_dag_accepts_finishes() {
     for seed in 0..500 {
         let roots = random_dag(seed);
         let refs = refs(&roots);
-        let verdict = validate_dag(&refs, None);
-        match simulate(&refs, &script) {
+        let cap = cap_of(seed, roots.len());
+        let verdict = validate_dag(&refs, cap);
+        match simulate(&refs, &script, cap) {
             Ok(fused) if verdict.is_ok() => {
                 assert_ran_bounded(&fused, seed);
                 accepted += 1;
@@ -138,7 +151,8 @@ fn every_dag_validate_dag_accepts_finishes() {
             Err(said) => {
                 assert!(
                     verdict.is_err(),
-                    "seed {seed}: accepted, and the driver stopped: {said}\n{roots:?}"
+                    "seed {seed}: accepted under cap {cap:?}, and the driver stopped: \
+                     {said}\n{roots:?}"
                 );
             }
         }
@@ -160,7 +174,8 @@ fn no_valid_dag_is_refused() {
     for seed in 0..500 {
         let roots = random_dag(seed);
         let shape = format!("{roots:?}");
-        let outcome = catch_unwind(AssertUnwindSafe(|| buffer_unbuffered_holds(roots, None)));
+        let cap = cap_of(seed, roots.len());
+        let outcome = catch_unwind(AssertUnwindSafe(|| buffer_unbuffered_holds(roots, cap)));
         let (roots, inserted) = outcome.unwrap_or_else(|why| {
             let why = why
                 .downcast_ref::<String>()
@@ -169,9 +184,10 @@ fn no_valid_dag_is_refused() {
             panic!("seed {seed}: {why}\n{shape}")
         });
         let refs = refs(&roots);
-        assert_eq!(validate_dag(&refs, None), Ok(()), "seed {seed}");
-        let fused = simulate(&refs, &script)
-            .unwrap_or_else(|said| panic!("seed {seed}: valid, and the driver stopped: {said}"));
+        assert_eq!(validate_dag(&refs, cap), Ok(()), "seed {seed}");
+        let fused = simulate(&refs, &script, cap).unwrap_or_else(|said| {
+            panic!("seed {seed}: valid under cap {cap:?}, and the driver stopped: {said}")
+        });
         assert_ran_bounded(&fused, seed);
         buffered += usize::from(inserted > 0);
     }

@@ -99,7 +99,7 @@ fn the_output_hook_sees_a_shared_batch_once() {
     let script = three("s");
     let roots = two_readers();
     let mut seen = vec![0usize; 5];
-    let fused = Driver::<Mock>::for_roots(&refs(&roots), &script, None)
+    let fused = Driver::<Mock>::for_roots(&refs(&roots), &script, None, None)
         .expect("the plan indexes")
         .with_hook(Box::new(|node, _, _| {
             seen[node] += 1;

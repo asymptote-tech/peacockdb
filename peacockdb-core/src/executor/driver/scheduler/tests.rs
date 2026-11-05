@@ -3,6 +3,8 @@
 //! disagree the incremental one is wrong by definition, which is the only cheap way to
 //! keep it honest as the holds grow.
 
+use std::num::NonZeroUsize;
+
 use super::*;
 use crate::plan::Reader;
 
@@ -90,8 +92,19 @@ fn shape(readers: &[Vec<(usize, usize)>], lanes: &[usize], joins: &[usize]) -> P
                 lanes: lanes[*node],
             })
             .collect(),
+        cap_regions: roots
+            .iter()
+            .map(|root| cut_off(Some(*root), None))
+            .collect(),
         roots,
         buffers: vec![false; n],
+    }
+}
+
+impl Scheduler {
+    /// No cap: every root admitted from the start, as a single tree always is.
+    fn new(shape: &PlanShape) -> Self {
+        Self::with_cap(shape, None)
     }
 }
 
@@ -419,6 +432,91 @@ fn a_satisfied_tree_returns_no_reader() {
         !scheduler.is_satisfied(5),
         "only the node itself is satisfied"
     );
+}
+
+/// Three roots over one source: unload(0) <- filter(1) <- S(2), unload(3) <- filter(4) <- S,
+/// unload(5) <- filter(6) <- S.
+fn three_roots_over_a_source() -> PlanShape {
+    shape(
+        &[
+            vec![],
+            vec![(0, 0)],
+            vec![(1, 0), (4, 0), (6, 0)],
+            vec![],
+            vec![(3, 0)],
+            vec![],
+            vec![(5, 0)],
+        ],
+        &[1; 7],
+        &[],
+    )
+}
+
+fn one() -> Option<NonZeroUsize> {
+    NonZeroUsize::new(1)
+}
+
+#[test]
+fn a_cap_holds_the_regions_of_roots_past_it() {
+    let mut scheduler = Scheduler::with_cap(&three_roots_over_a_source(), one());
+    for node in [1, 2, 4, 6] {
+        scheduler.set_lane_ready(node, 0, true);
+    }
+    assert!(scheduler.is_held(3) && scheduler.is_held(4), "root 1 waits");
+    assert!(scheduler.is_held(5) && scheduler.is_held(6), "root 2 waits");
+    assert!(!scheduler.is_held(1), "root 0 is admitted");
+    assert!(
+        !scheduler.is_held(2),
+        "a shared source is in no root's region"
+    );
+    assert_eq!(scheduler.next(), Some(1));
+}
+
+#[test]
+fn finishing_a_root_admits_the_next() {
+    let mut scheduler = Scheduler::with_cap(&three_roots_over_a_source(), one());
+    scheduler.set_lane_ready(4, 0, true);
+    scheduler.set_lane_ready(6, 0, true);
+    assert_eq!(scheduler.next(), None);
+    assert_eq!(scheduler.root_finished(0), vec![3, 4], "root 1's region");
+    assert_eq!(scheduler.next(), Some(4));
+    assert!(scheduler.is_held(6), "root 2 still waits on root 1");
+    assert!(
+        scheduler.root_finished(0).is_empty(),
+        "a root finishes once"
+    );
+    assert_eq!(scheduler.root_finished(3), vec![5, 6]);
+    assert!(!scheduler.is_held(6));
+}
+
+#[test]
+fn a_cap_hold_stops_at_a_buffer() {
+    // unload(0) <- filter(1) <- S(2); unload(3) <- buffer(4) <- filter(5) <- S.
+    let mut shape = shape(
+        &[
+            vec![],
+            vec![(0, 0)],
+            vec![(1, 0), (5, 0)],
+            vec![],
+            vec![(3, 0)],
+            vec![(4, 0)],
+        ],
+        &[1; 6],
+        &[],
+    );
+    shape.buffers[4] = true;
+    shape.cap_regions[1] = vec![3, 4];
+    let mut scheduler = Scheduler::with_cap(&shape, one());
+    scheduler.set_lane_ready(4, 0, true);
+    scheduler.set_lane_ready(5, 0, true);
+    assert!(scheduler.is_held(4) && !scheduler.is_held(5));
+    assert_eq!(
+        scheduler.next(),
+        Some(4),
+        "held by the cap, and still taking what it is offered"
+    );
+    scheduler.set_lane_ready(4, 0, false);
+    assert_eq!(scheduler.next(), Some(5), "the filter below it runs");
 }
 
 #[test]

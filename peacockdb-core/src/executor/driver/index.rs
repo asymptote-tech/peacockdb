@@ -96,6 +96,11 @@ pub(crate) fn build<'a>(roots: &[&'a dyn GpuNode]) -> Result<PlanIndex<'a>, Plan
             readers: dag.nodes.iter().map(|node| node.readers.clone()).collect(),
             joins,
             roots: dag.roots.clone(),
+            cap_regions: dag
+                .roots
+                .iter()
+                .map(|root| dag.held_region_of_node(*root))
+                .collect(),
             buffers: (0..nodes.len()).map(|at| dag.is_buffer(at)).collect(),
         },
         nodes,

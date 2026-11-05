@@ -41,24 +41,66 @@ pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     holds_are_buffered(&dag)
 }
 
-/// [`validate_roots`], then the wait-for graph between holds, which must have no cycle.
-/// Under the buffer rule none can form; the check is that argument made mechanical, and the
-/// first thing a later change to the rule breaks.
+/// [`validate_roots`], then the cap's own buffer rule, then the wait-for graph between holds,
+/// which must have no cycle. Under the buffer rule none can form; the check is that argument
+/// made mechanical, and the first thing a later change to the rule breaks.
 pub(crate) fn validate_dag(
     roots: &[&dyn GpuNode],
     cap: Option<NonZeroUsize>,
 ) -> Result<(), PlanError> {
-    if let Some(cap) = cap {
-        return Err(PlanError::Unsupported(format!(
-            "a cap of {cap} roots at once: no driver runs one"
-        )));
-    }
     validate_roots(roots)?;
     let dag = PlanDag::of(roots);
-    match first_cycle(&wait_for_edges(&dag)) {
+    capped_roots_are_buffered(&dag, cap)?;
+    match first_cycle(&wait_for_edges(&dag, cap)) {
         Some(holds) => Err(hold_cycle(&dag, holds)),
         None => Ok(()),
     }
+}
+
+pub(crate) fn validate_cap(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    capped_roots_are_buffered(&PlanDag::of(roots), cap)
+}
+
+/// The roots of ordinal `cap` and above, the ones that can wait for admission, each with the
+/// region the cap holds: the root's, stopping at buffers, since the cap lifts.
+fn waiting_roots(dag: &PlanDag<'_>, cap: Option<NonZeroUsize>) -> Vec<(usize, Vec<usize>)> {
+    let admitted = cap.map_or(dag.roots.len(), NonZeroUsize::get);
+    dag.roots
+        .iter()
+        .skip(admitted)
+        .map(|root| (*root, dag.held_region_of_node(*root)))
+        .collect()
+}
+
+/// Rule 3b over the cap's holds: a waiting root's region is entered from outside only through
+/// a buffer, so a shared source it reads never waits on its admission.
+fn capped_roots_are_buffered(
+    dag: &PlanDag<'_>,
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    for (root, region) in waiting_roots(dag, cap) {
+        if let Some((reader, slot, producer)) = unbuffered_entry(dag, &region, None) {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UnbufferedHold {
+                hold: root,
+                reader,
+                slot,
+                producer,
+                what: format!(
+                    "{} (node {reader}) reads {} (node {producer}) from outside the root {} \
+                     (node {root}), which waits for the cap; a GpuHoldBuffer must sit on that \
+                     edge",
+                    name(reader),
+                    name(producer),
+                    name(root)
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// A join's probe is its second child, which is the side its hold covers.
@@ -125,22 +167,43 @@ fn unbuffered_entry(
     None
 }
 
-/// `(waiting, held)`: a join in its build phase waits on every node its build side reads, and
-/// so on each hold whose region holds one of them. Holds stop at buffers, so a buffer below
-/// a build is what keeps that build from waiting.
-fn wait_for_edges(dag: &PlanDag<'_>) -> Vec<(usize, usize)> {
+/// `(waiting, held)`, each vertex a hold named by its node: a join's by the join, the cap's
+/// by the root it keeps waiting. A join in its build phase waits on every node its build side
+/// reads, and so on each hold whose region holds one of them — never on its own root's cap,
+/// which lifted before any of its steps. A waiting root waits on the roots before it
+/// finishing, so on each hold whose region holds a node of theirs. Holds stop at buffers, so
+/// a buffer below a build is what keeps that build from waiting.
+fn wait_for_edges(dag: &PlanDag<'_>, cap: Option<NonZeroUsize>) -> Vec<(usize, usize)> {
+    let waiting = waiting_roots(dag, cap);
     let held: Vec<(usize, Vec<usize>)> = joins(dag)
         .map(|join| (join, dag.region_of_edge(join, PROBE_CHILD)))
+        .chain(waiting.iter().cloned())
         .collect();
+    let edges_from = |from: usize, waits_on: &[bool], own_cap: Option<usize>| {
+        held.iter()
+            .filter(|(hold, region)| {
+                Some(*hold) != own_cap && region.iter().any(|member| waits_on[*member])
+            })
+            .map(|(hold, _)| (from, *hold))
+            .collect::<Vec<_>>()
+    };
     let mut edges = Vec::new();
     for join in joins(dag) {
-        let build = dag.nodes[join].children[0];
-        let waits_on = reached_from(dag, build);
-        for (hold, region) in &held {
-            if region.iter().any(|member| waits_on[*member]) {
-                edges.push((join, *hold));
+        let waits_on = reached_from(dag, dag.nodes[join].children[0]);
+        let own_cap = waiting
+            .iter()
+            .find(|(_, region)| region.contains(&join))
+            .map(|(root, _)| *root);
+        edges.extend(edges_from(join, &waits_on, own_cap));
+    }
+    for (root, _) in &waiting {
+        let mut waits_on = vec![false; dag.nodes.len()];
+        for before in dag.roots.iter().take_while(|earlier| *earlier != root) {
+            for (at, reached) in reached_from(dag, *before).into_iter().enumerate() {
+                waits_on[at] |= reached;
             }
         }
+        edges.extend(edges_from(*root, &waits_on, Some(*root)));
     }
     edges
 }

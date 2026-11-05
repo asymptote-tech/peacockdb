@@ -1260,8 +1260,6 @@ impl<'a> PlanDag<'a> {
 
     /// [`Self::region_of_node`] stopping at buffers as [`Self::region_of_edge`] does: what a
     /// hold on a whole root covers when the hold lifts.
-    // The concurrency cap's hold is its one reader, and no driver takes a cap yet.
-    #[allow(dead_code)]
     pub(crate) fn held_region_of_node(&self, node: usize) -> Vec<usize> {
         dag::held_region_of_node(self, node)
     }
@@ -1560,8 +1558,8 @@ pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
 }
 
 /// The one check a plan with several roots passes before it runs: [`validate_roots`], then
-/// that no holds wait on each other ([`PlanError::HoldCycle`]). `cap` is how many roots may
-/// run at once; no driver takes one yet, so `Some` is refused as unsupported.
+/// [`validate_cap`], then that no holds wait on each other ([`PlanError::HoldCycle`]). `cap`
+/// is how many roots may run at once.
 // The entry point that runs several roots is its caller, and only tests run several yet.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn validate_dag(
@@ -1569,6 +1567,20 @@ pub(crate) fn validate_dag(
     cap: Option<NonZeroUsize>,
 ) -> Result<(), PlanError> {
     validate::validate_dag(roots, cap)
+}
+
+/// Under a cap of `k` below the root count, every root of ordinal `k` or above waits for
+/// admission, and its region stopping at buffers is a hold: an edge into it from outside ends
+/// at a `GpuHoldBuffer`, or the plan is refused as [`PlanError::UnbufferedHold`] naming the
+/// root. A shared source a waiting root reads is outside its region, so it runs on into the
+/// buffer.
+// query-fuser calls it on its own; `validate_dag` reaches the same rule inside `validate`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn validate_cap(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    validate::validate_cap(roots, cap)
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock

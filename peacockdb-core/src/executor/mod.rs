@@ -1117,6 +1117,9 @@ pub(crate) struct PlanShape {
     pub(crate) readers: Vec<Vec<Reader>>,
     pub(crate) joins: Vec<JoinShape>,
     pub(crate) roots: Vec<usize>,
+    /// Per root, in root order, what the concurrency cap holds while that root waits: its
+    /// region, stopping at buffers, since the cap lifts. A shared source is in none.
+    pub(crate) cap_regions: Vec<Vec<usize>>,
     pub(crate) buffers: Vec<bool>,
 }
 
@@ -1134,8 +1137,6 @@ pub(crate) struct IndexedNode<'a> {
     pub(crate) readers: Vec<Reader>,
     /// Per child slot, this edge's ordinal among that child's `readers`: the cursor it reads
     /// the child's queue by.
-    // The queues get one cursor per reader with several roots; until then every one is 0.
-    #[allow(dead_code)]
     pub(crate) child_readers: Vec<usize>,
     pub(crate) lanes: usize,
     /// This node's position in a children-first walk, which is what `RecipePlan` indexes
@@ -1213,7 +1214,7 @@ pub(crate) struct FusedRun {
 
 /// Run several roots as one plan, each shared source loaded once. `validate_dag` decides
 /// first that the plan cannot deadlock, and its refusal comes back as `RunError::Backend`.
-/// `cap` is how many roots may run at once; no driver takes one yet, so `Some` is refused.
+/// `cap` is how many roots may run at once, admitted in root order as earlier ones finish.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn run_roots<B: Backend>(
     roots: &[&dyn GpuNode],

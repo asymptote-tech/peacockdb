@@ -9,6 +9,8 @@
 //! Nothing here knows about backends, batches or executors: it takes events and returns a
 //! node. That is what makes a scheduling corner reachable from a test that builds no plan.
 
+use std::num::NonZeroUsize;
+
 use crate::executor::{JoinShape, PlanShape};
 use crate::plan::Reader;
 
@@ -30,6 +32,16 @@ pub(crate) struct Scheduler {
     /// one of them must not free it from the other.
     build_holds: Vec<u32>,
     limit_holds: Vec<u32>,
+    /// The cap's hold, on the region of each root still waiting for admission. A flag in all
+    /// but name: the regions of two roots never meet.
+    cap_holds: Vec<u32>,
+    /// How many roots may run at once; `None` admits every root at the start.
+    cap: Option<NonZeroUsize>,
+    cap_regions: Vec<Vec<usize>>,
+    /// Per root, in root order.
+    admitted: Vec<bool>,
+    finished: Vec<bool>,
+    roots: Vec<usize>,
     /// per join, lanes that have yet to leave their build phase
     building: Vec<usize>,
     joins: Vec<JoinShape>,
@@ -46,8 +58,9 @@ pub(crate) struct Scheduler {
 
 impl Scheduler {
     /// A join holds its probe region from time zero: no lane has left build yet, and a
-    /// probe batch produced before `set_build` has nowhere to go.
-    pub(crate) fn new(shape: &PlanShape) -> Self {
+    /// probe batch produced before `set_build` has nowhere to go. The cap holds every root's
+    /// region, then admits the first `cap` roots.
+    pub(crate) fn with_cap(shape: &PlanShape, cap: Option<NonZeroUsize>) -> Self {
         let n = shape.node_count();
         let mut node_of_rank: Vec<usize> = (0..n).collect();
         node_of_rank.sort_by_key(|node| (shape.heights[*node], *node));
@@ -71,6 +84,12 @@ impl Scheduler {
             lane_count: shape.lanes.clone(),
             build_holds: vec![0; n],
             limit_holds: vec![0; n],
+            cap_holds: vec![0; n],
+            cap,
+            cap_regions: shape.cap_regions.clone(),
+            admitted: vec![false; shape.roots.len()],
+            finished: vec![false; shape.roots.len()],
+            roots: shape.roots.clone(),
             building: shape.joins.iter().map(|join| join.lanes).collect(),
             joins: shape.joins.clone(),
             satisfied: vec![false; n],
@@ -88,7 +107,52 @@ impl Scheduler {
                 scheduler.build_holds[*node] += 1;
             }
         }
+        for region in &shape.cap_regions {
+            for node in region {
+                scheduler.cap_holds[*node] += 1;
+            }
+        }
+        scheduler.admit();
         scheduler
+    }
+
+    /// The root has every lane done, or was satisfied. Its slot under the cap frees, and the
+    /// next roots in order are admitted; what comes back is every node whose cap hold lifted,
+    /// in which a hold buffer now does something else with the same inputs. A second report
+    /// of one root changes nothing.
+    pub(crate) fn root_finished(&mut self, root: usize) -> Vec<usize> {
+        let ordinal = self
+            .roots
+            .iter()
+            .position(|at| *at == root)
+            .expect("a root reports its own node");
+        if std::mem::replace(&mut self.finished[ordinal], true) {
+            return Vec::new();
+        }
+        self.admit()
+    }
+
+    fn admit(&mut self) -> Vec<usize> {
+        let mut lifted = Vec::new();
+        for ordinal in 0..self.roots.len() {
+            if self.admitted[ordinal] {
+                continue;
+            }
+            let running = (0..self.roots.len())
+                .filter(|at| self.admitted[*at] && !self.finished[*at])
+                .count();
+            if self.cap.is_some_and(|cap| running >= cap.get()) {
+                break;
+            }
+            self.admitted[ordinal] = true;
+            for at in 0..self.cap_regions[ordinal].len() {
+                let node = self.cap_regions[ordinal][at];
+                self.cap_holds[node] -= 1;
+                self.refresh(node);
+                lifted.push(node);
+            }
+        }
+        lifted
     }
 
     /// The pick: the runnable node of smallest height, ties leftmost. `None` ends the run.
@@ -198,7 +262,7 @@ impl Scheduler {
     }
 
     pub(crate) fn is_held(&self, node: usize) -> bool {
-        self.build_holds[node] > 0 || self.limit_holds[node] > 0
+        self.build_holds[node] > 0 || self.limit_holds[node] > 0 || self.cap_holds[node] > 0
     }
 
     fn refresh(&mut self, node: usize) {

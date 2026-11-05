@@ -111,6 +111,21 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - architecture.md "Early exit at a limit": the hold is the region, through buffers; retirement; a source stops when every reader has retired.
 - Counts after Task 6: `--lib` 1067 (1065 passed + 2 ignored), +9: `executor::driver::tests` 156 (limit +5, dag +1), Driver internals 60 (scheduler +2, queue +1). build-test.md: cpu 3582, `--lib` 1067, grand total 7962 (Rust 6132).
 
+## Task 7 notes
+
+- Dispatched 2026-11-05, CPU only, local. Task 7 has no device step.
+- `PlanShape.cap_regions` is per root ordinal: `held_region_of_node(root)`, which lost its `dead_code` allow. `Scheduler::with_cap(shape, cap)` holds every root's cap region with a third counter, `cap_holds`, then admits roots in order while fewer than `cap` admitted roots are unfinished. `root_finished(root)` is idempotent and returns the nodes whose cap hold lifted. A buffer masked only by a limit stays runnable under the cap's hold, as under a join's, so it takes what a shared source offers.
+- `Scheduler::new` had no production caller left (`for_roots` builds `with_cap`), so it moved to an inherent `impl` in `scheduler/tests.rs`, where every caller is.
+- The driver calls `report_root(node)` after `settle_limit` in `step` and in `seed`: a root whose lanes are all done, or that was satisfied (which marks it done), reports once. The buffers among the lifted nodes are re-checked, as `hold_lifted` does for a join (both go through `recheck_buffers`). Without the re-check the random-DAG tests stall (mutation check).
+- `validate_cap(roots, cap)` is the plan's interface (query-fuser calls it). `validate_dag` reaches the same rule, `capped_roots_are_buffered`, on its own `PlanDag`. The refusal is `UnbufferedHold { hold: root node, .. }`, its message naming the root. `PlanError::Unsupported` for a cap is gone.
+- Wait-for graph: a hold vertex is a node index, a join's or, for the cap, the waiting root's (an unload, so never a join's index). A waiting root r waits on each hold whose region holds a node reached from a root of lower ordinal. A join inside r's cap region gets no edge to r's cap. In practice a join only ever reaches r's region from inside r, since a root's region is reached through that root alone, so the exclusion is the only join→cap edge there would be. `wait_for_edges` takes `cap`.
+- `plan/validate/tests.rs` reached 999 lines with the three cap tests. Its several-roots section ("holds and buffers over several roots", unchanged but for `super::` paths becoming `crate::plan::validate::`) moved to `plan/validate/tests/holds.rs` (284 lines), which is where the cap tests sit. tests.rs is 720.
+- `cap.rs`'s "no step of root 1's region precedes root 0's last" excludes `Keep` events: a waiting root's buffer takes batches while held, which is the point. `a_capped_root_with_a_join_is_accepted_and_runs` uses `projected_join` (full validation) and compares with each root alone as a tree without the buffer.
+- The property tests draw `cap = seed % roots` (none when 0). Both still clear their thresholds.
+- Mutation checks, each turning tests red. A cap that never binds: 5. Roots never reported finished: 7, both property tests among them. No buffer re-check on admission: both property tests. A join waiting on its own root's cap: `a_capped_root_never_waits_on_its_own_region`. The cap's buffer rule off: 3.
+- The stale `#[allow(dead_code)]` on `IndexedNode.child_readers` ("until then every one is 0") went: Task 5's queues read it.
+- Counts after Task 7: `--lib` 1079 (1077 passed + 2 ignored), +12: `executor::driver::tests` 162 (cap +6), Driver internals 63 (scheduler +3), Plan types 57 (`plan::validate::tests` 49). build-test.md: cpu 3594, `--lib` 1079, grand total 7974 (Rust 6144).
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).

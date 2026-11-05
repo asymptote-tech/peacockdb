@@ -10,6 +10,7 @@
 //! keep, and a mid-plan `GpuLimit`, judged by the rows it emitted.
 
 use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroUsize;
 
 use super::StepError;
 use super::accounting::{Held, ResidentAccountant, Slot, Trip};
@@ -60,14 +61,16 @@ pub(crate) fn run_with_hook<'a, B: Backend>(
     driver.run(DEFAULT_MAX_STEPS)
 }
 
-/// Several roots, one answer each. The caller has validated the plan as a DAG.
+/// Several roots, one answer each, at most `cap` of them running at once. The caller has
+/// validated the plan as a DAG under that cap.
 pub(crate) fn run_roots_with_hook<'a, B: Backend>(
     roots: &[&'a dyn GpuNode],
     ctx: &'a B::Context,
     budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
     hook: Option<OutputHook<'a, B>>,
 ) -> Result<FusedRun, RunError> {
-    let mut driver = Driver::<B>::for_roots(roots, ctx, budget)?;
+    let mut driver = Driver::<B>::for_roots(roots, ctx, budget, cap)?;
     driver.hook = hook;
     driver.run_fused(DEFAULT_MAX_STEPS)
 }
@@ -137,20 +140,21 @@ impl<'a, B: Backend> Driver<'a, B> {
         ctx: &'a B::Context,
         budget: Option<usize>,
     ) -> Result<Self, RunError> {
-        Self::for_roots(&[root], ctx, budget)
+        Self::for_roots(&[root], ctx, budget, None)
     }
 
     pub(crate) fn for_roots(
         roots: &[&'a dyn GpuNode],
         ctx: &'a B::Context,
         budget: Option<usize>,
+        cap: Option<NonZeroUsize>,
     ) -> Result<Self, RunError> {
         // The rule the planner applies, applied to a tree that did not come from it: a
         // hand-built plan meets the same refusal a planned one would, and there is one
         // statement of it rather than two.
         check_canonical_form_of_roots(roots).map_err(RunError::Backend)?;
         let index = PlanIndex::build_roots(roots).map_err(RunError::Backend)?;
-        let scheduler = Scheduler::new(&index.shape);
+        let scheduler = Scheduler::with_cap(&index.shape, cap);
         let acct = ResidentAccountant::new(index.slots, budget);
         let states = index
             .nodes
@@ -264,6 +268,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         for node in 0..self.index.len() {
             self.refresh(node);
             self.settle_limit(node)?;
+            self.report_root(node);
         }
         Ok(())
     }
@@ -277,6 +282,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.steps += 1;
         self.run_node(node)?;
         self.settle_limit(node)?;
+        self.report_root(node);
         self.refresh(node);
         for at in 0..self.index.nodes[node].readers.len() {
             let parent = self.index.nodes[node].readers[at].parent;
