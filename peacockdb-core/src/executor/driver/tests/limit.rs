@@ -443,3 +443,23 @@ fn a_satisfied_limit_releases_what_a_buffer_below_it_keeps() {
     assert_accounted(&report);
     assert_conserved(plan.as_ref(), &report);
 }
+
+/// A satisfied limit excuses what it left queued, not a root that never ended: the run is
+/// over with root 1 never stepped, and the driver must say so rather than answer it empty.
+#[test]
+fn a_satisfied_limit_does_not_excuse_a_root_that_never_ended() {
+    let script = Script::default()
+        .source("a", vec![vec![spec(10, 80)]])
+        .source("b", vec![vec![spec(10, 80)]]);
+    let roots = vec![
+        unload_limited(filter(source("a", 1)), 0, Some(0)),
+        unload(filter(source("b", 1))),
+    ];
+    let mut driver = driver_of_roots(&refs(&roots), &script);
+    match driver.finish() {
+        Err(StepError::Run(RunError::Protocol(message))) => {
+            assert!(message.contains("never ended"), "{message}")
+        }
+        other => panic!("a root that never ended was let through: {other:?}"),
+    }
+}

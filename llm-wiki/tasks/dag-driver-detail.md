@@ -181,6 +181,30 @@ Tasks 6–10 were done by one developer, whose context ran long; Task 11 goes to
 - Counts: `--lib` 1101 (1099 passed + 2 ignored), +8: End to end 52. gpu `gpu_tests::` 748, +5: new row "Fused plans on a device" 5. build-test.md: cpu 3616, gpu 2417, grand total 8004 (Rust 6171).
 - **L40S run (Step 4), second run after the R2 change: `ALL rc=0`.** `peacock_cpu_tests` 67, `peacock_gpu_tests` 5, `peacock_join_session_tests` 56, `peacock_plan_tests` 136, `peacockdb_core_gpu_lib` 748 (the 5 `dag_cases` OK), `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 9 (`--skip bench_`), `test_node_timing` 1. These equal build-test.md's rows. Against Task 1's run: plan +1 and cpu +3 (Tasks 1 and 10, after rebase 2), corpus +20 (rebase 2), gpu lib +5 (this task). Disk before the build: 22 GB free on `/`, so nothing was deleted. The C++ rebuilt (`node_session.cpp`, `libpeacock_gpu.so`), so the device ran Task 10's numbering.
 
+## Review round 1 (2026-11-05)
+
+- **Important, `finish` and `seed`.** Two regression tests went red first.
+  - `cap::a_limit_satisfied_at_seed_still_lets_the_next_root_in` is the reviewer's case. It answered root 1 with `[0]` (one empty batch) and `Ok`.
+  - `limit::a_satisfied_limit_does_not_excuse_a_root_that_never_ended` calls `finish` right after `seed`. It was `Ok` with root 1 never stepped. With `seed` fixed, the driver gives no way to build a real stall beside a satisfied limit, so this one drives `finish` directly.
+  - Fix in `finish`: `assert_roots_ended`, split out of `assert_drained` in `partitioned/queues.rs`, now runs on both branches. Only the stranded-queue check is skipped on an early exit.
+  - Fix in `seed`: it settles every limit first, then refreshes and reports every node.
+  - The `finish` fix alone also turned the existing `limit::a_mid_plan_limit_of_no_rows_is_satisfied_before_any_pull_whatever_its_skip` red. That is the same stale-`seed` bug on a single tree. Its root never ended, and the old `finish` let it through, since the empty answer happens to be right for `LIMIT 0`. With the `seed` fix it is green.
+- **(a) A budget trip before a call.** New accountant methods `begin_call_with(slot, executor, Option<Held<T>>)` and `begin_call_taking(.., Held<T>)` release the taken input when the pre-check trips. All seven sites that take an input use them: five in `single_partition.rs` (Exec, Unload, Accumulate, SetBuild, Probe), the emitter and the cross-lane accumulator. The three no-input sites keep `begin_call`. `budget::a_call_refused_before_it_runs_releases_its_input` was red first (1 held, 0 released). It trips the filter's call with `modelling(1)` and a budget of 1.5 batches. `run_fused`'s comment, "held and released stay equal on every path out of here", is now true.
+- **(b)** `driver/mod.rs`'s `run_roots_with_hook` is one expression. The empty-roots refusal and `validate_dag` moved into `partitioned::run_roots_with_hook`.
+- **(c)** `OutQueue::high_water()` is an inherent `impl` in `queue/tests.rs`. The field keeps `#[cfg_attr(not(test), allow(dead_code))]` with the reason at the site: only tests read it.
+- **(d)** "rule 3b" now names the rule, "the only unbounded storage is a node you can see", in `architecture.md` and `validate.rs`.
+- **(e)** The two over-long comments, `partitioned.rs` `refresh` and `executor/mod.rs` `satisfied`, are reflowed.
+- **(f)** `architecture.md` changes:
+  - "the old argument" became "the argument is shorter".
+  - "a single query's text is unchanged" became "prints as a plain tree".
+  - The ABI lead now says three symbols carry per-call facts and the fourth gives a batch a second owner.
+  - The `GpuHoldBuffer` row names the cap's hold as well as a join's.
+  - In `coverage.rs`, the doc names both exclusions: the forwarders and the hold buffer.
+- **(g)** `validate_roots` refuses a root given twice, as `PlanError::Invalid` "`<name>: root <i> is root <j> given again — each root is its own query`" (`roots_are_distinct`, the first structural check). `validate::tests::the_same_root_given_twice_is_refused` was red first. `plan/mod.rs`'s doc and `architecture.md` "Traits" say so.
+- **(h)** The four `HandleDuplicate` gtests moved, with their three helpers, to `cpp/tests/gpu/test_handle_duplicate.cpp`, which is wired into `peacock_plan_tests` in `cpp/CMakeLists.txt`. The sibling files in that binary keep their own fixtures in an anonymous namespace, with no shared header. So the new file carries its own small copies of the scan and scatter plan builders, `CApiPlan`, `TimingOn` and `allocated_by`. The file is clang-formatted. It builds locally, and `peacock_plan_tests --gtest_list_tests` lists 136 with the four `HandleDuplicate` cases. This host has no GPU, so they were not run.
+- Counts after round 1: `--lib` 1105 (1103 passed + 2 ignored), +4: Drivers over a mock backend 166 (+3), Plan types 58 (+1). build-test.md: cpu 3620, grand total 8008 (Rust 6175). `test_corpus_goldens` 61, `test_cost_model` 3, `test_cpu_corpus` 2451, `plan_goldens` 25, `test_source_formatting` 32, `testdata/` untouched, gpu `gpu_tests::` 748 (`--no-run`, no warning), `ctest -L cpu` 1/1 (67), `peacock_plan_tests` lists 136. The L40S list was not rerun after the driver change.
+- rustfmt follows `mod` declarations. Formatting `partitioned.rs`, `queue.rs`, `validate.rs` and the two `mod.rs` files reformatted seven files I had not touched. Those were restored from HEAD by plain file writes, and the `compressed_bytes` hunk in `plan/mod.rs` was put back.
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).

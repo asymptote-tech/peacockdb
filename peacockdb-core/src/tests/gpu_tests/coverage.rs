@@ -41,9 +41,9 @@ const EXCLUDED: &[&str] = &[
     "GpuHoldBuffer",
 ];
 
-/// Every kind but a forwarder has a case, every case names a kind, and the exclusions are
-/// kinds with no case — so a new node kind, a misspelt one, or a forwarder that gains an
-/// executor each turns this red.
+/// Every kind but the excluded driver-owned ones (the forwarders and the hold buffer) has a
+/// case, every case names a kind, and the exclusions are kinds with no case — so a new node
+/// kind, a misspelt one, or an excluded kind that gains a case each turns this red.
 #[test]
 fn every_kind_has_a_case_or_is_a_forwarder() {
     let fixtures = every_kind();

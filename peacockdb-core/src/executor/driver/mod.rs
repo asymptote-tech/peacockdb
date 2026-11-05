@@ -26,7 +26,6 @@ use crate::executor::{
 };
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
-use crate::plan::validate_dag;
 use accounting::Trip;
 
 /// Run `root` to completion on `B`. `budget` of `None` accounts without ever tripping.
@@ -58,10 +57,6 @@ pub(crate) fn run_roots_with_hook<B: Backend>(
     cap: Option<NonZeroUsize>,
     hook: Option<OutputHook<'_, B>>,
 ) -> Result<FusedRun, RunError> {
-    if roots.is_empty() {
-        return Err(RunError::Protocol("a run needs at least one root".to_string()));
-    }
-    validate_dag(roots, cap).map_err(RunError::Backend)?;
     partitioned::run_roots_with_hook::<B>(roots, ctx, budget, cap, hook)
 }
 

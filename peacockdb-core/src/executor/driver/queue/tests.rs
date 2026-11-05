@@ -2,6 +2,13 @@ use super::*;
 use crate::executor::driver::accounting::{Held, ResidentAccountant};
 use crate::executor::driver::tests::mock::MockBatch;
 
+impl<T: Batch> OutQueue<T> {
+    /// The most entries ever queued at once.
+    pub(crate) fn high_water(&self) -> usize {
+        self.high_water
+    }
+}
+
 fn batch(rows: usize) -> MockBatch {
     MockBatch {
         rows,

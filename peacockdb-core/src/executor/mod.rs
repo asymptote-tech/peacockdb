@@ -694,9 +694,9 @@ pub struct RunReport {
     /// redistributes, so nothing else would sum.
     pub(crate) consumed: Vec<Vec<Vec<u64>>>,
     /// The nodes whose row interval was satisfied, and each source every reader of which
-    /// was, in index order — empty on a run that drained. What the golden's `early_exit=` marker names, and the reason a lane can be
-    /// short of what its plan called for: not a bool, because a reader of a smaller number
-    /// needs to know which limit produced it.
+    /// was, in index order — empty on a run that drained. What the golden's `early_exit=`
+    /// marker names, and the reason a lane can be short of what its plan called for: not a
+    /// bool, because a reader of a smaller number needs to know which limit produced it.
     pub(crate) satisfied: Vec<usize>,
 }
 

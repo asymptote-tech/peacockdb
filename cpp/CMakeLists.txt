@@ -218,7 +218,7 @@ set_tests_properties(peacock_gpu_tests PROPERTIES LABELS "gpu")
 add_executable(peacock_plan_tests tests/gpu/test_plan_executor.cpp tests/gpu/test_grouping_id.cpp
   tests/gpu/test_aggregate_no_input.cpp tests/gpu/test_column_refs.cpp
   tests/gpu/test_aggregate_builder.cpp tests/gpu/test_interval_arithmetic.cpp
-  tests/gpu/test_pinned_scan.cpp tests/gpu/test_scan_reader.cpp)
+  tests/gpu/test_pinned_scan.cpp tests/gpu/test_scan_reader.cpp tests/gpu/test_handle_duplicate.cpp)
 target_include_directories(peacock_plan_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src

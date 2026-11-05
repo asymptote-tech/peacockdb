@@ -626,9 +626,9 @@ fn a_join_that_needs_a_finish_pass_emits_at_the_end() {
 
 #[test]
 fn a_run_that_completed_normally_left_nothing_anywhere() {
-    // The property `assert_drained` enforces, stated: every lane of the root ended, and no
-    // queue in the tree still holds a batch. A run that ends any other way without a limit
-    // having been satisfied has lost work rather than finished.
+    // What `assert_roots_ended` and `assert_drained` enforce, stated: every lane of the root
+    // ended, and no queue in the tree still holds a batch. A run that ends any other way
+    // without a limit having been satisfied has lost work rather than finished.
     let plan = unload(merge(emit(filter(source("part", 1)), 4)));
     let script = Script::default().source("part", vec![vec![spec(9, 72); 3]]);
     let report = run(plan.as_ref(), &script);

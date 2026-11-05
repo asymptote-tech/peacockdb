@@ -1549,10 +1549,10 @@ pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
     validate_roots(&[root])
 }
 
-/// [`validate`] over a plan with several roots, each node checked once. Every root is a
-/// `GpuUnload`, and no `GpuUnload` is anything but a root. Every edge into a join's held probe
-/// region from a producer outside it ends at a `GpuHoldBuffer`, or the plan is refused as
-/// [`PlanError::UnbufferedHold`].
+/// [`validate`] over a plan with several roots, each node checked once. No root is given
+/// twice, every root is a `GpuUnload`, and no `GpuUnload` is anything but a root. Every edge
+/// into a join's held probe region from a producer outside it ends at a `GpuHoldBuffer`, or
+/// the plan is refused as [`PlanError::UnbufferedHold`].
 pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     validate::validate_roots(roots)
 }

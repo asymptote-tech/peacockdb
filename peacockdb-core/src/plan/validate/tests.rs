@@ -155,6 +155,17 @@ fn every_root_is_a_sink() {
 }
 
 #[test]
+fn the_same_root_given_twice_is_refused() {
+    // Each root answers once, so a root given twice would have its rows twice, under two
+    // ordinals, from one run of one tree.
+    let root = rooted(plain_source());
+    invalid(
+        validate_roots(&[root.as_ref(), root.as_ref()]),
+        "GpuUnload: root 1 is root 0 given again — each root is its own query",
+    );
+}
+
+#[test]
 fn the_validation_walk_visits_a_shared_node_once() {
     let load = crate::tests::plans::source("s", 1)
         .into_any_box()

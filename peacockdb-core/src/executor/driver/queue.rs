@@ -18,6 +18,9 @@ pub(crate) struct OutQueue<T> {
     /// Per reader, the absolute index of the next entry it takes.
     next: Vec<usize>,
     retired: Vec<bool>,
+    /// The most entries ever queued at once. Only the tests read it, through the accessor
+    /// in `queue/tests.rs`; the report's `peak_queued` is the driver's own, per node.
+    #[cfg_attr(not(test), allow(dead_code))]
     high_water: usize,
     /// Rows its readers will never take, summed over readers: what a retired reader left,
     /// and what was still queued when the run drained it.
@@ -108,12 +111,6 @@ impl<T: Batch> OutQueue<T> {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-
-    /// The most entries ever queued at once.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn high_water(&self) -> usize {
-        self.high_water
     }
 
     /// A retired reader's cursor may lag the front, so it is never subtracted from.

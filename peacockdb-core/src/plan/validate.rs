@@ -25,6 +25,7 @@ use super::{KeyDistribution, NodeKind, SortOrder};
 /// child's complaint comes before its parent's.
 pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
     let dag = PlanDag::of(roots);
+    roots_are_distinct(&dag)?;
     for &root in &dag.roots {
         let root = dag.nodes[root].node;
         if !is_sink(root) {
@@ -75,7 +76,8 @@ fn waiting_roots(dag: &PlanDag<'_>, cap: Option<NonZeroUsize>) -> Vec<(usize, Ve
         .collect()
 }
 
-/// Rule 3b over the cap's holds: a waiting root's region is entered from outside only through
+/// "The only unbounded storage is a node you can see" (`architecture.md`, "The scheduling
+/// rule") over the cap's holds: a waiting root's region is entered from outside only through
 /// a buffer, so a shared source it reads never waits on its admission.
 fn capped_roots_are_buffered(
     dag: &PlanDag<'_>,
@@ -275,6 +277,19 @@ fn hold_cycle(dag: &PlanDag<'_>, holds: Vec<usize>) -> PlanError {
 }
 
 /// A sink's output has already crossed to the host, so nothing on the device can read it.
+/// A root answers once, so one given twice would answer the same rows under two ordinals.
+fn roots_are_distinct(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for (ordinal, root) in dag.roots.iter().enumerate() {
+        if let Some(first) = dag.roots[..ordinal].iter().position(|seen| seen == root) {
+            return Err(PlanError::Invalid(format!(
+                "{}: root {ordinal} is root {first} given again — each root is its own query",
+                dag.nodes[*root].node.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn sinks_are_roots(dag: &PlanDag<'_>) -> Result<(), PlanError> {
     match dag
         .nodes

@@ -242,9 +242,6 @@ impl<B: Backend> LaneDriver<B> {
         if matches!(self.state, LaneState::Unbuilt) {
             self.build(site)?;
         }
-        let (n_rows, n_bytes) = input
-            .as_ref()
-            .map_or((0, 0), |held| (held.rows(), held.charge.bytes));
         match call {
             LaneCall::EndOfInput => {
                 self.state = LaneState::Finished;
@@ -257,7 +254,7 @@ impl<B: Backend> LaneDriver<B> {
                 let LaneState::Exec(executor) = &mut self.state else {
                     return Err(self.wrong_state(site, "exec"));
                 };
-                let modelled = acct.begin_call(site.slot, executor, n_rows, n_bytes)?;
+                let (modelled, batch) = acct.begin_call_taking(site.slot, executor, batch)?;
                 let result = executor.exec(batch.batch);
                 acct.release(batch.charge)?;
                 let (out, stats) = result.map_err(|e| failed(site, e))?;
@@ -273,7 +270,7 @@ impl<B: Backend> LaneDriver<B> {
                 let LaneState::Unload(executor) = &mut self.state else {
                     return Err(self.wrong_state(site, "unload"));
                 };
-                let modelled = acct.begin_call(site.slot, executor, n_rows, n_bytes)?;
+                let (modelled, batch) = acct.begin_call_taking(site.slot, executor, batch)?;
                 let result = executor.unload(batch.batch, rows);
                 acct.release(batch.charge)?;
                 let (out, stats) = result.map_err(|e| failed(site, e))?;
@@ -294,7 +291,7 @@ impl<B: Backend> LaneDriver<B> {
                 let LaneState::BatchAcc(executor) = &mut self.state else {
                     return Err(self.wrong_state(site, "accumulate_and_fetch"));
                 };
-                let modelled = acct.begin_call(site.slot, executor, n_rows, n_bytes)?;
+                let (modelled, batch) = acct.begin_call_taking(site.slot, executor, batch)?;
                 let result = executor.accumulate_and_fetch(batch.batch);
                 acct.release(batch.charge)?;
                 let (out, stats) = result.map_err(|e| failed(site, e))?;
@@ -325,7 +322,7 @@ impl<B: Backend> LaneDriver<B> {
                 else {
                     return Err(self.wrong_state(site, "set_build"));
                 };
-                let modelled = acct.begin_call(site.slot, &executor, n_rows, n_bytes)?;
+                let (modelled, input) = acct.begin_call_with(site.slot, &executor, input)?;
                 let (batch, charge) = match input {
                     Some(held) => (Some(held.batch), Some(held.charge)),
                     None => (None, None),
@@ -361,7 +358,7 @@ impl<B: Backend> LaneDriver<B> {
                 let LaneState::Probe(executor) = &mut self.state else {
                     return Err(self.wrong_state(site, "probe_and_fetch"));
                 };
-                let modelled = acct.begin_call(site.slot, executor, n_rows, n_bytes)?;
+                let (modelled, batch) = acct.begin_call_taking(site.slot, executor, batch)?;
                 let result = executor.probe_and_fetch(batch.batch);
                 acct.release(batch.charge)?;
                 let (out, stats) = result.map_err(|e| failed(site, e))?;

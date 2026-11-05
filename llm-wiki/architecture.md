@@ -207,7 +207,7 @@ Four limits on the number it produces.
 | `GpuUnion`, `GpuInterleave` | BatchForwarder | lane relabeling only. Union sums its inputs' lane counts and clears the hash; interleave takes output lane p from lane p of each input and so preserves it |
 | `GpuLimit` | BatchAccumulator, mid-plan only | an interval over a **one-lane** stream; streams and holds nothing; satisfied once it has emitted `fetch` rows |
 | `GpuUnload` | Unload | `GpuBatch` in, `CpuBatch` out, over a row range the driver supplies; carries a root-adjacent limit's interval |
-| `GpuHoldBuffer` | HoldBuffer, no backend | one store per lane, kept by the driver: under a join's hold it takes every batch its input emits and emits nothing, and once the hold lifts it emits them in arrival order. A hold stops at it. The planner places none; a fused plan does ([The scheduling rule](#the-scheduling-rule)) |
+| `GpuHoldBuffer` | HoldBuffer, no backend | one store per lane, kept by the driver: under a hold that lifts, a join's or the cap's on a waiting root, it takes every batch its input emits and emits nothing, and once the hold lifts it emits them in arrival order. A hold stops at it. The planner places none; a fused plan does ([The scheduling rule](#the-scheduling-rule)) |
 
 ### The sort decomposition
 
@@ -724,7 +724,7 @@ A node's height is its longest path to a root, so every reader is strictly lower
 reads. It lists each node's readers, and its *regions*: the nodes all of whose paths to a root
 pass through a given node or edge. A region for a hold that lifts decides nothing through a
 `GpuHoldBuffer`, so what lies only below one is outside it. On a tree these are the recursive
-walk's numbers, and a region is a contiguous subtree. Validation runs over it: every root is a `GpuUnload`, nothing
+walk's numbers, and a region is a contiguous subtree. Validation runs over it: no root is given twice, every root is a `GpuUnload`, nothing
 reads a `GpuUnload`, and each node is checked once, in post-order. The planner builds no DAG.
 
 **A batch is one table's worth of rows** — `num_rows()` and `byte_size()`, nothing else.
@@ -840,8 +840,8 @@ the plan is, so the lowest join no other unfinished join holds can always finish
 queue grows to make this true: what waits sits in a buffer, which the plan shows and the
 estimator charges. The two shapes: two roots whose builds wait on each other's probe source run
 because each probe edge ends at a buffer, and a join reading one source on both sides runs
-because the source feeds the build directly and the probe through a buffer. On a tree this is
-the old argument: the build subtree is disjoint from the probe subtree, completing the build
+because the source feeds the build directly and the probe through a buffer. On a tree the
+argument is shorter: the build subtree is disjoint from the probe subtree, completing the build
 lifts the hold, and nested joins resolve outermost-first.
 
 Several roots run as one plan through `run_roots`, which calls `validate_dag` first and answers
@@ -852,8 +852,8 @@ which needs no such proof: a tree never needs a buffer.
 once, which bounds the executor state alive together. Roots are admitted in root order, the
 first `cap` at the start and the next whenever an admitted root finishes, all its lanes done or
 its limit satisfied. A root waiting for admission is held by the cap over its region, stopping
-at buffers as a join's hold does, since the cap lifts. So rule 3b applies to every root that can
-wait, the roots of ordinal `cap` and above: an edge into its region from outside ends at a
+at buffers as a join's hold does, since the cap lifts. So "the only unbounded storage is a node you can see" (below) applies to
+every root that can wait, the roots of ordinal `cap` and above: an edge into its region from outside ends at a
 buffer, or `validate_cap` refuses the plan as `UnbufferedHold` naming the root. A shared source
 is in no root's region, so it never waits on an unadmitted root: it runs on into that root's
 buffer. In `validate_dag`'s wait-for graph a waiting root waits only on the roots before it
@@ -1155,8 +1155,9 @@ same expression and agree by construction rather than by two implementations hap
 match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans
 stack two merges, per lane and then across lanes.
 
-Four additive ABI symbols exist for what a frozen node cannot carry, since an fb node's fields
-are plan constants and these are decided per call:
+Four additive ABI symbols exist for what a frozen node cannot carry. An fb node's fields are
+plan constants: three of the symbols carry what is decided per call, and the fourth gives one
+batch a second owner:
 
 - `peacock_executor_execute_scan_rowgroups` — the scan arm otherwise emits every map entry in
   one call, so incremental loading is impossible.
@@ -1572,7 +1573,7 @@ name (`column_at`).
 
 **Several roots print as one text, and a shared node prints once.** With several roots each
 tree is preceded by `root <i>:`, counted from 0, and indented one level; one root prints no
-header, so a single query's text is unchanged. A node two or more parents read prints its line
+header, so a single query prints as a plain tree. A node two or more parents read prints its line
 prefixed `@<k> ` where the walk first reaches it, `k` counting such nodes from 1 in walk order.
 Every later visit prints `@<k>` alone and does not descend. The walk is `PlanDag`'s,
 `plan_text/dag_walk.rs`, and all four renderers draw through it: the plan, the memory section,

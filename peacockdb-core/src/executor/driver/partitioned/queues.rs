@@ -93,9 +93,10 @@ impl<B: Backend> Driver<'_, B> {
         self.release_kept()
     }
 
-    pub(crate) fn assert_drained(&self) -> Result<(), StepError> {
-        // A root not being done is the same failure seen from the other end: a node that
-        // never learned its input had ended never emitted, and no queue holds the evidence.
+    /// A root not being done is a stall seen from the root's end: a node that never learned
+    /// its input had ended never emitted, and no queue need hold the evidence. A satisfied
+    /// limit excuses none: it marks done what it stops, and what lies above it still ends.
+    pub(crate) fn assert_roots_ended(&self) -> Result<(), StepError> {
         for root in &self.index.shape.roots {
             if !self.states[*root].out_done.iter().all(|done| *done) {
                 return Err(RunError::Protocol(format!(
@@ -105,6 +106,10 @@ impl<B: Backend> Driver<'_, B> {
                 .into());
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn assert_drained(&self) -> Result<(), StepError> {
         let mut stranded: Vec<String> = (0..self.index.len())
             .flat_map(|node| {
                 self.states[node]

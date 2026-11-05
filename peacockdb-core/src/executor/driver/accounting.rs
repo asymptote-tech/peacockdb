@@ -12,6 +12,7 @@
 
 use std::rc::Rc;
 
+use super::StepError;
 use crate::executor::{Batch, CallStats, Executor, RunError, Underestimate, When};
 
 /// Which executor instance a figure belongs to. Dense `index` for the cache; `node` and
@@ -172,6 +173,40 @@ impl ResidentAccountant {
         self.check(self.resident() + modelled, slot, When::PreCall)?;
         self.calls += 1;
         Ok(modelled)
+    }
+
+    /// [`begin_call`](Self::begin_call) for a call handed `input`, already taken from its
+    /// queue. Refused, the batch goes nowhere, so its holder is released here, as a call that
+    /// failed releases its input once it returns; otherwise it comes back for the call.
+    pub(crate) fn begin_call_with<E: Executor + ?Sized, T: Batch>(
+        &mut self,
+        slot: Slot,
+        executor: &E,
+        input: Option<Held<T>>,
+    ) -> Result<(usize, Option<Held<T>>), StepError> {
+        let (rows, bytes) = input
+            .as_ref()
+            .map_or((0, 0), |held| (held.rows(), held.charge.bytes));
+        match self.begin_call(slot, executor, rows, bytes) {
+            Ok(modelled) => Ok((modelled, input)),
+            Err(trip) => {
+                if let Some(held) = input {
+                    self.release(held.charge)?;
+                }
+                Err(trip.into())
+            }
+        }
+    }
+
+    /// [`begin_call_with`](Self::begin_call_with) for a call that always takes a batch.
+    pub(crate) fn begin_call_taking<E: Executor + ?Sized, T: Batch>(
+        &mut self,
+        slot: Slot,
+        executor: &E,
+        input: Held<T>,
+    ) -> Result<(usize, Held<T>), StepError> {
+        let (modelled, input) = self.begin_call_with(slot, executor, Some(input))?;
+        Ok((modelled, input.expect("handed back as it was given")))
     }
 
     /// Post-check for a call whose executor survived it — including one that changed type,

@@ -190,3 +190,24 @@ fn a_capped_root_with_a_join_is_accepted_and_runs() {
     assert_accounted(&fused.report);
     assert_conserved_over(&refs(&roots), &fused.report);
 }
+
+/// Root 0's limit is satisfied before any step, below a filter. The filter learns its input
+/// ended only if its readiness is read after the limit settles; else root 0 never ends, and
+/// root 1, waiting on root 0 under a cap of one, is never admitted.
+#[test]
+fn a_limit_satisfied_at_seed_still_lets_the_next_root_in() {
+    let script = Script::default()
+        .source("a", vec![vec![spec(10, 80)]])
+        .source("b", vec![vec![spec(10, 80), spec(20, 160)]]);
+    let roots = vec![
+        unload(filter(limit(merge(source("a", 1)), 0, Some(0)))),
+        unload(filter(source("b", 1))),
+    ];
+    let fused = run_capped(&refs(&roots), &script, cap(1));
+    assert_eq!(
+        rows(&fused.answers)[1],
+        vec![10, 20],
+        "root 1 answered b's rows"
+    );
+    assert_accounted(&fused.report);
+}

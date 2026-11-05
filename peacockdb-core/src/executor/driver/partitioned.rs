@@ -27,6 +27,7 @@ use crate::plan::ExecutorCategory;
 use crate::plan::GpuNode;
 use crate::plan::PlanError;
 use crate::plan::check_canonical_form_of_roots;
+use crate::plan::validate_dag;
 use crate::wire::Seq;
 
 mod answers;
@@ -61,8 +62,8 @@ pub(crate) fn run_with_hook<'a, B: Backend>(
     driver.run(DEFAULT_MAX_STEPS)
 }
 
-/// Several roots, one answer each, at most `cap` of them running at once. The caller has
-/// validated the plan as a DAG under that cap.
+/// Several roots, one answer each, at most `cap` of them running at once, once
+/// `validate_dag` has accepted the plan under that cap.
 pub(crate) fn run_roots_with_hook<'a, B: Backend>(
     roots: &[&'a dyn GpuNode],
     ctx: &'a B::Context,
@@ -70,6 +71,12 @@ pub(crate) fn run_roots_with_hook<'a, B: Backend>(
     cap: Option<NonZeroUsize>,
     hook: Option<OutputHook<'a, B>>,
 ) -> Result<FusedRun, RunError> {
+    if roots.is_empty() {
+        return Err(RunError::Protocol(
+            "a run needs at least one root".to_string(),
+        ));
+    }
+    validate_dag(roots, cap).map_err(RunError::Backend)?;
     let mut driver = Driver::<B>::for_roots(roots, ctx, budget, cap)?;
     driver.hook = hook;
     driver.run_fused(DEFAULT_MAX_STEPS)
@@ -262,12 +269,15 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.finish()
     }
 
-    /// Readiness for every node, and the limits settled: a zero-row interval is satisfied
-    /// before anything runs, and the plan still has to complete rather than stall.
+    /// The limits settled, then readiness for every node: a zero-row interval is satisfied
+    /// before anything runs, and the plan still has to complete rather than stall. Settling
+    /// marks done what it stops, which its readers' readiness reads, so it comes first.
     pub(crate) fn seed(&mut self) -> Result<(), StepError> {
         for node in 0..self.index.len() {
-            self.refresh(node);
             self.settle_limit(node)?;
+        }
+        for node in 0..self.index.len() {
+            self.refresh(node);
             self.report_root(node);
         }
         Ok(())
@@ -291,9 +301,10 @@ impl<'a, B: Backend> Driver<'a, B> {
         Ok(true)
     }
 
-    /// A run that ended because a limit was satisfied legitimately leaves lanes not done
-    /// and queues non-empty; any other one has to have drained.
+    /// Every root has ended, however the run ended. One that ended because a limit was
+    /// satisfied legitimately leaves queues non-empty; any other one has to have drained.
     pub(crate) fn finish(&mut self) -> Result<(), StepError> {
+        self.assert_roots_ended()?;
         if self.scheduler.any_satisfied() {
             self.release_in_flight()
         } else {
@@ -470,9 +481,7 @@ impl<'a, B: Backend> Driver<'a, B> {
         let Some(CrossExecutor::Emitter(emitter)) = &mut self.states[node].cross else {
             return Err(wrong_cross(self.index.nodes[node].node).into());
         };
-        let modelled = self
-            .acct
-            .begin_call(slot, emitter, batch.rows(), batch.charge.bytes)?;
+        let (modelled, batch) = self.acct.begin_call_taking(slot, emitter, batch)?;
         let emitted = emitter.emit(batch.batch);
         // The batch went into the call either way, so its bytes leave here whether or not
         // the call came back.
@@ -526,14 +535,11 @@ impl<'a, B: Backend> Driver<'a, B> {
             if batch.is_none() {
                 self.states[node].lane_done_sent[lane] = true;
             }
-            let (rows, bytes) = batch
-                .as_ref()
-                .map_or((0, 0), |held| (held.rows(), held.charge.bytes));
             self.build_cross(node)?;
             let Some(CrossExecutor::Accumulator(accumulator)) = &mut self.states[node].cross else {
                 return Err(wrong_cross(self.index.nodes[node].node).into());
             };
-            let modelled = self.acct.begin_call(slot, accumulator, rows, bytes)?;
+            let (modelled, batch) = self.acct.begin_call_with(slot, accumulator, batch)?;
             let (event, kind, charge) = match batch {
                 Some(held) => (
                     LaneEvent::Batch(held.batch),
@@ -618,7 +624,8 @@ impl<'a, B: Backend> Driver<'a, B> {
     // -- schedule ----------------------------------------------------------------
 
     /// Recompute this node's ready lanes. Only the node just run and the parent of each of
-    /// its readers can have changed: a node's readiness is a fact about its inputs, and nothing else moved.
+    /// its readers can have changed: a node's readiness is a fact about its inputs, and
+    /// nothing else moved.
     fn refresh(&mut self, node: usize) {
         for lane in 0..self.index.nodes[node].ready_lanes {
             let ready = self.lane_ready(node, lane);
