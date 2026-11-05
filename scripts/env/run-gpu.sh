@@ -328,10 +328,11 @@ cmd_ship() {
 
 cmd_run() {
   local envs=()
+  # driver_checked first: it refuses a VM without the run image as "run prepare first" (exit 2).
+  driver_checked
   # The VM's run image as prepare left it: no pull, so a run never takes an image prepare did not
   # check, and a tree whose image inputs moved since is refused.
   machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
-  driver_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   on_vm vm_run "$dir" "$RUN_REF" "$mode" "${envs[@]}"

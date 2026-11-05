@@ -265,6 +265,15 @@ def test_run_refuses_old_driver():
         assert "rsh" not in h.verbs()[calls:] and h.docker_runs() == []
 
 
+def test_run_before_prepare_says_so():
+    with Host() as h:
+        images = h.world()["images"]
+        del images[RUN_REF]
+        h.world(images=images)
+        refused(h.gpu("run", "list"), 2, "prepare", RUN_REF)
+        assert h.docker_runs() == []
+
+
 def test_run_refuses_a_run_image_built_from_other_inputs():
     with Host() as h:
         prepared(h)

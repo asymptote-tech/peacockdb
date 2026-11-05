@@ -24,8 +24,10 @@
 | nebius-cpu128 | 2026-11-04 22:01:07 | 22:23:17 | 0.37 | Task 8 Steps 5–6: the disk check, both fetches, DuckDB and its database |
 | nebius-h100 | 2026-11-04 22:23:24 | 22:24:59 | 0.03 | the grown disk's `df -h /` (174 G, grown at boot) |
 | nebius-h100 | 2026-11-04 22:28:42 | 23:11:47 | 0.72 | Task 10 Steps 2–6: both prepares, the sf1 list, one benchmark case, Nsight |
+| nebius-gpu | 2026-11-05 00:42:22 | 00:44:37 | 0.04 | completeness: install-watch again, the guard on master |
+| nebius-h100 | 2026-11-05 00:44:49 | 00:46:29 | 0.03 | completeness: `nsys profile --help`, the `--gpu-metrics-device` probe |
 
-Hours so far: nebius-gpu 0.07, nebius-h100 0.91, nebius-cpu128 0.86. Dev's local time is UTC.
+Hours so far: nebius-gpu 0.11, nebius-h100 0.94, nebius-cpu128 0.86. Dev's local time is UTC.
 
 ## Task 1: the rename
 
@@ -1035,3 +1037,36 @@ Three findings, each fixed test-first. No VM was used.
   is the next CPU-VM build: a `docker pull` of an image the VM already holds, then one
   `docker image inspect`.
 - review round 2 (945f30a2): round 1 closed; one new important (plans relying on run-gpu.sh's old nebius-gpu default) fixed by the coordinator in markdown: containers-only-impl.md passes nebius-gpu's id, new-hosts-impl.md's interface and test name updated. Nits left.
+
+## Completeness (developer, 2026-11-05)
+
+- **1. `run` on a VM without the run image exited 1.** That was docker's own "No such image",
+  from `machine_image_label_checked`'s inspect. Round 1 had put the label check before
+  `driver_checked`, whose exit-2 "run prepare first" mapping then never ran.
+  - `cmd_run` now calls `driver_checked` first.
+  - New test `test_run_before_prepare_says_so`: no run image in the fake world, so exit 2,
+    naming `prepare` and the image, with no `docker run`. It was red first: exit 1 with
+    `Error: No such image`.
+  - `test_run_gpu.py`: 32 passed. Images 230 → 231, Python 1475 → 1476, grand total
+    7667 → 7668. `build-test.md` is the coordinator's for this pass.
+- **2. nebius-gpu's watcher, reinstalled.** `scripts/nebius.sh start`, then `install-watch`: exit 0.
+  It logged `profile editor-eu goes to the VM alone; 2 other(s) left out` and
+  `watcher installed, root's profile reaches the API`.
+  - Before: `/etc/peacock-gpu-idle.json` and `/root/.nebius/config.yaml` were from 2026-11-04 16:14.
+  - After: the install file is from 00:43 and reads
+    `{"instance_id": "computeinstance-e00tnrse7ayntnzcyt", "kind": "gpu"}`. The timer is active.
+  - `/usr/local/lib/peacock-gpu-idle.py` has sha256 `6aaa7f31…`, the same as the tree's
+    `scripts/nebius/idle_watch.py`.
+  - Root's `config.yaml` is from 00:43, one profile. `/root/.nebius/credentials.yaml` is still the
+    file from 2026-11-04 16:15. install-watch does not write it; it looks like the CLI's own
+    token cache. It was not opened (shared rules), and it was left there.
+  - No process was on the card. The soft stop returned 0, `STOPPED`.
+- **3. `--gpu-metrics-device=` on the H100's nsys 2025.3.2: accepted, but deprecated.**
+  - `nsys profile --help` lists only `--gpu-metrics-devices=`.
+  - A probe with the script's three options (`--gpu-metrics-device=0 --gpu-metrics-set=gh100
+    --gpu-metrics-frequency=20000`, on `true`) exited 0. It warned:
+    `Warning: '--gpu-metrics-device' is deprecated. Use '--gpu-metrics-devices' instead.`
+  - So `create_nsys_profile.sh:246` is unchanged. Moving to `--gpu-metrics-devices` would need
+    knowing whether verda's 2024.5 has the new name, which was not checked. If a later nsys drops
+    the old name, the counters pass on the H100 fails there first.
+  - The `gh100` set is accepted on the H100.
