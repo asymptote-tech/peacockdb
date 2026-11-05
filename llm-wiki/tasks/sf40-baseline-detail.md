@@ -661,3 +661,4 @@ Coordinator decision (2026-11-05): the plan's L40S correctness run is taken by C
 dispatch at `completeness approved`, which runs the same L40S list from binaries built on the runner and
 shipped, so it needs no build on nebius-gpu's full disk (4.9 GB free; chain K's tree and this tree's
 target dir hold it). Freeing that shared disk is the human's.
+- 2026-11-05: green (Task 12) at the reviewing commit; PR #198 (base ENS-bench-rows); reviewer round 1.
