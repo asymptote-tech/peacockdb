@@ -113,8 +113,9 @@ and `peak_bytes` is at least every `batch_bytes` entry. Every timed section outs
 carry the batches and the seven keys of the load, the peak, the cache and the prefill;
 `h200/`'s own section under another device's name is refused, naming `batch_rows`. The committed
 `h100-80gb-hbm3/` tree passes both checks, and a section that fails one is never committed, so
-the H100's q3 section is also held as a literal: it passes both checks, and each is shown refusing it with `load_us` or `execute_us` one off, `peak_bytes` one byte below
-its largest batch, one `batch_bytes` entry gone, or `prefill_us` deleted. Every
+the H100's q3 section is also held as a literal: it passes both checks, and each is shown
+refusing it with `load_us` or `execute_us` one off, `peak_bytes` one byte below its largest
+batch, one `batch_bytes` entry gone, or `prefill_us` deleted. Every
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, and the case list is, byte for byte, what the registry's enabled device cells
 for tpch and tpcds write. `testdata/benchmark-report.html` is, byte for byte, what the trees render

@@ -692,3 +692,4 @@ target dir hold it). Freeing that shared disk is the human's.
   DuckDB row is warm `yes`.
 - **Counts:** `--lib` 992 (`--list`), DuckDB oracle 50, report page 18. cpu 3507, grand total 7881:
   Rust 6056, C++ 278, Python 1547.
+- review round 2: all findings closed; completing.
