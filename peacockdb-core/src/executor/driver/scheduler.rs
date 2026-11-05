@@ -10,6 +10,7 @@
 //! node. That is what makes a scheduling corner reachable from a test that builds no plan.
 
 use crate::executor::{JoinShape, PlanShape};
+use crate::plan::Reader;
 
 pub(crate) struct Scheduler {
     /// rank -> node, sorted by (height, index): the first set bit is the pick.
@@ -34,6 +35,10 @@ pub(crate) struct Scheduler {
     joins: Vec<JoinShape>,
     satisfied: Vec<bool>,
     regions: Vec<Vec<usize>>,
+    readers: Vec<Vec<Reader>>,
+    /// Per node, per reader ordinal, whether that reader sits in a satisfied region the node
+    /// is outside of: it will never take another batch.
+    retired: Vec<Vec<bool>>,
     /// A hold buffer stays in the schedule under a join's hold, taking what it is offered;
     /// only a limit's, which never lifts, takes it out.
     buffers: Vec<bool>,
@@ -70,6 +75,12 @@ impl Scheduler {
             joins: shape.joins.clone(),
             satisfied: vec![false; n],
             regions: shape.regions.clone(),
+            readers: shape.readers.clone(),
+            retired: shape
+                .readers
+                .iter()
+                .map(|readers| vec![false; readers.len()])
+                .collect(),
             buffers: shape.buffers.clone(),
         };
         for join in &shape.joins {
@@ -136,18 +147,42 @@ impl Scheduler {
     }
 
     /// Enough rows have passed this node that no later one can change its answer. It
-    /// holds its whole region, itself included, and the hold never lifts — so this is
-    /// where a run ends with lanes not done and queues non-empty.
-    pub(crate) fn satisfy(&mut self, node: usize) {
-        if self.satisfied[node] {
-            return;
+    /// holds its whole region, itself included, through any buffer, and the hold never
+    /// lifts — so this is where a run ends with lanes not done and queues non-empty.
+    ///
+    /// Returns each `(producer, reader ordinal)` whose reader is inside the region and whose
+    /// producer is not: those readers retire. A producer left with no live reader is
+    /// satisfied in turn, its own pairs returned too. On a tree nothing enters a region from
+    /// outside, so the list is empty.
+    pub(crate) fn satisfy(&mut self, node: usize) -> Vec<(usize, usize)> {
+        let mut retired = Vec::new();
+        let mut pending = vec![node];
+        while let Some(node) = pending.pop() {
+            if std::mem::replace(&mut self.satisfied[node], true) {
+                continue;
+            }
+            let mut inside = vec![false; self.satisfied.len()];
+            for at in 0..self.regions[node].len() {
+                let held = self.regions[node][at];
+                inside[held] = true;
+                self.limit_holds[held] += 1;
+                self.refresh(held);
+            }
+            for producer in (0..inside.len()).filter(|producer| !inside[*producer]) {
+                let mut any = false;
+                for (ordinal, reader) in self.readers[producer].iter().enumerate() {
+                    if inside[reader.parent] && !self.retired[producer][ordinal] {
+                        self.retired[producer][ordinal] = true;
+                        retired.push((producer, ordinal));
+                        any = true;
+                    }
+                }
+                if any && self.retired[producer].iter().all(|gone| *gone) {
+                    pending.push(producer);
+                }
+            }
         }
-        self.satisfied[node] = true;
-        for at in 0..self.regions[node].len() {
-            let held = self.regions[node][at];
-            self.limit_holds[held] += 1;
-            self.refresh(held);
-        }
+        retired
     }
 
     /// Whether this node's own interval was satisfied. What the golden's `early_exit=`

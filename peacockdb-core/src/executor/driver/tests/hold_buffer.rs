@@ -5,12 +5,7 @@
 use super::mock::{FailAt, Script, spec};
 use super::*;
 use crate::executor::EmittedBatch;
-use crate::plan::new_hold_buffer;
 use crate::tests::plans::*;
-
-fn buffer(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
-    Box::new(new_hold_buffer(input))
-}
 
 /// unload <- join <- [coalesce <- project <- filter <- b, buffer <- filter <- p]. The build
 /// side is the deeper one, so the probe source is the lower height and runs first: only the

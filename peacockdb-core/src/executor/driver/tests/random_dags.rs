@@ -10,8 +10,8 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use super::Driver;
 use super::mock::{Mock, Script, spec};
+use super::{Driver, refs};
 use crate::executor::{FusedRun, RunError};
 use crate::plan::{GpuLoadParquet, GpuNode, SharedSource, new_hold_buffer, validate_dag};
 use crate::tests::plans::{coalesce_all, filter, project, projected_join, source, unload};
@@ -102,10 +102,6 @@ fn simulate(roots: &[&dyn GpuNode], script: &Script) -> Result<FusedRun, String>
         Err(RunError::Protocol(said)) => Err(said),
         Err(other) => panic!("the driver failed for a reason no schedule explains: {other:?}"),
     }
-}
-
-fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
-    roots.iter().map(|root| root.as_ref()).collect()
 }
 
 /// The node whose queues held more than one batch per lane at once, if any.

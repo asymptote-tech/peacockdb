@@ -2,8 +2,9 @@
 //! rows returned passes just as well when the whole input was read and trimmed at the end,
 //! which is the thing this lowering exists to avoid.
 
-use super::mock::{AccRule, Script, spec};
+use super::mock::{AccRule, Script, Spec, spec};
 use super::*;
+use crate::executor::CpuBatch;
 use crate::tests::plans::*;
 
 /// Six batches of ten rows on one lane, over a chain the interval sits on top of.
@@ -294,4 +295,151 @@ fn a_limit_whose_only_consumer_is_the_sink_is_refused_before_the_run() {
         ),
         other => panic!("expected the planner's refusal, got {other:?}"),
     }
+}
+
+// -- several roots over a shared source ----------------------------------------------
+
+fn batches_of_ten(count: usize) -> Vec<Spec> {
+    vec![spec(10, 80); count]
+}
+
+fn total_rows(batches: &[CpuBatch]) -> usize {
+    batches
+        .iter()
+        .map(|batch| batch.record_batch().num_rows())
+        .sum()
+}
+
+#[test]
+fn a_satisfied_root_does_not_stop_a_source_another_root_reads() {
+    // 0 unload A, 1 S, 2 unload B.
+    let script = Script::default().source("s", vec![batches_of_ten(5)]);
+    let s = shared("s", 1);
+    let roots = vec![unload_limited(read(&s), 0, Some(1)), unload(read(&s))];
+    let fused = run_roots(&refs(&roots), &script);
+    assert_eq!(fused.report.emitted[1][0].len(), 5, "B still read all of S");
+    assert_eq!(total_rows(&fused.answers[0]), 1);
+    assert_eq!(total_rows(&fused.answers[1]), 50);
+    assert!(
+        fused.report.peak_queued[1] <= 1,
+        "A's reader retired, so B took each batch whole and nothing piled up: {}",
+        fused.report.peak_queued[1]
+    );
+    assert_accounted(&fused.report);
+    assert_conserved_over(&refs(&roots), &fused.report);
+}
+
+#[test]
+fn the_source_stops_once_every_reader_is_satisfied() {
+    let script = Script::default().source("s", vec![batches_of_ten(5)]);
+    let s = shared("s", 1);
+    let roots = vec![
+        unload_limited(read(&s), 0, Some(1)),
+        unload_limited(read(&s), 0, Some(1)),
+    ];
+    let fused = run_roots(&refs(&roots), &script);
+    assert_eq!(count(&fused.report, CallKind::NextBatch), 1);
+    assert_eq!(fused.report.satisfied, vec![0, 1, 2], "S among them");
+    assert_eq!(total_rows(&fused.answers[0]), 1);
+    assert_eq!(total_rows(&fused.answers[1]), 1);
+    assert_accounted(&fused.report);
+    assert_conserved_over(&refs(&roots), &fused.report);
+}
+
+/// A = `unload(filter(limit(merge(S))))`, B = `unload(S)`, S at two lanes: 0 unload, 1 filter,
+/// 2 limit, 3 merge, 4 S, 5 unload. B takes a share of both lanes, the merge forwards lane
+/// 0's, and the limit is satisfied by it with lane 1's still queued for the merge alone.
+fn a_merge_left_behind() -> (Vec<Box<dyn GpuNode>>, Script) {
+    let script = Script::default().source("s", vec![batches_of_ten(3), batches_of_ten(3)]);
+    let s = shared("s", 2);
+    let roots = vec![
+        unload(filter(limit(merge(read(&s)), 0, Some(5)))),
+        unload(read(&s)),
+    ];
+    (roots, script)
+}
+
+#[test]
+fn a_retired_reader_releases_what_it_left_queued() {
+    let (limit_node, s) = (2, 4);
+    let (roots, script) = a_merge_left_behind();
+    let refs = refs(&roots);
+    let mut driver = driver_of_roots(&refs, &script);
+    while driver.step().expect("no protocol violation") {
+        if driver.is_satisfied(limit_node) {
+            break;
+        }
+    }
+    assert!(driver.is_satisfied(limit_node), "the limit was satisfied");
+    assert_eq!(
+        driver.queue_len(s, 1),
+        0,
+        "lane 1's batch was wanted by the retired merge alone, so it went back"
+    );
+    let fused = run_roots(&refs, &script);
+    assert_eq!(total_rows(&fused.answers[1]), 60, "B read every row");
+    assert_accounted(&fused.report);
+    assert_conserved_over(&refs, &fused.report);
+}
+
+#[test]
+fn a_limit_zero_root_retires_its_reader_before_any_step() {
+    // 0 unload A, 1 S, 2 unload B.
+    let script = Script::default().source("s", vec![batches_of_ten(3)]);
+    let s = shared("s", 1);
+    let roots = vec![unload_limited(read(&s), 0, Some(0)), unload(read(&s))];
+    let fused = run_roots(&refs(&roots), &script);
+    assert_eq!(total_rows(&fused.answers[0]), 0);
+    assert_eq!(total_rows(&fused.answers[1]), 30, "B still gets every row");
+    assert_eq!(fused.report.consumed[0][0][0], 0, "A took nothing");
+    assert_eq!(
+        fused.report.abandoned[1][0], 30,
+        "every row of S is one A never took"
+    );
+    assert!(
+        fused.report.peak_queued[1] <= 1,
+        "no batch waited for A: {}",
+        fused.report.peak_queued[1]
+    );
+    assert_accounted(&fused.report);
+    assert_conserved_over(&refs(&roots), &fused.report);
+}
+
+#[test]
+fn a_satisfied_limit_releases_what_a_buffer_below_it_keeps() {
+    // 0 unload, 1 join, 2 coalesce, 3 project, 4 filter, 5 b, 6 buffer, 7 filter, 8 p. The
+    // build path is the deeper, so p drains into the buffer during the build; the first
+    // probe batch satisfies the limit with two still kept.
+    let buffer_node = 6;
+    let plan = unload_limited(
+        join(
+            coalesce_all(project(filter(source("b", 1)))),
+            buffer(filter(source("p", 1))),
+        ),
+        0,
+        Some(1),
+    );
+    let script = Script::default()
+        .source("b", vec![vec![spec(4, 32)]])
+        .source("p", vec![batches_of_ten(3)]);
+    let mut driver = driver(plan.as_ref(), &script);
+    while driver.step().expect("no protocol violation") {
+        if driver.is_satisfied(0) {
+            break;
+        }
+    }
+    assert!(driver.is_satisfied(0), "the limit was satisfied");
+    assert_eq!(
+        driver.kept(buffer_node, 0),
+        0,
+        "the buffer gave back what it kept as the limit was satisfied"
+    );
+    let report = run(plan.as_ref(), &script);
+    assert_eq!(
+        report.emitted[buffer_node][0].len(),
+        1,
+        "released, not emitted"
+    );
+    assert_accounted(&report);
+    assert_conserved(plan.as_ref(), &report);
 }

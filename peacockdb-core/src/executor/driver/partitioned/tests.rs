@@ -54,6 +54,10 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.states[node].kept[lane].len()
     }
 
+    pub(crate) fn is_satisfied(&self, node: usize) -> bool {
+        self.scheduler.is_satisfied(node)
+    }
+
     pub(crate) fn last_call(&self) -> Option<CallKind> {
         self.trace.last().map(|event| event.call)
     }

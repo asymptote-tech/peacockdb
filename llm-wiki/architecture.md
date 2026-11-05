@@ -902,8 +902,17 @@ already passed rather than about the next call.
 
 The driver keeps one row count per such node, summed over every lane, and the node is satisfied
 once it reaches `skip + fetch`; a pure offset has no such point and is never satisfied. A
-satisfied node makes its **whole subtree** non-runnable, transitively, so the scan stops being
-scheduled and pulls cease through merges and emits alike.
+satisfied node holds its **region**, the nodes all of whose paths to a root pass through it, so
+the scan stops being scheduled and pulls cease through merges and emits alike. On a tree that is
+the whole subtree. The hold goes through a `GpuHoldBuffer`, since it never lifts, and a buffer
+inside it gives back what it keeps rather than emit it.
+
+Under several roots a region can end at a shared source another root still reads. The edge from
+inside the region to that source **retires**: its reader takes nothing more, what only it still
+wanted goes back at once, and every row it will never take counts as abandoned. The other roots
+read on, so a satisfied root never stops a source they need, and nothing waits in a queue for a
+reader that is gone. A source whose every reader has retired is satisfied in turn and stops.
+`Scheduler::satisfy` returns the retired readers, and the driver releases what they left.
 
 A mid-plan `GpuLimit` is held the same way, but its input is one lane, so its executor keeps the
 only count of it and makes every cut. The driver counts the rows the limit emitted and holds it

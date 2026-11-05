@@ -78,7 +78,7 @@ fn retiring_the_last_live_reader_hands_back_the_originals() {
 }
 
 #[test]
-fn a_drain_gives_each_entry_once_with_its_readers_left() {
+fn a_drain_gives_each_entry_once_and_abandons_it_for_each_reader_left() {
     let mut acct = ResidentAccountant::new(0, None);
     let mut queue = queue_of(2, &[1, 2], &mut acct);
     let share = queue.take(0).expect("a share").expect("a batch");
@@ -86,12 +86,47 @@ fn a_drain_gives_each_entry_once_with_its_readers_left() {
     assert_eq!(
         drained
             .iter()
-            .map(|(held, left)| (held.batch.rows, *left))
+            .map(|held| held.batch.rows)
             .collect::<Vec<_>>(),
-        vec![(1, 1), (2, 2)]
+        vec![1, 2]
     );
-    for held in std::iter::once(share).chain(drained.into_iter().map(|(held, _)| held)) {
+    assert_eq!(
+        queue.abandoned(),
+        1 + 2 * 2,
+        "reader 1 took neither, reader 0 not the 2"
+    );
+    for held in std::iter::once(share).chain(drained) {
         acct.release(held.charge).expect("a holder");
     }
     assert_eq!(acct.hops(), (2, 2));
+}
+
+#[test]
+fn a_retired_reader_abandons_what_it_had_yet_to_take_and_all_that_follows() {
+    let mut acct = ResidentAccountant::new(0, None);
+    let mut queue = queue_of(2, &[1, 2], &mut acct);
+    let share = queue.take(0).expect("a share").expect("a batch");
+    assert!(queue.retire(0).is_empty(), "reader 1 still wants both");
+    assert_eq!(queue.abandoned(), 2, "reader 0 took the 1 and never the 2");
+    let held = Held::of(batch(4));
+    acct.hold(&held.charge);
+    queue.push(held);
+    assert_eq!(
+        queue.abandoned(),
+        2 + 4,
+        "nor anything pushed after it retired"
+    );
+    let mut taken = vec![share];
+    while let Some(held) = queue.take(1).expect("the original") {
+        taken.push(held);
+    }
+    assert_eq!(
+        queue.len(),
+        0,
+        "reader 1 is the last live reader of every entry"
+    );
+    for held in taken {
+        acct.release(held.charge).expect("a holder");
+    }
+    assert_eq!(acct.hops(), (3, 3));
 }

@@ -9,30 +9,8 @@ use super::mock::{FailAt, Script, spec};
 use super::*;
 use crate::executor::CpuBatch;
 use crate::plan::Expr;
-use crate::plan::{
-    GpuLoadParquet, GpuProject, NamedExpr, PlanError, Schema, SharedSource, new_hold_buffer,
-};
+use crate::plan::{GpuProject, NamedExpr, PlanError, Schema};
 use crate::tests::plans::*;
-
-fn shared(table: &str, lanes: usize) -> SharedSource {
-    let load = source(table, lanes)
-        .into_any_box()
-        .downcast::<GpuLoadParquet>()
-        .expect("plans::source builds a loader");
-    SharedSource::new(*load)
-}
-
-fn read(source: &SharedSource) -> Box<dyn GpuNode> {
-    Box::new(source.clone())
-}
-
-fn buffer(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
-    Box::new(new_hold_buffer(input))
-}
-
-fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
-    roots.iter().map(|root| root.as_ref()).collect()
-}
 
 /// Three batches of sizes of their own, so an order is visible in what a reader took.
 fn three(table: &str) -> Script {
@@ -401,6 +379,49 @@ fn a_buffered_share_keeps_its_charge_after_the_last_reader_takes() {
         "{before_the_build} in flight: the kept shares no longer carry S's bytes"
     );
     let fused = run_roots(&refs, &script);
+    assert_accounted(&fused.report);
+    assert_conserved_over(&refs, &fused.report);
+}
+
+#[test]
+fn a_limit_retiring_a_reader_keeps_the_charge_a_buffer_holds() {
+    // 0 unload, 1 join, 2 coalesce, 3 project, 4 filter, 5 b, 6 buffer, 7 S, 8 unload,
+    // 9 filter. S runs first; B's filter takes a share of its first batch and B is satisfied
+    // by it, before the buffer has taken that batch at all.
+    let (buffer_node, s_node, b_root) = (6, 7, 8);
+    let script = three("s").source("b", vec![vec![spec(4, 32)]]);
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(join(
+            coalesce_all(project(filter(source("b", 1)))),
+            buffer(read(&s)),
+        )),
+        unload_limited(filter(read(&s)), 0, Some(1)),
+    ];
+    let refs = refs(&roots);
+    let mut driver = driver_of_roots(&refs, &script);
+    while driver.step().expect("no protocol violation") {
+        if driver.last_call() == Some(CallKind::SetBuild) {
+            break;
+        }
+    }
+    assert!(
+        driver.is_satisfied(b_root),
+        "B was satisfied during the build"
+    );
+    assert_eq!(driver.kept(buffer_node, 0), 3, "the buffer kept all three");
+    assert!(
+        driver.in_flight() >= 80 + 160 + 240,
+        "{} in flight: B's retired reader took the buffered bytes with it",
+        driver.in_flight()
+    );
+    assert!(
+        driver.queue_high_water(s_node, 0) <= 1,
+        "nothing waited for B's retired filter: {}",
+        driver.queue_high_water(s_node, 0)
+    );
+    let fused = run_roots(&refs, &script);
+    assert_eq!(rows_of(&fused.answers[1]).iter().sum::<usize>(), 1);
     assert_accounted(&fused.report);
     assert_conserved_over(&refs, &fused.report);
 }

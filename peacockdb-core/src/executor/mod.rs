@@ -682,17 +682,19 @@ pub struct RunReport {
     /// unmeasured rather than empty — the distinction `AbiCalls` carries.
     pub(crate) abi_calls: Vec<Vec<Vec<AbiCalls>>>,
     /// Per node, per output lane, rows it emitted that a reader never took, summed over its
-    /// readers — the queues an early exit left standing. Zero everywhere on a run that
-    /// drained, and what closes `Σ consumed over readers + abandoned == readers × emitted`
-    /// into an equality on every run; on a tree, one reader, the child's emitted.
+    /// readers — the queues an early exit left standing, and every row a retired reader of a
+    /// shared source never took. Zero everywhere on a run that drained, and what closes
+    /// `Σ consumed over readers + abandoned == readers × emitted` into an equality on every
+    /// run; on a tree, one reader, the child's emitted. A hold buffer's store is not in it:
+    /// the buffer consumed each batch as it took it.
     pub(crate) abandoned: Vec<Vec<u64>>,
     /// Per node, per child, per that child's lane, the rows this node consumed from it.
     /// Indexed by the child's lane rather than the consumer's, so it lines up with that
     /// child's own [`emitted`](RunReport::emitted) where the two differ — an emitter
     /// redistributes, so nothing else would sum.
     pub(crate) consumed: Vec<Vec<Vec<u64>>>,
-    /// The nodes whose row interval was satisfied, in index order — empty on a run that
-    /// drained. What the golden's `early_exit=` marker names, and the reason a lane can be
+    /// The nodes whose row interval was satisfied, and each source every reader of which
+    /// was, in index order — empty on a run that drained. What the golden's `early_exit=` marker names, and the reason a lane can be
     /// short of what its plan called for: not a bool, because a reader of a smaller number
     /// needs to know which limit produced it.
     pub(crate) satisfied: Vec<usize>,

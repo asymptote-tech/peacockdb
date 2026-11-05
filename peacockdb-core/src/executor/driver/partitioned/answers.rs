@@ -6,6 +6,7 @@
 use datafusion::arrow::array::RecordBatch;
 
 use super::Driver;
+use crate::executor::driver::queue::OutQueue;
 use crate::executor::{Backend, CpuBatch, FusedRun, RunReport};
 
 impl<B: Backend> Driver<'_, B> {
@@ -49,7 +50,11 @@ impl<B: Backend> Driver<'_, B> {
             peak_queued: self.peak_queued,
             emitted: self.emitted,
             abi_calls: self.abi_calls,
-            abandoned: self.abandoned,
+            abandoned: self
+                .states
+                .iter()
+                .map(|state| state.out_queues.iter().map(OutQueue::abandoned).collect())
+                .collect(),
             consumed: self.consumed,
             satisfied: (0..self.index.len())
                 .filter(|node| self.scheduler.is_satisfied(*node))

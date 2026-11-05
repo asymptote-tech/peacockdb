@@ -29,6 +29,7 @@ use crate::plan::check_canonical_form_of_roots;
 use crate::wire::Seq;
 
 mod answers;
+mod early_exit;
 mod hold_buffer;
 mod queues;
 #[cfg(test)]
@@ -102,7 +103,6 @@ pub(crate) struct Driver<'a, B: Backend> {
     /// Calls made against each seq so far, which is what stamps `AbiCall::call_index`.
     /// Empty on an unmeasured run: nothing is recorded, so nothing is counted.
     calls_made: HashMap<Seq, u64>,
-    abandoned: Vec<Vec<u64>>,
     consumed: Vec<Vec<Vec<u64>>>,
 }
 
@@ -183,11 +183,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             .iter()
             .map(|node| vec![Vec::new(); node.ready_lanes])
             .collect();
-        let abandoned = index
-            .nodes
-            .iter()
-            .map(|node| vec![0u64; node.lanes])
-            .collect();
         let consumed = index
             .nodes
             .iter()
@@ -220,7 +215,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             emitted,
             abi_calls,
             calls_made: HashMap::new(),
-            abandoned,
             consumed,
         };
         driver.wire_forwarders()?;
@@ -672,37 +666,6 @@ impl<'a, B: Backend> Driver<'a, B> {
             }
         }
         live == 0
-    }
-
-    /// Enough rows have passed this node that no later one can change its answer: an
-    /// unload's input has reached `skip + fetch`, or a mid-plan limit has emitted `fetch`.
-    /// It is marked done as it is held, or the hold would stop it reporting and strand its
-    /// parent — `LIMIT 0` is the case that forces it.
-    fn settle_limit(&mut self, node: usize) -> Result<(), StepError> {
-        let indexed = &self.index.nodes[node];
-        let Some(interval) = indexed.interval else {
-            return Ok(());
-        };
-        let (category, lanes, name) = (indexed.category, indexed.lanes, indexed.node.name());
-        let satisfied = match category {
-            ExecutorCategory::Unload => interval.satisfied_by(self.rows_seen[node]),
-            ExecutorCategory::BatchAccumulator => {
-                interval.satisfied_by_emitted(self.rows_emitted[node])
-            }
-            // The two carriers are judged by different counts, so a third would be judged
-            // by whichever rule it fell into rather than by one written for it.
-            _ => {
-                return Err(StepError::Run(RunError::Protocol(format!(
-                    "{name}: a row interval on neither an unload nor a limit"
-                ))));
-            }
-        };
-        if !satisfied {
-            return Ok(());
-        }
-        self.scheduler.satisfy(node);
-        self.states[node].out_done = vec![true; lanes];
-        Ok(())
     }
 
     // -- wiring ------------------------------------------------------------------

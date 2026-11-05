@@ -19,6 +19,9 @@ pub(crate) struct OutQueue<T> {
     next: Vec<usize>,
     retired: Vec<bool>,
     high_water: usize,
+    /// Rows its readers will never take, summed over readers: what a retired reader left,
+    /// and what was still queued when the run drained it.
+    abandoned: u64,
 }
 
 impl<T: Batch> OutQueue<T> {
@@ -29,10 +32,13 @@ impl<T: Batch> OutQueue<T> {
             next: vec![0; readers],
             retired: vec![false; readers],
             high_water: 0,
+            abandoned: 0,
         }
     }
 
     pub(crate) fn push(&mut self, held: Held<T>) {
+        let retired = self.retired.iter().filter(|gone| **gone).count();
+        self.abandoned += held.rows() * retired as u64;
         self.entries.push_back(held);
         self.high_water = self.high_water.max(self.entries.len());
     }
@@ -65,11 +71,13 @@ impl<T: Batch> OutQueue<T> {
         Ok(self.entries.pop_front())
     }
 
-    /// The reader stops reading. What only it still wanted comes back, the queue's holder
-    /// with it; an entry another live reader wants stays.
-    // Its caller is a satisfied limit's reader, which the driver does not retire yet.
-    #[allow(dead_code)]
+    /// The reader stops reading, and every row it had yet to take, now or later, is
+    /// abandoned. What only it still wanted comes back, the queue's holder with it; an entry
+    /// another live reader wants stays.
     pub(crate) fn retire(&mut self, reader: usize) -> Vec<Held<T>> {
+        if let Some(at) = self.position(reader) {
+            self.abandoned += self.entries.range(at..).map(Held::rows).sum::<u64>();
+        }
         self.retired[reader] = true;
         let mut released = Vec::new();
         while !self.entries.is_empty() && !self.is_wanted(self.front) {
@@ -79,14 +87,19 @@ impl<T: Batch> OutQueue<T> {
         released
     }
 
-    /// Every entry once, with how many live readers never took it.
-    pub(crate) fn drain(&mut self) -> Vec<(Held<T>, usize)> {
+    /// Every entry once, its rows abandoned by each live reader that never took it.
+    pub(crate) fn drain(&mut self) -> Vec<Held<T>> {
         let mut drained = Vec::new();
         while let Some(held) = self.entries.pop_front() {
-            drained.push((held, self.wanting(self.front)));
+            self.abandoned += held.rows() * self.wanting(self.front) as u64;
+            drained.push(held);
             self.front += 1;
         }
         drained
+    }
+
+    pub(crate) fn abandoned(&self) -> u64 {
+        self.abandoned
     }
 
     pub(crate) fn len(&self) -> usize {

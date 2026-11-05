@@ -84,10 +84,8 @@ impl<B: Backend> Driver<'_, B> {
     pub(crate) fn release_in_flight(&mut self) -> Result<(), StepError> {
         for node in 0..self.index.len() {
             for lane in 0..self.states[node].out_queues.len() {
-                // Each entry once: its readers that never took it count its rows as
-                // abandoned, and a share a reader took is its own holder's to release.
-                for (batch, untaken) in self.states[node].out_queues[lane].drain() {
-                    self.abandoned[node][lane] += batch.rows() * untaken as u64;
+                // Each entry once: a share a reader took is its own holder's to release.
+                for batch in self.states[node].out_queues[lane].drain() {
                     self.acct.release(batch.charge)?;
                 }
             }

@@ -9,6 +9,7 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - 2026-11-04: developer dispatched at Task 3, all steps, CPU only, local (verda unreachable).
 - 2026-11-04: developer dispatched at Task 4, all steps, CPU only, local (verda unreachable).
 - 2026-11-04: developer dispatched at Task 5, all steps, with Task 4's carry-over (the random-DAG runs), CPU only, local.
+- 2026-11-05: developer dispatched at Tasks 6–11, stopping at each commit step.
 
 ## Task 1 notes
 
@@ -93,6 +94,23 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - Counts after Task 5: `--lib` 1048 (1046 passed + 2 ignored), +22: `executor::driver::tests` 150 (dag 16, random_dags +1), Driver internals 57 (queue 4, accounting +1). `test_corpus_goldens` 53, `test_cost_model` 3, `test_cpu_corpus` 2451, `plan_goldens` 25, `test_source_formatting` 32, `testdata/` untouched. build-test.md: cpu 3555, `--lib` 1048, and the two rows.
 - The `--features gpu --no-run` build against rapids-cuda-12.2 compiles with no warning. No device run; Task 5 has no device step. Task 4's carry-over (the random-DAG runs) is done.
 
+## Task 6 notes
+
+- Dispatched 2026-11-05, CPU only, local. Task 6 has no device step.
+- **Decision (Task 4/5 carry-over): a buffer's kept batches are not abandoned rows.** A buffer's intake is counted as consumed, so its input edge already balances. Its store, released at a satisfied limit or at the end, is like rows a filter dropped. Counting it again as abandoned would break `Σ consumed + abandoned == readers × emitted` on the edge into the buffer. `RunReport.abandoned`'s doc says so. The plan's "adds those rows to abandoned" is not done.
+- `Scheduler::satisfy` returns `Vec<(producer, reader ordinal)>`. It works off a pending list: holding each newly satisfied node's region, retiring each reader inside that region of a producer outside it, and queueing a producer once every reader of it has retired. The scheduler keeps `readers` and a `retired` flag per reader. Only a source is shared, so in practice a retired producer is a source. The scheduler's differential test's `Naive` now computes the same closure from its definition (`satisfied_in_turn`): a node is satisfied in turn when every reader sits in a satisfied region that leaves the node outside. Mutation check: dropping the propagation turns three red, the differential test among them.
+- **`OutQueue` now owns the abandoned count** (`abandoned()`), and the driver's `abandoned` field is gone; the report reads it off the queues. A retire adds the rows the reader had yet to take. A push adds `rows × retired readers`. A drain adds `rows × live readers that never took it`. `drain` returns the entries only. Mutation check: not counting a push after a retire turns five red, the queue test among them.
+- `settle_limit` moved to `partitioned/early_exit.rs` (partitioned.rs 920 → 883). On satisfaction it retires each returned reader on every lane of its producer and releases what `retire` hands back. Every node satisfied in this call (the node and any producer satisfied in turn) is marked done, and each buffer in its region gives back its store and is marked done. No re-check is needed: everything touched is held by the limit.
+- Test helpers `shared`, `read`, `buffer`, `refs` moved into `driver/tests/mod.rs` from `dag.rs`, `hold_buffer.rs` and `random_dags.rs`, since `limit.rs` needs them too. `partitioned/tests.rs` gained `is_satisfied(node)`.
+- Plan tests whose shape changed:
+  - `a_retired_reader_releases_what_it_left_queued`: A = `unload(filter(limit(merge(S))))`, B = `unload(S)`, S at 2 lanes. A merge forwards one batch per visit, so the limit is satisfied by lane 0's batch with lane 1's still queued for the merge alone (B took a share before). An unload takes every lane in one step, so an unload-limited root never leaves anything queued.
+  - `a_satisfied_limit_releases_what_a_buffer_below_it_keeps` uses Task 4's `join(coalesce_all(project(filter(b))), buffer(filter(p)))` under `unload_limited(.., 0, Some(1))`. p drains into the buffer before b runs, so "P stops" cannot happen in this shape: p has already finished. The test checks the store is empty right after the satisfying step, and the buffer emitted one batch.
+  - `a_limit_retiring_a_reader_keeps_the_charge_a_buffer_holds` (moved from Task 5): B = `unload_limited(filter(S), 0, Some(1))` is satisfied before the buffer has taken S's first batch. It also checks S's queue never held more than one, which fails without retirement (2).
+  - The tests that need it check `peak_queued[S] <= 1`. Before retirement, a retired root's cursor kept every later entry queued.
+- `RunReport.satisfied` now lists a source satisfied in turn (`the_source_stops_once_every_reader_is_satisfied`: `[0, 1, 2]`). A single tree never satisfies one, so the goldens' `early_exit=` is unchanged.
+- architecture.md "Early exit at a limit": the hold is the region, through buffers; retirement; a source stops when every reader has retired.
+- Counts after Task 6: `--lib` 1067 (1065 passed + 2 ignored), +9: `executor::driver::tests` 156 (limit +5, dag +1), Driver internals 60 (scheduler +2, queue +1). build-test.md: cpu 3582, `--lib` 1067, grand total 7962 (Rust 6132).
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).
@@ -112,7 +130,7 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
   `no_valid_dag_is_refused` and `every_dag_validate_dag_accepts_finishes` (Task 4 landed only the
   validation half, since the driver had one root).
 - Task 6 must decide how a buffer's kept batches at a run's end are counted (`abandoned` vs the row
-  conservation check); see Task 4 notes.
+  conservation check); see Task 4 notes. Decided in Task 6: not abandoned (Task 6 notes).
 
 ## Rebase (2026-11-04)
 

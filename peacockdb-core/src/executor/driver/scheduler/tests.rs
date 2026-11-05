@@ -379,6 +379,48 @@ fn a_satisfied_root_holds_only_its_own_region() {
     );
 }
 
+/// Root A: unload(0) <- filter(1) <- S(2); root B: unload(3) <- S(2). S's readers are the
+/// filter, ordinal 0, and B, ordinal 1.
+fn two_roots_over_a_source() -> PlanShape {
+    shape(
+        &[vec![], vec![(0, 0)], vec![(1, 0), (3, 0)], vec![]],
+        &[1; 4],
+        &[],
+    )
+}
+
+#[test]
+fn satisfying_a_consumer_retires_its_reader_and_a_source_with_none_left_is_satisfied() {
+    let s = 2;
+    let mut scheduler = Scheduler::new(&two_roots_over_a_source());
+    scheduler.set_lane_ready(s, 0, true);
+    assert_eq!(
+        scheduler.satisfy(0),
+        vec![(s, 0)],
+        "A's filter reads S from outside A's region"
+    );
+    assert!(!scheduler.is_satisfied(s) && !scheduler.is_held(s));
+    assert_eq!(scheduler.next(), Some(s), "B still reads it");
+    assert_eq!(scheduler.satisfy(3), vec![(s, 1)]);
+    assert!(
+        scheduler.is_satisfied(s),
+        "no reader of S is left, so S is satisfied in turn"
+    );
+    assert_eq!(scheduler.next(), None, "and its hold stops it");
+}
+
+#[test]
+fn a_satisfied_tree_returns_no_reader() {
+    let mut scheduler = Scheduler::new(&chain(3));
+    assert_eq!(scheduler.satisfy(1), vec![]);
+    let mut scheduler = Scheduler::new(&one_join(1));
+    assert_eq!(scheduler.satisfy(0), vec![]);
+    assert!(
+        !scheduler.is_satisfied(5),
+        "only the node itself is satisfied"
+    );
+}
+
 #[test]
 fn a_satisfied_limit_and_a_join_hold_the_same_node_independently() {
     let mut scheduler = Scheduler::new(&one_join(1));
@@ -450,9 +492,38 @@ impl Naive {
             .iter()
             .zip(&self.building)
             .any(|(join, left)| *left > 0 && join.probe.contains(&node));
+        let satisfied = self.satisfied_in_turn();
         let satisfied = (0..self.shape.node_count())
-            .any(|other| self.satisfied[other] && self.shape.regions[other].contains(&node));
+            .any(|other| satisfied[other] && self.shape.regions[other].contains(&node));
         (building && !self.shape.buffers[node]) || satisfied
+    }
+
+    /// The satisfied nodes and, to a fixed point, every node all of whose readers sit in a
+    /// satisfied region that leaves the node itself outside.
+    fn satisfied_in_turn(&self) -> Vec<bool> {
+        let regions = &self.shape.regions;
+        let mut satisfied = self.satisfied.clone();
+        loop {
+            let retired = |producer: usize, parent: usize, satisfied: &[bool]| {
+                (0..satisfied.len()).any(|other| {
+                    satisfied[other]
+                        && regions[other].contains(&parent)
+                        && !regions[other].contains(&producer)
+                })
+            };
+            let next = (0..satisfied.len()).find(|producer| {
+                let readers = &self.shape.readers[*producer];
+                !satisfied[*producer]
+                    && !readers.is_empty()
+                    && readers
+                        .iter()
+                        .all(|reader| retired(*producer, reader.parent, &satisfied))
+            });
+            match next {
+                Some(producer) => satisfied[producer] = true,
+                None => return satisfied,
+            }
+        }
     }
 
     fn pick(&self) -> Option<usize> {

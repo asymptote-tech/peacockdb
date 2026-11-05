@@ -30,6 +30,29 @@ use self::mock::{Mock, Script};
 use super::partitioned::Driver;
 use crate::executor::{CallKind, FusedRun, PlanIndex, RunError, RunReport, TraceEvent};
 use crate::plan::GpuNode;
+use crate::plan::{GpuLoadParquet, SharedSource, new_hold_buffer};
+use crate::tests::plans::source;
+
+/// `plans::source` as the one node several parents may hold.
+fn shared(table: &str, lanes: usize) -> SharedSource {
+    let load = source(table, lanes)
+        .into_any_box()
+        .downcast::<GpuLoadParquet>()
+        .expect("plans::source builds a loader");
+    SharedSource::new(*load)
+}
+
+fn read(source: &SharedSource) -> Box<dyn GpuNode> {
+    Box::new(source.clone())
+}
+
+fn buffer(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
+    Box::new(new_hold_buffer(input))
+}
+
+fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
+    roots.iter().map(|root| root.as_ref()).collect()
+}
 
 /// Run to completion under no budget, which is what most flow cases want.
 fn run(root: &dyn GpuNode, script: &Script) -> RunReport {
