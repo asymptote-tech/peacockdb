@@ -1070,3 +1070,5 @@ Three findings, each fixed test-first. No VM was used.
     knowing whether verda's 2024.5 has the new name, which was not checked. If a later nsys drops
     the old name, the counters pass on the H100 fails there first.
   - The `gh100` set is accepted on the H100.
+- completeness approved 2026-11-05 (fb93bff3 + board). Device CI: pipeline.yml dispatch 41944133356 at 2026-11-05T00:49:08Z; PR #195 CI for the same head.
+- done 2026-11-05: PR #195 CI 41944128467 green; dispatch 41944133356 green (GPU Tests (nebius-gpu) included; cudf 26.02 docker-pull flake rerun once).
