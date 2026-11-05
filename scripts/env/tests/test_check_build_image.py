@@ -1,0 +1,81 @@
+"""`check-build-image.sh`: the CPU-VM build's image, pulled on the VM and checked against this tree.
+
+The VM's copy of the tree comes from nebius-sync.sh without .git, and the build image's inputs
+include the third_party/cudf commit the git index pins, so the check runs on dev and docker on
+the VM, through scripts/nebius.sh (gpu_host.py has the fakes).
+"""
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
+from harness import main  # noqa: E402
+from gpu_host import BUILD_REF, CPU_VM, Host, label  # noqa: E402
+
+SCRIPT = "scripts/env/check-build-image.sh"
+
+
+def checked(h, *args, env=None):
+    return h.script(SCRIPT, *args, env=env)
+
+
+def test_check_build_image_pulls_then_reads_the_label_on_the_vm():
+    with Host() as h:
+        r = checked(h, *CPU_VM)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        calls = h.docker_calls()
+        assert calls[0] == ["pull", BUILD_REF], calls
+        assert any(a[:2] == ["image", "inspect"] and a[-1] == BUILD_REF for a in calls[1:]), calls
+        assert not any(a[0] == "run" for a in calls), calls
+        assert all(a[:4] == CPU_VM for a in h.nebius_calls()), h.nebius_calls()
+        assert set(h.verbs()) == {"ssh"}, h.verbs()
+        assert not h.dev_log.exists(), h.dev_log.read_text()
+
+
+def test_check_build_image_refuses_one_built_from_other_inputs():
+    with Host() as h:
+        images = h.world()["images"]
+        images[BUILD_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/venv.lock")
+        h.world(images=images)
+        r = checked(h, *CPU_VM)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "docker/venv.lock" in r.stderr and BUILD_REF in r.stderr, r.stderr
+
+
+def test_check_build_image_refuses_one_without_a_label():
+    with Host() as h:
+        images = h.world()["images"]
+        images[BUILD_REF]["labels"] = {}
+        h.world(images=images)
+        r = checked(h, *CPU_VM)
+        assert r.returncode == 2 and "peacockdb.inputs" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_check_build_image_without_an_instance_id_is_refused():
+    with Host() as h:
+        for args in ((), ("--profile", "eu-west1")):
+            r = checked(h, *args)
+            assert r.returncode == 2 and "--instance-id" in r.stderr, (r.returncode, r.stderr)
+        assert h.nebius_calls() == []
+
+
+def test_check_build_image_refuses_bad_input():
+    with Host() as h:
+        for args, word in (((*CPU_VM, "--color", "red"), "--color"), ((*CPU_VM, "--cudf", "24.12"), "24.12"),
+                           ((*CPU_VM, "build"), "build")):
+            r = checked(h, *args)
+            assert r.returncode == 2 and word in r.stderr, (args, r.returncode, r.stderr)
+        r = checked(h, *CPU_VM, env={"FAKE_NEBIUS_RC": "64"})
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert h.docker_calls() == []
+
+
+def test_check_build_image_passes_on_nebius_shs_own_codes():
+    with Host() as h:
+        for rc in (69, 75):
+            r = checked(h, *CPU_VM, env={"FAKE_NEBIUS_RC": str(rc)})
+            assert r.returncode == rc, (rc, r.returncode, r.stderr)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(globals()))

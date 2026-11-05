@@ -974,3 +974,63 @@ it (Task 10 Step 2). Resizing is the human's (analyst, above). Human: grow nebiu
 200 GiB or more and the H100's to 150 GiB or more, then clear the block. Resume at Task 8 Step 5's
 `df` check, then Task 10 Step 2. Task 10 Step 1's install is at `/home/dmitry/build/peacock/new-hosts/install`.
 - 2026-11-04: green at af557d5c; PR #195 (base ENS-containers-rebase); reviewer round 1 dispatched.
+
+## Review round 1 (developer, 2026-11-05)
+
+Three findings, each fixed test-first. No VM was used.
+
+- **1. `run-gpu.sh` without `--instance-id` reached nebius-gpu.** It now refuses, exit 2, before
+  any `nebius.sh` call, and names `--instance-id`. `--profile` alone does not count.
+  - `test_run_gpu_without_options_reaches_the_default_vm` became
+    `test_run_gpu_without_an_instance_id_is_refused`: no nebius call at all.
+  - `gpu_host.Host.gpu` names the H100 unless the args name a VM, or `vm=None` is passed. So the
+    other tests still reach their verbs.
+  - Docs: the usage line in the script and in `build-test.md`, the exit-2 row, plan Task 9's
+    interface.
+- **2. `build-test.md` claimed the sf40 test binaries run on the H100.** No verb runs them:
+  `run-tests.sh` skips `peacock_tpch_tests` and `peacock_tpchv_tests` under `list` and `filter`, and
+  `bench` runs only `peacock_gpu_benchmarks`.
+  - The Runs legend and the "L40S list" paragraph now say the sf40 benchmark cases run through
+    `run bench`. They also say the C++ pair has no H100 path and runs only on shad-gpu, which is
+    down.
+  - Rows "TPC-H sf40 bare-cuDF" and "TPC-H+V sf40 bare-cuDF" are now `manual` with that reason.
+  - `run-tests.sh` is unchanged (it is an image input).
+- **3a. `run` never checked the run image against the tree.**
+  - `machine.sh`: `machine_image_checked` = `docker pull` + the new `machine_image_label_checked`,
+    which is the old body without the pull. Bootstrap's 17 tests pass unchanged.
+  - `run` calls `machine_image_label_checked … run` before the driver check: no pull, so a run
+    takes only an image `prepare` checked.
+  - New tests: `test_run_refuses_a_run_image_built_from_other_inputs`,
+    `test_run_checks_the_run_image_without_pulling_it`.
+  - `prompts.md`'s H100 bracket says `prepare` comes first on a fresh VM, and again whenever `run`
+    refuses its image. The plan's Task 5a text says the same.
+- **3b. The CPU-VM build ran whatever build image was cached.** New
+  `scripts/env/check-build-image.sh --instance-id <id> [--profile <p>] [--cudf <v>]`, run on dev
+  between the sync and the `docker run`.
+  - It pulls the build image on the VM, reads its label there, and compares on dev, through
+    `machine_image_checked` with docker forwarded over `nebius.sh ssh`.
+  - **Why not on the VM, as the finding put it:** `nebius-sync.sh` passes `--exclude=.git`. The
+    build image's inputs include the `third_party/cudf` commit read from the git index
+    (`image_inputs`), so on the VM's copy `image_inputs build` returns 2. `run-gpu.sh prepare`
+    already checks this way.
+  - It also requires `--instance-id`, and maps `nebius.sh`'s 64 to 2.
+  - Tests: `test_check_build_image.py`, 6 over `gpu_host.py`'s fakes. `TREE_FILES` gains the
+    script, and `Host.script` runs any tree script.
+  - The recipe gained the line in both copies (plan Global Constraints and `build-test.md`), and
+    they are identical (`diff`). Task 11's text no longer says "five commands".
+- **Mutations, each red:**
+  - `check-build-image.sh`: no label check (3 red); no pull (1); no instance check (1); 64 not
+    mapped (1).
+  - `run-gpu.sh`: `run` pulling (1).
+  - Finding 1's check was red before it existed.
+- **shellcheck** (`koalaman/shellcheck:stable -x -P SCRIPTDIR`): `check-build-image.sh` and
+  `run-gpu.sh` clean. `machine.sh` has SC2034 and SC2153, the same two HEAD's copy has. The image
+  was removed.
+- **Counts:** Images 222 → 230 (`test_run_gpu.py` 29 → 31, plus 6 new). Python 1467 → 1475, grand
+  total 7659 → 7667.
+- **Offline sweep:** all 13 nebius test files 0 failed; `scripts/env/tests/` 0 failed except
+  the image-dependent `test_image_any_user.py` (1) and `test_run_image.py` (2), as in Task 11.
+  cost-report `test_source_formatting` 32 passed.
+- **Not checked live.** `check-build-image.sh` has run only over the fakes. Its first live use
+  is the next CPU-VM build: a `docker pull` of an image the VM already holds, then one
+  `docker image inspect`.

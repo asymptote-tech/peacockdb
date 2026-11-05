@@ -2,7 +2,7 @@
 # The device run on a Nebius VM, in the run image, over scripts/nebius.sh (llm-wiki/build-test.md,
 # "Nebius host").
 #
-#   run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] <verb>
+#   run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] <verb>
 #
 #   prepare                    ready the VM: Docker, the NVIDIA Container Toolkit and nsys if
 #                                missing; the GPU's counters open to non-root; the build and run
@@ -19,8 +19,9 @@
 #                                tree, and the runs' logs into ~/.cache/peacock/run-gpu/<i>/
 #
 # --instance-id and --profile go, as given, to every scripts/nebius.sh call ($NEBIUS_SH), which
-# picks the VM; with neither it is nebius-gpu. run-gpu.sh never starts or stops the VM: the caller
-# does, with nebius.sh. <i> is this tree's directory name by default, <v> 25.02.
+# picks the VM. --instance-id is required: without it nebius.sh means nebius-gpu, the shared L40S,
+# which runs no sf40 and no benchmark. run-gpu.sh never starts or stops the VM: the caller does,
+# with nebius.sh. <i> is this tree's directory name by default, <v> 25.02.
 #
 # Exit 0; 1 the run failed; 2 bad input (nebius.sh's 64 too), a stale image, a run in progress,
 # or a step missing (prepare, ship); 3 the VM's driver is older than the run image needs; 4 restart
@@ -34,11 +35,12 @@ die() { echo "run-gpu.sh: $*" >&2; exit 2; }
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git -C "$here" rev-parse --show-toplevel)
 NEBIUS=("${NEBIUS_SH:-$root/scripts/nebius.sh}")
-dir=$(basename "$root") cudf=25.02 install="" mode=""
+dir=$(basename "$root") cudf=25.02 install="" mode="" instance=""
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage ;;
-    --instance-id|--profile) [ -n "${2:-}" ] || die "$1 needs a value"; NEBIUS+=("$1" "$2"); shift 2 ;;
+    --instance-id|--profile) [ -n "${2:-}" ] || die "$1 needs a value"; NEBIUS+=("$1" "$2")
+                             [ "$1" = --profile ] || instance=$2; shift 2 ;;
     --dir) [ -n "${2:-}" ] || die "--dir needs a name"; dir=$2; shift 2 ;;
     --cudf) [ -n "${2:-}" ] || die "--cudf needs a version such as 25.02"; cudf=$2; shift 2 ;;
     -*) die "unknown option $1" ;;
@@ -65,6 +67,8 @@ esac
 [[ "$dir" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$dir" != cudf-* ]] \
   || die "--dir $dir: a directory name under ~/peacock/, of letters, digits, '.', '_' and '-', not cudf-*"
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
+[ -n "$instance" ] \
+  || die "name the VM with --instance-id: without it nebius.sh means nebius-gpu, the shared L40S, which runs no sf40"
 
 . "$root/scripts/lib/peacock-config.sh"
 . "$root/scripts/lib/image-inputs.sh"
@@ -324,6 +328,9 @@ cmd_ship() {
 
 cmd_run() {
   local envs=()
+  # The VM's run image as prepare left it: no pull, so a run never takes an image prepare did not
+  # check, and a tree whose image inputs moved since is refused.
+  machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
   driver_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")

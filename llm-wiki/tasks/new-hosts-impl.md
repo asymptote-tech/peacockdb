@@ -89,6 +89,7 @@ Branch: `ENS-new-hosts`.
 C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"
 $C start
 D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)
+scripts/env/check-build-image.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1
 $C ssh "cd ~/$D && docker run --rm --user \$(id -u):\$(id -g) -e HOME=/tmp -v \$PWD:\$PWD -w \$PWD ghcr.io/asymptote-tech/peacockdb-build:cudf-25.02 scripts/env/stage-install.sh"
 rsync -a -e "$C rsh" "nebius-cpu128:$D/cpp/install/" <local install dir>/
 $C stop
@@ -421,7 +422,8 @@ reads the three hosts' roles from the standing rules; no chain needs an override
     correctness: "Only the L40S list runs there: no sf40, no benchmarks." Beside it, the H100
     bracket: the CPU-VM build (`build-test.md`, "Nebius host", "The CPU-VM build"), then
     `nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start` →
-    `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`; sf40, benchmarks and Nsight run
+    `scripts/env/run-gpu.sh … ship | run | pull` → `… stop` (`prepare` first on a fresh VM, and
+    whenever `run` refuses its image, review round 1); sf40, benchmarks and Nsight run
     there and only there. nebius-cpu128 runs DuckDB and stages the H100's install: binaries for
     H100 runs are built on the CPU VM; local and verda builds stay for development. The VM-time
     rule: a VM starts right before its first remote command and stops right after its last
@@ -595,7 +597,8 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Consumes: Task 2's `scripts/nebius.sh [--instance-id <id>] [--profile <name>] start|stop [--force]|status|ip|ssh <cmd…>|rsh <host> <cmd…>`
   (exit 64 on a bad option); Task 8's `fetch-sf40.sh --env -`; containers' `machine_data_set`,
   `machine_image_checked` (`scripts/lib/machine.sh`).
-- Produces: `run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <dir>] | run <list|filter|bench> | pull`.
+- Produces: `run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <dir>] | run <list|filter|bench> | pull`
+  (`--instance-id` required since review round 1).
   The two VM options go, as given, to every `${NEBIUS_SH:-<repo>/scripts/nebius.sh}` call; with
   neither, the VM is nebius.sh's default, nebius-gpu. Remote commands go through `nebius.sh … ssh`,
   every rsync through `-e "<nebius.sh> <options> rsh"`; the login is nebius.sh's. `run-gpu.sh`
@@ -683,7 +686,7 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 three VMs, the L40S (nebius-gpu), the H100 and the 128-core CPU VM, each with its instance id,
 region, profile and role; `nebius.sh`'s flags and aliases, `install-watch --key-file`, the CPU
 kind's rule, the install file, the three-leg watch and its notices, the secrets; `run-gpu.sh`'s
-verbs, options and exit codes, `stage-install.sh`; a subsection "The CPU-VM build", the five
+verbs, options and exit codes, `stage-install.sh`; a subsection "The CPU-VM build", the
 commands of Global Constraints verbatim with one line on why (binaries for H100 runs are built on
 the CPU VM from the workspace as it stands, never a `git pull`; local and verda builds stay for
 development), which the prompts.md H100 bracket (Task 5a) cites. "Datasets" (rows for TPC-H+V sf40 and TPC-DS

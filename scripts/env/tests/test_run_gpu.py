@@ -59,14 +59,13 @@ def test_run_gpu_passes_instance_and_profile_to_every_nebius_call():
         nothing_bypassed(h)
 
 
-def test_run_gpu_without_options_reaches_the_default_vm():
+def test_run_gpu_without_an_instance_id_is_refused():
+    # nebius.sh without --instance-id is nebius-gpu, the shared L40S: no sf40, no benchmarks.
     with Host() as h:
         for verb in VERBS:
-            ok(h.gpu(*verb))
-        calls = h.nebius_calls()
-        assert calls
-        for a in calls:
-            assert "--instance-id" not in a and "--profile" not in a, a
+            refused(h.gpu(*verb, vm=None), 2, "--instance-id")
+            refused(h.gpu("--profile", "editor-eu", *verb, vm=None), 2, "--instance-id")
+        assert h.nebius_calls() == []
         nothing_bypassed(h)
 
 
@@ -264,6 +263,29 @@ def test_run_refuses_old_driver():
         calls = len(h.nebius_calls())
         refused(h.gpu("run", "list"), 3, "530.30.02", DRIVER_MINIMUM)
         assert "rsh" not in h.verbs()[calls:] and h.docker_runs() == []
+
+
+def test_run_refuses_a_run_image_built_from_other_inputs():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        images = h.world()["images"]
+        images[RUN_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
+        h.world(images=images)
+        refused(h.gpu("run", "list"), 2, "docker/run-tests.sh", RUN_REF)
+        assert h.docker_runs() == []
+
+
+def test_run_checks_the_run_image_without_pulling_it():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        before = len(h.docker_calls())
+        ok(h.gpu("run", "list"))
+        run_calls = h.docker_calls()[before:]
+        assert not any(a[0] == "pull" for a in run_calls), run_calls
+        inspected = [a for a in run_calls if a[:2] == ["image", "inspect"] and "peacockdb.inputs" in " ".join(a)]
+        assert inspected and inspected[0][-1] == RUN_REF, run_calls
 
 
 def test_run_passes_the_machines_hostname():

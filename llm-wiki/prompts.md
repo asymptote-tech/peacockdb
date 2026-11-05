@@ -393,7 +393,8 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   - The H100 (nebius-h100), for sf40, benchmarks and Nsight, there and only there: the CPU-VM
     build (`build-test.md`, "Nebius host", "The CPU-VM build"), then
     `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`
-    → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`.
+    → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`. `prepare` comes first on a fresh
+    VM, and again whenever `run` refuses its image, exit 2: the run image no longer matches the tree.
   - The 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries for
     H100 runs are built there. Local and verda builds stay for development.
 

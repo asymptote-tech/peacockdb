@@ -21,7 +21,7 @@ import tempfile
 from machine import KEYS, REPO, git, lib
 
 TREE_FILES = [
-    "scripts/env/run-gpu.sh", "scripts/env/sf40.sha256", "scripts/lib/image-inputs.sh",
+    "scripts/env/run-gpu.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256", "scripts/lib/image-inputs.sh",
     "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/peacock-config.sh",
     "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
@@ -29,6 +29,7 @@ CUDF = "25.02"
 RUN_REF = f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{CUDF}"
 BUILD_REF = f"ghcr.io/asymptote-tech/peacockdb-build:cudf-{CUDF}"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
+CPU_VM = ["--instance-id", "computeinstance-e01t2mm4265y8x88ey", "--profile", "eu-west1"]
 HOSTNAME = "h100-test-node"
 DRIVER_MINIMUM = "535.104.05"
 
@@ -275,8 +276,17 @@ class Host:
             (d / rel).write_text(mark)
         return d
 
-    def gpu(self, *args, env=None):
+    def gpu(self, *args, env=None, vm=H100):
+        """run-gpu.sh <args>, naming the VM by `vm` (the H100) unless the args name one already."""
+        if vm and "--instance-id" not in args:
+            args = (*vm, *args)
         cmd = [str(self.tree / "scripts" / "env" / "run-gpu.sh"), *map(str, args)]
+        return subprocess.run(cmd, env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=120, cwd=self.tree)
+
+    def script(self, rel, *args, env=None):
+        """The tree's script <rel> with the fakes, as `gpu` runs run-gpu.sh."""
+        cmd = [str(self.tree / rel), *map(str, args)]
         return subprocess.run(cmd, env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL, capture_output=True,
                               text=True, timeout=120, cwd=self.tree)
 
