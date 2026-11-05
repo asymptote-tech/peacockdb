@@ -604,7 +604,11 @@ table PlanNode {
 
 /// Top-level message: the entire GPU execution plan.
 table GpuPlan {
+  /// The one root of a single query's plan. Unset when `roots` is set.
   root: PlanNode;
+  /// The roots of a fused plan, in order, each indexed after the last; a node several of
+  /// them read is one offset, indexed at its first visit. Unset for one root.
+  roots: [PlanNode];
 }
 
 root_type GpuPlan;

@@ -1127,6 +1127,16 @@ one handle and scatters it into the plan-declared N; none of them cross-checks h
 against the plan tree. And stats
 come back per output handle per call, so a per-node figure is this side's fold over its calls.
 
+**A fused plan crosses as one buffer.** Several roots share one seq space: `GpuPlan.roots`
+holds them in order, and a single query's plan still sets `root` alone, so its bytes do not
+change. A plan setting both is refused. A node several parents read, a shared source, is
+written once: every later parent holds the same offset (`Writer::reuse`). Both sides number by
+first visit. The Rust walk is `PlanDag`'s, and `NodeSession::index_post_order` keeps a visited
+set, so the node takes one seq, at its first visit, on both sides. The recipes are indexed by
+`PlanDag`'s post-order, one per node (`attach_recipes_for_roots`). A `GpuHoldBuffer` is not on
+the wire: its reader takes its child's offset, which for a buffered shared source is the
+source's own.
+
 **Every aggregate merges as state and finalizes in a project**, so both engines evaluate the
 same expression and agree by construction rather than by two implementations happening to
 match. Two appended fbs values buy that: `UnaryOp.Sqrt`, so a finalize can be written, and `AggregateMode.Merge`, so a merge can be only a merge: these plans

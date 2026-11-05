@@ -5,38 +5,59 @@
 //! claim — a seq means the same node on both sides — and the check that it holds
 //! ([`check_seq_kinds`]) is not a rendering concern.
 
+use std::collections::HashSet;
+
 use super::generated::peacock::plan as fb;
 
 use super::RecipePlan;
 use crate::plan::PlanError;
 
-/// The node at `seq`, by the post-order the C++ indexes with — children in
-/// `node_children` order, then the node. `None` where the tree is shorter than `seq`; an
-/// error where the walk meets a node kind it does not know.
+/// The node at `seq`, by the post-order the C++ indexes with. `None` where the tree is
+/// shorter than `seq`; an error where the walk meets a node kind it does not know.
 pub(crate) fn node_at<'a>(
     plan: &fb::GpuPlan<'a>,
     seq: u32,
 ) -> Result<Option<fb::PlanNode<'a>>, PlanError> {
-    let mut position = 0;
-    let Some(root) = plan.root() else {
-        return Ok(None);
-    };
-    find(root, seq, &mut position)
+    Ok(indexed(plan)?.get(seq as usize).copied())
 }
 
-fn find<'a>(
-    node: fb::PlanNode<'a>,
-    seq: u32,
-    position: &mut u32,
-) -> Result<Option<fb::PlanNode<'a>>, PlanError> {
-    for child in children(&node)? {
-        if let Some(found) = find(child, seq, position)? {
-            return Ok(Some(found));
-        }
+/// Every node in seq order, as `NodeSession::index_post_order` indexes them: the roots in
+/// order, children in `node_children` order, then the node — and a node several parents
+/// hold, which is one offset in the buffer, only at its first visit.
+pub(crate) fn indexed<'a>(plan: &fb::GpuPlan<'a>) -> Result<Vec<fb::PlanNode<'a>>, PlanError> {
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+    for root in roots_of(plan)? {
+        index(root, &mut seen, &mut order)?;
     }
-    let at = *position;
-    *position += 1;
-    Ok((at == seq).then_some(node))
+    Ok(order)
+}
+
+/// `roots` where it is set, else the one `root`: a plan setting both is refused, as the C++
+/// refuses it.
+fn roots_of<'a>(plan: &fb::GpuPlan<'a>) -> Result<Vec<fb::PlanNode<'a>>, PlanError> {
+    match (plan.root(), plan.roots()) {
+        (Some(_), Some(_)) => Err(PlanError::Invalid(
+            "GpuPlan sets both root and roots".to_string(),
+        )),
+        (_, Some(roots)) => Ok(roots.iter().collect()),
+        (root, None) => Ok(root.into_iter().collect()),
+    }
+}
+
+fn index<'a>(
+    node: fb::PlanNode<'a>,
+    seen: &mut HashSet<usize>,
+    order: &mut Vec<fb::PlanNode<'a>>,
+) -> Result<(), PlanError> {
+    if !seen.insert(node._tab.loc()) {
+        return Ok(());
+    }
+    for child in children(&node)? {
+        index(child, seen, order)?;
+    }
+    order.push(node);
+    Ok(())
 }
 
 /// The child order `NodeSession::node_children` walks, which is what makes a seq mean the
@@ -106,6 +127,7 @@ pub(crate) fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
     };
     let buffer = flatbuffers::root_with_opts::<fb::GpuPlan>(&options, plan.bytes())
         .map_err(|e| PlanError::Invalid(format!("the recipe plan does not verify: {e}")))?;
+    let indexed = indexed(&buffer)?;
     for node in 0..plan.nodes() {
         let Some(recipe) = plan.get(node) else {
             continue;
@@ -114,7 +136,7 @@ pub(crate) fn check_seq_kinds(plan: &RecipePlan) -> Result<(), PlanError> {
             let Some((seq, kind)) = call.target else {
                 continue;
             };
-            let Some(written) = node_at(&buffer, seq)? else {
+            let Some(written) = indexed.get(seq as usize) else {
                 return Err(PlanError::Invalid(format!(
                     "seq #{seq} is published as {kind} and the plan has no node there — the \
                      numbering is longer than the tree, so every seq above it addresses the \
@@ -142,10 +164,16 @@ pub(crate) fn depth(plan: &RecipePlan) -> Result<usize, PlanError> {
     };
     let buffer = flatbuffers::root_with_opts::<fb::GpuPlan>(&options, plan.bytes())
         .map_err(|e| PlanError::Invalid(format!("the recipe plan does not verify: {e}")))?;
-    let root = buffer
-        .root()
-        .ok_or_else(|| PlanError::Invalid("the recipe plan has no root".to_string()))?;
-    depth_of(root)
+    let mut deepest = 0;
+    for root in roots_of(&buffer)? {
+        deepest = deepest.max(depth_of(root)?);
+    }
+    match deepest {
+        0 => Err(PlanError::Invalid(
+            "the recipe plan has no root".to_string(),
+        )),
+        deepest => Ok(deepest),
+    }
 }
 
 fn depth_of(node: fb::PlanNode<'_>) -> Result<usize, PlanError> {

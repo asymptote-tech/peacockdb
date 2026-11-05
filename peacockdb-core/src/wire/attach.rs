@@ -4,11 +4,12 @@
 //! `writer.rs` has the three rules that keep those the same sequence.
 
 use super::join::JoinNode;
-use super::writer::Writer;
+use super::writer::{NodeOffset, Writer};
 use super::{AbiSymbol, Call, CallPattern, FbKind, Input, ProjectRole, Recipe, RecipePlan};
 use super::{aggregate_writer, join, node_writer};
 use crate::plan::GpuNode;
 use crate::plan::Phase;
+use crate::plan::PlanDag;
 use crate::plan::PlanError;
 use crate::plan::Schema;
 use crate::plan::{
@@ -17,44 +18,72 @@ use crate::plan::{
     GpuSort, GpuUnload, NodeRef, try_as_node_ref,
 };
 
-/// Build the recipe plan for a finished tree. It runs after planning because a recipe is
-/// a statement about a node, and a node is not finished until the plan is.
+/// Build the recipe plan for finished roots. It runs after planning because a recipe is a
+/// statement about a node, and a node is not finished until the plan is.
+///
+/// The walk is `PlanDag`'s: roots in order, children left to right, a node several parents
+/// read written at its first visit and its offset taken again at every later one. So the
+/// recipes are indexed by `PlanDag`'s post-order, one per node, and a shared node has one
+/// seq on both sides of the ABI.
 ///
 /// `Err` where a node's payload cannot be written — an expression the wire has no shape
 /// for (#249) — because a plan missing one node's arguments is not a plan the C++ can be
 /// handed, and the alternative is a buffer whose every later seq has to be checked against
 /// a list to be trusted.
-pub(crate) fn attach_recipes(
-    root: &dyn GpuNode,
+pub(crate) fn attach_recipes_for_roots(
+    roots: &[&dyn GpuNode],
     join_scratch_bytes: u64,
 ) -> Result<RecipePlan, PlanError> {
-    let mut writer = Writer::with_join_scratch(join_scratch_bytes);
-    let mut recipes = Vec::new();
-    walk(root, &mut writer, &mut recipes)?;
-    let (bytes, wire_nodes) = writer.finish()?;
+    let dag = PlanDag::of(roots);
+    let mut walk = Walk {
+        dag: &dag,
+        writer: Writer::with_join_scratch(join_scratch_bytes),
+        recipes: Vec::new(),
+        written: vec![None; dag.nodes.len()],
+    };
+    for root in &dag.roots {
+        walk.visit(*root)?;
+        walk.writer.end_root()?;
+    }
+    let (bytes, wire_nodes) = walk.writer.finish()?;
     Ok(RecipePlan {
-        recipes,
+        recipes: walk.recipes,
         bytes,
         wire_nodes,
         join_scratch_bytes,
     })
 }
 
-fn walk(
-    node: &dyn GpuNode,
-    writer: &mut Writer,
-    recipes: &mut Vec<Option<Recipe>>,
-) -> Result<(), PlanError> {
-    let mark = writer.mark();
-    for child in node.children() {
-        walk(child, writer, recipes)?;
+struct Walk<'d, 'n, 'a> {
+    dag: &'d PlanDag<'n>,
+    writer: Writer<'a>,
+    recipes: Vec<Option<Recipe>>,
+    /// The offset each shared node left at its first visit.
+    written: Vec<Option<NodeOffset<'a>>>,
+}
+
+impl Walk<'_, '_, '_> {
+    fn visit(&mut self, at: usize) -> Result<(), PlanError> {
+        if let Some(offset) = self.written[at] {
+            self.writer.reuse(offset);
+            return Ok(());
+        }
+        let node = self.dag.nodes[at].node;
+        let mark = self.writer.mark();
+        for slot in 0..self.dag.nodes[at].children.len() {
+            self.visit(self.dag.nodes[at].children[slot])?;
+        }
+        let inputs = input_schemas(node);
+        let recipe = emit(node, inputs.as_slice(), &mut self.writer)?;
+        self.recipes.push(recipe);
+        // Whatever this node did not consume is gathered here, so nothing it was handed
+        // becomes unreachable: an orphan is never indexed and every seq above it would shift.
+        self.writer.reduce(mark)?;
+        if self.dag.nodes[at].readers.len() >= 2 {
+            self.written[at] = Some(self.writer.last());
+        }
+        Ok(())
     }
-    let inputs = input_schemas(node);
-    let recipe = emit(node, inputs.as_slice(), writer)?;
-    recipes.push(recipe);
-    // Whatever this node did not consume is gathered here, so nothing it was handed
-    // becomes unreachable: an orphan is never indexed and every seq above it would shift.
-    writer.reduce(mark)
 }
 
 /// The schemas a node declares it consumes, in child order. Read here and handed to the

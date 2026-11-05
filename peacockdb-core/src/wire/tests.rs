@@ -6,7 +6,7 @@
 use super::attach::{accumulate_and_sort, aggregate, aggregate_batches};
 use super::generated::peacock::plan as fb;
 use super::join::JoinNode;
-use super::read::{children, node_at};
+use super::read::{children, indexed, node_at};
 use super::writer::Writer;
 use super::*;
 use crate::plan::AggregateBody;
@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 mod aggregate_init;
 mod intervals;
+mod roots;
 
 /// An input whose layout and schema the test writes. A recipe function is handed its
 /// node and the schemas that node declares it consumes, so that is all a case needs to

@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace peacock {
@@ -342,7 +343,12 @@ struct NodeSession::Impl {
   /// before the answer does.
   std::unique_ptr<RegionSink> sink;
 
+  /// A node several parents read is one offset in the buffer, and is indexed at its first
+  /// visit only, so its seq is the one the Rust writer numbered it with.
+  std::unordered_set<const fb::PlanNode*> indexed;
+
   void index_post_order(const fb::PlanNode* node) {
+    if (!indexed.insert(node).second) return;
     for (auto* child : node_children(node)) index_post_order(child);
     post_order.push_back(node);
   }
@@ -415,6 +421,12 @@ NodeSession::NodeSession(const uint8_t* plan_bytes, uint64_t plan_len)
   if (!impl_->plan->Verify(verifier))
     throw std::runtime_error("FlatBuffer verification failed");
   auto* root = impl_->plan->root();
+  auto* roots = impl_->plan->roots();
+  if (root && roots) throw std::runtime_error("GpuPlan sets both root and roots");
+  if (roots) {
+    for (auto* each : *roots) impl_->index_post_order(each);
+    return;
+  }
   if (!root) throw std::runtime_error("GpuPlan has no root node");
   impl_->index_post_order(root);
 }

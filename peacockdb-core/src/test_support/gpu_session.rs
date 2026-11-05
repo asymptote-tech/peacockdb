@@ -6,7 +6,7 @@ use crate::executor::{
     GpuContext, PrefillError, PrefillStats, Region, collect_regions, prefill_on,
 };
 use crate::plan::GpuNode;
-use crate::wire::{RecipePlan, attach_recipes};
+use crate::wire::{RecipePlan, attach_recipes_for_roots};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
@@ -25,7 +25,12 @@ pub(crate) struct Session {
 impl Session {
     /// `join_scratch` is the mode's `join_scratch_bytes`, which every join's session chunks by.
     pub(crate) fn open(tree: &dyn GpuNode, join_scratch: u64, what: &str) -> Self {
-        let recipes = attach_recipes(tree, join_scratch)
+        Self::open_roots(&[tree], join_scratch, what)
+    }
+
+    /// [`Session::open`] over several roots, crossing as one buffer and one seq space.
+    pub(crate) fn open_roots(roots: &[&dyn GpuNode], join_scratch: u64, what: &str) -> Self {
+        let recipes = attach_recipes_for_roots(roots, join_scratch)
             .unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(

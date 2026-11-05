@@ -337,6 +337,81 @@ TEST(Lifecycle, DuplicateWithNoPlanIsRefused) {
 // process-global mode, and the whole safety argument for the benchmark work is that the
 // correctness suite never leaves it on. Stuck on, it would leak a CUDA event pair per
 // region until the session ends, and nothing would fail.
+// A fused plan crosses as one buffer: a node two parents read is one offset, indexed once,
+// and several roots are indexed in the order given. No GPU is touched: a session indexes
+// its plan when it is built, and `execute_scan_rowgroups` refuses a non-scan by name before
+// it reads anything.
+namespace {
+
+flatbuffers::Offset<fb::PlanNode> scan(flatbuffers::FlatBufferBuilder& b) {
+  fb::CudfScanBuilder scan(b);
+  return fb::CreatePlanNode(b, fb::PlanNodeKind_CudfScan, scan.Finish().Union());
+}
+
+flatbuffers::Offset<fb::PlanNode> filter_of(flatbuffers::FlatBufferBuilder& b,
+                                            flatbuffers::Offset<fb::PlanNode> input) {
+  fb::CudfFilterBuilder filter(b);
+  filter.add_input(input);
+  return fb::CreatePlanNode(b, fb::PlanNodeKind_CudfFilter, filter.Finish().Union());
+}
+
+flatbuffers::Offset<fb::PlanNode> project_of(flatbuffers::FlatBufferBuilder& b,
+                                             flatbuffers::Offset<fb::PlanNode> input) {
+  fb::CudfProjectBuilder project(b);
+  project.add_input(input);
+  return fb::CreatePlanNode(b, fb::PlanNodeKind_CudfProject, project.Finish().Union());
+}
+
+std::string kind_refused_at(peacock::NodeSession& session, uint64_t seq) {
+  std::vector<uint32_t> groups{0};
+  try {
+    session.execute_scan_rowgroups(seq, groups, nullptr);
+  } catch (std::runtime_error const& e) {
+    return e.what();
+  }
+  return "nothing refused";
+}
+
+}  // namespace
+
+TEST(NodeSession, IndexesASharedNodeOnce) {
+  flatbuffers::FlatBufferBuilder b;
+  auto shared = scan(b);
+  auto inputs = b.CreateVector(std::vector{filter_of(b, shared), filter_of(b, shared)});
+  auto root =
+      fb::CreatePlanNode(b, fb::PlanNodeKind_CudfUnion, fb::CreateCudfUnion(b, inputs).Union());
+  b.Finish(fb::CreateGpuPlan(b, root));
+  peacock::NodeSession session(b.GetBufferPointer(), b.GetSize());
+  EXPECT_EQ(session.node_count(), 4u) << "the scan, two filters and the union";
+}
+
+TEST(NodeSession, IndexesSeveralRootsInOrder) {
+  flatbuffers::FlatBufferBuilder b;
+  auto first = filter_of(b, scan(b));
+  auto second = project_of(b, scan(b));
+  auto roots = b.CreateVector(std::vector{first, second});
+  b.Finish(fb::CreateGpuPlan(b, 0, roots));
+  peacock::NodeSession session(b.GetBufferPointer(), b.GetSize());
+  ASSERT_EQ(session.node_count(), 4u);
+  EXPECT_NE(kind_refused_at(session, 1).find("seq 1 is a CudfFilter"), std::string::npos)
+      << kind_refused_at(session, 1);
+  EXPECT_NE(kind_refused_at(session, 3).find("seq 3 is a CudfProject"), std::string::npos)
+      << kind_refused_at(session, 3);
+}
+
+TEST(NodeSession, RefusesBothRootAndRoots) {
+  flatbuffers::FlatBufferBuilder b;
+  auto root = scan(b);
+  auto roots = b.CreateVector(std::vector{scan(b)});
+  b.Finish(fb::CreateGpuPlan(b, root, roots));
+  try {
+    peacock::NodeSession session(b.GetBufferPointer(), b.GetSize());
+    ADD_FAILURE() << "a plan setting both was indexed";
+  } catch (std::runtime_error const& e) {
+    EXPECT_STREQ(e.what(), "GpuPlan sets both root and roots");
+  }
+}
+
 TEST(NodeTiming, DefaultsOff) {
   EXPECT_EQ(peacock::node_timing(), peacock::NodeTiming::Off);
   EXPECT_FALSE(peacock::node_timing_enabled());

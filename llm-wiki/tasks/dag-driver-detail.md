@@ -143,6 +143,30 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - I wrote these tests before reporting Task 8's checkpoint, set them aside as a patch, and reapplied them after Task 8's commit. They failed to compile (no `render_plans`, `render_plans_memory` or `render_runs`) before the implementation. Mutation check: never labelling a shared node turns all four red.
 - Counts after Task 9: `--lib` 1088 (1086 passed + 2 ignored), +5: Plan text 20, `executor::driver::tests` 163. build-test.md: cpu 3603, `--lib` 1088, grand total 7983 (Rust 6153).
 
+## Task 10 notes
+
+- Dispatched 2026-11-05, CPU and compile only, local. Task 10 has no device step; Task 11 has the L40S run.
+- `gpu_plan.fbs`: `GpuPlan.roots: [PlanNode]` appended after `root`. One root writes `root` alone, so every single-query buffer is byte-identical (`one_root_writes_no_roots_field` compares `attach_recipes` with `attach_recipes_for_roots(&[root])`; `recipe-payloads.txt` and every plan golden unchanged).
+- Writer: `reuse(offset)` pushes a written node back for the next parent to take, spending no seq; `last()` is what a node left after `reduce`. **Deviation:** the plan's `finish(self, roots)` became `end_root()` plus `finish(self)`. A finished root leaves the pool at once, so a later root's node can never take it as a child when `take` would otherwise stub a slot. `finish` ends the root still in the pool, so the existing tests that write one node and call `finish` are unchanged.
+- `attach_recipes_for_roots` walks `PlanDag` (`attach.rs`'s `Walk`): roots in order, children in order, a node with two or more readers written at its first visit and its offset kept (`written`). `attach_recipes(root)` delegates. Recipes are pushed in first-visit post-order, which is `PlanDag`'s post-order.
+- Reader: `read::indexed(plan)` lists the nodes in seq order, visiting a node once by its buffer location (`_tab.loc()`), roots in order; `node_at` reads it, `check_seq_kinds` builds it once, `depth` takes the deepest root. A plan setting both `root` and `roots` is refused on both sides with `"GpuPlan sets both root and roots"`.
+- `recipes.rs`'s node count is `PlanDag::of(&[root]).nodes.len()`. Its renderer stays one-root; nothing asked for a fused recipes section.
+- C++: `NodeSession::Impl::indexed` (an `unordered_set`) makes `index_post_order` skip a node already indexed; the constructor indexes `roots()` in order when set. The three CPU tests build buffers by hand. `IndexesSeveralRootsInOrder` reads the order off `execute_scan_rowgroups`'s refusal of a non-scan, which names the kind at a seq before touching the device: roots `[filter(scan), project(scan)]` put a filter at 1 and a project at 3.
+- `test_support::Session::open_roots(roots, join_scratch, what)`; `open` delegates. No caller yet: Task 11's device cases.
+- The FFI tier (`--lib -- ffi_tests::`, default features) passes, 5 of 5, run as the handoff below says.
+- The new Rust tests are in `wire/tests/roots.rs`, since `wire/tests.rs` is 992 lines. The schema change alone broke the lib's build (`GpuPlanArgs` gained a field), so the Rust tests were red as a compile failure. Three mutation checks each turned tests red: a shared node rewritten at every visit (2), the reader revisiting a node (3), one root written as `roots` (1). The three C++ tests failed on behaviour before the C++ change (count 5 for 4, "no root node", no refusal).
+- Counts after Task 10: `--lib` 1093 (1091 passed + 2 ignored), +5: Recipes per join type 37. `peacock_cpu_tests` 67 (+3). build-test.md: cpu 3608, `--lib` 1093, C++ CPU/FFI 67, grand total 7991 (Rust 6158, C++ 286).
+
+## Handoff to Task 11 (2026-11-05)
+
+Tasks 6–10 were done by one developer, whose context ran long; Task 11 goes to a fresh one.
+
+- **What Task 11 consumes is in place:** `share_sources`, `new_hold_buffer`, `buffer_unbuffered_holds(roots, cap)` (`src/tests/share.rs`), `run_roots(roots, ctx, budget, cap)`, `estimate_roots`, `render_plans`/`render_runs`, `attach_recipes_for_roots`, and `Session::open_roots` (`test_support/gpu_session.rs`, no caller yet). `plans::shared(table, lanes)` in `src/tests/plans.rs` builds a shared source from the mock fixtures.
+- **Running the FFI and gpu binaries locally:** `scripts/cargo-cudf.sh test …` builds them, but running one fails with exit 127 (`libcudf.so` not found) unless `LD_LIBRARY_PATH` holds `~/data/miniforge3/envs/rapids-cuda-12.2/lib` and the newest `target-cudf-rapids-cuda-12.2/debug/build/peacockdb-ffi-*/out/lib` (where `libpeacock_gpu.so` is). Run the test binary directly with that path. The C++ build: `scripts/build.sh --cudf_ROOT ~/data/miniforge3/envs/rapids-cuda-12.2 --gcc-version 12 --build`, then `ctest --test-dir cpp/build -L cpu`.
+- **Counts at the end of Task 10:** `--lib` 1093 (1091 + 2 ignored), `test_corpus_goldens` 61, `test_cost_model` 3, `test_cpu_corpus` 2451, `plan_goldens` 25, `peacock_cpu_tests` 67, `peacock_plan_tests` 136, gpu `gpu_tests::` 743, `ffi_tests::` 5. build-test.md's rows were checked against `--list` at each task, and the cpu rows sum to the header.
+- **Device step:** nebius-gpu's disk had 4.9 GB free on 2026-11-05. The coordinator's rule: check `df -h /` first; under 10 GB, stop and report, unless deleting this worktree's own `~/peacockdb-peacockdb-beta/target-cudf-*` on the VM frees enough, then rebuild cold. The C++ side changed in Tasks 1 and 10 (`node_session.cpp`, `gpu_plan.fbs`), so the device build is not incremental from Task 1's.
+- q95's shape: the plan describes it from `testdata/goldens/tpcds.sf1/tp1-single-mini.cpu.txt` (`== q95`); check it still reads `web_sales` four times before relying on "1 shared, 4 buffers". If the count differs, record what `buffer_unbuffered_holds` reports and the edges.
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).
