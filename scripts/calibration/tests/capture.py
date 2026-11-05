@@ -29,7 +29,15 @@ create table CUPTI_ACTIVITY_KIND_RUNTIME (start integer, end integer, globalTid 
 create table TARGET_INFO_GPU (id integer, name text);
 create table TARGET_INFO_GPU_METRICS (metricId integer, metricName text);
 create table GPU_METRICS (timestamp integer, value real, metricId integer);
+create table ENUM_CUDA_MEM_KIND (id integer, name text, label text);
 """
+
+# The export's own numbering of a copy's memory kind, as nsys 2025 writes it. It is not
+# CUPTI's (1 pageable, 2 pinned), and the readers decode `srcKind` through this table.
+MEM_KINDS = [(0, "CUDA_MEMOPR_MEMORY_KIND_PAGEABLE", "Pageable"),
+             (1, "CUDA_MEMOPR_MEMORY_KIND_PINNED", "Pinned"),
+             (2, "CUDA_MEMOPR_MEMORY_KIND_DEVICE", "Device")]
+PAGEABLE, PINNED = 0, 1
 
 
 class Capture:
@@ -40,6 +48,8 @@ class Capture:
         self.conn.executescript(SCHEMA)
         self.conn.executemany("insert into TARGET_INFO_GPU (id, name) values (?, ?)",
                               list(enumerate(gpus)))
+        self.conn.executemany("insert into ENUM_CUDA_MEM_KIND (id, name, label) values (?, ?, ?)",
+                              MEM_KINDS)
         self.domains = {}
         self.clock = 1_000_000
         self.correlation = 0
@@ -107,7 +117,7 @@ class Capture:
         )
 
     def memcpy(self, launched_at, duration, nbytes, src_kind, tid=1, copy_kind=1):
-        """A copy of `nbytes`; `copy_kind` and `src_kind` are CUPTI's enums (1 = HtoD)."""
+        """A copy of `nbytes`; `copy_kind` is 1 for HtoD, `src_kind` an `ENUM_CUDA_MEM_KIND` id."""
         corr = self.runtime_call("cudaMemcpyAsync_v3020", launched_at, launched_at + 5, tid)
         self.conn.execute(
             "insert into CUPTI_ACTIVITY_KIND_MEMCPY "

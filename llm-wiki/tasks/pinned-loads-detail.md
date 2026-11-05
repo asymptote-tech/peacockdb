@@ -21,6 +21,8 @@
 - 2026-11-04: Task 4b offline (the benchmark's prefill), no VM. Notes below.
 - 2026-11-04: Task 5 Steps 1–4 offline (the scan reads through a one-chunk chunked parquet
   reader), no VM. Notes below.
+- 2026-11-05: new-hosts done; the block lifted. Rebased onto `596261f8`, re-proven offline, then
+  Task 2 Steps 3–8 on the H100 path. Notes under "Resumed after new-hosts".
 
 ## Task 1: the load breakdown
 
@@ -377,12 +379,147 @@ image's nvcc) and `nvidia-smi -q | grep -i 'Addressing Mode'`.
 
 - **nebius-h100, `free -b`:** total 211069927424 bytes (196.6 GiB), available 208810188800 at
   07:20Z on a fresh boot. No swap.
-- **Not read yet:** the bytes of `tpch.sf40` and `tpcds.sf40` parquet (`du -cb`), the run
-  container's limit (`memory.max` inside `run-gpu.sh`'s `docker run`), the default cache and
-  whether each dataset fits. They wait for the H100 path: new-hosts' fetch and the CPU-VM build.
+- **Read 2026-11-05 02:15Z, after `prepare` and `ship`:** `free -b` total 211069919232. `du -cbL`:
+  `tpch.sf40` 42442683465 bytes of parquet (`lineitem` 9030797348), `tpcds.sf40` 15787929533.
+  The run image's `memory.max` is `max` with and without `--gpus all` (`run-gpu.sh`'s `docker run`
+  sets no `--memory`): no container limit. Default cache: 211069919232 × 3/4 = 158302439424 bytes
+  (147.4 GiB). Each dataset fits, and both together (58230612998).
 - **Note, the H100's software:** kernel `6.11.0-1016-nvidia`; driver `NVIDIA UNIX Open Kernel
   Module for x86_64 580.173.02` (built with gcc 13.3.0); glibc 2.39 (Ubuntu `2.39-0ubuntu8.9`).
   `devprops` needs `GLIBC_2.34`, so it runs there.
+
+## Before load times
+
+Unprofiled, 2026-11-05 02:16–02:17Z on nebius-h100, from an install of today's engine (see
+"Resumed after new-hosts"): `PCK_TEST_FILTER=bench_tpch_sf40_<q>_tp1_single run-gpu.sh … run bench`,
+`pull`, the VM's `records.tsv` removed after each. All four green. The results file is aside at
+`/tmp/Lsurg/pl-h100/tp1_single.before.txt` on dev, not committed (sf40-baseline owns it).
+
+| query | `run_us` | table | projections | `total_us` |
+|---|--:|---|---|--:|
+| q1 | 653875 | lineitem | l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate | 403877 |
+| q3 | 471863 | customer | c_custkey, c_mktsegment | 40065 |
+| q3 |  | orders | o_orderkey, o_custkey, o_orderdate, o_shippriority | 52176 |
+| q3 |  | lineitem | l_orderkey, l_extendedprice, l_discount, l_shipdate | 333341 |
+| q6 | 96796 | lineitem | l_quantity, l_extendedprice, l_discount, l_shipdate | 91920 |
+| q8 | 659854 | region | r_regionkey, r_name | 1043 |
+| q8 |  | nation | n_nationkey, n_name | 866 |
+| q8 |  | nation | n_nationkey, n_regionkey | 739 |
+| q8 |  | customer | c_custkey, c_nationkey | 37872 |
+| q8 |  | orders | o_orderkey, o_custkey, o_orderdate | 45101 |
+| q8 |  | supplier | s_suppkey, s_nationkey | 32362 |
+| q8 |  | part | p_partkey, p_type | 44424 |
+| q8 |  | lineitem | l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount | 447118 |
+
+## Before profile
+
+`create_nsys_profile.sh --trace` per query, same install, 02:17–02:20Z (`PCK_BENCH_HBM_SET=gh100
+PCK_BENCH_HBM_PEAK_BW=3.35e12`). Captures in `/tmp/Lsurg/pl-h100/capture-<q>-before.sqlite`; each
+`loads-<q>-before.tsv` is re-derived from them by the fixed `nsys_loads.py` (below). Ten executions
+each. `host_read_source` is `kvikio` in every capture: 25.02's kvikio pushes its `libkvikio` ranges,
+so the trace pass needs no `osrt`. No launch was ambiguous.
+
+**q1** (tpch sf40, tp1-single)
+
+| `recipe_seq` | `executions` | `calls` | `load_us` | `host_read_source` | `host_read_us` | `h2d_count` | `h2d_bytes` | `h2d_us` | `h2d_gbps` | `h2d_pinned_bytes` | `h2d_pinned_gbps` | `h2d_pageable_bytes` | `h2d_pageable_gbps` | `h2d_max_bytes` | `decompress_us` | `decode_us` | `other_device_us` | `off_thread_device_us` | `pinned_alloc_count` | `pinned_alloc_us` | `unattributed_us` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 10 | 1 | 422744 | kvikio | 284977 | 1948 | 1693633748 | 63092 | 26.8 | 1692832228 | 26.8 | 801520 | 27.5 | 4006080 | 39135 | 40146 | 11829 | 0 | 0 | 0 | 50112 |
+
+**q3** (tpch sf40, tp1-single)
+
+| `recipe_seq` | `executions` | `calls` | `load_us` | `host_read_source` | `host_read_us` | `h2d_count` | `h2d_bytes` | `h2d_us` | `h2d_gbps` | `h2d_pinned_bytes` | `h2d_pinned_gbps` | `h2d_pageable_bytes` | `h2d_pageable_gbps` | `h2d_max_bytes` | `decompress_us` | `decode_us` | `other_device_us` | `off_thread_device_us` | `pinned_alloc_count` | `pinned_alloc_us` | `unattributed_us` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 10 | 1 | 41359 | kvikio | 5411 | 120 | 26432232 | 1222 | 21.6 | 26427436 | 21.8 | 4796 | 0.6 | 492584 | 29430 | 4841 | 118 | 0 | 0 | 0 | 2293 |
+| 3 | 10 | 1 | 53571 | kvikio | 14321 | 732 | 299761060 | 11287 | 26.6 | 299715236 | 26.6 | 45824 | 6.9 | 1254166 | 31714 | 2177 | 331 | 9832 | 0 | 0 | 5972 |
+| 8 | 10 | 1 | 353267 | kvikio | 248329 | 3180 | 1375967160 | 53803 | 25.6 | 1375764664 | 25.6 | 202496 | 12.9 | 1011840 | 54087 | 5688 | 3561 | 0 | 0 | 0 | 42099 |
+
+**q6** (tpch sf40, tp1-single)
+
+| `recipe_seq` | `executions` | `calls` | `load_us` | `host_read_source` | `host_read_us` | `h2d_count` | `h2d_bytes` | `h2d_us` | `h2d_gbps` | `h2d_pinned_bytes` | `h2d_pinned_gbps` | `h2d_pageable_bytes` | `h2d_pageable_gbps` | `h2d_max_bytes` | `decompress_us` | `decode_us` | `other_device_us` | `off_thread_device_us` | `pinned_alloc_count` | `pinned_alloc_us` | `unattributed_us` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 10 | 1 | 98574 | kvikio | 43271 | 614 | 237274556 | 9141 | 26.0 | 237207676 | 26.0 | 66880 | 7.8 | 790232 | 25851 | 3077 | 1367 | 0 | 0 | 0 | 25788 |
+
+**q8** (tpch sf40, tp1-single)
+
+| `recipe_seq` | `executions` | `calls` | `load_us` | `host_read_source` | `host_read_us` | `h2d_count` | `h2d_bytes` | `h2d_us` | `h2d_gbps` | `h2d_pinned_bytes` | `h2d_pinned_gbps` | `h2d_pageable_bytes` | `h2d_pageable_gbps` | `h2d_max_bytes` | `decompress_us` | `decode_us` | `other_device_us` | `off_thread_device_us` | `pinned_alloc_count` | `pinned_alloc_us` | `unattributed_us` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 10 | 1 | 1376 | kvikio | 20 | 21 | 2351 | 18 | 0.1 | 2195 | 0.2 | 156 | 0.0 | 384 | 13 | 71 | 85 | 0 | 0 | 0 | 1171 |
+| 3 | 10 | 1 | 1229 | kvikio | 14 | 21 | 2630 | 18 | 0.1 | 2474 | 0.2 | 156 | 0.0 | 398 | 21 | 74 | 84 | 0 | 0 | 0 | 1023 |
+| 5 | 10 | 1 | 1131 | kvikio | 23 | 20 | 3049 | 17 | 0.2 | 2889 | 0.2 | 160 | 0.0 | 480 | 20 | 53 | 74 | 0 | 0 | 0 | 947 |
+| 7 | 10 | 1 | 38832 | kvikio | 5631 | 116 | 27932945 | 1268 | 22.0 | 27928177 | 22.1 | 4768 | 1.0 | 492584 | 29445 | 2536 | 99 | 0 | 0 | 0 | 1870 |
+| 9 | 10 | 1 | 46556 | kvikio | 8814 | 316 | 187401575 | 6608 | 28.4 | 187382407 | 28.4 | 19168 | 3.5 | 1254064 | 31336 | 1940 | 205 | 6039 | 0 | 0 | 5124 |
+| 12 | 10 | 1 | 32230 | kvikio | 437 | 26 | 1865153 | 106 | 17.6 | 1864705 | 18.5 | 448 | 0.1 | 492584 | 28999 | 2058 | 77 | 0 | 0 | 0 | 1145 |
+| 14 | 10 | 1 | 45506 | kvikio | 7894 | 154 | 40318301 | 1778 | 22.7 | 40311873 | 22.8 | 6428 | 0.9 | 492584 | 29577 | 6358 | 127 | 0 | 0 | 0 | 2348 |
+| 17 | 10 | 1 | 466083 | kvikio | 280387 | 3926 | 4948172976 | 154142 | 32.1 | 4947797648 | 32.1 | 375328 | 21.0 | 1878128 | 125713 | 12912 | 7468 | 100557 | 0 | 0 | 39773 |
+
+- **The copies are pinned, at the pinned DMA's per-copy rate for 4 MiB pieces: 25–32 GB/s** on the
+  four `lineitem` loads (`h2d_pinned_gbps`). Pageable bytes are 0.01–0.05 % of `h2d_bytes` there;
+  only q8's three tiny loads reach 5–7 %, of about 160 bytes. `h2d_max_bytes` is 4006080: kvikio's
+  4 MiB `task_size`, as "cuDF 25.02 default" read from source. Neither the ~10 GB/s pageable rate
+  nor the ~55 GB/s rate appears: the copies are pinned but small, synchronous, and each follows a
+  `pread`.
+- **The copy is 15 % of q1's load, 9–33 % of the four `lineitem` loads** (`h2d_us / load_us`:
+  q1 0.149, q3 #8 0.152, q6 0.093, q8 #17 0.331). The most pinning could save,
+  `pageable/10 GB/s − pageable/55 GB/s`, is 66 µs on q1 and under 35 µs on every other load.
+- **The host read is most of a big load:** `host_read_us` is 67 % of q1's `load_us` (284977 of
+  422744), 70 % of q3 #8, 44 % of q6, 60 % of q8 #17. That is the page-cache `pread` into kvikio's
+  bounce buffer. It is what the cache (Tasks 3–4) removes.
+- **Kernel names.** Every kernel launched in a load window was listed per capture
+  (`/tmp/Lsurg/tools/load_kernels.py` over the four captures, by `nsys_loads.classify`). Every
+  `nvcomp::unsnap_kernel` is `decompress`, and every `gpuDecode*`, `gpuComputePage*` and
+  `gpuBuildStringDictionaryIndex` kernel is `decode`. The `other` time is two kernels:
+  `cudf::detail::device_cast<long, __int128>` (the engine's decimal widening after the read, about
+  7.6 ms per q1 execution) and cub's `MultiBlockBatchMemcpyKernel` over a `constant_iterator<std::byte>`
+  (the reader's buffer memset, about 3.4 ms). Neither is decompression or decode, so the patterns stand.
+
+## Readers from pinned memory (#232)
+
+`DISABLED_ReaderProbe.ReadParquetAgainstOneChunk` on nebius-h100, 2026-11-05 02:20–02:21Z, sf40
+`lineitem.parquet` (9030797348 bytes), every row group, 10 runs, `us` the second-fastest, in the
+run image with `PEACOCK_RMM_POOL_BYTES=68719476736` (the binary's own 1 GiB pool fails it:
+`Maximum pool size exceeded`, as "Task 2 notes" warns):
+
+```
+q6 columns (l_shipdate,l_discount,l_quantity,l_extendedprice):
+[reader-probe] source=path reader=read_parquet chunks=1 rows=240012290 us=390239
+[reader-probe] source=path reader=chunked chunks=1 rows=240012290 us=390298
+[reader-probe] source=pinned reader=read_parquet chunks=1 rows=240012290 us=135146
+[reader-probe] source=pinned reader=chunked chunks=1 rows=240012290 us=135432
+q1 columns (l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate):
+[reader-probe] source=path reader=read_parquet chunks=1 rows=240012290 us=395900
+[reader-probe] source=path reader=chunked chunks=1 rows=240012290 us=395530
+[reader-probe] source=pinned reader=read_parquet chunks=1 rows=240012290 us=143463
+[reader-probe] source=pinned reader=chunked chunks=1 rows=240012290 us=143466
+```
+
+**One chunk does not beat `read_parquet` on the H100, from the path or from pinned memory:** the two
+are within 0.2 % (q6: 390239 vs 390298 µs from the path, 135146 vs 135432 from pinned memory). The
+source is what moves: pinned memory is 2.9× (q6) and 2.8× (q1) faster than the path.
+
+Under `nsys profile -t cuda,nvtx` (q6's columns; `/tmp/Lsurg/pl-h100/probe-nsys/probe-q6.{nsys-rep,sqlite}`;
+per run, split at libcudf's `read_parquet`/`read_chunk` range ends, median of runs 2–10;
+`/tmp/Lsurg/tools/probe_totals.py`):
+
+| source, reader | wall µs | kvikio read µs | H2D copies | pinned bytes | pinned µs | pageable bytes | decompress µs | decode µs | other µs |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| path, `read_parquet` | 427654 | 309690 | 5880 | 1554763808 | 66402 | 437824 | 48597 | 12552 | 2270 |
+| path, chunked | 427609 | 309483 | 5880 | 1554763808 | 66165 | 437824 | 48573 | 12732 | 2274 |
+| pinned, `read_parquet` | 151537 | 0 | 5880 | 1554763808 | 43619 | 437824 | 48599 | 12563 | 2276 |
+| pinned, chunked | 156343 | 0 | 5880 | 1554763808 | 43628 | 437824 | 48569 | 12754 | 2275 |
+
+The same bytes cross in the same 5880 copies (at most 2188480 bytes each) both ways; from the span
+they run at 35.6 GB/s instead of 23.4 GB/s, and kvikio's 310 ms of reads are gone. Kernels are
+identical across all four. The chunked reader adds nothing on the device.
+
+## Decision
+
+**`NULL_RESULT`.** Over the four queries' loads, the median `h2d_pageable_bytes` share of
+`h2d_bytes` is 0.02 % (the most, 6.6 %, on q8 #0's 156 bytes), against `RAISE_THRESHOLD`'s 10 %. Every
+load's `pinned_alloc_us` is 0, against `CONFIGURE_POOL`'s 5 % of `load_us`: no `cudaHostAlloc`-family
+call starts in any load window. cuDF 25.02 already pins what it copies, through kvikio's bounce
+buffer. The cache (Tasks 3–4) and the chunked reader (Task 5) stay in; Task 6 does not run; #149's
+pool part closes as misdiagnosed. What costs a load is the page-cache read before each copy, not the
+copy's memory kind.
 
 ## Task 2 notes
 
@@ -407,6 +544,8 @@ image's nvcc) and `nvidia-smi -q | grep -i 'Addressing Mode'`.
 | nebius-gpu (L40S) | 2026-11-04 06:57:37 (requested; never RUNNING) | 2026-11-04 07:13:08 (`stop`: already STOPPED) | 0 | Task 2 Step 3, `devprops`; no capacity, see "Discrete cards" |
 | nebius-gpu (L40S) | 2026-11-04 07:17:36 (coordinator's retry; RUNNING) | 2026-11-04 07:18:37 (`stop`: stopped) | 0.02 | Task 2 Step 3, `devprops` and addressing mode |
 | nebius-h100 | 2026-11-04 07:18:44 (RUNNING 07:19:49) | 2026-11-04 07:20:49 (`stop`: stopped) | 0.03 | Task 2 Step 3, `devprops`, addressing mode, `free -b`, kernel/driver/glibc; its own bracket, before the CPU-VM build |
+| nebius-cpu128 | 2026-11-05 01:51:00 (RUNNING 01:52:09) | 2026-11-05 02:00:20 (`stop`: stopped) | 0.16 | Task 2 Step 3, the CPU-VM build of today's engine (`436b3dd8`'s tree) |
+| nebius-h100 | 2026-11-05 02:01:21 (RUNNING 02:02:21) | 2026-11-05 02:22:50 (`stop`: stopped) | 0.36 | Task 2 Steps 3–6: `prepare` (11 min), `ship`, host memory, before load times, before profile, the probe and its Nsight run |
 - L40S start for Task 2 Step 3's devprops: no capacity from 2026-11-04T06:57:37Z (developer; treated as 75). The coordinator retries every 15 min up to 10 h (until 16:57Z). Decision: the H100's devprops is read in its own short bracket before the CPU-VM build exists, so Tasks 3–5 (offline) can start once both cards are read; one extra H100 start of a few minutes, against the plan's order (Step 3 reads it after the build).
 - Order change (coordinator, 2026-11-04): Tasks 3, 4, 4b and 5 (offline, tested on no VM) run now, before Task 2's before profile, because the H100 path waits on new-hosts' block. The before profile and the before load times (Task 2 Steps 4–8) are then taken on an install staged from `ENS-new-hosts`'s tip (today's engine, no pinned-loads change), never from this branch. Task 6 waits on Task 2's Decision.
 
@@ -454,3 +593,41 @@ Unchanged: the device cases and the H100 path wait, as "Blocked" says.
 Still `blocked(building)` at Task 2 Step 3: the H100 path waits on new-hosts' new block, the two
 VMs' disks (`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared.
 Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
+
+## Resumed after new-hosts (2026-11-05)
+
+- **The second rebase**, onto `596261f8` (new-hosts done): 10 commits, no code conflict.
+  `build-test.md` lost three pinned-loads rows again (C++ CPU/FFI unit, cuDF GPU smoke,
+  Plan-executor), taken whole since HEAD's equalled the base, and the total. The Nsight paragraph
+  keeps new-hosts' text: the metric set's default is `gh100` (`create_nsys_profile.sh:75`), so only
+  the peak needs setting. Total recounted from the rows: 7739 (Rust 5976, C++ 277, Python 1486).
+  Re-proven: `cargo test --features rust-only -p peacockdb-core` exit 0 (`--lib` 928 + 2 ignored,
+  2447, 47, 3, 1, 41), `cargo test -p cost-report` 49 + 32, `git status --short testdata/` empty.
+- **Today's engine is `436b3dd8`'s tree, not `ENS-new-hosts`' tip.** `git diff 596261f8 436b3dd8`
+  touches no engine source: only scripts, the wiki and the reader probe (`test_reader_probe.cpp`,
+  one `CMakeLists.txt` line adding it to `peacock_gpu_tests`). Step 6 needs that probe, so the
+  install is that tree: `git archive 436b3dd8` plus the worktree's `third_party/cudf` (at the
+  submodule's pinned `43505bb9`; CMake includes its `cmake/`), rsynced as `nebius-sync.sh` does to
+  `~/peacockdb-pl-before` on the CPU VM, built by `stage-install.sh` (rc 0, 5.3 min; the two
+  warnings are flatbuffers' own), and pulled to `/home/dmitry/build/peacock/pinned-loads/before-install`.
+  Checked there: the probe's name is in `peacock_gpu_tests`; `peacock_pinned_cache_prefill` is not in
+  `libpeacock_gpu.so`.
+- **`nsys_loads.py` read pinned as pageable (fixed).** It took `srcKind` in CUPTI's numbering
+  (1 pageable, 2 pinned). The export renumbers it: its `ENUM_CUDA_MEM_KIND` table has 0 pageable,
+  1 pinned, 2 device. So every pinned copy counted as pageable and every pageable one as neither.
+  Seen on the probe's pinned span, whose copies came out "pageable". Now the ids are read off that
+  table by name, and a capture with copies but without it is refused. The fixture writes the table
+  as an export does. Red first: `test_load_row_splits_copy_from_decode` showed the swap, and the two
+  new tests, `test_memory_kinds_are_read_off_the_export_s_enum` (the ids moved) and
+  `test_capture_without_the_memory_kind_enum_is_refused`, failed; then 12/12, and the calibration
+  suite 53/53 in the venv. Every `loads-<q>-before.tsv` above is re-derived from its capture with the
+  fix. No re-profile.
+- **`nsys_calls.py` refuses any capture of a query with a join** (not this task's file; not fixed).
+  Since join-backend (`4b75f649`) a join's recipe is `join_build(#N CudfJoin)`, and
+  `recipe_seqs`' pattern, `execute_\w+\(#(\d+) (\w+)`, declares nothing for it. The capture names
+  those calls `N.0 join_build` and `N.1 join_probe`. So q3 (`[5, 10]`) and q8 (seven seqs) fail
+  "driven but not declared", and `create_nsys_profile.sh --trace` stops before `nsys_loads.py`. Their
+  load breakdowns were derived from the pulled captures by hand. The refusal listed nothing missing
+  and no kind differing, so the captures are of the planned queries. The fix needs a pattern for
+  `join_build` and a rule mapping `join_build`/`join_probe` onto `CudfJoin`. It is calibration's
+  (bp-benchmarks'), and it blocks any Nsight trace of a join query, sf40-baseline's included.

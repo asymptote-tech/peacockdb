@@ -27,10 +27,12 @@ import record
 # A load is every partition region of a call of this kind: `GpuLoadParquet`'s recipe.
 LOAD_KIND = "CudfScan"
 
-# CUPTI's enums: CUpti_ActivityMemcpyKind and CUpti_ActivityMemoryKind.
+# CUPTI's CUpti_ActivityMemcpyKind, which the export keeps. A copy's memory kind is not
+# CUPTI's numbering: the export renumbers it, so `memory_kinds` reads it off the export.
 MEMCPY_HTOD = 1
-MEM_KIND_PAGEABLE = 1
-MEM_KIND_PINNED = 2
+MEM_KIND_ENUM = "ENUM_CUDA_MEM_KIND"
+MEM_KIND_PAGEABLE = "CUDA_MEMOPR_MEMORY_KIND_PAGEABLE"
+MEM_KIND_PINNED = "CUDA_MEMOPR_MEMORY_KIND_PINNED"
 
 # Tried in this order on a kernel's demangled name; a kernel matching neither is `other`.
 DECOMPRESS_RE = re.compile(r"unsnap|snappy|inflate|zstd|lz4|brotli|nvcomp|decompress", re.I)
@@ -81,6 +83,15 @@ def api_calls(conn):
                 f"""select a.start, a.end, a.globalTid, a.correlationId, s.value
                     from {table} a left join StringIds s on s.id = a.nameId""").fetchall()
     return out
+
+
+def memory_kinds(conn):
+    """`(pageable id, pinned id)` as this export numbers `srcKind`; exits without the table."""
+    if not columns_of(conn, MEM_KIND_ENUM):
+        sys.exit(f"capture has no {MEM_KIND_ENUM} table, so a copy's srcKind cannot be read "
+                 "as pinned or pageable. Export it with an nsys that writes its enums.")
+    ids = dict(conn.execute(f"select name, id from {MEM_KIND_ENUM}").fetchall())
+    return ids.get(MEM_KIND_PAGEABLE), ids.get(MEM_KIND_PINNED)
 
 
 def device_ops(conn, calls):
@@ -224,7 +235,7 @@ class Attributed:
         self.ops, self.allocs, self.off_thread_ns = [], [], 0
 
 
-def execution_values(found, windows, reads):
+def execution_values(found, windows, reads, kinds):
     """One execution of one load, in the columns' units, before the median."""
     ops, allocs = found.ops, found.allocs
     clip = merged(windows)
@@ -235,8 +246,9 @@ def execution_values(found, windows, reads):
             htod.append(op)
         else:
             by_class[classify(op.name) if op.kind == "kernel" else "other"] += op.end - op.start
-    pinned = [op for op in htod if op.src_kind == MEM_KIND_PINNED]
-    pageable = [op for op in htod if op.src_kind == MEM_KIND_PAGEABLE]
+    pageable_id, pinned_id = kinds
+    pinned = [op for op in htod if op.src_kind == pinned_id]
+    pageable = [op for op in htod if op.src_kind == pageable_id]
     load_ns = sum(end - start for start, end, _ in windows)
     covered = union_ns(read_spans + Spans([(op.start, op.end) for op in ops]).within(clip)
                        + Spans(allocs).within(clip))
@@ -302,10 +314,11 @@ def main():
             found[next(iter(open_now))].allocs.append((start, end))
     source, reads = host_reads(conn, doms)
     reads = Spans(reads)
+    kinds = memory_kinds(conn) if columns_of(conn, "CUPTI_ACTIVITY_KIND_MEMCPY") else (None, None)
 
     rows = []
     for key in sorted(windows):
-        per_exec = [execution_values(found[(key, e)], ws, reads)
+        per_exec = [execution_values(found[(key, e)], ws, reads, kinds)
                     for e, ws in sorted(windows[key].items())]
         (dataset, sf, query, mode), seq = key
         row = dict(dataset=dataset, sf=sf, query=query, mode=mode, recipe_seq=seq,

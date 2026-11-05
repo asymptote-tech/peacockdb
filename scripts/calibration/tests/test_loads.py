@@ -17,11 +17,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import nsys_loads  # noqa: E402
 import record  # noqa: E402
-from capture import Capture  # noqa: E402
+from capture import PAGEABLE, PINNED, Capture  # noqa: E402
 from harness import main, raises  # noqa: E402
 
 Q6 = "tpch.sf40 q6 tp1-single"
-PAGEABLE, PINNED = 1, 2
 
 
 def loads_of(capture, out):
@@ -205,6 +204,44 @@ def test_capture_without_kernel_names_is_refused():
             conn.execute("alter table CUPTI_ACTIVITY_KIND_KERNEL drop column demangledName")
             conn.commit()
         with raises(SystemExit, match="demangledName"):
+            loads_of(path, tmp / "loads.tsv")
+        assert not (tmp / "loads.tsv").exists(), "the refused capture left a loads.tsv"
+
+
+def test_memory_kinds_are_read_off_the_export_s_enum():
+    """`srcKind` means what the export's `ENUM_CUDA_MEM_KIND` says. nsys numbers pinned 1,
+    CUPTI numbers it 2, and reading one as the other swaps pinned and pageable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        path = tmp / "capture.sqlite"
+        cap = Capture(path)
+        t = cap.clock
+        cap.load(Q6, 0, 0, t, t + 1_000_000)
+        cap.memcpy(t + 100_000, 80_000, 4_000_000, 7)
+        cap.memcpy(t + 300_000, 100_000, 1_000_000, 5)
+        cap.close()
+        with contextlib.closing(sqlite3.connect(path)) as conn:
+            conn.execute("update ENUM_CUDA_MEM_KIND set id = id + 5")
+            conn.execute("update ENUM_CUDA_MEM_KIND set id = 7 where name like '%PINNED'")
+            conn.commit()
+        rows = loads_of(path, tmp / "loads.tsv")
+
+    assert_columns(rows[0], h2d_pinned_bytes=4_000_000, h2d_pinned_gbps=50.0,
+                   h2d_pageable_bytes=1_000_000, h2d_pageable_gbps=10.0)
+
+
+def test_capture_without_the_memory_kind_enum_is_refused():
+    """Without the table a copy's kind cannot be read, and guessing it is the swap above."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        path = tmp / "capture.sqlite"
+        cap = Capture(path)
+        q6_load(cap)
+        cap.close()
+        with contextlib.closing(sqlite3.connect(path)) as conn:
+            conn.execute("drop table ENUM_CUDA_MEM_KIND")
+            conn.commit()
+        with raises(SystemExit, match="ENUM_CUDA_MEM_KIND"):
             loads_of(path, tmp / "loads.tsv")
         assert not (tmp / "loads.tsv").exists(), "the refused capture left a loads.tsv"
 
