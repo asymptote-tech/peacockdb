@@ -969,3 +969,4 @@ Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
   definitions; the entry's `lineitem`-only table gave way to it.
 - build-test.md: the Images row names the two `create_nsys_profile.sh` cases and counts 234; the
   total is 7746 (Python 1491).
+- done 2026-11-05: dispatch 41977195126 green (GPU Tests (nebius-gpu) included); PR run 41977199429 green after reruns of runner disk-full docker pulls (`no space left on device` pulling rapidsai/base).
