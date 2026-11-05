@@ -289,6 +289,7 @@
 | nebius-h100 | 2026-11-05 11:11 | 12:30 | 1.32 | Task 9: prepare, ship, the 130-case run |
 | nebius-h100 | 2026-11-05 12:35 | 14:14 | 1.65 | Task 10: both Nsight passes, both datasets |
 | nebius-cpu128 | 2026-11-05 14:15 | 14:40 | 0.42 | Task 11: DuckDB's corpus runs, both datasets |
+| nebius-gpu | 2026-11-05 15:29 | 15:32 | 0.05 | the L40S list: synced, disk 4.9 GB free, no build (below) |
 
 Totals on 2026-11-05: nebius-h100 2.97 h, nebius-cpu128 0.65 h. Both VMs were stopped softly at
 the end of each step, and both read `STOPPED` at 14:40.
@@ -608,3 +609,55 @@ Work items handed to this task:
   - `build-test.md` was recounted for this commit: cpu 3505 (`--lib` 990, `test_corpus_goldens`
     61). The rows are DuckDB oracle 49, DuckDB result rendering 29 and calibration 77. The grand
     total is 7879: Rust 6054, C++ 278, Python 1547.
+
+## The coordinator's decisions (2026-11-05, after 30a6165e)
+
+- **The 14 tpcds queries without a call breakdown are listed and left**: q18, q30, q31, q32, q33,
+  q56, q60, q61, q71, q81, q83, q85, q91 and q92. At sf40 the planner orders their joins
+  differently from the sf1 plan goldens that `nsys_calls.py` checks a capture against, so their
+  captures cannot be checked. No sf40 plan goldens are made. build-test.md says so in
+  "sf40 baseline" and in the `calls.tsv` bullet of "Benchmark data flow".
+- **The one unidentified Python failure** (Task 11, Step 4) is recorded as seen once and not
+  reproduced in six reruns. It is not disabled and has no ticket.
+
+## The L40S list (2026-11-05): blocked on nebius-gpu's disk
+
+The plan's one L40S correctness run, after the last harness change, did not happen.
+`scripts/nebius.sh start` at 15:29 and `nebius-sync.sh` went fine. Then `df -h /` gave **4.9 GB
+free of 96 GB** (91 GB used), and build-test.md's "Disk" says not to build below 10 GB.
+
+- **Tried:** `~/miniforge3/bin/conda clean -a -y` freed nothing; its 13 GB `pkgs/` is linked into
+  the envs.
+- **What holds the disk:**
+  - `~/peacockdb-peacockdb-beta` 19 GB, this tree's: `target-cudf-rapids-cuda-12.2` 13 GB, built
+    today at 04:59 by this tree's earlier tasks, so warm and not stale; `cpp/install` 4.8 GB.
+  - `~/peacockdb-K` 18 GB: chain K's tree, not this task's to remove.
+  - `~/miniforge3` 17 GB; `/usr` 14 GB; `/opt` 4.5 GB.
+  - With `incremental/` (1.9 GB) dropped as well, the disk would still be under 10 GB.
+- **Removed:** nothing.
+- **Stop:** the VM was stopped softly at 15:32 (`STOPPED`).
+- **What it needs:** room on the shared disk, the human's or chain K's call. Or a decision to
+  rebuild this tree's 13 GB target dir cold.
+
+## Suites
+
+Each suite this task ran, and where:
+
+| suite | where | CI |
+|---|---|---|
+| `cargo test --features rust-only -p peacockdb-core` (all targets, goldens included) | dev | dataset-matrix |
+| `cargo test -p cost-report` (`test_source_formatting` too) | dev | cost-report |
+| `--features gpu --no-run` through `cargo-cudf.sh` (rapids-cuda-12.2); `--list` of the gpu binaries against `cpp/build` | dev | shad-gpu / nebius-gpu |
+| `scripts/calibration/tests/test_*.py` (77; each file alone) | dev, matplotlib on `PYTHONPATH` | cost-report job's calibration step |
+| `testdata/test_duckdb_result.py` (29; the five that render need the wheel and `tpch.sf1`) | dev | its row in build-test.md; the rendering five skip in CI |
+| `benchmarks/tests/test_duckdb_minimal.py` (9; DuckDB 1.5.4 and the local sf1) | dev | **none yet**: a new directory no CI job runs; containers-only adds it to the image's script step |
+| `scripts/env/tests/test_bench_each.py`, `test_run_gpu.py` (51) | dev | **none**: `scripts/env/tests` runs on dev only until then |
+| `scripts/test_ticket_widget.py` | dev | as before |
+| the H100 benchmark (`bench-each.sh`), both Nsight passes | nebius-h100 | none (by hand) |
+| `duckdb_minimal.sh --cases` | nebius-cpu128 | none (by hand) |
+| the L40S list | not run: nebius-gpu's disk, above | gpu-tests |
+
+Coordinator decision (2026-11-05): the plan's L40S correctness run is taken by CI's `GPU Tests (nebius-gpu)`
+dispatch at `completeness approved`, which runs the same L40S list from binaries built on the runner and
+shipped, so it needs no build on nebius-gpu's full disk (4.9 GB free; chain K's tree and this tree's
+target dir hold it). Freeing that shared disk is the human's.

@@ -1444,7 +1444,8 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
   ├── bench-each.sh over run-gpu.sh (the H100), one process per query: the same files, and
   │     each process's record set aside as a segment; join_records.py joins the segments,
   │     split_record.py --cases <the device's cases.csv> cuts the result, and publish_record.sh
-  │     uploads and pins it from dev, as above
+  │     uploads and pins it from dev, as above. PCK_WRITE_GPU_RESULT=1 on every run:
+  │     └──► goldens/<dataset>.sf40/gpu-result.txt   the H100's answers, held to DuckDB's below
   │
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
@@ -1466,6 +1467,17 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
 calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.tsv
   └── plot.py ──► calibration/plots/{load,compute,spread,query,icicle,hbm}/*.png
                   calibration/plots/index.html      one call, every panel
+
+create_nsys_profile.sh --cases <ds>.csv --device <device>   (a device's own run, by hand after it)
+  └──► calls.tsv, loads.tsv, hbm.tsv moved to calibration/<device>/<dataset>.sf<sf>/   (committed)
+
+tpch.sf40, tpcds.sf40 on nebius-cpu128, as DuckDB databases (duckdb_minimal.sh --build-only)
+  └── duckdb_minimal.sh --cases <the H100's cases.csv> --answers <db> --results <tsv>
+        ├──► benchmark-results/duckdb-cpu128/<dataset>.sf40/duckdb.tsv   warm 2nd-min of six, 128 threads
+        └──► answers-<dataset>.duckdb (threads=1), copied to dev
+              └── duckdb_result.py --sf 40 --answers <db>
+                    └──► goldens/<dataset>.sf40/duckdb-result.txt
+                          └── every_sf40_device_answer_meets_duckdb ↔ the H100's gpu-result.txt
 ```
 
 `<device>` is the card's slug, `h100-80gb-hbm3` for `NVIDIA H100 80GB HBM3`. The H200's two
@@ -1498,7 +1510,9 @@ What the arrows are there to make checkable:
   which is why the record carries one rather than a node number.
 - **`calls.tsv` is keyed by case.** The harness names each `(dataset, sf, query, mode)` in an
   NVTX range around the run, and `nsys_calls.py` reads the case off that range; keyed on the
-  node alone, three cases fold into one row set.
+  node alone, three cases fold into one row set. Each case is checked against its dataset's sf1
+  plan golden, so a case the planner orders differently at sf40 cannot be read. The H100's
+  tpcds `calls.tsv` leaves out 14 such queries ("sf40 baseline").
 - **`loads.tsv` splits each parquet load.** `calls.tsv` gives a cuDF call one `device_us`, so a
   load's copy cannot be told from its decode there. `nsys_loads.py` writes one row per load node
   per case: every partition region of a `CudfScan` call. Each number is computed per execution,
@@ -1541,7 +1555,9 @@ What the arrows are there to make checkable:
   time and never leaves the host: each case is joined there and deleted before the next, and
   only `hbm.tsv` comes home.
   `testdata/.gitignore` is deny-by-default over `calibration/`, re-including the pin and the
-  committed derived files only, so `loads.tsv` stays out without a line of its own.
+  committed derived files only, so `loads.tsv` stays out without a line of its own. A device's
+  directory, `calibration/<device>/<dataset>.sf<sf>/`, re-includes its `calls.tsv`, `loads.tsv`
+  and `hbm.tsv`, and keeps the fetched `records.tsv` out ("sf40 baseline").
   `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run — q6 at `tp1-single` and
   `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
@@ -2070,7 +2086,8 @@ scripts/calibration/publish_record.sh --from <split> <device>/tpch.sf40 <device>
 Nsight runs on the VM itself, over the same door:
 `create_nsys_profile.sh --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i>
 --remote-cudf-root /home/dmitry/peacock/cudf-25.02`. Its HBM defaults are an H200's. The
-metric set `gh100` fits the H100 too, but the peak does not: set `PCK_BENCH_HBM_PEAK_BW=3.35e12`.
+metric set `gh100` fits the H100 too, but the peak does not: set `PCK_BENCH_HBM_PEAK_BW=3.35e12`,
+and `PCK_BENCH_HBM_FREQ=10000` ("sf40 baseline").
 That is the H100's 2619 MHz memory clock × 2 × 5120 bits, NVIDIA's 3.35 TB/s. `--cases
 <cases.csv>` profiles a device list's `ok` and `wrong` rows instead of the main list, the trace
 pass by their names; `--device <slug>` reads the pinned records from
@@ -2948,6 +2965,101 @@ and the record never depend on each other. `PEACOCK_BENCHMARK_CAPTURE=trace|metr
 NVTX on, writes `capture=` into the heading and leaves the tree alone — a captured run is
 never the published one; unset means `capture=none`, any other value fails naming the two.
 `PEACOCK_GPU_DEBUG` is not forwarded: its per-operator sync is the thing being measured.
+
+### sf40 baseline
+
+The H100's tp1_single tree at sf40, and DuckDB on 128 cores for the same queries: the two baselines
+query batching is measured against. sf40-baseline measured them on 2026-11-05.
+
+**The one ordered list** is `testdata/benchmark-results/h100-80gb-hbm3/cases.csv`. query-fuser,
+tp4-sized and batching-report read it, and no second list is kept. Nobody writes it by hand.
+`the_h100_list_is_the_lists_measured`, in `test_corpus_goldens`, writes it from the tree:
+
+```
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens \
+    -- the_h100_list_is_the_lists_measured
+```
+
+- Its candidates are the main list's lines carrying `tp1_single`, in the list's order: tpch 48
+  (q1-q22 and 26 micro queries) and tpcds 82. `H100_MODES` names the modes it writes; tp4-sized
+  adds its own.
+- A query with a timed section is an `ok` row. A query whose every section failed is a `skipped`
+  row, its note the failure's reason.
+- A `wrong` row is kept from the file as it stands, since the tree knows no tickets. Mark one by
+  hand, `wrong` and `#NN`, and the writer carries it.
+- Without the variable the test holds the file to the tree. It fails naming the first line that
+  differs, or a tree with no file.
+- Scripts read the list through `scripts/calibration/device_cases.py`.
+
+On 2026-11-05 the list held 124 `ok`, 4 `skipped` and 2 `wrong` rows:
+
+- skipped: tpch `anti_join`, whose export's `o_comment` comes back LargeUtf8, not Utf8; tpcds
+  q17, q25 and q29, which tp1_single's planner refuses because their accumulators need more than
+  the 2 GiB budget;
+- wrong, [#306](tickets/testinfra.md#t306): tpcds q18 and q73. Both answers hold DuckDB's rows;
+  only rows tied on every sort key come in another order, which a `no_sort` comparison refuses.
+
+**The protocol.** peacockdb's warm numbers read files resident in pinned host memory. Each
+query's process prefills them once, before any round. DuckDB's read its own storage through its
+buffer manager, over a warm page cache. Neither counts the first read from disk. The prefill's
+bytes and time are in each section's trailer (`prefill_bytes`, `prefill_us`), apart from the load.
+A timed section with `pinned_cache` other than `on`, or with `prefill_files=0`, is no baseline.
+
+**The H100 side, again.** Every VM starts right before its first command and stops after its last:
+
+1. The install, built on the CPU VM ("The CPU-VM build"), into
+   `/home/dmitry/build/peacock/sf40-baseline/install`.
+2. Set aside dev's `testdata/calibration/records.tsv` if a run other than this one left it. Clear
+   the H100's `~/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/`, so nothing stale comes home.
+3. `$H start`; `$G prepare`; `$G ship --install /home/dmitry/build/peacock/sf40-baseline/install`.
+4. `scripts/env/bench-each.sh $VM --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --mode tp1_single --timeout 1800 --records <scratch>/records`,
+   then `$H stop`. On 2026-11-05 it ran the 130 cases in 65 min, without a break.
+5. The list and the page, as above and under "The page".
+6. The record: `join_records.py --record <scratch>/records/*.tsv --out <joined>`;
+   `split_record.py --record <joined> --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --out-dir <split>`;
+   `publish_record.sh --from <split> h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40`, with dev's
+   `peacock.env` exported.
+7. The profiles, per dataset, from a cases file of the header and that dataset's rows:
+   `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000 scripts/create_nsys_profile.sh --cases <ds>.csv --device h100-80gb-hbm3 --host nebius-h100 --ssh "$H rsh" --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
+   Move `testdata/calibration/{calls,loads,hbm}.tsv` to `testdata/calibration/h100-80gb-hbm3/<ds>.sf40/`,
+   and restore the H200's `calls.tsv` and `hbm.tsv` from git. Then `$H stop`.
+
+`$VM`, `$H` and `$G` are the H100's `--instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu`,
+`scripts/nebius.sh $VM` and `scripts/env/run-gpu.sh $VM`.
+
+**The profiles' files.** A device's derived files lie at
+`testdata/calibration/<device>/<ds>.sf<sf>/{calls,loads,hbm}.tsv`, committed. The fetched
+`records.tsv` beside them is not. The H100 needs `PCK_BENCH_HBM_FREQ=10000`: at the default 20 kHz
+a sample read 101 % of peak. `nsys_hbm.py` counts only sampling gaps over the case's ranges. Each
+H100 process ends with a gap of about 1.5 s, which is likely the pinned cache being freed.
+
+**What `calls.tsv` does not cover.** `nsys_calls.py` checks each case's capture against
+`goldens/<ds>.sf1`'s recipes, since plan goldens exist at sf1 only. At sf40 the planner orders the
+joins of 14 tpcds queries differently, so their captures cannot be checked: q18, q30, q31, q32,
+q33, q56, q60, q61, q71, q81, q83, q85, q91 and q92. The H100's tpcds `calls.tsv` covers the other
+65, from a trace pass over those alone. Its `loads.tsv` and `hbm.tsv` cover all 79, since neither
+reads a plan. tpch's three files cover all 47. No sf40 plan goldens are kept.
+
+**DuckDB's side, again**, on nebius-cpu128 (`$C`, "Nebius host"):
+
+1. `$C start`; `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`.
+   `sha256sum` of the H100's `cases.csv` must agree on dev and on the VM.
+2. Once per database: `benchmarks/duckdb_minimal.sh --dataset tpcds --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --build-only`
+   (tpch's database is built the same way, without `--dataset`).
+3. Per dataset, in `~/$D`: `benchmarks/duckdb_minimal.sh --dataset <ds> --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --answers /var/lib/peacock/answers-<ds>.duckdb --results /tmp/duckdb-<ds>.tsv`.
+   Run it detached: tpch took 11 min, tpcds 9. Copy both files home with `rsync -e "$C rsh"`, then `$C stop`.
+4. On dev: `python3 testdata/duckdb_result.py --dataset <ds> --sf 40 --answers <answers-<ds>.duckdb>`
+   writes `goldens/<ds>.sf40/duckdb-result.txt`. The TSV goes to
+   `testdata/benchmark-results/duckdb-cpu128/<ds>.sf40/duckdb.tsv`, and the page is regenerated.
+   An answer over the cap by its row count alone is fingerprinted in batches and never rendered.
+   tpch's `filter-project` is 96 M rows: 9 min, 13.5 GB.
+
+**The sf40 answer check**, `every_sf40_device_answer_meets_duckdb` in `test_cpu_corpus`. It holds
+each `ok` and `wrong` row's `goldens/<ds>.sf40/gpu-result.txt` section to DuckDB's, under the
+oracle of the query's sf1 registry line. An `ok` row must meet DuckDB and a `wrong` row must still
+differ; a `skipped` row is not judged. No registry line is written for sf40, so a device section
+is compared by its fingerprint whenever it holds one: at sf40 an answer passes the cap by scale,
+whatever the sf1 line declares.
 
 ### Wall-time C++ suites (currently unscripted)
 
