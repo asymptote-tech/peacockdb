@@ -6,8 +6,9 @@
 #
 # The host file names the instance, INSTANCE_ID. The CLI on PATH is pointed at hosts/<name>/config.yaml,
 # a service account's profile, which is never opened, printed or copied here; without it the host is
-# powered by hand and ip is its HOST. start waits out a stop, starts with --async, and waits for the
-# GPU key to log in, stopping again what it started when it never does; stop waits for STOPPED.
+# powered by hand and ip is its HOST; with it and no CLI on PATH, every command is refused. start waits
+# out a stop, starts with --async, and waits for the GPU key to log in, stopping again what it started
+# when it never does; stop waits for STOPPED.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -23,17 +24,22 @@ HOST_CONFIG_NAME=config.yaml
 WAIT=${PEACOCK_HOST_WAIT:-900}
 POLL=${PEACOCK_HOST_POLL:-10}
 
-# without_power — why the CLI cannot reach the host, empty when it can.
+# without_power — why the host is powered by hand, empty when the CLI powers it.
 without_power() {
   if [ ! -f "$HOST_CONFIG" ]; then
     echo "no $HOST_CONFIG: provision-vm.sh --gpu-host $HOST_NAME … --provider-config <file> puts the CLI's profile there"
-  elif ! command -v nebius > /dev/null; then
-    echo "no nebius CLI on PATH"
   fi
 }
-powered() { local why; why=$(without_power); [ -z "$why" ] || { peacock_refuse "$why"; return; }; }
+# cli_checked — refuses a host whose config is there and no CLI to read it: it is not powered by hand,
+# and its address is not HOST, which moves on every start.
+cli_checked() {
+  [ ! -f "$HOST_CONFIG" ] || command -v nebius > /dev/null \
+    || peacock_refuse "$HOST_NAME has its CLI config but no nebius CLI on PATH: an instance's build image has one; elsewhere, install it"
+}
+powered() { local why; cli_checked; why=$(without_power); [ -z "$why" ] || { peacock_refuse "$why"; return; }; }
 host_powers() {
   local why
+  cli_checked
   why=$(without_power)
   if [ -n "$why" ]; then echo "$HOST_NAME is powered by hand: $why"; return 1; fi
   echo "$HOST_NAME is started and stopped through the nebius CLI"
@@ -77,6 +83,7 @@ stopped() {
 host_status() { powered; state; }
 host_ip() {
   local j s ip
+  cli_checked
   if [ -n "$(without_power)" ]; then echo "$HOST_ADDRESS"; return; fi
   j=$(instance) || return
   s=$(field state <<< "$j")

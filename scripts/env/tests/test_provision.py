@@ -6,13 +6,14 @@ user and group tools are fakes, and the VM is a directory, so nothing leaves the
 import getpass
 import pathlib
 import stat
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
 from laptop import PAT, Laptop  # noqa: E402
-from machine import KEYS  # noqa: E402
+from machine import KEYS, REPO, git  # noqa: E402
 
 TARGET = "ubuntu@vm1.test"
 
@@ -153,6 +154,25 @@ def test_provision_refuses_a_token_it_cannot_use():
         assert PAT not in r.stdout + r.stderr
     with Laptop() as lap:
         refused(lap.provision(TARGET, "--env", lap.received, stdin=""), lap, "token")
+
+
+def test_provision_asks_a_token_for_the_repository_the_vm_clones():
+    for origin in ("git@github.com:someone/peacockdb-fork.git", "/srv/mirror/peacockdb.git"):
+        with Laptop() as lap:
+            git(lap.clone, "remote", "set-url", "origin", origin)
+            r = readied(lap)
+            assert "Resource owner: asymptote-tech" in r.stdout and "someone" not in r.stdout, (origin, r.stdout)
+            checks = [c["argv"][:2] for c in lap.gh_calls() if c["host"] == "laptop"]
+            assert checks == [["api", "repos/asymptote-tech/peacockdb"]], (origin, checks)
+
+
+def test_bootstrap_clones_the_repository_provision_asks_a_token_for():
+    repo = subprocess.run(["bash", "-c", '. scripts/lib/peacock-config.sh && echo "$PEACOCK_REPO"'],
+                          cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
+    assert repo, "peacock-config.sh names no PEACOCK_REPO"
+    lines = [ln for ln in (REPO / "scripts/env/bootstrap-vm.sh").read_text().splitlines()
+             if ln.startswith("REPO_URL=")]
+    assert lines == [f"REPO_URL=https://github.com/{repo}.git"], lines
 
 
 def test_provision_rerun_skips_what_is_done():

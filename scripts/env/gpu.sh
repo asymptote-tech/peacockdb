@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The device run on a GPU host, from a built tree (llm-wiki/build-test.md, "GPU hosts").
 #
-#   gpu.sh <host> prepare|ship|run <list|filter|bench>|pull [--cudf <v> | --image <tag>] [--instance <name>]
+#   gpu.sh <host> prepare | run <list|filter|bench> [--cudf <v> | --image <tag>] [--instance <name>]
+#   gpu.sh <host> ship | pull [--instance <name>]
 #   gpu.sh <host> start | stop [--force]
-#
+# --instance, required outside an instance, names the tree's dir on the host, ~/peacock/<instance>/.
 # prepare: the driver, Docker, rsync and the toolkit, both images checked against the tree, sf1 and
-# sf40. ship: cpp/install and the fixtures to ~/peacock/<instance>/. run: run-tests.sh in the run image,
-# detached on the host, one device run there at a time, followed; a rerun follows it. pull: results,
-# records and logs home. A host its adapter powers is started by each, and soft-stopped when it exits.
+# sf40. ship: cpp/install and the fixtures there. run: run-tests.sh in the run image, detached on the
+# host, one device run there at a time, followed; a rerun follows it. pull: results, records and logs
+# home. A host its adapter powers is started by each, and soft-stopped when it exits.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.

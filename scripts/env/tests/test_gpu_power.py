@@ -120,6 +120,20 @@ def test_soft_stop_waits_for_another_instance_s_work():
         assert len(device_runs(rig)) == 1 and rig.nebius()["state"] == "STOPPED"
 
 
+def test_the_laptop_stops_a_host_with_its_own_gpu_key():
+    with GpuRig() as rig:
+        rig.nebius_host()
+        rig.nebius(state="RUNNING")
+        key = rig.home / ".config" / "peacock" / "gpu_ed25519"
+        key.write_bytes(rig.key.read_bytes())
+        key.chmod(0o600)
+        key.with_suffix(".pub").write_bytes(rig.key.with_suffix(".pub").read_bytes())
+        laptop = {"GPU_SSH_KEY_FILE": None, "PEACOCK_INSTANCE": None}
+        ok(rig.gpu(HOST, "stop", env=laptop))
+        assert rig.nebius()["state"] == "STOPPED", rig.nebius_verbs()
+        assert rig.calls("ssh") and all(str(key) in c["argv"] for c in rig.calls("ssh")), rig.calls("ssh")
+
+
 def test_stop_checks_the_card_unless_the_host_is_stopped():
     with GpuRig() as rig:
         rig.nebius_host()
@@ -161,6 +175,15 @@ def test_an_adapter_that_cannot_answer_powers_is_not_read_as_by_hand():
         r = rig.gpu(HOST, "prepare")
         refused(r, "INSTANCE_ID")
         assert "by hand" not in r.stderr and rig.calls("nebius") == [], r.stderr
+
+
+def test_a_host_with_a_config_and_no_cli_is_refused_not_read_as_by_hand():
+    with GpuRig() as rig:
+        rig.nebius_host()
+        (rig.bin / "nebius").unlink()
+        r = rig.gpu(HOST, "prepare")
+        refused(r, "nebius CLI")
+        assert "by hand" not in r.stderr and rig.calls("ssh") == [], r.stderr
 
 
 def test_a_soft_stop_without_ssh_on_a_running_host_declines():

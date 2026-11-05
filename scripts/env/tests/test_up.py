@@ -185,9 +185,7 @@ def test_up_mounts_per_instance():
         ssh_key = m.home / ".ssh" / "gpu_key"
         ssh_key.parent.mkdir()
         ssh_key.write_text("not a real key\n")
-        provider = m.home / ".provider-cli"
-        provider.mkdir()
-        m.write_keys(KEYS, f"GPU_SSH_KEY_FILE={ssh_key}\nPROVIDER_CONFIG_DIR={provider}\n")
+        m.write_keys(KEYS, f"GPU_SSH_KEY_FILE={ssh_key}\n")
         up_ok(m, "A", "--env", m.keys_file)
         up_ok(m, "B", "--env", m.keys_file)
         a, b = the_instance_run(m, "A"), the_instance_run(m, "B")
@@ -206,7 +204,7 @@ def test_up_mounts_per_instance():
             f"{m.clone}/.git": False, claude_dir: False, f"{home}/.config/gh": False,
             f"{home}/.gitconfig": True, f"{home}/.local/share/claude": True,
             f"{home}/.local/bin/claude": True, f"{home}/.config/peacock/hosts": True,
-            str(ssh_key): True, str(provider): True, CARGO_REGISTRY: True,
+            str(ssh_key): True, CARGO_REGISTRY: True,
         }
         for dst, readonly in want.items():
             assert mount_at(a, dst)[2] is readonly, (dst, mount_at(a, dst))
@@ -223,6 +221,49 @@ def test_up_mounts_per_instance():
                    if mt[1].startswith(home + "/") and not mt[1].startswith(wa + "/")]
         for point in points:
             assert point.exists() and point.stat().st_uid == os.getuid(), f"docker would make {point} as root"
+
+
+def test_up_mounts_a_provider_s_config_only_from_hosts():
+    with Machine() as m:
+        provider = m.home / ".provider-cli"
+        provider.mkdir()
+        m.write_keys(KEYS, f"PROVIDER_CONFIG_DIR={provider}\n")
+        up_ok(m, "A", "--env", m.keys_file)
+        mounted = {p for mt in mounts(the_instance_run(m, "A")) for p in mt[:2]}
+        assert str(provider) not in mounted, mounted
+
+
+def test_up_names_the_chain_s_gpu_host_only_when_recorded():
+    with Machine() as m:
+        hosts = m.home / ".config" / "peacock" / "hosts"
+        (hosts / "h100.env").write_text("PROVIDER=ssh\nHOST=gpu.test\nUSER=ubuntu\n")
+        up_ok(m, "A", "--env", m.keys_file, "--gpu-host", "h100")
+        assert "PEACOCK_GPU_HOST=h100" in flag_values(the_instance_run(m, "A"), "-e")
+        r = up_ok(m, "B", "--env", m.keys_file)
+        assert not [e for e in flag_values(the_instance_run(m, "B"), "-e") if e.startswith("PEACOCK_GPU_HOST")]
+        assert "up.sh: " not in r.stderr, r.stderr
+    for name, words in (("a100", ("a100", "provision-vm.sh --gpu-host")), ("../h", ("../h",))):
+        with Machine() as m:
+            refused(m.up("A", "--env", m.keys_file, "--gpu-host", name), m, *words)
+            assert not (m.home / "peacock-instances" / "A").exists(), "a worktree made before the refusal"
+
+
+def test_up_needs_the_chain_s_gpu_host_named_when_several_are_recorded():
+    with Machine() as m:
+        hosts = m.home / ".config" / "peacock" / "hosts"
+        for name in ("h100", "a100"):
+            (hosts / f"{name}.env").write_text("PROVIDER=ssh\nHOST=gpu.test\nUSER=ubuntu\n")
+        refused(m.up("A", "--env", m.keys_file), m, "--gpu-host", "a100", "h100")
+        assert not (m.home / "peacock-instances" / "A").exists(), "a worktree made before the refusal"
+        up_ok(m, "A", "--env", m.keys_file, "--gpu-host", "a100")
+
+
+def test_up_with_no_gpu_host_recorded_says_its_gpu_steps_will_stall():
+    with Machine() as m:
+        r = up_ok(m, "A", "--env", m.keys_file)
+        warnings = [ln for ln in r.stderr.splitlines() if ln.startswith("up.sh: ")]
+        assert len(warnings) == 1 and "provision-vm.sh --gpu-host" in warnings[0], r.stderr
+        assert m.instance_runs(), "the chain did not start"
 
 
 def test_up_runs_as_the_machine_user():
@@ -361,14 +402,13 @@ def test_up_takes_the_default_env_file():
 
 
 def test_up_refuses_a_relative_path_in_the_env_file():
-    for name in ("GPU_SSH_KEY_FILE", "PROVIDER_CONFIG_DIR"):
-        with Machine() as m:
-            (m.home / "rel").mkdir()
-            (m.home / "rel" / "key").write_text("k\n")
-            m.write_keys(KEYS, f"{name}=rel/key\n" if name == "GPU_SSH_KEY_FILE" else f"{name}=rel\n")
-            r = m.up("A", "--env", m.keys_file, cwd=m.home)
-            refused(r, m, name, "absolute")
-            assert not (m.home / "peacock-instances" / "A").exists(), "a worktree made before the refusal"
+    with Machine() as m:
+        (m.home / "rel").mkdir()
+        (m.home / "rel" / "key").write_text("k\n")
+        m.write_keys(KEYS, "GPU_SSH_KEY_FILE=rel/key\n")
+        r = m.up("A", "--env", m.keys_file, cwd=m.home)
+        refused(r, m, "GPU_SSH_KEY_FILE", "absolute")
+        assert not (m.home / "peacock-instances" / "A").exists(), "a worktree made before the refusal"
 
 
 def test_up_never_runs_the_machine_s_git_hooks():

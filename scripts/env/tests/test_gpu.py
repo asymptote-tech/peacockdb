@@ -599,6 +599,13 @@ def test_gpu_has_help():
     with GpuRig() as rig:
         r = ok(rig.gpu("--help"))
         assert "gpu.sh <host>" in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
+        usage = [ln for ln in r.stdout.splitlines() if "gpu.sh <host>" in ln]
+        for verb in ("ship", "pull"):
+            line = next(ln for ln in usage if verb in ln.split())
+            assert "--instance" in line and "--cudf" not in line and "--image" not in line, line
+        for verb in ("prepare", "run"):
+            line = next(ln for ln in usage if verb in ln.split())
+            assert "--instance" in line and "--cudf" in line and "--image" in line, line
 
 
 def test_a_host_tool_s_own_status_is_exit_1():

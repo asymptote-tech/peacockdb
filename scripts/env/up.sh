@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Start chain <chain>'s ensemble instance in the build image (llm-wiki/build-test.md, "Containers").
 #
-#   up.sh <chain> [--branch <b> | --board <ref>] [--cudf <v> | --image cudf-<v>-<commit>] [--env <file>] [--vm <name>]
+#   up.sh <chain> [--branch <b> | --board <ref>] [--cudf <v> | --image cudf-<v>-<commit>] [--env <file>] [--gpu-host <name>] [--vm <name>]
 #
 # The container peacock-<user>-<chain> runs scripts/ensemble-watchdog.sh <chain> in its worktree,
 # kept by down.sh. A new one is on --branch, a chain that ran before, or else a new chain's first
 # branch, from its section on --board (origin/master). A chain runs once a machine. --cudf is 25.02
 # by default. --env, ~/.config/peacock/peacock.env by default, holds the four AWS_* keys and maybe
-# GPU_SSH_KEY_FILE and PROVIDER_CONFIG_DIR. With no instances here, the arguments go over ssh to the
-# VM provision-vm.sh recorded last, or --vm's. Refused, exit 2 naming why, by a check that fails.
+# GPU_SSH_KEY_FILE. --gpu-host, a host in hosts/, is the chain's, as PEACOCK_GPU_HOST. With no
+# instances here, the arguments go to the VM provision-vm.sh recorded last, or --vm's. Refused, exit 2.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -22,18 +22,19 @@ die() { echo "up.sh: $*" >&2; exit 2; }
 . "$here/../lib/data-inputs.sh"
 . "$here/../lib/machine.sh"
 . "$here/../lib/board.sh"
+. "$here/../lib/host.sh"
 clone=$(dirname "$(machine_git -C "$here" rev-parse --path-format=absolute --git-common-dir)")
 
-chain="" cudf="" image_tag="" env_file="" vm="" branch="" board_ref="" forwarded=()
+chain="" cudf="" image_tag="" env_file="" vm="" branch="" board_ref="" gpu_host="" forwarded=()
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
-    --cudf|--image|--env|--vm|--branch|--board)
+    --cudf|--image|--env|--vm|--branch|--board|--gpu-host)
       [ -n "${2:-}" ] || die "$1 needs a value"
       case "$1" in
         --cudf) var=cudf ;; --image) var=image_tag ;; --env) var=env_file ;; --vm) var=vm ;;
-        --branch) var=branch ;; --board) var=board_ref ;;
+        --branch) var=branch ;; --board) var=board_ref ;; --gpu-host) var=gpu_host ;;
       esac
       take "$var" "$1" "$2"
       if [ "$1" != --vm ]; then forwarded+=("$1" "$2"); fi
@@ -48,6 +49,7 @@ done
 for name in "$branch" "$board_ref"; do
   [ -z "$name" ] || [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "not a branch or ref name: $name"
 done
+[ -z "$gpu_host" ] || host_name_is_valid "$gpu_host" || die "not a GPU host's name: $gpu_host"
 if [ -n "$image_tag" ]; then
   [ -z "$cudf" ] || die "--image names its cuDF version: drop --cudf"
   [[ "$image_tag" =~ ^cudf-([0-9]+\.[0-9]+)-[0-9a-f]{12}$ ]] || die "--image takes a tag cudf-<v>-<commit>: $image_tag"
@@ -101,11 +103,17 @@ for key in GH_TOKEN GITHUB_TOKEN; do
   if grep -q "^$key=" "$env_file"; then die "$env_file holds $key: no token goes in the env file"; fi
 done
 ssh_key=$(env_path GPU_SSH_KEY_FILE)
-provider=$(env_path PROVIDER_CONFIG_DIR)
 [ -z "$ssh_key" ] || [[ "$ssh_key" == /* ]] || die "GPU_SSH_KEY_FILE must be an absolute path: $ssh_key"
 [ -z "$ssh_key" ] || [ -f "$ssh_key" ] || die "no GPU_SSH_KEY_FILE $ssh_key"
-[ -z "$provider" ] || [[ "$provider" == /* ]] || die "PROVIDER_CONFIG_DIR must be an absolute path: $provider"
-[ -z "$provider" ] || [ -d "$provider" ] || die "no PROVIDER_CONFIG_DIR $provider"
+[ -z "$gpu_host" ] || [ -f "$PEACOCK_HOSTS/$gpu_host.env" ] \
+  || die "no GPU host $gpu_host in $PEACOCK_HOSTS: provision-vm.sh --gpu-host $gpu_host <user>@<address> records it"
+# Without --gpu-host the coordinator takes the only host recorded, so several make it guess.
+recorded=""
+if [ -d "$PEACOCK_HOSTS" ]; then
+  recorded=$(find "$PEACOCK_HOSTS" -maxdepth 1 -name '*.env' -printf '%f\n' | sed 's/\.env$//' | sort | paste -sd' ' -)
+fi
+[ -n "$gpu_host" ] || [ "$(wc -w <<< "$recorded")" -le 1 ] \
+  || die "hosts/ records $recorded: name the chain's with --gpu-host <name>"
 [ -d "$MACHINE_DATA" ] && [ -w "$MACHINE_DATA" ] \
   || die "the machine's data directory $MACHINE_DATA is missing or not writable for $(id -un):" \
          "bootstrap-vm.sh makes it, provision-vm.sh puts a developer in its group"
@@ -249,7 +257,6 @@ done
 (umask 077 && mkdir -p "$PEACOCK_HOSTS")
 bind "$PEACOCK_HOSTS" "$PEACOCK_HOSTS" ro
 if [ -n "$ssh_key" ]; then bind "$ssh_key" "$ssh_key" ro; fi
-if [ -n "$provider" ]; then bind "$provider" "$provider" ro; fi
 
 # Docker makes a missing mount point as root, inside the mount that holds it: in the instance's
 # home or worktree on the machine, where it would leave a directory its uid cannot write beside.
@@ -277,6 +284,7 @@ run=(docker run -d --init --name "$container" --label "peacockdb.chain=$chain" -
      -e "CLAUDE_CONFIG_DIR=$claude_dir" -e "CCACHE_DIR=$MACHINE_CCACHE"
      -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e "GIT_CONFIG_VALUE_0=$worktree/third_party/cudf"
      -e "PEACOCK_INSTANCE=$user-$chain" -e "PEACOCK_IMAGE_TAG=${image_tag:-cudf-$cudf}")
+if [ -n "$gpu_host" ]; then run+=(-e "PEACOCK_GPU_HOST=$gpu_host"); fi
 run+=(--env-file "$env_file")
 for i in "${!dsts[@]}"; do
   spec="type=bind,src=${srcs[$i]},dst=${dsts[$i]}"
@@ -285,3 +293,6 @@ for i in "${!dsts[@]}"; do
 done
 "${run[@]}" -w "$worktree" "$ref" scripts/ensemble-watchdog.sh "$chain" > /dev/null
 echo "chain $chain is up: docker exec -it $container bash; scripts/env/down.sh $chain stops it"
+if [ -z "$recorded" ]; then
+  echo "up.sh: no GPU host is recorded, so chain $chain's GPU steps stall until provision-vm.sh --gpu-host records one" >&2
+fi

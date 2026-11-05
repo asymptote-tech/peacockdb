@@ -73,6 +73,15 @@ def test_nebius_adapter_powers_a_host_only_with_its_config():
         assert rig.calls("nebius") == []
 
 
+def test_nebius_adapter_refuses_a_config_without_its_cli():
+    with GpuRig() as rig:
+        rig.nebius_host()
+        (rig.bin / "nebius").unlink()
+        for args in (("powers",), ("status",), ("start",), ("stop",), ("ip",), ("ssh", "hostname")):
+            refused(rig.adapter("nebius", "h100", *args), "nebius CLI", "h100")
+        assert rig.calls("ssh") == []
+
+
 def test_nebius_adapter_goes_through_its_cli():
     with GpuRig() as rig:
         config = rig.nebius_host()

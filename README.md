@@ -44,3 +44,9 @@ These are design targets / back-of-envelope figures for an H100/H200-class GPU,
 not measured results. The point of co-location is the data movement: the
 rescored candidate set stays resident instead of being copied to and from a
 separate service.
+
+## Developing
+
+peacockdb is developed by a chain of agents. To run one on a VM of your own, with its GPU steps on
+a GPU host: [Getting started on a VM](llm-wiki/README.md#getting-started-on-a-vm). Everything
+else an agent or a developer needs is in [`llm-wiki/`](llm-wiki/).

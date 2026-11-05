@@ -15,6 +15,7 @@ shopt -s inherit_errexit
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "bootstrap-vm.sh: $*" >&2; exit 2; }
 
+# PEACOCK_REPO's (scripts/lib/peacock-config.sh), spelled out: nothing of the clone is here before it.
 REPO_URL=https://github.com/asymptote-tech/peacockdb.git
 MARKETPLACE=anthropics/claude-plugins-official
 clone=$HOME/peacockdb

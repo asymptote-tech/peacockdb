@@ -100,9 +100,7 @@ fi
 # The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
 if [ -z "$gpu_host" ] && { [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; }; then
   command -v gh > /dev/null || die "no gh on this machine to check the token with"
-  origin=$(git -C "$here" remote get-url origin)
-  [[ "$origin" =~ github\.com[:/]([^/]+)/([^/]+)$ ]] || die "the clone's origin is not a GitHub repository: $origin"
-  owner=${BASH_REMATCH[1]} repo=${BASH_REMATCH[2]%.git}
+  owner=${PEACOCK_REPO%/*} repo=${PEACOCK_REPO#*/}
   cat << EOF
 A GitHub token for the VMs, made once and kept in $PEACOCK_PAT:
   https://github.com/settings/personal-access-tokens/new

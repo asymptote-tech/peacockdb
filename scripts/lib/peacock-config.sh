@@ -13,8 +13,10 @@ PEACOCK_VMS=$PEACOCK_CONFIG/vm
 PEACOCK_MARKER=$PEACOCK_CONFIG/machine
 # One file a GPU host, <name>.env, written by provision-vm.sh --gpu-host (scripts/lib/host.sh).
 PEACOCK_HOSTS=$PEACOCK_CONFIG/hosts
-# bootstrap-vm.sh's clone, relative to the home of the user who ran it.
+# bootstrap-vm.sh's clone, relative to the home of the user who ran it, and the repository it clones,
+# which the VMs' PAT is made for whatever the laptop clone's origin is.
 PEACOCK_CLONE_IN_HOME=peacockdb
+PEACOCK_REPO=asymptote-tech/peacockdb
 # What peacock.env holds on a laptop, and must hold on a VM.
 PEACOCK_STORAGE_KEYS=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL AWS_REGION)
 

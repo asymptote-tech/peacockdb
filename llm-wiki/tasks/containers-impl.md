@@ -658,7 +658,8 @@ developers share the storage keys and keep their own token, GPU key and Linux us
 - [x] **Step 2:** implement.
 - [ ] **Step 3: verify on a GPU VM of its own** (an L40S, never nebius-gpu itself, whose old path
   knows none of gpu.sh's locks): `provision-vm.sh --gpu-host <name> …`, then from an instance
-  `gpu.sh <name> prepare`, `ship`, `run list` with binaries from the build image: the device tiers
+  `gpu.sh <name> prepare`, `ship`, `run list` with binaries from the build image, staged by
+  `scripts/env/stage-tree.sh`, its first run on a gpu build: the device tiers
   pass with the same counts as the latest `GPU Tests (nebius-gpu)` run. Record counts and wall
   times, and the detail file's Task 7 checklist.
 - [x] **Step 4:** commit.
@@ -720,6 +721,29 @@ developers share the storage keys and keep their own token, GPU key and Linux us
   regenerated from master's registry. Record conflicts in the detail file. If not yet merged when
   Tasks 1–9 are done, stop and report.
 
+### Task 10a: a developer deploys alone
+
+A developer who does not know the setup readies a VM, starts a chain on it and runs its GPU steps.
+
+- [x] **Step 1: the entry point.** `llm-wiki/README.md`, "Getting started on a VM", linked from
+  `README.md`: what to ask for and from which role, the VM's, the GPU host's and the laptop's
+  needs, the commands in order with the line that shows each worked, and operating a chain.
+  A chain in an instance runs its GPU steps through `gpu.sh` on the host `up.sh --gpu-host` names,
+  or the only one recorded (`prompts.md`, `ensemble.md`); the path outside an instance is
+  unchanged.
+- [x] **Step 2: the scripts the docs contradicted**, each test first: `host/nebius.sh` refuses a
+  config with no CLI instead of reading the host as powered by hand; `up.sh` drops
+  `PROVIDER_CONFIG_DIR`, which nothing wrote or read; the PAT is asked for `PEACOCK_REPO`, the
+  repository the VM clones, whatever the laptop clone's origin; `gpu.sh --help` gives each command
+  its own flags; `up.sh --gpu-host` names a chain's host, as `PEACOCK_GPU_HOST`, once `hosts/`
+  records it; `scripts/env/stage-tree.sh` builds and stages the tree gpu.sh ships, its lists held to
+  `build-test-shadgpu.sh`'s by a test; `up.sh` refuses a start without `--gpu-host` while several
+  hosts are recorded and warns when none is; gpu.sh and the adapters take the GPU key
+  `provision-vm.sh` left in `~/.config/peacock/` when `GPU_SSH_KEY_FILE` is unset, so the laptop
+  stops a powered host before any chain does.
+- [x] **Step 3:** `scripts/env/tests` and `scripts/calibration/tests` green, but the two library
+  checks that need `PEACOCK_STAGED_INSTALLS`; the counts in `build-test.md`.
+
 ### Task 11: the benchmark run on an 80 GB A100 or H100
 
 - [ ] **Step 1:** the human creates the machine on nebius. The rowgroup modes (`tp1_rowgroup`,
@@ -764,3 +788,11 @@ shows the first coordinator turn, this shows the whole path a real chain takes.
 - [ ] **Step 3:** the PR closed unmerged, the scratch branches deleted on origin, `down.sh <c>`;
   `docker volume ls` and the machine clone's `git worktree list` show nothing of the instance.
   Record the run in the detail file.
+
+### Task 13: on master
+
+- [ ] **Step 1:** in the commit that brings this branch to master, remove the paragraphs that hold
+  only until `scripts/env/` is on master: the "Until `scripts/env/` is on master" one in
+  `llm-wiki/README.md` and the one of the same name in `build-test.md`'s "A fresh VM".
+  `git grep -n 'ENS-containers' -- llm-wiki/README.md llm-wiki/build-test.md` prints nothing
+  afterwards.

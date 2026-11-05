@@ -42,10 +42,13 @@ host_read() {
   [[ "$HOST_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { peacock_refuse "$file: not a user name: $HOST_USER"; return; }
 }
 
-# host_ssh_options — sets HOST_SSH to ssh with the person's key, for the host host_read read. The
-# host key is kept under the host's name, so an address that moves on every start still finds it.
+# host_ssh_options — sets HOST_SSH to ssh with the person's key, for the host host_read read:
+# GPU_SSH_KEY_FILE, or where nothing sets it, on the laptop or a bare VM, the key provision-vm.sh
+# put in ~/.config/peacock. The host key is kept under the host's name, so an address that moves on
+# every start still finds it.
 host_ssh_options() {
   local key=${GPU_SSH_KEY_FILE:-}
+  if [ -z "$key" ] && [ -f "$PEACOCK_GPU_KEY" ]; then key=$PEACOCK_GPU_KEY; fi
   [ -n "$key" ] || { peacock_refuse "GPU_SSH_KEY_FILE is not set: it names the key to GPU hosts, as peacock.env does on a VM"; return; }
   [[ "$key" =~ ^/[^[:space:]]+$ ]] || { peacock_refuse "GPU_SSH_KEY_FILE must be an absolute path without spaces: $key"; return; }
   [ -f "$key" ] || { peacock_refuse "no GPU_SSH_KEY_FILE $key"; return; }
@@ -65,7 +68,7 @@ host_reachable() {
 # <cmd>`; --needs, the keys beyond PROVIDER, HOST and USER its host files hold; --config-name, the
 # file in hosts/<name>/ its CLI is pointed at, none for a provider without one. The adapter defines
 # HOST_NEEDS, HOST_CONFIG_NAME and host_start, host_stop, host_status, host_ip and host_powers; powers
-# exits 0 when the adapter can start and stop the host, else 1 saying why.
+# exits 0 when the adapter can start and stop the host, 1 saying why not, and 2 when it cannot tell.
 host_main() {
   local script=$1 provider name verb key ip
   shift

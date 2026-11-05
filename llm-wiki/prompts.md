@@ -188,25 +188,55 @@ state, and a watchdog restarts you.
     rule exists to prevent, and a silent dispatch is evidence the rule was broken.
   - **Then the analyst, then the board.** Spend an analyst on the obstacle; if that does not
     resolve it, write `blocked(building)` with what you learned from all three steps.
-- **Check whether verda is up before each dispatch** — one `ssh` with a short timeout. When
-  it answers, tell the developer to run that task's CPU tests there through
-  `scripts/build-test.sh --host <user@ip>`; when it does not, say so, and a local run is fine.
-  The human starts verda by hand, so this is per dispatch rather than per chain. `verda` is a
-  name for the host and not an address of it: it is an ephemeral instance with a new IP per
-  reprovision and no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or
-  down. Ask the human for the address, or `scripts/list_verda_instances.sh` for it.
-- **The GPU host is nebius-gpu, started and stopped through `scripts/nebius.sh`**
-  (`build-test.md`, "Nebius host"). Before dispatching a round with a GPU step, `nebius.sh start`.
-  On exit 75 (no capacity), retry every 15 minutes for 10 hours. Record the first failure's time
-  in `<task>-detail.md` so a restart keeps the clock, and wait in bounded waits of at most 10
-  minutes. After 10 hours, write `stalled: gpu host unavailable` and exit. Exit 69 (the instance
-  is gone) is a stall at once: rebuilding it is the human's. Exit 1 is a stall at once too, and
-  is never retried. Most often the VM came up but ssh never answered; `start` has already
-  stopped a VM it started. Write `stalled: gpu host up but unreachable`, or the reason in
-  `~/.config/peacock/nebius/nebius.log`, and exit.
-- **Hard stops are yours.** `nebius.sh stop --force` on entering `completeness approved`, on
-  entering `done`, and before every exit: stalled, a tight window, or `stop`. Developers and CI
-  stop softly.
+- **Outside an instance, check whether verda is up before each dispatch** — one `ssh` with a short
+  timeout. When it answers, tell the developer to run that task's CPU tests there through
+  `scripts/build-test.sh --host <user@ip>`; when it does not, say so, and a local run is fine. The
+  human starts verda by hand, so this is per dispatch rather than per chain. `verda` is a name for
+  the host and not an address of it: it is an ephemeral instance with a new IP per reprovision and
+  no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or down. Ask the
+  human for the address, or `scripts/list_verda_instances.sh` for it. An instance has no `VERDA_*`
+  credentials: there the CPU tests run in the container, and the dispatch says so.
+- **Outside an instance, the GPU host is nebius-gpu, started and stopped through
+  `scripts/nebius.sh`** (`build-test.md`, "Nebius host"); in one, see below. Before dispatching a
+  round with a GPU step, `nebius.sh start`. On exit 75 (no capacity), retry every 15 minutes for
+  10 hours. Record the first failure's time in `<task>-detail.md` so a restart keeps the clock,
+  and wait in bounded waits of at most 10 minutes. After 10 hours, write
+  `stalled: gpu host unavailable` and exit. Exit 69 (the instance is gone) is a stall at once:
+  rebuilding it is the human's. Exit 1 is a stall at once too, and is never retried. Most often
+  the VM came up but ssh never answered; `start` has already stopped a VM it started. Write
+  `stalled: gpu host up but unreachable`, or the reason in `~/.config/peacock/nebius/nebius.log`,
+  and exit.
+- **Outside an instance, hard stops are yours.** `nebius.sh stop --force` on entering
+  `completeness approved`, on entering `done`, and before every exit: stalled, a tight window, or
+  `stop`. Developers and CI stop softly.
+- **In an instance the GPU host is a gpu.sh host, never nebius-gpu.** You are in one when
+  `PEACOCK_INSTANCE` is set: `up.sh` started you in a container, which has no Nebius profile and
+  no key to nebius-gpu. Your host is `PEACOCK_GPU_HOST`, which `up.sh --gpu-host` sets; without
+  it, the one `*.env` file in `~/.config/peacock/hosts/`. With neither, or several such files,
+  write `stalled: no gpu host; up.sh --gpu-host names one` and exit. Its GPU steps are
+  `scripts/env/gpu.sh <host>` (`build-test.md`, "GPU hosts"), and each command starts a host its
+  adapter powers and soft-stops it, so there is no `start` before a dispatch. Your hard stops, at
+  the same three points, are soft there: `gpu.sh <host> stop`, never `--force`, since another
+  chain's run may be on a shared host and `--force` skips every check. Its exit 2 on a busy host
+  is fine: the busy command soft-stops the host when it ends. A host powered by hand refuses it,
+  exit 2, and that is fine too. Use `stop --force` only when the refusal itself names it,
+  `gpu.sh <host> stop --force stops it unchecked`: the host's address and state are unknown.
+  nebius-gpu is CI's alone: you never call `nebius.sh`. The final device run below is the same,
+  and its `GPU Tests (nebius-gpu)` needs the developer's login, which your gh carries, on
+  `GPU_ALLOWED_ACTORS`. A developer hands you only what it cannot act on: gpu.sh's line, with the
+  adapter's line above it.
+  - **The provider refused the start**: gpu.sh exits 1 with `… start failed (exit <n>)`, after
+    the provider CLI's error matching `scripts/nebius.sh`'s classifier
+    (`RESOURCE_EXHAUSTED|ResourceExhausted|NotEnoughResources|not enough|quota|capacity`, case
+    ignored), or after `<host> is <state>, not RUNNING, after <n>s`. It waits as `nebius.sh`'s 75
+    does: retry on the same clock and in the same bounded waits, each probe `gpu.sh <host> start`;
+    on its exit 0, dispatch the step again.
+  - **Anything else is a stall at once**, with both lines as the reason:
+    `RUNNING, but the GPU key does not log in over ssh` (a host that very call started is stopped
+    again; one it found running stays up), `cannot reach <host> … start it by hand` (a host
+    powered by hand is a person's to start, and the stall is how they learn of it), the key
+    refused, sudo, a data directory refusal that names no fix, a card below compute capability
+    8.0, an adapter that cannot say whether it powers the host, and exit 3, the driver too old.
 - **The final device run is CI's.** In `completeness approved`, after the hard stop, note the
   time in UTC (`date -u +%FT%TZ`) and run `gh workflow run pipeline.yml --ref <branch>`. Then find your run: `gh run list
   --workflow pipeline.yml --branch <branch> --event workflow_dispatch --json
@@ -218,9 +248,11 @@ state, and a watchdog restarts you.
   PR's CI. Then the hard stop, then `done`.
   - **A `cancelled` run is dispatched again, not diagnosed.** The `nebius-gpu` concurrency
     group cancels a waiting run when a newer one queues.
-  - **On restart, redo a run you left going.** If `<task>-detail.md` names a dispatched run
-    that had not finished when you exited, your hard stop on exit killed it. Dispatch it again.
-    Its failure is not a developer's, so do not route it to one.
+  - **On restart, redo a run you left going.** If `<task>-detail.md` names a dispatched run that
+    had not finished when you exited, your hard stop on exit killed it. Dispatch it again. Its
+    failure is not a developer's, so do not route it to one. In an instance your stop never
+    touched nebius-gpu, so the run lives on: find it by its id with
+    `gh run view <id> --json status,conclusion` and wait on it instead.
 - **Contention is expected.** Other chains and CI share the VM. A run killed by someone else's
   stop is rerun, not diagnosed.
 - **Task loop**: branch; dispatch the developer with the spec and the context it needs;
@@ -374,14 +406,33 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   why the coordinator has no self-wake either.
 - After small fixes run only the affected subsets; kick heavy suites off in the background
   rather than blocking. Full-suite runs are for milestones and handoffs.
-- **A GPU step is bracketed.** `scripts/nebius.sh start` → `scripts/nebius-sync.sh` →
+- **Outside an instance, a GPU step is bracketed.** `scripts/nebius.sh start` →
+  `scripts/nebius-sync.sh` →
   `scripts/nebius.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'`
   → `scripts/nebius.sh ssh '~/<dest>/scripts/nebius-test.sh run ~/<dest>'`, polled with
-  `… status`, → `scripts/nebius.sh stop`. Only the L40S list runs: no sf40, no benchmarks.
-  If the host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
-  the retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card:
-  leave it. Never edit `~/.ssh/config` for the VM, and never accept a host key by hand:
-  `nebius.sh` resolves the IP and replaces a changed key itself.
+  `… status`, → `scripts/nebius.sh stop`. Only the L40S list runs: no sf40, no benchmarks. If the
+  host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns the
+  retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card: leave it.
+  Never edit `~/.ssh/config` for the VM, and never accept a host key by hand: `nebius.sh` resolves
+  the IP and replaces a changed key itself.
+- **In an instance (`PEACOCK_INSTANCE` is set), a GPU step is gpu.sh's**, on the host the
+  coordinator names: `scripts/env/stage-tree.sh` builds and stages the tree in the worktree, then
+  `scripts/env/gpu.sh <host> prepare` → `ship` → `run list` (or `run filter` with
+  `PCK_TEST_FILTER`) → `pull`. The run is the same L40S list. A red run is `run`'s exit 1 with
+  run-tests.sh's `<binary> exited <code>` lines above it, its logs in `.gpu-test/<host>/logs/`
+  after `pull`: it is yours. A refusal or a loss that names its own remedy is acted on once, then
+  the step again: `gpu.sh <host> prepare` first, `prepare makes it`, `prepare pulls it`,
+  `prepare pulls :<tag> again`, `prepare fetches it`, `ship` first, `prepare, then ship`,
+  `try again`, `gpu.sh <host> run <mode> follows it`,
+  `Run the command again: it starts the <mode> run now`, `build and stage the binaries first` or
+  `stage the gpu test binaries there` (stage-tree.sh), and the losses
+  `lost <host> while following the run` and
+  `lost the ssh connection to <host> while fetching sf40`, each rerun once. Everything else goes
+  to the coordinator, gpu.sh's line with the adapter's line above it: `start failed`,
+  `cannot reach <host>`, `the run on <host> ended with exit <n>` (docker's own failure or a
+  signal, not a red run), the key refused, sudo, a data directory refusal that names no fix, a
+  card below compute capability 8.0, an adapter that cannot say whether it powers the host, and
+  exit 3. Never `nebius.sh` from an instance.
 - **You never look at CI.** Not a run, not its logs, not its config. Work the tests
   directly, locally or on a remote host. A CI failure reaches you as a failing test the
   coordinator hands you, carrying its signature; that is the only form you ever see it in.
@@ -409,7 +460,8 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - Anything the next developer on this task would want to know goes in
   `llm-wiki/tasks/<task>-detail.md` — what you tried, what is subtle, what a finding
   actually meant. You may be replaced between review rounds.
-- Definition of done: CPU tests green (locally or on verda), GPU tests green on nebius-gpu's L40S list,
+- Definition of done: CPU tests green (locally or on verda), GPU tests green on nebius-gpu's L40S list
+  (in an instance, gpu.sh's `run list`),
   clean build with no new warnings, plan goldens regenerated iff plan shape changed, no
   leftover debug prints or scratch files, and a final message naming files touched and the
   proving test commands.
