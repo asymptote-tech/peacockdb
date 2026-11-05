@@ -2,17 +2,17 @@
 
 ## Known state
 
-- The branch `ENS-containers` starts from `ENS-optimizer` (`611b5dcd`, PR #165, not yet merged);
-  Task 10 moves it onto master once that merges.
+- The branch `ENS-containers` is on master (`b3c18098`), since Task 10; "Task 10: onto master"
+  says what the rebase changed.
 - Facts the plan rests on, read on `611b5dcd`: CI builds in `rapidsai/base:25.02-cuda12.0-py3.12`
   and `rapidsai/base:25.10a-cuda12-py3.12` (the leg named 26.02, #129); the committed device
   answers came from nebius-gpu's `rapids-cuda-12.2` (libcudf 25.02.02, Arrow 19.0.1); its explicit
   specs exist only on that VM; `docker/cudf-build.Dockerfile` and `scripts/docker-build.sh` were in
   master from 2026-08-07 to `dbf44bcc` (2026-10-08), a build-only image retired when the build
   moved onto nebius-gpu natively.
-- The benchmark today times 26 hand-listed cases (`corpus_benchmark_cases.inc`); the registry
-  enables about 534 tpch and tpcds device cells. The H200 run of the 26 took 3,602 s, 96 % of it the
-  six rowgroup cases. The benchmark pool is a fixed 69 GiB.
+- The benchmark's case list is the registry's (Task 9): 650 tpch and tpcds device cells over 130
+  queries on master's registry. The H200 tree holds the 26 the hand-written list named; their run
+  took 3,602 s, 96 % of it the six rowgroup cases. The benchmark pool is a fixed 69 GiB.
 - Decided for Task 11's run: the rowgroup modes check correctness and are not benchmarked, so a
   run times the other three; tpcds sf40 comes from the bucket `tpcds-sf40` ("tpcds sf40 in its
   bucket").
@@ -1746,6 +1746,114 @@ code.
 **Red.** `an_append_that_stops_partway_leaves_the_file_as_it_was` (`record/tests.rs`, `--lib`)
 writes four of a call's bytes and fails. With `set_len` replaced by `Ok(())` it is red: the file
 ends `row 1\nrow ` instead of `row 1\n`.
+
+## Task 10: onto master
+
+`git rebase --onto origin/master 611b5dcd`, master at `b3c18098`, rerere off, from a backup branch.
+The 13 join-optimizer commits `69448594`…`611b5dcd` were dropped: PR #165 brought them in as
+`c7b845d1`. `02f6a4d8` (the 26 sf40 cases, the record in S3) was not carried: master has it as
+`a5c852e4`, the same subject adapted to master's `benchmark.rs`, with the case list and the
+`h200/` tree byte for byte the same. `h200/cases.inc`, build-test.md and `benchmarks.md` now name
+`a5c852e4` where they named `02f6a4d8`. The last three commits are one. Authors and author dates
+are kept.
+
+| old | new | | old | new |
+|---|---|---|---|---|
+| `462ed26b` | `cfd8b933` | | `cb8c3637` | `f3765c1f` |
+| `8437d6cd` | `01ab2daa` | | `2976fd7e` | `faff639c` |
+| `b84a192e` | `896c5a13` | | `804ce52a` | `ab4aec55` |
+| `f8694342` | `3851df72` | | `615b60e8` | `9c2fb152` |
+| `7bc901f2` | `790c85a4` | | `b50d9b2a` | `c48af9f1` |
+| `c0c7b9cd` | `348c89ee` | | `b71758e9` | `775a0c67` |
+| `f75cba7e` | `36707827` | | `4429a733` | `e9a37ec7` |
+| `0d9e1dc4` | `b04b1075` | | `e539c1dd`, `fcc9105f`, `bb241b0f` | `74558088` |
+| `199bde5f` | `4cd95b1b` | | | |
+| `d2a0f88c` | `fc5f119b` | | | |
+
+**Conflicts, and how each was resolved.**
+
+- **build-test.md**, at every commit that moved a count (`f75cba7e`, `199bde5f`, `d2a0f88c`,
+  `cb8c3637`, `b50d9b2a`, `b71758e9`, `4429a733`): master's page kept, and each commit's own change
+  to a row, a block header or the grand total replayed onto master's numbers as a delta. Our
+  "GPU host scripts (Python)" row (104) is dropped: master carries it as "Nebius scripts (Python)"
+  (170). `images.yml`'s line sits beside master's `nebius-watch.yml`. The self-consistency
+  paragraph (`cb8c3637`) is ours, then master's sentences on the lists compiled in. The
+  credential paragraph (`4429a733`) is ours, naming `nebius.sh`.
+- **`device_answer.rs`** (`d2a0f88c`): our `cudf_release` above master's new `GpuResultMode` doc.
+- **`benchmark.rs`** (`d2a0f88c`): the `use` list is master's plus `Provenance` and `device_slug`;
+  master's mask tests and our device-tree tests both kept; `modes`' doc comment master's.
+- **`benchmark.rs`** (`cb8c3637`), the one change of substance. Master dropped `macro_invocations`
+  and compiles both corpus lists in (`TimedDeclaration`, `LineDeclaration`), and cost-report's
+  `no_core_test_reads_the_checkout` (#252) refuses `CARGO_MANIFEST_DIR` in a core test. Task 9's
+  code read `corpus_benchmark_cases.inc` and `h200/cases.inc` by path at run time, so it now:
+  - reads the case list through `TimedDeclaration`, and compares its bytes through
+    `include_str!`;
+  - under `UPDATE_CANONICAL=1` writes `tests/common/corpus_benchmark_cases.inc` relative to the
+    package root, where cargo runs a test, and returns: the binary compiled the old list in, so
+    the next build is what checks the new one;
+  - compiles `h200/cases.inc` in through `mod h200_list`, a `corpus_query_benchmark!` of its own
+    feeding `H200Declaration`. `predates_list(device)` names the list of each device in
+    `PREDATES_PROVENANCE`, and refuses one it has no list for.
+
+  Its read of `UPDATE_CANONICAL` raced master's
+  `a_regeneration_does_not_make_the_read_only_path_write`, which sets the variable for the whole
+  process. Overlapping, the case-list test rewrote the list and passed without comparing: five
+  runs of five, beside a case holding the variable set for three seconds, against a list made
+  stale on purpose. `static ENV: Mutex<()>` in `test_corpus_goldens.rs` now covers both: the
+  regeneration case holds it across its set and remove, the case-list test around its read, and
+  the same five runs go red. The regeneration case's SAFETY comment says so.
+- **`prompts.md`** (`4429a733`): our credential rule, naming `scripts/nebius.sh`.
+- **`containers-impl.md`**, in the fold pass: the global constraints' adjacent lines at
+  `462ed26b` and `7bc901f2`, each commit's own text with master's script names.
+
+**Master's names.** Our commits now name `scripts/nebius.sh`, `nebius-test.sh`,
+`scripts/nebius/ci-ship.sh` and `scripts/nebius/tests`: `gpu.sh`'s and `host/nebius.sh`'s comments,
+`test_gpu.py` (the fixtures check reads `scripts/nebius/ci-ship.sh`), `test_run_tests.py` (now
+`test_the_list_rules_are_nebius_test_s`), build-test.md's GPU hosts section, `prompts.md`, the
+plan. `gpu.sh`'s comment says "ci-ship.sh" without its directory: `test_host.py`'s rule reads
+`gpu.sh` and would find the provider in `scripts/nebius/`. That rule checks the scripts of
+gpu.sh's path by name, not every script; master's `scripts/nebius*` are the provider's own old
+path, outside it, as `scripts/gpu-host.sh` was, which ran the nebius CLI too. So it still means
+what it says, unchanged.
+Two places keep the old name. `docker/run-tests.sh`'s usage comment still says
+`scripts/gpu-host-test.sh`: the file is a run image input, and changing it makes `gpu.sh` refuse
+the published run images, whose `peacockdb.inputs` match this tree otherwise. It goes with the
+next image build. The spec, `containers.md`, names the old scripts too; it is frozen.
+
+**What master's tree asked of ours.** Master's `2c1b99f8` added `testdata/fixtures` to
+`ci-ship.sh`'s list, since `peacock_cpu_tests` reads it on the GPU host. `gpu.sh` ships the same
+device tier, and `test_the_fixtures_are_ci_ship_s` went red, so `SHIPPED` and the rigs' `FIXTURES`
+gained it.
+
+**The case list from master's registry.** `UPDATE_CANONICAL=1 … the_benchmark_cases_follow_the_registry`
+at `cb8c3637`'s replay, after the test went red naming 116 cells enabled and not listed: 650 cells
+over 130 queries, from 534 over 110. Twenty queries are new, at all five modes: tpch
+`distinct_functions`, `mixed_join`, `nested_limits`, `rollup_distinct`, `rollup_grouping`,
+`rollup_over_join`, `scan_limit`, `rollup_stddev`, `global_stddev`, and tpcds q2, q5, q14, q17,
+q18, q22, q28, q39, q77, q78, q80. Six gain modes: tpch q11 and tpcds q32, q88, q90, q96 the three
+tp4 modes, tpch q22 `tp4_single`. build-test.md's benchmark counts follow: 650 `bench_` cases, the
+harness row and the gpu block's `peacock_gpu_benchmarks` 658.
+
+**Counts.** build-test.md's header is master's tables plus ours: 7,717 cases, Rust 5,944, C++ 233,
+Python 1,540; each block header sums its rows, and the three language totals sum the rows of
+both tables.
+
+**Gates.** `cargo test --features rust-only -p peacockdb-core` and `cargo test -p cost-report`,
+green at each commit where what those tests read changes. The other commits change none of it.
+
+| commit | what changes there | `--lib` passed (ignored) | `test_corpus_goldens` |
+|---|---|--:|--:|
+| `cfd8b933` | nothing they read: Rust, workflows and tickets as on master | 895 (2) | 29 |
+| `36707827` | `images.yml` | 895 (2) | 29 |
+| `fc5f119b` | Rust and tickets | 902 (2) | 33 |
+| `f3765c1f` | Rust, tickets and the case list | 903 (2) | 45 |
+| the last | nothing they read since `f3765c1f` | 903 (2) | 45 |
+
+At each: `test_cpu_corpus` 2,447 passed, cost-report 49 and 32. `f3765c1f`'s numbers are the last
+commit's run, which has the same Rust, tickets and workflows. On the last commit, every
+`scripts/env/tests/test_*.py` passes but `test_run_image.py`'s two library checks, which need
+`PEACOCK_STAGED_INSTALLS`, 295 cases in all; the five `scripts/calibration/tests` files pass, 41
+cases, `test_plot.py` with matplotlib installed as CI installs it.
 
 ## tpcds sf40 in its bucket
 

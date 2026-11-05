@@ -232,5 +232,4 @@ rather than branching afresh; `join-optimizer-detail.md` says what is on it.
 A build image and a device-run image per cuDF version (25.02, 26.02) on ghcr.io, one launcher for
 isolated ensemble instances on a fresh CPU VM, provider adapters and a device run for any GPU host
 reached over ssh, and the benchmark of every device-enabled query on an 80 GB A100 or H100 with
-each result naming its device. The branch starts from `ENS-optimizer` and moves onto master once
-that merges.
+each result naming its device. The branch is on master.

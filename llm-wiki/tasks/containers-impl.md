@@ -715,7 +715,7 @@ developers share the storage keys and keep their own token, GPU key and Linux us
 
 ### Task 10: onto master
 
-- [ ] **Step 1:** when `ENS-optimizer` is merged, rebase this branch onto master (backup branch
+- [x] **Step 1:** when `ENS-optimizer` is merged, rebase this branch onto master (backup branch
   first, rerere off); every commit passes rust-only and the cost-report crate; Task 9's case list
   regenerated from master's registry. Record conflicts in the detail file. If not yet merged when
   Tasks 1–9 are done, stop and report.
