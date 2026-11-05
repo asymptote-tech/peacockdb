@@ -1282,7 +1282,8 @@ copies together.
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
 hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
 regions, the NVTX domain and the harness range),
-`expr.cpp` (expression and AST building), `interval.cpp` (a date or timestamp ± an interval
+`expr.cpp` (expression and AST building), `pinned_host_cache.cpp` (the process's pinned
+host file cache: leases, eviction, reload on a changed file, the prefill, its size), `interval.cpp` (a date or timestamp ± an interval
 literal, the column path's one interval arm),
 `table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
 `column_at`),
@@ -1339,8 +1340,8 @@ whose corpus line names a result golden or an oracle.
 cuDF's defaults are not SQL's, and they are not DataFusion's. Every option below is a place
 where taking the default would produce a plausible wrong answer rather than an error, so each
 one is either set explicitly or carried in the flat buffers — and the ones carried in the flat buffers are carried
-precisely so cuDF cannot infer something the CPU side did not. One row is the exception: the parquet reader is
-set for speed, and either reader gives the same answer.
+precisely so cuDF cannot infer something the CPU side did not. Two rows are the exception: the parquet reader and
+the parquet source are set for speed, and every reader and source gives the same answer.
 
 | Option | Set at | Value | What the default would do |
 |---|---|---|---|
@@ -1360,7 +1361,7 @@ set for speed, and either reader gives the same answer.
 
 ### What the Rust side puts in the flat buffers
 
-Half of the table above is not a choice the C++ side makes — it reads a value the planner
+Several rows of the table above are not a choice the C++ side makes — it reads a value the planner
 already computed and the recipe writer wrote down. That is deliberate: an option carried in
 the flat buffers cannot be re-derived differently by the two engines, so anything where
 cuDF's own inference could drift from DataFusion's is serialized rather than inferred. The

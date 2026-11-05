@@ -445,9 +445,11 @@ STUB_CALLS = r'''import sys
 a = sys.argv[1:]
 open(a[a.index("--out") + 1], "w").write("# calls\nrow\n")
 '''
+# As nsys_calls.py refuses a capture of a query with a join: a message and exit 1, nothing written.
+REFUSING_CALLS = 'import sys\nsys.exit("capture does not match q3\'s recipes")\n'
 
 
-def nsys_profile(tmp, extra_env=None):
+def nsys_profile(tmp, extra_env=None, calls=STUB_CALLS):
     """`create_nsys_profile.sh --trace` over fakes, the VM a directory and nsys a stub: the run
     and the tree it ran in."""
     tmp = pathlib.Path(tmp)
@@ -458,7 +460,7 @@ def nsys_profile(tmp, extra_env=None):
             (tree / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / rel, tree / rel)
     (tree / "scripts/calibration").mkdir()
-    (tree / "scripts/calibration/nsys_calls.py").write_text(STUB_CALLS)
+    (tree / "scripts/calibration/nsys_calls.py").write_text(calls)
     (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_CALLS)
     cases = (tree / "peacockdb-core/tests/common/corpus_benchmark_cases.inc").read_text()
     for ds in set(re.findall(r"corpus_query_benchmark!\(\s*(\w+)\s*,", cases)):
@@ -500,6 +502,15 @@ def test_nsys_profile_uses_the_given_ssh():
         assert any(c == "bash" for c in commands), commands
         assert any(c.startswith("rsync --server") for c in commands), commands
         assert "switches: cache=unset reader=unset" in r.stdout, r.stdout
+
+
+def test_nsys_profile_writes_the_load_breakdown_when_the_call_breakdown_refuses():
+    """nsys_calls.py refuses any capture of a query with a join; loads.tsv does not depend on it,
+    so it is written, and the run still fails for the refusal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        r, tree = nsys_profile(pathlib.Path(tmp), calls=REFUSING_CALLS)
+        assert r.returncode != 0, (r.stdout, r.stderr)
+        assert (tree / "testdata/calibration/loads.tsv").is_file(), (r.stdout, r.stderr)
 
 
 def test_nsys_profile_passes_the_pinned_cache_and_scan_reader_switches():

@@ -948,3 +948,24 @@ Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
   `ctest -L cpu` 1/1, `peacock_cpu_tests` 63, `peacock_plan_tests` lists 132; `git clang-format
   --diff HEAD -- cpp/` changes nothing. build-test.md recounted: 7745 (Rust 5977, C++ 278).
 - review round 2: findings closed; build-test.md's skip count nit fixed by the coordinator; nsys_calls.py join gap routed to sf40-baseline. completing.
+
+## Completeness pass (2026-11-05)
+
+- **1, no engine path applies `pinned_host_cache_bytes`, because no engine path opens a device
+  run.** Every device run goes through `test_support::gpu_session::Session::open` (`GpuContext`
+  is built nowhere else outside test modules, and carries `cfg_attr(not(feature =
+  "test-support"), allow(dead_code))`). Its callers are three harnesses: the device corpus
+  (`corpus_gpu.rs:49`), the benchmark (`corpus_benchmark.rs:347, 441`, which applies the option
+  at `:345`) and node timing (`node_timing.rs`); `wire::gpu_tests` and
+  `gpu_backend::gpu_tests::backend` open test-local sessions. The corpus and timing harnesses plan
+  from a `SessionContext`, but no case of theirs sets the option, so applying it there would apply
+  the default. The CLI (`peacockdb/src/main.rs`) runs on the CPU alone. No code changed for this
+  item, and no device run.
+- **2, `create_nsys_profile.sh` lost the load breakdown whenever the call breakdown refused.**
+  `nsys_loads.py` now runs before `nsys_calls.py`; a refusal still fails the script.
+  Red: `test_nsys_profile_writes_the_load_breakdown_when_the_call_breakdown_refuses` (a calls stub
+  exiting 1) found no `loads.tsv`; green after; `test_run_gpu.py` 35/35.
+- **3, Done-when 4's load-rate table** is in #149's archive entry, whole (16 rows), with its
+  definitions; the entry's `lineitem`-only table gave way to it.
+- build-test.md: the Images row names the two `create_nsys_profile.sh` cases and counts 234; the
+  total is 7746 (Python 1491).

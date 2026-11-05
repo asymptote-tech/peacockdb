@@ -51,21 +51,39 @@ puts pageable bytes at 0.01–0.05 % of each `lineitem` load's H2D and finds no 
 load, so cuDF's pool was left alone (Decision `NULL_RESULT`). What cost the load was the page-cache
 read before each copy: 44–70 % of it. The engine now reads each file from a process-wide pinned
 host file cache (`pinned_host_cache_bytes`, default `min(RAM, cgroup) × 3/4`, prefilled by the
-benchmark), through `source_info` over the pinned bytes:
+benchmark), through `source_info` over the pinned bytes.
 
-| `lineitem` load, µs | before | cache | chunked | all (default) |
-|---|--:|--:|--:|--:|
-| q1 | 403877 | 154641 | 386539 | 151556 |
-| q3 | 333341 | 119347 | 317780 | 118873 |
-| q6 | 91920 | 53299 | 88248 | 53071 |
-| q8 | 447118 | 268975 | 425933 | 271455 |
+Done-when 4's load rates, tpch sf40 tp1-single: `load_us` is Σ `GpuLoadParquet` `total_us`
+of the reported run; compressed bytes are what the loads copied (the profiles' `h2d_bytes`, equal
+in every configuration); decoded bytes are the batches the loads emitted; each GB/s is
+`bytes / (load_us · 1000)`; H2D is bytes-weighted over the query's loads, all of it pinned.
+`before` is today's engine before the change, `read_parquet` from the path; `cache` is
+`read_parquet` from the cache; `chunked` is one chunk from the path; `all` is the default.
 
-H2D, bytes-weighted per query, all pinned: 25.7–31.8 GB/s before, 41.0–48.6 GB/s from the cache;
-copies stay one per column-chunk run (median 0.1–0.8 MiB), so 55.5 GB/s is not reached. The load
-rate over the compressed bytes copied, before → default: q1 4.2 → 11.2 GB/s, q3 4.0 → 8.6,
-q6 2.6 → 4.5, q8 8.5 → 12.5. The default capacity on the H100 VM (196.6 GiB, no container limit)
-is 147.4 GiB. The prefill reads 9.0–15.5 GB per query process at 2.0–2.1 GB/s from the page
-cache (91.7 MB/s cold). The L40S list is green with the cache on and off, goldens unchanged.
+| query | config | compressed bytes (copied) | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s |
+|---|---|--:|--:|--:|--:|--:|--:|
+| q1 | `before` | 1693633748 | 18667100168 | 403877 | 4.2 | 46.2 | 26.8 |
+| q1 | `cache` | 1693633748 | 18667100168 | 154641 | 11.0 | 120.7 | 46.4 |
+| q1 | `chunked` | 1693633748 | 18667100168 | 386539 | 4.4 | 48.3 | 29.0 |
+| q1 | `all` | 1693633748 | 18667100168 | 151556 | 11.2 | 123.2 | 46.4 |
+| q3 | `before` | 1702160452 | 6603217369 | 425582 | 4.0 | 15.5 | 25.7 |
+| q3 | `cache` | 1702160452 | 6603217369 | 198993 | 8.6 | 33.2 | 41.4 |
+| q3 | `chunked` | 1702160452 | 6603217369 | 407713 | 4.2 | 16.2 | 27.0 |
+| q3 | `all` | 1702160452 | 6603217369 | 198697 | 8.6 | 33.2 | 41.4 |
+| q6 | `before` | 237274556 | 1922457600 | 91920 | 2.6 | 20.9 | 26.0 |
+| q6 | `cache` | 237274556 | 1922457600 | 53299 | 4.5 | 36.1 | 41.0 |
+| q6 | `chunked` | 237274556 | 1922457600 | 88248 | 2.7 | 21.8 | 27.0 |
+| q6 | `all` | 237274556 | 1922457600 | 53071 | 4.5 | 36.2 | 41.0 |
+| q8 | `before` | 5205698980 | 14304945284 | 609525 | 8.5 | 23.5 | 31.8 |
+| q8 | `cache` | 5205698980 | 14304945284 | 413057 | 12.6 | 34.6 | 48.6 |
+| q8 | `chunked` | 5205698980 | 14304945284 | 586575 | 8.9 | 24.4 | 32.8 |
+| q8 | `all` | 5205698980 | 14304945284 | 415650 | 12.5 | 34.4 | 48.6 |
+
+Copies stay one per column-chunk run (median 0.1–0.8 MiB), so the H2D rate stays under 55.5 GB/s.
+The `lineitem` loads drop 62–64 % (q1, q3), 42 % (q6) and 40 % (q8) under the cache; the reader
+alone moves them by no more than session noise. The default capacity on the H100 VM (196.6 GiB,
+no container limit) is 147.4 GiB. The prefill reads 9.0–15.5 GB per query process at 2.0–2.1 GB/s
+from the page cache (91.7 MB/s cold). The L40S list is green with the cache on and off, goldens unchanged.
 Integrated: deferred, no GB10.
 
 <a id="t232"></a>

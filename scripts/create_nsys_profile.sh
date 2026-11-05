@@ -225,14 +225,15 @@ if [ "$TRACE" -eq 1 ]; then
   pull_one "$CAPTURE_REL.sqlite" "the trace capture" \
     || die "the trace pass left no capture on $REMOTE; its log is /tmp/$BENCH_TARGET.trace.log there."
   # Derived here rather than on the host: the reader is a local script over local goldens,
-  # it costs seconds, and the capture comes home anyway.
+  # it costs seconds, and the capture comes home anyway. Loads first: they read no golden, so a
+  # call breakdown that refuses the capture still fails the run without losing them.
+  python3 scripts/calibration/nsys_loads.py \
+    --capture "testdata/$CAPTURE_REL.sqlite" --out "testdata/$LOADS_REL"
+  echo "==> the load breakdown: $(grep -vc '^#' "testdata/$LOADS_REL") rows"
   python3 scripts/calibration/nsys_calls.py \
     --capture "testdata/$CAPTURE_REL.sqlite" --plans-dir "$PLANS_DIR" \
     --out "testdata/$CALLS_REL"
   echo "==> the call breakdown: $(grep -vc '^#' "testdata/$CALLS_REL") rows"
-  python3 scripts/calibration/nsys_loads.py \
-    --capture "testdata/$CAPTURE_REL.sqlite" --out "testdata/$LOADS_REL"
-  echo "==> the load breakdown: $(grep -vc '^#' "testdata/$LOADS_REL") rows"
 fi
 
 if [ "$METRICS" -eq 1 ]; then

@@ -174,3 +174,14 @@ No other symbol changes.
   records the bytes pinned per dataset.
 - The H100 is reached through new-hosts' tooling, which is why new-hosts comes first in the
   chain.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: the pinned host file cache and the one-chunk reader, measured alone and
+together on the H100 (`lineitem` loads 40–64% faster with the cache; readers equal within 0.2%); the
+L40S list green with the cache on and off; #149 and #232 closed, #305 opened; the load-rate table is
+in #149's archive entry. Shortcuts: Task 6 skipped (NULL_RESULT: cuDF already pins); the
+`prefill_*` trailer keys belong to bench-rows (stderr only here); `pinned_host_cache_bytes` is
+applied by the benchmark harness only, since no engine path opens a device run yet; the device tiers
+never ran under `PEACOCK_SCAN_READER=read_parquet`; the signoff's compressed bytes are the profiles'
+`h2d_bytes`; q3/q8 load breakdowns derived by hand (`nsys_calls.py` join gap, routed to sf40-baseline).
