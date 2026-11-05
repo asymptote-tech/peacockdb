@@ -355,3 +355,30 @@ Work items handed to this task:
   holds q1/q6/q8 from an older binary and q3 from bench-rows' Task 5. A resumed run now re-measures
   the old-format ones (`holds_measured`), but clear the directory before the first run so nothing
   stale is pulled home.
+
+## build-test.md after the second rebase (2026-11-05)
+
+- **Merged by meaning** from `merge-file --diff3` (ours HEAD, base `9ab0b6e3`, theirs
+  `L-pre-rebase2-sf40-baseline`), 10 hunks. Each was resolved as HEAD's text plus sf40-baseline's
+  rows. That covers the calibration row (HEAD's memory-kind enum with the device-list reader, the
+  joined segments and the publish) and the Images row (`run-gpu.sh`'s case timeout, answer switch
+  and answers pulled, beside HEAD's run-image check, switches and `check-build-image.sh`). It adds
+  `create_nsys_profile.sh --cases/--device` and `bench-each.sh` there, plus the DuckDB benchmark
+  script row, the DuckDB results reader and column, `run`'s env list, `--cases` under Nsight, the
+  tpcds `--build-only` line and the page's DuckDB column with HEAD's registry-order rule.
+- **`bench-each.sh`'s usage** on the page and in the plan: `--instance-id <id>` is required. Without
+  it, exit 2 before any call.
+- **Recounted** from `--list` and pytest's collection. cpu 3501 (`--lib` 987, `test_cpu_corpus`
+  2451, `test_corpus_goldens` 60, `test_cost_model` 3). The benchmark report page row is 16 (each
+  side added 2), corpus goldens 60, calibration 72, Images 250. gpu 2411 re-listed (742, 1009, 659,
+  1) with `cpp/build` on `LD_LIBRARY_PATH`. `cpp/install` is from 2026-10-09 and lacks
+  `peacock_join_build`, so the binaries do not load against it. Grand total 7868: Rust 6050, C++
+  278, Python 1540.
+- **Re-proven offline.** `cargo test --features rust-only -p peacockdb-core` exit 0, no warnings,
+  `testdata/` clean: `--lib` 985 passed, 2 ignored; `test_cpu_corpus` 2451; `test_corpus_goldens`
+  60; `test_cost_model` 3; `test_golden_format` 41; `test_crate_privacy` 1. `cargo test -p
+  cost-report`: 49, plus 32. `--features gpu --no-run` through `cargo-cudf.sh` (rapids-cuda-12.2):
+  exit 0, no warnings. Python: `test_run_gpu.py` and `test_bench_each.py` 51 passed;
+  `scripts/calibration/tests` 72 passed, with each file exiting 0 when run alone (matplotlib from
+  `~/.cache/j13-pydeps` on `PYTHONPATH`); `test_duckdb_minimal.py` and `test_duckdb_result.py` 36
+  passed (DuckDB 1.5.4, local sf1).
