@@ -906,3 +906,4 @@ Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
   and no kind differing, so the captures are of the planned queries. The fix needs a pattern for
   `join_build` and a rule mapping `join_build`/`join_probe` onto `CudfJoin`. It is calibration's
   (bp-benchmarks'), and it blocks any Nsight trace of a join query, sf40-baseline's included.
+- 2026-11-05: green at ec5c068e; PR #196 (base ENS-new-hosts); reviewer round 1.
