@@ -1034,3 +1034,4 @@ Three findings, each fixed test-first. No VM was used.
 - **Not checked live.** `check-build-image.sh` has run only over the fakes. Its first live use
   is the next CPU-VM build: a `docker pull` of an image the VM already holds, then one
   `docker image inspect`.
+- review round 2 (945f30a2): round 1 closed; one new important (plans relying on run-gpu.sh's old nebius-gpu default) fixed by the coordinator in markdown: containers-only-impl.md passes nebius-gpu's id, new-hosts-impl.md's interface and test name updated. Nits left.

@@ -599,8 +599,8 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   `machine_image_checked` (`scripts/lib/machine.sh`).
 - Produces: `run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <dir>] | run <list|filter|bench> | pull`
   (`--instance-id` required since review round 1).
-  The two VM options go, as given, to every `${NEBIUS_SH:-<repo>/scripts/nebius.sh}` call; with
-  neither, the VM is nebius.sh's default, nebius-gpu. Remote commands go through `nebius.sh … ssh`,
+  The two VM options go, as given, to every `${NEBIUS_SH:-<repo>/scripts/nebius.sh}` call; without
+  `--instance-id` it exits 2 before any call. Remote commands go through `nebius.sh … ssh`,
   every rsync through `-e "<nebius.sh> <options> rsh"`; the login is nebius.sh's. `run-gpu.sh`
   never starts or stops the VM: the caller does, with `scripts/nebius.sh`.
   `<i>` defaults to the repo root's basename; `--install` defaults to the repo root's `cpp/install`
@@ -638,8 +638,7 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   `test_prepare_refuses_stale_run_image` — and
   `test_run_gpu_passes_instance_and_profile_to_every_nebius_call` (every recorded call holds
   `--instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu` before its verb),
-  `test_run_gpu_without_options_reaches_the_default_vm` (no call holds `--instance-id` or
-  `--profile`), `test_run_gpu_bad_instance_id_is_2` (fake answers 64 → exit 2, no rsync),
+  `test_run_gpu_without_an_instance_id_is_refused` (exit 2, no nebius call; since review round 1), `test_run_gpu_bad_instance_id_is_2` (fake answers 64 → exit 2, no rsync),
   `test_run_gpu_never_starts_or_stops_the_vm` (no `start` or `stop` call over all four verbs),
   `test_prepare_sends_keys_on_stdin_only` (no key value in any argv),
   `test_prepare_says_restart_when_counters_are_admin_only` (exit 4),
